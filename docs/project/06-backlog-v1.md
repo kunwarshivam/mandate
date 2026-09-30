@@ -1363,7 +1363,8 @@ risk (rule 3):
   convictions and score `null`, and the evaluation's lists empty, on a decision no §8.3 evaluation
   produced (a goal completion, a removed instrument, a risk exit); `ask_suppressed` when a
   classified `ask` is not asked (DEC-156 item 5); and `lifecycle` as `normal`, `paused`, or
-  `stopped`, never `exits_only`.
+  `stopped`, never `exits_only`. From the v0.5 reconciliation (DEC-177 item 24): `causation_id` on
+  each copy of an owner command, the control stream's `OwnerCommandIssued` (§9.1 rule 16).
 - **Stream L: the shell's envelope carries the required `config_refs` and the `artifact_refs`**
   (DEC-174 item 5). `mandate-shell` writes `config_refs: {}` and `artifact_refs: []` on every draft,
   so every event that requires `mandate_version` or `model_version` is `missing_config_ref`, and every
@@ -1403,6 +1404,12 @@ risk (rule 3):
   `range_verification` case in which the approved intent differs from the bound content object in
   one action member, failing §11's `intent_action_mismatch` second clause; a mutant that skips that
   clause; and rule 7's check that no `ApprovalRequested` names a decision with `ask_suppressed`.
+- **Verify owner copies against the control stream** (DEC-177 item 24). §9.1 rule 16 checks only
+  that an owner copy's `causation_id` is non-null, because `append` and §11's per-range checks read
+  one stream. A cross-stream check in `mandate journal verify` resolves it on `ctl:{workspace_id}`
+  and fails unless it names an `OwnerCommandIssued` of the copy's command and subject, submitted
+  before the copy, copied at most once into each event type on the agent stream, as the generator's
+  `check_owner_copies` does for the vectors; §11 names the check and its code, with a vector.
 
 Minor and nit findings from round 1 of the independent review of the journal spec v0.5 change
 ([DEC-177](04-decision-log.md#decisions); held back by the freeze rule, one row each):
@@ -1410,12 +1417,19 @@ Minor and nit findings from round 1 of the independent review of the journal spe
 - **A copied `AgentModeChanged` names its `AgentModeApplied`.** When the agent runtime copies a
   mode change the executor originated, the copy's `causation_id` names the originating
   `AgentModeApplied` (§2); add the rule to §9.1 and a vector for it.
+  *Narrowed (DEC-177 item 24):* §9.1 rule 16 covers the owner's pause, resume, and Stop, which name
+  their `OwnerCommandIssued`. What remains is the copy of an account-stream mode change (reasons
+  `restriction_changed` and `awaiting_reconciliation`).
 - **Bound the model-supplied free text.** `ModelOutputRecorded.model_id`, `model_version`,
   `direction`, and `invalidation` are any non-empty text: bound their length or check them against
   the model registry and the directions v1 allows, and scan them for personal data as §6.4
   requires.
 - **`KillSwitchActivated` records the initiator's step-up**, or names its `OwnerExitRequested`
   (for example as `causation_id`), so the switch's own record shows what authorized it.
+  *Done for the owner's switch (DEC-177 item 24):* §9.1 rule 16 makes an owner's
+  `KillSwitchActivated` name its `OwnerCommandIssued`, which carries the step-up evidence (§9), as its
+  `OwnerExitRequested` does. What remains is a `platform_operator` switch, which names no owner
+  command.
 - **`journal.yaml`'s header notes the DEC-176 exception.** Its line "Changing these vectors requires
   founder approval" predates DEC-176, under which agents accept changes that only tighten or
   reconcile.
@@ -1448,6 +1462,7 @@ Minor findings from round 2 of the same review (#320 round 2;
 - **Correct §9.1's citation for a removed instrument (#320 round 2).** `exit_origin`'s row cites
   mandate spec "(§2.2, §2.3)" for a removed instrument, where mandate spec §6.1 cites §2.3 and §5.9
   cites §2.3 and §8.6. Cite the sections the mandate spec gives.
+  *Done (DEC-177 item 22):* the row cites mandate spec §6.1's purpose table, §2.3, and §8.6.
 - **Reconcile #320 and #321 when the second merges (#320 round 2; DEC-177 item 20).** Both call
   themselves journal spec v0.5. Whichever merges second:
   (a) resolves the textual conflicts in the Status line and the v0.5 change-history bullet and
@@ -1463,3 +1478,8 @@ Minor findings from round 2 of the same review (#320 round 2;
   change lands" in `DecisionMade`'s table;
   (e) re-checks each §9.1 citation of mandate spec §6.1 against the merged text, since §9.1 cites
   §6.1 for a rule only #321 states.
+  *Done (DEC-177 items 21 to 24), with (b)'s vectors deferred:* #320's change is v0.6 (a); rule 10
+  and §11 allow and bind the `ApprovalRevalidated` cause, whose range case waits for the row
+  "Close the approval events' schemas in §9.1, with vectors" (b); rule 16 and the chain's causation
+  ids (c); one `ask_suppressed` definition, citing mandate spec §6.4, and no hedge (d); and §9.1's
+  §6.1 citations name what §6.1 states (e).
