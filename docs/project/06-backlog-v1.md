@@ -58,6 +58,26 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   than waiting for a reviewer (the #316 reviews).
   *Accepted when:* both run in `ci lint`, pinned in `.github/workflows/ci.yml` and `install.sh`,
   and a planted `SC2086` or an unknown workflow key fails the job.
+- **E1-5 (Should)** As an engineer, I want the merge script's remaining gaps from #316's
+  round-3 review closed, so that the only path from approval to `main` (DEC-175) is tested as
+  GitHub actually answers it. The items:
+  - The stub `gh` serves only the first page unless `--paginate` is passed, and a case lists
+    `web.yml` past file 100.
+  - A fixture lists workflow runs newest first, as GitHub does, so that `.[-1]` in place of
+    `max_by(.id)` fails.
+  - A merge GitHub refuses is a skip, not a failed job. That covers a sweep and a per-PR run racing
+    after one of them has merged, a ruleset block, and a head that moved between the read and the
+    merge call.
+  - The approval line is not read inside an HTML comment, an indented code block (four or more
+    leading spaces; a bullet indented up to three spaces is still read, as DEC-175 allows), or a
+    four-backtick fence.
+  - The web path rule comes from `web.yml`'s `paths` filter, not a second copy, and a file renamed
+    out of `web/` counts by its `previous_filename` too.
+  - Optionally, the latest `labeled coordinator-approved` event must be newer than the head
+    commit, so that a description line alone approves nothing.
+
+  *Accepted when:* each item has a refusal or merge case in `xtask`'s merge-script tests, and each
+  fails when its fix is reverted.
 
 ### E2 Market data
 
@@ -794,17 +814,37 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   among the executor's drafts, but it is a control-stream event the executor never writes; the
   executor's alert is its own record (`ProtectionChanged interval_limit`) plus `Effect::Notify`.
   Correct the oracle before slice 2 un-ignores it (found building slice 3a, #267).
-- **E7-4 slice 3b (stream K), from #258's round 2 (comment 5862870455):** (1) pin with tests the
-  three fail-open paths whose code is right but unclaimed: `reconcile::agents` counting an ownerless
-  order as `""`, `orders::unmapped`'s ownerless (`Some(None)`) arm, and `reattribute` without its
-  instrument filter; (2) make the pins' `sources()` skip `#[cfg(test)]` regions and drop the
-  `concat!` idiom that dodges them.
+- **E7-4 slice 2 (stream K), #242's plants that go live with it:** plant 7 (held quantity 10 → 5)
+  and plant 8 (held limit 150 → 100), and plant 9 (`fault::protected` on a plain `restart`), which
+  the coordinator moved from 3a to slice 2 (#267, comment 5862923162): under rule 13 no exit waits
+  for the startup reconciliation, so the plant gets weight only with the first opening through
+  `fault::protected` (slice 2's add). Slice 2's PR shows each of the three red.
 - **E7-4 slice 4 (stream K), from #264's review (comment 5862761692):** (a) name the do-nothing
   finding in slice 4's PR: a permissive `ladder_price` turns `fault::crash_at_confirmation_before_exit_submit`
   green, and only `protection::sequence_tests::an_unprotected_exit_never_reaches_the_ladder_stub`
   catches it; (b) pin the fault fixture's exact recovered cash rather than §11's ±15.40 band;
   (c) make the fault fixture's `equity` and `buying_power` consistent with its cash before any
   slice reads buying power from it.
+- **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
+  `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
+  outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
+  rule 5's ruled carve-out: an exit that goes once its opening's cancel is overdue, answered or not,
+  with the opening still resting ([DEC-160](04-decision-log.md#decisions) (7), (13), (18)).
+  Carve that case out through a DEC-77 tests correction before slice 5 or 6 lets the property run.
+- **Trading-domain spec §5.7's missing `PendingCancel` edges (stream K), from #286 round 2
+  (minor 3):** a spec PR that adds `PendingCancel → Expired` and `PendingCancel → Rejected` to
+  §5.7's transition table, with reference cases, and then the executor change that follows it.
+  Until then such a report is journaled and ignored ([DEC-160](04-decision-log.md#decisions)
+  (13)), so an exit waiting on the order goes at rule 5's bound (item (18)), but the residue
+  stays: a day order that expired, or was rejected, while its cancel was outstanding is left in
+  `PendingCancel` and keeps its buying-power reservation until reconciliation or a later report
+  moves it.
+- **`mandate-executor`, from #286 round 2 (nit 1):** marking an accepted order's cancel overdue
+  (`protection::overdue`) journals a self-transition, which `orders::transition` records as an
+  attempted edge with `ignored: true` so the fold applies only `cancel_overdue`. The record reads
+  as a refused transition. A dedicated flag-only record needs the fold's `Unknown` branch
+  (which resets `unknown_since` and the absence count) kept out of it, so it is not a one-line
+  change; do it with the §5.7 edges above.
 - **`mandate-executor` fees (stream K), from #259 round 1:** (1) a typed `Environment` in place of
   the stream's environment text, so `paper_only_fee_config` refuses a live stream by its type
   (rung 1) rather than by a string comparison; (2) `mandate_accounting::Config` carries the
