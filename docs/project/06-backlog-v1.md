@@ -1141,7 +1141,15 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   nothing else is listed. The change touches the YAML,
   the reference implementation's checks, and the regenerated fixtures, so it cannot share a pull
   request with code (ES-22).
-- Tighten the families G and F harness (#317 re-review, minor 2 and nits 1 to 4), in one tests
+- Done in the families G and F harness tightening (branch `cursor/harness-gf-tightening-138b`;
+  `an_allowed_exit_the_gate_paces_fails_since_no_case_states_a_pacing`,
+  `an_allow_fails_unless_it_reports_every_check_passed_in_order`; DEC-178 items 11, 12 and 14):
+  the gate arm takes `Decision` apart whole and requires no `pacing` on every `gate` case, so the
+  always-marketable `pacing` below now fails MC-G08 to MC-G10, MC-G13 and MC-G15; item 12 says why
+  the five values are typed again; the allow pin has its own edit test and item 11 says it holds
+  only for an allowed opening (checks 2 and 5 to 8 are not run for an exit); and group ids are built
+  from the case's own names, so the unreachable rank error is gone. The row as it was:
+  Tighten the families G and F harness (#317 re-review, minor 2 and nits 1 to 4), in one tests
   correction of `crates/mandate-refcases/src/mandate/risk_gate.rs` and DEC-178:
   - compare `pacing` as `None` on every allowed `gate` case and destructure `Decision`, so a new
     member does not compile until it is compared; today a `pacing` that always sets
