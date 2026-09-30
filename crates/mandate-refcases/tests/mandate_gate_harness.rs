@@ -56,10 +56,6 @@ fn case_of(fixture: &Json, id: &str) -> Json {
         .clone()
 }
 
-/// The one `gate` case the gate cannot decide yet: an allowed reopen reaches checks 5 and 6, which
-/// fail closed until E6-8 (DEC-129 item 29), so `status.toml` holds it pending on that story.
-const OWED_TO_E6_8: &str = "MC-G13";
-
 /// Applies `doctor` to a copy of the fixture and runs `id`, which must fail naming `named`.
 fn fails_naming(fixture: &Json, id: &str, named: &str, doctor: impl FnOnce(&mut Json)) {
     let mut doctored = fixture.clone();
@@ -72,8 +68,7 @@ fn fails_naming(fixture: &Json, id: &str, named: &str, doctor: impl FnOnce(&mut 
 }
 
 /// Every member of every `gate` and `agent_flatten` case, at every level the arms read, is one they
-/// know: a member planted beside the real ones fails its case, naming it. MC-G13 is swept too,
-/// because every sweep runs before the gate is asked to decide.
+/// know: a member planted beside the real ones fails its case, naming it.
 #[test]
 fn every_gate_and_flatten_member_is_read() {
     let fixture = fixture();
@@ -185,9 +180,9 @@ const EVERY_FIGURE: [(&str, &str); 8] = [
     ("instrument", "7b4a1c2e-9999-4a2b-9c3d-000000000009"),
 ];
 
-/// Every `gate` case but the one owed to E6-8 passes as the fixture states it, and fails, naming the
-/// member, when its verdict or reason is edited or dropped, when any `computed` figure it states is
-/// edited, and when a figure it does not state is added.
+/// Every `gate` case passes as the fixture states it, and fails, naming the member, when its verdict
+/// or reason is edited or dropped, when any `computed` figure it states is edited, and when a figure
+/// it does not state is added.
 ///
 /// The added figure is the other direction: a case states only the figures its title is about, so
 /// the arm compares the ones stated, and one the gate did not report, or reported with another value,
@@ -199,7 +194,7 @@ fn every_gate_case_passes_and_fails_on_each_edited_expectation() {
     let ids = ids_of(&fixture, "gate");
     assert_eq!(ids.len(), 16, "family G is 16 cases");
     let mut edits = 0;
-    for id in ids.iter().filter(|id| *id != OWED_TO_E6_8) {
+    for id in &ids {
         if let Err(failure) = run(fixture.clone(), id) {
             panic!("{id} must pass as the fixture states it: {failure}");
         }
@@ -247,9 +242,9 @@ fn every_gate_case_passes_and_fails_on_each_edited_expectation() {
     }
     assert_eq!(
         edits,
-        15 * 4 + 24 + (15 * 8 - 24),
-        "verdict and reason edited and dropped in each of 15 cases, the 24 figures they state edited, \
-         and each of the 96 figures they do not state added"
+        16 * 4 + 28 + (16 * 8 - 28),
+        "verdict and reason edited and dropped in each of the 16 cases, the 28 figures they state \
+         edited, and each of the 100 figures they do not state added"
     );
 }
 
@@ -264,14 +259,30 @@ fn the_full_gate_only_entry_expires_when_the_verdicts_agree() {
     });
 }
 
-/// MC-G13 fails at the check it is owed, naming the story that owes it, and not at the harness.
+/// MC-G13, the allowed reopen, passes through all eight checks, conduct included: E6-8 made checks
+/// 5 and 6 whole, so the case the harness held pending on them is decided by the gate. The same
+/// reopen five minutes before the close is denied `close_window` at check 6, so the case's path
+/// runs through the conduct controls rather than around them; stated that way, with the check-7
+/// figures the denial no longer reaches taken out, it passes.
 #[test]
-fn the_gate_case_owed_to_e6_8_fails_at_its_owed_check() {
-    let failure = run(fixture(), OWED_TO_E6_8).expect_err("MC-G13 reaches the fail-closed checks");
-    assert!(
-        failure.contains("mandate_risk::evaluate") && failure.contains("E6-8"),
-        "{OWED_TO_E6_8}: the failure must be the gate's own refusal, naming E6-8, got: {failure}"
-    );
+fn the_allowed_reopen_passes_the_conduct_checks_e6_8_made_whole() {
+    let fixture = fixture();
+    if let Err(failure) = run(fixture.clone(), "MC-G13") {
+        panic!("MC-G13 must pass as the fixture states it: {failure}");
+    }
+    let mut in_the_close_window = fixture;
+    let case = case_mut(&mut in_the_close_window, "MC-G13");
+    case["state"]["now"] = json!("2026-09-21T19:55:00.000000000Z");
+    case["expect"]["verdict"] = json!("deny");
+    case["expect"]["reason"] = json!("close_window");
+    let computed = case["expect"]["computed"]
+        .as_object_mut()
+        .expect("MC-G13 states computed figures");
+    computed.remove("gross");
+    computed.remove("gross_limit");
+    if let Err(failure) = run(in_the_close_window, "MC-G13") {
+        panic!("MC-G13 in the close window must be denied at check 6: {failure}");
+    }
 }
 
 /// The `index`th member of the expected plan's `list`.

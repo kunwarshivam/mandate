@@ -176,15 +176,30 @@ pub(super) fn gate_case(fixture: &Json, case: &Json) -> Result<(), String> {
             failed.len() == 1 && failed.iter().all(|(_, code)| *code == reason),
             || format!("the one failing check must be `{reason}`, got {failed:?}"),
         )?,
-        None => ensure(failed.is_empty(), || {
-            format!("an allowed order has failing checks: {failed:?}")
-        })?,
+        None => expect_eq(
+            "an allowed order's checks",
+            decision.checks.as_slice(),
+            EVERY_CHECK_PASSED.as_slice(),
+        )?,
     }
     match computed {
         Some(stated) => compare_computed(stated, &decision, &[]),
         None => Ok(()),
     }
 }
+
+/// Trading-domain §9.1's eight checks in its order, each passed: what an allowed US-equity order
+/// must report, so an allow cannot come from a check the gate skipped or listed as not reached.
+const EVERY_CHECK_PASSED: [CheckOutcome; 8] = [
+    CheckOutcome::Passed(Check::AccountAndMode),
+    CheckOutcome::Passed(Check::UniverseAndLimits),
+    CheckOutcome::Passed(Check::SessionAndHalt),
+    CheckOutcome::Passed(Check::OrderConstraints),
+    CheckOutcome::Passed(Check::MarkAndCollar),
+    CheckOutcome::Passed(Check::ConductControls),
+    CheckOutcome::Passed(Check::BuyingPowerAndExposure),
+    CheckOutcome::Passed(Check::DayTradeBudget),
+];
 
 /// The [`FULL_GATE_ONLY`] assertions for one listed case.
 fn full_gate_only(
