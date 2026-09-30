@@ -1019,7 +1019,13 @@ risk (rule 3):
   `ModelOutputRecorded.as_of` and `expires_at`); `data_ref` and `content_hash` as stored artifacts
   rather than inline data; `DecisionMade`'s convictions, outputs used, model weights, and clips
   applied; `step_up` as `{assertion_id, authenticated_at, method}`; and the agent stream's
-  `StreamOpened` at seq 1, which nothing writes today.
+  `StreamOpened` at seq 1, which nothing writes today. From round 1 of the review (DEC-177 items 9,
+  11, 12, and 13): `user` and `step_up_status` on every `OwnerExitRequested`, including the owner kill
+  switch's, with `step_up` only when valid; `exit_origin` on every `DecisionMade`, with the
+  convictions and score `null`, and the evaluation's lists empty, on a decision no §8.3 evaluation
+  produced (a goal completion, a removed instrument, a risk exit); `ask_suppressed` when a
+  classified `ask` is not asked (DEC-156 item 5); and `lifecycle` as `normal`, `paused`, or
+  `stopped`, never `exits_only`.
 - **Stream L: the shell's envelope carries the required `config_refs` and the `artifact_refs`**
   (DEC-174 item 5). `mandate-shell` writes `config_refs: {}` and `artifact_refs: []` on every draft,
   so every event that requires `mandate_version` or `model_version` is `missing_config_ref`, and every
@@ -1030,10 +1036,18 @@ risk (rule 3):
   and `tif` rather than `agent`, `kind`, `instrument`, and `limit`; `OrderSubmitted` writing `null`
   for its empty members rather than omitting them (§4.2).
 - **E7-9's tests PR: the harness reads `agent_stream`, then the vectors become version 4.**
-  `mandate-refcases`' journal module reproduces the section's chain and artifacts and refuses each
-  invalid draft with its reason and path; `mandate-journal` gains a boolean type, the schema choice
-  by stream type for `StreamOpened` and `KillSwitchActivated`, and the §9.1 rules. `journal::version`
-  pins 3 and is passing, so the bump is a code PR that accepts 4, then a one-line spec change (ES-22).
+  `mandate-refcases`' journal module reproduces the section's chain and artifacts, refuses each
+  invalid draft with its reason and path (a change may `delete` a member), accepts each valid draft
+  and valid batch, refuses each invalid batch at its `draft_index`, and fails each
+  `range_verification` case with its code at its seq; `mandate-journal` gains a boolean type, the
+  schema choice by stream type for `StreamOpened` and `KillSwitchActivated`, and the §9.1 rules.
+  `journal::version` pins 3 and is passing, so the bump is a code PR that accepts 4, then a one-line
+  spec change (ES-22).
+- **`mandate-journal` and the verifier check the agent stream's cross-event facts** (DEC-177 item
+  14). `append` refuses a batch whose `IntentProposed` differs in an action member from the
+  `DecisionMade` it names in the same batch (§9.1 rule 10), and §11's `intent_action_mismatch` and
+  `mode_event_mismatch` run in `mandate journal verify` and the scheduled verification, against the
+  vectors' `invalid_batches` and `range_verification`.
 - **The model registry stores each pinned model's content object as an artifact.**
   `ModelOutputRecorded.content_hash` is a `sha256:` reference, so it is in `artifact_refs` (§3), and
   §11 check 6 fails `artifact_missing` unless the object is in the artifact store.
@@ -1042,3 +1056,24 @@ risk (rule 3):
   given and does not rule.
 - **The account stream's `KillSwitchActivated` and `AgentModeApplied` schemas** are not closed by
   §9.1; they close with the executor's account-stream schemas.
+
+Minor and nit findings from round 1 of the independent review of the journal spec v0.5 change
+([DEC-177](04-decision-log.md#decisions); held back by the freeze rule, one row each):
+
+- **A copied `AgentModeChanged` names its `AgentModeApplied`.** When the agent runtime copies a
+  mode change the executor originated, the copy's `causation_id` names the originating
+  `AgentModeApplied` (§2); add the rule to §9.1 and a vector for it.
+- **Bound the model-supplied free text.** `ModelOutputRecorded.model_id`, `model_version`,
+  `direction`, and `invalidation` are any non-empty text: bound their length or check them against
+  the model registry and the directions v1 allows, and scan them for personal data as §6.4
+  requires.
+- **`KillSwitchActivated` records the initiator's step-up**, or names its `OwnerExitRequested`
+  (for example as `causation_id`), so the switch's own record shows what authorized it.
+- **`journal.yaml`'s header notes the DEC-176 exception.** Its line "Changing these vectors requires
+  founder approval" predates DEC-176, under which agents accept changes that only tighten or
+  reconcile.
+- **Tidy the journal generator.** Add `from __future__ import annotations` to
+  `reference/journal/generate.py`, whose forward reference in `T` fails on Python before 3.14, and
+  run ruff over `reference/`.
+- **Correct `mandate-refcases`' journal module doc.** `crates/mandate-refcases/src/journal.rs` says
+  the vectors are version 2; they are version 3.
