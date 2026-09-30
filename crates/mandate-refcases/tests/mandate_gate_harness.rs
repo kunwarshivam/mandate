@@ -56,26 +56,50 @@ fn case_of(fixture: &Json, id: &str) -> Json {
         .clone()
 }
 
-/// Applies `doctor` to a copy of the fixture and runs `id`, which must fail naming `named`.
+/// Applies `doctor` to a copy of the fixture and runs `id`, which must fail with a message that
+/// starts with `named`. Every needle names the member or case it is about and the arms' messages
+/// start with what they compared, so a failure for another reason, even one that mentions the
+/// member further on, does not match.
 fn fails_naming(fixture: &Json, id: &str, named: &str, doctor: impl FnOnce(&mut Json)) {
     let mut doctored = fixture.clone();
     doctor(case_mut(&mut doctored, id));
     let failure = run(doctored, id).expect_err("the doctored case must fail");
     assert!(
-        failure.contains(named),
-        "{id}: the failure must name `{named}`, got: {failure}"
+        failure.starts_with(named),
+        "{id}: the failure must start with `{named}`, got: {failure}"
     );
 }
 
+/// The sweep's message for a member planted at `path`, naming the level and the member.
+fn planted_at(path: &[&str], planted: &str) -> String {
+    let level = match path {
+        [] => "case keys",
+        ["expect"] => "expectations",
+        ["state"] => "`state` members",
+        ["proposed"] => "`proposed` members",
+        ["state", "working_opening_orders", _] => "working opening order members",
+        ["expect", "computed"] => "`computed` members",
+        ["input"] => "`input` members",
+        ["input", "open_orders", _] => "open order members",
+        ["input", "agent_positions", _] => "agent position members",
+        ["input", "broker_positions", _] => "broker position members",
+        ["expect", "sells", _] => "sell members",
+        ["expect", "deferred_sells", _] => "deferred sell members",
+        other => panic!("no sweep message for {other:?}"),
+    };
+    format!("{level} not interpreted: {planted}")
+}
+
 /// Every member of every `gate` and `agent_flatten` case, at every level the arms read, is one they
-/// know: a member planted beside the real ones fails its case, naming it.
+/// know: a member planted beside the real ones fails its case at the sweep of its own level, naming
+/// it.
 #[test]
 fn every_gate_and_flatten_member_is_read() {
     let fixture = fixture();
     let planted = "a_member_the_harness_does_not_read";
     let mut sites = 0;
     let mut plant = |id: &str, path: &[&str]| {
-        fails_naming(&fixture, id, planted, |case| {
+        fails_naming(&fixture, id, &planted_at(path, planted), |case| {
             let mut slot = case;
             for step in path {
                 slot = match step.parse::<usize>() {
@@ -205,19 +229,24 @@ fn every_gate_case_passes_and_fails_on_each_edited_expectation() {
         }
         let case = case_of(&fixture, id);
         let expect = case["expect"].clone();
-        fails_naming(&fixture, id, "verdict", |case| {
+        fails_naming(&fixture, id, "verdict: ", |case| {
             case["expect"]["verdict"] = other_verdict(&expect["verdict"]);
         });
-        fails_naming(&fixture, id, "reason", |case| {
+        fails_naming(&fixture, id, "reason: ", |case| {
             case["expect"]["reason"] = other_reason(&expect["reason"]);
         });
         for member in ["verdict", "reason"] {
-            fails_naming(&fixture, id, member, |case| {
-                case["expect"]
-                    .as_object_mut()
-                    .expect("an expectation")
-                    .remove(member);
-            });
+            fails_naming(
+                &fixture,
+                id,
+                &format!("fixture has no `{member}`"),
+                |case| {
+                    case["expect"]
+                        .as_object_mut()
+                        .expect("an expectation")
+                        .remove(member);
+                },
+            );
         }
         edits += 4;
         let flipped = match case["proposed"]["purpose"].as_str() {
@@ -226,7 +255,7 @@ fn every_gate_case_passes_and_fails_on_each_edited_expectation() {
             _ => None,
         };
         if let Some(flipped) = flipped {
-            fails_naming(&fixture, id, "purpose", |case| {
+            fails_naming(&fixture, id, "purpose: ", |case| {
                 case["proposed"]["purpose"] = json!(flipped);
             });
             edits += 1;
@@ -237,7 +266,7 @@ fn every_gate_case_passes_and_fails_on_each_edited_expectation() {
             .cloned()
             .unwrap_or_default();
         for (key, value) in &stated {
-            fails_naming(&fixture, id, &format!("computed.{key}"), |case| {
+            fails_naming(&fixture, id, &format!("computed.{key}: "), |case| {
                 case["expect"]["computed"][key] = other_figure(key, value);
             });
             edits += 1;
@@ -251,7 +280,7 @@ fn every_gate_case_passes_and_fails_on_each_edited_expectation() {
             } else {
                 json!(value)
             };
-            fails_naming(&fixture, id, &format!("computed.{key}"), |case| {
+            fails_naming(&fixture, id, &format!("computed.{key}: "), |case| {
                 case["expect"]["computed"][key] = figure;
             });
             edits += 1;
@@ -271,10 +300,15 @@ fn every_gate_case_passes_and_fails_on_each_edited_expectation() {
 #[test]
 fn the_full_gate_only_entry_expires_when_the_verdicts_agree() {
     let fixture = fixture();
-    fails_naming(&fixture, "MC-G02", "expired", |case| {
-        case["expect"]["verdict"] = json!("deny");
-        case["expect"]["reason"] = json!("working_order_limit");
-    });
+    fails_naming(
+        &fixture,
+        "MC-G02",
+        "MC-G02: the full gate now gives the case's own verdict",
+        |case| {
+            case["expect"]["verdict"] = json!("deny");
+            case["expect"]["reason"] = json!("working_order_limit");
+        },
+    );
 }
 
 /// MC-G13, the allowed reopen, passes through all eight checks, conduct included: E6-8 made checks
@@ -332,7 +366,7 @@ fn every_flatten_case_passes_and_fails_on_each_edited_expectation() {
             panic!("{id} must pass as the fixture states it: {failure}");
         }
         let expect = case_of(&fixture, id)["expect"].clone();
-        fails_naming(&fixture, id, "mode_applied_first", |case| {
+        fails_naming(&fixture, id, "mode_applied_first: ", |case| {
             let mode = &mut case["expect"]["mode_applied_first"];
             *mode = if *mode == "paused" {
                 json!("stopped")
@@ -340,7 +374,7 @@ fn every_flatten_case_passes_and_fails_on_each_edited_expectation() {
                 json!("paused")
             };
         });
-        fails_naming(&fixture, id, "purpose", |case| {
+        fails_naming(&fixture, id, "purpose: ", |case| {
             let purpose = &mut case["expect"]["purpose"];
             *purpose = if *purpose == "risk_exit" {
                 json!("owner_exit")
@@ -361,13 +395,13 @@ fn every_flatten_case_passes_and_fails_on_each_edited_expectation() {
         let mut longer = cancels.clone();
         longer.push(json!("b-1"));
         for list in [reversed, shorter, longer] {
-            fails_naming(&fixture, id, "cancel_client_order_ids", |case| {
+            fails_naming(&fixture, id, "cancel_client_order_ids: ", |case| {
                 case["expect"]["cancel_client_order_ids"] = Json::Array(list);
             });
             edits += 1;
         }
         for endpoint in ["cancel_all_endpoint", "close_position_endpoint"] {
-            fails_naming(&fixture, id, endpoint, |case| {
+            fails_naming(&fixture, id, &format!("{endpoint}: "), |case| {
                 let flag = &mut case["expect"][endpoint];
                 *flag = json!(!flag.as_bool().expect("a boolean"));
             });
@@ -376,15 +410,16 @@ fn every_flatten_case_passes_and_fails_on_each_edited_expectation() {
 
         let sells = expect["sells"].as_array().expect("a sell list").clone();
         for index in 0..sells.len() {
-            fails_naming(&fixture, id, "sells", |case| {
+            let member = |name: &str| format!("sells[{index}].{name}: ");
+            fails_naming(&fixture, id, &member("instrument"), |case| {
                 nth(case, "sells", index)["instrument"] =
                     json!("7b4a1c2e-9999-4a2b-9c3d-000000000009");
             });
-            fails_naming(&fixture, id, "sells", |case| {
+            fails_naming(&fixture, id, &member("qty"), |case| {
                 let qty = &mut nth(case, "sells", index)["qty"];
                 *qty = other_amount(qty);
             });
-            fails_naming(&fixture, id, "sells", |case| {
+            fails_naming(&fixture, id, &member("pricing"), |case| {
                 let pricing = &mut nth(case, "sells", index)["pricing"];
                 *pricing = if *pricing == "market_or_ladder" {
                     json!("exit_price_ladder")
@@ -392,14 +427,14 @@ fn every_flatten_case_passes_and_fails_on_each_edited_expectation() {
                     json!("market_or_ladder")
                 };
             });
-            fails_naming(&fixture, id, "sells", |case| {
+            fails_naming(&fixture, id, &member("floor_price"), |case| {
                 let members = nth(case, "sells", index).as_object_mut().expect("a sell");
                 match members.get("floor_price").cloned() {
                     Some(floor) => members.insert("floor_price".to_owned(), other_amount(&floor)),
                     None => members.insert("floor_price".to_owned(), json!("97")),
                 };
             });
-            fails_naming(&fixture, id, "sells", |case| {
+            fails_naming(&fixture, id, &member("remainder"), |case| {
                 let members = nth(case, "sells", index).as_object_mut().expect("a sell");
                 if members.remove("remainder").is_none() {
                     members.insert(
@@ -414,14 +449,14 @@ fn every_flatten_case_passes_and_fails_on_each_edited_expectation() {
         dropped.pop();
         let mut added = sells.clone();
         added.push(sells.first().expect("at least one sell").clone());
-        let mut lists = vec![dropped, added];
+        let mut lists = vec![("sells: ", dropped), ("sells: ", added)];
         if sells.len() > 1 {
             let mut swapped = sells.clone();
             swapped.reverse();
-            lists.push(swapped);
+            lists.push(("sells[0].", swapped));
         }
-        for list in lists {
-            fails_naming(&fixture, id, "sells", |case| {
+        for (named, list) in lists {
+            fails_naming(&fixture, id, named, |case| {
                 case["expect"]["sells"] = Json::Array(list);
             });
             edits += 1;
@@ -432,19 +467,20 @@ fn every_flatten_case_passes_and_fails_on_each_edited_expectation() {
             .expect("a deferred list")
             .clone();
         for index in 0..deferred.len() {
-            fails_naming(&fixture, id, "deferred_sells", |case| {
+            let member = |name: &str| format!("deferred_sells[{index}].{name}: ");
+            fails_naming(&fixture, id, &member("instrument"), |case| {
                 nth(case, "deferred_sells", index)["instrument"] =
                     json!("7b4a1c2e-9999-4a2b-9c3d-000000000009");
             });
-            fails_naming(&fixture, id, "deferred_sells", |case| {
+            fails_naming(&fixture, id, &member("qty"), |case| {
                 let qty = &mut nth(case, "deferred_sells", index)["qty"];
                 *qty = other_amount(qty);
             });
-            fails_naming(&fixture, id, "deferred_sells.until", |case| {
+            fails_naming(&fixture, id, &member("until"), |case| {
                 nth(case, "deferred_sells", index)["until"] = json!("next_risk_day");
             });
             edits += 3;
-            fails_naming(&fixture, id, "deferred_sells", |case| {
+            fails_naming(&fixture, id, "deferred_sells: ", |case| {
                 case["expect"]["deferred_sells"]
                     .as_array_mut()
                     .expect("a deferred list")
@@ -452,7 +488,7 @@ fn every_flatten_case_passes_and_fails_on_each_edited_expectation() {
             });
             edits += 1;
         }
-        fails_naming(&fixture, id, "deferred_sells", |case| {
+        fails_naming(&fixture, id, "deferred_sells: ", |case| {
             case["expect"]["deferred_sells"]
                 .as_array_mut()
                 .expect("a deferred list")
@@ -478,16 +514,31 @@ fn every_flatten_case_passes_and_fails_on_each_edited_expectation() {
 #[test]
 fn the_flatten_arm_refuses_inputs_it_cannot_read() {
     let fixture = fixture();
-    fails_naming(&fixture, "MC-F03", "max_exit_offset", |case| {
-        case["input"]
-            .as_object_mut()
-            .expect("an input")
-            .remove("max_exit_offset");
-    });
-    fails_naming(&fixture, "MC-F04", "confirmed_bid", |case| {
-        case["input"]["confirmed_bid"] = json!("100");
-    });
-    fails_naming(&fixture, "MC-F01", "someone_else", |case| {
-        case["input"]["initiator"] = json!("someone_else");
-    });
+    fails_naming(
+        &fixture,
+        "MC-F03",
+        "a confirmed bid needs the `max_exit_offset`",
+        |case| {
+            case["input"]
+                .as_object_mut()
+                .expect("an input")
+                .remove("max_exit_offset");
+        },
+    );
+    fails_naming(
+        &fixture,
+        "MC-F04",
+        "the case states a `confirmed_bid` the owner did not confirm",
+        |case| {
+            case["input"]["confirmed_bid"] = json!("100");
+        },
+    );
+    fails_naming(
+        &fixture,
+        "MC-F01",
+        "`someone_else` is not a flatten initiator",
+        |case| {
+            case["input"]["initiator"] = json!("someone_else");
+        },
+    );
 }

@@ -279,12 +279,12 @@ fn compare_computed(
         let what = format!("computed.{key}");
         if let Some((_, pinned)) = unreached.iter().find(|(name, _)| name == key) {
             expect_eq(
-                &format!("{what}, as its FULL_GATE_ONLY entry pins it"),
+                &format!("{what}: as its FULL_GATE_ONLY entry pins it"),
                 text(want, &what)?.as_str(),
                 *pinned,
             )?;
             ensure(c.get(key).is_none(), || {
-                format!("{what} is after the deciding check, so the gate must not have reached it")
+                format!("{what}: after the deciding check, so the gate must not have reached it")
             })?;
             continue;
         }
@@ -860,12 +860,53 @@ pub(super) fn agent_flatten_case(case: &Json) -> Result<(), String> {
         .iter()
         .map(flatten_sell)
         .collect::<Result<Vec<_>, String>>()?;
-    expect_eq("sells", plan.sells, sells)?;
+    compare_sells(&plan.sells, &sells)?;
     let deferred = list_at(expect, "deferred_sells")?
         .iter()
-        .map(deferred_sell)
+        .enumerate()
+        .map(|(index, sell)| deferred_sell(index, sell))
         .collect::<Result<Vec<_>, String>>()?;
-    expect_eq("deferred_sells", plan.deferred_sells, deferred)
+    compare_deferred_sells(&plan.deferred_sells, &deferred)
+}
+
+/// The plan's sells against the case's, in order and member by member, so a failure names the one
+/// member that differs (`sells[1].pricing`). Each sell is taken apart whole, so a member the crate
+/// adds to `FlattenSell` does not compile here until it is compared.
+fn compare_sells(got: &[FlattenSell], wanted: &[FlattenSell]) -> Result<(), String> {
+    expect_eq("sells", got.len(), wanted.len())?;
+    for (index, (sell, want)) in got.iter().zip(wanted).enumerate() {
+        let FlattenSell {
+            instrument,
+            qty,
+            pricing,
+            floor_price,
+            rests_at_floor_then_waits_for_open,
+        } = sell;
+        let member = |name: &str| format!("sells[{index}].{name}");
+        expect_eq(&member("instrument"), instrument, &want.instrument)?;
+        expect_eq(&member("qty"), qty, &want.qty)?;
+        expect_eq(&member("pricing"), pricing, &want.pricing)?;
+        expect_eq(&member("floor_price"), floor_price, &want.floor_price)?;
+        expect_eq(
+            &member("remainder"),
+            rests_at_floor_then_waits_for_open,
+            &want.rests_at_floor_then_waits_for_open,
+        )?;
+    }
+    Ok(())
+}
+
+/// The plan's deferred sells against the case's, in order and member by member, as
+/// [`compare_sells`] does.
+fn compare_deferred_sells(got: &[DeferredSell], wanted: &[DeferredSell]) -> Result<(), String> {
+    expect_eq("deferred_sells", got.len(), wanted.len())?;
+    for (index, (sell, want)) in got.iter().zip(wanted).enumerate() {
+        let DeferredSell { instrument, qty } = sell;
+        let member = |name: &str| format!("deferred_sells[{index}].{name}");
+        expect_eq(&member("instrument"), instrument, &want.instrument)?;
+        expect_eq(&member("qty"), qty, &want.qty)?;
+    }
+    Ok(())
 }
 
 /// One expected sell. An absent `floor_price` is no floor and an absent `remainder` is none, so a plan
@@ -900,11 +941,11 @@ fn flatten_sell(sell: &Json) -> Result<FlattenSell, String> {
 
 /// One expected deferred sell. `until` must be the regular-session open, the only deferral a
 /// `DeferredSell` means, so a case naming another fails rather than being read as that one.
-fn deferred_sell(sell: &Json) -> Result<DeferredSell, String> {
+fn deferred_sell(index: usize, sell: &Json) -> Result<DeferredSell, String> {
     unknown_members(sell, DEFERRED_KEYS)
         .map_err(|unknown| format!("deferred sell members not interpreted: {unknown}"))?;
     expect_eq(
-        "deferred_sells.until",
+        &format!("deferred_sells[{index}].until"),
         str_at(sell, "until")?,
         "regular_session_open",
     )?;
