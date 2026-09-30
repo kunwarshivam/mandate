@@ -197,12 +197,13 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   reach me, and asks capped per day, so that a prompt-injected or looping agent can neither trade
   unasked nor wear me down ([ADR-0003](../adr/0003-earned-autonomy.md) part 10, [DEC-185](04-decision-log.md#decisions), [DEC-195](04-decision-log.md#decisions)). The client ceiling is
   mandate spec §6.2 step 5a and MI-30 ([#328](https://github.com/kunwarshivam/mandate/pull/328)); the
-  ask budget waits on its spec change (MI-33). Safety-critical (autonomy policy), DEC-77 sequence.
+  per-client ask budget waits on its spec change (MI-33, [DEC-251](04-decision-log.md#decisions)). Safety-critical (autonomy policy), DEC-77 sequence.
   *Accepted when:* `requested_by` is set from the authenticated channel and journaled in
   `DecisionMade`; a client-requested opening is `ask` under every `auto` rule, `auto` default, live
   delegation, and `auto` admission, and a `deny` still denies; owner and agent requests decide as
-  before; past the daily ask budget (20 per agent, 10 per client by default) further asks are skipped
-  and journaled with their reason, never notified; risk-limit alerts are never capped.
+  before; past 10 client-requested asks per client per risk day (the owner may lower it), further
+  asks from that client are suppressed as `client_budget` and journaled, never notified, on top of
+  §6.4's per-agent budget of 10; risk-limit alerts are never capped.
 - **E6-13 (Should)** As an owner, I want tripwires I set in advance to end my delegations or hold new
   openings when their condition is met, so that trust does not outlive the conditions I gave it
   under ([DEC-187](04-decision-log.md#decisions)). Waits on the mandate spec change for `autonomy.tripwires` (MI-31, V-044).
@@ -284,7 +285,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   means the owner's choices (approve or skip, with the default stated), never platform-authored
   alternative trades ([mandate spec §6.4](../specs/mandate.md#64-approvals), FR-6.2).
   *Follow-up (DEC-165 item 3, #236):* the content's Trigger row still lacks "the rule as the owner
-  wrote it". It joins the content object once the M7 spec PR fixes §6.4's list, with a test that
+  wrote it". §6.4 now fixes it (DEC-173 item 2): `trigger.rule` is the owner's confirmed rule
+  `{id, when, then}` exactly as the mandate holds it, or null for `default` and
+  `admission_ceiling`. It joins the content object in a tests correction, with a test that
   scans owner-written text apart from the platform's own in
   `the_content_never_carries_advice_wording`, so an owner's rule named `target_weight` is shown as
   written and never read as platform advice.
@@ -328,7 +331,62 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   runtime's tests PR (3 of 4):** a test commits an owner exit whose step-up is stale at commit
   and asserts two things. First, the refusal is journaled. Second, the exit is still routed as
   a regular-session exit and reaches the executor, so no step-up outcome can remove an owner's
-  risk reduction. The mandate spec §6.1 wording goes with the M7 spec PR.
+  risk reduction. The mandate spec §6.1 wording is in ("Owner controls and step-up", DEC-173
+  item 5).
+  *Follow-up (M7 spec PR, DEC-173 item 1):* the MC-E cases (MC-E01 to MC-E31) are not yet in
+  `mandate.yaml`, because `mandate_harness.rs`'s
+  `the_fixture_holds_the_families_this_stream_expects` pins the fixture's total at 298 cases and
+  300 tests, and the spec guard keeps that `crates/` fix out of a spec PR. Two changes, in order:
+  first a tests correction that makes the harness count only the families it owns, or read §11's
+  stated count; then an MC-E spec PR that generates the cases from `reference/mandate/ref.py`'s
+  escalation model (already fuzzed and mutation-checked), with `cargo xtask refcases --write`, and
+  no `status.toml` row.
+  *Follow-up (M7 spec PR, DEC-173 item 11):* the `mandate-journal` catalogue (`src/catalogue.rs`,
+  `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
+  (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
+  journal them.
+  *Follow-up (#321 review, major; DEC-173 item 13), owned by the M7 tests correction:*
+  `mandate-approval`'s admission (`src/admit.rs`, `quorum`) reads only the bound
+  `approvers_required` and `independent_required`. It must judge check 7 against the stricter of
+  those and the workspace policy overlay current at the effective time: independence if either
+  requires it, the larger approver count, and an author's earlier `counted` grant not counting once
+  independence is required. Tests first, against `reference/mandate/ref.py`'s `approval_quorum`.
+  *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
+  control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
+  would make MI-24 true as written.
+  *Follow-up (#321 review, minor 2):* §6.1's and §6.4's "one assertion per approval" should read "per grant",
+  because a two-approver approval takes two assertions.
+  *Follow-up (#321 review, minor 3):* §5.9 says the executor cancels pending approvals, but §6.4 and
+  journal spec §2 put that in the runtime's step; align them.
+  *Follow-up (#321 review, minor 4):* journal spec §9's `ApprovalRevalidated` row lacks the
+  working-universe membership that check 9 compares.
+  *Follow-up (#321 review, minor 5):* check 3's `role:` approver entries are resolved at an unstated
+  moment; state it.
+  *Follow-up (#321 review, minor 6):* the reference model's assertion ledger never fills `used` from
+  `OwnerCommandIssued` or `OwnerAcknowledged`.
+  *Follow-up (#321 review, minor 7):* `notifications.channels` cannot express `cli_inbox`.
+  *Follow-up (#321 review, minor 8):* `recent_timeout` does not say whose `timeout_s` it uses.
+  *Follow-up (#321 review, minor 9):* `reference/mandate/mutants.py` runs only in
+  `cargo xtask ci nightly`, not in `cargo xtask check`.
+  *Follow-up (#321 round 2, minor 1), owned by the M7 tests correction:* nothing tests that
+  `ApprovalResponded` records the approver count and independence check 7 applied; dropping the
+  member survives the whole fuzz. Assert the recorded quorum against the fuzz's own `own_quorum`,
+  and add a mutant.
+  *Follow-up (#321 round 2, minor 2):* say which stream the policy overlay is folded from.
+  `PolicyChanged` is on the workspace control stream, and §2's copy list for the agent runtime does
+  not include it. State either that the runtime copies it into the agent stream, or that replay
+  reads the recorded quorum rather than re-deriving the overlay. Every interleaving only
+  over-tightens today, because check 7 takes the maximum with the bound values.
+  *Follow-up (#321 round 2, minor 3):* the reference model reads absolute
+  `independent_approval_required` and `two_approver_above_usd` from `PolicyChanged`, where journal §9
+  gives `level`, `diff` and `affected agents`. State how a partial diff resolves, at which level,
+  and whether the agent must be listed in `affected agents`.
+  *Follow-up (#321 round 2, nits):*
+  - reword the admission sentence as "the grants that count … now number check 7's approver count";
+  - say once that "at the effective time" and "folded before the step" coincide because the clock
+    fold advances on every event;
+  - the approval surface shows the current requirement, not only the bound `approvers` (a PX item);
+  - add the per-order approval to §4.3's list of what `independent_approval_required` scopes.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded
@@ -704,8 +762,8 @@ fuzzed and seeded bugs caught before code:
   `exits_only`, risk-reducing to add; MI-31 and V-044.
 - `autonomy.review_by` (DEC-188): a §7 platform default of 90 days, at most 180; past it every `auto`
   and delegation reads as `ask`; MI-32.
-- The ask budget (DEC-195): per-agent and per-client daily caps on asks, beyond which asks are
-  skipped; MI-33.
+- The per-client ask budget (DEC-195, DEC-251): at most 10 client-requested asks per client per
+  risk day, which the owner may lower, suppressed as `client_budget` after §6.4's per-agent `budget`; MI-33.
 - The delegation total (DEC-196): the sum of `max_total_usd` over a version's delegations is at most
   `capital.allocation_usd`; V-045.
 - The unasked-dollars figure (DEC-189): its formula in mandate spec §4.2 beside the confirmation
@@ -726,6 +784,10 @@ From the independent reviews of stream J's implementation (`mandate-research`, #
 From E10-3's implementation (DEC-172 items 1 and 12):
 
 - Align `reference/mandate/ref.py`'s `classify` with the crate where the crate reads more strictly or more exactly: pinned instruments compared by whole entry (a symbol or asset-class change is an added instrument), an absent member and a `null` one reported as a changed path, and a same-set reordering of `asset_classes` neutral. No MC-C case exercises any of the three, and the reference's reading of the first is the one that could skip step-up.
+- From the review of #318 and #319, three minors for the next `mandate-spec` tests correction:
+  - replace the four near-identical `ValidationContext` fixtures in `tests/change.rs`, `tests/validate.rs`, `tests/goal.rs` and `tests/risk.rs` with one `validation_context()` in `tests/common/mod.rs`;
+  - give `tests/change.rs` a `runner_with(cases)` instead of the MI-11 property's inline copy of `runner()`'s four fields;
+  - `ChangeClass`'s derived `Ord` is now what `join` relies on (DEC-172 item 8). Only `the_class_order_is_the_severity_order` and four MC-C cases catch a reorder, so either give the variants explicit discriminants or point the enum's doc at that test.
 
 From the independent review of E10-1's slice-S implementation ([#225](https://github.com/kunwarshivam/mandate/pull/225)
 round 1), as the coordinator ruled there:
@@ -1055,19 +1117,66 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   where it is configured or plans the flatten without a floor.
 - Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
   row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.
-- **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163).
-  `crates/mandate-refcases/src/trading_domain.rs` has no gate driver: `propose_order` steps and the
-  `decision` expectation are pending on E6-3, and the crate does not depend on `mandate-risk`. An
-  arm that builds a `GateInput` from a case, calls `mandate_risk::evaluate`, and compares verdict
-  and reason code is the first step, and it does not run RC-25 by itself: RC-25's steps carry no
-  `quote`, `trailing_5m_volume` or `adv_20d`, so its openings would be denied `stale_mark` at check 5
-  or `conduct_limit_breached` at check 6, and they name a `purpose` where the gate assigns one from
-  an `Origin`. The arm must also state, with its own tests, the market data a case omits and the
-  origin each purpose maps to; only then does RC-25 run, and RC-15, RC-16 and RC-09's gate steps
-  with it. RC-22 needs more: `broker_order_update` (E7-2), the exit sequence's `actions` (E7-4), and
-  the `conduct_breach` step's switch to `exits_only` with an owner alert, a mode transition the
-  runtime owns (§5.9, §9.6's "breach → agent `exits_only`", E6-11); the pure gate only denies the
-  breaching opening `conduct_limit_breached`.
+- Delete `crates/mandate-risk/tests/refcases.rs` once the families G and F status rows (DEC-178)
+  have merged: `crates/mandate-refcases/src/mandate/risk_gate.rs` now runs MC-G01 to MC-G16 and
+  MC-F01 to MC-F04 against the same `evaluate` and `agent_flatten`, and the file's own doc says it
+  moves there. Its doc on `FULL_GATE_ONLY` still calls MC-G13 pending on E6-8, which #311 made
+  live; deleting the file retires that too, and moving any figure it pins that
+  `crates/mandate-risk/tests/hand.rs` does not goes in the same tests correction.
+- Reconcile MC-G02 with its header under DEC-176: the header says "every other check passes", yet
+  its working opening order in the proposal's own instrument trips trading-domain §5.3 rule 6
+  (`working_order_limit`), which is why [DEC-150](04-decision-log.md#decisions) item 1 lists it on
+  `FULL_GATE_ONLY`. Stating the same $1,300 as a position (`positions_mv` 1300, no working order in
+  that instrument) keeps `instrument_total` and `gross` at 1500, so the case would pin `gross` on an
+  allow path, the window DEC-150 records, and the entry could expire. Restated, MC-G02 becomes an
+  allowed opening (an increase), so like MC-G13 it runs through checks 5 and 6 and check 7, and the
+  full gate allows it: against the restated state the harness reports the entry expired
+  (DEC-178 item 11). The same pull request deletes the entry, and `FULL_GATE_ONLY` with it if
+  nothing else is listed. The change touches the YAML,
+  the reference implementation's checks, and the regenerated fixtures, so it cannot share a pull
+  request with code (ES-22).
+- Tighten the families G and F harness (#317 re-review, minor 2 and nits 1 to 4), in one tests
+  correction of `crates/mandate-refcases/src/mandate/risk_gate.rs` and DEC-178:
+  - compare `pacing` as `None` on every allowed `gate` case and destructure `Decision`, so a new
+    member does not compile until it is compared; today a `pacing` that always sets
+    `marketable_limit_required` leaves every F, G and L case green, and only `mandate-risk`'s own
+    tests catch it (DEC-178 item 14);
+  - reword DEC-178 item 12: the five non-fixture fields are compared with the same values typed
+    again, because `mandate-risk`'s `test_default_config` is test-only and another crate cannot
+    call it;
+  - add an edit test for item 11's pin on an allowed order's whole `checks` list, which today no
+    harness test of its own guards;
+  - note in item 11 that the pin is only meaningful for an allowed opening (MC-G13), since the gate
+    reports checks 5 to 8 as `Passed` for an exit without running them;
+  - drop the unreachable typed error for an unknown group rank in `Scene::read`, or state why it
+    stays.
+- **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163;
+  the gate driver since E6-9, DEC-199). `crates/mandate-refcases/src/trading_domain/gate.rs` now
+  decides `propose_order` steps with `mandate_risk::evaluate`, states the market data a case omits
+  (a quote at the limit price, volumes that pass check 6) and the origin each purpose maps to, each
+  with its own tests. RC-25 still waits for the instrument fields `prior_close` and
+  `median_dollar_volume_20d` (E6-7's rows in the harness) and for `owner_confirmed_bid`, which the
+  header writes as `true` and the gate takes as a price (DEC-199 Q3). RC-22 needs more:
+  `broker_order_update` (E7-2), the exit sequence's `actions` (E7-4), and the `conduct_breach`
+  step's switch to `exits_only` with an owner alert, a mode transition the runtime owns (§5.9,
+  §9.6's "breach → agent `exits_only`", E6-11); the pure gate only denies the breaching opening
+  `conduct_limit_breached`. RC-16 also needs the case file's `not_in_universe` reconciled with the
+  gate's `not_in_working_universe` (DEC-199 Q1).
+- Tighten the trading-domain gate driver (#333 review, minors 1 and 2 and nit 2), in one tests
+  correction of `crates/mandate-refcases/src/trading_domain/gate.rs` and DEC-199:
+  - pin, or better, show taking effect, the values DEC-199 item 6 fills: `median_dollar_volume_20d`
+    (the collar tier), `min_order_size`, and the two participation volumes. Today changing any of
+    them leaves every test green, although none of the three changes is looser than the spec;
+  - refuse a second `propose_order` step in the same case until E7-4 and E7-5 land. DEC-199 item 3
+    decides each proposal alone, against an account with no working, unknown or related resting
+    orders, and nothing fails if a case adds a second proposal;
+  - add `agent_mode` to `check()`'s allowed keys, so that an `agent_mode` expectation on an event
+    outside `MODE_OWNERS` fails naming its owning story rather than as `expect: unknown key`.
+- The case-file side of DEC-199 Q1 to Q3, in one reference-case change for the founder:
+  - RC-16 says `not_in_working_universe`, the registered code mandate spec §5.3 defines;
+  - the header says the eligibility floor is checked against the limit price when no
+    `prior_close` is given (or a case below $5 states its own);
+  - RC-25 carries `owner_confirmed_bid` as the displayed bid's price rather than `true`.
 - **trading-domain §9.6: state that the opposite-fill interval includes its last instant**
   (DEC-163 item 3; DEC-176 clarification). §9.6's "within 60 seconds after" an opposite-side fill
   is read inclusively, so an opening exactly 60 s after the fill is denied; the spec text should

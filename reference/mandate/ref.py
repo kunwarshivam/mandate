@@ -1539,3 +1539,272 @@ def classify(old, new):
     if "reducing" in res:
         return "risk_reducing", paths
     return "neutral", paths
+
+# ------------------------------------------------------------------ escalation (§6.1, §6.4; DEC-155, DEC-156, DEC-158, DEC-173)
+STEP_UP_WINDOW_S = 300
+ASK_BUDGET_PER_RISK_DAY = 10
+DRIFT_BAND_BP = {"us_equity": 100, "crypto": 200}
+BOUND_FIELDS = ("instrument", "side", "qty", "limit_price", "purpose", "mandate_version")
+CANCEL_REASONS = ("version_applied", "mode_tightened", "owner_pause", "owner_stop", "kill_switch")
+CONTENT_KEYS = ("action", "trigger", "evidence", "risk_impact", "reference_mark", "deadline", "default", "choices", "approvers")
+DEFAULT_SENTENCE = "If you do nothing, this action is skipped"
+SCORE_LABEL = "combined model score, not a probability of profit"
+
+def approval_content(m, req, figures):
+    """The §6.4 content object whose SHA-256 is the content hash; `figures` are the §6.3 values at the request."""
+    r, rules = m["risk"], {x["id"]: x for x in m["autonomy"]["rules"]}
+    by = req["decided_by"]
+    rule = rules.get(by[len("rule:"):]) if by.startswith("rule:") else None
+    E = D(figures["agent_equity"])
+    ladder = [D(x["at"]) for x in r["drawdown_ladder"]]
+    caps = {"order_usd": r["max_order_usd"], "position_usd_after": norm(min(D(r["max_position_usd"]), D(r["max_position_fraction"]) * E)),
+            "gross_usd_after": norm(min(D(r["max_gross_exposure_usd"]), E)), "bought_today_usd": None,
+            "drawdown": norm(min(ladder)) if ladder else None, "daily_pnl_fraction": r["max_daily_loss"]}
+    return {
+        "action": {k: req[k] for k in ("instrument", "asset_class", "side", "qty")} | {"limit": req["limit_price"]}
+                  | {"order_usd": norm(D(req["qty"]) * D(req["limit_price"])), "purpose": req["purpose"]},
+        "trigger": {"mandate_version": req["mandate_version"], "decided_by": by, "requested_by": req.get("requested_by", "agent"),
+                    "client": req.get("client") if req.get("requested_by") == "client" else None,
+                    "rule": None if rule is None else {"id": rule["id"], "when": rule["when"], "then": rule["then"]}},
+        "evidence": {"combined_score": {"value": req["combined_score"], "label": SCORE_LABEL}, "outputs": req.get("outputs", [])},
+        "risk_impact": [{"field": f, "value": norm(D(req["qty"]) * D(req["limit_price"])) if f == "order_usd" else figures[f], "cap": caps[f]}
+                        for f in ("order_usd", "position_usd_after", "gross_usd_after", "bought_today_usd", "drawdown", "daily_pnl_fraction")],
+        "reference_mark": req["reference_mark"],
+        "deadline": req["deadline"],
+        "default": DEFAULT_SENTENCE,
+        "choices": ["approve", "skip"] + list(req.get("delegation_shapes", [])),
+        "approvers": {"required": req["approvers_required"], "independent": req["independent_required"]},
+    }
+
+def content_hash(content):
+    return "sha256:" + hashlib.sha256(canon(content).encode()).hexdigest()
+
+def approval_notification(req):
+    """Rule 6: the request's opaque approval id and one generic text; nothing else of the request leaves."""
+    return {"subject": req["approval"], "text": "approval_needed"}
+
+def step_up_fault(ev, at, environment, used):
+    """§6.4 step-up judged at `at`: the first of missing, stale, reused, method, or None when the evidence counts.
+    Fresh is 0 to 300 s old inclusive; evidence authenticated after `at` is stale, so clock skew fails closed."""
+    if ev is None:
+        return "step_up_missing"
+    age = (T(at) - T(ev["authenticated_at"])).total_seconds()
+    if not 0 <= age <= STEP_UP_WINDOW_S:
+        return "step_up_stale"
+    if ev["assertion"] in used:
+        return "step_up_reused"
+    if not (ev["method"] == "cli_confirm" and environment == "paper"):
+        return "step_up_method"
+    return None
+
+def evidence_fault(ev, at, environment, used):
+    """Malformed evidence counts as missing."""
+    try:
+        return step_up_fault(ev, at, environment, used)
+    except (KeyError, TypeError, ValueError, AssertionError):
+        return "step_up_missing"
+
+NO_POLICY = {"independent_approval_required": False, "two_approver_above_usd": None}
+
+def approval_quorum(req, policy):
+    """§6.4 check 7's requirement: the stricter of what the request bound and the workspace policy overlay (§4.3)
+    current at the response. Independence if either requires it; the larger approver count, where a policy ceiling
+    below the order value asks for two. A policy change can only tighten a pending approval (DEC-173 item 13)."""
+    ceiling = policy["two_approver_above_usd"]
+    by_policy = 2 if ceiling is not None and D(req["qty"]) * D(req["limit_price"]) > D(ceiling) else 1
+    return {"required": max(req["approvers_required"], by_policy),
+            "independent": req["independent_required"] or policy["independent_approval_required"]}
+
+def approval_admit(req, resp, ctx):
+    """§6.4 admission, checks 1 to 7 in order. `req` is the request as the fold holds it after this step's own
+    cancellations, or None when it is not pending. A skip runs checks 1 to 5 only."""
+    eff = max(T(resp["submitted_at"]), T(ctx["clock"]))
+    out = lambda result, reason=None: {"result": result, "reason": reason, "effective_at": fmt(eff)}
+    if req is None or req["approval"] != resp["approval"]:
+        return out("refused", "not_pending")
+    if eff >= T(req["deadline"]):
+        return out("refused", "late")
+    if resp["actor_kind"] != "user" or resp["responder"] not in ctx["approvers"]:
+        return out("refused", "not_an_approver")
+    if not req["delivered"]:
+        return out("refused", "not_delivered")
+    if resp["content_hash"] != req["content_hash"]:
+        return out("refused", "content_mismatch")
+    if resp["verdict"] == "skipped":
+        return out("admitted")
+    fault = evidence_fault(resp["step_up"], fmt(eff), ctx["environment"], ctx["used_assertions"])
+    if fault:
+        return out("refused", fault)
+    q = approval_quorum(req, ctx["policy"])
+    judged = lambda result, reason=None: out(result, reason) | {"quorum": q}
+    if resp["responder"] in req["grants"]:
+        return judged("refused", "duplicate_approver")
+    if q["independent"] and resp["responder"] == ctx["author"]:
+        return judged("refused", "not_independent")
+    counting = {g for g in req["grants"] if not (q["independent"] and g == ctx["author"])}
+    return judged("admitted" if len(counting) + 1 >= q["required"] else "counted")
+
+def within_drift(m_req, m_now, asset_class):
+    """§6.4 drift: |m_now − m_req| × 10 000 ≤ band_bp × m_req, exact, no division; no mark at either end is outside."""
+    if m_req is None or m_now is None:
+        return False
+    return abs(D(m_now) - D(m_req)) * 10000 <= DRIFT_BAND_BP[asset_class] * D(m_req)
+
+def approval_revalidate(req, now):
+    """§6.4 re-validation, checks 8 to 12 in order, for a grant admitted in the same step. It only skips: the act
+    carries the bound fields unchanged."""
+    skip = lambda reason: {"result": "skip", "reason": reason}
+    if now["mandate_version"] != req["mandate_version"]:
+        return skip("version_changed")
+    if now["mode"] != "normal":
+        return skip("mode")
+    if now["instrument_restricted"] or not now["in_working_universe"]:
+        return skip("instrument_restricted")
+    c = now["classification"]
+    if c["decision"] == "deny":
+        return skip("reclassified_deny")
+    if c["decision"] == "ask" and c["by"] != req["decided_by"]:
+        return skip("reclassified_other_trigger")
+    if now["dry_run"]["verdict"] != "allow":
+        return skip(now["dry_run"]["reason"])
+    if not within_drift((req["reference_mark"] or {}).get("price"), now["mark"], req["asset_class"]):
+        return skip("drift")
+    return {"result": "act", "reason": None, "intent": {k: req[k] for k in BOUND_FIELDS}}
+
+def ask_permit(ledger, instrument, at):
+    """§6.4 anti-fatigue bounds over one agent's journaled asks, in the precedence budget, skipped_today,
+    recent_timeout. A suppressed ask is not an ApprovalRequested, so it is not in the ledger and does not count."""
+    today = risk_day(at)["risk_day"]
+    asked, skipped, timed_out = 0, False, False
+    for e in ledger:
+        if e["event"] == "requested" and risk_day(e["at"])["risk_day"] == today:
+            asked += 1
+        elif e["event"] == "owner_skipped" and e["instrument"] == instrument and risk_day(e["at"])["risk_day"] == today:
+            skipped = True
+        elif e["event"] == "version_applied":
+            skipped = False
+        elif e["event"] == "timed_out" and e["instrument"] == instrument and 0 <= (T(at) - T(e["at"])).total_seconds() < e["timeout_s"]:
+            timed_out = True
+    if asked >= ASK_BUDGET_PER_RISK_DAY:
+        return "budget"
+    if skipped:
+        return "skipped_today"
+    if timed_out:
+        return "recent_timeout"
+    return None
+
+def deliver_now(channel, quiet_hours, at):
+    """§6.4 quiet hours: a push inside [start, end) America/New_York wall time is suppressed; the inbox always delivers."""
+    if channel == "cli_inbox" or quiet_hours is None:
+        return "delivered"
+    local = T(at).astimezone(NY)
+    minute = local.hour * 60 + local.minute
+    start, end = (int(x[:2]) * 60 + int(x[3:5]) for x in (quiet_hours["start"], quiet_hours["end"]))
+    return "suppressed_quiet_hours" if (minute - start) % 1440 < (end - start) % 1440 else "delivered"
+
+def owner_command(kind, ev, committed_at, processed_at, environment, used):
+    """§6.1 owner controls: pause always applies; resume, stop, and acknowledge are judged when the runtime processes
+    them; an owner exit when the owner committed it. The kill switch is `owner_kill_switch`, which never refuses."""
+    if kind == "pause":
+        return {"result": "apply", "reason": None}
+    at = committed_at if kind == "owner_exit" else processed_at
+    fault = evidence_fault(ev, at, environment, used)
+    return {"result": "apply" if fault is None else "refused", "reason": fault}
+
+def owner_exit_order(m, st, prop, mode, session, asset_class, confirmed_bid, authority):
+    """§6.1: a refused owner exit loses only the owner-exit privilege (an equity sale outside the regular session at the
+    confirmed bid); the exit itself is still routed, as a regular-session exit, and never dropped."""
+    privilege = confirmed_bid and authority["result"] == "apply"
+    return order_decision(m, st, prop, mode, set(), session, False, owner_confirmed_bid=privilege, asset_class=asset_class)
+
+def owner_kill_switch(inp, ev, committed_at, environment, used):
+    """§6.1 and DEC-158 option (c): never refused. Without valid evidence as committed it still stops the agent and
+    flattens as an automated flatten does (equities wait for the regular session); with it, the owner-exit privilege applies."""
+    fault = evidence_fault(ev, committed_at, environment, used)
+    out = agent_flatten(dict(inp, initiator="owner", owner_confirmed_bid=inp.get("owner_confirmed_bid", False) and fault is None))
+    return dict(out, step_up=fault)
+
+def proposal_route(pending, purpose):
+    """Rule 13: nothing waits on an approval but a risk-adding proposal, which waits while one is pending (§6.4)."""
+    if purpose in REDUCING:
+        return "handed"
+    return "awaiting_approval" if pending else "evaluate"
+
+def escalation_apply(st, e):
+    """The approval fold over the runtime's own journal and the scheduler's `ClockAdvanced`, which the runtime folds
+    before it steps a tick, so replay and restart give the same answers."""
+    st["clock"] = max(st["clock"], T(e["clock"]))
+    a, t = e.get("approval"), e["type"]
+    pending = st["pending"]
+    if t == "ApprovalRequested":
+        pending[a] = {k: e[k] for k in e if k not in ("type", "clock")} | {"delivered": False, "grants": set()}
+    elif t == "ApprovalDelivered" and e["status"] == "delivered" and a in pending:
+        pending[a]["delivered"] = True
+    elif t == "ApprovalResponded":
+        st["copied"].add(e["source"])
+        if e["step_up"] is not None and isinstance(e["step_up"], dict) and "assertion" in e["step_up"]:
+            st["used"].add(e["step_up"]["assertion"])
+        if a in pending and e["verdict"] == "approved" and e["result"] in ("admitted", "counted"):
+            pending[a]["grants"].add(e["responder"])
+        if a in pending and e["verdict"] == "skipped" and e["result"] == "admitted":
+            del pending[a]
+    elif t in ("ApprovalRevalidated", "ApprovalTimedOut", "ApprovalCanceled"):
+        pending.pop(a, None)
+    elif t == "PolicyChanged":
+        st["policy"] = {k: e[k] for k in NO_POLICY}
+    return st
+
+def escalation_fold(journal, t0):
+    st = {"clock": T(t0), "pending": {}, "copied": set(), "used": set(), "policy": dict(NO_POLICY)}
+    for e in journal:
+        escalation_apply(st, e)
+    return st
+
+def escalation_step(st, inp, ctx):
+    """One runtime step over the approval lifecycle (§6.4). Returns the drafts, in order; the caller folds them.
+    Every draft carries the step's risk clock. The reference hashes the canonical request as a stand-in for the
+    content object, which `approval_content` builds and `fuzz_content` checks on its own."""
+    kind = inp["kind"]
+    clock = max(st["clock"], T(inp["at"])) if kind == "tick" else st["clock"]
+    c = fmt(clock)
+    drafts = []
+    if kind == "ask":
+        if proposal_route(st["pending"], inp["bound"]["purpose"]) != "evaluate":
+            return drafts
+        req = dict(inp["bound"], approval=inp["approval"], deadline=fmt(clock + timedelta(seconds=ctx["timeout_s"])))
+        req["content_hash"] = content_hash({k: req[k] for k in sorted(req)})
+        drafts.append(dict(req, type="ApprovalRequested", clock=c))
+        for channel in ["cli_inbox"] * ctx["inbox"] + ctx["push_channels"]:
+            drafts.append({"type": "ApprovalDelivered", "approval": inp["approval"], "channel": channel,
+                           "status": deliver_now("cli_inbox" if channel == "cli_inbox" else "push", ctx["quiet_hours"], c), "clock": c})
+    elif kind == "tick":
+        for a in sorted(st["pending"]):
+            if T(st["pending"][a]["deadline"]) <= clock:
+                drafts.append({"type": "ApprovalTimedOut", "approval": a, "on_timeout": "skip", "clock": c})
+    elif kind in ("cancel", "batch"):
+        for a in sorted(st["pending"]):
+            drafts.append({"type": "ApprovalCanceled", "approval": a, "reason": inp["reason"], "clock": c})
+        after = copy.deepcopy(st)
+        for d in drafts:
+            escalation_apply(after, d)
+        for resp in inp.get("responses", []):
+            out = escalation_step(after, {"kind": "response", "response": resp, "now": inp["now"]}, ctx)
+            for d in out:
+                escalation_apply(after, d)
+            drafts += out
+    elif kind == "response":
+        resp = inp["response"]
+        if resp["source"] in st["copied"]:
+            return drafts
+        req = st["pending"].get(resp["approval"])
+        adm = approval_admit(req, resp, dict(ctx, clock=c, used_assertions=st["used"], policy=st["policy"]))
+        drafts.append({"type": "ApprovalResponded", "approval": resp["approval"], "source": resp["source"],
+                       "responder": resp["responder"], "verdict": resp["verdict"], "step_up": resp["step_up"],
+                       "clock": c} | adm)
+        if adm["result"] == "admitted" and resp["verdict"] == "approved":
+            rv = approval_revalidate(req, inp["now"])
+            drafts.append({"type": "ApprovalRevalidated", "approval": resp["approval"], "result": rv["result"],
+                           "reason": rv["reason"], "clock": c})
+            if rv["result"] == "act":
+                drafts.append(dict(rv["intent"], type="IntentProposed", approval=resp["approval"], clock=c))
+    return drafts

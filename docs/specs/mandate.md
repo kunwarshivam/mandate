@@ -22,7 +22,8 @@ builder, versioning, change classification, and the records kept.
 
 - **v0.6, amended ([DEC-185](../project/04-decision-log.md#decisions)):** the client ceiling: an
   order an owner-connected client requested is never `auto` (§6.2 step 5a, MI-30), the approval card
-  names the client (§6.4), and `DecisionMade` records `requested_by` (§10). It only tightens, so no
+  names the client from the content object's `trigger` and its `decided_by` may be `client_ceiling`
+  (§6.4), and `DecisionMade` records `requested_by` (§10). It only tightens, so no
   existing reference case changes.
 - **v0.6, amended ([DEC-181](../project/04-decision-log.md#decisions), [ADR-0003](../adr/0003-earned-autonomy.md)):**
   `autonomy.delegations` lets the owner turn an `ask` into `auto` inside the envelope, bounded in
@@ -33,6 +34,17 @@ builder, versioning, change classification, and the records kept.
   MI-12 is restated and MI-26 to MI-29 added (§1.1); `DecisionMade` and `ApprovalResponded` carry
   the delegation (§10, journal spec §9). The MC-U reference cases follow in their own tests-first
   change (§11).
+- **v0.6, amended ([DEC-173](../project/04-decision-log.md#decisions)):** approval escalation v0
+  (M7; [DEC-155](../project/04-decision-log.md#decisions), [DEC-156](../project/04-decision-log.md#decisions),
+  [DEC-158](../project/04-decision-log.md#decisions)). §6.4 specifies the request's content object
+  and hash, the lifecycle, admission and re-validation in order, drift, lateness, step-up, two
+  approvers (at the stricter of the bound requirement and the current policy overlay, so a policy
+  change never loosens a pending approval), the ask budget, quiet hours as push-only, and
+  cancellation; §6.1 states the owner controls, the step-up each needs and when it is judged, the
+  kill switch under DEC-158 option (c),
+  and what a refused owner exit loses; MI-1 names the owner exit's step-up and MI-21 to MI-25 join
+  §1.1. The reference implementation models and fuzzes all of it; the MC-E cases follow in a later
+  change, so §11 is unchanged.
 - **v0.6, amended ([DEC-167](../project/04-decision-log.md#decisions)):** V-040 bounds the
   precision of the ladder's scale factors, so no valid mandate can hold a size factor the order
   builder or the risk state cannot compute exactly (§4.1, §5.5, §8.3).
@@ -80,11 +92,12 @@ builder, versioning, change classification, and the records kept.
 
 Every rule in this spec must preserve these properties. The reference implementation asserts
 them with property-based tests over random sequences of marks, fills, clock ticks, allocation
-changes, acknowledgments, and version changes (AGENTS.md, "Getting it right the first time").
+changes, acknowledgments, version changes, approval requests and responses, and owner commands
+(AGENTS.md, "Getting it right the first time").
 
 | ID | Invariant |
 |---|---|
-| MI-1 | Risk reduction is never denied by a mandate limit, conduct control, session rule, or instrument restriction: `risk_exit` and `protective` orders are allowed; `owner_exit` is allowed (outside the regular session, once the bid is confirmed); `discretionary_exit` is allowed or deferred. Exits may be held only by agent mode `paused` or `stopped`, an `Unknown` order, or the broker (trading spec principle 4) |
+| MI-1 | Risk reduction is never denied by a mandate limit, conduct control, session rule, or instrument restriction: `risk_exit` and `protective` orders are allowed; `owner_exit` is allowed (outside the regular session, once the bid is confirmed and the owner's step-up is valid as committed, §6.1; otherwise it waits for the regular session); `discretionary_exit` is allowed or deferred. Exits may be held only by agent mode `paused` or `stopped`, an `Unknown` order, or the broker (trading spec principle 4) |
 | MI-2 | An applied allocation change never triggers or lifts a limit, never lowers drawdown or the daily loss fraction, and never raises floor headroom or agent return |
 | MI-3 | Latched limits lift only by their defined path (§5.8): drawdown by owner acknowledgment once flat; daily loss by a new risk day plus `daily_breach_min_s`; the lifetime floor only by a loosening version (§5.7) |
 | MI-4 | The lifetime floor bounds cumulative loss: it latches once its breach has accumulated `breach_confirm_s` of breach time, or when 1.25 × its loss level holds on two sane quotes at least min(`breach_confirm_s`, 10 s) apart (checked against an independent oracle) |
@@ -104,6 +117,11 @@ changes, acknowledgments, and version changes (AGENTS.md, "Getting it right the 
 | MI-18 | A lineage never admits a revision past `max_revisions_per_lineage`, and no revision carries a predecessor's score |
 | MI-19 | Exactly the theses that expired, were invalidated, or whose lineage retired remove their instrument; removal restricts that instrument only, never the agent, and MI-1 still holds for it |
 | MI-20 | A pinned universe (bring-your-own-strategy) admits nothing |
+| MI-21 | **Silence never acts** (§6.4). An `IntentProposed` follows an approval only when an admitted, timely grant was re-validated to `act`, at most once per approval; every approval ends in exactly one terminal event of the §6.4 lifecycle; no approval outlives the version or tightening that cancelled it, and a response processed in the same step as that cancellation is never admitted; each control-stream response is copied once, and replay folds to the same approvals |
+| MI-22 | **A grant never widens** (§6.4). The intent equals the bound instrument, side, quantity, limit price, purpose, and mandate version; re-validation can only skip; drift is inside the band exactly when \|m_now − m_req\| × 10 000 ≤ band_bp × m_req, and no mark is outside it (checked against scaled integers) |
+| MI-23 | **Risk reduction never waits on an approval or on step-up** (§6.1, rule 13). No exit, protective order, risk exit, or flatten waits on, or is cancelled by, any approval state; pause always applies; a kill switch always stops and flattens its agent, and only step-up valid as the owner committed it lets it sell equities outside the regular session; a refused owner exit loses only that privilege and is still routed; each owner control is judged at its own moment |
+| MI-24 | **Only a listed human approves what they were shown** (§6.4). A grant counts exactly when the response comes from a `user` actor in `autonomy.approval.approvers`, before the deadline, for a delivered request, repeats its content hash, and carries step-up evidence valid at the effective time whose assertion the workspace has never seen; each approver counts once, and not the mandate's author when independence is required; the approver count and independence are the stricter of the bound values and the workspace policy overlay at the effective time, so no policy change loosens a pending approval |
+| MI-25 | **Asking is bounded** (§6.4). At most one risk-adding approval is pending per agent, and a risk-adding proposal waits exactly while one is; at most 10 requests per agent per risk day; a skipped instrument is not asked again that risk day until a version applies, nor a timed-out one within `timeout_s`; quiet hours suppress exactly the push deliveries inside [start, end) America/New_York wall time, in both DST states, and never the inbox |
 | MI-26 | A delegation only lifts: with or without `autonomy.delegations`, every decision is the same, except that an `ask` from the rule or default a live delegation names may become `auto`. A `deny` is never lifted, built-in decisions never change, and the admission ceiling still holds (MI-17), so no delegation covers a newly admitted instrument |
 | MI-27 | A delegation is bounded: over any sequence of decisions, the orders decided `auto` under it are each at most its `max_order_usd`, number at most its `max_orders`, total at most its `max_total_usd`, and were all decided in [`starts_at`, `expires_at`) (checked against an independent accumulator over the decision log) |
 | MI-28 | While the agent's effective mode is not `normal`, a drawdown rung is active, a limit is accumulating breach time or latched, or a kill switch in the agent's scope is engaged, every decision is what it would be with no delegations |
@@ -384,9 +402,10 @@ limits, never pre-filled as values.
 - **Policy changes** are journaled as `PolicyChanged` (level, diff, author, step-up evidence,
   affected agents). They apply to running agents at the next evaluation as an **overlay**: the
   stricter value governs, and `auto` evaluates as `ask` when `auto_allowed` becomes false, including
-  an `auto` a delegation produced (§6.5). Affected
-  agents are flagged `policy_nonconforming` and their owners are alerted; a conforming version is
-  required before any risk-increasing change.
+  an `auto` a delegation produced (§6.5). A pending
+  approval's quorum and independence follow the same overlay at §6.4 check 7, which only tightens
+  what the request bound. Affected agents are flagged `policy_nonconforming` and their owners are
+  alerted; a conforming version is required before any risk-increasing change.
 
 ## 5. Risk state and limits
 
@@ -596,9 +615,43 @@ exit, typed by its origin. A sell above the position is rejected (no short sales
 |---|---|---|---|
 | `open`, `increase` | Order builder | Autonomy rules (§6.2) | Apply (trading spec §9.6) |
 | `discretionary_exit` | Order builder (signal exit), goal completion, removed instruments (§2.3, including an expired or invalidated thesis) | Built-in AUTO; never denied | **Paced, never denied:** price collar and participation caps; in the close window, marketable limit orders only (DEC-70); equities in the regular session only (verdict `defer` outside it) |
-| `owner_exit` | The owner closes a position or triggers a kill switch | The owner's instruction (step-up); never denied | Participation caps pace it. Outside the regular session, equities sell through the exit price ladder once the owner has confirmed the displayed bid and bid size and a **floor price** (default: the confirmed bid × (1 − the exit ladder's maximum offset)); the ladder never prices below the floor, any remainder rests at the floor and then waits for the session, and the owner is alerted (DEC-66) |
+| `owner_exit` | The owner closes a position or triggers a kill switch | The owner's instruction, with step-up judged as the owner committed it; never denied (without valid step-up it loses only the owner-exit privilege, below) | Participation caps pace it. Outside the regular session, equities sell through the exit price ladder once the owner has confirmed the displayed bid and bid size and a **floor price** (default: the confirmed bid × (1 − the exit ladder's maximum offset)); the ladder never prices below the floor, any remainder rests at the floor and then waits for the session, and the owner is alerted (DEC-66) |
 | `risk_exit` | Risk engine: limits, flatten, `trim_to_target`, stop watchdog (trading spec §5.4) | Built-in AUTO; never denied | Exempt |
 | `protective` | Executor: placing and re-placing protection | Built-in AUTO; never denied | Exempt |
+
+**Owner controls and step-up** ([DEC-155](../project/04-decision-log.md#decisions),
+[DEC-158](../project/04-decision-log.md#decisions), [DEC-173](../project/04-decision-log.md#decisions);
+product experience PX-4). The owner's controls reach an agent only as events committed to the
+workspace control stream: `ApprovalResponseSubmitted` for an answer to an approval (§6.4) and
+`OwnerCommandIssued` for a command (journal spec §2, §9). The agent runtime copies each into its own
+stream with `causation_id` and judges it there; nothing the owner's client checks is authority.
+
+| Control | Step-up | Judged at | Without valid step-up |
+|---|---|---|---|
+| Pause | None | — | Always applies |
+| Resume | Required | When the runtime processes it | Refused. A resume lifts only the owner's own pause, never a latched limit or a hold (MI-3) |
+| Stop (DEC-136) | Required | When the runtime processes it | Refused |
+| Acknowledge (§5.8, trading spec §11) | Required | When the runtime processes it | Refused |
+| Owner exit | Required | When the owner committed it | Refused **as an owner exit**: it loses only the owner-exit privilege (selling equities outside the regular session at the confirmed bid, DEC-58, DEC-66). The exit is still routed, and never dropped: in the regular session, or at once for crypto; an equity sale outside the session waits for it unless the owner commits it again with a freshly confirmed bid and fresh step-up |
+| Kill switch, any scope | Only for its privileges beyond the stop | When the owner committed it | **Never refused** (DEC-158 option (c)): it stops the agent and flattens as an automated flatten does, equities waiting for the regular session (trading spec §5.5). With valid step-up and a confirmed bid it also sells equities outside the regular session as an owner exit does |
+| Approve (§6.4) | Required, one assertion per approval | The response's effective time | Refused |
+| Skip (§6.4) | None | — | — |
+
+- **Valid step-up.** Evidence is `{assertion, authenticated_at, method}`. It is valid at a moment
+  *t* when 0 ≤ *t* − `authenticated_at` ≤ 300 s (evidence authenticated after *t* is stale, so
+  clock skew fails closed); its assertion id appears on no earlier `ApprovalResponseSubmitted`,
+  `OwnerCommandIssued`, or `OwnerAcknowledged` in the workspace's control stream, whatever that
+  event's outcome; and its method is allowed for the environment. Missing or malformed evidence
+  counts as missing. A refusal is journaled with `step_up_missing`, `step_up_stale`,
+  `step_up_reused`, or `step_up_method`.
+- **Methods.** v0's only method is `cli_confirm`: the owner re-types a confirmation code the CLI
+  derives locally, with no network, runtime, or model state. It is allowed only in a `paper`
+  environment (DEC-155 item 4); live step-up waits for E9-4's signed assertions.
+- **Why a refused owner exit is not a denied exit (rule 13, MI-1).** What is refused is an
+  instruction not shown to be the owner's, never the exit. Pause and the kill switch stay
+  available, and every automated exit, protective order, and risk exit runs untouched (MI-23).
+  Judging an owner exit and a kill switch when the owner committed them means a runtime that was
+  down or lagging still applies them when it reads them.
 
 ### 6.2 Evaluation
 
@@ -662,45 +715,178 @@ example, `thesis_confidence lt 0.6 → ask`).
 
 ### 6.4 Approvals
 
-- **Content:**
-  - the proposed action (instrument, side, quantity, limit price, order value), its purpose, the
-    mandate version, and the rule that triggered it;
-  - the combined score, labeled "combined model score, not a probability of profit";
-  - the deadline, and "If you do nothing, this action is skipped".
-  - For a client-requested order (§6.2 step 5a), the client that asked, by the name the owner gave
-    it when connecting it, and "Requested by your connected agent".
-  - Model outputs sit behind "View model output", labeled by author. A user-selected model is
-    labeled "Output of software you selected"; the research agent's thesis is labeled
-    platform-authored.
-  - **For an admission** (`new_instrument`), the full thesis in the §8.2 and §8.4 shape (DEC-126):
-    instrument, direction, horizon, evidence and corroboration as links to the allowlisted sources
-    (DEC-101), invalidation conditions, and confidence labeled "self-reported by the model and
-    uncalibrated". For a revision it also shows the lineage's revision count and what the revision
-    changed (DEC-111). No price targets, no profit estimates, and **no scorecard** until counsel
-    answers [question 35](../product/08-compliance-and-regulatory.md), because a scorecard may count
-    as hypothetical performance.
-  - Notification payloads carry only opaque IDs and generic text (`AGENTS.md` rule 6); no thesis
-    content ever reaches them.
-  - Never persuasive language or profit estimates.
-- **Binding:** an approval binds the quantity, limit price, and mandate version. On approval the
-  gate runs again; if it denies, or the version has changed, the action is skipped. No re-pricing
-  in v1.
-- **Step-up:** live approvals require step-up authentication within the 5 minutes before the
-  response.
-- **Two approvers:** an ASKed action with `order_usd` above `two_approver_above_usd` needs two
-  distinct approvers; with `independent_approval_required`, neither may be the mandate's author.
-  `deny` is never overridden.
-- **Timeout:** `on_timeout` is always `skip`. Approval requests are not delivered during quiet
-  hours, so they time out and are skipped. **Risk-limit alerts ignore quiet hours.** A timed-out
-  request creates no delegation.
-- **Delegation scopes** ([DEC-181](../project/04-decision-log.md#decisions)): an approval card may
-  offer, beside Approve and Skip, the delegation shapes of §6.5. "Approve just this" comes first;
-  no scope is pre-selected, and each option carries the same visual weight as Skip. The card may
-  show counts for the agent (asks approved, skipped, and timed out; orders decided under each
-  delegation), never profit, loss, or outcome, until counsel answers questions 35 and 37. A scope
-  is never offered for an admission (`new_instrument`), for an ask that needs two approvers, in a
-  live environment until counsel signs off (`AGENTS.md` rule 8), or to an owner-connected agent's
-  session (DEC-141).
+An `ask` (§6.2 step 6) requests an approval for one `open` or `increase` order the gate dry run
+allowed. The agent runtime journals the request with everything it binds (`ApprovalRequested`,
+journal spec §9), notifies, and acts only on an admitted human grant that passes re-validation.
+Silence, lateness, a failed check, a restart, a version change, and a tightening all end in `skip`
+(MI-21) ([DEC-155](../project/04-decision-log.md#decisions),
+[DEC-156](../project/04-decision-log.md#decisions), [DEC-173](../project/04-decision-log.md#decisions)).
+
+**Content.** The request carries a canonical **content object**; the SHA-256 of its canonical form
+(journal spec §4), written `sha256:` and 64 lowercase hex digits, is the **content hash**. The object
+has exactly these keys, and everything an approver is shown comes from it:
+
+| Key | Content |
+|---|---|
+| `action` | `instrument`, `asset_class`, `side` (`buy`), `qty`, `limit` (the limit price), `order_usd` (limit price × quantity), and `purpose` |
+| `trigger` | `mandate_version`; `decided_by`, the label of what asked (`rule:<id>`, `default`, `admission_ceiling`, or `client_ceiling`); `requested_by` (`agent`, `owner`, or `client`) and `client`, the name the owner gave the connected client when connecting it, or `null` unless `requested_by` is `client` (§6.2 step 5a; the approver is shown "Requested by your connected agent" with that name); and `rule`, the owner's confirmed rule `{id, when, then}` exactly as the mandate holds it, or `null` for `default`, `admission_ceiling`, and `client_ceiling` |
+| `evidence` | `combined_score` as `{value, label}`, labeled "combined model score, not a probability of profit"; and `outputs`, one `{event_id, artifact, label}` per model output used (the artifact hash or `null`, and the author label below) |
+| `risk_impact` | One `{field, value, cap}` for each of `order_usd`, `position_usd_after`, `gross_usd_after`, `bought_today_usd`, `drawdown`, and `daily_pnl_fraction`: its §6.3 value at the request and the mandate cap it is measured against, respectively `max_order_usd`; min(`max_position_usd`, `max_position_fraction` × E); min(`max_gross_exposure_usd`, E); `null`; the lowest ladder rung's `at`; and `max_daily_loss` (§5.5, §8.3) |
+| `reference_mark` | The last `MarkUpdated` for the instrument as `{price, seq}`, or `null` |
+| `deadline` | A UTC timestamp: the request's risk clock + `autonomy.approval.timeout_s` |
+| `default` | "If you do nothing, this action is skipped" |
+| `choices` | `approve` and `skip`, with equal weight and neither preselected (PX-10); then, when delegation scopes are offered (below), the names of the §6.5 shapes offered, none preselected (PX-15). These are the only "alternatives" an approval shows; it never shows a platform-authored alternative trade |
+| `approvers` | `required`: 2 when `two_approver_above_usd` is set and `order_usd` exceeds it, else 1; `independent`: `independent_approval_required`, the workspace policy's maker-checker requirement (a §4.3 policy key, not a mandate field). Both are the values at the request; check 7 can only raise them |
+
+Decimals are canonical strings (journal spec §4). The owner-written `trigger.rule` is the owner's
+own text, shown as theirs and never as the platform's.
+
+- Model outputs sit behind "View model output", labeled by author. A user-selected model is
+  labeled "Output of software you selected"; the research agent's thesis is labeled
+  platform-authored. Large parts (a thesis, a model's output) are artifacts referenced by hash.
+- **For an admission** (`new_instrument`), the full thesis in the §8.2 and §8.4 shape (DEC-126):
+  instrument, direction, horizon, evidence and corroboration as links to the allowlisted sources
+  (DEC-101), invalidation conditions, and confidence labeled "self-reported by the model and
+  uncalibrated". For a revision it also shows the lineage's revision count and what the revision
+  changed (DEC-111). No price targets, no profit estimates, and **no scorecard** until counsel
+  answers [question 35](../product/08-compliance-and-regulatory.md), because a scorecard may count
+  as hypothetical performance.
+- Notification payloads are exactly the request's opaque approval id and one generic text
+  (`AGENTS.md` rule 6): no instrument, side, quantity, price, order value, score, thesis, agent
+  name, rule, or deadline ever reaches them.
+- Never persuasive language or profit estimates.
+
+**Lifecycle.** An approval is **pending** from its `ApprovalRequested` until exactly one terminal
+event:
+
+- an admitted skip (`ApprovalResponded`, verdict `skipped`, result `admitted`);
+- `ApprovalRevalidated` with result `act` (followed in the same batch by `IntentProposed`) or
+  `skip`;
+- `ApprovalTimedOut` (`on_timeout: skip`) at the first tick at or after the deadline;
+- `ApprovalCanceled`, with reason `version_applied`, `mode_tightened` (exits-only or stricter,
+  §5.9), `owner_pause`, `owner_stop`, or `kill_switch`.
+
+A refused response and a grant short of the quorum (`counted`) are not terminal, and nothing after
+the terminal event changes the outcome. The deadline is folded state and never moves; a timer only
+says when to look, so a lost timer delays the `ApprovalTimedOut` record and never produces an act.
+Pending approvals survive a restart with their deadlines. While a risk-adding approval is pending,
+the agent makes no new risk-adding proposal; exits, protective orders, risk exits, flattens, and
+kill switches never wait on, are ordered after, or are cancelled by any approval state (rule 13,
+MI-23).
+
+**Responses.** An answer reaches the runtime only as an `ApprovalResponseSubmitted` committed to
+the workspace control stream, which names the approval, the verdict (`approved` or `skipped`), the
+content hash, `submitted_at`, the responder, and step-up evidence for a grant (§6.1). The runtime
+copies each such event exactly once, as one `ApprovalResponded` with `causation_id` pointing to it;
+a re-tailed or replayed event is not copied again. A response's **effective time** is the later of
+its `submitted_at` and the runtime's folded risk clock. The runtime folds the scheduler's
+`ClockAdvanced` before it steps a tick, and every event a step writes carries that step's clock, so
+replay and restart give the same answers.
+
+**Admission** (checks 1 to 7). The first failing check refuses the response with its reason code,
+journaled on `ApprovalResponded` with result `refused`:
+
+| # | Check | Reason on failure |
+|---|---|---|
+| 1 | The approval is pending, read after any cancellation the same step or batch applies | `not_pending` |
+| 2 | The effective time is before the deadline | `late` |
+| 3 | The response's actor is a `user` in `autonomy.approval.approvers` (journal spec §3); no agent, system, broker, or platform operator can approve | `not_an_approver` |
+| 4 | The request was delivered on at least one channel | `not_delivered` |
+| 5 | The response repeats the request's content hash | `content_mismatch` |
+| 6 | Step-up evidence is valid at the effective time (§6.1) | `step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method` |
+| 7 | The responder is not already in the approval's grant set, and, when independence is required, is not the mandate's author. The requirement is the **stricter** of the bound `approvers` and the workspace policy overlay (§4.3) current at the effective time: independence is required if either requires it, and the approver count is the larger of the bound `required` and the overlay's (2 when the overlay's `two_approver_above_usd` is set and `order_usd` exceeds it, else 1) | `duplicate_approver`, `not_independent` |
+
+A grant that passes all seven joins the approval's grant set. It is `admitted` if the set now holds
+check 7's approver count of distinct approvers, none of them the mandate's author while check 7
+requires independence, and otherwise `counted`, and the approval stays pending. A skip runs checks 1
+to 5 only: it needs no step-up, and one admitted skip from any listed approver ends the approval
+whatever the quorum.
+
+**Policy changes only tighten a pending approval** (DEC-173 item 13). The overlay current at the
+effective time is every `PolicyChanged` the runtime folded before the step that judges the response;
+the runtime folds them as it folds `ClockAdvanced`, and `ApprovalResponded` records the count and
+independence check 7 applied. An admin who turns on `independent_approval_required` or lowers
+`two_approver_above_usd` while an approval is pending binds that approval: with maker-checker on,
+the author can no longer grant it and an author's earlier `counted` grant stops counting toward the
+quorum, and a lowered ceiling can only raise the count to 2. A `PolicyChanged` that turns either
+off or raises the ceiling leaves the bound values in force.
+
+**Re-validation** (checks 8 to 12). An admitted grant is re-validated in the same step, against the
+current state, and the result is journaled on `ApprovalRevalidated` with every value compared.
+Re-validation only skips: it never re-prices, re-sizes, or changes the order.
+
+| # | Check | Reason on failure |
+|---|---|---|
+| 8 | The current mandate version equals the bound version | `version_changed` |
+| 9 | The effective mode is `normal`, and the instrument is unrestricted and in the working universe | `mode`, `instrument_restricted` |
+| 10 | Re-classifying the bound order (§6.2) gives neither `deny` nor an `ask` decided by a different `decided_by` label | `reclassified_deny`, `reclassified_other_trigger` |
+| 11 | The gate dry run allows the bound order | The gate's reason code |
+| 12 | The price drift since the request is inside the band | `drift` |
+
+Checks 10 and 11 measure the bound order's own fields and its bound combined score against the
+current §6.3 risk fields and the current view. The score is bound because it is what the approver
+saw; the risk fields are current because they are what could have made the order unsafe since. An
+`auto` at check 10 passes (the grant still covers the order); a different `ask` trigger is a
+question the approver has not seen, so it skips and is asked afresh at a later evaluation.
+
+**Drift.** With `m_req` the `reference_mark` price and `m_now` the latest folded mark, the drift is
+inside the band exactly when |`m_now` − `m_req`| × 10 000 ≤ `band_bp` × `m_req`, on exact decimals
+with no division. `band_bp` is 100 for `us_equity` and 200 for `crypto`: the smallest
+aggressiveness `x` the price collar uses for each asset class, which trading spec §9.6 states as
+1% or 2%. Drift is symmetric, and a missing mark at the request or now is outside the band.
+
+**Binding.** An approval binds the instrument, side, quantity, limit price, purpose, and mandate
+version. On `act`, `IntentProposed` carries them unchanged (MI-22) and the executor's binding gate
+still decides; the dry run is never authority. No re-pricing in v1: anything still wanted is
+proposed again at a later evaluation at its own price.
+
+**Step-up.** Every grant carries step-up evidence valid at its effective time (§6.1), one assertion
+per approval and never one gesture for several. Paper grants use `cli_confirm`; live approvals wait
+for E9-4's step-up methods.
+
+**Two approvers.** An ASKed action with `order_usd` above `two_approver_above_usd`, as bound or as
+the policy overlay lowers it while the approval is pending, needs two distinct approvers; when the
+request bound `independent_approval_required` or the overlay now requires it, neither may be the
+mandate's author (check 7). Each approver counts once. In a one-person workspace such an approval
+cannot reach its quorum, so it times out and is skipped. `deny` is never overridden.
+
+**Delegation scopes** ([DEC-181](../project/04-decision-log.md#decisions)): an approval card may
+offer, beside Approve and Skip, the delegation shapes of §6.5, listed in `choices`. "Approve just
+this" comes first; no scope is pre-selected, and each option carries the same visual weight as
+Skip. The card may
+show counts for the agent (asks approved, skipped, and timed out; orders decided under each
+delegation), never profit, loss, or outcome, until counsel answers questions 35 and 37. A scope
+is never offered for an admission (`new_instrument`), for an ask that needs two approvers, in a
+live environment until counsel signs off (`AGENTS.md` rule 8), or to an owner-connected agent's
+session (DEC-141).
+
+**Asking is bounded.** Besides the one pending risk-adding approval per agent, an `ask` is
+suppressed, in this precedence:
+
+1. `budget`: the agent already has 10 `ApprovalRequested` in the current risk day (§5.2);
+2. `skipped_today`: the owner skipped this instrument earlier in the risk day and no version has
+   applied since;
+3. `recent_timeout`: an approval for this instrument timed out at *t* and the ask falls in
+   [*t*, *t* + `timeout_s`).
+
+A suppressed ask is journaled on `DecisionMade` as `ask_suppressed` with its reason and skipped. It
+is not an `ApprovalRequested`, so it does not count against the budget.
+
+**Timeout.** `on_timeout` is always `skip`. A response at or after the deadline is late even when
+the tick that would time the approval out has not come. A timed-out request creates no delegation.
+
+**Quiet hours and delivery.** A request is grantable only once it has been delivered on at least one
+channel. `notifications.quiet_hours` is the window [start, end) in America/New_York wall time, and
+it suppresses **push** deliveries only, journaled as `ApprovalDelivered` with status
+`suppressed_quiet_hours`. `cli_inbox` is a pull channel: it is delivered in the request's own batch
+and never suppressed, so a request is listed and grantable in quiet hours too. v0's only channel is
+`cli_inbox`; push channels are E8-4. A request whose every channel was suppressed or failed is not
+grantable and times out. **Risk-limit alerts ignore quiet hours.**
+
+**Cancellation.** Any `MandateVersionApplied` (§2.2), an effective mode of exits-only or stricter
+(§5.9), an owner pause or Stop, and a kill switch cancel every pending approval in the same step,
+before the switch's own effects. A response processed in that step or batch is judged against the
+pending set after those cancellations, so it is refused as `not_pending` (MI-21).
 
 ### 6.5 Delegations (DEC-181, ADR-0003)
 
@@ -1110,7 +1296,7 @@ delegation changes against random actions, times, usage, and suspension states.
 | `PolicyChanged`, `WorkspaceProfileAssigned` | workspace control | Level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
 | `MandateVersionApplied`, `HighWaterMarkReset`, `PositionReleased`, `UniverseChanged` | account | §5.10 |
 | `ThesisProposed`, `ThesisRevised` | agent | Research agent id, version, and content hash; thesis id, lineage id, revision, and (for a revision) the predecessor and what it changed; instrument, direction, horizon, evidence and sources, corroboration, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); the admission decision and its reason (§8.5) |
-| `OwnerExitRequested`, `ApprovalRequested` … `ApprovalCanceled` | agent | §5.10; content shown (artifact), bound quantity and price, approvers, step-up evidence; for `ApprovalRequested`, the delegation shapes offered (§6.4); for `ApprovalResponded`, the shape chosen and, if one, the new mandate version and delegation id |
+| `OwnerExitRequested`, `ApprovalRequested` … `ApprovalCanceled` | agent | §5.10, §6.4; the content object inline (large parts by artifact reference) and its hash, the bound fields, approvers, admission and re-validation results, step-up evidence; the delegation shapes offered appear in the content object's `choices`, and `ApprovalResponded` records the shape chosen and, if one, the new mandate version and delegation id |
 | `DecisionMade` | agent | Journal spec §9; its autonomy classification names the source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling) and `requested_by` and, when §6.2 step 4a lifted the decision, `delegation_id`. Delegation usage (§6.5) is counted from these events |
 
 A mandate version and its records are retained at least 6 years after the later of its

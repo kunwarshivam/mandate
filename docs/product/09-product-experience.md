@@ -609,9 +609,9 @@ Auditors see these screens and nothing that acts.
 **X1 Policies** ⚠: the organization and workspace policy editors. A value looser than its parent is
 rejected with a message naming the parent limit (FR-1.5; the nearest ancestor per mandate §4.3); a change shows the agents it makes
 nonconforming (mandate §4.3). **X2 Members and roles**, with separation of duties (FR-1.3, FR-1.6).
-**X3 Notifications**: channels, escalation chain, quiet hours; the screen states that approval
-requests are not delivered in quiet hours and so time out, while risk-limit alerts ignore quiet hours
-(mandate §6.4). **X4 Deployment health** (hybrid and on-prem, where the customer is the deployment's
+**X3 Notifications**: channels, escalation chain, quiet hours; the screen states that quiet hours
+hold back push notifications of approval requests, which stay listed in the inbox and can still be
+answered before their deadline, while risk-limit alerts ignore quiet hours (mandate §6.4, DEC-173). **X4 Deployment health** (hybrid and on-prem, where the customer is the deployment's
 operator; journey J4): versions, heartbeats, reachability, and the DEC-100 operator surface, which
 shows the aggregate-flow monitor's alerts (research-agent exposure per instrument over the
 deployment's workspaces above the DEC-123 threshold; the monitor never halts by itself) and the active
@@ -769,6 +769,10 @@ undone and leaves positions without further management (DEC-131), so it gets the
 kill switch. Needs a line in the runtime brief or the mandate spec.
 
 *Decision: (b), accepted; the owner Stop in it is as amended by DEC-136 (offered only when flat).*
+*Spec line:* mandate spec §6.1, "Owner controls and step-up" (DEC-173). The kill switch is as
+DEC-158 option (c) leaves it: without valid step-up it still stops the agent and flattens as an
+automated flatten does, and only its privileges beyond the stop (selling equities outside the regular
+session at a confirmed bid) need step-up. The web kill switch inherits the same rule.
 
 **PX-5. What the owner sees while reconciliation holds an agent.**
 (a) "Paused: reconciliation mismatch" and a resume button. (b) The difference (ledger against broker,
@@ -963,7 +967,7 @@ owners, with a recommended reading; none is decided here.
    run of a mandate whose envelope is identical except for those two fields (PX-8).
 4. **The owner pause as a restriction.** Should §5.9 list an owner pause, and does resuming from it
    need step-up? (Runtime DEC-131 raises the first part in its Decisions needed 4; PX-4 bears on the
-   second.)
+   second, which mandate §6.1 now answers: resume needs step-up, DEC-173.)
 5. **Account-wide close-position scope.** Trading §5.5 says "close-position endpoint per instrument"
    without saying which instruments. Recommended: the confirmation lists every position it will close,
    including those no agent manages (PX-12).
