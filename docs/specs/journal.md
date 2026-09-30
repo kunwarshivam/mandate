@@ -17,10 +17,14 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `IntentProposed`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`, and rules on
   every contradiction [DEC-174](../project/04-decision-log.md#decisions) item 3 found in them: `null`,
   never empty strings; timestamps, never risk-clock seconds; artifact references, never inline data;
-  `IntentProposed` as the `IntentReceived` vector's intent fields. The test vectors gain a generated
-  `agent_stream` section (a hash-chained stream from `StreamOpened` with its artifacts, and an invalid
-  draft for every rule) and stay version 3 until the harness reads it. The approval events close with
-  the escalation spec change (M7).
+  `IntentProposed` as the `IntentReceived` vector's intent fields. `OwnerExitRequested` records the
+  owner and `step_up_status` on every owner exit; `DecisionMade` carries `exit_origin` and
+  `ask_suppressed`, and the order builder's numbers only on decisions it produced. §11 gains the
+  per-range checks `intent_action_mismatch` and `mode_event_mismatch`. The test vectors gain a
+  generated `agent_stream` section (a hash-chained stream from `StreamOpened` with its artifacts, an
+  invalid draft for every rule, valid drafts, batches, and range-verification cases) and stay
+  version 3 until the harness reads it. The approval events close with the escalation spec change
+  (M7).
 - **v0.4 ([DEC-97](../project/04-decision-log.md#decisions), [DEC-111](../project/04-decision-log.md#decisions)):**
   `ThesisProposed` and `ThesisRevised` join the agent stream and `UniverseChanged` the account
   stream, where it is a risk input carrying `risk_clock` ([mandate spec §2.3, §8.4 to
