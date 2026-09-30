@@ -396,10 +396,16 @@ check still owed.
   property), `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
   oracle, which never calls the crate's arithmetic). Planted bugs per test: the task brief.
 - **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
-  `fixtures/refcases/mandate.json`; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
+  `fixtures/refcases/mandate.json`, through `crates/mandate-refcases/src/mandate/risk_gate.rs`
+  (DEC-178; MC-G13 stays pending on E6-8's checks 5 and 6), with
+  `crates/mandate-refcases/tests/mandate_gate_harness.rs` proving the two arms read and compare
+  every member; `crates/mandate-risk/tests/refcases.rs` is the crate-local copy it replaces, kept
+  until a follow-up deletes it; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
   and `RC-25` with their variants, and the `propose_order` steps of `RC-03`, `RC-08` and `RC-18`,
   in `fixtures/refcases/trading-domain.json`.
-- **Run:** `cargo nextest run -p mandate-risk`.
+- **Run:** `cargo nextest run -p mandate-risk`, and
+  `cargo test -p mandate-refcases --test refcases -- --include-ignored mandate::MC-G` (and
+  `mandate::MC-F`).
 
 ## Journal drafts and the event catalogue
 
@@ -535,8 +541,10 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `crates/mandate-domain/tests/domain.rs` (live). Planted bugs per test: the task brief and the E10-3
   tests and implementation PRs.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
-  through `crates/mandate-refcases/src/mandate.rs`; families G, A, and B stay with streams G and H
-  and fail as "not interpreted until" their owning story, and family N is stream J's (below). A rejection that carries no reason
+  through `crates/mandate-refcases/src/mandate.rs`; families G and F are stream G's, through
+  `crates/mandate-refcases/src/mandate/risk_gate.rs` (Risk gate, above); families A and B stay
+  with stream H and fail as "not interpreted until" their owning story, and family N is stream J's
+  (below). A rejection that carries no reason
   fails its case, so the thirty cases expecting `schema_valid: false` cannot pass on a parse that
   refuses everything.
 - **Run:** `cargo nextest run -p mandate-spec`, `cargo nextest run -p mandate-domain`, and
@@ -623,11 +631,14 @@ proves each pending test fails on them (DEC-110).
   story), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/tests/harness.rs`
   (the harness reads the account type and checks `buying_power`: RC-08 and RC-18's cash variant
   without their gate step), `crates/mandate-refcases/src/mandate/research.rs` (family N of the
-  mandate suite, through `mandate-research`), `crates/mandate-refcases/status.toml`
-  (founder-owned).
+  mandate suite, through `mandate-research`), `crates/mandate-refcases/src/mandate/risk_gate.rs`
+  (families G and F, through `mandate-risk`, with
+  `crates/mandate-refcases/tests/mandate_gate_harness.rs`; DEC-178),
+  `crates/mandate-refcases/status.toml` (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
-  pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L harnessed by stream F; the rest pending their streams).
+  pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L
+  harnessed by stream F, N by stream J, and G and F by stream G; the rest pending their streams).
 - **Run:** `cargo nextest run -p mandate-refcases`; pending cases with
   `cargo test -p mandate-refcases -- --include-ignored`.
 

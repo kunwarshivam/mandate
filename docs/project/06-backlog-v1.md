@@ -895,6 +895,19 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   the next tests correction that touches the file. E6-3 has landed; the test now stops at E6-8's
   fail-closed stub (DEC-129 item 29), and `ci pending` accepts any story's stub, so the stale tag
   misnames what it waits on without failing the gate (#217 review, round 1, minor 2).
+- Delete `crates/mandate-risk/tests/refcases.rs` once the families G and F status rows (DEC-178)
+  have merged: `crates/mandate-refcases/src/mandate/risk_gate.rs` now runs MC-G01 to MC-G16 and
+  MC-F01 to MC-F04 against the same `evaluate` and `agent_flatten`, and the file's own doc says it
+  moves there. Deleting it retires the `mc_g13` retag above, and moving any figure it pins that
+  `crates/mandate-risk/tests/hand.rs` does not goes in the same tests correction.
+- Reconcile MC-G02 with its header under DEC-176: the header says "every other check passes", yet
+  its working opening order in the proposal's own instrument trips trading-domain §5.3 rule 6
+  (`working_order_limit`), which is why [DEC-150](04-decision-log.md#decisions) item 1 lists it on
+  `FULL_GATE_ONLY`. Stating the same $1,300 as a position (`positions_mv` 1300, no working order in
+  that instrument) keeps `instrument_total` and `gross` at 1500, so the case would pin `gross` on an
+  allow path, the window DEC-150 records, and the entry could expire. The change touches the YAML,
+  the reference implementation's checks, and the regenerated fixtures, so it cannot share a pull
+  request with code (ES-22).
 - **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
   every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
   held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;
