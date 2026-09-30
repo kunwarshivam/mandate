@@ -286,7 +286,7 @@ founder's merge in the order below.
 | F | [#124](https://github.com/kunwarshivam/mandate/issues/124) | E10-3 implementation (`change.rs`), then the MC-C status rows | new | DEC-172 items | building |
 | G | [#123](https://github.com/kunwarshivam/mandate/issues/123) | E6-8 implementation, the market-conduct controls at the gate; RC-22 and RC-25; report what still fails closed for an ordinary opening | new | DEC-163 | building |
 | M7 | [#213](https://github.com/kunwarshivam/mandate/issues/213) | The next DEC-77 step after E8-3: the runtime's approval-flow tests PR, or the M7 spec PR first if the brief orders it so | new | DEC-173 | building |
-| L | [#171](https://github.com/kunwarshivam/mandate/issues/171) | E7-9 tests PR: the agent-stream payload schemas in `mandate-journal`; spec gaps reported, not invented | new | DEC-174 | building |
+| L | [#171](https://github.com/kunwarshivam/mandate/issues/171) | E7-9's spec step: journal spec v0.5 §9.1 closes the agent stream's payload schemas, with generated vectors (DEC-174 item 4); the tests PR follows | `cursor/journal-agent-stream-schemas-138b` ([#320](https://github.com/kunwarshivam/mandate/pull/320)) | DEC-177 | in review, round 2: three majors, no blocker; fixes pushed as DEC-177 items 16 to 18, minors backlogged (items 19 and 20); awaiting round 3 |
 | H | [#125](https://github.com/kunwarshivam/mandate/issues/125) | E6-2's harness-and-status PR for family A (16 MC-A cases); family B assessed, not harnessed, while the gate refuses openings | new | DEC-162 | building |
 | W3 | [#247](https://github.com/kunwarshivam/mandate/issues/247) | `web/.gitignore` ignores `.vercel` | `cursor/web-ignore-vercel-138b` ([#307](https://github.com/kunwarshivam/mandate/pull/307)) | — | open |
 

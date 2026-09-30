@@ -731,24 +731,16 @@ mod tests {
         read_fixture(&dir, "mandate.json").map(Arc::unwrap_or_clone)
     }
 
-    /// The family-N cases whose kind this module interprets now; the rest still name their story.
+    /// The family-N cases, every one of which this module interprets.
     fn family_n(fixture: &Json) -> Result<Vec<String>, String> {
-        let all: Vec<&Json> = crate::list_at(fixture, "cases")?
+        let ids: Vec<String> = crate::list_at(fixture, "cases")?
             .iter()
-            .filter(|c| c["id"].as_str().is_some_and(|id| id.starts_with("MC-N")))
+            .filter_map(|c| c["id"].as_str())
+            .filter(|id| id.starts_with("MC-N"))
+            .map(str::to_owned)
             .collect();
-        let pending = |c: &&Json| {
-            super::super::PENDING_KINDS
-                .iter()
-                .any(|(k, _)| c["kind"] == *k)
-        };
-        let ids: Vec<String> = all
-            .iter()
-            .filter(|c| !pending(c))
-            .filter_map(|c| c["id"].as_str().map(str::to_owned))
-            .collect();
-        crate::ensure(all.len() == 28 && !ids.is_empty(), || {
-            format!("family N holds 28 cases, {} interpreted here", ids.len())
+        crate::ensure(ids.len() == 28, || {
+            format!("family N holds 28 cases, found {}", ids.len())
         })?;
         Ok(ids)
     }

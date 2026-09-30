@@ -149,7 +149,7 @@ MI-12 is asserted by the semantic cases rather than fuzzed, as §1.1 says.
 | §9.2 the version is increasing if any path is, otherwise reducing if any path is, otherwise neutral; an unlisted path is increasing | `change::an_unknown_path_is_increasing`, `properties::classification_is_the_join_over_changed_paths` |
 | ES-22 the Rust parse accepts exactly what the JSON Schema accepts, each decimal against its field's **whole** `$def` — the pattern and, for `decimal`, the `not: {const: "-0"}` beside it | `schema::one_test_per_s_case`, `properties::the_parse_agrees_with_each_fields_whole_schema_def`, `properties::a_schema_dec_is_its_own_dec_str_normal_form` |
 | ES-21 no clock, no randomness, `BTreeMap`, exact arithmetic or a typed error | `properties::no_output_depends_on_iteration_order`, `num::every_new_operation_matches_its_integer_oracle` |
-| The harness reads every key every owned case states (DEC-85) | `harness::every_owned_case_key_is_read`, `harness::a_family_another_stream_owns_fails_with_its_story`, `harness::a_wrong_expected_value_fails_the_case` |
+| The harness reads every key every owned case states (DEC-85) | `harness::every_owned_case_key_is_read`, `harness::a_kind_no_arm_interprets_fails_naming_it` (first `a_family_another_stream_owns_fails_with_its_story`), `harness::a_wrong_expected_value_fails_the_case` |
 
 ### Oracles
 
@@ -1101,6 +1101,6 @@ nothing catches means the test set is incomplete, not that the bug is harmless.
 | 24 | The parse ignores unknown members instead of rejecting them | `schema::one_test_per_s_case`, MC-S05 |
 | 25 | `canonical_bytes` re-serialises from the typed fields rather than reproducing the canonical form, so a 28-place decimal loses a digit and the version hash moves | `change::the_version_vector`, `properties::equal_documents_hash_equally_and_a_one_bit_change_does_not` |
 | 26 | The harness treats an unknown `expect` member as satisfied | `harness::every_owned_case_key_is_read`, `harness::a_wrong_expected_value_fails_the_case` |
-| 27 | The harness dispatches a `gate` case to the risk state instead of failing with its owning story | `harness::a_family_another_stream_owns_fails_with_its_story` |
+| 27 | The harness dispatches a `gate` case to the risk state instead of failing with its owning story | `harness::a_kind_no_arm_interprets_fails_naming_it` (first `a_family_another_stream_owns_fails_with_its_story`) |
 | 28 | A hard-breach lift journals an `action` instead of `reason: hard_breach_cleared`, or the two rungs share one event | `risk::a_single_flash_print_latches_nothing`, MC-R19 step 3 |
 | 29 | `GoalCompleted` always carries `reason` and `then`, so the `goal_complete` input's `on_complete`-only entry does not match | `goal::one_test_per_row_of_the_goal_table`, MC-R16, MC-R17 |
