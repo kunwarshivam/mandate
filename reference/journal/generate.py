@@ -6,11 +6,12 @@ implementation. It:
 1. canonicalizes per spec §4 and proves it by reproducing every version-3 vector (chain bodies and
    hashes, the export line, string escaping, and decimal normalization) before trusting itself;
 2. builds the artifacts and the agent-stream chain, hashing each body onto the previous one;
-3. validates every draft against the closed schemas and the §9.1 consistency and subject rules:
-   each chain event must pass every rule, and each invalid draft must break exactly the one rule
-   it names, with the reason and path it expects;
+3. validates every draft against the closed schemas and the §9.1 consistency, subject, and copy
+   rules: each chain event must pass every rule, and each invalid draft must break exactly the one
+   rule it names, with the reason and path it expects;
 4. recomputes the `DecisionMade` numbers from the model output and weights (mandate spec §8.3) by
-   an independent path, and checks `IntentProposed` against the account chain's `IntentReceived`;
+   an independent path, checks `IntentProposed` against the account chain's `IntentReceived`, and
+   checks each owner copy against the control-stream command it names;
 5. seeds bugs, into the validator and into the vectors, and requires every one to be caught.
 
 Usage: `generate.py` (or `generate.py --write`) rewrites the agent-stream section of journal.yaml;
@@ -536,6 +537,29 @@ def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     return out
 
 
+OWNER_MODE_REASONS = ("owner_pause", "owner_resume", "owner_stop")
+
+
+def copy_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """Rule 16: the agent runtime's copy of an owner command (§2) names it as its cause."""
+    p = draft["payload"]
+    if event_type == "OwnerExitRequested":
+        kind = "owner_exit"
+    elif event_type == "KillSwitchActivated" and (
+        p["initiator"] == "owner" or "overreach.rule_16_automated_kill_switch" in skip
+    ):
+        kind = "kill_switch"
+    elif event_type == "AgentModeChanged" and (
+        p["reason"] in OWNER_MODE_REASONS or "overreach.rule_16_kill_switch_mode" in skip
+    ):
+        kind = "mode"
+    else:
+        return []
+    if draft["causation_id"] is not None or f"rule.16.{kind}" in skip:
+        return []
+    return [Violation(f"rule.16.{kind}", "schema", "causation_id")]
+
+
 def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violation]:
     """Every rule an agent-stream draft breaks, in the journal's check order (spec §9.1)."""
     out = type_violations(ENVELOPE, draft, "", skip)
@@ -578,6 +602,7 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         out.append(Violation("pii_refs", "pii_refs", "pii_refs"))
     if not payload_types:
         out += subject_violations(event_type, as_read, skip)
+        out += copy_violations(event_type, as_read, skip)
     return out
 
 
@@ -666,6 +691,17 @@ SEQ = {name: seq for seq, (name, _) in enumerate(CHAIN, start=1)}
 ID = dict(CHAIN)
 ABSENT_EVENT_ID = "01J8ZNB0A000000000000000Z9"
 assert is_ulid(ABSENT_EVENT_ID) and ABSENT_EVENT_ID not in ID.values(), "names no event of the chain"
+CONTROL_STREAM = f"ctl:{WORKSPACE}"
+COMMAND = {
+    "close_held": "01J8Z6A00000000000000000C1",
+    "close_opened": "01J8ZMR00000000000000000C2",
+    "kill_switch": "01J8ZNB00000000000000000C3",
+    "pause": "01J8ZNB00000000000000000C4",
+    "resume": "01J8ZNB00000000000000000C5",
+    "stop": "01J8ZNB00000000000000000C6",
+}
+assert all(is_ulid(c) for c in COMMAND.values()), "each command is an event ID (§3)"
+assert not set(COMMAND.values()) & {*ID.values(), ABSENT_EVENT_ID}, "commands are control-stream events"
 
 QUOTE_SNAPSHOT = {
     "kind": "quote_snapshot",
@@ -703,8 +739,28 @@ DERIVATION = {
         "confirmed bid, whose floor is the default, bid x (1 - max_exit_offset), for the instrument's "
         ">= 50 M USD tier (trading spec §5.5, §5.6); that close's own limit is the floor. Step-up is "
         "valid for 300 s after authentication (DEC-156 item 8). The regular session is 09:30 to 16:00 "
-        "America/New_York (EDT, UTC-4, on this date)."
+        "America/New_York (EDT, UTC-4, on this date). The owner commands are the control stream's "
+        "OwnerCommandIssued events that the owner copies name as their cause (spec §2, §9.1 rule 16); "
+        "they are on another stream, so only the members the copies are checked against are listed."
     ),
+    "owner_commands": [
+        {
+            "event_id": COMMAND[name],
+            "stream_id": CONTROL_STREAM,
+            "command": command,
+            "scope": scope,
+            "subject": subject,
+            "submitted_at": f"2026-09-21T{at}.500000000Z",
+        }
+        for name, command, scope, subject, at in (
+            ("close_held", "owner_exit", "instrument", HELD_INSTRUMENT, "14:59:59"),
+            ("close_opened", "owner_exit", "instrument", INSTRUMENT, "20:09:59"),
+            ("kill_switch", "kill_switch", "agent", AGENT, "20:29:59"),
+            ("pause", "pause", "agent", AGENT, "20:29:59"),
+            ("resume", "resume", "agent", AGENT, "20:29:59"),
+            ("stop", "stop", "agent", AGENT, "20:29:59"),
+        )
+    ],
     "owner_bid": "151",
     "goal_exit_reference_bid": "151",
     "exit_offset": "0.005",
@@ -894,6 +950,7 @@ def chain_bodies() -> list[dict]:
                     "method": "webauthn",
                 },
             },
+            causation_id=COMMAND["close_held"],
         ),
         event(
             "owner_close_in_session_intent",
@@ -952,6 +1009,7 @@ def chain_bodies() -> list[dict]:
                     "method": "webauthn",
                 },
             },
+            causation_id=COMMAND["close_opened"],
         ),
         event(
             "owner_close_confirmed_intent",
@@ -992,6 +1050,7 @@ def chain_bodies() -> list[dict]:
                 "step_up_status": "absent",
                 "step_up": None,
             },
+            causation_id=COMMAND["kill_switch"],
         ),
         event(
             "kill_switch",
@@ -999,6 +1058,7 @@ def chain_bodies() -> list[dict]:
             f"{day}20:30:00.000000000Z",
             f"{day}20:30:00.000300000Z",
             {"scope": "agent", "subject": AGENT, "initiator": "owner", "mode_event": ID["kill_switch_mode"]},
+            causation_id=COMMAND["kill_switch"],
         ),
     ]
     assert [b["seq"] for b in bodies] == list(range(1, len(CHAIN) + 1)), "bodies follow CHAIN's order"
@@ -1471,6 +1531,34 @@ def invalid_drafts() -> list[dict]:
             "stream_mismatch",
             "payload.subject",
         ),
+        invalid(
+            "owner_exit_without_its_command",
+            "§9.1 rule 16",
+            "owner_close_in_session",
+            [change("causation_id", None)],
+            "schema",
+            "causation_id",
+        ),
+        invalid(
+            "owner_kill_switch_without_its_command",
+            "§9.1 rule 16",
+            "kill_switch",
+            [change("causation_id", None)],
+            "schema",
+            "causation_id",
+        ),
+        invalid(
+            "owner_pause_without_its_command",
+            "§9.1 rule 16",
+            "kill_switch_mode",
+            [
+                change("payload.to", "paused"),
+                change("payload.reason", "owner_pause"),
+                change("payload.lifecycle", "paused"),
+            ],
+            "schema",
+            "causation_id",
+        ),
     ]
 
 
@@ -1488,7 +1576,8 @@ def valid_drafts() -> list[dict]:
     """Drafts a rule might be misread to refuse. Each must be accepted: refusing an owner exit, or the
     owner's pause or Stop, would hold a reduction (`AGENTS.md` rule 13), and refusing a suppressed
     ask would leave the skip unrecorded (DEC-156 item 5). The owner's mode changes put `to` equal to
-    `lifecycle`, rule 11's boundary."""
+    `lifecycle`, rule 11's boundary, and name their command (rule 16); an automated kill switch is
+    no owner copy, so rule 16 must not hold it."""
     return [
         valid(
             "mode_owner_pause",
@@ -1498,6 +1587,7 @@ def valid_drafts() -> list[dict]:
                 change("payload.to", "paused"),
                 change("payload.reason", "owner_pause"),
                 change("payload.lifecycle", "paused"),
+                change("causation_id", COMMAND["pause"]),
             ],
         ),
         valid(
@@ -1509,6 +1599,7 @@ def valid_drafts() -> list[dict]:
                 change("payload.to", "normal"),
                 change("payload.reason", "owner_resume"),
                 change("payload.lifecycle", "normal"),
+                change("causation_id", COMMAND["resume"]),
             ],
         ),
         valid(
@@ -1519,7 +1610,14 @@ def valid_drafts() -> list[dict]:
                 change("payload.to", "stopped"),
                 change("payload.reason", "owner_stop"),
                 change("payload.lifecycle", "stopped"),
+                change("causation_id", COMMAND["stop"]),
             ],
+        ),
+        valid(
+            "kill_switch_automated_without_a_command",
+            "§9.1 rule 16",
+            "kill_switch",
+            [change("payload.initiator", "risk_limit"), change("causation_id", None)],
         ),
         valid(
             "decision_ask_suppressed_by_budget",
@@ -1636,6 +1734,7 @@ def range_verification() -> list[dict]:
                 ("kill_switch_mode", "payload.to", "paused"),
                 ("kill_switch_mode", "payload.reason", "owner_pause"),
                 ("kill_switch_mode", "payload.lifecycle", "paused"),
+                ("kill_switch_mode", "causation_id", COMMAND["pause"]),
             ],
             "mode_event_mismatch",
             "kill_switch",
@@ -1859,6 +1958,58 @@ def check_owner_exits(chain: list[dict], d: dict, decision: dict) -> list[str]:
     return problems
 
 
+def copied_command(body: dict) -> str | None:
+    """The `OwnerCommandIssued` command an event copies (§2, §9 control stream), read from what the
+    event means rather than from rule 16's list."""
+    p = body["payload"]
+    match body["event_type"]:
+        case "OwnerExitRequested":
+            return "owner_exit" if p["scope"] == "instrument" else "kill_switch"
+        case "KillSwitchActivated" if p["initiator"] == "owner":
+            return "kill_switch"
+        case "AgentModeChanged":
+            return {"owner_pause": "pause", "owner_resume": "resume", "owner_stop": "stop"}.get(p["reason"])
+    return None
+
+
+def check_owner_copies(chain: list[dict], valid_drafts: list[dict], d: dict) -> list[str]:
+    """Spec §2 and rule 16 from the derivation's control-stream commands: each owner copy, on the
+    chain or among the valid drafts, names the command it was made from, of its kind and subject, on
+    its workspace's control stream and submitted before the copy; and on the chain a command is
+    copied at most once into each event type."""
+    problems = []
+    commands = {c["event_id"]: c for c in d["owner_commands"]}
+    copies = [(f"seq {e['seq']}", e["body"], True) for e in chain]
+    copies += [(f"valid draft {c['name']}", apply_changes(chain, c), False) for c in valid_drafts]
+    copied = set()
+    for where, body, on_chain in copies:
+        kind = copied_command(body)
+        if kind is None:
+            continue
+        label = f"{body['event_type']} {where}"
+        command = commands.get(body["causation_id"])
+        if command is None:
+            problems.append(f"{label}: its cause is no control-stream OwnerCommandIssued")
+            continue
+        _, workspace, agent = body["stream_id"].split(":")
+        p = body["payload"]
+        subject = ("agent", agent) if body["event_type"] == "AgentModeChanged" else (p["scope"], p["subject"])
+        if command["stream_id"] != f"ctl:{workspace}":
+            problems.append(f"{label}: its command is not on its workspace's control stream")
+        if command["command"] != kind:
+            problems.append(f"{label}: copies the command {command['command']}, not {kind}")
+        if (command["scope"], command["subject"]) != subject:
+            problems.append(f"{label}: its command addresses another subject")
+        if nanos(command["submitted_at"]) > nanos(body["event_time"]):
+            problems.append(f"{label}: copied before its command was submitted")
+        if on_chain:
+            key = (body["event_type"], command["event_id"])
+            if key in copied:
+                problems.append(f"{label}: its command is already copied into a {body['event_type']}")
+            copied.add(key)
+    return problems
+
+
 def check_chain(section: dict, v3: dict) -> list[str]:
     """Cross-event facts no single draft check can see. Returns every failure, so seeded bugs can be
     shown to be caught."""
@@ -1923,6 +2074,7 @@ def check_chain(section: dict, v3: dict) -> list[str]:
         problems.append("an owner kill switch's final mode is stopped (trading spec §5.5)")
     problems += check_goal_exit(chain, section["derivation"], decision, named["goal_exit"])
     problems += check_owner_exits(chain, section["derivation"], decision)
+    problems += check_owner_copies(chain, section["valid_drafts"], section["derivation"])
     for case in section["invalid_drafts"]:
         got = violations(apply_changes(chain, case))
         want = case["expect"]
@@ -1967,6 +2119,11 @@ VALIDATOR_MUTANTS = (
     "rule.12.step_up",
     "rule.15.agent",
     "rule.15.workspace",
+    "rule.16.owner_exit",
+    "rule.16.kill_switch",
+    "rule.16.mode",
+    "overreach.rule_16_automated_kill_switch",
+    "overreach.rule_16_kill_switch_mode",
     *REGRESSIONS,
     "regress.rule_12_ties_evidence_to_the_bid",
     "regress.rule_8_numbers_on_every_exit_but_risk",
@@ -1983,12 +2140,20 @@ def draft_named(section: dict, name: str) -> dict:
     return next(d for d in section["invalid_drafts"] if d["name"] == name)
 
 
+def valid_named(section: dict, name: str) -> dict:
+    return next(d for d in section["valid_drafts"] if d["name"] == name)
+
+
 def body_named(section: dict, name: str) -> dict:
     return section["chain"][SEQ[name] - 1]["body"]
 
 
 def payload_named(section: dict, name: str) -> dict:
     return body_named(section, name)["payload"]
+
+
+def command_named(section: dict, name: str) -> dict:
+    return next(c for c in section["derivation"]["owner_commands"] if c["event_id"] == COMMAND[name])
 
 
 def vector_mutants(section: dict) -> list[tuple[str, dict]]:
@@ -2007,6 +2172,16 @@ def vector_mutants(section: dict) -> list[tuple[str, dict]]:
 
     def decision(s: dict) -> dict:
         return payload_named(s, "decision")
+
+    def copy_kill_switch_again(s: dict) -> None:
+        """A second, otherwise valid, `KillSwitchActivated` from the one command, appended at the head."""
+        again = copy.deepcopy(body_named(s, "kill_switch"))
+        again.update(
+            seq=len(s["chain"]) + 1,
+            event_id="01J8ZNB0R000000000000000K3",
+            recorded_at="2026-09-21T20:30:00.000400000Z",
+        )
+        s["chain"].append({"seq": again["seq"], "event_type": again["event_type"], "body": again})
 
     out = []
     for name, fn in [
@@ -2085,6 +2260,31 @@ def vector_mutants(section: dict) -> list[tuple[str, dict]]:
         (
             "kill switch flatten proposed as an intent",
             lambda s: body_named(s, "owner_close_confirmed_intent").update(causation_id=ID["owner_kill_switch"]),
+        ),
+        (
+            "owner close copies the kill switch command",
+            lambda s: body_named(s, "owner_close_in_session").update(causation_id=COMMAND["kill_switch"]),
+        ),
+        (
+            "owner copy caused by an agent-stream event",
+            lambda s: body_named(s, "kill_switch").update(causation_id=ID["kill_switch_mode"]),
+        ),
+        (
+            "one close command copied into two owner exits",
+            lambda s: body_named(s, "owner_close_confirmed").update(causation_id=COMMAND["close_held"]),
+        ),
+        ("kill switch command copied twice", copy_kill_switch_again),
+        (
+            "owner pause copies the Stop command",
+            lambda s: valid_named(s, "mode_owner_pause")["changes"][-1].update(value=COMMAND["stop"]),
+        ),
+        (
+            "owner command journaled on the agent stream",
+            lambda s: command_named(s, "kill_switch").update(stream_id=STREAM),
+        ),
+        (
+            "owner exit copied before its command",
+            lambda s: command_named(s, "close_opened").update(submitted_at="2026-09-21T20:10:00.500000000Z"),
         ),
         (
             "invalid draft expects the wrong reason",

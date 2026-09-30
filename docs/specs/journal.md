@@ -24,6 +24,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   generated `agent_stream` section (a hash-chained stream from `StreamOpened` with its artifacts, an
   invalid draft for every rule, valid drafts, batches, and range-verification cases) and stay
   version 3 until the harness reads it. The approval events that v0.5 added are not closed here.
+  Reconciled with v0.5 (DEC-177 items 21 to 24): `IntentProposed` may be caused by an
+  `ApprovalRevalidated` and then repeats its approval's bound action, and rule 16 makes each copy of
+  an owner command name its `OwnerCommandIssued`.
 - **v0.5, amended ([DEC-181](../project/04-decision-log.md#decisions)):** `DecisionMade` names the
   source of its autonomy decision and, when a delegation lifted it, the `delegation_id` that
   delegation usage is counted from ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003));
@@ -412,9 +415,9 @@ never read as `null` (§4.2), even where `null` would be valid. The first violat
 reported, in this order: unlisted members (in key order), then the listed members in the order given,
 then the numbered consistency rules in number order, each rule's clauses in the order given (only on
 a payload whose members are all well typed), then `artifact_refs` and `pii_refs` (§3), then the
-subject rules 14 and 15 (`stream_mismatch`). Rule 10's second clause spans a batch, so it is checked
-only once every draft in the batch passes these checks, and is reported at the first `IntentProposed`
-in the batch that breaks it. Paths are dotted from the envelope (`payload.step_up.authenticated_at`).
+subject rules 14 and 15 (`stream_mismatch`), then the copy rule 16 (also only on a well-typed
+payload). Rule 10's second clause spans a batch, so it is checked only once every draft in the batch
+passes these checks, and is reported at the first `IntentProposed` in the batch that breaks it. Paths are dotted from the envelope (`payload.step_up.authenticated_at`).
 
 **`StreamOpened`** on the agent stream. The schema of `StreamOpened` and of `KillSwitchActivated` is
 chosen by the stream type of `stream_id`; the account stream's are unchanged.
@@ -575,6 +578,21 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
 14. `StreamOpened`: `stream_id` equals `agent:{workspace_id}:{agent_id}` — `stream_id`.
 15. `KillSwitchActivated`, `OwnerExitRequested`: scope `agent` names the stream's agent and scope
     `workspace` its workspace — `payload.subject`.
+
+**Copy rule** (reason `schema`):
+
+16. The agent runtime's copies of an owner command (§2) have a non-null `causation_id` —
+    `causation_id`. The copies are every `OwnerExitRequested`, a `KillSwitchActivated` whose
+    `initiator` is `owner`, and an `AgentModeChanged` whose `reason` is `owner_pause`,
+    `owner_resume`, or `owner_stop`. `causation_id` is the `event_id` of the control stream's
+    `OwnerCommandIssued` the copy was made from. That ID is from another stream, which §2 allows and
+    which neither `append` nor §11's per-range checks resolve, since both read only this stream. On
+    one agent stream a command is copied at most once into each of these event types: an owner's
+    kill switch is copied as its `OwnerExitRequested` and its `KillSwitchActivated`, both naming the
+    one command, and every other command has one copy. The copy always has its command in hand, so the rule
+    never holds a pause, a Stop, an owner exit, or a kill switch (`AGENTS.md` rule 13). A mode
+    change that originates on the account stream, and the `AgentModeChanged` a kill switch writes,
+    are not owner copies and are not covered here.
 
 Two facts span events. `IntentProposed` repeats its `DecisionMade`'s action, which `append`
 checks when both are in one batch (rule 10), and `mode_event` names this stream's
