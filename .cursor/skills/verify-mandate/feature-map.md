@@ -539,8 +539,10 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `ValidatedMandate`), `crates/mandate-spec/src/policy.rs` (the hierarchy and its runtime overlay),
   `crates/mandate-spec/src/risk.rs` (the risk-state types, breach confirmation, risk days),
   `crates/mandate-spec/src/risk/limits.rs` (the §5.2 and §5.6 comparisons),
-  `crates/mandate-spec/src/risk/fold.rs` (the fold's spine over marks, fills, and clock ticks, slice
-  R2; the rest of §5 is `unimplemented` until R3 and R4, DEC-167 items 5 and 6),
+  `crates/mandate-spec/src/risk/fold.rs` (the fold over marks, fills, clock ticks, universe changes,
+  staleness, and a `profit_stop` goal, slices R2 and R3; the rest of §5 is `unimplemented` until R4,
+  DEC-167 items 5 to 7), `crates/mandate-spec/src/risk/fold/daily.rs` (the daily loss over risk
+  days: the rollover, a breach carried over it, the renewal, and the lift),
   `crates/mandate-spec/src/goal.rs`, `crates/mandate-spec/src/change.rs` (the version and §9.2
   classification), `crates/mandate-spec/src/condition.rs` (the §6.3 language, owned here and nowhere
   else), `crates/mandate-spec/src/context.rs` (`ValidationContext::from_journal`, the fold over
@@ -571,11 +573,13 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   and MI-11 against a first-match evaluator of the test's own; DEC-172),
   `crates/mandate-spec/src/change/tests.rs` (the `not_in` shapes no other test reaches, DEC-172
   item 13); `crates/mandate-spec/src/risk/limits.rs`'s tests (the comparisons against an integer
-  oracle, and the exact set of limits they read); `crates/mandate-spec/src/risk/fold/tests.rs` (the
-  spine's edges: the lift delay's boundary and restart, severe rungs that a receding drawdown does not
-  lift, the whole-second monotone risk clock, staleness left to R3, the crypto and equity clocks, the
-  floor's carry, fills, the daily action, every input left to R3 and R4, and a lift property whose
-  oracle is a run rule);
+  oracle, the exact set of limits they read, and the profit stop's level);
+  `crates/mandate-spec/src/risk/fold/tests.rs` (the fold's edges: the lift delay's boundary,
+  restart, and a clock that over-reports, severe rungs that a receding drawdown does not lift, the
+  whole-second monotone risk clock, staleness, the crypto and equity clocks, the floor's carry,
+  fills, the daily action, a breach carried over the rollover, the renewal, the daily hard wait
+  across midnight, the profit stop, every input left to R4, and a lift property whose oracle is a
+  run rule);
   `crates/mandate-domain/tests/domain.rs` (live). Planted bugs per test: the task brief and the E10-3
   tests and implementation PRs.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
