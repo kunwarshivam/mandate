@@ -422,7 +422,10 @@ passes a check still owed.
   every member; `crates/mandate-risk/tests/refcases.rs` is the crate-local copy it replaces, kept
   until a follow-up deletes it; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
   and `RC-25` with their variants, and the `propose_order` steps of `RC-03`, `RC-08` and `RC-18`,
-  in `fixtures/refcases/trading-domain.json`.
+  in `fixtures/refcases/trading-domain.json`. The trading-domain harness decides them through
+  `evaluate` (E6-9, DEC-199): RC-03's `gate_rejects_zero_crossing_order`, RC-08 and RC-18's
+  `generic_cash_account` run; the rest fail naming the stories they still wait for (RC-15 on E7-2,
+  E7-3, E7-4 and E7-5).
 - **Run:** `cargo nextest run -p mandate-risk`, and
   `cargo test -p mandate-refcases --test refcases -- --include-ignored mandate::MC-G` (and
   `mandate::MC-F`).
@@ -658,9 +661,16 @@ proves each pending test fails on them (DEC-110).
   prose case), `crates/mandate-refcases/src/trading_domain.rs` (fills, marks, fee charges,
   settlement, corporate actions, dividends, cash-in-lieu postings, the account type, and buying
   power; every other step type and expectation key fails as "not interpreted until" its owning
-  story), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/tests/harness.rs`
+  story), `crates/mandate-refcases/src/trading_domain/gate.rs` (E6-9's gate driver, DEC-199:
+  `propose_order` steps and the `decision` expectation through `mandate_risk::evaluate`, and the
+  account's §7.3 status from `initial.account` and `broker_account_update`; its in-module tests
+  run RC-15's steps 3 and 4 in a `closing_only` account),
+  `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/tests/harness.rs`
   (the harness reads the account type and checks `buying_power`: RC-08 and RC-18's cash variant
-  without their gate step), `crates/mandate-refcases/src/mandate/research.rs` (family N of the
+  without their gate step), `crates/mandate-refcases/tests/trading_domain_gate_harness.rs` (the gate
+  driver reads every key it claims, an edited decision fails, and what it cannot read is refused;
+  RC-15's `status_not_active` without its later stories' expectations passes),
+  `crates/mandate-refcases/src/mandate/research.rs` (family N of the
   mandate suite, through `mandate-research`), `crates/mandate-refcases/src/mandate/autonomy.rs`
   (family A, through `mandate-builder`'s `classify`),
   `crates/mandate-refcases/src/mandate/risk_gate.rs` (families G and F, through `mandate-risk`,
