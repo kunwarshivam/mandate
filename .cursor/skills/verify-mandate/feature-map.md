@@ -534,9 +534,11 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   switch as a whole and each way it fails to be one, the autonomy shapes, the literal version-vector
   digest, and four properties: step-up exactly when some path increases risk, the join over changed
   paths against hand-written per-edit classes, an allocation-only change classified by its direction,
-  and MI-11 against a first-match evaluator of the test's own; DEC-172);
+  and MI-11 against a first-match evaluator of the test's own; DEC-172),
+  `crates/mandate-spec/src/change/tests.rs` (the `not_in` shapes no other test reaches, DEC-172
+  item 13);
   `crates/mandate-domain/tests/domain.rs` (live). Planted bugs per test: the task brief and the E10-3
-  tests PR.
+  tests and implementation PRs.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
   through `crates/mandate-refcases/src/mandate.rs`; families G, A, and B stay with streams G and H
   and fail as "not interpreted until" their owning story, and family N is stream J's (below). A rejection that carries no reason
