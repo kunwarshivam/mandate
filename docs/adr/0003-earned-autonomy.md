@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Proposed ([DEC-180](../project/04-decision-log.md#decisions), [DEC-181](../project/04-decision-log.md#decisions), [DEC-183](../project/04-decision-log.md#decisions) wait for the founder under DEC-79); [DEC-182](../project/04-decision-log.md#decisions) and [DEC-184](../project/04-decision-log.md#decisions) accepted by an agent |
+| **Status** | Accepted: the founder accepted [DEC-180](../project/04-decision-log.md#decisions), [DEC-181](../project/04-decision-log.md#decisions), [DEC-183](../project/04-decision-log.md#decisions), [DEC-191](../project/04-decision-log.md#decisions), [DEC-193](../project/04-decision-log.md#decisions), and PX-15 to PX-18 ([DEC-198](../project/04-decision-log.md#decisions)) on 2026-09-30, each as recommended; the other decisions were accepted by an agent |
 | **Date** | 2026-09-30 |
-| **Deciders** | Founder (DEC-180, DEC-181, DEC-183); drafted by a Cursor agent at the founder's request of 2026-09-30 to research Muse, Grok Bot, and OpenAI Dots and recommend a direction |
+| **Deciders** | Founder (DEC-180, DEC-181, DEC-183, DEC-191, DEC-193, DEC-198); drafted by a Cursor agent at the founder's request of 2026-09-30 to research Muse, Grok Bot, and OpenAI Dots and recommend a direction |
 
 ## Context
 
@@ -72,7 +72,7 @@ grow.
    no connection is ever proposed. The loss answer maps only to limits (`max_loss_from_allocation`,
    `max_drawdown`, and `max_daily_loss`), never to position sizing beyond them.
 2. **Delegations: bounded, expiring, owner-picked autonomy** ([DEC-181](../project/04-decision-log.md#decisions);
-   a mandate spec change, for the founder). A new envelope field, `autonomy.delegations`, holds
+   a mandate spec change, accepted by the founder). A new envelope field, `autonomy.delegations`, holds
    owner-created permissions that turn an `ask` into `auto` inside the envelope. The mandate spec
    will define it; the invariants come first and bind that text:
    1. **It only lifts an ask.** A delegation changes an `ask` from step 4 of §6.2 (a named rule or
@@ -118,7 +118,7 @@ grow.
    escalation work ([DEC-173](../project/04-decision-log.md#decisions)). Every one of these
    surfaces is public-facing, so its copy says Owlhead, never Mandate (DEC-171).
 5. **The money layer for general agents** ([DEC-183](../project/04-decision-log.md#decisions);
-   for the founder). E10-6's MCP server (DEC-141, DEC-148) is packaged as a plugin for Dots, Muse,
+   accepted by the founder). E10-6's MCP server (DEC-141, DEC-148) is packaged as a plugin for Dots, Muse,
    and Grok Bot and becomes a primary distribution path beside Mandate's own app. It is listed
    under the public name **Owlhead** and links owlhead.ai, like every other public surface
    ([DEC-171](../project/04-decision-log.md#decisions)); "Mandate" stays internal. The general agent
@@ -164,9 +164,9 @@ grow.
     | **Review date:** unconfirmed past it, every `auto` and delegation reads as `ask` | A mandate nobody has looked at in months still acting alone | DEC-188 |
     | **Unasked dollars:** one figure for what can trade without asking right now | Autonomy the owner cannot size | DEC-189 |
     | **"Can I?" dry run** for connected agents | Connected agents flooding the owner with asks the gate would deny | DEC-190 |
-    | **Hold new openings** from a connected agent (`exits_only`, never pause) | An owner away from Owlhead unable to stop new risk from where they are | DEC-191 (founder) |
+    | **Hold new openings** from a connected agent (`exits_only`, never pause) | An owner away from Owlhead unable to stop new risk from where they are | DEC-191 |
     | **Explanations from the record:** "why" answered from journaled events | A model inventing its reasons after the fact | DEC-192 |
-    | **A statement you can verify:** the hash chain proves every action was within the mandate | Trust resting on the platform's word | DEC-193 (founder) |
+    | **A statement you can verify:** the hash chain proves every action was within the mandate | Trust resting on the platform's word | DEC-193 |
     | **Away mode:** a reducing version with an end date; restoring asks the owner | Autonomy running while the owner cannot answer | DEC-194 |
     | **Ask budget:** a daily cap on asks per agent and per client; beyond it, asks are skipped | Approval fatigue, and an agent or client wearing the owner down | DEC-195 |
     | **Delegation total:** all of a version's delegations together stay within the allocation | Twenty small delegations adding up to one large one | DEC-196 |
