@@ -6527,7 +6527,7 @@ cases:
   title: trim_to_target withheld outside the regular session and while holding
   base: two_stock_swing_trim
   input:
-    now: '2026-09-22T14:00:00.000000000Z'
+    now: '2026-09-22T21:00:00.000000000Z'
     instrument: 7b4a1c2e-2222-4a2b-9c3d-000000000002
     asset_class: us_equity
     agent_equity: '10000'
@@ -6548,10 +6548,10 @@ cases:
     holding: true
     outputs:
     - {model_id: quant.momentum, model_version: 1.0.0, content_hash: 'sha256:2222222222222222222222222222222222222222222222222222222222222222',
-      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T13:59:00.000000000Z', expires_at: '2026-09-22T15:00:00.000000000Z',
+      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T20:59:00.000000000Z', expires_at: '2026-09-22T22:00:00.000000000Z',
       conviction: '0.8', confidence: '0.9'}
     - {model_id: llm.news_research, model_version: 0.3.0, content_hash: 'sha256:3333333333333333333333333333333333333333333333333333333333333333',
-      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T13:59:00.000000000Z', expires_at: '2026-09-22T15:00:00.000000000Z',
+      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T20:59:00.000000000Z', expires_at: '2026-09-22T22:00:00.000000000Z',
       conviction: '0.2', confidence: '0.5'}
   expect:
     cap: '1500'
@@ -6762,7 +6762,7 @@ cases:
   title: Discretionary exit outside the regular session is deferred
   base: two_stock_swing
   input:
-    now: '2026-09-22T14:00:00.000000000Z'
+    now: '2026-09-22T21:00:00.000000000Z'
     instrument: 7b4a1c2e-2222-4a2b-9c3d-000000000002
     asset_class: us_equity
     agent_equity: '10000'
@@ -6780,10 +6780,10 @@ cases:
     session: after_hours
     outputs:
     - {model_id: quant.momentum, model_version: 1.0.0, content_hash: 'sha256:2222222222222222222222222222222222222222222222222222222222222222',
-      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T13:59:00.000000000Z', expires_at: '2026-09-22T15:00:00.000000000Z',
+      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T20:59:00.000000000Z', expires_at: '2026-09-22T22:00:00.000000000Z',
       conviction: '-0.8', confidence: '0.9'}
     - {model_id: llm.news_research, model_version: 0.3.0, content_hash: 'sha256:3333333333333333333333333333333333333333333333333333333333333333',
-      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T13:59:00.000000000Z', expires_at: '2026-09-22T15:00:00.000000000Z',
+      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T20:59:00.000000000Z', expires_at: '2026-09-22T22:00:00.000000000Z',
       conviction: '-0.2', confidence: '0.5'}
   expect:
     cap: '1500'
@@ -6804,7 +6804,7 @@ cases:
   title: Discretionary exit in the close window goes out as a marketable limit
   base: two_stock_swing
   input:
-    now: '2026-09-22T14:00:00.000000000Z'
+    now: '2026-09-22T19:55:00.000000000Z'
     instrument: 7b4a1c2e-2222-4a2b-9c3d-000000000002
     asset_class: us_equity
     agent_equity: '10000'
@@ -6822,10 +6822,10 @@ cases:
     in_close_window: true
     outputs:
     - {model_id: quant.momentum, model_version: 1.0.0, content_hash: 'sha256:2222222222222222222222222222222222222222222222222222222222222222',
-      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T13:59:00.000000000Z', expires_at: '2026-09-22T15:00:00.000000000Z',
+      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T19:54:00.000000000Z', expires_at: '2026-09-22T20:55:00.000000000Z',
       conviction: '-0.8', confidence: '0.9'}
     - {model_id: llm.news_research, model_version: 0.3.0, content_hash: 'sha256:3333333333333333333333333333333333333333333333333333333333333333',
-      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T13:59:00.000000000Z', expires_at: '2026-09-22T15:00:00.000000000Z',
+      instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002, as_of: '2026-09-22T19:54:00.000000000Z', expires_at: '2026-09-22T20:55:00.000000000Z',
       conviction: '-0.2', confidence: '0.5'}
   expect:
     cap: '1500'

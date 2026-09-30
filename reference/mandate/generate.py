@@ -481,6 +481,13 @@ GST = {"agent_equity": "10000", "positions_mv": {}, "working_opening_orders": []
        "last_exit_fill_at": {}, "working_universe": [BTC, QRS, XYZ]}
 def gst(**kw):
     return dict(GST, **kw)
+def at_now(inp, now):
+    """`inp` with its clock at `now`: each output keeps its `as_of` and `expires_at` offsets from `now`."""
+    shift = T(now) - T(inp["now"])
+    return dict(inp, now=now, outputs=[dict(o, as_of=fmt(T(o["as_of"]) + shift), expires_at=fmt(T(o["expires_at"]) + shift))
+                                       for o in inp["outputs"]])
+AFTER_HOURS = "2026-09-22T21:00:00.000000000Z"
+CLOSE_WINDOW = "2026-09-22T19:55:00.000000000Z"
 BI = {"now": NOW, "instrument": XYZ, "asset_class": "us_equity", "agent_equity": "10000", "position_qty": "0",
       "quote": {"bid": "99.9", "ask": "100"}, "qty_increment": "1", "min_order_usd": "1", "gate_state": GST}
 TWO = [out(MOM, "0.8", "0.9"), out(NEWS, "0.2", "0.5")]
@@ -524,8 +531,8 @@ B = [
     ("MC-B30", "trim_to_target withheld until the rung is confirmed", "two_stock_swing_trim",
      dict(BI, position_qty="10", size_factor="0.5", scale_active_s=10, gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
     ("MC-B31", "trim_to_target withheld outside the regular session and while holding", "two_stock_swing_trim",
-     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, session="after_hours", holding=True,
-          gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+     at_now(dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, session="after_hours", holding=True,
+                 gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO), AFTER_HOURS)),
     ("MC-B32", "No trim when the excess is below the rebalance band", "two_stock_swing_trim",
      dict(BI, position_qty="8", size_factor="0.5", scale_active_s=120, gate_state=gst(positions_mv={XYZ: "799.2"}), outputs=TWO)),
     ("MC-B18", "Delta within the rebalance band: hold", "two_stock_swing", dict(BI, position_qty="7", gate_state=gst(positions_mv={XYZ: "699.3"}), outputs=TWO)),
@@ -535,11 +542,11 @@ B = [
     ("MC-B21", "Gate dry run denies: no ASK is sent", "two_stock_swing",
      dict(BI, outputs=[out(MOM, "0.9", "0.6"), out(NEWS, "0.9", "0.6")], gate_state=gst(orders_today=50))),
     ("MC-B22", "Discretionary exit outside the regular session is deferred", "two_stock_swing",
-     dict(BI, session="after_hours", position_qty="5", gate_state=gst(positions_mv={XYZ: "499.5"}),
-          outputs=[out(MOM, "-0.8", "0.9"), out(NEWS, "-0.2", "0.5")])),
+     at_now(dict(BI, session="after_hours", position_qty="5", gate_state=gst(positions_mv={XYZ: "499.5"}),
+                 outputs=[out(MOM, "-0.8", "0.9"), out(NEWS, "-0.2", "0.5")]), AFTER_HOURS)),
     ("MC-B23", "Discretionary exit in the close window goes out as a marketable limit", "two_stock_swing",
-     dict(BI, in_close_window=True, position_qty="5", gate_state=gst(positions_mv={XYZ: "499.5"}),
-          outputs=[out(MOM, "-0.8", "0.9"), out(NEWS, "-0.2", "0.5")])),
+     at_now(dict(BI, in_close_window=True, position_qty="5", gate_state=gst(positions_mv={XYZ: "499.5"}),
+                 outputs=[out(MOM, "-0.8", "0.9"), out(NEWS, "-0.2", "0.5")]), CLOSE_WINDOW)),
     ("MC-B24", "Averaging-down rule denies an increase", "two_stock_swing_no_avg_down",
      dict(BI, position_qty="3", position_pnl_fraction="-0.04", gate_state=gst(positions_mv={XYZ: "299.7"}), outputs=TWO)),
     ("MC-B25", "Re-entry after a round trip is not a first trade", "two_stock_swing_no_avg_down",
