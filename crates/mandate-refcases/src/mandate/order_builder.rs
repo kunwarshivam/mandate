@@ -1351,6 +1351,7 @@ fn gate_error(what: &str, e: &gate::GateError) -> String {
 /// runs the case through the suite, so the suite's own sweeps are part of what is tested.
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::path::Path;
     use std::sync::Arc;
 
@@ -1579,25 +1580,75 @@ mod tests {
         }
     }
 
-    /// Every enum-valued expectation of case `id` in `fixture`, swapped for its sibling, fails the
-    /// case at that member's comparison, whose message starts `<member>: expected`. Returns how
-    /// many were swapped.
-    fn every_sibling_fails_its_comparison(fixture: &Json, id: &str) -> Result<usize, String> {
-        let case = family_b(fixture)?
-            .into_iter()
-            .find(|c| c["id"] == id)
-            .ok_or_else(|| format!("no case {id}"))?;
-        let expect = crate::at(&case, "expect")?;
+    /// The enum-valued members that need no sibling: `on_timeout` has one variant, `skip`, and
+    /// `action` decides which other members a case may state, so a sibling fails at one of those
+    /// before its own comparison.
+    const NO_SIBLING: [&str; 2] = ["on_timeout", "action"];
+
+    /// A snake-case word, the spelling of every closed vocabulary a family-B case states.
+    fn is_word(value: &Json) -> bool {
+        value.as_str().is_some_and(|text| {
+            !text.is_empty() && text.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        })
+    }
+
+    /// A stated value from a closed vocabulary: a word, the null a gate reason may be, or a list of
+    /// words. Decimals, model ids (`llm.news_research`) and `rule:` deciders are none of these.
+    fn is_enum_value(value: &Json) -> bool {
+        match value {
+            Json::Null => true,
+            Json::Array(items) => !items.is_empty() && items.iter().all(is_word),
+            _ => is_word(value),
+        }
+    }
+
+    /// The expectation objects of `case`, each with its pointer.
+    fn expectation_objects(case: &Json) -> Result<Vec<(String, Json)>, String> {
+        let expect = crate::at(case, "expect")?;
         let mut objects = vec![("/expect".to_owned(), expect.clone())];
         for nested in ["gate_dry_run", "autonomy"] {
             if let Some(value) = expect.get(nested) {
                 objects.push((format!("/expect/{nested}"), value.clone()));
             }
         }
-        let mut swapped = 0_usize;
-        for (at, object) in objects {
+        Ok(objects)
+    }
+
+    /// Every `(pointer, member)` some family-B case states with an enum value, read from the
+    /// fixture rather than listed, so an empty `clipped_by` counts because another case lists a
+    /// clip, and a case that gains an enum-valued expectation is swept without an edit here.
+    fn enum_valued_members(fixture: &Json) -> Result<BTreeSet<(String, String)>, String> {
+        let mut found = BTreeSet::new();
+        for case in family_b(fixture)? {
+            for (at, object) in expectation_objects(&case)? {
+                for (member, value) in members(&object)? {
+                    if is_enum_value(&value) {
+                        found.insert((at.clone(), member));
+                    }
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    /// Every enum-valued expectation of case `id` in `fixture`, swapped for its sibling, fails the
+    /// case at that member's comparison, whose message starts `<member>: expected`; and each one
+    /// but [`NO_SIBLING`]'s has a [`sibling`] arm, so a vocabulary whose arm answers `None` fails
+    /// here rather than going unswept.
+    fn every_sibling_fails_its_comparison(fixture: &Json, id: &str) -> Result<(), String> {
+        let enum_valued = enum_valued_members(fixture)?;
+        let case = family_b(fixture)?
+            .into_iter()
+            .find(|c| c["id"] == id)
+            .ok_or_else(|| format!("no case {id}"))?;
+        for (at, object) in expectation_objects(&case)? {
             for (member, value) in members(&object)? {
                 let Some(other) = sibling(&at, &member, &value) else {
+                    crate::ensure(
+                        !enum_valued.contains(&(at.clone(), member.clone()))
+                            || NO_SIBLING.contains(&member.as_str()),
+                        || format!("{id}: {at}/{member} is enum-valued and has no sibling arm"),
+                    )?;
                     continue;
                 };
                 crate::ensure(other != value, || {
@@ -1609,10 +1660,9 @@ mod tests {
                     &format!("{member}: expected"),
                     &format!("{id}: {at}/{member} swapped for a sibling variant"),
                 )?;
-                swapped = swapped.saturating_add(1);
             }
         }
-        Ok(swapped)
+        Ok(())
     }
 
     fn members(value: &Json) -> Result<Vec<(String, Json)>, String> {
@@ -1656,18 +1706,10 @@ mod tests {
     fn every_expected_member_is_compared_and_required() -> Result<(), String> {
         let fixture = fixture()?;
         let mut doctorings = 0_usize;
-        let mut siblings = 0_usize;
         for case in passing(&fixture)? {
             let id = id(&case)?;
-            siblings = siblings.saturating_add(every_sibling_fails_its_comparison(&fixture, &id)?);
-            let expect = crate::at(&case, "expect")?;
-            let mut objects = vec![("/expect".to_owned(), expect.clone())];
-            for nested in ["gate_dry_run", "autonomy"] {
-                if let Some(value) = expect.get(nested) {
-                    objects.push((format!("/expect/{nested}"), value.clone()));
-                }
-            }
-            for (at, object) in objects {
+            every_sibling_fails_its_comparison(&fixture, &id)?;
+            for (at, object) in expectation_objects(&case)? {
                 for (member, value) in members(&object)? {
                     let edited = doctored(&fixture, &id, &format!("{at}/{member}"), |v| {
                         *v = changed(&value);
@@ -1693,13 +1735,7 @@ mod tests {
                 )?;
             }
         }
-        crate::expect_eq("doctorings, counted from the fixture", doctorings, 698)?;
-        crate::expect_eq(
-            "siblings: ten hold reasons, one hold's and eleven buys' clips, and each of thirteen \
-             orders' purpose, verdict, reason, decision and decider",
-            siblings,
-            10 + 1 + 11 + 13 * 5,
-        )
+        crate::expect_eq("doctorings, counted from the fixture", doctorings, 698)
     }
 
     /// A hold reaches neither the gate nor approval, so a hold that states either fails naming it,
@@ -2101,7 +2137,6 @@ mod tests {
     #[test]
     fn the_two_session_cases_pass_once_now_agrees_with_their_labels() -> Result<(), String> {
         let fixture = fixture()?;
-        let mut siblings = 0_usize;
         for (id, now, as_of, expires_at) in [
             (
                 "MC-B22",
@@ -2129,13 +2164,8 @@ mod tests {
                 }
             })?;
             run(moved.clone(), id).map_err(|e| format!("{id} at {now}: {e}"))?;
-            siblings = siblings.saturating_add(every_sibling_fails_its_comparison(&moved, id)?);
+            every_sibling_fails_its_comparison(&moved, id)?;
         }
-        crate::expect_eq(
-            "siblings: each case's purpose, verdict, reason, decision and decider, and MC-B23's \
-             order type",
-            siblings,
-            11,
-        )
+        Ok(())
     }
 }
