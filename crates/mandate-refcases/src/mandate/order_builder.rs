@@ -26,11 +26,12 @@
 //!
 //! **What the harness fills.** The fixture header's four defaults (`session` regular,
 //! `in_close_window` false, fee rates 0, `has_prior_fill` = position above zero) and `ref.py`'s
-//! (`size_factor` 1, and 0 for the drawdown, both P&L fractions, the day's buys, the cost basis and
-//! the goal spend). Every base pins its universe, so no order can be an admission: `new_instrument`
-//! is false and `thesis_confidence` 0 (§6.3, "0 when no thesis applies"), and a base that does not
-//! pin is refused rather than guessed about. The gate is handed no fee reservation, so a cash fee
-//! rate above zero is refused, and so is an equity asset fee rate.
+//! (`size_factor` 1, and 0 for the position's P&L fraction, the cost basis and the goal spend). The
+//! drawdown, the day's P&L fraction and the day's buys are 0 and not accepted: no base has an
+//! autonomy rule that reads them. Every base pins its universe, so no order can be an admission:
+//! `new_instrument` is false and `thesis_confidence` 0 (§6.3, "0 when no thesis applies"), and a
+//! base that does not pin is refused rather than guessed about. The gate is handed no fee
+//! reservation, so a cash fee rate above zero is refused, and so is an equity asset fee rate.
 //!
 //! **Every key is read (DEC-85).** The case, its `input`, `quote`, `gate_state`, every output and
 //! working order, `expect`, `gate_dry_run` and `autonomy` are each swept against the members read
@@ -65,7 +66,10 @@ use super::{at_of, digest, instant, not_implemented, num, unknown_members, valid
 use crate::{Json, at, ensure, expect_eq, list_at, str_at, u64_at};
 
 const CASE_KEYS: &[&str] = &["id", "kind", "title", "base", "input", "expect"];
-/// The members `ref.py`'s builder reads, and nothing else.
+/// The members `ref.py`'s builder reads, and nothing else, less three it reads only as autonomy
+/// facts (`drawdown`, `daily_pnl_fraction` and `bought_today_usd`): no family-B base has a rule on
+/// any of them, so no case could show one read, and each is refused until a case states it
+/// (DEC-250 item 16).
 const INPUT_KEYS: &[&str] = &[
     "now",
     "instrument",
@@ -87,9 +91,6 @@ const INPUT_KEYS: &[&str] = &[
     "fee_rate_cash",
     "fee_rate_asset",
     "has_prior_fill",
-    "drawdown",
-    "daily_pnl_fraction",
-    "bought_today_usd",
     "position_pnl_fraction",
     "scale_active_s",
     "holding",
@@ -705,19 +706,13 @@ impl Inputs {
             },
             risk: RiskContext {
                 size_factor: num(SizeFraction::parse(size_factor), "size_factor")?,
-                drawdown: num(Unit::parse(text_or(input, "drawdown", "0")?), "drawdown")?,
-                daily_pnl_fraction: num(
-                    Signed::parse(text_or(input, "daily_pnl_fraction", "0")?),
-                    "daily_pnl_fraction",
-                )?,
+                drawdown: Unit::ZERO,
+                daily_pnl_fraction: Signed::ZERO,
                 position_pnl_fraction: num(
                     Signed::parse(text_or(input, "position_pnl_fraction", "0")?),
                     "position_pnl_fraction",
                 )?,
-                bought_today_usd: num(
-                    Usd::parse(text_or(input, "bought_today_usd", "0")?),
-                    "bought_today_usd",
-                )?,
+                bought_today_usd: Usd::ZERO,
                 has_prior_fill: flag_or(input, "has_prior_fill", !position.is_zero())?,
                 new_instrument: false,
                 thesis_confidence: Unit::ZERO,
@@ -1752,7 +1747,8 @@ mod tests {
 
     /// Every member of a case is read: a plant at the top level, in `input`, its `quote`, its
     /// `gate_state`, each output and each working order fails naming the plant, and so does a
-    /// trim guard on a mandate that does not trim.
+    /// trim guard on a mandate that does not trim, and an autonomy fact no base's rule reads, even
+    /// stated as its default.
     #[test]
     fn every_input_member_is_read_and_no_other_is_accepted() -> Result<(), String> {
         let fixture = fixture()?;
@@ -1792,6 +1788,10 @@ mod tests {
             for (guard, value) in [("scale_active_s", json!(0)), ("holding", json!(false))] {
                 let stated = doctored(&fixture, &id, "/input", insert(guard, value))?;
                 fails_naming(run(stated, &id), guard, &format!("{id}: {guard} stated"))?;
+            }
+            for fact in ["drawdown", "daily_pnl_fraction", "bought_today_usd"] {
+                let stated = doctored(&fixture, &id, "/input", insert(fact, json!("0")))?;
+                fails_naming(run(stated, &id), fact, &format!("{id}: {fact} stated"))?;
             }
         }
         crate::expect_eq(
