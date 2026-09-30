@@ -9,10 +9,10 @@ import { PALETTE, PALETTE_DARK, type Palette, type TokenName } from "./palette";
 const hex = (palette: Palette, token: TokenName) => toHex(palette.tokens[token].value).toUpperCase();
 
 export const BRAND_PALETTE = [
-  { name: "Ink", hex: hex(PALETTE, "foreground"), role: "The mark and the type on a light surface, and the primary action" },
+  { name: "Ink", hex: hex(PALETTE, "foreground"), role: "The mark and the type on a light surface" },
   { name: "Off-white", hex: hex(PALETTE, "card"), role: "The mark on a dark surface; the tile behind the app icons and the share image" },
-  { name: "Azure", hex: hex(PALETTE, "primary"), role: "The accent: the primary link, your mandate's rules and markers. Never a large block" },
-  { name: "Deep azure", hex: hex(PALETTE, "mandate-strong"), role: "Azure as text on a light surface, and your mandate's labels" },
+  { name: "Azure", hex: hex(PALETTE, "mandate-marker"), role: "The accent: your mandate's rules and markers. Never a large block" },
+  { name: "Deep azure", hex: hex(PALETTE, "mandate-strong"), role: "Azure as text on a light surface: the primary action and link, and your mandate's labels" },
   { name: "Sun", hex: hex(PALETTE, "highlight"), role: "The highlight: the current range, a new figure. Always under ink type" },
   { name: "Night", hex: hex(PALETTE_DARK, "background"), role: "The page in dark mode" },
 ] as const;

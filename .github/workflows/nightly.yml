@@ -43,7 +43,12 @@ jobs:
     needs: changed
     if: needs.changed.outputs.run == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # 90 minutes: the 2026-09-30 run was cancelled at the old 30-minute cap mid
+    # `cargo xtask ci nightly`, after DEC-253 extended the mutation gate to every
+    # safety-critical crate (tool crates included) and the workspace grew by seven
+    # crates; the cap must clear the workload, not cancel it (last full success
+    # 2026-09-26).
+    timeout-minutes: 90
     permissions:
       contents: read
     # The oldest Postgres the journal supports (ADR-0001 ES-08); per-PR `full` runs the newest.

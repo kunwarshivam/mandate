@@ -193,7 +193,9 @@ export function rampValue(ref: RampRef): string {
 }
 
 /**
- * Light: paper surfaces and ink type. Azure-600 is the primary action and links; ink is the
+ * Light: paper surfaces and ink type. Azure-800 is the primary action and links (the deep azure,
+ * as dark's primary is the bright one, so no primary text sits in the saturated azure-600 the
+ * mandate's rules and markers use); ink is the
  * account's fill, the Stop control and a stopped agent. Azure is the mandate (a pale azure field
  * under azure-500 rules and markers, azure-700 labels). Sun is too light for a line or a label on
  * paper, so it appears as the highlight, a sun-300 fill that always carries ink type, and as an
@@ -206,7 +208,7 @@ export const TOKEN_REFS: Record<TokenName, RampRef> = {
   border: "paper-200",
   foreground: "ink-950",
   "muted-foreground": "ink-800",
-  primary: "azure-600",
+  primary: "azure-800",
   "primary-foreground": "paper-50",
   lapis: "ink-950",
   "lapis-foreground": "paper-50",
@@ -250,13 +252,14 @@ export const TOKEN_REFS: Record<TokenName, RampRef> = {
 };
 
 /**
- * Dark: near-black surfaces and paper type. The primary action is a bright azure-400 fill under ink
+ * Dark: near-black surfaces and paper type. The primary action is a bright azure-300 fill under ink
  * type; the Stop control and stopped states turn to a paper fill with ink type. Azure turns bright:
  * azure-400 rules and markers, azure-300 labels, and the same sun-300 highlight under ink type. The
  * mandate's field and the account's are a raised ink-850 charcoal, so a risk panel or an approval
  * card sits on the near-black page without a blue cast; azure stays in their bars, rules and labels.
- * Crimson keeps its fill; its edge lightens so the kill switch still clears 3:1 on the dark sheet
- * while its label keeps 7:1 on the fill.
+ * The first asset series runs brighter than the rules (azure-200), so a holdings bar never
+ * paints a block in the mandate's own azure. Crimson keeps its fill; its edge lightens so the kill
+ * switch still clears 3:1 on the dark sheet while its label keeps 7:1 on the fill.
  */
 export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
   background: "ink-975",
@@ -301,7 +304,7 @@ export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
   "loss-cvd": "cvd-orange-300",
   "gain-cvd-soft": "cvd-teal-900",
   "loss-cvd-soft": "cvd-orange-900",
-  "series-1": "azure-400",
+  "series-1": "azure-200",
   "series-2": "sun-300",
   "series-3": "teal-400",
   "series-4": "sky-300",

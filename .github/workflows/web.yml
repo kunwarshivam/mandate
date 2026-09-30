@@ -32,7 +32,10 @@ concurrency:
 jobs:
   web:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    # 40 minutes: the 2026-09-30 run on #364 was cancelled at the old 25-minute cap
+    # while the e2e suite (grown by the W4 polish rounds) was still retrying. A clean
+    # run fits well inside this; the cap clears the suite with retries, not cancels it.
+    timeout-minutes: 40
     permissions:
       contents: read
     env:

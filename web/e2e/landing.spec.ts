@@ -82,7 +82,17 @@ test("a contents link scrolls its section to the top of the window", async ({ pa
   await open(page, 1440);
   await page.getByRole("navigation", { name: "Contents" }).getByRole("link", { name: "How it works" }).click();
   await expect(page).toHaveURL(/#how$/);
-  await expect.poll(() => page.locator("#how").evaluate((el) => Math.round(el.getBoundingClientRect().top))).toBe(24);
+  // The page scrolls inside the retro browser's window, not the viewport: the section's top is
+  // measured against that scroll root, where the page's own 24 px offset and the sunken 2 px
+  // border land it at 26.
+  await expect
+    .poll(() =>
+      page.locator("#how").evaluate((el) => {
+        const root = el.closest("[data-scroll-root]")!;
+        return Math.round(el.getBoundingClientRect().top - root.getBoundingClientRect().top);
+      }),
+    )
+    .toBe(26);
 });
 
 test("the contents selects the section being read, and the status bar shows where a hovered link goes", async ({ page }) => {

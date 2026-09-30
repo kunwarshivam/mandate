@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Owner** | Product |
-| **Status** | Draft v0.2, 2026-09-27. Replaces v0.1, which made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
-| **Method** | Public web pages only, read 2026-09-26 and 2026-09-27. Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
+| **Status** | Draft v0.3, 2026-09-30. Adds the general-purpose agents section [ADR-0003](../adr/0003-earned-autonomy.md) sequenced. Replaces v0.2 of 2026-09-27, which replaced v0.1 after it made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
+| **Method** | Public web pages only, read 2026-09-26 and 2026-09-27; the general-agents section's sources were read 2026-09-30. Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
 | **Regulatory material** | Public commentary, not legal advice. Legal and compliance text is reserved for the founder and counsel ([DEC-79](../project/04-decision-log.md#decisions)) |
 | **Related** | [Strategy options](10-strategy-options.md), [Vision](01-vision-and-strategy.md), [Compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) |
 
@@ -50,6 +50,11 @@
    either register as advisers (Composer, Quantbase for Surmount's internal accounts, Autopilot,
    Autonomous) or describe themselves as software or technology providers (TradeAgentic, Scalar
    Field, Surmount for self-directed connections). See [Strategy options](10-strategy-options.md).
+6. **The general-purpose agents (Muse, Grok Bot, Dots) shipped scoped, owner-picked permissions
+   and no money layer.** All three document approval machinery and none documents any brokerage
+   or trading reach, while the brokers their plugins would reach state they do not supervise
+   connected agents. That is the gap the money-layer plugin (DEC-183) bets on, and their
+   "always allow" scopes are exactly the perpetual delegation ADR-0003 caps at 30 days.
 
 ## Segment map
 
@@ -57,6 +62,7 @@
 |---|---|---|
 | Agentic features inside brokers | Public Agents, Robinhood Agentic Trading, eToro Agent Portfolios, Composer by SoFi | Competitors for the retail user, and channels when they let outside agents in |
 | Direct agent-trading products on the user's own account | Scalar Field, Conviction, TradeAgentic, NexusTrade, Coil, Regent (a control layer, not an end-user product) | Closest competitors |
+| General-purpose agents with money ambitions | Meta Muse, SpaceXAI Grok Bot, OpenAI Dots | Not competitors today (no documented trading); the money-layer plugin (DEC-183) makes them a channel, and their permission scopes set the expectations ADR-0003's delegations answer |
 | Strategy and automation platforms | QuantConnect (Mia, LEAN), Composer, Surmount, Autopilot, Option Alpha, TradersPost, Capitalise.ai, Autonomous | Substitutes for delegated execution; several are registered advisers |
 | Broker channels and MCP servers | Alpaca, Interactive Brokers, Webull, Tradier, tastytrade, TradeStation, Kraken, Coinbase, Public MCP, Robinhood MCP | Channels and suppliers; each is also a substitute when a user connects their own agent directly |
 | Infrastructure | Alpaca (API, paper, OAuth), NautilusTrader, LEAN, SnapTrade | Suppliers, or build-versus-buy alternatives |
@@ -354,6 +360,113 @@ included" [CL1].
 - **Instinct (YC W26)** and **Volaren (YC F26):** pre-launch; execution not documented [YC1] [YC2].
   An unrelated company also called Instinct raised a large round in 2026; do not conflate them.
 
+## General-purpose agents with money ambitions
+
+Not competitors today: none of the three documents a brokerage connection, order placement, or
+any investing capability. They matter here for two reasons. Their permission models set the
+expectations owners now bring to any autonomous agent, and
+[ADR-0003](../adr/0003-earned-autonomy.md) packages Mandate's MCP server as the money layer for
+exactly these agents (DEC-183), which makes them a channel if that bet is right — while the
+client ceiling (DEC-185) keeps an order one of them asked for out of `auto`.
+
+### Meta Muse
+
+**What it documents**
+
+- Launched 2026-09-08: "a secure, private personal AI agent that proactively helps with people's
+  goals and suggests ideas", running on a dedicated Muse Secure VM with its own browser and
+  working "on a person's behalf across the apps they use daily" [GA1].
+- A separate Sentinel agent is the permission authority: "Nothing Muse does reaches the internet
+  unless the Sentinel approves it, and it asks the person for permission when needed" [GA1].
+- It "keeps working after people close the app, and comes back when something changes or when it
+  needs approval, like before it sends an email or makes a purchase" [GA1].
+- Approvals are scoped: "Allow once", "Allow for this task", "Allow for this site", "Always
+  allow" (per Connector), or "Deny" [GA2]. The help centre tells owners they are "responsible for
+  guiding it carefully and approving its actions" and to "review your permissions periodically"
+  [GA2].
+- Payments go through Link, whose agent wallet "generates a one-time-use card so your real card
+  details stay hidden"; Muse is "the first AI agent covered by Link's purchase protections" [GA1].
+- An activity log, an Upcoming list, and "a complete audit trail of everything it has done and
+  plans to do" [GA1] [GA2].
+
+**What it does not document**
+
+- Any brokerage, trading, or investing capability. Link purchases are payments, not trades.
+- Any export or integrity check on the audit trail.
+- Any timeout default when the owner does not answer an approval.
+
+**Overlap with Mandate.** The Muse/Sentinel split is the same shape as Mandate's gate-and-agent
+split, and Muse's scoped approvals are the pattern ADR-0003's delegations answer, bounded the way
+Mandate requires and Muse does not document: a delegation expires within 30 days, is suspended by
+any sign of trouble, and is spent or expires, where "Always allow" [GA2] never re-asks.
+
+### SpaceXAI Grok Bot
+
+**What it documents**
+
+- Launched in beta 2026-08-11: "your team of always-on agents. They have their own computer, work
+  inside tools and apps like you do, and keep working 24/7" [GA3].
+- Bots "finish jobs end to end, and only come back when something needs your approval" [GA3].
+- The multi-bot pattern: "A chief of staff sits on top, with a specialist for each lane", and in
+  group chats the bots "pass work, assign ownership, and only pull you in for judgment calls"
+  [GA3].
+
+**What it does not document**
+
+- Any brokerage, trading, or payment capability.
+- Any per-action approval or permission-scoping mechanism of its own. A third-party summary
+  reports an "Auto Review" step that allows, asks about, or blocks each action; xAI's own launch
+  page does not document one, and the summary was unreachable on re-read (2026-09-30), so we
+  treat it as unverified.
+
+**Overlap with Mandate.** The chief-of-staff-over-specialists shape is the desk metaphor
+ADR-0003 part 4 adopts (the research analyst, the risk officer, the trader, the reviewer, the
+chief of staff). Like Muse, Grok Bot documents no way to reach a brokerage account, so it would
+arrive as a client of the money layer rather than a competitor to it.
+
+### OpenAI Dots
+
+**What it documents**
+
+- Announced at DevDay 2026-09-29: agents that "run all the time on their own cloud computers and
+  work on a user's behalf", on GPT-6 Astra, each with "its own cloud computer and browser",
+  connecting "to more than 4,000 apps through plugins" [GA4].
+- "Dots start with built-in rules on when to act alone and when to ask for approval. Users can
+  set Custom Rules to allow, block or require approval for specific actions. An auto-review step
+  checks actions that could affect accounts or share information" [GA4].
+- Proactive background work is read-only: "a dot can only use connected apps in read-only mode,
+  so it cannot send messages or change content" [GA4].
+- "A monitoring system can pause or stop a dot if it detects a safety concern"; "some sensitive
+  tasks, such as changing a password, always stay with the user" [GA4].
+- The first dot is included in Pro and Business Premium plans; "Over time, we envision teams of
+  dots working together on your behalf" [GA4].
+
+**What it does not document**
+
+- Any brokerage connection or trading capability.
+- What the built-in rules are, or what the auto-review step checks.
+- Any exportable or verifiable record of a dot's actions.
+
+**Overlap with Mandate.** Dots' built-in rules plus owner-set Custom Rules (allow, require
+approval, block) is the same three-valued shape as Mandate's AUTO, ASK, DENY with the owner
+picking the rules. What no general agent documents is the part that matters for money: a limit
+envelope that binds independently of the agent's own behaviour, a decision record that survives
+the agent, and venue-side protection while the agent is down.
+
+### Why this segment matters here
+
+- All three permission models include an "always" scope with no expiry, and none documents a
+  review date or a suspension on trouble. That is the perpetual delegation ADR-0003 holds back:
+  a 30-day cap forces a second look with fresh evidence.
+- The brokers these agents would reach do not supervise them: Robinhood states it does not
+  "control, supervise, monitor, recommend, or audit these AI agents" [RH1]. A general agent
+  holding a raw broker key trades with no gate at all.
+- Model trading with no envelope and no gate has a measured downside. In Alpha Arena Season 1
+  (2026-10-18 to 2026-11-03), six models each staked a real $10,000 on leveraged crypto
+  perpetuals; two finished in profit and the other four finished down 42.01 to 58.74 percent
+  [GA5]. The lesson ADR-0003 draws is the opposite of the format: there, sizing and limits were
+  left to the model; here they never are.
+
 ## Strategy and automation platforms
 
 ### QuantConnect (Mia and LEAN)
@@ -576,6 +689,11 @@ Accessed means the page carried no date and was read on 2026-09-26 or 2026-09-27
 | AU2 | [TechStartups: ATG emerges from stealth with $15M](https://techstartups.com/2026/01/07/paperspace-founders-ai-startup-atg-emerges-from-stealth-with-15m-to-bring-autonomous-ai-financial-advisors-to-everyone/) | 2026-01-07 |
 | NF1 | [Nof1 funding release](https://www.businesswire.com/news/home/20260515505589/en/SUI-Group-Co-Leads-$15-Million-Funding-Round-for-AI-Trading-Lab-Nof1-Makes-Strategic-Investment-in-Recursive-Superintelligence) (read through its Nasdaq syndication) | 2026-05-15 |
 | NF2 | [Business Standard: AI bots auditioning for Wall Street are mostly losing money](https://www.business-standard.com/markets/news/ai-bots-auditioning-for-wall-street-trading-are-mostly-losing-money-126050701793_1.html) | 2026-05 |
+| GA1 | [Meta newsroom: Introducing Muse](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/) | 2026-09-08, re-read 2026-09-30 |
+| GA2 | [Meta Help Center: How Muse works with your guidance and approval](https://www.meta.com/help/artificial-intelligence/1385290430137537/) | accessed 2026-09-30 |
+| GA3 | [xAI: Introducing Grok Bot](https://x.ai/news/introducing-grok-bot) | 2026-08-11, re-read 2026-09-30 |
+| GA4 | [The Next Web: OpenAI launches dots, always-on AI agents with their own cloud computers](https://thenextweb.com/news/openai-dots-always-on-ai-agents-cloud-computers-devday) | 2026-09-29, re-read 2026-09-30 |
+| GA5 | [TradeRank: Alpha Arena leaderboard, final results](https://www.traderank.ai/alpha-arena-leaderboard) (nof1's own figures, from an archived nof1.ai snapshot of 2026-08-06) | accessed 2026-09-30 |
 | YC1 | [Instinct, YC company page](https://www.ycombinator.com/companies/instinct-xyz) | accessed |
 | YC2 | [Volaren, YC company page](https://www.ycombinator.com/companies/volaren-inc) | accessed |
 | QC1 | [QuantConnect: Mia](https://www.quantconnect.com/docs/v2/ai-assistance/predefined-agents/mia) | accessed |

@@ -23,7 +23,7 @@ export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> 
   border: { meaning: "surface", role: "Hairlines between rows" },
   foreground: { meaning: "text", role: "Text, the mark, and the ring on an exits-only mode" },
   "muted-foreground": { meaning: "text", role: "Secondary text, labels, ages, and a mandate level's dashed line on a chart" },
-  primary: { meaning: "account", role: "The primary action and links: ink in light, paper in dark" },
+  primary: { meaning: "account", role: "The primary action and links: the deep azure in light, the bright azure in dark" },
   "primary-foreground": { meaning: "account", role: "Text on a primary action" },
   lapis: { meaning: "account", role: "The account as a fill: the approvals count, its marker on the equity ladder, the paper hatch. Ink in light, paper in dark" },
   "lapis-foreground": { meaning: "account", role: "Text on the account fill" },
