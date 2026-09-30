@@ -115,10 +115,13 @@ grow.
    research analyst (the research agent), the risk officer (the gate), the trader (the executor),
    the reviewer (post-trade journal review), and the chief of staff (the brief). The concept of part
    2 is named **delegation**, because "grant" already means an approver's response in the approval
-   escalation work ([DEC-173](../project/04-decision-log.md#decisions)).
+   escalation work ([DEC-173](../project/04-decision-log.md#decisions)). Every one of these
+   surfaces is public-facing, so its copy says Owlhead, never Mandate (DEC-171).
 5. **The money layer for general agents** ([DEC-183](../project/04-decision-log.md#decisions);
    for the founder). E10-6's MCP server (DEC-141, DEC-148) is packaged as a plugin for Dots, Muse,
-   and Grok Bot and becomes a primary distribution path beside Mandate's own app. The general agent
+   and Grok Bot and becomes a primary distribution path beside Mandate's own app. It is listed
+   under the public name **Owlhead** and links owlhead.ai, like every other public surface
+   ([DEC-171](../project/04-decision-log.md#decisions)); "Mandate" stays internal. The general agent
    stays owner input: it can read status, the plan, and the brief, ask for an order, and propose an
    envelope change; the gate decides, and the human confirms. It never holds broker credentials and
    never approves. Mandate stays the complete product and its research agent stays the default
