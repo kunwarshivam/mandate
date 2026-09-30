@@ -1431,6 +1431,17 @@ held back by the freeze rule; R3 took minors 1, 2, and 4, DEC-167 item 7 (i) and
 - **Wrap `M5-F-mandate-spec.md`'s long line** (#324, minor 7), the R2 row that runs past the file's
   wrap width.
 
+Nits from the independent review of slice R3 ([#344](https://github.com/kunwarshivam/mandate/pull/344);
+held back by the freeze rule; its two minors and its DEC-167 nits went into R3's tests correction):
+
+- **R3's remaining nits** (#344 review). (a) A step that leaves the book flat clears `stale_mark`
+  with reason `sane_mark` though no mark arrived. No change: DEC-167 item 7 (e) records it, since
+  `sane_mark` is the only clearing reason §5.10 names. (b) `Limits::daily_loss`, like
+  `Limits::conditions`, re-parses `HARD_TRIGGER_MULTIPLE` on every call; parse it once into
+  `Limits` (an implementation change). (c) DEC-167 item 7 (k) counts 441 added non-blank non-test
+  lines where a recount gives 464. Immaterial: R3 is over ES-13's 400 either way, and item 5 fixes
+  its contents.
+
 From journal spec v0.5 §9.1, the agent-stream payload schemas ([DEC-177](04-decision-log.md#decisions);
 DEC-174 items 4 and 5). Until each lands, the drafts it names stay refused at `append`, which adds no
 risk (rule 3):
