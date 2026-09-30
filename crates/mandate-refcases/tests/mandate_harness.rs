@@ -1,5 +1,5 @@
-//! The `mandate` harness reads every key of every case it owns, dispatches every family it does not
-//! own to the story that will, and never lets a case pass for the wrong reason (DEC-85, DEC-128).
+//! The `mandate` harness reads every key of every case it owns, fails any kind it does not
+//! interpret, and never lets a case pass for the wrong reason (DEC-85, DEC-128).
 //!
 //! Added in review round 1 of the tests PR, which found the three tests the brief names absent. They
 //! matter because the harness is the thing that decides whether 202 reference cases are being checked
@@ -74,33 +74,48 @@ fn every_owned_case_key_is_read() {
     );
 }
 
-/// A family another stream owns fails with that stream's story, so nobody can mistake it for covered.
-/// Family N (`admission`, `lineage`, `thesis_expiry`, `stagger`) left this list when stream J's
-/// harness interpreted it (E17-3, DEC-77 stage 4); its own oracle is in `src/mandate/research.rs`.
-/// Family A (`autonomy`) left it when stream H's did (E6-2, DEC-162); its oracle is in
-/// `src/mandate/autonomy.rs`. Families G and F (`gate`, `agent_flatten`) left it with stream G's arm
-/// (DEC-178), whose oracle is `tests/mandate_gate_harness.rs`.
+/// A case of a kind no arm interprets fails naming the kind, so nobody can mistake it for covered; and
+/// every kind the fixture holds reaches an arm.
+///
+/// This was `a_family_another_stream_owns_fails_with_its_story` while some families waited on their
+/// stories. Family N left that list with stream J's harness (E17-3), family A with stream H's (E6-2,
+/// DEC-162), families G and F with stream G's (DEC-178), and family B, the last, with stream H's
+/// (E6-2, DEC-250), so no story is left to name: the rule that remains is that an uninterpreted kind
+/// fails rather than passes (DEC-85).
 #[test]
-fn a_family_another_stream_owns_fails_with_its_story() {
+fn a_kind_no_arm_interprets_fails_naming_it() {
     let fixture = fixture();
-    let expected = [("builder", "E6-2")];
-    let mut seen = 0;
-    for (kind, story) in expected {
-        let id = fixture["cases"]
-            .as_array()
-            .expect("a case list")
-            .iter()
-            .find(|c| c["kind"] == kind)
-            .and_then(|c| c["id"].as_str())
-            .unwrap_or_else(|| panic!("the fixture has no `{kind}` case"));
-        seen += 1;
-        let failure = run(fixture.clone(), id).expect_err("another stream's family must fail");
-        assert!(
-            failure.contains(story) && failure.contains("not interpreted until"),
-            "{id} (`{kind}`) must name {story}, got: {failure}"
-        );
+    let cases = fixture["cases"].as_array().expect("a case list");
+    let mut kinds: Vec<(&str, &str)> = Vec::new();
+    for case in cases {
+        let kind = case["kind"].as_str().expect("a kind");
+        if !kinds.iter().any(|(k, _)| *k == kind) {
+            kinds.push((kind, case["id"].as_str().expect("an id")));
+        }
     }
-    assert_eq!(seen, 1, "the one unowned kind is dispatched");
+    assert_eq!(kinds.len(), 15, "the fixture's fifteen kinds");
+    for (kind, id) in &kinds {
+        if let Err(failure) = run(fixture.clone(), id) {
+            assert!(
+                !failure.contains(&format!("kind `{kind}`")),
+                "{id}: `{kind}` must reach an arm, got: {failure}"
+            );
+        }
+    }
+
+    let (_, id) = kinds.first().expect("a kind");
+    let mut doctored = fixture.clone();
+    doctored["cases"]
+        .as_array_mut()
+        .expect("a case list")
+        .iter_mut()
+        .find(|c| c["id"] == *id)
+        .expect("the case")["kind"] = json!("a_kind_no_arm_interprets");
+    let failure = run(doctored, id).expect_err("a kind no arm interprets must fail");
+    assert!(
+        failure.contains("`a_kind_no_arm_interprets`"),
+        "{id}: the failure must name the kind, got: {failure}"
+    );
 }
 
 /// A wrong expected value fails its case, and a right one passes: MC-S01 and the first rejection

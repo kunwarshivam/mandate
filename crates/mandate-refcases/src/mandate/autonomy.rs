@@ -137,7 +137,7 @@ fn unread_facts() -> Result<ActionContext, String> {
 }
 
 /// §6.1's six purposes, spelt as the fixture writes them.
-fn purpose(text: &str) -> Result<Purpose, String> {
+pub(super) fn purpose(text: &str) -> Result<Purpose, String> {
     match text {
         "open" => Ok(Purpose::Open),
         "increase" => Ok(Purpose::Increase),
@@ -150,7 +150,7 @@ fn purpose(text: &str) -> Result<Purpose, String> {
 }
 
 /// Every member of the expectation: the decision, what decided it, and the approval, both ways.
-fn compare(expect: &Json, decided: &Classification) -> Result<(), String> {
+pub(super) fn compare(expect: &Json, decided: &Classification) -> Result<(), String> {
     let decision = decision_name(decided.decision);
     let known: Vec<&str> = ["decision", "by"]
         .into_iter()

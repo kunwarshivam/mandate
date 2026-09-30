@@ -170,12 +170,19 @@ the crate is pending.
   than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. Family A also runs in
   the shared harness, through `crates/mandate-refcases/src/mandate/autonomy.rs` on the parsed
   mandate's own `autonomy` block (DEC-162); its `status.toml` rows move in a status-only PR, since
-  the spec guard keeps that file apart from code (ES-22). Family B moves in a later
-  harness-and-status PR, once stream G's gate (E6-8) supplies the `gate_dry_run` verdict each of
-  those cases states.
-- **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; family A in the shared harness with
-  `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A mandate::autonomy` (the
-  flag runs cases `status.toml` does not yet list as passing).
+  the spec guard keeps that file apart from code (ES-22). Family B (all 32 `MC-B` cases) runs in the
+  shared harness through `crates/mandate-refcases/src/mandate/order_builder.rs` (DEC-250): `propose`,
+  then `mandate_risk::evaluate` on the proposed order as §6.2 step 2's dry run, then `decide` on
+  that verdict, with the session and close window from `mandate_risk::session_at`. 23 pass; the
+  four `trim_to_target` cases fail at `mandate_risk::trim_proposals` (E6-4), the three crypto buys
+  at the gate's owed check 2 (E6-10), and `MC-B22` and `MC-B23` on a `session` or
+  `in_close_window` label their `now` contradicts (DEC-250's open question). Its in-module tests
+  doctor the fixture to prove every member is read and the two session cases pass once their clock
+  agrees.
+- **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; families A and B in the shared
+  harness with `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A
+  mandate::autonomy mandate::MC-B mandate::order_builder` (the flag runs cases `status.toml` does
+  not yet list as passing).
 
 ## Agent runtime and kill switches
 
@@ -631,8 +638,16 @@ proves each pending test fails on them (DEC-110).
 
 ## Approval core: content, admission, re-validation, and step-up (E8-1 to E8-3)
 
-- **Spec:** the [M7 brief](../../../docs/project/tasks/M7-escalation-v0.md); mandate spec §6.4;
-  DEC-155, DEC-156, DEC-158 (option (c)), DEC-165. The MC-E cases arrive with the M7 spec PR.
+- **Spec:** the [M7 brief](../../../docs/project/tasks/M7-escalation-v0.md); mandate spec §6.1
+  (owner controls and step-up), §6.4, and MI-21 to MI-25; journal spec v0.5 §9; DEC-155, DEC-156,
+  DEC-158 (option (c)), DEC-165, DEC-173. The MC-E cases follow the harness count correction
+  (DEC-173 item 1).
+- **Reference model:** the escalation section of `reference/mandate/ref.py`, fuzzed by
+  `reference/mandate/fuzz.py` (`fuzz_escalation`, `fuzz_policy_quorum`, `fuzz_drift`,
+  `fuzz_ask_budget`, `fuzz_quiet_hours`, `fuzz_owner_controls`, `fuzz_content`) and
+  mutation-checked by `reference/mandate/mutants.py`. Check 7's quorum is the stricter of the bound
+  requirement and the policy overlay (DEC-173 item 13); `admit.rs` still reads only the bound
+  values until the M7 tests correction.
 - **Code:** `mandate-approval` (layer 1; E8-1, E8-2 and E8-3 implemented):
   `crates/mandate-approval/src/content.rs` (`BoundAction`, `content_object`, `content_hash`,
   `confirmation_code`), `crates/mandate-approval/src/admit.rs` (`admit`: checks 1 to 7),
@@ -672,14 +687,16 @@ proves each pending test fails on them (DEC-110).
   RC-15's `status_not_active` without its later stories' expectations passes),
   `crates/mandate-refcases/src/mandate/research.rs` (family N of the
   mandate suite, through `mandate-research`), `crates/mandate-refcases/src/mandate/autonomy.rs`
-  (family A, through `mandate-builder`'s `classify`),
+  (family A, through `mandate-builder`'s `classify`), `crates/mandate-refcases/src/mandate/order_builder.rs`
+  (family B, through `mandate-builder`'s `propose` and `decide` and `mandate-risk`'s `evaluate`),
   `crates/mandate-refcases/src/mandate/risk_gate.rs` (families G and F, through `mandate-risk`,
   with `crates/mandate-refcases/tests/mandate_gate_harness.rs`; DEC-178),
   `crates/mandate-refcases/status.toml` (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
   pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L
-  harnessed by stream F, N by stream J, and G and F by stream G; the rest pending their streams).
+  harnessed by stream F, N by stream J, A and B by stream H, and G and F by stream G; a case whose
+  own story is pending fails naming it).
 - **Run:** `cargo nextest run -p mandate-refcases`; pending cases with
   `cargo test -p mandate-refcases -- --include-ignored`.
 
