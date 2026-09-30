@@ -883,7 +883,8 @@ fn a_carried_breach_undecided_at_the_next_rollover_is_refused_and_a_dropped_one_
 }
 
 /// A latched daily loss that has seen a new risk day is renewed by a breach of the new day's line,
-/// here at its 1.25x level on one sane quote (§5.4). A renewal only extends the latch: it adds no
+/// here at its 1.25x level on one sane quote, while a sane quote past only the line starts confirming
+/// (§5.4). A renewal only extends the latch: it adds no
 /// restriction, fires no second kill switch, and moves no mode. Before the new day nothing renews,
 /// and a `flatten_and_pause` daily loss never lifts without the owner's acknowledgment, which is
 /// R4's.
@@ -900,7 +901,8 @@ fn a_new_day_breach_renews_on_one_hard_quote_and_a_daily_flatten_waits_for_the_o
             mark(11, "98.75")?,
             mark(12, "97.5")?,
             new_day(13)?,
-            mark(14, "96.25")?,
+            mark(14, "96.5")?,
+            mark(15, "96.25")?,
             new_day(86_400)?,
             tick(100_000)?,
         ],
@@ -933,8 +935,16 @@ fn a_new_day_breach_renews_on_one_hard_quote_and_a_daily_flatten_waits_for_the_o
         ),
         "a 1.25% fall on the day the limit latched renews nothing"
     );
+    let soft = outcomes.get(4).ok_or("no soft breach")?;
+    assert!(
+        soft.journal.is_empty(),
+        "9650 is 1.03% under the new day's 9750, past the line but not the hard level: a sane quote \
+         there only starts confirming, {:?}",
+        soft.journal
+    );
+    assert_eq!(soft.pending, BTreeSet::from([key]));
     assert_eq!(
-        journals.get(4).copied(),
+        journals.get(5).copied(),
         Some([triggered(key, flatten, Some(TriggerReason::NewDayBreach))].as_slice()),
         "9625 is 1.28% under the new day's 9750: past the hard level on the first sane quote"
     );
