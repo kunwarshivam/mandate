@@ -180,10 +180,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   RC-15 passes.
 - **E6-10 (Must)** As an owner, I want the gate to admit crypto **USD pairs only** (trading-domain
   §3.2 item 7), so that an agent cannot open a stablecoin-quoted pair the floor was never written
-  for. Needs a quote-currency input: `InstrumentSnapshot` carries none and `AssetId` is a UUID, so
-  today nothing tells BTC/USD from BTC/USDT. Until it lands the gate keeps a crypto opening owed at
-  check 2 and refuses it fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a
-  non-USD pair is denied, a USD pair passes the floor, and check 2 is whole for crypto.
+  for. `AssetId` is a UUID, so the quote currency is its own input,
+  `InstrumentSnapshot::quote_currency`, where only a stated USD admits (DEC-254). Until the
+  implementation reads it the gate keeps a crypto opening owed at check 2 and refuses it
+  fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a non-USD pair is denied, a
+  USD pair passes the floor, and check 2 is whole for crypto (`crates/mandate-risk/tests/usd_pairs.rs`).
 - **E6-11 (Must)** As an owner, I want the daily surveillance report delivered to me and a conduct
   breach to move the agent to `exits_only`, so that §9.6's "breach → agent `exits_only`" and its
   "threshold breaches are routed to the owner, whose acknowledgment is journaled" hold. E6-8 computes
@@ -268,12 +269,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   (DEC-168, the coordinator's ruling on #171). *Accepted when:* each agent-stream event the runtime
   and the executor write has a registered schema, tested first against the journal spec's vectors.
   *Unblocked in half* ([DEC-177](04-decision-log.md#decisions)): journal spec v0.4 closed none of the
-  eleven agent-stream schemas the runtime writes (DEC-174). Journal spec v0.5 §9.1 closes the agent
+  eleven agent-stream schemas the runtime writes (DEC-174). Journal spec v0.6 §9.1 closes the agent
   stream's `StreamOpened`, `ObservationRecorded`, `ModelOutputRecorded`, `DecisionMade`,
   `IntentProposed`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`, with
   vectors in `journal.yaml`'s `agent_stream` section, so their tests can be written first now. The
-  approval events wait for M7's spec change (claim
-  [#213](https://github.com/kunwarshivam/mandate/issues/213)).
+  approval events, which journal spec v0.5 added (M7, claim
+  [#213](https://github.com/kunwarshivam/mandate/issues/213)), are not closed yet (DEC-177 item 23).
 - **E7-10 (Must, M6)** As the founder, I want the control-stream payload schemas registered and mapped
   to stream F's `JournaledFact`, so that `ValidationContext::from_journal` has a production source
   (DEC-168, DEC-169, the coordinator's ruling on #124). *Accepted when:* `AccountSnapshotRecorded`,
@@ -338,13 +339,29 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   risk reduction. The mandate spec §6.1 wording is in ("Owner controls and step-up", DEC-173
   item 5).
   *Follow-up (M7 spec PR, DEC-173 item 1):* the MC-E cases (MC-E01 to MC-E31) are not yet in
-  `mandate.yaml`, because `mandate_harness.rs`'s
-  `the_fixture_holds_the_families_this_stream_expects` pins the fixture's total at 298 cases and
-  300 tests, and the spec guard keeps that `crates/` fix out of a spec PR. Two changes, in order:
-  first a tests correction that makes the harness count only the families it owns, or read §11's
-  stated count; then an MC-E spec PR that generates the cases from `reference/mandate/ref.py`'s
-  escalation model (already fuzzed and mutation-checked), with `cargo xtask refcases --write`, and
-  no `status.toml` row.
+  `mandate.yaml`. Two changes, in order. *Done (the tests correction,
+  [#343](https://github.com/kunwarshivam/mandate/pull/343)):* `mandate_harness.rs` counts only the seven families it
+  owns, by case-ID prefix (MC-S, MC-V, MC-P, MC-C, MC-R, MC-T, MC-L), and
+  `a_kind_no_arm_interprets_fails_naming_it` accepts a kind no arm interprets as long as its cases
+  fail, so a new family changes no harness test while a case added to or dropped from an owned
+  family still fails. Still open: an MC-E spec PR that generates the cases from
+  `reference/mandate/ref.py`'s escalation model (already fuzzed and mutation-checked), with
+  `cargo xtask refcases --write`, and no `status.toml` row. Give the family a kind of its own: the
+  family A, B, G, F, and P count tests select their cases by kind, so a new family reusing one of
+  those kinds would change their counts. The same PR corrects mandate spec §11's and §1's sentences
+  that MC-U "lands in its own tests-first change, because the shared harness pins the case count":
+  since #343 it no longer does (#343 review, minor 4).
+  *Follow-up (#343 review, minor 1; a tests correction):* a new family that reuses an owned family's
+  kind (for example an `MC-E01` of kind `semantic`) now moves no count in `mandate_harness.rs` and
+  runs through that family's arm, where on `main` before #343 it failed two counts. `unread_keys`
+  still refuses any member it ignores, so it cannot pass half-read, but the loud failure is gone.
+  Assert that the owned-by-kind id set equals the owned-by-prefix set in
+  `the_fixture_holds_the_families_this_stream_expects`; the reviewer's four-line version passes on
+  today's fixture and fails on that scenario.
+  *Follow-up (#343 review, nits):* make `INTERPRETED` a `pub const` in `src/mandate.rs` that
+  `run_listed`'s dispatch and the test both read; the `{prefix}{n:02}` ids with a lexicographic sort
+  break past 99 cases in a family; the uninterpreted-kind branch asserts only `is_err()`, not that
+  the message names the kind.
   *Follow-up (M7 spec PR, DEC-173 item 11):* the `mandate-journal` catalogue (`src/catalogue.rs`,
   `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
   (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
@@ -944,6 +961,25 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   outside the registry, beside `instrument_not_in_universe` and `broker`, so ES-09's stable reason
   codes do not yet cover what the partial gate journals ([DEC-129](04-decision-log.md#decisions)
   items 23 and 27, ADR-0001 ES-09; #206 review).
+- **Before E6-10's implementation merges:** register `crypto_pair_not_usd` in the trading-domain
+  `reason_codes` registry and name it in §3.2 item 7, or record why `not_in_working_universe`
+  stands. Mandate spec §5.3 defines that code as "the instrument is in the working universe", which
+  a BTC/USDT pair the research agent admitted is, so the journaled denial would say something false
+  about it. Registering a code adds no risk and closes a gap, so DEC-176 lets an agent do it in its
+  own spec PR; the tests' `PAIR_CODE` constant flips with it ([DEC-254](04-decision-log.md#decisions)
+  item 3; DEC-129 items 25 and 27; #342 review, minors 1 and 2). *Done (#352,
+  [DEC-255](04-decision-log.md#decisions)):* the code is registered and §3.2 item 7 names it; the
+  gate's emission and the `PAIR_CODE` flip stay with E6-10's implementation.
+- **The broker symbol's quote currency is read exactly** (E6-10; #342 review, minor 3). The gate's
+  USD-pair rule rests on the §3.1 loader mapping a pair to `QuoteCurrency`, and E7-8's
+  `TradingClient::asset` criterion does not name it. The loader matches `USD` exactly and
+  case-sensitively, with tests that `usd`, `USDT`, `USDC`, a padded code, and an absent symbol all
+  land on `Other` or `None` (DEC-254 item 1).
+- **E6-10's tests nits** (#342 review): `usd_pairs.rs`'s property sets `quote_currency` twice for a
+  crypto draw; DEC-254 item 3's alternatives omit DEC-129 item 27's "assert the verdict, leave the
+  code unasserted" option; and `cargo xtask ci pending` accepts any `Unimplemented` report rather
+  than the story its `#[ignore]` label names, which is how `hand::crypto_never_counts` sat labelled
+  E6-6 while failing at E6-10's stub. Compare the stub's story with the label if it recurs.
 - **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
   properties. 29 of the 33 pass when every reachable stub returns `Ok(())`, so a no-op executor
   would satisfy them; each property must also assert a positive effect a no-op cannot produce
@@ -1165,24 +1201,24 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   - drop the unreachable typed error for an unknown group rank in `Scene::read`, or state why it
     stays.
 - Tighten the family-B harness (#331 review, minors 4 and 5 and the nits), in one tests correction
-  of `crates/mandate-refcases/src/mandate/order_builder.rs` and DEC-250:
-  - `an_unreadable_input_is_refused_naming_it` says every scalar the harness reads is parsed, but
-    its sweep leaves out the `gate_state.positions_mv` values, `gate_state.last_exit_fill_at`,
-    `gate_state.working_universe`, and the working orders' own `instrument` and `max_cost`. Extend
-    the sweep to them, or narrow the doc to what it covers (minor 4);
-  - the gate's `fee_reservation` is hardcoded `Usd::ZERO`, while a non-zero crypto
-    `fee_rate_cash` is accepted (DEC-250 item 6 refuses only an equity fee rate). Refuse a non-zero
-    cash fee rate, or derive the reservation from it, before any crypto B case states one
-    (minor 5);
-  - `crates/mandate-builder/tests/refcases.rs`'s module doc still says the harness hands `decide`
-    the case's own verdict until stream G's gate lands; the shared harness now composes propose,
-    gate and `decide`, so the doc is stale (nit);
-  - `test_default_gate_config` and `gate_mandate` are a third copy of the gate helpers, beside
-    `risk_gate.rs` and `trading_domain/gate.rs`. Share them, and when they are shared, add
+  of `crates/mandate-refcases/src/mandate/order_builder.rs` and DEC-250. *Done (E6-2,
+  [#346](https://github.com/kunwarshivam/mandate/pull/346); DEC-250 items 16 to 18), all but the shared gate helpers,
+  which stay open:*
+  - *done:* `an_unreadable_input_is_refused_naming_it` now also sweeps the `gate_state.positions_mv`
+    map and its values, `gate_state.last_exit_fill_at` (whole, and a planted entry, since no case
+    states one), `gate_state.working_universe` and its entries, and each working order's
+    `instrument` and `max_cost`, in the gate state and restated (minor 4);
+  - *done:* a cash fee rate above zero is refused for crypto as for equities, since the gate's
+    `fee_reservation` is `Usd::ZERO`; a stated 0 is read and passes (minor 5, DEC-250 item 17);
+  - *done:* `crates/mandate-builder/tests/refcases.rs`'s module doc says this crate's harness hands
+    `decide` the case's verdict because it does not depend on `mandate-risk`, and points at the
+    shared harness's propose, gate and `decide` composition (nit);
+  - **open:** `test_default_gate_config` and `gate_mandate` are a third copy of the gate helpers,
+    beside `risk_gate.rs` and `trading_domain/gate.rs`. Share them, and when they are shared, add
     DEC-178 item 12's check against `configs.test_default.gate` to the family-B arm (nit);
-  - `INPUT_KEYS` declares `fee_rate_cash`, `drawdown`, `daily_pnl_fraction` and
-    `bought_today_usd`, which no B case states, so no test shows any of them read. Drop them until a
-    case states one, or add a doctoring that does (nit).
+  - *done:* `INPUT_KEYS` keeps `fee_rate_cash`, which `a_cash_fee_rate_above_zero_is_refused` shows
+    read, and drops `drawdown`, `daily_pnl_fraction` and `bought_today_usd`, which no base's
+    autonomy rule reads, until a case states one (nit, DEC-250 item 16).
 - **Family B's three contradicting clocks, as a reference-case PR under DEC-176** (DEC-250 item 12,
   #331 review). MC-B22 (`session: after_hours`), MC-B23 (`in_close_window: true`) and MC-B31
   (`session: after_hours`) all put `now` at 2026-09-22T14:00Z, the regular session, so the harness
@@ -1194,11 +1230,38 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   `cargo xtask refcases --write`, and the reference checks land together, apart from code (ES-22).
   Whether `session` and `in_close_window` stay case-file inputs at all is a separate question,
   Proposed to the founder in DEC-250.
-- Derive the family-B sibling counts (#331 round-2 review, nit). The `sibling` sweep's
-  `siblings == 87` and `siblings == 11` are hand-written, and they alone catch a `sibling` that
-  returns `None` for a vocabulary. Replace them with an assertion that every stated enum-valued
-  expectation has a sibling arm (`on_timeout` and `action` excepted, as the review showed), so a
-  case that gains or loses an enum expectation needs no count edit.
+  *Done (DEC-250's 2026-09-30 amendment):* `generate.py` moves the three clocks and keeps each
+  output's offsets from `now`, no expectation changes, and `check_cases.py` now fails any builder
+  case whose `session` or `in_close_window` contradicts its `now`. MC-B22 and MC-B23 pass, and their
+  status rows are a separate status-only PR. MC-B31 still fails at `mandate_risk::trim_proposals`
+  (pending E6-4). The founder question above stays Proposed.
+- **Tests correction for family B's moved clocks** (DEC-250's 2026-09-30 amendment; crate code, so
+  not in the reference-case PR, ES-22). `crates/mandate-refcases/src/mandate/order_builder.rs`.
+  *Done (`cursor/family-b-clock-owed-tests-v2-138b`, which lands before #347):* moving MC-B22 and
+  MC-B23 from `OWED` to `PASSING` would be red on the fixture before #347, so a `CLOCKED` table
+  judges them by the fixture's own consistency instead. When a case's `session` and
+  `in_close_window` agree with `mandate_risk::session_at` at its `now`, it must pass; otherwise it
+  must fail naming the conflict, as before. The test compares the labels itself, so a harness that
+  stops comparing them is still caught. MC-B31 stays in `OWED`: a `trim_to_target` case stops at
+  `trim_proposals` before its labels are compared. `the_two_session_cases_pass_once_now_agrees_with_their_labels`
+  is kept, because on the fixture before #347 its clock moves are what give its sibling-swap proof
+  (the only one for a sell's `order_type` and for a deferred outcome) a case that passes.
+- Fold the clocked cases back once #347 and #346 have both merged (the tests correction above,
+  follow-up). With the clocks moved, `labels_agree_with_calendar` is true for both cases, so:
+  - move MC-B22 and MC-B23 into `PASSING`, where `every_expected_member_is_compared_and_required`
+    also sweeps them, and delete `CLOCKED` and `labels_agree_with_calendar`;
+  - drop `the_two_session_cases_pass_once_now_agrees_with_their_labels`'s clock doctoring, which
+    re-sets MC-B22's clock to the values it already holds and changes only MC-B23's `expires_at`,
+    and run its sibling-swap proof on the two cases as the fixture states them;
+  - reword that test's doc, which says the two cases fail only because their labels contradict their
+    clock. DEC-250 item 3's label-against-clock comparison stays proved by
+    `the_builder_and_the_gate_see_one_scene`'s doctored MC-B01.
+- Derive the family-B sibling counts (#331 round-2 review, nit). *Done (E6-2,
+  [#346](https://github.com/kunwarshivam/mandate/pull/346); DEC-250 item 18):* the hand-written `siblings == 87` and
+  `siblings == 11` are replaced by an assertion that every enum-valued expectation a swept case
+  states (a word, a null, or a non-empty list of words in some family-B case) has a `sibling` arm,
+  `on_timeout` and `action` excepted, so a case that gains or loses an enum expectation needs no
+  count edit.
 - **Settle what `safety_critical = true` means for a `tool`-layer crate** (#331 round-2 review, for
   the founder's after-the-fact look). `xtask/layers.toml` marks `mandate-refcases`
   `safety_critical = true`, and CODEOWNERS lists it, but two checks read it as not safety-critical:
@@ -1211,6 +1274,27 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   mutates safety-critical `tool` crates on the diff, and ES-13's safety-critical limit applies,
   with DEC-178's `risk_gate.rs` and DEC-250's `order_builder.rs` as recorded exceptions or split.
   Record the reading in a decision-log row in the same change as the xtask edit.
+  *Done (DEC-253):* the flag governs. `mutated_crates` reads `safety_critical` alone, pinned by
+  `the_gate_mutates_every_safety_critical_crate_tool_layer_included`; ADR-0001's ES-11 and ES-13
+  say so, and ES-13 records `risk_gate.rs` and `order_builder.rs` as exceptions, not split.
+- `parse_status` returning an empty map survives every test (DEC-253's proof run: `cargo xtask ci
+  mutants` on a diff touching it missed `replace parse_status -> Result<BTreeMap<String,
+  CaseStatus>, String> with Ok(BTreeMap::new())`). `tests/refcases.rs` treats a case the map does
+  not name as pending and ignores it, so a harness that read no status would run no case and pass,
+  and ES-11's "a passing case never regresses" would hold vacuously. Add a live test in
+  `crates/mandate-refcases/src/lib.rs` that parses a two-suite sample and asserts the whole map,
+  and one that reading the committed `status.toml` yields at least one passing case. Until then
+  the mutation gate fails any change whose diff touches `parse_status`.
+- Family B's harness arm has 13 mutants no live test catches (DEC-253's timing run of the gate over
+  DEC-250's diff of `crates/mandate-refcases/src/mandate/order_builder.rs`: 79 mutants, 40 caught,
+  26 unviable, 13 missed). `scaling_rung` (five: every return value, its `==`, its `&&`) is reached
+  only by the trim cases, which fail pending E6-4, so no live test runs it; `judge`'s
+  `nothing_proposed` guard can be `true`; `Inputs::read`'s `has_prior_fill` default can lose its `!`
+  (DEC-250 item 13: no base rule reads the flag); `listing`'s
+  `qty_increment < 1` (fractionable) can be `==`, `>` or `<=`; and `builder_error` can return any
+  string or flip its `==`. One tests correction of the arm adds doctored-case tests in
+  `crates/mandate-refcases/tests/`, as `mandate_gate_harness.rs` does for families G and F, so each
+  survivor is caught; until then the gate fails any change whose diff touches those lines.
 - **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163;
   the gate driver since E6-9, DEC-199). `crates/mandate-refcases/src/trading_domain/gate.rs` now
   decides `propose_order` steps with `mandate_risk::evaluate`, states the market data a case omits
@@ -1260,6 +1344,22 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   beside a resting protective sell in the same instrument is denied `conduct_limit_breached` though
   §5.3 rule 8 lets a bracket add a tranche. A stop is not in the book until triggered; deciding
   whether it counts would reopen that path.
+- **An exit's pacing can return a gate error** (#311 round 2, minor 1). `conduct::pacing` propagates
+  `NumError` from `Qty::portion` in `slice` and from `Price::collar_bound` in `price_by_collar`, so
+  an owner or discretionary exit with extreme prices or volumes gets `Err` rather than a decision.
+  Nothing exercises it, since the property's generators are small. Add a property over extreme
+  prices and volumes, or state what the executor does with a gate error on an exit (it must still
+  route the exit, rule 13).
+- **The opposite-fill property pins its boundary only by chance** (#311 round 2, minor 2).
+  `properties::only_an_opposite_side_fill_starts_the_interval` draws `elapsed in 0..120`, and
+  `ci test` fixes no proptest seed. `gate::tests::the_opposite_fill_interval_includes_its_last_instant`
+  pins the 60 s edge deterministically; add 60 to the property's draw explicitly so it is not the
+  boundary's cover by luck.
+- **Assert the whole exit for exempt purposes** (#311 round 2, minor 3).
+  `an_allowed_exit_is_never_below_its_minimum_or_zero` samples `RiskEngine` and `ProtectiveLeg` but
+  asserts only the quantity bound for them, not `sent == proposed`, which
+  `a_slice_binds_only_below_the_proposal_and_names_its_cap` covers separately. Assert it in the
+  property too.
 - **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
   every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
   held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;
@@ -1317,8 +1417,8 @@ From E6-4's V-040 spec change (stream H; the coordinator's ruling on #251, round
   (V-040). The 2¹³ × 5¹³ ladder, where the whole product fits and a subset does not, belongs there
   too. For now all three are pinned in `reference/mandate/fuzz.py::fuzz_ladder_precision`, which runs
   on every seed, and as in-module rows in `crates/mandate-spec/src/validate/tests.rs`. They are not
-  reference cases because a case changes counts that live `mandate_harness.rs` tests assert (298
-  cases, 67 semantic, 202 owned, and the member sweeps), and the spec guard keeps the fixture and
+  reference cases because a case changes counts that live `mandate_harness.rs` tests assert (67
+  semantic, 202 owned, and the member sweeps), and the spec guard keeps the fixture and
   those tests in separate PRs. The founder-owned YAML (ES-22) and the counts must change together.
 - **Three minors from #251's round 2, deferred by the freeze rule.** (1) `docs/specs/mandate.md`'s
   front matter still says a change needs founder approval with no qualification; DEC-167 item 3
@@ -1357,20 +1457,49 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   a limit on one print, which DEC-63 rules out. The crate follows the spec (DEC-167 item 6), and no
   reference case changes either way. Drop `"fill"` from the tuple and regenerate with
   `reference/mandate/generate.py`, which must leave `fixtures/refcases/mandate.json` unchanged.
-- **The three `ref.py` readings the #124 handover left for R3 and R4.** (1) R3: a daily hard breach
-  pending at the rollover is popped into the rollover record and never read again, so `hard_breach`
-  can stay applied with nothing to clear it; keep it pending under the new day and record the reading
-  as a DEC-167 item. (2) R3: the renewal's `acked` is always false, since only a `flatten_and_pause`
-  daily is acknowledged; write it as false. (3) R4: settling time before an allocation change only
-  when `at > self.t` is equivalent to settling always; settle always. Handover items 4 (one cash sum)
-  and 5 (the post-loop lift reset) are R2's and are in `risk/fold.rs`.
-- **No MC-R case passes until R3 (R3's status PR).** Every equity case builds on `two_stock_swing`,
-  whose goal is `profit_stop` (R3), and every crypto case opens with `risk_day_started` (R3). With
-  the profit stop stubbed out locally, MC-R01 to MC-R04, MC-R18, and MC-R19 match every expectation on
-  R2's spine. R3's PR runs `cargo test -p mandate-refcases --test refcases -- --include-ignored
-  mandate::MC-R` and proposes the passing ones for `status.toml` (founder-owned).
+- **The `ref.py` reading the #124 handover left for R4.** Settling time before an allocation change
+  only when `at > self.t` is equivalent to settling always; settle always. Readings 1 and 2 were
+  R3's and are DEC-167 item 7 (a) and (c); handover items 4 (one cash sum) and 5 (the post-loop lift
+  reset) are R2's and are in `risk/fold.rs`.
+- **R3's status PR: fifteen MC-R cases pass.** MC-R01 to MC-R08, MC-R13, MC-R15, MC-R18 to MC-R20,
+  MC-R22, and MC-R24 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
+  mandate::MC-R` on R3 (DEC-167 item 7 (l)); proposing them for `status.toml` is founder-owned.
 
-From journal spec v0.5 §9.1, the agent-stream payload schemas ([DEC-177](04-decision-log.md#decisions);
+From E6-4's slice R3 (stream H2; DEC-167 item 7):
+
+- **`ref.py` drops a daily hard wait at the rollover (reference fix).** `RiskState.step` pops
+  `hard_first["max_daily_loss"]` into the rollover record and never reads it again, so `hard_breach`
+  can stay applied with nothing to clear it. The crate keeps the wait under the new day (DEC-167
+  item 7 (a)). Keep it in `hard_first` and regenerate with `reference/mandate/generate.py`, which must
+  leave `fixtures/refcases/mandate.json` unchanged (checked from the crate's side: putting `ref.py`'s
+  reading into the fold leaves the same fifteen MC-R cases passing).
+
+Minor findings from the independent review of slice R2 ([#324](https://github.com/kunwarshivam/mandate/pull/324);
+held back by the freeze rule; R3 took minors 1, 2, and 4, DEC-167 item 7 (i) and (j), and minor 6,
+`SpecError::Unimplemented`'s doc):
+
+- **The `strictest` oracle reads the daily-loss mode by hand** (#324, minor 3; a tests correction).
+  `tests/risk.rs`'s `strictest` maps `DailyLoss` to `exits_only`, while the fold reads
+  `daily_loss_action`. Its property still walks `ladder_only`, whose daily action is the base's
+  `exits_only`, and R3's renewal walks are in-module tests that do not use it; take the action from
+  the mandate before a walk over a `flatten_and_pause` daily loss does.
+- **A `Qty::checked_sub` failure is always reported as a short sale** (#324, minor 5). True while a
+  negative result is its only failure; name the error by its kind if `Qty` gains another.
+- **Wrap `M5-F-mandate-spec.md`'s long line** (#324, minor 7), the R2 row that runs past the file's
+  wrap width.
+
+Nits from the independent review of slice R3 ([#344](https://github.com/kunwarshivam/mandate/pull/344);
+held back by the freeze rule; its two minors and its DEC-167 nits went into R3's tests correction):
+
+- **R3's remaining nits** (#344 review). (a) A step that leaves the book flat clears `stale_mark`
+  with reason `sane_mark` though no mark arrived. No change: DEC-167 item 7 (e) records it, since
+  `sane_mark` is the only clearing reason §5.10 names. (b) `Limits::daily_loss`, like
+  `Limits::conditions`, re-parses `HARD_TRIGGER_MULTIPLE` on every call; parse it once into
+  `Limits` (an implementation change). (c) DEC-167 item 7 (k) counts 441 added non-blank non-test
+  lines where a recount gives 464. Immaterial: R3 is over ES-13's 400 either way, and item 5 fixes
+  its contents.
+
+From journal spec v0.6 §9.1, the agent-stream payload schemas ([DEC-177](04-decision-log.md#decisions);
 DEC-174 items 4 and 5). Until each lands, the drafts it names stay refused at `append`, which adds no
 risk (rule 3):
 
@@ -1387,7 +1516,8 @@ risk (rule 3):
   convictions and score `null`, and the evaluation's lists empty, on a decision no §8.3 evaluation
   produced (a goal completion, a removed instrument, a risk exit); `ask_suppressed` when a
   classified `ask` is not asked (DEC-156 item 5); and `lifecycle` as `normal`, `paused`, or
-  `stopped`, never `exits_only`.
+  `stopped`, never `exits_only`. From the v0.5 reconciliation (DEC-177 item 24): `causation_id` on
+  each copy of an owner command, the control stream's `OwnerCommandIssued` (§9.1 rule 16).
 - **Stream L: the shell's envelope carries the required `config_refs` and the `artifact_refs`**
   (DEC-174 item 5). `mandate-shell` writes `config_refs: {}` and `artifact_refs: []` on every draft,
   so every event that requires `mandate_version` or `model_version` is `missing_config_ref`, and every
@@ -1418,6 +1548,21 @@ risk (rule 3):
   given and does not rule.
 - **The account stream's `KillSwitchActivated` and `AgentModeApplied` schemas** are not closed by
   §9.1; they close with the executor's account-stream schemas.
+- **Close the approval events' schemas in §9.1, with vectors** (DEC-177 item 23). `ApprovalRequested`,
+  `ApprovalDelivered`, `ApprovalResponded`, `ApprovalRevalidated`, `ApprovalTimedOut`, and
+  `ApprovalCanceled` (journal spec v0.5, mandate spec §6.4) are listed in §9 but not closed. The
+  change that closes them also adds the chain events an approved order needs (`DecisionMade` with
+  `autonomy: ask`, `ApprovalRequested`, `ApprovalResponded` naming an `ApprovalResponseSubmitted`,
+  `ApprovalRevalidated` with result `act`, and its `IntentProposed` in the same batch); a
+  `range_verification` case in which the approved intent differs from the bound content object in
+  one action member, failing §11's `intent_action_mismatch` second clause; a mutant that skips that
+  clause; and rule 7's check that no `ApprovalRequested` names a decision with `ask_suppressed`.
+- **Verify owner copies against the control stream** (DEC-177 item 24). §9.1 rule 16 checks only
+  that an owner copy's `causation_id` is non-null, because `append` and §11's per-range checks read
+  one stream. A cross-stream check in `mandate journal verify` resolves it on `ctl:{workspace_id}`
+  and fails unless it names an `OwnerCommandIssued` of the copy's command and subject, submitted
+  before the copy, copied at most once into each event type on the agent stream, as the generator's
+  `check_owner_copies` does for the vectors; §11 names the check and its code, with a vector.
 
 Minor and nit findings from round 1 of the independent review of the journal spec v0.5 change
 ([DEC-177](04-decision-log.md#decisions); held back by the freeze rule, one row each):
@@ -1425,12 +1570,19 @@ Minor and nit findings from round 1 of the independent review of the journal spe
 - **A copied `AgentModeChanged` names its `AgentModeApplied`.** When the agent runtime copies a
   mode change the executor originated, the copy's `causation_id` names the originating
   `AgentModeApplied` (§2); add the rule to §9.1 and a vector for it.
+  *Narrowed (DEC-177 item 24):* §9.1 rule 16 covers the owner's pause, resume, and Stop, which name
+  their `OwnerCommandIssued`. What remains is the copy of an account-stream mode change (reasons
+  `restriction_changed` and `awaiting_reconciliation`).
 - **Bound the model-supplied free text.** `ModelOutputRecorded.model_id`, `model_version`,
   `direction`, and `invalidation` are any non-empty text: bound their length or check them against
   the model registry and the directions v1 allows, and scan them for personal data as §6.4
   requires.
 - **`KillSwitchActivated` records the initiator's step-up**, or names its `OwnerExitRequested`
   (for example as `causation_id`), so the switch's own record shows what authorized it.
+  *Done for the owner's switch (DEC-177 item 24):* §9.1 rule 16 makes an owner's
+  `KillSwitchActivated` name its `OwnerCommandIssued`, which carries the step-up evidence (§9), as its
+  `OwnerExitRequested` does. What remains is a `platform_operator` switch, which names no owner
+  command.
 - **`journal.yaml`'s header notes the DEC-176 exception.** Its line "Changing these vectors requires
   founder approval" predates DEC-176, under which agents accept changes that only tighten or
   reconcile.
@@ -1463,6 +1615,7 @@ Minor findings from round 2 of the same review (#320 round 2;
 - **Correct §9.1's citation for a removed instrument (#320 round 2).** `exit_origin`'s row cites
   mandate spec "(§2.2, §2.3)" for a removed instrument, where mandate spec §6.1 cites §2.3 and §5.9
   cites §2.3 and §8.6. Cite the sections the mandate spec gives.
+  *Done (DEC-177 item 22):* the row cites mandate spec §6.1's purpose table, §2.3, and §8.6.
 - **Reconcile #320 and #321 when the second merges (#320 round 2; DEC-177 item 20).** Both call
   themselves journal spec v0.5. Whichever merges second:
   (a) resolves the textual conflicts in the Status line and the v0.5 change-history bullet and
@@ -1478,3 +1631,36 @@ Minor findings from round 2 of the same review (#320 round 2;
   change lands" in `DecisionMade`'s table;
   (e) re-checks each §9.1 citation of mandate spec §6.1 against the merged text, since §9.1 cites
   §6.1 for a rule only #321 states.
+  *Done (DEC-177 items 21 to 24), with (b)'s vectors deferred:* #320's change is v0.6 (a); rule 10
+  and §11 allow and bind the `ApprovalRevalidated` cause, whose range case waits for the row
+  "Close the approval events' schemas in §9.1, with vectors" (b); rule 16 and the chain's causation
+  ids (c); one `ask_suppressed` definition, citing mandate spec §6.4, and no hedge (d); and §9.1's
+  §6.1 citations name what §6.1 states (e).
+
+Minor and nit findings from round 1 of the independent review of the v0.5 reconciliation
+([#340](https://github.com/kunwarshivam/mandate/pull/340); [DEC-177](04-decision-log.md#decisions)
+item 25; held back by the freeze rule, one row each):
+
+- **Name the members an approved intent is compared on (#340 round 1).** Rule 10 compares the
+  seven intent fields, but the `IntentProposed` sentence and §11's second `intent_action_mismatch`
+  clause mean the five `ApprovalRequested` binds (`instrument_id`, `side`, `qty`, `limit_price`,
+  `purpose`; not `type` or `tif`). List the compared members in both places, so an approved intent
+  is never refused over a `tif` its approval did not bind.
+- **Enforce that `ApprovalRevalidated` precedes its intent in the same batch (#340 round 1).**
+  §9.1 allows an `IntentProposed` caused by an `ApprovalRevalidated` with result `act` "that
+  precedes it in the same batch", and no rule checks either the order or the batch.
+- **State `OwnerCommandIssued`'s scope and subject (#340 round 1).** `check_owner_copies` models the
+  command as carrying `scope` (including `instrument`) and `subject`, which §9's control-stream row
+  does not state; add them to the row, or change the oracle to the members the row names.
+- **Test rule 16's guard and report position (#340 round 1).** No draft shows that rule 16 is
+  checked only on a well-typed payload, or that it reports after the subject rules; add a draft
+  that breaks rule 15 and rule 16 together, and one with an ill-typed payload and no cause, each
+  with a mutant.
+- **A range case with `from_seq` above 1 (#340 round 1).** Every `range_verification` case has
+  `from_seq: 1`, so `mode_event_mismatch.unresolved`'s full-chain guard is untested: add a case
+  verifying from a later seq whose `mode_event` names an earlier event, expecting no failure, with
+  a mutant that drops the guard.
+- **`outside_session_exit_defer_code()` checks with `assert` (#340 round 1),** which `python -O`
+  removes; raise instead.
+- **Note: the `exit_origin` citation fix pulled a round-2 minor forward (#340 round 1, nit).** Item
+  22 corrected the removed-instrument citation that #320 round 2 had backlogged; no action.

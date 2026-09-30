@@ -29,9 +29,9 @@ use mandate_risk::{
     AssetClass, AssetId, Check, CheckOutcome, ClientOrderId, Computed, ConductState,
     DayTradeLedger, DayTradeRegime, Decision, DeferredSell, EtpClass, Exchange, FlattenInitiator,
     FlattenInput, FlattenPricing, FlattenSell, GateConfig, GateError, GateInput, GatePass, GroupId,
-    InstrumentSnapshot, MarketSnapshot, Origin, ProposedKind, ProposedOrder, Purpose, ReasonCode,
-    RiskSnapshot, SaneQuote, Session, Side, TimeInForce, ValidatedMandate, Verdict, WorkingOrder,
-    WorkingUniverse, agent_flatten, evaluate,
+    InstrumentSnapshot, MarketSnapshot, Origin, ProposedKind, ProposedOrder, Purpose,
+    QuoteCurrency, ReasonCode, RiskSnapshot, SaneQuote, Session, Side, TimeInForce,
+    ValidatedMandate, Verdict, WorkingOrder, WorkingUniverse, agent_flatten, evaluate,
 };
 use mandate_spec::document::{self as spec_doc, LadderAction, Mandate};
 use mandate_time::{UtcNanos, new_york_date_and_hour};
@@ -590,6 +590,7 @@ fn listed_equity(
         ptp_no_exception: false,
         etp: EtpClass::Plain,
         etp_classified_at: Some(now),
+        quote_currency: Some(QuoteCurrency::Usd),
         prior_close: Some(price),
         median_dollar_volume_20d: Some(num(Usd::parse("90000000"), "median_dollar_volume_20d")?),
         median_dollar_volume_30d: None,

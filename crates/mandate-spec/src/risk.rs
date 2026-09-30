@@ -491,9 +491,9 @@ pub trait SessionClock {
 /// staleness on it (DEC-167 item 5). The clock is not state: two states that folded the same inputs
 /// are equal whichever clock each holds.
 ///
-/// Slice R2 folds marks, fills, and clock ticks. The risk day, a held instrument's mark going stale,
-/// universe changes, and a `profit_stop` goal (slice R3), and acknowledgments, allocation changes,
-/// floor loosening, goal completion, and retirement (slice R4) are [`SpecError::Unimplemented`].
+/// Slices R2 and R3 fold marks, fills, clock ticks, the risk day, universe changes, a held
+/// instrument's staleness, and a `profit_stop` goal. Acknowledgments, allocation changes, floor
+/// loosening, goal completion, and retirement (slice R4) are [`SpecError::Unimplemented`].
 #[derive(Clone)]
 pub struct RiskState<'c> {
     clock: &'c dyn SessionClock,
@@ -521,19 +521,27 @@ impl<'c> RiskState<'c> {
     }
 
     /// Applies one input in the §5.2 order: settle time, apply the input, update E then H, the ladder
-    /// rungs in ascending `at`, the daily loss, the lifetime floor, then the effective mode. The
-    /// journal follows that order.
+    /// rungs in ascending `at`, the daily loss (a breach carried over the rollover, then the trigger,
+    /// the renewal, or the lift), the lifetime floor, a `profit_stop` goal, the instrument's
+    /// restrictions, then the effective mode. The journal follows that order.
     ///
     /// A step at the previous step's instant is folded with no time passing.
     ///
     /// # Errors
     /// A step before the previous step's time is [`SpecError::ClockWentBackwards`]. A step between two
-    /// whole seconds of the risk clock (§5.2) and a sale of more than the agent holds are
-    /// `invalid_input`. A step that fails leaves the state as it was.
+    /// whole seconds of the risk clock (§5.2), a sale of more than the agent holds, and a risk day
+    /// that starts while a breach carried over the previous rollover is still undecided are
+    /// `invalid_input`. An input slice R4 folds is [`SpecError::Unimplemented`]. A step that fails
+    /// leaves the state as it was.
+    ///
+    /// An error is never an answer, neither "nothing happened" nor a refusal of the input: it is a
+    /// refusal to decide. The caller must fail closed, as the gate's caller does with a `GateError`
+    /// (E6-3's task brief, rule 3 of `AGENTS.md`): stop stepping this agent's state, admit no new
+    /// risk, keep its exit paths open, and escalate. It must never skip the input and step the next
+    /// one, since every later figure would then be folded over a stream that is not the journal's.
     pub fn step(&mut self, step: &Step) -> Result<Outcome, SpecError> {
-        let mut next = self.fold.clone();
-        let outcome = next.step(self.clock, step)?;
-        self.fold = next;
+        let (fold, outcome) = self.fold.step(self.clock, step)?;
+        self.fold = fold;
         self.snapshot = outcome.snapshot.clone();
         Ok(outcome)
     }
