@@ -14,7 +14,9 @@ founder reviews after the fact and can revert (DEC-79).
 ## Sources of truth
 
 Read the relevant document before changing anything it covers. If code and docs disagree,
-stop and ask; do not silently pick one.
+stop and ask; do not silently pick one. The one exception is DEC-176: when one reading only
+tightens the rule and adds no risk, an agent may record that reading in a DEC and take it; a
+reading that loosens the spec toward the code still goes to the founder.
 
 | Question | Document |
 |---|---|
@@ -187,8 +189,9 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   get a CODEOWNERS line and start `src/lib.rs` with the lint header `cargo xtask layers` checks.
 - **New dependencies** need a row in `docs/dependencies.md` in the same change (none by default).
 - **Reference-case fixtures** (`fixtures/refcases/`) are generated: after a YAML change the founder
-  approved, or one DEC-176 lets an agent accept (it only tightens a rule or makes spec and code
-  agree), run `cargo xtask refcases --write`; never edit them by hand.
+  approved, or one DEC-176 lets an agent accept (it tightens a rule, or resolves a gap by the
+  reading that adds no risk, and weakens no safety invariant or non-negotiable), run
+  `cargo xtask refcases --write`; never edit them by hand.
 - **Tasks** use `docs/project/templates/task.md`; PRs use `.github/pull_request_template.md`;
   decisions use `docs/adr/template.md` plus a decision-log row.
 - **Rust** for the core: runtime, risk, execution, connectors, market data, journal.
