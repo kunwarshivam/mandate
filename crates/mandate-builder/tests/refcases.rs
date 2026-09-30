@@ -7,18 +7,19 @@
 //! reading **every** member of its `expect` block, and an `expect` member this harness has not been
 //! taught fails the case loudly rather than going unchecked (DEC-85).
 //!
-//! **The gate's verdict is an input, not an output.** Every `B` case states a `gate_state` and
-//! expects a `gate_dry_run` verdict, which is `mandate-risk`'s (DEC-130 items 2 and 15). This
-//! harness therefore reads the case's own expected verdict and hands it to [`decide`] as the value
-//! §6.2 step 2 says it is, then checks the `autonomy` block the case expects. When stream G's gate
-//! lands, the harness-and-status PR composes propose → gate → `decide` and moves these cases in
-//! `crates/mandate-refcases/status.toml`; nothing in that file changes here.
+//! **Here the gate's verdict is an input, not an output.** Every `B` case states a `gate_state` and
+//! expects a `gate_dry_run` verdict, which is `mandate-risk`'s (DEC-130 items 2 and 15), and this
+//! crate does not depend on `mandate-risk`. This harness therefore reads the case's own expected
+//! verdict and hands it to [`decide`] as the value §6.2 step 2 says it is, then checks the
+//! `autonomy` block the case expects. The shared harness,
+//! `crates/mandate-refcases/src/mandate/order_builder.rs`, composes `propose`, the real gate on the
+//! proposed order, and `decide`, and compares the case's `gate_dry_run` with the gate's answer
+//! (DEC-250); that harness and `crates/mandate-refcases/status.toml` decide which cases pass.
 //!
 //! **Four `B` cases are not here.** `MC-B17` and `MC-B30` to `MC-B32` assert the §5.5
 //! `trim_to_target` risk exit and its four guards, which turn on ladder state the builder does not
-//! hold; they are stream G's (DEC-130 item 3).
-//!
-//! Every case is pending until the implementation PR and fails on `BuilderError::Unimplemented`.
+//! hold (DEC-130 item 3); the shared harness runs them against `mandate_risk::trim_proposals`
+//! (DEC-250 item 11).
 
 mod common;
 
