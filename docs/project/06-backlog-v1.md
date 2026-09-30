@@ -766,9 +766,8 @@ fuzzed and seeded bugs caught before code:
   `exits_only`, risk-reducing to add; MI-31 and V-044.
 - `autonomy.review_by` (DEC-188): a §7 platform default of 90 days, at most 180; past it every `auto`
   and delegation reads as `ask`; MI-32.
-- The delegation and client members of `DecisionMade` (`decided_by`, `delegation_id`,
-  `requested_by`, the client's id) and the shape chosen on `ApprovalResponded` join journal spec
-  §9.1's closed schemas, with generated vectors (DEC-177), before E8-8 or E6-12 writes them.
+- The delegation shape chosen on `ApprovalResponded` joins journal spec §9.1 when the approval
+  events close (M7); `DecisionMade`'s delegation and client members are closed (DEC-252).
 - The per-client ask budget (DEC-195, DEC-251): at most 10 client-requested asks per client per
   risk day, which the owner may lower, suppressed as `client_budget` after §6.4's per-agent `budget`; MI-33.
 - The delegation total (DEC-196): the sum of `max_total_usd` over a version's delegations is at most
@@ -1187,6 +1186,23 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   `cargo xtask refcases --write`, and the reference checks land together, apart from code (ES-22).
   Whether `session` and `in_close_window` stay case-file inputs at all is a separate question,
   Proposed to the founder in DEC-250.
+- Derive the family-B sibling counts (#331 round-2 review, nit). The `sibling` sweep's
+  `siblings == 87` and `siblings == 11` are hand-written, and they alone catch a `sibling` that
+  returns `None` for a vocabulary. Replace them with an assertion that every stated enum-valued
+  expectation has a sibling arm (`on_timeout` and `action` excepted, as the review showed), so a
+  case that gains or loses an enum expectation needs no count edit.
+- **Settle what `safety_critical = true` means for a `tool`-layer crate** (#331 round-2 review, for
+  the founder's after-the-fact look). `xtask/layers.toml` marks `mandate-refcases`
+  `safety_critical = true`, and CODEOWNERS lists it, but two checks read it as not safety-critical:
+  - `cargo xtask ci mutants` skips it, because `mutated_crates` requires a `Product` layer;
+  - DEC-250 item 15 applied ES-13's 800-line limit for crates outside the safety-critical list,
+    not the 400 the flag implies.
+
+  Neither changed #331's outcome, but a harness change could land with no mutation gate while its
+  entry claims otherwise. The conservative reading is that the flag governs: `ci mutants` also
+  mutates safety-critical `tool` crates on the diff, and ES-13's safety-critical limit applies,
+  with DEC-178's `risk_gate.rs` and DEC-250's `order_builder.rs` as recorded exceptions or split.
+  Record the reading in a decision-log row in the same change as the xtask edit.
 - **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163;
   the gate driver since E6-9, DEC-199). `crates/mandate-refcases/src/trading_domain/gate.rs` now
   decides `propose_order` steps with `mandate_risk::evaluate`, states the market data a case omits
@@ -1236,6 +1252,22 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   beside a resting protective sell in the same instrument is denied `conduct_limit_breached` though
   §5.3 rule 8 lets a bracket add a tranche. A stop is not in the book until triggered; deciding
   whether it counts would reopen that path.
+- **An exit's pacing can return a gate error** (#311 round 2, minor 1). `conduct::pacing` propagates
+  `NumError` from `Qty::portion` in `slice` and from `Price::collar_bound` in `price_by_collar`, so
+  an owner or discretionary exit with extreme prices or volumes gets `Err` rather than a decision.
+  Nothing exercises it, since the property's generators are small. Add a property over extreme
+  prices and volumes, or state what the executor does with a gate error on an exit (it must still
+  route the exit, rule 13).
+- **The opposite-fill property pins its boundary only by chance** (#311 round 2, minor 2).
+  `properties::only_an_opposite_side_fill_starts_the_interval` draws `elapsed in 0..120`, and
+  `ci test` fixes no proptest seed. `gate::tests::the_opposite_fill_interval_includes_its_last_instant`
+  pins the 60 s edge deterministically; add 60 to the property's draw explicitly so it is not the
+  boundary's cover by luck.
+- **Assert the whole exit for exempt purposes** (#311 round 2, minor 3).
+  `an_allowed_exit_is_never_below_its_minimum_or_zero` samples `RiskEngine` and `ProtectiveLeg` but
+  asserts only the quantity bound for them, not `sent == proposed`, which
+  `a_slice_binds_only_below_the_proposal_and_names_its_cap` covers separately. Assert it in the
+  property too.
 - **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
   every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
   held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;
@@ -1345,6 +1377,31 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   the profit stop stubbed out locally, MC-R01 to MC-R04, MC-R18, and MC-R19 match every expectation on
   R2's spine. R3's PR runs `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` and proposes the passing ones for `status.toml` (founder-owned).
+
+Minor findings from the independent review of slice R2 ([#324](https://github.com/kunwarshivam/mandate/pull/324);
+held back by the freeze rule; R3's builder is asked to take 1, 2, 4, and 6 where they fit its code):
+
+- **Say that a caller fails closed on a refused step** (#324, minor 1). `RiskState::step`'s
+  `# Errors` block lists the refusals and that the state is unchanged, but not what the caller does:
+  treat any `Err` as a refusal to decide (stop stepping the agent, admit no new risk, keep exits
+  open, escalate), never skip the input as though it had not happened. `E6-3-risk-gate.md` states
+  the same rule for `GateError`.
+- **Clamp session seconds by wall seconds** (#324, minor 2). The fold credits the caller's
+  `SessionClock` seconds to the lift delay unclamped, so a clock that over-reports lifts a
+  `scale_sizes` rung early. `session_s.min(wall_s)` only tightens, and is an identity for crypto.
+- **The `strictest` oracle reads the daily-loss mode by hand** (#324, minor 3; a tests correction).
+  `tests/risk.rs`'s `strictest` maps `DailyLoss` to `exits_only`, while the fold reads
+  `daily_loss_action`. No walk triggers the daily loss today; R3's renewal walks could, so take the
+  action from the mandate before they do.
+- **Make a refused fold step inert by type** (#324, minor 4). `Fold` writes `self.at` and the mark
+  age before the staleness guard can refuse, and only `RiskState::step`'s clone keeps a refusal
+  inert. `Fold::step(&self) -> Result<(Self, Outcome)>` would hold it at rung 1.
+- **A `Qty::checked_sub` failure is always reported as a short sale** (#324, minor 5). True while a
+  negative result is its only failure; name the error by its kind if `Qty` gains another.
+- **`SpecError::Unimplemented`'s doc is stale** (#324, minor 6). It says the implementation PR
+  removes the variant; DEC-167 item 5 makes it the answer for what R3 and R4 still own.
+- **Wrap `M5-F-mandate-spec.md`'s long line** (#324, minor 7), the R2 row that runs past the file's
+  wrap width.
 
 From journal spec v0.6 §9.1, the agent-stream payload schemas ([DEC-177](04-decision-log.md#decisions);
 DEC-174 items 4 and 5). Until each lands, the drafts it names stay refused at `append`, which adds no
