@@ -1015,6 +1015,24 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   Also worth knowing: a change that touches only `crates/mandate-refcases/tests/` never starts the
   gate, so a tests correction that kills survivors proves it by re-running the gate over the
   original diff locally.
+- **The journal generator's mutant coverage** (#340 round-2 review, minors and nits), one change to
+  `reference/journal/generate.py` and its docs:
+  - the "every oracle check has a registered vector mutant" guard filters on
+    `check.startswith("owner_copies.")`, so 20 of the 44 `ORACLE_CHECKS` entries (for example
+    `kill_switch.stopped`, `goal_exit.origin`, `owner_exits.sell`, `owner_exits.user`) can be deleted
+    with `--check` still green. Require a mutant for every entry, with an explicit allow-list for
+    the chain checks that re-verify the generator with its own `canon` and `sha256_hex`
+    (`chain.seq`, `chain.canonical`, `chain.hash`, `chain.stream`, `chain.opened`) (minor 1);
+  - `received.intent` is its own family, which silences the masking rule rather than isolating a
+    mutant, and it has no mutant of its own, so deleting its oracle leaves `--check` green. Add
+    one only it catches; the review showed "intent recorded after the account stream copied it"
+    (`recorded_at` of the `intent` body moved to `2026-09-21T14:00:00.900000000Z`) does (minor 2);
+  - `VALIDATOR_MUTANTS` lists `rule.16.mode.owner_pause`, `owner_resume`, and `owner_stop` by hand
+    while the skip key derives from the reason, so a fourth `OWNER_MODE_REASONS` entry would get no
+    mutant. Generate the entries from `OWNER_MODE_REASONS` (minor 3);
+  - DEC-177 item 25(b) and #340's description say three mutants were re-seeded; two were, and the
+    third was renamed into `received.intent`'s family, its own mutant still owed (nit);
+  - `docs/specs/journal.md`'s rule-16 prose has a 107-character line; rewrap it (nit).
 - **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
   properties. 29 of the 33 pass when every reachable stub returns `Ok(())`, so a no-op executor
   would satisfy them; each property must also assert a positive effect a no-op cannot produce
