@@ -661,7 +661,7 @@ impl Inputs {
         ensure(fee_rate_cash == no_fee, || {
             "`fee_rate_cash` above zero: the gate is handed no fee reservation, which holds only \
              for a fee paid in the asset (trading-domain §7.2), so a cash fee would reach the \
-             buying-power check unreserved (§9.5, DEC-250 item 6)"
+             buying-power check unreserved (§9.5, DEC-250 item 17)"
                 .to_owned()
         })?;
         ensure(
