@@ -926,12 +926,17 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   (`working_order_limit`), which is why [DEC-150](04-decision-log.md#decisions) item 1 lists it on
   `FULL_GATE_ONLY`. Stating the same $1,300 as a position (`positions_mv` 1300, no working order in
   that instrument) keeps `instrument_total` and `gross` at 1500, so the case would pin `gross` on an
-  allow path, the window DEC-150 records, and the entry could expire. The change touches the YAML,
+  allow path, the window DEC-150 records, and the entry could expire. Restated, MC-G02 becomes an
+  allowed opening (an increase), so like MC-G13 it runs through checks 5 and 6 and check 7, and the
+  full gate allows it: against the restated state the harness reports the entry expired
+  (DEC-178 item 11). The same pull request deletes the entry, and `FULL_GATE_ONLY` with it if
+  nothing else is listed. The change touches the YAML,
   the reference implementation's checks, and the regenerated fixtures, so it cannot share a pull
   request with code (ES-22).
 - **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163).
   `crates/mandate-refcases/src/trading_domain.rs` has no gate driver: `propose_order` steps and the
-  `decision` expectation are pending on E6-3, and the crate does not depend on `mandate-risk`. An
+  `decision` expectation are pending on E6-3. The crate depends on `mandate-risk` for the mandate
+  suite's families G and F (DEC-178), but the trading-domain arm does not call it. An
   arm that builds a `GateInput` from a case, calls `mandate_risk::evaluate`, and compares verdict
   and reason code is the first step, and it does not run RC-25 by itself: RC-25's steps carry no
   `quote`, `trailing_5m_volume` or `adv_20d`, so its openings would be denied `stale_mark` at check 5
