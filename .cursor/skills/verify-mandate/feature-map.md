@@ -173,12 +173,12 @@ the crate is pending.
   the spec guard keeps that file apart from code (ES-22). Family B (all 32 `MC-B` cases) runs in the
   shared harness through `crates/mandate-refcases/src/mandate/order_builder.rs` (DEC-250): `propose`,
   then `mandate_risk::evaluate` on the proposed order as §6.2 step 2's dry run, then `decide` on
-  that verdict, with the session and close window from `mandate_risk::session_at`. 23 pass; the
-  four `trim_to_target` cases fail at `mandate_risk::trim_proposals` (E6-4), the three crypto buys
-  at the gate's owed check 2 (E6-10), and `MC-B22` and `MC-B23` on a `session` or
-  `in_close_window` label their `now` contradicts (DEC-250's open question). Its in-module tests
-  doctor the fixture to prove every member is read, a cash fee rate the gate would not reserve is
-  refused, and the two session cases pass once their clock agrees.
+  that verdict, with the session and close window from `mandate_risk::session_at`. 25 pass,
+  `MC-B22` after hours and `MC-B23` in the close window among them since #347 moved their clocks;
+  the four `trim_to_target` cases fail at `mandate_risk::trim_proposals` (E6-4) and the three
+  crypto buys at the gate's owed check 2 (E6-10). Its in-module tests doctor the fixture to prove
+  every member is read, a cash fee rate the gate would not reserve is refused, and a `session` or
+  `in_close_window` label that contradicts `now` fails the case.
 - **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; families A and B in the shared
   harness with `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A
   mandate::autonomy mandate::MC-B mandate::order_builder` (the flag runs cases `status.toml` does
