@@ -576,6 +576,12 @@ pub struct AccountSnapshot {
     pub market_values: BTreeMap<AssetId, Usd>,
     pub working_orders: BTreeMap<ClientOrderId, WorkingOrder>,
     pub unknown_orders: BTreeSet<AssetId>,
+    /// §9.6's self-trade input: per instrument, every side on which an order rests in any account
+    /// of the owner's related-accounts group (by default every account in the workspace), this
+    /// account included, whichever agent placed it, the deciding agent's own included, and of any
+    /// purpose, protective included. The gate filters nothing: any listed side opposite an opening
+    /// denies it. In this account a non-protective order already denies an opening at check 4
+    /// (§5.3 rule 6), so here the set adds the resting protective orders (DEC-163 item 11).
     pub related_account_resting: BTreeMap<AssetId, BTreeSet<RestingSide>>,
 }
 
@@ -621,12 +627,31 @@ pub struct MarketSnapshot {
     pub adv_20d: Option<Qty>,
 }
 
+/// What the executor folds from the account streams for §9.6 (DEC-163 item 11). "Today" is the
+/// risk day, 00:00 to 00:00 America/New_York (mandate §5.3), which holds an equity's whole trading
+/// day; a per-day field starts from empty at its first instant.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConductState {
+    /// Per instrument, the deciding agent's orders that filled at least in part today, each order
+    /// once however many fills it took, so partial fills cannot dilute the ratio. Only this agent's
+    /// orders, in the account it trades (§9.6: "per agent per instrument per day"); reset daily.
     pub filled_today: BTreeMap<AssetId, u32>,
+    /// Per instrument, the deciding agent's orders submitted today, of any purpose, each
+    /// `client_order_id` once, rejected ones included, less those an exit sequence or a kill switch
+    /// canceled (§9.6); the proposal being decided is not among them. Only this agent's orders, in
+    /// the account it trades; reset daily.
     pub orders_today_per_instrument: BTreeMap<AssetId, u32>,
+    /// Per instrument and side, the latest fill on that side by any agent in any account of the
+    /// related-accounts group. Never reset: a fill older than `opposite_fill_interval_s` simply no
+    /// longer blocks, across midnight too.
     pub last_opposite_fill_at: BTreeMap<(AssetId, RestingSide), UtcNanos>,
+    /// Per instrument, the quantity filled today on both sides by every agent in every account of
+    /// the related-accounts group, plus the open quantity of their working orders in it; the
+    /// proposal being decided is not included. Reset daily.
     pub participation_today: BTreeMap<AssetId, Qty>,
+    /// Per working order in this account, the instant the broker accepted it, kept until the order
+    /// is done. [`evaluate`] does not read it; the executor passes the canceled order's instant to
+    /// [`evaluate_cancel`] as [`CancelInput::resting_since`].
     pub resting_since: BTreeMap<ClientOrderId, UtcNanos>,
 }
 
@@ -689,11 +714,21 @@ pub struct GateInput<'a> {
 /// item 20).
 #[derive(Debug, Clone)]
 pub struct CancelInput<'a> {
+    /// The risk clock's latest tick, as for [`GateInput::now`].
     pub now: UtcNanos,
     pub config: &'a GateConfig,
+    /// The working order to cancel, as it stands in [`AccountSnapshot::working_orders`].
     pub order: &'a WorkingOrder,
+    /// The instant the broker accepted `order`, from [`ConductState::resting_since`].
     pub resting_since: UtcNanos,
+    /// Whether the cancel is a step toward a risk-reducing order: an exit sequence, a kill switch,
+    /// or clearing the way for a risk exit, a protective order or an owner exit. §9.6 exempts it,
+    /// and it is the only way an exit sequence's or kill switch's cancel is exempt, since the
+    /// executor sets it and this input has no cause field (DEC-163 item 7).
     pub precedes_risk_reducing_order: bool,
+    /// Whether `order`'s limit trades against the current quote (a buy at or above the ask, a sell
+    /// at or below the bid). With no usable quote it is `false`, so an order not known to be
+    /// marketable is held to the resting time.
     pub marketable: bool,
 }
 
