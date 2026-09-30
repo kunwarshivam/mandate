@@ -1543,6 +1543,15 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   minimum order; the ADV is shown only as at least 1,000,000); (4) rename the `num` closure in
   `the_listing_and_market_are_dec_199_item_6s`, which shadows the crate's `num`; (5) shorten the
   done row's verbatim "The row as it was" copy to a pointer at its review.
+- **E8-3's check 7 tests after the overlay correction** (#354 and #355 review, nits), for E8-3's
+  implementation PR: (1) `crates/mandate-approval/tests/quorum.rs` draws a `two_approver_above_usd`
+  of `"0"`, which `schemas/policy.schema.json` excludes (`positive_decimal`); draw only ceilings a
+  workspace can hold, as DEC-173 item 15 already does for grant sets; (2) `quorum`'s doc in
+  `crates/mandate-approval/src/admit.rs` promises `ApprovalError::Unrepresentable` for an order
+  value that overflows, which `content.rs` already refuses when the request is built; say so in the
+  doc or pin it with a test; (3) document `Quorum`'s two public fields as `PolicyOverlay`'s are;
+  (4) rewrap the 165-character line the M7 bullet of `.cursor/skills/verify-mandate/feature-map.md`
+  gained; (5) DEC-173 item 12 still says `mutants.py` has 50 escalation mutants, which #355 made 52.
 
 From E6-4's slice R3 (stream H2; DEC-167 item 7):
 
