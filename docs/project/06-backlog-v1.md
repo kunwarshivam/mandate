@@ -626,6 +626,10 @@ From the independent reviews of stream J's implementation (`mandate-research`, #
 From E10-3's implementation (DEC-172 items 1 and 12):
 
 - Align `reference/mandate/ref.py`'s `classify` with the crate where the crate reads more strictly or more exactly: pinned instruments compared by whole entry (a symbol or asset-class change is an added instrument), an absent member and a `null` one reported as a changed path, and a same-set reordering of `asset_classes` neutral. No MC-C case exercises any of the three, and the reference's reading of the first is the one that could skip step-up.
+- From the review of #318 and #319, three minors for the next `mandate-spec` tests correction:
+  - replace the four near-identical `ValidationContext` fixtures in `tests/change.rs`, `tests/validate.rs`, `tests/goal.rs` and `tests/risk.rs` with one `validation_context()` in `tests/common/mod.rs`;
+  - give `tests/change.rs` a `runner_with(cases)` instead of the MI-11 property's inline copy of `runner()`'s four fields;
+  - `ChangeClass`'s derived `Ord` is now what `join` relies on (DEC-172 item 8). Only `the_class_order_is_the_severity_order` and four MC-C cases catch a reorder, so either give the variants explicit discriminants or point the enum's doc at that test.
 
 From the independent review of E10-1's slice-S implementation ([#225](https://github.com/kunwarshivam/mandate/pull/225)
 round 1), as the coordinator ruled there:
