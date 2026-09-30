@@ -802,7 +802,6 @@ fn the_close_window_follows_the_early_close_calendar() {
 
 /// `RC-25` step 2: an increase at 15:50 is `close_window`, not `auction_window` (DEC-129 item 18).
 #[test]
-#[ignore = "pending E6-8"]
 fn an_increase_in_the_closing_ten_minutes_is_close_window() {
     let mut s = Scenario::allowing();
     s.now = at("2026-09-22T19:50:00Z");
@@ -932,7 +931,6 @@ fn crypto_exits_run_at_all_hours() {
 
 /// §9.6's resting time binds a cancel, and a cancel before a risk-reducing order is exempt.
 #[test]
-#[ignore = "pending E6-8"]
 fn a_cancel_inside_the_resting_window_is_denied() {
     let config = common::test_default_config();
     let order = open_order(AgentId(1), INSTRUMENT_3, "100");
@@ -953,7 +951,6 @@ fn a_cancel_inside_the_resting_window_is_denied() {
 }
 
 #[test]
-#[ignore = "pending E6-8"]
 fn a_cancel_before_a_risk_reducing_order_is_exempt() {
     let config = common::test_default_config();
     let order = open_order(AgentId(1), INSTRUMENT_3, "100");
@@ -1029,7 +1026,6 @@ fn a_reservation_includes_the_rounded_fee() {
 /// Each row moves exactly one component, so a `required` that omits any one of them allows a case
 /// this denies.
 #[test]
-#[ignore = "pending E6-6"]
 fn required_counts_every_component() {
     let base_ledger = mandate_risk::DayTradeLedger {
         window_count: 2,
@@ -1102,7 +1098,6 @@ fn the_window_is_today_plus_four() {
 
 /// `intraday_margin` denies nothing per order: a reported deficit is an account state (§9.2).
 #[test]
-#[ignore = "pending E6-6"]
 fn a_reported_deficit_is_an_account_state_not_a_denial() {
     let mut s = Scenario::allowing();
     s.account.regime = mandate_risk::DayTradeRegime::IntradayMargin {
@@ -1151,7 +1146,6 @@ fn crypto_never_counts() {
 
 /// §9.6's participation caps slice a discretionary exit; they never deny one.
 #[test]
-#[ignore = "pending E6-8"]
 fn a_participation_cap_slices_and_never_denies() {
     let mut s = Scenario::allowing();
     s.market.adv_20d = Some(qty("1000"));
@@ -1173,7 +1167,6 @@ fn a_participation_cap_slices_and_never_denies() {
 
 /// The surveillance report states figures and flags thresholds; it makes no judgement.
 #[test]
-#[ignore = "pending E6-8"]
 fn the_surveillance_report_matches_a_hand_computed_day() {
     let mut input = mandate_risk::SurveillanceInput::default();
     input.orders.insert(
@@ -1280,7 +1273,6 @@ fn a_halted_instrument_denies_an_opening() {
 /// re-priced rather than refused. Denying it would also put an instrument restriction in front of
 /// a risk exit, which is exactly what MI-1 forbids (DEC-129 item 28).
 #[test]
-#[ignore = "pending E6-9"]
 fn a_dropped_status_feed_is_a_presumed_halt() {
     let mut s = Scenario::allowing();
     s.instrument.status_feed_current = false;
@@ -1323,7 +1315,6 @@ fn a_dropped_status_feed_is_a_presumed_halt() {
 /// of 101.5 is aggressive for a liquid instrument and passive enough for an illiquid one. A limit
 /// below both — 101, say — is allowed either way and would tell the tiers apart not at all.
 #[test]
-#[ignore = "pending E6-8"]
 fn a_median_dollar_volume_exactly_at_the_threshold_is_liquid() {
     let mut liquid = Scenario::allowing();
     liquid.instrument.median_dollar_volume_20d = Some(usd("50000000"));
@@ -1345,7 +1336,6 @@ fn a_median_dollar_volume_exactly_at_the_threshold_is_liquid() {
 
 /// §9.6: the collar binds aggressive prices only; a passive price inside the band is allowed.
 #[test]
-#[ignore = "pending E6-8"]
 fn a_passive_price_inside_the_band_is_allowed() {
     let mut s = Scenario::allowing();
     s.proposed = proposal(INSTRUMENT_3, Side::Buy, "1", "90", Origin::OrderBuilder);
@@ -1377,7 +1367,6 @@ fn a_rejected_order_still_counts() {
 
 /// MI-19: a removed instrument is exits-only in that instrument, and nowhere else.
 #[test]
-#[ignore = "pending E6-3"]
 fn a_removed_instrument_restricts_only_itself() {
     let mut s = Scenario::allowing();
     s.agent.instrument_restrictions.insert(
@@ -1405,7 +1394,6 @@ fn a_removed_instrument_restricts_only_itself() {
 
 /// §8.2: an opening needs a fresh quote-based risk mark; a reduction takes any source.
 #[test]
-#[ignore = "pending E6-8"]
 fn an_opening_needs_a_fresh_quote() {
     let mut s = Scenario::allowing();
     s.market.quote = None;
@@ -1465,7 +1453,6 @@ fn an_extended_hours_opening_needs_a_limit() {
 
 /// §9.6: self-trade prevention across the owner's related accounts.
 #[test]
-#[ignore = "pending E6-8"]
 fn an_opposite_side_rest_in_a_related_account_blocks_an_opening() {
     let mut s = Scenario::allowing();
     s.account.related_account_resting.insert(
@@ -1482,7 +1469,6 @@ fn an_opposite_side_rest_in_a_related_account_blocks_an_opening() {
 
 /// §9.6: the order-to-fill ratio is only evaluated after twenty orders.
 #[test]
-#[ignore = "pending E6-8"]
 fn the_order_to_fill_ratio_needs_twenty_orders() {
     let mut s = Scenario::allowing();
     s.conduct
@@ -1575,7 +1561,6 @@ fn three_consecutive_unexplained_403s_restrict_the_account() {
 
 /// §9.6: a sliced exit reports which control sliced it.
 #[test]
-#[ignore = "pending E6-8"]
 fn a_sliced_exit_reports_what_it_applied() {
     let mut s = Scenario::allowing();
     s.market.adv_20d = Some(qty("1000"));
