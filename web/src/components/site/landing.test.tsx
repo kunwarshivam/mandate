@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { contrastRatio } from "@/lib/color";
 import { tokenValue } from "@/lib/tokens";
 import { HEADLINE, Landing, QUESTIONS, SECTIONS, SUBHEAD } from "./landing";
+import { DISCARDED } from "./apps";
+import { GREETING, TIPS } from "./assistant";
 import { PLAYLIST } from "./music";
+import { TOUR, TOUR_VIDEO, tourVtt } from "./tour";
 import { EDITED, TRACE } from "./record-trace";
 
 /**
@@ -264,6 +267,9 @@ describe("the desktop", () => {
       "owl.jpg",
       "Display",
       "Winamp",
+      "Tour.mp4",
+      "Minesweeper",
+      "Recycle Bin",
       "Sign in",
       "Shut down…",
     ]);
@@ -276,6 +282,92 @@ describe("the desktop", () => {
     await press(off);
     expect(screen.queryByRole("button", { name: /safe to turn off/ })).toBeNull();
     expect(win("Owlhead Home Page")).toBeVisible();
+  });
+});
+
+describe("the desktop's other things", () => {
+  const right = () => screen.getByRole("list", { name: "Desktop, right" });
+
+  it("plays Tour.mp4 in Media Player, loading nothing until play, with captions and a transcript", async () => {
+    renderLanding();
+    await press(within(right()).getByRole("button", { name: "Tour.mp4" }));
+    const player = win("Tour.mp4 - Media Player");
+    const video = player.querySelector("video")!;
+    expect(video).toHaveAttribute("preload", "none");
+    expect(video).toHaveAttribute("poster", TOUR_VIDEO.poster);
+    expect(video.querySelector("source")).toHaveAttribute("src", TOUR_VIDEO.src);
+    expect(video.querySelector("track[kind=captions]")).toHaveAttribute("src", TOUR_VIDEO.captions);
+    await press(within(player).getByRole("button", { name: "Transcript" }));
+    for (const s of TOUR) expect(within(player).getByRole("list", { name: "Transcript" })).toHaveTextContent(s.caption);
+  });
+
+  it("ships the tour's video, poster and the captions its scenes make", () => {
+    const pub = join(__dirname, "../../../public");
+    expect(readFileSync(join(pub, TOUR_VIDEO.src)).byteLength).toBeLessThan(4_000_000);
+    expect(readFileSync(join(pub, TOUR_VIDEO.poster)).byteLength).toBeGreaterThan(1000);
+    expect(readFileSync(join(pub, TOUR_VIDEO.captions), "utf8")).toBe(tourVtt());
+  });
+
+  it("plays Minesweeper: the first click opens safe ground, right-click flags, and the owl starts over", async () => {
+    renderLanding();
+    await press(within(right()).getByRole("button", { name: "Minesweeper" }));
+    const game = win("Minesweeper");
+    const field = within(game).getByRole("grid", { name: "Minefield" });
+    expect(field).toHaveAttribute("data-phase", "ready");
+    await press(within(field).getByRole("button", { name: "Row 5, column 5: hidden" }));
+    expect(["playing", "won"]).toContain(field.getAttribute("data-phase"));
+    expect(within(field).getByRole("button", { name: /^Row 5, column 5: (empty|\d)$/ })).toBeInTheDocument();
+    const hidden = within(field).getAllByRole("button", { name: /: hidden$/ })[0];
+    if (hidden) {
+      await act(async () => fireEvent.contextMenu(hidden));
+      expect(hidden.getAttribute("aria-label")).toMatch(/flagged$/);
+      expect(within(game).getByRole("img", { name: "Mines left: 9" })).toBeInTheDocument();
+    }
+    await press(within(game).getByRole("button", { name: "New game" }));
+    expect(field).toHaveAttribute("data-phase", "ready");
+  });
+
+  it("keeps what Owlhead won't do in the Recycle Bin: Restore says why, and Empty empties it", async () => {
+    renderLanding();
+    await press(within(right()).getByRole("button", { name: "Recycle Bin" }));
+    const bin = win("Recycle Bin");
+    const [first] = DISCARDED;
+    await press(within(bin).getByRole("button", { name: first.name }));
+    expect(within(bin).getByRole("status")).toHaveTextContent(first.why);
+    await press(within(bin).getByRole("button", { name: "Restore" }));
+    expect(within(bin).getByRole("status")).toHaveTextContent(`${first.name} can't be restored.`);
+    await press(within(bin).getByRole("button", { name: "Empty Recycle Bin" }));
+    expect(bin).toHaveTextContent("This folder is empty.");
+    expect(within(bin).getByRole("button", { name: "Empty Recycle Bin" })).toBeDisabled();
+  });
+
+  it("brings the owl assistant back from the desktop's menu, with tips and the tour", async () => {
+    const { container } = renderLanding();
+    fireEvent.contextMenu(container.querySelector("[data-slot=wallpaper]")!);
+    await press(screen.getByRole("menuitem", { name: "Ask the owl…" }));
+    const owl = screen.getByRole("complementary", { name: "Owl assistant" });
+    expect(owl).toHaveTextContent(GREETING);
+    await press(within(owl).getByRole("button", { name: "Give me a tip" }));
+    expect(owl).toHaveTextContent(TIPS[0]);
+    await press(within(owl).getByRole("button", { name: "Next tip" }));
+    expect(owl).toHaveTextContent(TIPS[1]);
+    await press(within(owl).getByRole("button", { name: "Watch the tour" }));
+    expect(screen.queryByRole("complementary", { name: "Owl assistant" })).toBeNull();
+    expect(win("Tour.mp4 - Media Player")).toBeVisible();
+  });
+
+  it("previews the Flying Owls screen saver from Display, and a key wakes the desktop", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const now = vi.spyOn(performance, "now");
+    now.mockReturnValue(0);
+    const { container } = renderLanding();
+    await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Display" }));
+    await press(within(win("Display Properties")).getByRole("button", { name: "Preview" }));
+    expect(container.ownerDocument.querySelector("[data-slot=screen-saver]")).not.toBeNull();
+    now.mockReturnValue(1000);
+    await act(async () => fireEvent.keyDown(window, { key: "a" }));
+    expect(container.ownerDocument.querySelector("[data-slot=screen-saver]")).toBeNull();
+    vi.restoreAllMocks();
   });
 });
 

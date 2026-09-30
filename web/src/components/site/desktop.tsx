@@ -1,15 +1,19 @@
 "use client";
 
-import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { OwlheadMark } from "@/components/brand/Logo";
 import { Owl } from "@/components/domain/owl";
 import { cn } from "@/lib/utils";
-import { Notepad, PictureViewer } from "./apps";
+import { DISCARDED, Notepad, PictureViewer, RecycleBin } from "./apps";
+import { Assistant } from "./assistant";
 import { MONO, PIXEL, RAISED, SUNKEN } from "./letter";
-import { BOLT, BOOK, HELP, KEY, LEDGER, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
+import { MediaPlayer } from "./media-player";
+import { Minesweeper } from "./minesweeper";
+import { BIN, BIN_EMPTY, BOLT, BOOK, FILM, HELP, KEY, LEDGER, MINE, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
 import { TitleBar, WINDOW_BUTTON } from "./retro";
+import { ScreenSaver, useIdle, useSaver } from "./screensaver";
 import { ThemeSwitch } from "./theme-switch";
 import { DisplayProperties, Wallpaper } from "./wallpaper";
 import type { AmpState } from "./winamp";
@@ -17,7 +21,7 @@ import type { AmpState } from "./winamp";
 /** Webamp is a megabyte of player, so it loads only when someone opens Winamp. */
 const Winamp = dynamic(() => import("./winamp"), { ssr: false });
 
-export type AppId = "home" | "readme" | "owl" | "display";
+export type AppId = "home" | "readme" | "owl" | "display" | "tour" | "mines" | "bin";
 
 type Win = { open: boolean; min: boolean; max: boolean; x: number; y: number; z: number };
 
@@ -37,7 +41,8 @@ const CLOSED: Win = { open: false, min: false, max: false, x: 0, y: 0, z: 0 };
 const closed = (id: AppId): Win => ({ ...CLOSED, ...APPS[id].offset });
 
 function initial(): State {
-  return { top: 1, wins: { home: { ...closed("home"), open: true, z: 1 }, readme: closed("readme"), owl: closed("owl"), display: closed("display") } };
+  const wins = Object.fromEntries((Object.keys(APPS) as AppId[]).map((id) => [id, closed(id)])) as Record<AppId, Win>;
+  return { top: 1, wins: { ...wins, home: { ...wins.home, open: true, z: 1 } } };
 }
 
 function reduce(state: State, action: Action): State {
@@ -113,9 +118,31 @@ const APPS: Record<AppId, App> = {
     frame: "sm:m-auto sm:h-fit sm:max-h-[calc(100%-2rem)] sm:w-[28rem]",
     offset: { x: 0, y: 24 },
   },
+  tour: {
+    title: "Tour.mp4 - Media Player",
+    task: "Tour.mp4",
+    icon: <PixelIcon sprite={FILM} className="size-4" />,
+    frame: "sm:m-auto sm:h-fit sm:max-h-[calc(100%-2rem)] sm:w-[min(44rem,calc(100%-2rem))]",
+    offset: { x: 24, y: -12 },
+  },
+  mines: {
+    title: "Minesweeper",
+    task: "Minesweeper",
+    icon: <PixelIcon sprite={MINE} className="size-4" />,
+    frame: "sm:m-auto sm:h-fit sm:w-fit",
+    offset: { x: -72, y: 12 },
+  },
+  bin: {
+    title: "Recycle Bin",
+    task: "Recycle Bin",
+    icon: <PixelIcon sprite={BIN} className="size-4" />,
+    frame: "sm:m-auto sm:h-[min(25rem,calc(100%-2rem))] sm:w-[34rem]",
+    offset: { x: 72, y: -36 },
+  },
 };
 
-type Shortcut = { id: string; label: string; icon: ReactNode } & ({ app: AppId; hash?: string } | { href: string } | { amp: true });
+/** `right` icons sit down the desktop's right edge on a wide screen, as a Recycle Bin often did. */
+type Shortcut = { id: string; label: string; icon: ReactNode; right?: true } & ({ app: AppId; hash?: string } | { href: string } | { amp: true });
 
 const sprite = (s: Sprite) => <PixelIcon sprite={s} />;
 
@@ -128,8 +155,14 @@ const SHORTCUTS: Shortcut[] = [
   { id: "owl", label: "owl.jpg", icon: sprite(PICTURE), app: "owl" },
   { id: "display", label: "Display", icon: sprite(MONITOR), app: "display" },
   { id: "winamp", label: "Winamp", icon: sprite(BOLT), amp: true },
+  { id: "tour", label: "Tour.mp4", icon: sprite(FILM), app: "tour", right: true },
+  { id: "mines", label: "Minesweeper", icon: sprite(MINE), app: "mines", right: true },
+  { id: "bin", label: "Recycle Bin", icon: sprite(BIN), app: "bin", right: true },
   { id: "signin", label: "Sign in", icon: sprite(KEY), href: "/login" },
 ];
+
+/** The owl assistant says hello this long after the desktop opens, once a visit. */
+const HELLO = 9_000;
 
 const WIDE = "(min-width: 40rem)";
 
@@ -322,6 +355,10 @@ export function Desktop({ home }: { home: ReactNode }) {
   const [amp, setAmp] = useState<AmpState>("off");
   const [ampLoaded, setAmpLoaded] = useState(false);
   const [ampAnchor, setAmpAnchor] = useState<HTMLElement | null>(null);
+  const [bin, setBin] = useState(DISCARDED);
+  const [helper, setHelper] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const saver = useSaver();
   const front = frontmost(state);
   const startRef = useRef<HTMLDivElement>(null);
 
@@ -344,6 +381,18 @@ export function Desktop({ home }: { home: ReactNode }) {
   useEffect(() => {
     if (start) startRef.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
   }, [start]);
+
+  useEffect(() => {
+    if (!window.matchMedia(WIDE).matches) return;
+    const t = setTimeout(() => setHelper(true), HELLO);
+    return () => clearTimeout(t);
+  }, []);
+
+  const idle = useCallback(() => {
+    if (![...document.querySelectorAll("video, audio")].some((m) => !(m as HTMLMediaElement).paused)) setSaving(true);
+  }, []);
+  const wake = useCallback(() => setSaving(false), []);
+  useIdle(saver.minutes, saver.kind === "owls" && !saving && !off, idle);
 
   const openApp = (id: AppId, hash?: string) => {
     dispatch({ type: "open", id });
@@ -373,8 +422,34 @@ export function Desktop({ home }: { home: ReactNode }) {
     home,
     readme: <Notepad />,
     owl: <PictureViewer />,
-    display: <DisplayProperties onDone={() => dispatch({ type: "close", id: "display" })} />,
+    display: <DisplayProperties onDone={() => dispatch({ type: "close", id: "display" })} onPreview={() => setSaving(true)} />,
+    tour: <MediaPlayer />,
+    mines: <Minesweeper />,
+    bin: <RecycleBin items={bin} onEmpty={() => setBin([])} />,
   };
+
+  const iconFor = (s: Shortcut) => (s.id === "bin" && bin.length === 0 ? sprite(BIN_EMPTY) : s.icon);
+
+  const icons = (list: Shortcut[]) =>
+    list.map((s) => {
+      const on = selected === s.id;
+      return (
+        <li key={s.id} className="grid justify-items-center">
+          <ShortcutItem s={s} onOpen={launch} className="group grid w-24 cursor-pointer content-start justify-items-center gap-1 p-1 outline-none">
+            <span className={cn("grid size-8 place-items-center", on && "opacity-80")}>{iconFor(s)}</span>
+            <span
+              className={cn(
+                "px-1 text-center text-[0.875rem] leading-tight group-focus-visible:outline-1 group-focus-visible:outline-dotted group-focus-visible:outline-offset-1 group-focus-visible:outline-card",
+                PIXEL,
+                on ? "bg-highlight text-highlight-foreground" : "bg-foreground text-card",
+              )}
+            >
+              {s.label}
+            </span>
+          </ShortcutItem>
+        </li>
+      );
+    });
 
   const open = (Object.keys(APPS) as AppId[]).filter((id) => state.wins[id].open);
   const layers = (Object.keys(APPS) as AppId[]).toSorted((a, b) => state.wins[a].z - state.wins[b].z);
@@ -398,25 +473,10 @@ export function Desktop({ home }: { home: ReactNode }) {
         {ampLoaded && ampAnchor && <Winamp anchor={ampAnchor} state={amp} onState={setAmp} />}
 
         <ul aria-label="Desktop" className="grid content-start gap-1 p-2 max-sm:grid-cols-4 sm:h-full sm:grid-flow-col sm:auto-cols-[6.5rem] sm:grid-rows-[repeat(auto-fill,5.25rem)]" data-slot="desktop-icons">
-          {SHORTCUTS.map((s) => {
-            const on = selected === s.id;
-            return (
-              <li key={s.id} className="grid justify-items-center">
-                <ShortcutItem s={s} onOpen={launch} className="group grid w-24 cursor-pointer content-start justify-items-center gap-1 p-1 outline-none">
-                  <span className={cn("grid size-8 place-items-center", on && "opacity-80")}>{s.icon}</span>
-                  <span
-                    className={cn(
-                      "px-1 text-center text-[0.875rem] leading-tight group-focus-visible:outline-1 group-focus-visible:outline-dotted group-focus-visible:outline-offset-1 group-focus-visible:outline-card",
-                      PIXEL,
-                      on ? "bg-highlight text-highlight-foreground" : "bg-foreground text-card",
-                    )}
-                  >
-                    {s.label}
-                  </span>
-                </ShortcutItem>
-              </li>
-            );
-          })}
+          {icons(SHORTCUTS.filter((s) => !s.right))}
+        </ul>
+        <ul aria-label="Desktop, right" className="grid content-start gap-1 px-2 max-sm:grid-cols-4 sm:absolute sm:inset-y-0 sm:right-0 sm:w-[7.5rem] sm:py-2" data-slot="desktop-icons-right">
+          {icons(SHORTCUTS.filter((s) => s.right))}
         </ul>
 
         {(Object.keys(APPS) as AppId[]).map((id) => (
@@ -433,8 +493,28 @@ export function Desktop({ home }: { home: ReactNode }) {
             <button type="button" role="menuitem" onClick={() => openApp("display")} className={MENU_ITEM}>
               Change wallpaper…
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenu(null);
+                setHelper(true);
+              }}
+              className={MENU_ITEM}
+            >
+              Ask the owl…
+            </button>
           </div>
         )}
+
+        <Assistant
+          shown={helper}
+          onClose={() => setHelper(false)}
+          onTour={() => {
+            setHelper(false);
+            openApp("tour");
+          }}
+        />
       </div>
 
       <div className={cn("relative z-[70] flex h-10 shrink-0 items-center gap-1 border-t-2 border-t-card bg-muted px-1", PIXEL)} data-slot="taskbar">
@@ -461,7 +541,7 @@ export function Desktop({ home }: { home: ReactNode }) {
                 {[{ id: "home", label: "Owlhead Home Page", icon: <OwlheadMark title="" className="size-6" />, app: "home" as const }, ...SHORTCUTS.slice(1)].map((s) => (
                   <li key={s.id} className={cn(s.id === "signin" && "mt-1 border-t border-t-foreground/40 pt-1")}>
                     <ShortcutItem s={s} onOpen={launch} role="menuitem" className={MENU_ITEM}>
-                      <span className="grid size-6 place-items-center [&>svg]:size-6">{s.icon}</span>
+                      <span className="grid size-6 place-items-center [&>svg]:size-6">{iconFor(s)}</span>
                       {s.label}
                     </ShortcutItem>
                   </li>
@@ -523,6 +603,8 @@ export function Desktop({ home }: { home: ReactNode }) {
           <Clock />
         </div>
       </div>
+
+      {saving && <ScreenSaver onWake={wake} />}
 
       {off && (
         <button
