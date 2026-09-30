@@ -26,10 +26,12 @@
 //!
 //! **What the harness fills.** The fixture header's four defaults (`session` regular,
 //! `in_close_window` false, fee rates 0, `has_prior_fill` = position above zero) and `ref.py`'s
-//! (`size_factor` 1, and 0 for the drawdown, both P&L fractions, the day's buys, the cost basis and
-//! the goal spend). Every base pins its universe, so no order can be an admission: `new_instrument`
-//! is false and `thesis_confidence` 0 (§6.3, "0 when no thesis applies"), and a base that does not
-//! pin is refused rather than guessed about.
+//! (`size_factor` 1, and 0 for the position's P&L fraction, the cost basis and the goal spend). The
+//! drawdown, the day's P&L fraction and the day's buys are 0 and not accepted: no base has an
+//! autonomy rule that reads them. Every base pins its universe, so no order can be an admission:
+//! `new_instrument` is false and `thesis_confidence` 0 (§6.3, "0 when no thesis applies"), and a
+//! base that does not pin is refused rather than guessed about. The gate is handed no fee
+//! reservation, so a cash fee rate above zero is refused, and so is an equity asset fee rate.
 //!
 //! **Every key is read (DEC-85).** The case, its `input`, `quote`, `gate_state`, every output and
 //! working order, `expect`, `gate_dry_run` and `autonomy` are each swept against the members read
@@ -64,7 +66,10 @@ use super::{at_of, digest, instant, not_implemented, num, unknown_members, valid
 use crate::{Json, at, ensure, expect_eq, list_at, str_at, u64_at};
 
 const CASE_KEYS: &[&str] = &["id", "kind", "title", "base", "input", "expect"];
-/// The members `ref.py`'s builder reads, and nothing else.
+/// The members `ref.py`'s builder reads, and nothing else, less three it reads only as autonomy
+/// facts (`drawdown`, `daily_pnl_fraction` and `bought_today_usd`): no family-B base has a rule on
+/// any of them, so no case could show one read, and each is refused until a case states it
+/// (DEC-250 item 16).
 const INPUT_KEYS: &[&str] = &[
     "now",
     "instrument",
@@ -86,9 +91,6 @@ const INPUT_KEYS: &[&str] = &[
     "fee_rate_cash",
     "fee_rate_asset",
     "has_prior_fill",
-    "drawdown",
-    "daily_pnl_fraction",
-    "bought_today_usd",
     "position_pnl_fraction",
     "scale_active_s",
     "holding",
@@ -536,6 +538,7 @@ impl Order {
     /// The builder is the origin of every order it proposes; the gate assigns the purpose from that,
     /// the side and the position (§6.1, DEC-129 item 19). A marketable exit goes as a plain limit and
     /// the gate's pacing says it must be marketable, since the proposal has no marketable kind.
+    /// The fee reservation is zero because [`Inputs::read`] refuses a cash fee rate above zero.
     fn proposed(&self, instrument: gate::AssetId, id: gate::ClientOrderId) -> gate::ProposedOrder {
         gate::ProposedOrder {
             instrument,
@@ -655,9 +658,14 @@ impl Inputs {
         let fee_rate_cash = fee("fee_rate_cash")?;
         let fee_rate_asset = fee("fee_rate_asset")?;
         let no_fee = num(FeeRate::parse("0"), "a zero fee rate")?;
+        ensure(fee_rate_cash == no_fee, || {
+            "`fee_rate_cash` above zero: the gate is handed no fee reservation, which holds only \
+             for a fee paid in the asset (trading-domain §7.2), so a cash fee would reach the \
+             buying-power check unreserved (§9.5, DEC-250 item 17)"
+                .to_owned()
+        })?;
         ensure(
-            asset_class == AssetClass::Crypto
-                || (fee_rate_cash == no_fee && fee_rate_asset == no_fee),
+            asset_class == AssetClass::Crypto || fee_rate_asset == no_fee,
             || {
                 "an equity fee rate: the fixture states no fee schedule to reserve an equity \
                  buy's fees from (§9.5)"
@@ -698,19 +706,13 @@ impl Inputs {
             },
             risk: RiskContext {
                 size_factor: num(SizeFraction::parse(size_factor), "size_factor")?,
-                drawdown: num(Unit::parse(text_or(input, "drawdown", "0")?), "drawdown")?,
-                daily_pnl_fraction: num(
-                    Signed::parse(text_or(input, "daily_pnl_fraction", "0")?),
-                    "daily_pnl_fraction",
-                )?,
+                drawdown: Unit::ZERO,
+                daily_pnl_fraction: Signed::ZERO,
                 position_pnl_fraction: num(
                     Signed::parse(text_or(input, "position_pnl_fraction", "0")?),
                     "position_pnl_fraction",
                 )?,
-                bought_today_usd: num(
-                    Usd::parse(text_or(input, "bought_today_usd", "0")?),
-                    "bought_today_usd",
-                )?,
+                bought_today_usd: Usd::ZERO,
                 has_prior_fill: flag_or(input, "has_prior_fill", !position.is_zero())?,
                 new_instrument: false,
                 thesis_confidence: Unit::ZERO,
@@ -815,7 +817,10 @@ impl GateState {
                 instant(when, "gate_state.last_exit_fill_at")?,
             );
         }
-        let listed = list_at(state, "working_universe")?;
+        let listed = state
+            .get("working_universe")
+            .and_then(Json::as_array)
+            .ok_or("`gate_state.working_universe` is not a list")?;
         let working_universe = listed
             .iter()
             .map(|i| {
@@ -851,12 +856,20 @@ fn working_orders(listed: &Json, what: &str) -> Result<Vec<(gate::AssetId, Usd)>
         .as_array()
         .ok_or_else(|| format!("`{what}` is not a list"))?
         .iter()
-        .map(|order| {
+        .enumerate()
+        .map(|(index, order)| {
             unknown_members(order, WORKING_ORDER_KEYS)
                 .map_err(|unknown| format!("`{what}` order members not interpreted: {unknown}"))?;
+            let member = |key: &str| format!("{what}[{index}].{key}");
+            let text = |key: &str| {
+                order
+                    .get(key)
+                    .and_then(Json::as_str)
+                    .ok_or_else(|| format!("`{}` is not a string", member(key)))
+            };
             Ok((
-                gate_asset(&asset(str_at(order, "instrument")?, what)?)?,
-                num(Usd::parse(str_at(order, "max_cost")?), what)?,
+                gate_asset(&asset(text("instrument")?, &member("instrument"))?)?,
+                num(Usd::parse(text("max_cost")?), &member("max_cost"))?,
             ))
         })
         .collect()
@@ -1339,6 +1352,7 @@ fn gate_error(what: &str, e: &gate::GateError) -> String {
 /// runs the case through the suite, so the suite's own sweeps are part of what is tested.
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::path::Path;
     use std::sync::Arc;
 
@@ -1567,25 +1581,75 @@ mod tests {
         }
     }
 
-    /// Every enum-valued expectation of case `id` in `fixture`, swapped for its sibling, fails the
-    /// case at that member's comparison, whose message starts `<member>: expected`. Returns how
-    /// many were swapped.
-    fn every_sibling_fails_its_comparison(fixture: &Json, id: &str) -> Result<usize, String> {
-        let case = family_b(fixture)?
-            .into_iter()
-            .find(|c| c["id"] == id)
-            .ok_or_else(|| format!("no case {id}"))?;
-        let expect = crate::at(&case, "expect")?;
+    /// The enum-valued members that need no sibling: `on_timeout` has one variant, `skip`, and
+    /// `action` decides which other members a case may state, so a sibling fails at one of those
+    /// before its own comparison.
+    const NO_SIBLING: [&str; 2] = ["on_timeout", "action"];
+
+    /// A snake-case word, the spelling of every closed vocabulary a family-B case states.
+    fn is_word(value: &Json) -> bool {
+        value.as_str().is_some_and(|text| {
+            !text.is_empty() && text.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        })
+    }
+
+    /// A stated value from a closed vocabulary: a word, the null a gate reason may be, or a list of
+    /// words. Decimals, model ids (`llm.news_research`) and `rule:` deciders are none of these.
+    fn is_enum_value(value: &Json) -> bool {
+        match value {
+            Json::Null => true,
+            Json::Array(items) => !items.is_empty() && items.iter().all(is_word),
+            _ => is_word(value),
+        }
+    }
+
+    /// The expectation objects of `case`, each with its pointer.
+    fn expectation_objects(case: &Json) -> Result<Vec<(String, Json)>, String> {
+        let expect = crate::at(case, "expect")?;
         let mut objects = vec![("/expect".to_owned(), expect.clone())];
         for nested in ["gate_dry_run", "autonomy"] {
             if let Some(value) = expect.get(nested) {
                 objects.push((format!("/expect/{nested}"), value.clone()));
             }
         }
-        let mut swapped = 0_usize;
-        for (at, object) in objects {
+        Ok(objects)
+    }
+
+    /// Every `(pointer, member)` some family-B case states with an enum value, read from the
+    /// fixture rather than listed, so an empty `clipped_by` counts because another case lists a
+    /// clip, and a case that gains an enum-valued expectation is swept without an edit here.
+    fn enum_valued_members(fixture: &Json) -> Result<BTreeSet<(String, String)>, String> {
+        let mut found = BTreeSet::new();
+        for case in family_b(fixture)? {
+            for (at, object) in expectation_objects(&case)? {
+                for (member, value) in members(&object)? {
+                    if is_enum_value(&value) {
+                        found.insert((at.clone(), member));
+                    }
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    /// Every enum-valued expectation of case `id` in `fixture`, swapped for its sibling, fails the
+    /// case at that member's comparison, whose message starts `<member>: expected`; and each one
+    /// but [`NO_SIBLING`]'s has a [`sibling`] arm, so a vocabulary whose arm answers `None` fails
+    /// here rather than going unswept.
+    fn every_sibling_fails_its_comparison(fixture: &Json, id: &str) -> Result<(), String> {
+        let enum_valued = enum_valued_members(fixture)?;
+        let case = family_b(fixture)?
+            .into_iter()
+            .find(|c| c["id"] == id)
+            .ok_or_else(|| format!("no case {id}"))?;
+        for (at, object) in expectation_objects(&case)? {
             for (member, value) in members(&object)? {
                 let Some(other) = sibling(&at, &member, &value) else {
+                    crate::ensure(
+                        !enum_valued.contains(&(at.clone(), member.clone()))
+                            || NO_SIBLING.contains(&member.as_str()),
+                        || format!("{id}: {at}/{member} is enum-valued and has no sibling arm"),
+                    )?;
                     continue;
                 };
                 crate::ensure(other != value, || {
@@ -1597,10 +1661,9 @@ mod tests {
                     &format!("{member}: expected"),
                     &format!("{id}: {at}/{member} swapped for a sibling variant"),
                 )?;
-                swapped = swapped.saturating_add(1);
             }
         }
-        Ok(swapped)
+        Ok(())
     }
 
     fn members(value: &Json) -> Result<Vec<(String, Json)>, String> {
@@ -1644,18 +1707,10 @@ mod tests {
     fn every_expected_member_is_compared_and_required() -> Result<(), String> {
         let fixture = fixture()?;
         let mut doctorings = 0_usize;
-        let mut siblings = 0_usize;
         for case in passing(&fixture)? {
             let id = id(&case)?;
-            siblings = siblings.saturating_add(every_sibling_fails_its_comparison(&fixture, &id)?);
-            let expect = crate::at(&case, "expect")?;
-            let mut objects = vec![("/expect".to_owned(), expect.clone())];
-            for nested in ["gate_dry_run", "autonomy"] {
-                if let Some(value) = expect.get(nested) {
-                    objects.push((format!("/expect/{nested}"), value.clone()));
-                }
-            }
-            for (at, object) in objects {
+            every_sibling_fails_its_comparison(&fixture, &id)?;
+            for (at, object) in expectation_objects(&case)? {
                 for (member, value) in members(&object)? {
                     let edited = doctored(&fixture, &id, &format!("{at}/{member}"), |v| {
                         *v = changed(&value);
@@ -1681,13 +1736,7 @@ mod tests {
                 )?;
             }
         }
-        crate::expect_eq("doctorings, counted from the fixture", doctorings, 698)?;
-        crate::expect_eq(
-            "siblings: ten hold reasons, one hold's and eleven buys' clips, and each of thirteen \
-             orders' purpose, verdict, reason, decision and decider",
-            siblings,
-            10 + 1 + 11 + 13 * 5,
-        )
+        crate::expect_eq("doctorings, counted from the fixture", doctorings, 698)
     }
 
     /// A hold reaches neither the gate nor approval, so a hold that states either fails naming it,
@@ -1735,7 +1784,8 @@ mod tests {
 
     /// Every member of a case is read: a plant at the top level, in `input`, its `quote`, its
     /// `gate_state`, each output and each working order fails naming the plant, and so does a
-    /// trim guard on a mandate that does not trim.
+    /// trim guard on a mandate that does not trim, and an autonomy fact no base's rule reads, even
+    /// stated as its default.
     #[test]
     fn every_input_member_is_read_and_no_other_is_accepted() -> Result<(), String> {
         let fixture = fixture()?;
@@ -1776,6 +1826,10 @@ mod tests {
                 let stated = doctored(&fixture, &id, "/input", insert(guard, value))?;
                 fails_naming(run(stated, &id), guard, &format!("{id}: {guard} stated"))?;
             }
+            for fact in ["drawdown", "daily_pnl_fraction", "bought_today_usd"] {
+                let stated = doctored(&fixture, &id, "/input", insert(fact, json!("0")))?;
+                fails_naming(run(stated, &id), fact, &format!("{id}: {fact} stated"))?;
+            }
         }
         crate::expect_eq(
             "plants: four objects per case, forty-four outputs and two working orders",
@@ -1784,8 +1838,14 @@ mod tests {
         )
     }
 
-    /// Every scalar the harness reads is parsed, never defaulted: each one replaced by a value of
-    /// the wrong type fails the case naming it.
+    /// Every input the harness reads is parsed, never defaulted: each one replaced by an unreadable
+    /// word, and each one replaced by a value of the wrong type, fails the case naming it. That is
+    /// the input's own scalars, the quote's bid and ask, the gate state's `agent_equity` and
+    /// `orders_today`, its `positions_mv` and `last_exit_fill_at` maps whole and each value, its
+    /// `working_universe` whole and each entry, each working order's `instrument` and `max_cost`,
+    /// in the gate state and in a restated `working_opening_orders`, and each output's members. An
+    /// entry planted in either map with an unreadable key or value fails naming the map, since no
+    /// family-B case states a `last_exit_fill_at` entry for the sweep to replace.
     #[test]
     fn an_unreadable_input_is_refused_naming_it() -> Result<(), String> {
         let fixture = fixture()?;
@@ -1804,6 +1864,41 @@ mod tests {
             for key in ["agent_equity", "orders_today"] {
                 scalars.push((format!("/input/gate_state/{key}"), key.to_owned()));
             }
+            for map in ["positions_mv", "last_exit_fill_at"] {
+                let named = format!("gate_state.{map}");
+                scalars.push((format!("/input/gate_state/{map}"), named.clone()));
+                for (key, _) in members(crate::at(input, &named)?)? {
+                    scalars.push((format!("/input/gate_state/{map}/{key}"), named.clone()));
+                }
+            }
+            let universe = "gate_state.working_universe";
+            scalars.push((
+                "/input/gate_state/working_universe".to_owned(),
+                universe.to_owned(),
+            ));
+            for (index, _) in crate::list_at(input, universe)?.iter().enumerate() {
+                scalars.push((
+                    format!("/input/gate_state/working_universe/{index}"),
+                    universe.to_owned(),
+                ));
+            }
+            for (pointer, what) in [
+                (
+                    "/input/gate_state/working_opening_orders",
+                    "gate_state.working_opening_orders",
+                ),
+                ("/input/working_opening_orders", "working_opening_orders"),
+            ] {
+                let listed = case.pointer(pointer).and_then(Json::as_array);
+                for (index, _) in listed.into_iter().flatten().enumerate() {
+                    for key in ["instrument", "max_cost"] {
+                        scalars.push((
+                            format!("{pointer}/{index}/{key}"),
+                            format!("`{what}[{index}].{key}`"),
+                        ));
+                    }
+                }
+            }
             for (index, output) in crate::list_at(input, "outputs")?.iter().enumerate() {
                 for (key, _) in members(output)? {
                     scalars.push((
@@ -1816,7 +1911,11 @@ mod tests {
                 let unreadable = doctored(&fixture, &id, &pointer, |v| *v = json!(PLANTED))?;
                 fails_naming(run(unreadable, &id), &named, &format!("{id}: {pointer}"))?;
                 let mistyped = doctored(&fixture, &id, &pointer, |v| {
-                    *v = if v.is_string() { json!(7) } else { json!([]) };
+                    *v = if v.is_string() || v.is_array() {
+                        json!(7)
+                    } else {
+                        json!([])
+                    };
                 })?;
                 fails_naming(
                     run(mistyped, &id),
@@ -1825,8 +1924,28 @@ mod tests {
                 )?;
                 refused = refused.saturating_add(1);
             }
+            let instrument = crate::str_at(input, "instrument")?;
+            for (map, readable) in [
+                ("positions_mv", json!("1")),
+                ("last_exit_fill_at", json!("2026-09-01T00:00:00.000000000Z")),
+            ] {
+                let pointer = format!("/input/gate_state/{map}");
+                for (key, value) in [
+                    (PLANTED, readable),
+                    (instrument, json!(PLANTED)),
+                    (instrument, json!(7)),
+                ] {
+                    let planted = doctored(&fixture, &id, &pointer, insert(key, value.clone()))?;
+                    fails_naming(
+                        run(planted, &id),
+                        &format!("gate_state.{map}"),
+                        &format!("{id}: {pointer} given {key}: {value}"),
+                    )?;
+                    refused = refused.saturating_add(1);
+                }
+            }
         }
-        crate::expect_eq("scalars refused, counted from the fixture", refused, 611)
+        crate::expect_eq("inputs refused, counted from the fixture", refused, 899)
     }
 
     /// The builder and the gate see one account: the gate state's equity, the instrument's market
@@ -1894,7 +2013,7 @@ mod tests {
             (
                 "MC-B01",
                 "/input",
-                Box::new(insert("fee_rate_cash", json!("0.001"))),
+                Box::new(insert("fee_rate_asset", json!("0.001"))),
                 "equity fee rate",
             ),
             (
@@ -1920,6 +2039,41 @@ mod tests {
                 named,
                 &format!("{id}: {pointer} for {named}"),
             )?;
+        }
+        Ok(())
+    }
+
+    /// The gate is handed no fee reservation, so a cash fee rate above zero is refused, for a crypto
+    /// case as for an equity one; a stated zero, the header's default, is read and passes, and an
+    /// unreadable one fails naming it.
+    #[test]
+    fn a_cash_fee_rate_above_zero_is_refused() -> Result<(), String> {
+        let fixture = fixture()?;
+        for id in ["MC-B01", "MC-B29"] {
+            let charged = doctored(
+                &fixture,
+                id,
+                "/input",
+                insert("fee_rate_cash", json!("0.001")),
+            )?;
+            fails_naming(
+                run(charged, id),
+                "`fee_rate_cash` above zero",
+                &format!("{id}: a cash fee rate"),
+            )?;
+            let unreadable = doctored(
+                &fixture,
+                id,
+                "/input",
+                insert("fee_rate_cash", json!(PLANTED)),
+            )?;
+            fails_naming(
+                run(unreadable, id),
+                "fee_rate_cash",
+                &format!("{id}: an unreadable cash fee rate"),
+            )?;
+            let free = doctored(&fixture, id, "/input", insert("fee_rate_cash", json!("0")))?;
+            run(free, id).map_err(|e| format!("{id} with a stated zero cash fee rate: {e}"))?;
         }
         Ok(())
     }
@@ -1984,7 +2138,6 @@ mod tests {
     #[test]
     fn the_two_session_cases_pass_once_now_agrees_with_their_labels() -> Result<(), String> {
         let fixture = fixture()?;
-        let mut siblings = 0_usize;
         for (id, now, as_of, expires_at) in [
             (
                 "MC-B22",
@@ -2012,13 +2165,8 @@ mod tests {
                 }
             })?;
             run(moved.clone(), id).map_err(|e| format!("{id} at {now}: {e}"))?;
-            siblings = siblings.saturating_add(every_sibling_fails_its_comparison(&moved, id)?);
+            every_sibling_fails_its_comparison(&moved, id)?;
         }
-        crate::expect_eq(
-            "siblings: each case's purpose, verdict, reason, decision and decider, and MC-B23's \
-             order type",
-            siblings,
-            11,
-        )
+        Ok(())
     }
 }

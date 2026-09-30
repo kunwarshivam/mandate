@@ -1,25 +1,31 @@
-//! The §5 fold's spine (DEC-167 item 5, slice R2): the agent sub-ledger over marks and fills, the
-//! high-water mark, the ladder, breach confirmation with the hard trigger, the daily-loss trigger, the
-//! lifetime floor, and the effective mode.
+//! The §5 fold (DEC-167 item 5): the agent sub-ledger over marks and fills, the high-water mark, the
+//! ladder, breach confirmation with the hard trigger, the daily loss over risk days, the lifetime
+//! floor, a `profit_stop` goal, the instrument's staleness and universe restrictions, and the
+//! effective mode (slices R2 and R3).
 //!
-//! What it does not fold yet is [`SpecError::Unimplemented`], never a silent answer: the risk day,
-//! a held instrument's mark going stale, universe changes, and a `profit_stop` goal are slice R3's;
-//! acknowledgments, allocation changes, floor loosening, goal completion, and retirement are R4's.
+//! What it does not fold yet is [`SpecError::Unimplemented`], never a silent answer:
+//! acknowledgments, allocation changes, floor loosening, goal completion, and retirement are slice
+//! R4's.
+
+mod daily;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_domain::{AgentMode, AssetClass, MarketSession, Side};
+use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
 use mandate_num::{Price, Qty, Ratio, Rounding, Usd};
 use mandate_time::UtcNanos;
 
+use self::daily::{DailyLatch, Rollover};
 use super::limits::{Figures, Limits, Readings};
 use super::{
-    Confirmation, Input, KillScope, LiftReason, LimitKey, Opening, Outcome, Restriction, RiskEvent,
-    SessionClock, Snapshot, Step, TriggerReason, add_seconds, hard_wait_s, rung_index, size_factor,
+    Confirmation, GoalReason, Input, InstrumentRestriction, KillScope, LiftReason, LimitKey,
+    Opening, Outcome, RemovalReason, Restriction, RestrictionReason, RiskEvent, SessionClock,
+    Snapshot, Step, ThenAction, TriggerReason, UniverseChange, add_seconds, hard_wait_s,
+    rung_index, size_factor,
 };
-use crate::document::{Goal, LadderAction, LadderRung, LimitAction, Pointer};
+use crate::SpecError;
+use crate::document::{LadderAction, LadderRung, LimitAction, Pointer};
 use crate::validate::ValidatedMandate;
-use crate::{SchemaDec, SpecError};
 
 /// The places §5.2 reports the drawdown and the daily P&L fraction at, rounded half to even.
 const REPORTED_RATIO_PLACES: u32 = 12;
@@ -32,6 +38,7 @@ pub(super) struct Fold {
     ladder: Vec<LadderRung>,
     daily_action: LimitAction,
     breach_confirm_s: u32,
+    daily_breach_min_s: u32,
     scale_lift_after_s: u32,
     asset_class: AssetClass,
     mark_max_age_s: u32,
@@ -56,9 +63,16 @@ pub(super) struct Fold {
     scale: BTreeMap<u8, ScaleRung>,
     confirmations: BTreeMap<LimitKey, Confirmation>,
     /// Each limit whose 1.25x level a sane quote reached, and when: the start of its hard wait (§5.6).
+    /// The daily loss's wait carries over the rollover, since the quote that armed it is still the
+    /// last one the state saw.
     hard_since: BTreeMap<LimitKey, UtcNanos>,
+    /// The latched rungs and the floor. The daily loss latches in `daily`, which also says when its
+    /// lift may come (§5.4).
     latched: BTreeSet<LimitKey>,
+    daily: Option<DailyLatch>,
+    rollover: Option<Rollover>,
     restrictions: BTreeSet<Restriction>,
+    instrument_restrictions: BTreeSet<InstrumentRestriction>,
     mode: AgentMode,
 }
 
@@ -126,10 +140,6 @@ impl Fold {
     /// E = H = E₀ = C = N = the allocation, L = the connection's loss carry, and mode `normal` (§5.2).
     pub(super) fn open(mandate: &ValidatedMandate, opening: &Opening) -> Result<Self, SpecError> {
         let document = mandate.mandate();
-        match &document.goal {
-            Goal::ProfitStop { profit_level, .. } => return confirm_profit_stop(profit_level),
-            Goal::Continuous { .. } | Goal::Accumulate { .. } => {}
-        }
         on_the_risk_clock(opening.at)?;
         if opening.inherited_loss_usd.is_negative() {
             return Err(SpecError::InvalidInput {
@@ -155,6 +165,7 @@ impl Fold {
             ladder: risk.drawdown_ladder.clone(),
             daily_action: risk.daily_loss_action,
             breach_confirm_s: risk.breach_confirm_s,
+            daily_breach_min_s: risk.daily_breach_min_s,
             scale_lift_after_s: risk.scale_lift_after_s,
             asset_class: opening.asset_class,
             mark_max_age_s: opening.mark_max_age_s,
@@ -173,19 +184,30 @@ impl Fold {
             confirmations: BTreeMap::new(),
             hard_since: BTreeMap::new(),
             latched: BTreeSet::new(),
+            daily: None,
+            rollover: None,
             restrictions: BTreeSet::new(),
+            instrument_restrictions: BTreeSet::new(),
             mode: AgentMode::Normal,
         })
     }
 
-    /// One input in §5.2's order: settle time, apply the input, E then H, the rungs in ladder order,
-    /// the daily loss, the floor, then the effective mode. The caller keeps the fold it had when this
-    /// fails, so an error never leaves a half-applied step behind.
+    /// One input, folded on a copy: the fold it returns and what the step produced, or an error and
+    /// nothing, so a refused step can never leave a half-applied fold behind.
     pub(super) fn step(
-        &mut self,
+        &self,
         clock: &dyn SessionClock,
         step: &Step,
-    ) -> Result<Outcome, SpecError> {
+    ) -> Result<(Self, Outcome), SpecError> {
+        let mut next = self.clone();
+        let outcome = next.fold(clock, step)?;
+        Ok((next, outcome))
+    }
+
+    /// One input in §5.2's order: settle time, apply the input, E then H, the rungs in ladder order,
+    /// the daily loss, the floor, the profit stop, the instrument's restrictions, then the effective
+    /// mode.
+    fn fold(&mut self, clock: &dyn SessionClock, step: &Step) -> Result<Outcome, SpecError> {
         on_the_risk_clock(step.at)?;
         if step.at < self.at {
             return Err(SpecError::ClockWentBackwards);
@@ -196,11 +218,10 @@ impl Fold {
             AssetClass::UsEquity => clock.seconds_between(self.at, step.at)?,
         };
         self.at = step.at;
-        let expired = self.age_mark(session_s)?;
-        let read = self.apply(step)?;
-        if self.goes_stale(expired, read) {
-            return mark_goes_stale(&step.input);
-        }
+        let before = self.instrument_restrictions.clone();
+        let mut journal = Vec::new();
+        self.age_mark(session_s)?;
+        let read = self.apply(step, wall_s, &mut journal)?;
         let figures = self.settle_equity()?;
         let readings = self.limits.conditions(&figures)?;
         let moment = Moment {
@@ -208,20 +229,16 @@ impl Fold {
             session_s,
             quote: read == Read::Quote,
         };
-        let mut journal = Vec::new();
         self.ladder(&readings, moment, &mut journal)?;
-        let daily = Limit {
-            key: LimitKey::MaxDailyLoss,
-            action: self.daily_action.into(),
-            restriction: Restriction::DailyLoss,
-        };
-        self.confirm(daily, &readings, moment, &mut journal)?;
+        self.daily_loss(&readings, figures.equity, moment, &mut journal)?;
         let floor = Limit {
             key: LimitKey::LifetimeFloor,
             action: LadderAction::FlattenAndPause,
             restriction: Restriction::LifetimeFloor,
         };
         self.confirm(floor, &readings, moment, &mut journal)?;
+        self.profit_stop(readings.profit, moment, &mut journal)?;
+        self.instrument_events(&before, &step.input, &mut journal);
         self.apply_mode(&mut journal);
         Ok(Outcome {
             snapshot: self.snapshot()?,
@@ -239,6 +256,10 @@ impl Fold {
             .iter()
             .filter_map(|(index, rung)| rung.active_s.map(|active| (*index, active)))
             .collect();
+        let mut latched = self.latched.clone();
+        if self.daily.is_some() {
+            latched.insert(LimitKey::MaxDailyLoss);
+        }
         Ok(Snapshot {
             agent_equity: equity,
             high_water_mark: self.high_water,
@@ -249,11 +270,11 @@ impl Fold {
             capital_base: self.capital,
             inherited_loss: self.inherited,
             size_factor: size_factor(&self.ladder, &active_rungs)?,
-            latched: self.latched.clone(),
+            latched,
             active_rungs,
             restrictions: self.restrictions.clone(),
             agent_mode: self.mode,
-            instrument_restrictions: BTreeSet::new(),
+            instrument_restrictions: self.instrument_restrictions.clone(),
             net_contributed: self.net_contributed,
         })
     }
@@ -278,29 +299,26 @@ impl Fold {
         })
     }
 
-    /// Advances a held instrument's mark age by the interval, before the input applies, and says
-    /// whether it has reached the staleness limit (§5.2).
-    fn age_mark(&mut self, session_s: u64) -> Result<bool, SpecError> {
+    /// Advances a held instrument's mark age by the interval, before the input applies, and marks it
+    /// `stale_mark` once the age reaches the staleness limit (§5.2).
+    fn age_mark(&mut self, session_s: u64) -> Result<(), SpecError> {
         if self.qty.is_zero() {
-            return Ok(false);
+            return Ok(());
         }
         self.mark_age_s = add_seconds(self.mark_age_s, session_s)?;
-        Ok(self.mark_age_s >= u64::from(self.mark_max_age_s))
-    }
-
-    /// Whether the step leaves a held instrument without a sane mark (§5.2): a mark that failed its
-    /// checks while held, or an age that reached the limit while held and that no sane mark reset. An
-    /// expiry stands even if this step's sale leaves the book flat, since the instrument was held for
-    /// the whole interval. A book flat all along has nothing to go stale.
-    fn goes_stale(&self, expired: bool, read: Read) -> bool {
-        match read {
-            Read::Quote => false,
-            Read::Failed => !self.qty.is_zero(),
-            Read::Nothing => expired,
+        if self.mark_age_s >= u64::from(self.mark_max_age_s) {
+            self.instrument_restrictions
+                .insert(InstrumentRestriction::StaleMark);
         }
+        Ok(())
     }
 
-    fn apply(&mut self, step: &Step) -> Result<Read, SpecError> {
+    fn apply(
+        &mut self,
+        step: &Step,
+        wall_s: u64,
+        journal: &mut Vec<RiskEvent>,
+    ) -> Result<Read, SpecError> {
         match &step.input {
             Input::Mark { bid, sane } => Ok(self.read_mark(*bid, *sane, step.session)),
             Input::Fill { side, qty, price } => {
@@ -308,10 +326,20 @@ impl Fold {
                 Ok(Read::Nothing)
             }
             Input::Clock => Ok(Read::Nothing),
-            Input::RiskDayStarted
-            | Input::OwnerAcknowledged { .. }
+            Input::RiskDayStarted => {
+                self.start_day(wall_s, journal)?;
+                Ok(Read::Nothing)
+            }
+            Input::UniverseChanged {
+                instrument,
+                change,
+                reason,
+            } => {
+                self.change_universe(instrument, *change, *reason, journal);
+                Ok(Read::Nothing)
+            }
+            Input::OwnerAcknowledged { .. }
             | Input::AllocationChange { .. }
-            | Input::UniverseChanged { .. }
             | Input::FloorLoosened { .. }
             | Input::AgentStopped { .. }
             | Input::GoalComplete => fold_later(&step.input),
@@ -319,7 +347,8 @@ impl Fold {
     }
 
     /// For an equity only a regular-session mark counts; crypto counts every mark. A counted sane
-    /// mark moves E and resets the mark's age (§5.2, trading spec §8.2).
+    /// mark moves E, resets the mark's age, and clears `stale_mark`; a counted mark that fails its
+    /// checks makes a held instrument `stale_mark` (§5.2, trading spec §8.2).
     fn read_mark(&mut self, bid: Price, sane: bool, session: MarketSession) -> Read {
         let counts = self.asset_class == AssetClass::Crypto || session == MarketSession::Regular;
         if !counts {
@@ -327,10 +356,40 @@ impl Fold {
         } else if sane {
             self.mark = bid;
             self.mark_age_s = 0;
+            self.instrument_restrictions
+                .remove(&InstrumentRestriction::StaleMark);
             Read::Quote
         } else {
+            if !self.qty.is_zero() {
+                self.instrument_restrictions
+                    .insert(InstrumentRestriction::StaleMark);
+            }
             Read::Failed
         }
+    }
+
+    /// A removal restricts the instrument and a re-admission lifts it (§5.9). The state holds one
+    /// instrument's position, as [`Opening`] does, so a change applies to it whatever id it carries.
+    fn change_universe(
+        &mut self,
+        instrument: &AssetId,
+        change: UniverseChange,
+        reason: RemovalReason,
+        journal: &mut Vec<RiskEvent>,
+    ) {
+        match change {
+            UniverseChange::Removed => self
+                .instrument_restrictions
+                .insert(InstrumentRestriction::RemovedInstrument),
+            UniverseChange::Admitted => self
+                .instrument_restrictions
+                .remove(&InstrumentRestriction::RemovedInstrument),
+        };
+        journal.push(RiskEvent::UniverseChanged {
+            instrument: instrument.clone(),
+            change,
+            reason,
+        });
     }
 
     /// A fill moves the sub-ledger in any session (§5.2). A sale of more than the agent holds would be
@@ -390,6 +449,10 @@ impl Fold {
 
     /// A `scale_sizes` rung triggers at once and lifts after `scale_lift_after_s` of session time
     /// continuously below its lift level (§5.5). It is the only kind of rung the lift level lifts.
+    ///
+    /// The delay credits no more session seconds than wall seconds passed, so a calendar that
+    /// over-reports its session can never lift a rung early. Active time and staleness take the
+    /// clock's count as it is, since an over-report only makes a trim or a stale mark come sooner.
     fn scale_rung(
         &mut self,
         key: LimitKey,
@@ -416,7 +479,7 @@ impl Fold {
             what: "a scale_sizes rung the state did not open with",
         })?;
         if rung.lifting {
-            rung.lift_s = add_seconds(rung.lift_s, moment.session_s)?;
+            rung.lift_s = add_seconds(rung.lift_s, moment.session_s.min(moment.wall_s))?;
         }
         if let Some(active_s) = rung.active_s {
             rung.active_s = Some(add_seconds(active_s, moment.session_s)?);
@@ -445,8 +508,8 @@ impl Fold {
         Ok(())
     }
 
-    /// A limit that confirms (§5.6) and then holds until its own lift path, none of which a mark is
-    /// (§5.4, §5.7, §5.8): a latched limit is not evaluated again in this slice.
+    /// A rung or the floor, which confirms (§5.6) and then holds until its own lift path, none of
+    /// which a mark is (§5.7, §5.8): a latched one is not evaluated again until R4's paths lift it.
     fn confirm(
         &mut self,
         limit: Limit,
@@ -462,13 +525,20 @@ impl Fold {
         else {
             return Ok(());
         };
-        self.confirmations.remove(&limit.key);
         self.latched.insert(limit.key);
+        self.latch(limit, trigger.reason(), journal);
+        Ok(())
+    }
+
+    /// Applies a limit that has just triggered: its restriction, its event, and for a flatten the
+    /// agent's kill switch (§5.4, §5.5, §5.7). Its breach time is spent.
+    fn latch(&mut self, limit: Limit, reason: Option<TriggerReason>, journal: &mut Vec<RiskEvent>) {
+        self.confirmations.remove(&limit.key);
         self.restrictions.insert(limit.restriction);
         journal.push(RiskEvent::RiskLimitTriggered {
             limit: limit.key,
             action: limit.action,
-            reason: trigger.reason(),
+            reason,
         });
         if limit.action == LadderAction::FlattenAndPause {
             journal.push(RiskEvent::KillSwitchActivated {
@@ -476,7 +546,77 @@ impl Fold {
                 initiator: limit.key,
             });
         }
+    }
+
+    /// A `profit_stop` goal confirms by breach time with no hard trigger, until the goal completes
+    /// (§3.1, §5.6). It is a goal and not a limit: it journals `GoalCompleted` with the one outcome
+    /// §3.1 gives it, and restricts the agent to `goal_complete`.
+    fn profit_stop(
+        &mut self,
+        reading: Option<bool>,
+        moment: Moment,
+        journal: &mut Vec<RiskEvent>,
+    ) -> Result<(), SpecError> {
+        let Some(hit) = reading else {
+            return Ok(());
+        };
+        if self.restrictions.contains(&Restriction::GoalComplete) {
+            return Ok(());
+        }
+        let key = LimitKey::ProfitStop;
+        if self.confirmations.entry(key).or_default().update(
+            hit,
+            moment.wall_s,
+            self.breach_confirm_s,
+        )? {
+            self.confirmations.remove(&key);
+            self.restrictions.insert(Restriction::GoalComplete);
+            journal.push(RiskEvent::GoalCompleted {
+                reason: Some(GoalReason::ProfitStopReached),
+                then: Some(ThenAction::DiscretionaryExitAllThenRetire),
+                on_complete: None,
+            });
+        }
         Ok(())
+    }
+
+    /// A book the step leaves flat has nothing to go stale (§5.2). Then one event per instrument
+    /// restriction the step changed, never one standing for another (§5.10): a removal or re-admission
+    /// carries its universe change's reason, and `stale_mark` carries `no_sane_mark` when set and
+    /// `sane_mark` when cleared.
+    fn instrument_events(
+        &mut self,
+        before: &BTreeSet<InstrumentRestriction>,
+        input: &Input,
+        journal: &mut Vec<RiskEvent>,
+    ) {
+        if self.qty.is_zero() {
+            self.instrument_restrictions
+                .remove(&InstrumentRestriction::StaleMark);
+        }
+        for restriction in [
+            InstrumentRestriction::RemovedInstrument,
+            InstrumentRestriction::StaleMark,
+        ] {
+            let active = self.instrument_restrictions.contains(&restriction);
+            if active == before.contains(&restriction) {
+                continue;
+            }
+            let reason = match input {
+                Input::UniverseChanged { reason, .. }
+                    if restriction == InstrumentRestriction::RemovedInstrument =>
+                {
+                    RestrictionReason::Removal(*reason)
+                }
+                _ if active => RestrictionReason::NoSaneMark,
+                _ => RestrictionReason::SaneMark,
+            };
+            journal.push(RiskEvent::InstrumentRestrictionChanged {
+                restriction,
+                reason,
+                active,
+            });
+        }
     }
 
     /// Breach time, then the hard trigger (§5.6, DEC-63): a sane quote at the 1.25x level applies
@@ -609,20 +749,7 @@ fn elapsed_s(from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
         .ok_or(SpecError::ClockWentBackwards)
 }
 
-/// Slice R3: a `profit_stop` goal's confirmation (§3.1, §5.6), which runs at every step.
-fn confirm_profit_stop(profit_level: &SchemaDec) -> Result<Fold, SpecError> {
-    let _ = profit_level;
-    Err(SpecError::Unimplemented)
-}
-
-/// Slice R3: `stale_mark`, set and cleared with its `InstrumentRestrictionChanged` (§5.2, §5.9).
-fn mark_goes_stale(input: &Input) -> Result<Outcome, SpecError> {
-    let _ = input;
-    Err(SpecError::Unimplemented)
-}
-
-/// Slices R3 and R4: the risk day and universe changes (R3); acknowledgments, allocation changes,
-/// floor loosening, retirement, and goal completion (R4).
+/// Slice R4: acknowledgments, allocation changes, floor loosening, retirement, and goal completion.
 fn fold_later(input: &Input) -> Result<Read, SpecError> {
     let _ = input;
     Err(SpecError::Unimplemented)
