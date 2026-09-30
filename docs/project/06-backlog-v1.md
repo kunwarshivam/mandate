@@ -1193,14 +1193,25 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   status rows are a separate status-only PR. MC-B31 still fails at `mandate_risk::trim_proposals`
   (pending E6-4). The founder question above stays Proposed.
 - **Tests correction for family B's moved clocks** (DEC-250's 2026-09-30 amendment; crate code, so
-  not in the reference-case PR, ES-22). `crates/mandate-refcases/src/mandate/order_builder.rs`:
-  - move MC-B22 and MC-B23 from `OWED` to `PASSING` (25 and 7). Until this lands,
-    `every_builder_case_passes_or_fails_at_its_owner` fails with `MC-B22: the case still passed`;
-  - `the_two_session_cases_pass_once_now_agrees_with_their_labels` is redundant: it re-sets MC-B22's
-    clock to the values the case already holds, and changes only MC-B23's `expires_at` (20:55Z to
-    21:00Z). Keep its sibling-swap proof, which is the only one for a sell's `order_type` and for a
-    deferred outcome, but run it on the two cases as the fixture states them, and drop the clock
-    doctoring. DEC-250 item 3's label-against-clock comparison stays proved by
+  not in the reference-case PR, ES-22). `crates/mandate-refcases/src/mandate/order_builder.rs`.
+  *Done (`cursor/family-b-clock-owed-tests-v2-138b`, which lands before #347):* moving MC-B22 and
+  MC-B23 from `OWED` to `PASSING` would be red on the fixture before #347, so a `CLOCKED` table
+  judges them by the fixture's own consistency instead. When a case's `session` and
+  `in_close_window` agree with `mandate_risk::session_at` at its `now`, it must pass; otherwise it
+  must fail naming the conflict, as before. The test compares the labels itself, so a harness that
+  stops comparing them is still caught. MC-B31 stays in `OWED`: a `trim_to_target` case stops at
+  `trim_proposals` before its labels are compared. `the_two_session_cases_pass_once_now_agrees_with_their_labels`
+  is kept, because on the fixture before #347 its clock moves are what give its sibling-swap proof
+  (the only one for a sell's `order_type` and for a deferred outcome) a case that passes.
+- Fold the clocked cases back once #347 and #346 have both merged (the tests correction above,
+  follow-up). With the clocks moved, `labels_agree_with_calendar` is true for both cases, so:
+  - move MC-B22 and MC-B23 into `PASSING`, where `every_expected_member_is_compared_and_required`
+    also sweeps them, and delete `CLOCKED` and `labels_agree_with_calendar`;
+  - drop `the_two_session_cases_pass_once_now_agrees_with_their_labels`'s clock doctoring, which
+    re-sets MC-B22's clock to the values it already holds and changes only MC-B23's `expires_at`,
+    and run its sibling-swap proof on the two cases as the fixture states them;
+  - reword that test's doc, which says the two cases fail only because their labels contradict their
+    clock. DEC-250 item 3's label-against-clock comparison stays proved by
     `the_builder_and_the_gate_see_one_scene`'s doctored MC-B01.
 - Derive the family-B sibling counts (#331 round-2 review, nit). The `sibling` sweep's
   `siblings == 87` and `siblings == 11` are hand-written, and they alone catch a `sibling` that
