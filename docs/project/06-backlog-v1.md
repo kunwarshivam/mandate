@@ -973,6 +973,21 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   nothing else is listed. The change touches the YAML,
   the reference implementation's checks, and the regenerated fixtures, so it cannot share a pull
   request with code (ES-22).
+- Tighten the families G and F harness (#317 re-review, minor 2 and nits 1 to 4), in one tests
+  correction of `crates/mandate-refcases/src/mandate/risk_gate.rs` and DEC-178:
+  - compare `pacing` as `None` on every allowed `gate` case and destructure `Decision`, so a new
+    member does not compile until it is compared; today a `pacing` that always sets
+    `marketable_limit_required` leaves every F, G and L case green, and only `mandate-risk`'s own
+    tests catch it (DEC-178 item 14);
+  - reword DEC-178 item 12: the five non-fixture fields are compared with the same values typed
+    again, because `mandate-risk`'s `test_default_config` is test-only and another crate cannot
+    call it;
+  - add an edit test for item 11's pin on an allowed order's whole `checks` list, which today no
+    harness test of its own guards;
+  - note in item 11 that the pin is only meaningful for an allowed opening (MC-G13), since the gate
+    reports checks 5 to 8 as `Passed` for an exit without running them;
+  - drop the unreachable typed error for an unknown group rank in `Scene::read`, or state why it
+    stays.
 - **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163).
   `crates/mandate-refcases/src/trading_domain.rs` has no gate driver: `propose_order` steps and the
   `decision` expectation are pending on E6-3. The crate depends on `mandate-risk` for the mandate
