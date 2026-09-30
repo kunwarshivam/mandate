@@ -309,6 +309,23 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   those and the workspace policy overlay current at the effective time: independence if either
   requires it, the larger approver count, and an author's earlier `counted` grant not counting once
   independence is required. Tests first, against `reference/mandate/ref.py`'s `approval_quorum`.
+  *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
+  control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
+  would make MI-24 true as written.
+  *Follow-up (#321 review, minor 2):* §6.1's and §6.4's "one assertion per approval" should read "per grant",
+  because a two-approver approval takes two assertions.
+  *Follow-up (#321 review, minor 3):* §5.9 says the executor cancels pending approvals, but §6.4 and
+  journal spec §2 put that in the runtime's step; align them.
+  *Follow-up (#321 review, minor 4):* journal spec §9's `ApprovalRevalidated` row lacks the
+  working-universe membership that check 9 compares.
+  *Follow-up (#321 review, minor 5):* check 3's `role:` approver entries are resolved at an unstated
+  moment; state it.
+  *Follow-up (#321 review, minor 6):* the reference model's assertion ledger never fills `used` from
+  `OwnerCommandIssued` or `OwnerAcknowledged`.
+  *Follow-up (#321 review, minor 7):* `notifications.channels` cannot express `cli_inbox`.
+  *Follow-up (#321 review, minor 8):* `recent_timeout` does not say whose `timeout_s` it uses.
+  *Follow-up (#321 review, minor 9):* `reference/mandate/mutants.py` runs only in
+  `cargo xtask ci nightly`, not in `cargo xtask check`.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded
