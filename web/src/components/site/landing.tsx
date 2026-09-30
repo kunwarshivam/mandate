@@ -10,7 +10,8 @@ import { Contents } from "./contents";
 import { BODY, BOLD, BUTTON, H2, LINK, MONO, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
 import { ModeChart, Perch, TitleOwl } from "./owls";
 import { RecordTrace } from "./record-trace";
-import { Blink, Browser, Desktop, UnderConstruction, Window } from "./retro";
+import { Desktop } from "./desktop";
+import { Blink, Browser, UnderConstruction, Window } from "./retro";
 import { SiteFooter } from "./site-footer";
 
 export const HEADLINE = "Owlhead";
@@ -208,15 +209,15 @@ function Section({ id, n, title, children }: { id: string; n: number; title: str
 
 /**
  * The landing page at owlhead.ai (DEC-212), for signed-out visitors: one homepage, set as the web
- * looked in the late 1990s, that says what Owlhead is, why and how, and asks for an email. It brings
- * its own `<main>` and footer.
+ * looked in the late 1990s and open in a browser window on a desktop of the time, that says what
+ * Owlhead is, why and how, and asks for an email. It brings its own `<main>` and footer.
  */
 export function Landing() {
   return (
-    <Desktop className="flex-1">
-      <div id="top" className="mx-auto w-full max-w-[68rem] px-1.5 py-3 sm:px-6 sm:py-8" data-slot="landing-page">
+    <Desktop
+      home={
         <Browser address="http://www.owlhead.ai/">
-          <div className={cn("text-[1.125rem] leading-[1.65]", BODY)}>
+          <div id="top" className={cn("text-[1.125rem] leading-[1.65]", BODY)} data-slot="landing-page">
           <header className="grid justify-items-center gap-4 px-4 pt-8 pb-2 text-center sm:px-8 sm:pt-12">
             <h1>
               <span className="sr-only">{HEADLINE}</span>
@@ -280,7 +281,7 @@ export function Landing() {
           <SiteFooter />
           </div>
         </Browser>
-      </div>
-    </Desktop>
+      }
+    />
   );
 }

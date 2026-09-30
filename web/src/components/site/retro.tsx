@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { ArrowClockwise, ArrowLeft, ArrowRight, FolderOpen, HandPalm, House, Image as ImageIcon, Key, MagnifyingGlass, Printer } from "@phosphor-icons/react/ssr";
 import { OwlheadMark } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
@@ -12,21 +12,28 @@ export function Blink({ children }: { children: ReactNode }) {
 
 const WINDOW_BUTTONS = ["_", "□", "×"];
 
-/** A title bar from a 1990s desktop: dark, with the three buttons at the right. */
-function TitleBar({ title, icon }: { title: string; icon?: ReactNode }) {
+export const WINDOW_BUTTON = cn(RAISED, "grid size-5 place-items-center bg-muted text-xs leading-none text-foreground");
+
+/**
+ * A title bar from a 1990s desktop: dark while its window is in front, grey behind, with the three
+ * buttons at the right. Without `controls`, the buttons are drawn and do nothing.
+ */
+export function TitleBar({ title, icon, inactive, controls, className, ...rest }: { title: string; icon?: ReactNode; inactive?: boolean; controls?: ReactNode } & ComponentProps<"div">) {
   return (
-    <div className={cn("flex h-7 items-center justify-between gap-3 bg-foreground ps-1.5 pe-0.5 text-[0.9375rem] text-card", PIXEL)}>
+    <div className={cn("flex h-7 shrink-0 items-center justify-between gap-3 ps-1.5 pe-0.5 text-[0.9375rem] text-card", inactive ? "bg-muted-foreground" : "bg-foreground", PIXEL, className)} {...rest}>
       <span className="flex min-w-0 items-center gap-1.5">
         {icon}
         <span className="truncate">{title}</span>
       </span>
-      <span aria-hidden className="flex shrink-0 gap-0.5">
-        {WINDOW_BUTTONS.map((glyph) => (
-          <span key={glyph} className={cn(RAISED, "grid size-5 place-items-center bg-muted text-xs leading-none text-foreground")}>
-            {glyph}
-          </span>
-        ))}
-      </span>
+      {controls ?? (
+        <span aria-hidden className="flex shrink-0 gap-0.5">
+          {WINDOW_BUTTONS.map((glyph) => (
+            <span key={glyph} className={WINDOW_BUTTON}>
+              {glyph}
+            </span>
+          ))}
+        </span>
+      )}
     </div>
   );
 }
@@ -67,16 +74,14 @@ export const DIRECTORY = [
 ];
 
 /**
- * The page open in a browser of 1996: title bar, menus, toolbar, the address, the guide buttons, and
- * a status bar that shows where a link goes. Only the guide buttons work; the rest is hidden from
- * assistive technology.
+ * The page open in a browser of 1996, inside its desktop window: menus, toolbar, the address, the
+ * guide buttons, the page, which scrolls on its own, and a status bar that shows where a link goes.
+ * Only the guide buttons work; the rest is hidden from assistive technology.
  */
 export function Browser({ address, children }: { address: string; children: ReactNode }) {
   return (
-    <div className={cn(RAISED, "bg-muted p-0.5 ring-1 ring-foreground/70")} data-slot="browser">
-      <TitleBar title="Owlhead Home Page" icon={<OwlheadMark title="" className="size-4 shrink-0" />} />
-
-      <div aria-hidden className={cn("flex gap-4 overflow-hidden px-2 py-0.5 text-[0.9375rem] whitespace-nowrap", PIXEL)}>
+    <div className="flex min-h-0 flex-1 flex-col" data-slot="browser">
+      <div aria-hidden className={cn("flex shrink-0 gap-4 overflow-hidden px-2 py-0.5 text-[0.9375rem] whitespace-nowrap", PIXEL)}>
         {MENU.map((m) => (
           <span key={m}>
             <span className="underline">{m[0]}</span>
@@ -85,11 +90,15 @@ export function Browser({ address, children }: { address: string; children: Reac
         ))}
       </div>
 
-      <div className="border-t border-b border-t-card border-b-foreground/40 px-1.5 py-1.5">
+      <div className="shrink-0 border-t border-b border-t-card border-b-foreground/40 px-1.5 py-1.5">
         <div className="flex items-stretch justify-between gap-2">
-          <div aria-hidden className={cn("flex flex-wrap gap-1", PIXEL)}>
+          <div className={cn("flex flex-wrap gap-1", PIXEL)}>
             {TOOLS.map((t) => (
-              <span key={t.label} className={cn(RAISED, "grid w-[4.25rem] justify-items-center gap-0.5 bg-muted px-1 py-1 text-[0.8125rem] leading-none", t.off && "text-foreground/35", t.wide && "hidden sm:grid")}>
+              <span
+                key={t.label}
+                aria-hidden
+                className={cn(RAISED, "grid w-[4.25rem] justify-items-center gap-0.5 bg-muted px-1 py-1 text-[0.8125rem] leading-none", t.off && "text-foreground/35", t.wide && "hidden sm:grid")}
+              >
                 {t.icon}
                 {t.label}
               </span>
@@ -123,33 +132,17 @@ export function Browser({ address, children }: { address: string; children: Reac
         </nav>
       </div>
 
-      <div className={cn(SUNKEN, "bg-card")}>{children}</div>
+      <div className={cn(SUNKEN, "min-h-0 flex-1 overflow-y-auto overscroll-contain bg-card")} data-scroll-root>
+        {children}
+      </div>
 
-      <div aria-hidden className={cn("mt-0.5 flex gap-0.5 text-[0.875rem]", PIXEL)}>
+      <div aria-hidden className={cn("mt-0.5 flex shrink-0 gap-0.5 text-[0.875rem]", PIXEL)}>
         <span className={cn(SUNKEN, "grid w-8 shrink-0 place-items-center")}>
           <Key className="size-4" />
         </span>
         <StatusText origin={address} className={cn(SUNKEN, "min-w-0 flex-1 truncate px-2 py-0.5")} />
         <span className={cn(SUNKEN, "hidden w-40 px-2 py-0.5 sm:block")}>Private beta</span>
       </div>
-    </div>
-  );
-}
-
-/** The desktop behind the browser: grey, dithered in a two by two grid the way 16 colours made greys. */
-export function Desktop({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={cn("relative isolate bg-muted", className)}>
-      <svg aria-hidden className="absolute inset-0 -z-10 size-full">
-        <defs>
-          <pattern id="dither" width="4" height="4" patternUnits="userSpaceOnUse">
-            <rect width="1" height="1" className="fill-foreground/15" />
-            <rect x="2" y="2" width="1" height="1" className="fill-foreground/15" />
-          </pattern>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#dither)" />
-      </svg>
-      {children}
     </div>
   );
 }

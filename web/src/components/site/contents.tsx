@@ -1,21 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { BOLD, LINK, SUNKEN } from "./letter";
 
 type Item = { id: string; title: string };
 
-/** How far down the window a heading must pass before its section counts as the one being read. */
+/** How far down the page's window a heading must pass before its section counts as the one being read. */
 const READING_LINE = 0.3;
 
-function reading(ids: string[]): string | null {
-  const bottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+/** The page scrolls inside its browser window, so "being read" is measured against that pane. */
+function reading(ids: string[], pane: HTMLElement): string | null {
+  const bottom = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2;
   if (bottom) return ids.at(-1) ?? null;
+  const line = pane.getBoundingClientRect().top + pane.clientHeight * READING_LINE;
   let current: string | null = null;
   for (const id of ids) {
     const top = document.getElementById(id)?.getBoundingClientRect().top;
-    if (top !== undefined && top <= window.innerHeight * READING_LINE) current = id;
+    if (top !== undefined && top <= line) current = id;
   }
   return current;
 }
@@ -26,26 +28,29 @@ function reading(ids: string[]): string | null {
  */
 export function Contents({ items }: { items: Item[] }) {
   const [current, setCurrent] = useState<string | null>(null);
+  const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
+    const pane = ref.current?.closest<HTMLElement>("[data-scroll-root]");
+    if (!pane) return;
     const ids = items.map((i) => i.id);
     let frame = 0;
     const update = () => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => setCurrent(reading(ids)));
+      frame = requestAnimationFrame(() => setCurrent(reading(ids, pane)));
     };
     update();
-    window.addEventListener("scroll", update, { passive: true });
+    pane.addEventListener("scroll", update, { passive: true });
     window.addEventListener("resize", update);
     return () => {
       cancelAnimationFrame(frame);
-      window.removeEventListener("scroll", update);
+      pane.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
     };
   }, [items]);
 
   return (
-    <nav aria-labelledby="contents-title" className={cn(SUNKEN, "bg-muted px-4 py-3 lg:sticky lg:top-4")} data-slot="contents">
+    <nav ref={ref} aria-labelledby="contents-title" className={cn(SUNKEN, "bg-muted px-4 py-3 lg:sticky lg:top-4")} data-slot="contents">
       <h2 id="contents-title" className={cn(BOLD, "pb-1")}>
         Contents
       </h2>

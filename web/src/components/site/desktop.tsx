@@ -1,0 +1,508 @@
+"use client";
+
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
+import { OwlheadMark } from "@/components/brand/Logo";
+import { Owl } from "@/components/domain/owl";
+import { cn } from "@/lib/utils";
+import { Notepad, PictureViewer } from "./apps";
+import { MONO, PIXEL, RAISED, SUNKEN } from "./letter";
+import { BOOK, HELP, KEY, LEDGER, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
+import { TitleBar, WINDOW_BUTTON } from "./retro";
+import { ThemeSwitch } from "./theme-switch";
+import { DisplayProperties, Wallpaper } from "./wallpaper";
+
+export type AppId = "home" | "readme" | "owl" | "display";
+
+type Win = { open: boolean; min: boolean; max: boolean; x: number; y: number; z: number };
+
+type State = { top: number; wins: Record<AppId, Win> };
+
+type Action =
+  | { type: "open"; id: AppId }
+  | { type: "close"; id: AppId }
+  | { type: "minimize"; id: AppId }
+  | { type: "maximize"; id: AppId }
+  | { type: "focus"; id: AppId }
+  | { type: "move"; id: AppId; x: number; y: number }
+  | { type: "reset" };
+
+const CLOSED: Win = { open: false, min: false, max: false, x: 0, y: 0, z: 0 };
+
+function initial(): State {
+  return { top: 1, wins: { home: { ...CLOSED, open: true, z: 1 }, readme: CLOSED, owl: CLOSED, display: CLOSED } };
+}
+
+function reduce(state: State, action: Action): State {
+  if (action.type === "reset") return initial();
+  const win = state.wins[action.id];
+  const set = (patch: Partial<Win>, raise = false): State => ({
+    top: raise ? state.top + 1 : state.top,
+    wins: { ...state.wins, [action.id]: { ...win, ...patch, ...(raise && { z: state.top + 1 }) } },
+  });
+  switch (action.type) {
+    case "open":
+      return set({ open: true, min: false }, true);
+    case "close":
+      return set({ ...CLOSED });
+    case "minimize":
+      return set({ min: true });
+    case "maximize":
+      return set({ max: !win.max }, true);
+    case "focus":
+      return win.z === state.top ? state : set({}, true);
+    case "move":
+      return set({ x: action.x, y: action.y });
+    default: {
+      const unhandled: never = action;
+      return unhandled;
+    }
+  }
+}
+
+/** The window in front: open, not minimized, and highest. */
+function frontmost(state: State): AppId | null {
+  let front: AppId | null = null;
+  for (const id of Object.keys(state.wins) as AppId[]) {
+    const w = state.wins[id];
+    if (w.open && !w.min && (front === null || w.z > state.wins[front].z)) front = id;
+  }
+  return front;
+}
+
+type App = { title: string; task: string; icon: ReactNode; frame: string };
+
+/** Each window's place on a wide screen. On a phone every window fills the desktop. */
+const APPS: Record<AppId, App> = {
+  home: {
+    title: "Owlhead Home Page",
+    task: "Owlhead",
+    icon: <OwlheadMark title="" className="size-4 shrink-0" />,
+    frame: "sm:inset-y-3 sm:left-[7.5rem] sm:right-3 2xl:right-auto 2xl:w-[72rem]",
+  },
+  readme: {
+    title: "readme.txt - Notepad",
+    task: "readme.txt",
+    icon: <PixelIcon sprite={NOTE} className="size-4" />,
+    frame: "sm:inset-auto sm:top-12 sm:right-8 sm:h-[27rem] sm:max-h-[calc(100%-4rem)] sm:w-[27rem]",
+  },
+  owl: {
+    title: "owl.jpg - Picture Viewer",
+    task: "owl.jpg",
+    icon: <PixelIcon sprite={PICTURE} className="size-4" />,
+    frame: "sm:inset-auto sm:top-6 sm:right-28 sm:h-[38rem] sm:max-h-[calc(100%-2rem)] sm:w-[23rem]",
+  },
+  display: {
+    title: "Display Properties",
+    task: "Display",
+    icon: <PixelIcon sprite={MONITOR} className="size-4" />,
+    frame: "sm:inset-auto sm:top-10 sm:left-[max(8rem,calc(50%-14rem))] sm:max-h-[calc(100%-3rem)] sm:w-[28rem]",
+  },
+};
+
+type Shortcut = { id: string; label: string; icon: ReactNode } & ({ app: AppId; hash?: string } | { href: string });
+
+const sprite = (s: Sprite) => <PixelIcon sprite={s} />;
+
+const SHORTCUTS: Shortcut[] = [
+  { id: "owlhead", label: "Owlhead", icon: <Owl seed="owlhead" mood="awake" className="size-8" />, app: "home" },
+  { id: "guestbook", label: "Guestbook", icon: sprite(BOOK), app: "home", hash: "beta" },
+  { id: "record", label: "The record", icon: sprite(LEDGER), app: "home", hash: "record" },
+  { id: "questions", label: "Questions", icon: sprite(HELP), app: "home", hash: "questions" },
+  { id: "readme", label: "readme.txt", icon: sprite(NOTE), app: "readme" },
+  { id: "owl", label: "owl.jpg", icon: sprite(PICTURE), app: "owl" },
+  { id: "display", label: "Display", icon: sprite(MONITOR), app: "display" },
+  { id: "signin", label: "Sign in", icon: sprite(KEY), href: "/login" },
+];
+
+const WIDE = "(min-width: 40rem)";
+
+/** How much of a dragged window must stay on the desktop, so its title bar can always be caught. */
+const GRIP = 96;
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+const PRESS = "cursor-pointer active:border-t-foreground/60 active:border-l-foreground/60 active:border-r-card active:border-b-card outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground";
+
+/** The title bar's glyphs, as 8 by 8 pixel drawings. */
+const GLYPHS = {
+  minimize: [[1, 6, 5, 2]],
+  maximize: [
+    [0, 0, 8, 2],
+    [0, 2, 1, 6],
+    [7, 2, 1, 6],
+    [0, 7, 8, 1],
+  ],
+  restore: [
+    [2, 0, 6, 1],
+    [7, 1, 1, 4],
+    [0, 3, 6, 2],
+    [0, 5, 1, 3],
+    [5, 5, 1, 3],
+    [0, 7, 6, 1],
+  ],
+  close: [
+    [0, 0, 2, 1],
+    [6, 0, 2, 1],
+    [1, 1, 2, 1],
+    [5, 1, 2, 1],
+    [2, 2, 4, 1],
+    [3, 3, 2, 2],
+    [2, 5, 4, 1],
+    [1, 6, 2, 1],
+    [5, 6, 2, 1],
+    [0, 7, 2, 1],
+    [6, 7, 2, 1],
+  ],
+} as const;
+
+function Glyph({ name }: { name: keyof typeof GLYPHS }) {
+  return (
+    <svg aria-hidden viewBox="0 0 8 8" shapeRendering="crispEdges" className="size-2 fill-current">
+      {GLYPHS[name].map(([x, y, w, h]) => (
+        <rect key={`${x}.${y}`} x={x} y={y} width={w} height={h} />
+      ))}
+    </svg>
+  );
+}
+
+function Window({ id, win, front, dispatch, children }: { id: AppId; win: Win; front: boolean; dispatch: (a: Action) => void; children: ReactNode }) {
+  const { title, icon, frame } = APPS[id];
+  const ref = useRef<HTMLElement>(null);
+  const drag = useRef<{ sx: number; sy: number; ox: number; oy: number; minX: number; maxX: number; minY: number; maxY: number } | null>(null);
+
+  const grab = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || win.max || (e.target as Element).closest("button")) return;
+    if (!window.matchMedia(WIDE).matches) return;
+    const el = ref.current;
+    const desk = el?.parentElement;
+    if (!el || !desk) return;
+    const r = el.getBoundingClientRect();
+    const d = desk.getBoundingClientRect();
+    drag.current = {
+      sx: e.clientX,
+      sy: e.clientY,
+      ox: win.x,
+      oy: win.y,
+      minX: win.x + d.left - r.right + GRIP,
+      maxX: win.x + d.right - r.left - GRIP,
+      minY: win.y + d.top - r.top,
+      maxY: win.y + d.bottom - r.top - 28,
+    };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
+  const pull = (e: PointerEvent<HTMLDivElement>) => {
+    const g = drag.current;
+    if (!g) return;
+    dispatch({ type: "move", id, x: clamp(g.ox + e.clientX - g.sx, g.minX, g.maxX), y: clamp(g.oy + e.clientY - g.sy, g.minY, g.maxY) });
+  };
+
+  const drop = () => {
+    drag.current = null;
+  };
+
+  return (
+    <section
+      ref={ref}
+      id={`win-${id}`}
+      aria-label={title}
+      tabIndex={-1}
+      hidden={!win.open || win.min}
+      data-slot="os-window"
+      data-window={id}
+      data-front={front || undefined}
+      data-maximized={win.max || undefined}
+      onPointerDownCapture={() => dispatch({ type: "focus", id })}
+      onFocusCapture={() => dispatch({ type: "focus", id })}
+      className={cn(RAISED, "absolute inset-0 flex flex-col bg-muted p-0.5 ring-1 ring-foreground/70 outline-none max-sm:translate-none!", !win.max && frame)}
+      style={{ zIndex: win.z, translate: win.max ? undefined : `${win.x}px ${win.y}px` }}
+    >
+      <TitleBar
+        title={title}
+        icon={icon}
+        inactive={!front}
+        onPointerDown={grab}
+        onPointerMove={pull}
+        onPointerUp={drop}
+        onPointerCancel={drop}
+        onDoubleClick={(e) => {
+          if (!(e.target as Element).closest("button")) dispatch({ type: "maximize", id });
+        }}
+        className={cn("select-none", !win.max && "sm:cursor-grab sm:touch-none sm:active:cursor-grabbing")}
+        controls={
+          <span className="flex shrink-0 gap-0.5">
+            <button type="button" aria-label={`Minimize ${title}`} onClick={() => dispatch({ type: "minimize", id })} className={cn(WINDOW_BUTTON, PRESS)}>
+              <Glyph name="minimize" />
+            </button>
+            <button type="button" aria-label={`${win.max ? "Restore" : "Maximize"} ${title}`} onClick={() => dispatch({ type: "maximize", id })} className={cn(WINDOW_BUTTON, PRESS, "max-sm:hidden")}>
+              <Glyph name={win.max ? "restore" : "maximize"} />
+            </button>
+            <button type="button" aria-label={`Close ${title}`} onClick={() => dispatch({ type: "close", id })} className={cn(WINDOW_BUTTON, PRESS, "ms-0.5")}>
+              <Glyph name="close" />
+            </button>
+          </span>
+        }
+      />
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+    </section>
+  );
+}
+
+function subscribeClock(onChange: () => void): () => void {
+  const t = setInterval(onChange, 10_000);
+  return () => clearInterval(t);
+}
+
+const now = () => new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
+/** The tray's clock. It shows the visitor's own time, so it waits for the browser before it draws. */
+function Clock() {
+  const time = useSyncExternalStore(subscribeClock, now, () => "");
+  return (
+    <span aria-hidden className="w-[4.75rem] text-center text-[0.9375rem] max-sm:hidden" data-slot="clock">
+      {time}
+    </span>
+  );
+}
+
+const MENU_ITEM = cn("flex w-full cursor-pointer items-center gap-2.5 px-2 py-1 text-start text-[0.9375rem] outline-none hover:bg-foreground hover:text-card focus-visible:bg-foreground focus-visible:text-card", PIXEL);
+
+/** Up and Down move through a menu's items, as a menu of the time did. */
+function arrowKeys(e: KeyboardEvent<HTMLElement>) {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  e.preventDefault();
+  const items = [...e.currentTarget.querySelectorAll<HTMLElement>("[role=menuitem]")];
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+}
+
+function ShortcutItem({ s, onOpen, role, className, children }: { s: Shortcut; onOpen: (s: Shortcut) => void; role?: "menuitem"; className?: string; children: ReactNode }) {
+  if ("href" in s)
+    return (
+      <Link href={s.href} role={role} className={className}>
+        {children}
+      </Link>
+    );
+  return (
+    <button type="button" role={role} onClick={() => onOpen(s)} className={className}>
+      {children}
+    </button>
+  );
+}
+
+/**
+ * The landing page as a desktop from the late 1990s (DEC-218): a painting from the Met for wallpaper,
+ * icons that open windows, and windows that drag by their title bars, come to the front when touched,
+ * and minimize to the taskbar, fill the desktop, or close. The home page is always in the document,
+ * so its headings and landmarks are there to read even while its window is hidden.
+ */
+export function Desktop({ home }: { home: ReactNode }) {
+  const [state, dispatch] = useReducer(reduce, undefined, initial);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [start, setStart] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [off, setOff] = useState(false);
+  const front = frontmost(state);
+  const startRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!start && !menu) return;
+    const shut = (e: Event) => {
+      if (e instanceof globalThis.KeyboardEvent ? e.key === "Escape" : !(e.target instanceof Element && e.target.closest("[data-slot=start], [data-slot=desktop-menu]"))) {
+        setStart(false);
+        setMenu(null);
+      }
+    };
+    document.addEventListener("keydown", shut);
+    document.addEventListener("pointerdown", shut);
+    return () => {
+      document.removeEventListener("keydown", shut);
+      document.removeEventListener("pointerdown", shut);
+    };
+  }, [start, menu]);
+
+  useEffect(() => {
+    if (start) startRef.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  }, [start]);
+
+  const openApp = (id: AppId, hash?: string) => {
+    dispatch({ type: "open", id });
+    setStart(false);
+    setMenu(null);
+    requestAnimationFrame(() => {
+      const target = hash ? document.getElementById(hash) : null;
+      if (target) {
+        target.scrollIntoView({ block: "start" });
+        history.replaceState(null, "", `#${hash}`);
+      }
+      document.getElementById(`win-${id}`)?.focus({ preventScroll: true });
+    });
+  };
+
+  const launch = (s: Shortcut) => {
+    setSelected(s.id);
+    if ("app" in s) openApp(s.app, s.hash);
+  };
+
+  const bodies: Record<AppId, ReactNode> = {
+    home,
+    readme: <Notepad />,
+    owl: <PictureViewer />,
+    display: <DisplayProperties onDone={() => dispatch({ type: "close", id: "display" })} />,
+  };
+
+  const open = (Object.keys(APPS) as AppId[]).filter((id) => state.wins[id].open);
+
+  return (
+    <div className="flex h-dvh flex-col overflow-hidden" data-slot="desktop">
+      <div
+        className="relative isolate min-h-0 flex-1 overflow-hidden"
+        onPointerDown={(e) => {
+          if (!(e.target as Element).closest("button, a, [data-slot=os-window]")) setSelected(null);
+        }}
+        onContextMenu={(e) => {
+          if ((e.target as Element).closest("button, a, [data-slot=os-window]")) return;
+          e.preventDefault();
+          const r = e.currentTarget.getBoundingClientRect();
+          setMenu({ x: Math.min(e.clientX - r.left, r.width - 200), y: Math.min(e.clientY - r.top, r.height - 90) });
+        }}
+      >
+        <Wallpaper />
+
+        <ul aria-label="Desktop" className="grid content-start gap-1 p-2 max-sm:grid-cols-4 sm:h-full sm:grid-flow-col sm:auto-cols-[6.5rem] sm:grid-rows-[repeat(auto-fill,5.75rem)]" data-slot="desktop-icons">
+          {SHORTCUTS.map((s) => {
+            const on = selected === s.id;
+            return (
+              <li key={s.id} className="grid justify-items-center">
+                <ShortcutItem s={s} onOpen={launch} className="group grid w-24 cursor-pointer content-start justify-items-center gap-1 p-1 outline-none">
+                  <span className={cn("grid size-8 place-items-center", on && "opacity-80")}>{s.icon}</span>
+                  <span
+                    className={cn(
+                      "px-1 text-center text-[0.875rem] leading-tight group-focus-visible:outline-1 group-focus-visible:outline-dotted group-focus-visible:outline-offset-1 group-focus-visible:outline-card",
+                      PIXEL,
+                      on ? "bg-highlight text-highlight-foreground" : "bg-foreground text-card",
+                    )}
+                  >
+                    {s.label}
+                  </span>
+                </ShortcutItem>
+              </li>
+            );
+          })}
+        </ul>
+
+        {(Object.keys(APPS) as AppId[]).map((id) => (
+          <Window key={id} id={id} win={state.wins[id]} front={front === id} dispatch={dispatch}>
+            {bodies[id]}
+          </Window>
+        ))}
+
+        {menu && (
+          <div role="menu" aria-label="Desktop" data-slot="desktop-menu" onKeyDown={arrowKeys} className={cn(RAISED, "absolute z-[60] w-48 bg-muted py-1 ring-1 ring-foreground/70")} style={{ left: menu.x, top: menu.y }}>
+            <button type="button" role="menuitem" autoFocus onClick={() => openApp("home")} className={MENU_ITEM}>
+              Open Owlhead
+            </button>
+            <button type="button" role="menuitem" onClick={() => openApp("display")} className={MENU_ITEM}>
+              Change wallpaper…
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className={cn("relative z-[70] flex h-10 shrink-0 items-center gap-1 border-t-2 border-t-card bg-muted px-1", PIXEL)} data-slot="taskbar">
+        <div data-slot="start" className="contents">
+          <button
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={start}
+            aria-controls="start-menu"
+            onClick={() => setStart((v) => !v)}
+            className={cn(start ? SUNKEN : RAISED, "flex h-8 shrink-0 cursor-pointer items-center gap-1.5 bg-muted px-2 text-[0.9375rem] outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground")}
+          >
+            <OwlheadMark title="" className="size-5" />
+            Start
+          </button>
+          {start && (
+            <div ref={startRef} id="start-menu" role="menu" aria-label="Start" onKeyDown={arrowKeys} className={cn(RAISED, "absolute bottom-10 left-1 flex bg-muted ring-1 ring-foreground/70")}>
+              <span aria-hidden className={cn("flex w-8 items-end justify-center bg-foreground pb-3 text-lg text-card [writing-mode:vertical-rl]", PIXEL)}>
+                <span className="rotate-180">
+                  Owlhead <span className="text-highlight">98</span>
+                </span>
+              </span>
+              <ul className="grid min-w-56 py-1">
+                {[{ id: "home", label: "Owlhead Home Page", icon: <OwlheadMark title="" className="size-6" />, app: "home" as const }, ...SHORTCUTS.slice(1)].map((s) => (
+                  <li key={s.id} className={cn(s.id === "signin" && "mt-1 border-t border-t-foreground/40 pt-1")}>
+                    <ShortcutItem s={s} onOpen={launch} role="menuitem" className={MENU_ITEM}>
+                      <span className="grid size-6 place-items-center [&>svg]:size-6">{s.icon}</span>
+                      {s.label}
+                    </ShortcutItem>
+                  </li>
+                ))}
+                <li>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setStart(false);
+                      setOff(true);
+                    }}
+                    className={MENU_ITEM}
+                  >
+                    <span aria-hidden className="grid size-6 place-items-center">
+                      <Glyph name="close" />
+                    </span>
+                    Shut down…
+                  </button>
+                </li>
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <span aria-hidden className="mx-0.5 h-7 border-r border-l border-r-card border-l-foreground/40" />
+
+        <ul aria-label="Open windows" className="flex min-w-0 flex-1 gap-1">
+          {open.map((id) => (
+            <li key={id} className="min-w-0 max-w-44 flex-1">
+              <button
+                type="button"
+                aria-pressed={front === id}
+                onClick={() => (front === id ? dispatch({ type: "minimize", id }) : openApp(id))}
+                className={cn(front === id ? "bg-card" : "bg-muted", front === id ? SUNKEN : RAISED, "flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 px-1.5 text-[0.875rem] outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground")}
+              >
+                {APPS[id].icon}
+                <span className="truncate">{APPS[id].task}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        <div className={cn(SUNKEN, "flex h-8 shrink-0 items-center gap-1 px-0.5")} data-slot="tray">
+          <ThemeSwitch />
+          <Clock />
+        </div>
+      </div>
+
+      {off && (
+        <button
+          type="button"
+          autoFocus
+          onClick={() => {
+            setOff(false);
+            dispatch({ type: "reset" });
+          }}
+          className={cn(MONO, "fixed inset-0 z-[100] grid cursor-pointer place-content-center gap-4 bg-foreground p-6 text-center text-[clamp(1.75rem,4.5vw,3rem)] leading-tight text-highlight outline-none dark:bg-background")}
+          data-slot="shut-down"
+        >
+          <span>
+            It&apos;s now safe to turn off
+            <br />
+            your computer.
+          </span>
+          <span className="text-xl text-card dark:text-foreground">Click anywhere to start Owlhead again.</span>
+        </button>
+      )}
+    </div>
+  );
+}

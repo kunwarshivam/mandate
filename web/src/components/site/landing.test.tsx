@@ -69,6 +69,22 @@ describe("the landing page's structure", () => {
     expect(within(browser as HTMLElement).getByText("http://www.owlhead.ai/").closest("[aria-hidden=true]")).toBeNull();
   });
 
+  it("switches dark mode from the taskbar's tray, pressed in while on, and saves the app's own theme choice", async () => {
+    const root = document.documentElement;
+    root.dataset.mode = "light";
+    renderLanding();
+    const toggle = screen.getByRole("button", { name: "Dark" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await act(async () => fireEvent.click(toggle));
+    expect(root.dataset.mode).toBe("dark");
+    expect(document.cookie).toContain("owlhead-theme=dark");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await act(async () => fireEvent.click(toggle));
+    expect(root.dataset.mode).toBe("light");
+    expect(document.cookie).toContain("owlhead-theme=light");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("answers every question as a term and its description", () => {
     renderLanding();
     for (const { q } of QUESTIONS) {
@@ -118,14 +134,144 @@ describe("links", () => {
     expect(status).toHaveTextContent("http://www.owlhead.ai/#how");
     fireEvent.pointerOut(link);
     expect(status).toHaveTextContent("Document: Done");
-    fireEvent.focusIn(screen.getAllByRole("link", { name: "Sign in" })[0]);
+    const browser = container.querySelector<HTMLElement>("[data-slot=browser]")!;
+    fireEvent.focusIn(within(browser).getAllByRole("link", { name: "Sign in" })[0]);
     expect(status).toHaveTextContent("http://www.owlhead.ai/login");
   });
 
-  it("links nowhere off the page but sign-in: no invented legal pages", () => {
+  it("links nowhere off the page but sign-in and the Met's page for each picture: no invented legal pages", () => {
+    const { container } = renderLanding();
+    const hrefs = [...container.querySelectorAll("a[href]")].map((a) => a.getAttribute("href")!);
+    const away = hrefs.filter((h) => !h.startsWith("#") && h !== "/login");
+    expect(away.length).toBeGreaterThan(0);
+    for (const h of away) expect(h).toMatch(/^https:\/\/www\.metmuseum\.org\/art\/collection\/search\/\d+$/);
+  });
+});
+
+const frame = () => new Promise((r) => requestAnimationFrame(r));
+
+async function press(el: HTMLElement) {
+  await act(async () => {
+    fireEvent.click(el);
+    await frame();
+  });
+}
+
+const win = (name: string) => screen.getByRole("region", { name });
+const zOf = (el: HTMLElement) => Number(el.style.zIndex);
+
+describe("the desktop", () => {
+  afterEach(() => localStorage.clear());
+
+  it("opens on the home page's window, in front, with the page's one main inside it", () => {
     renderLanding();
-    const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
-    expect(new Set(hrefs.filter((h) => !h?.startsWith("#")))).toEqual(new Set(["/login"]));
+    const home = win("Owlhead Home Page");
+    expect(home).toBeVisible();
+    expect(home).toHaveAttribute("data-front", "true");
+    expect(within(home).getByRole("main")).toHaveAttribute("id", "main");
+    const tasks = within(screen.getByRole("list", { name: "Open windows" })).getAllByRole("button");
+    expect(tasks.map((b) => b.textContent)).toEqual(["Owlhead"]);
+    expect(tasks[0]).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("minimizes a window to the taskbar, and brings it back from there", async () => {
+    renderLanding();
+    await press(screen.getByRole("button", { name: "Minimize Owlhead Home Page" }));
+    expect(screen.queryByRole("region", { name: "Owlhead Home Page" })).toBeNull();
+    const task = within(screen.getByRole("list", { name: "Open windows" })).getByRole("button", { name: "Owlhead" });
+    expect(task).toHaveAttribute("aria-pressed", "false");
+    await press(task);
+    expect(win("Owlhead Home Page")).toBeVisible();
+    expect(task).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("maximizes a window to fill the desktop, and restores it", async () => {
+    renderLanding();
+    await press(screen.getByRole("button", { name: "Maximize Owlhead Home Page" }));
+    expect(win("Owlhead Home Page")).toHaveAttribute("data-maximized", "true");
+    await press(screen.getByRole("button", { name: "Restore Owlhead Home Page" }));
+    expect(win("Owlhead Home Page")).not.toHaveAttribute("data-maximized");
+  });
+
+  it("closes a window off the taskbar, and the Owlhead icon opens it again", async () => {
+    renderLanding();
+    await press(screen.getByRole("button", { name: "Close Owlhead Home Page" }));
+    expect(screen.queryByRole("region", { name: "Owlhead Home Page" })).toBeNull();
+    expect(within(screen.getByRole("list", { name: "Open windows" })).queryAllByRole("button")).toHaveLength(0);
+    await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Owlhead" }));
+    expect(win("Owlhead Home Page")).toBeVisible();
+  });
+
+  it("opens each icon's window in front, and a touched window comes forward", async () => {
+    renderLanding();
+    const icons = screen.getByRole("list", { name: "Desktop" });
+    await press(within(icons).getByRole("button", { name: "readme.txt" }));
+    const readme = win("readme.txt - Notepad");
+    expect(readme).toHaveTextContent("Drag a window by its title bar.");
+    expect(readme).toHaveAttribute("data-front", "true");
+    expect(zOf(readme)).toBeGreaterThan(zOf(win("Owlhead Home Page")));
+
+    await press(within(icons).getByRole("button", { name: "owl.jpg" }));
+    const owl = win("owl.jpg - Picture Viewer");
+    expect(within(owl).getByRole("img")).toHaveAccessibleName(/owl in ink, perched on a pine branch/);
+    expect(owl).toHaveTextContent("Soga Nichokuan, Owl on a Pine Branch, early 17th century.");
+    expect(within(owl).getByRole("link", { name: "See it at the Met" })).toHaveAttribute("href", "https://www.metmuseum.org/art/collection/search/77198");
+
+    fireEvent.pointerDown(win("Owlhead Home Page"));
+    expect(win("Owlhead Home Page")).toHaveAttribute("data-front", "true");
+    expect(zOf(win("Owlhead Home Page"))).toBeGreaterThan(zOf(owl));
+  });
+
+  it("sends the Guestbook icon to the guestbook, in the home page's window", async () => {
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+    renderLanding();
+    await press(screen.getByRole("button", { name: "Minimize Owlhead Home Page" }));
+    await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Guestbook" }));
+    expect(win("Owlhead Home Page")).toBeVisible();
+    expect(scroll.mock.contexts.at(-1)).toBe(document.getElementById("beta"));
+    scroll.mockRestore();
+  });
+
+  it("changes the wallpaper in Display, credits the painting, and remembers the choice", async () => {
+    const { container } = renderLanding();
+    const wallpaper = container.querySelector("[data-slot=wallpaper]")!;
+    expect(wallpaper).toHaveAttribute("data-wallpaper", "auto");
+    await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Display" }));
+    const display = win("Display Properties");
+    await act(async () => fireEvent.click(within(display).getByRole("radio", { name: "Wheat Field with Cypresses" })));
+    expect(wallpaper).toHaveAttribute("data-wallpaper", "wheat-field-cypresses");
+    expect(localStorage.getItem("owlhead-wallpaper")).toBe("wheat-field-cypresses");
+    expect(display).toHaveTextContent("Vincent van Gogh, Wheat Field with Cypresses, 1889.");
+    await press(within(display).getByRole("button", { name: "OK" }));
+    expect(screen.queryByRole("region", { name: "Display Properties" })).toBeNull();
+  });
+
+  it("lists every window in Start, closes it on Escape, and shuts down to the safe-to-turn-off screen", async () => {
+    renderLanding();
+    const startButton = screen.getByRole("button", { name: "Start" });
+    await press(startButton);
+    expect(startButton).toHaveAttribute("aria-expanded", "true");
+    const start = screen.getByRole("menu", { name: "Start" });
+    expect(within(start).getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
+      "Owlhead Home Page",
+      "Guestbook",
+      "The record",
+      "Questions",
+      "readme.txt",
+      "owl.jpg",
+      "Display",
+      "Sign in",
+      "Shut down…",
+    ]);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Start" })).toBeNull();
+
+    await press(startButton);
+    await press(within(screen.getByRole("menu", { name: "Start" })).getByRole("menuitem", { name: "Shut down…" }));
+    const off = screen.getByRole("button", { name: /safe to turn off/ });
+    await press(off);
+    expect(screen.queryByRole("button", { name: /safe to turn off/ })).toBeNull();
+    expect(win("Owlhead Home Page")).toBeVisible();
   });
 });
 
@@ -304,12 +450,18 @@ const LANDING_PAIRS = [
   { fg: "foreground", bg: "muted", use: "The contents frame, the chrome and the guestbook" },
   { fg: "mandate-strong", bg: "muted", use: "Links in the contents frame" },
   { fg: "highlight-foreground", bg: "highlight", use: "The guestbook buttons, the New tag, a hovered link and the sun badge" },
-  { fg: "card", bg: "foreground", use: "Title bars, the record's column heads and the ink badges" },
+  { fg: "card", bg: "foreground", use: "Title bars, icon labels, the record's column heads and the ink badges" },
+  { fg: "card", bg: "muted-foreground", use: "The title bars of windows behind the front one" },
   { fg: "foreground", bg: "warning-soft", use: "The edited line of the record" },
 ] as const;
 
 describe("contrast", () => {
   it.each((["light", "dark"] as const).flatMap((theme) => LANDING_PAIRS.map((p) => [theme, p.fg, p.bg] as const)))("%s: %s on %s reaches WCAG AA (4.5:1)", (theme, fg, bg) => {
     expect(contrastRatio(tokenValue(fg, theme), tokenValue(bg, theme))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("sets the shut-down screen's sun type on ink by day and on the night's background after dark", () => {
+    expect(contrastRatio(tokenValue("highlight", "light"), tokenValue("foreground", "light"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(tokenValue("highlight", "dark"), tokenValue("background", "dark"))).toBeGreaterThanOrEqual(4.5);
   });
 });
