@@ -1,11 +1,14 @@
-# Nightly checks on main (ADR-0001 ES-11, ES-12, DEC-76): every per-PR job plus long fuzz seeds, the
-# seeded-bug mutation check, and a full-history secret scan. Skipped when main has not changed
-# since the last successful nightly, to save Actions minutes.
+# The weekly checks on main (ADR-0001 ES-11, ES-12, DEC-76; weekly since DEC-256): every per-PR job
+# plus long fuzz seeds, the seeded-bug mutation check, and a full-history secret scan. It ran
+# nightly until 2026-09-30, when the repository prepared to go private: the widened mutation gate
+# needs tens of minutes a run, and a private repository's Actions minutes cannot afford that every
+# night, so it runs Sunday 06:17 UTC and on demand. Skipped when main has not changed since the
+# last successful run, to save Actions minutes.
 name: nightly
 
 on:
   schedule:
-    - cron: "17 6 * * *"
+    - cron: "17 6 * * 0"
   workflow_dispatch:
 
 permissions: {}
