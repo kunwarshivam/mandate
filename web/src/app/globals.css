@@ -669,6 +669,15 @@ html:root[data-mode="dark"] [data-slot="owl"] {
   25% { opacity: 1; }
   100% { opacity: 0; transform: translate(4px, -10px); }
 }
+/* The assistant owl's attention bob: exponential ease-out (DEC-200 bans bounce and
+   elastic easing), rising and settling with the same decelerating curve. */
+@keyframes assistant-bob {
+  0%, 55%, 100% { transform: translateY(0); }
+  27.5% { transform: translateY(-6px); }
+}
+[data-slot="assistant"] .assistant-bob {
+  animation: assistant-bob 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -687,6 +696,9 @@ html:root[data-mode="dark"] [data-slot="owl"] {
   [data-slot="step-up-dialog"],
   [data-slot="sheet-backdrop"] {
     transition: none !important;
+  }
+  [data-slot="assistant"] .assistant-bob {
+    animation: none !important;
   }
   [data-slot="skeleton"] {
     animation: none !important;

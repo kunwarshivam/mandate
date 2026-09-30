@@ -69,7 +69,7 @@ export function Assistant({ shown, onClose, onTour }: { shown: boolean; onClose:
         </div>
         <span aria-hidden className="absolute -bottom-2 right-10 size-3.5 rotate-45 border-r border-b border-foreground bg-card" />
       </div>
-      <span className="me-5 motion-safe:animate-bounce [animation-duration:2.4s]">
+      <span className="me-5 assistant-bob">
         <Owl seed="assistant" mood="awake" className="size-14" />
       </span>
     </aside>
