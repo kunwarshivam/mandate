@@ -8,12 +8,17 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use mandate_risk::AccountState;
+use mandate_num::{Price, Qty, Usd};
+use mandate_risk::{
+    AccountState, AssetClass, AssetId, EtpClass, Exchange, InstrumentSnapshot, MarketSnapshot,
+    SaneQuote,
+};
+use mandate_time::UtcNanos;
 use serde_json::json;
 
-use super::Gate;
+use super::{Gate, listing, market};
 use crate::trading_domain::{BrokerProfile, config, initial, instruments, run_step};
-use crate::{Json, ensure, list_at, read_fixture, str_at};
+use crate::{Json, ensure, expect_eq, list_at, read_fixture, str_at};
 
 fn rc_15() -> Result<(Json, Json), String> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
@@ -90,6 +95,75 @@ fn the_same_steps_in_an_active_account_allow_the_opening() -> Result<(), String>
             ],
         || format!("{outcomes:?}"),
     )
+}
+
+/// DEC-199 item 6's listing and market, every member typed again here. Both structs are taken
+/// apart whole, so a member `mandate-risk` adds does not compile until it is pinned. The median, the
+/// trailing volume and the minimum order are also shown deciding a case at their edge
+/// (`trading_domain_gate_harness`); the ADV only as at least 1,000,000, since its daily cap of
+/// 500,000 shares cannot bind before the order cap of 50,000 does.
+#[test]
+fn the_listing_and_market_are_dec_199_item_6s() -> Result<(), String> {
+    let num = |parsed: Result<Qty, _>| parsed.map_err(|e| format!("{e}"));
+    let at = UtcNanos::parse_rfc3339("2026-09-22T14:00:00Z").map_err(|e| e.to_string())?;
+    let limit = Price::parse("400").map_err(|e| e.to_string())?;
+    let msft = AssetId::new("MSFT").map_err(|e| e.to_string())?;
+    let InstrumentSnapshot {
+        instrument,
+        asset_class,
+        exchange,
+        status_active,
+        tradable,
+        fractionable,
+        ipo,
+        ptp_no_exception,
+        etp,
+        etp_classified_at,
+        prior_close,
+        median_dollar_volume_20d,
+        median_dollar_volume_30d,
+        min_order_size,
+        halted,
+        status_feed_current,
+    } = listing(msft.clone(), Exchange::Nyse, true, limit, at)?;
+    expect_eq("instrument", instrument, msft)?;
+    expect_eq("asset_class", asset_class, AssetClass::UsEquity)?;
+    expect_eq("exchange", exchange, Some(Exchange::Nyse))?;
+    expect_eq("status_active", status_active, true)?;
+    expect_eq("tradable", tradable, true)?;
+    expect_eq("fractionable", fractionable, true)?;
+    expect_eq("ipo", ipo, false)?;
+    expect_eq("ptp_no_exception", ptp_no_exception, false)?;
+    expect_eq("etp", etp, EtpClass::Plain)?;
+    expect_eq("etp_classified_at", etp_classified_at, Some(at))?;
+    expect_eq("prior_close", prior_close, Some(limit))?;
+    expect_eq(
+        "median_dollar_volume_20d",
+        median_dollar_volume_20d,
+        Some(Usd::parse("90000000").map_err(|e| e.to_string())?),
+    )?;
+    expect_eq("median_dollar_volume_30d", median_dollar_volume_30d, None)?;
+    expect_eq("min_order_size", min_order_size, num(Qty::parse("1"))?)?;
+    expect_eq("halted", halted, false)?;
+    expect_eq("status_feed_current", status_feed_current, true)?;
+
+    let bid = Price::parse("399").map_err(|e| e.to_string())?;
+    let ask = Price::parse("401").map_err(|e| e.to_string())?;
+    let quote = SaneQuote { bid, ask, at };
+    let MarketSnapshot {
+        quote: stated,
+        last_trade,
+        trailing_5m_volume,
+        adv_20d,
+    } = market(quote, limit)?;
+    expect_eq("quote", stated, Some(quote))?;
+    expect_eq("last_trade", last_trade, Some((limit, at)))?;
+    expect_eq(
+        "trailing_5m_volume",
+        trailing_5m_volume,
+        Some(num(Qty::parse("1000000"))?),
+    )?;
+    expect_eq("adv_20d", adv_20d, Some(num(Qty::parse("10000000"))?))
 }
 
 #[test]

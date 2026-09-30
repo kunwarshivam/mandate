@@ -306,7 +306,6 @@ impl Gate {
                 .collect::<Result<_, _>>()?,
             pinned: false,
         };
-        let one_share = num(Qty::parse("1"), "one share")?;
         let usd = |text: &str| num(Usd::parse(text), "a harness figure");
         let risk = RiskSnapshot {
             agent_equity: equity,
@@ -353,30 +352,14 @@ impl Gate {
             orders_today: 0,
             day_trades: DayTradeLedger::default(),
         };
-        let listing = InstrumentSnapshot {
-            instrument: proposed.clone(),
-            asset_class: AssetClass::UsEquity,
-            exchange: Some(exchange),
-            status_active: true,
-            tradable: true,
-            fractionable: fractionable.unwrap_or(false),
-            ipo: false,
-            ptp_no_exception: false,
-            etp: EtpClass::Plain,
-            etp_classified_at: Some(now),
-            prior_close: Some(limit_price),
-            median_dollar_volume_20d: Some(usd("90000000")?),
-            median_dollar_volume_30d: None,
-            min_order_size: one_share,
-            halted: false,
-            status_feed_current: true,
-        };
-        let market = MarketSnapshot {
-            quote: Some(SaneQuote { bid, ask, at: now }),
-            last_trade: Some((limit_price, now)),
-            trailing_5m_volume: Some(num(Qty::parse("1000000"), "trailing_5m_volume")?),
-            adv_20d: Some(num(Qty::parse("10000000"), "adv_20d")?),
-        };
+        let listing = listing(
+            proposed.clone(),
+            exchange,
+            fractionable.unwrap_or(false),
+            limit_price,
+            now,
+        )?;
+        let market = market(SaneQuote { bid, ask, at: now }, limit_price)?;
         let out_of_reach = usd(OUT_OF_REACH_USD)?;
         let mandate = ValidatedMandate::from_validated_parts(
             RiskLimits {
@@ -460,6 +443,49 @@ impl Gate {
     pub(super) fn restrict(&mut self, state: AccountState) {
         self.state = state;
     }
+}
+
+/// DEC-199 item 6's listing: active, tradable and unhalted on `exchange` with a current status
+/// feed, a plain ETP classified at `now`, last closed at the limit price, a 90,000,000 median dollar
+/// volume (the liquid collar tier), one share its minimum order, and fractionable only when the
+/// case says so.
+fn listing(
+    instrument: AssetId,
+    exchange: Exchange,
+    fractionable: bool,
+    limit_price: Price,
+    now: UtcNanos,
+) -> Result<InstrumentSnapshot, String> {
+    Ok(InstrumentSnapshot {
+        instrument,
+        asset_class: AssetClass::UsEquity,
+        exchange: Some(exchange),
+        status_active: true,
+        tradable: true,
+        fractionable,
+        ipo: false,
+        ptp_no_exception: false,
+        etp: EtpClass::Plain,
+        etp_classified_at: Some(now),
+        prior_close: Some(limit_price),
+        median_dollar_volume_20d: Some(num(Usd::parse("90000000"), "median_dollar_volume_20d")?),
+        median_dollar_volume_30d: None,
+        min_order_size: num(Qty::parse("1"), "min_order_size")?,
+        halted: false,
+        status_feed_current: true,
+    })
+}
+
+/// DEC-199 item 6's market: `quote`, the last trade at the limit price, a trailing 5-minute volume
+/// of 1,000,000 and a 20-day ADV of 10,000,000, so both participation caps pass any order up to
+/// 50,000 shares.
+fn market(quote: SaneQuote, limit_price: Price) -> Result<MarketSnapshot, String> {
+    Ok(MarketSnapshot {
+        quote: Some(quote),
+        last_trade: Some((limit_price, quote.at)),
+        trailing_5m_volume: Some(num(Qty::parse("1000000"), "trailing_5m_volume")?),
+        adv_20d: Some(num(Qty::parse("10000000"), "adv_20d")?),
+    })
 }
 
 /// `configs.<name>.gate` as the gate's settings, with DEC-178's values for the five it does not

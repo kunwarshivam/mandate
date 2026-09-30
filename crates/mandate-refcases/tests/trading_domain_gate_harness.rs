@@ -450,6 +450,127 @@ fn a_stated_quote_is_the_market_the_collar_reads() {
     );
 }
 
+/// The listing's 90,000,000 median dollar volume puts MSFT in the liquid collar tier (DEC-199 item
+/// 6): a buy at 400.00 against a 395.00 ask is above the liquid tier's 1% ceiling (398.95) and
+/// inside the other tier's 2% (402.90). With the tier's threshold at the median the buy is denied
+/// `price_outside_collar`, since the tier is `≥`; one cent above the median it is allowed. The
+/// pair holds only for a median of exactly 90,000,000.
+#[test]
+fn the_filled_median_is_the_liquid_collar_tier_to_the_cent() {
+    let at_threshold = |threshold: &str, decision: Json| {
+        scene(
+            json!([proposal(
+                TEN_AM,
+                buy_msft(json!({ "quote": { "bid": "394.00", "ask": "395.00" } })),
+                decision
+            )]),
+            |c| {
+                c["config_overrides"] =
+                    json!({ "gate": { "collar": { "liquid_threshold_usd": threshold } } });
+            },
+        )
+    };
+    assert_eq!(
+        at_threshold("90000000.00", stop("deny", "price_outside_collar")),
+        Ok(())
+    );
+    assert_eq!(at_threshold("90000000.01", allow()), Ok(()));
+}
+
+/// The filled volumes decide the order-size participation cap for an opening (DEC-199 item 6):
+/// 0.05 of the 1,000,000 trailing 5-minute volume is 50,000 shares, so a 50,000-share buy is
+/// allowed and a 50,001-share one is denied `conduct_limit_breached`. The allowed buy also shows
+/// the 20-day ADV is at least 1,000,000, or 0.05 of it would deny 50,000 shares under the daily
+/// cap; its own 10,000,000 cannot bind first, so the unit test pins it. The account holds enough
+/// cash that no other check reaches either size.
+#[test]
+fn the_filled_trailing_volume_is_the_order_size_cap_to_the_share() {
+    let buy = |qty: &str, decision: Json| {
+        scene(
+            json!([proposal(TEN_AM, buy_msft(json!({ "qty": qty })), decision)]),
+            |c| c["initial"]["account"]["cash"]["settled"] = json!("30000000.00"),
+        )
+    };
+    assert_eq!(buy("50000", allow()), Ok(()));
+    assert_eq!(buy("50001", stop("deny", "conduct_limit_breached")), Ok(()));
+}
+
+/// The listing's minimum order is one share (DEC-199 item 6): in a fractionable MSFT a day buy of
+/// one share is allowed, and one of 0.999999999 is refused under §5.3 rule 2's minimum size, which
+/// has no registered reason code yet (DEC-129 item 27).
+#[test]
+fn the_filled_minimum_order_is_one_share_to_the_last_place() {
+    let buy = |qty: &str| {
+        scene(
+            json!([proposal(
+                TEN_AM,
+                buy_msft(json!({ "qty": qty, "tif": "day" })),
+                allow()
+            )]),
+            |c| c["instruments"]["MSFT"]["fractionable"] = json!(true),
+        )
+    };
+    assert_eq!(buy("1"), Ok(()));
+    assert_eq!(
+        buy("0.999999999"),
+        err(
+            "step 2: `mandate_risk::evaluate`: the reason code of §5.3 rule 2's minimum size is not implemented yet (pending DEC-129 item 27) (unimplemented)"
+        )
+    );
+}
+
+/// Each proposal is decided alone, with no trace of an earlier one (DEC-199 item 3), so a case
+/// with a second `propose_order` step waits for the stories that give a submission its effects.
+/// RC-08 passes with its one proposal and fails, naming them, with that proposal listed twice.
+#[test]
+fn a_second_proposal_in_one_case_waits_for_e7_4_and_e7_5() {
+    let waits =
+        err("a second `propose_order` step in one case not interpreted until E7-4 and E7-5");
+    assert_eq!(run(fixture(), "RC-08"), Ok(()));
+    assert_eq!(
+        run(
+            edited("RC-08", |c| {
+                let steps = c["steps"].as_array_mut().unwrap();
+                let proposal = steps[2].clone();
+                assert_eq!(proposal["event"], "propose_order");
+                steps.insert(3, proposal);
+            }),
+            "RC-08",
+        ),
+        waits
+    );
+    assert_eq!(
+        scene(
+            json!([
+                proposal(TEN_AM, buy_msft(json!({})), allow()),
+                proposal(TEN_AM, sell_aapl("risk_exit"), allow())
+            ]),
+            |_| {}
+        ),
+        waits
+    );
+}
+
+/// An `agent_mode` expectation after an event the driver's `MODE_OWNERS` does not list, where
+/// nothing moves the mode, is the account ledger's (E7-5), and fails naming it rather than as an
+/// unknown key.
+#[test]
+fn an_agent_mode_where_nothing_moves_it_names_the_account_ledger() {
+    assert_eq!(
+        scene(
+            json!([proposal(TEN_AM, buy_msft(json!({})), allow())]),
+            |c| c["steps"][1]["expect"]["agent_mode"] = json!("normal"),
+        ),
+        err("step 2: expectation `agent_mode` not interpreted until E7-5")
+    );
+    assert_eq!(
+        scene(json!([]), |c| {
+            c["steps"][0]["expect"] = json!({ "agent_mode": "normal" });
+        }),
+        err("step 1: expectation `agent_mode` not interpreted until E7-5")
+    );
+}
+
 #[test]
 fn an_unmarked_or_short_position_is_refused_rather_than_valued() {
     let unmarked = |steps: Json| {
@@ -643,7 +764,7 @@ fn every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for() {
     let pending = [
         (
             "RC-15",
-            "`broker_order_update` steps not interpreted until E7-2; expectation `actions` not interpreted until E7-4; expectation `agent_mode` after `broker_order_update` not interpreted until E7-3",
+            "`broker_order_update` steps not interpreted until E7-2; a second `propose_order` step in one case not interpreted until E7-4 and E7-5; expectation `actions` not interpreted until E7-4; expectation `agent_mode` after `broker_order_update` not interpreted until E7-3",
         ),
         (
             "RC-15::unexplained_403s",
@@ -663,15 +784,15 @@ fn every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for() {
         ),
         (
             "RC-17",
-            "`deploy_agent` steps not interpreted until E7-5; expectation `buying_power` after `propose_order` not interpreted until E7-5; initial `agents` not interpreted until E7-5; proposal field `agent` not interpreted until E7-5",
+            "`deploy_agent` steps not interpreted until E7-5; a second `propose_order` step in one case not interpreted until E7-4 and E7-5; expectation `buying_power` after `propose_order` not interpreted until E7-5; initial `agents` not interpreted until E7-5; proposal field `agent` not interpreted until E7-5",
         ),
         (
             "RC-09B",
-            "`propose_order` on a `generic` margin account's day-trade regime not interpreted until E6-6; expectation `day_trade_count` not interpreted until E6-6; initial account `last_equity` not interpreted until E6-6; initial account `prior_day_trades` not interpreted until E6-6; initial account `regime` not interpreted until E6-6",
+            "`propose_order` on a `generic` margin account's day-trade regime not interpreted until E6-6; a second `propose_order` step in one case not interpreted until E7-4 and E7-5; expectation `day_trade_count` not interpreted until E6-6; initial account `last_equity` not interpreted until E6-6; initial account `prior_day_trades` not interpreted until E6-6; initial account `regime` not interpreted until E6-6",
         ),
         (
             "RC-22",
-            "`broker_order_update` steps not interpreted until E7-2; `conduct_breach` steps not interpreted until E6-8; expectation `actions` not interpreted until E7-4; expectation `agent_mode` after `conduct_breach` not interpreted until E6-11; instrument field `median_dollar_volume_20d` not interpreted until E6-7",
+            "`broker_order_update` steps not interpreted until E7-2; `conduct_breach` steps not interpreted until E6-8; a second `propose_order` step in one case not interpreted until E7-4 and E7-5; expectation `actions` not interpreted until E7-4; expectation `agent_mode` after `conduct_breach` not interpreted until E6-11; instrument field `median_dollar_volume_20d` not interpreted until E6-7",
         ),
         (
             "RC-24::presumed_halt_regular_session",
@@ -679,7 +800,7 @@ fn every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for() {
         ),
         (
             "RC-25",
-            "instrument field `median_dollar_volume_20d` not interpreted until E6-7; instrument field `prior_close` not interpreted until E6-7; proposal field `owner_confirmed_bid` not interpreted until E6-8",
+            "a second `propose_order` step in one case not interpreted until E7-4 and E7-5; instrument field `median_dollar_volume_20d` not interpreted until E6-7; instrument field `prior_close` not interpreted until E6-7; proposal field `owner_confirmed_bid` not interpreted until E6-8",
         ),
     ];
     for (case, wanted) in pending {
