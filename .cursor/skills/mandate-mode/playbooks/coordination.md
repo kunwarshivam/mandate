@@ -60,7 +60,9 @@ with green CI and say so in its body. The Claude Code coordinating session is th
 coordinator for both sides: it launches the independent review on a different model, relays
 findings back to the author through the PR, and on PASS squash-merges (the reviewer may merge on
 its behalf, as ship.md step 5 allows). Merges go in claim order, one at a time, so shared files
-never race. Nobody rebases, force-pushes, or closes a branch they did not create; to ask for a
+never race. Under DEC-175 the `merge` workflow may land two approved PRs close together; one that
+a merge left conflicting is not mergeable, so the workflow skips it, and its author merges `main`
+in and asks for a new approval of the new head. Nobody rebases, force-pushes, or closes a branch they did not create; to ask for a
 review, a decision, or a rebase, comment on the PR or the claim issue.
 
 The exception is UI PRs (DEC-200): the Cursor coordinating session launches their independent

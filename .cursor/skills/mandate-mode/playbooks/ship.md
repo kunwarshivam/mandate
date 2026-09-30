@@ -39,10 +39,13 @@ decides.
      `interrogate` skill on the diff;
    - return PASS or FAIL with file and line evidence for each finding.
 4. On FAIL, fix the findings in the same PR and repeat from step 2.
-5. On PASS, the coordinating session adds the `coordinator-approved` label (DEC-175). The `merge`
-   workflow squash-merges when `fast` and `full` are green on the head, with the PR title and
-   description as the commit message, and ignores anything else. A push after the label removes it;
-   label again after the next PASS. A session that can merge directly squash-merges through the
+5. On PASS, the coordinating session approves the head the review passed (DEC-175). It writes
+   `Coordinator-approved-head: <full sha>` into the PR description and adds the
+   `coordinator-approved` label. The `merge` workflow squash-merges when that sha is still the head,
+   GitHub reports the PR mergeable, and the latest `ci` run on the head succeeded (and `web`, for a
+   change under `web/`), with the PR title and description as the commit message; otherwise it
+   does nothing. A push moves the head off the approved sha, so new commits need a new PASS and a
+   new line. A session that can merge directly squash-merges through the
    GitHub API with the story ID in the title and an explicit `commit_message` (the PR
    description): GitHub's default squash message copies every commit message, including
    `Co-authored-by` trailers, which must not reach `main`. Never force-push `main`, never label or
