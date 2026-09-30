@@ -505,7 +505,8 @@ impl<'c> RiskState<'c> {
     /// Opens the state at `opening.at` with E = H = E0 = C = the allocation and mode `normal` (§5.2).
     ///
     /// # Errors
-    /// `invalid_input` for a negative inherited loss, which would lower the floor (§5.7).
+    /// `invalid_input` for a negative inherited loss, which would lower the floor (§5.7), and for an
+    /// instant between two whole seconds, which the risk clock never reads (§5.2).
     pub fn open(
         mandate: &ValidatedMandate,
         opening: &Opening,
@@ -526,8 +527,9 @@ impl<'c> RiskState<'c> {
     /// A step at the previous step's instant is folded with no time passing.
     ///
     /// # Errors
-    /// A step before the previous step's time is [`SpecError::ClockWentBackwards`], and a sale of
-    /// more than the agent holds is `invalid_input`. A step that fails leaves the state as it was.
+    /// A step before the previous step's time is [`SpecError::ClockWentBackwards`]. A step between two
+    /// whole seconds of the risk clock (§5.2) and a sale of more than the agent holds are
+    /// `invalid_input`. A step that fails leaves the state as it was.
     pub fn step(&mut self, step: &Step) -> Result<Outcome, SpecError> {
         let mut next = self.fold.clone();
         let outcome = next.step(self.clock, step)?;

@@ -130,6 +130,7 @@ impl Fold {
             Goal::ProfitStop { profit_level, .. } => return confirm_profit_stop(profit_level),
             Goal::Continuous { .. } | Goal::Accumulate { .. } => {}
         }
+        on_the_risk_clock(opening.at)?;
         if opening.inherited_loss_usd.is_negative() {
             return Err(SpecError::InvalidInput {
                 what: "a negative inherited loss, which would lower the lifetime floor",
@@ -185,6 +186,7 @@ impl Fold {
         clock: &dyn SessionClock,
         step: &Step,
     ) -> Result<Outcome, SpecError> {
+        on_the_risk_clock(step.at)?;
         if step.at < self.at {
             return Err(SpecError::ClockWentBackwards);
         }
@@ -286,13 +288,14 @@ impl Fold {
         Ok(self.mark_age_s >= u64::from(self.mark_max_age_s))
     }
 
-    /// Whether the step leaves a held instrument without a sane mark: one that failed its checks, or
-    /// an age at the limit that no sane mark reset (§5.2). A flat book has nothing to go stale.
+    /// Whether the step leaves a held instrument without a sane mark (§5.2): a mark that failed its
+    /// checks while held, or an age that reached the limit while held and that no sane mark reset. An
+    /// expiry stands even if this step's sale leaves the book flat, since the instrument was held for
+    /// the whole interval. A book flat all along has nothing to go stale.
     fn goes_stale(&self, expired: bool, read: Read) -> bool {
-        let held = !self.qty.is_zero();
-        held && match read {
+        match read {
             Read::Quote => false,
-            Read::Failed => true,
+            Read::Failed => !self.qty.is_zero(),
             Read::Nothing => expired,
         }
     }
@@ -586,6 +589,18 @@ fn reported(numerator: Usd, denominator: Usd) -> Result<Ratio, SpecError> {
     Ok(numerator.ratio_to(denominator, REPORTED_RATIO_PLACES, Rounding::HalfEven)?)
 }
 
+/// The risk clock counts whole seconds (§5.2). An instant between two of them is refused rather than
+/// rounded, because either rounding could end a wait up to a second before §5.6 lets it end.
+fn on_the_risk_clock(at: UtcNanos) -> Result<(), SpecError> {
+    if at.nanos() == 0 {
+        Ok(())
+    } else {
+        Err(SpecError::InvalidInput {
+            what: "an instant between two seconds of the risk clock, which counts whole seconds",
+        })
+    }
+}
+
 /// Whole seconds from `from` to `to`, the risk clock's unit (§5.2).
 fn elapsed_s(from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
     to.secs()
@@ -612,3 +627,6 @@ fn fold_later(input: &Input) -> Result<Read, SpecError> {
     let _ = input;
     Err(SpecError::Unimplemented)
 }
+
+#[cfg(test)]
+mod tests;
