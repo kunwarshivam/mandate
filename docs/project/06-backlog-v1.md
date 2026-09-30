@@ -348,7 +348,20 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `reference/mandate/ref.py`'s escalation model (already fuzzed and mutation-checked), with
   `cargo xtask refcases --write`, and no `status.toml` row. Give the family a kind of its own: the
   family A, B, G, F, and P count tests select their cases by kind, so a new family reusing one of
-  those kinds would change their counts.
+  those kinds would change their counts. The same PR corrects mandate spec §11's and §1's sentences
+  that MC-U "lands in its own tests-first change, because the shared harness pins the case count":
+  since #343 it no longer does (#343 review, minor 4).
+  *Follow-up (#343 review, minor 1; a tests correction):* a new family that reuses an owned family's
+  kind (for example an `MC-E01` of kind `semantic`) now moves no count in `mandate_harness.rs` and
+  runs through that family's arm, where on `main` before #343 it failed two counts. `unread_keys`
+  still refuses any member it ignores, so it cannot pass half-read, but the loud failure is gone.
+  Assert that the owned-by-kind id set equals the owned-by-prefix set in
+  `the_fixture_holds_the_families_this_stream_expects`; the reviewer's four-line version passes on
+  today's fixture and fails on that scenario.
+  *Follow-up (#343 review, nits):* make `INTERPRETED` a `pub const` in `src/mandate.rs` that
+  `run_listed`'s dispatch and the test both read; the `{prefix}{n:02}` ids with a lexicographic sort
+  break past 99 cases in a family; the uninterpreted-kind branch asserts only `is_err()`, not that
+  the message names the kind.
   *Follow-up (M7 spec PR, DEC-173 item 11):* the `mandate-journal` catalogue (`src/catalogue.rs`,
   `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
   (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
