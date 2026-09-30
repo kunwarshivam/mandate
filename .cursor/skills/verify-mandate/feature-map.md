@@ -167,10 +167,15 @@ the crate is pending.
   two `mandate-num` additions in `crates/mandate-num/tests/num.rs`. Planted bugs per test: the task
   brief and the tests PR's body.
 - **Reference cases:** the 16 `mandate::MC-A` cases and the 28 `mandate::MC-B` builder cases other
-  than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. They move in a
-  harness-and-status PR after stream F's tests PR adds the `mandate` harness module and, for the `B`
-  family, stream G's gate supplies the `gate_dry_run` verdict each of those cases states.
-- **Run:** `cargo nextest run -p mandate-builder -p mandate-num`.
+  than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. Family A also runs in
+  the shared harness, through `crates/mandate-refcases/src/mandate/autonomy.rs` on the parsed
+  mandate's own `autonomy` block (DEC-162); its `status.toml` rows move in a status-only PR, since
+  the spec guard keeps that file apart from code (ES-22). Family B moves in a later
+  harness-and-status PR, once stream G's gate (E6-8) supplies the `gate_dry_run` verdict each of
+  those cases states.
+- **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; family A in the shared harness with
+  `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A mandate::autonomy` (the
+  flag runs cases `status.toml` does not yet list as passing).
 
 ## Agent runtime and kill switches
 
@@ -630,7 +635,8 @@ proves each pending test fails on them (DEC-110).
   story), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/tests/harness.rs`
   (the harness reads the account type and checks `buying_power`: RC-08 and RC-18's cash variant
   without their gate step), `crates/mandate-refcases/src/mandate/research.rs` (family N of the
-  mandate suite, through `mandate-research`), `crates/mandate-refcases/status.toml`
+  mandate suite, through `mandate-research`), `crates/mandate-refcases/src/mandate/autonomy.rs`
+  (family A, through `mandate-builder`'s `classify`), `crates/mandate-refcases/status.toml`
   (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
