@@ -784,17 +784,23 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
-  rule 5's ruled carve-out: an exit that goes once its opening's cancel is overdue and the query is
-  answered, with the opening still resting ([DEC-160](04-decision-log.md#decisions) (7), (13)).
+  rule 5's ruled carve-out: an exit that goes once its opening's cancel is overdue, answered or not,
+  with the opening still resting ([DEC-160](04-decision-log.md#decisions) (7), (13), (18)).
   Carve that case out through a DEC-77 tests correction before slice 5 or 6 lets the property run.
-- **E7-4 (stream K), from #286 round 1's mutation run, needs a ruling:** a passive exit opens no
-  unprotected interval, so once its OCO's cancel is confirmed, an exit the gate then holds (rule
-  13's `Unknown`, `paused` or `stopped`) or one still waiting on its agent's opening (rule 5, up
-  to `unknown_absent_window_s` and the query's answer) leaves the position with no protection and
-  nothing bounding or alerting it until the exit is placed as the new OCO. A denied or abandoned
-  one re-places the protection ([DEC-160](04-decision-log.md#decisions) (17)). Options: open the
-  interval, so `max_unprotected_s` bounds and alerts it, or re-place the recorded OCO while the
-  exit waits.
+- **Trading-domain spec §5.7's missing `PendingCancel` edges (stream K), from #286 round 2
+  (minor 3):** a spec PR that adds `PendingCancel → Expired` and `PendingCancel → Rejected` to
+  §5.7's transition table, with reference cases, and then the executor change that follows it.
+  Until then such a report is journaled and ignored ([DEC-160](04-decision-log.md#decisions)
+  (13)), so an exit waiting on the order goes at rule 5's bound (item (18)), but the residue
+  stays: a day order that expired, or was rejected, while its cancel was outstanding is left in
+  `PendingCancel` and keeps its buying-power reservation until reconciliation or a later report
+  moves it.
+- **`mandate-executor`, from #286 round 2 (nit 1):** marking an accepted order's cancel overdue
+  (`protection::overdue`) journals a self-transition, which `orders::transition` records as an
+  attempted edge with `ignored: true` so the fold applies only `cancel_overdue`. The record reads
+  as a refused transition. A dedicated flag-only record needs the fold's `Unknown` branch
+  (which resets `unknown_since` and the absence count) kept out of it, so it is not a one-line
+  change; do it with the §5.7 edges above.
 - **`mandate-executor` fees (stream K), from #259 round 1:** (1) a typed `Environment` in place of
   the stream's environment text, so `paper_only_fee_config` refuses a live stream by its type
   (rung 1) rather than by a string comparison; (2) `mandate_accounting::Config` carries the
