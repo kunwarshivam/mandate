@@ -1207,3 +1207,42 @@ Minor and nit findings from round 1 of the independent review of the journal spe
   run ruff over `reference/`.
 - **Correct `mandate-refcases`' journal module doc.** `crates/mandate-refcases/src/journal.rs` says
   the vectors are version 2; they are version 3.
+
+Minor findings from round 2 of the same review (#320 round 2;
+[DEC-177](04-decision-log.md#decisions) item 19; held back by the freeze rule, one row each):
+
+- **Test both directions of §9.1's biconditionals (#320 round 2).** Rules 1, 3, 4, 5, and 13 each
+  have an invalid draft for one direction only (for example a sell labelled `open`, but no buy
+  labelled an exit), so a validator checking only that direction passes. Add a draft for the other
+  direction of each, and split each rule's mutant into one per direction, each caught only by its
+  own draft.
+- **Vectors for the untested envelope members (#320 round 2).** No draft tests that `artifact_refs`
+  is exact (sorted, de-duplicated, and no ref the payload does not hold), that `pii_refs` is
+  ordered, or that `actor.build` is required for a `system` or `agent` actor. Add an invalid draft
+  and a mutant for each.
+- **Assert §9.1's report order (#320 round 2).** "The first violation, in this order" is never
+  tested: every invalid draft breaks one rule. Add drafts that each break two rules of different
+  ranks (for example an extra member and a rule-4 breach, or rules 4 and 5 together) and expect the
+  earlier one, with a mutant that reverses the order.
+- **Trace mandate spec §5.10's `OwnerExitRequested` row to §9.1 (#320 round 2).** Its field list
+  ("instrument or scope, bid shown and confirmed, user (opaque), step-up evidence") lacks
+  `step_up_status`, which §9.1 requires on every owner exit (DEC-177 item 11). Add it there, and
+  check the §10 row the same way.
+- **Correct §9.1's citation for a removed instrument (#320 round 2).** `exit_origin`'s row cites
+  mandate spec "(§2.2, §2.3)" for a removed instrument, where mandate spec §6.1 cites §2.3 and §5.9
+  cites §2.3 and §8.6. Cite the sections the mandate spec gives.
+- **Reconcile #320 and #321 when the second merges (#320 round 2; DEC-177 item 20).** Both call
+  themselves journal spec v0.5. Whichever merges second:
+  (a) resolves the textual conflicts in the Status line and the v0.5 change-history bullet and
+  renumbers itself to v0.6, in the §9.1 heading, the `journal.yaml` header, and `generate.py`'s
+  `spec` string, then runs `reference/journal/generate.py --write` and `cargo xtask refcases --write`;
+  (b) adds `ApprovalRevalidated` to §9.1 as a third allowed cause of `IntentProposed` (rule 10), and
+  records a decision on whether `intent_action_mismatch` compares an approved intent against the
+  approval's bound fields;
+  (c) states a §9.1 causation rule for #321's §2 copy rule ("`causation_id` pointing to the owner
+  command"), which the chain's `OwnerExitRequested` events (seqs 6, 9, 12) and `KillSwitchActivated`
+  (seq 13) break with `causation_id: null`, and regenerates the vectors to meet it;
+  (d) keeps one definition of `ask_suppressed`, which both add, and drops #320's hedge "once M7's
+  change lands" in `DecisionMade`'s table;
+  (e) re-checks each §9.1 citation of mandate spec §6.1 against the merged text, since §9.1 cites
+  §6.1 for a rule only #321 states.
