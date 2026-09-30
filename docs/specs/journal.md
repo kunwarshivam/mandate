@@ -23,8 +23,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   per-range checks `intent_action_mismatch` and `mode_event_mismatch`. The test vectors gain a
   generated `agent_stream` section (a hash-chained stream from `StreamOpened` with its artifacts, an
   invalid draft for every rule, valid drafts, batches, and range-verification cases) and stay
-  version 3 until the harness reads it. The approval events close with the escalation spec change
-  (M7).
+  version 3 until the harness reads it. The approval events that v0.5 added are not closed here.
 - **v0.5, amended ([DEC-181](../project/04-decision-log.md#decisions)):** `DecisionMade` names the
   source of its autonomy decision and, when a delegation lifted it, the `delegation_id` that
   delegation usage is counted from ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003));
@@ -390,7 +389,7 @@ draft carrying one is refused as an unlisted member. Each schema is `schema_vers
 a record with exactly the listed members, every one present (§4.2). The test vectors' `agent_stream`
 section holds at least one chain event per schema, an invalid draft for every rule below, and valid
 drafts for the cases a rule might be misread to refuse. The other agent-stream events are not
-closed yet: the approval events close with the escalation spec change (M7),
+closed yet: the approval events that v0.5 added (§9, mandate spec §6.4) close in their own change,
 `ModelInvocationRecorded`, `ThesisProposed`, and `ThesisRevised` with their own stories.
 
 **Types.**
@@ -464,7 +463,7 @@ model gave it; one the agent does not use carries the reason in `ignored`.
 | `qty` | `decimal` | |
 | `limit_price` | `decimal?` | Rule 2 |
 | `purpose` | `open` \| `increase` \| `discretionary_exit` \| `risk_exit` | The proposer's label: the order builder's, a goal completion's or a removed instrument's (`exit_origin`), or the risk engine's `trim_to_target`. The gate assigns the purpose it enforces ([trading spec §9.1](trading-domain.md#91-evaluation-order-and-reason-codes)) |
-| `exit_origin` | `signal` \| `goal_completion` \| `removed_instrument`, or `null` | Which of the three origins mandate spec §6.1 gives a `discretionary_exit`: the order builder's signal exit (§8.3 step 2), a goal's completion (§3.1), or a removed instrument (§2.2, §2.3). `null` for every other purpose: rule 8 |
+| `exit_origin` | `signal` \| `goal_completion` \| `removed_instrument`, or `null` | Which of the three origins [mandate spec §6.1](mandate.md#61-purposes)'s purpose table gives a `discretionary_exit`: the order builder's signal exit (§8.3 step 2), a goal's completion (§3.1), or a removed instrument (§2.3, including an expired or invalidated thesis, §8.6). `null` for every other purpose: rule 8 |
 | `exit_conviction`, `buy_conviction`, `combined_score` | `decimal?` | c, b, and s of §8.3 step 1, for a decision a §8.3 evaluation produced (an opening, an increase, or a signal exit); `null` for every other: rule 8 |
 | `outputs_used` | `[ulid]` | The `ModelOutputRecorded` event IDs of the fresh outputs combined; empty for a decision no §8.3 evaluation produced: rules 8 and 9 |
 | `model_weights` | `[{key: text, value: decimal}]` | The weight of **every** configured model, fresh or not (§4.1); empty for a decision no §8.3 evaluation produced: rules 8 and 9 |
@@ -472,7 +471,7 @@ model gave it; one the agent does not use carries the reason in `ignored`.
 | `dry_run` | `allow` \| `deny` \| `defer` | The gate dry run: rules 4 to 6 |
 | `reason_code` | `id?` | The gate's reason code (trading spec §9.1): rule 4 |
 | `autonomy` | `auto` \| `ask` \| `deny`, or `null` | The §6.2 classification, reached only after an `allow`: rules 5 and 7 |
-| `ask_suppressed` | `budget` \| `skipped_today` \| `recent_timeout`, or `null` | Why an `ask` was classified but not asked ([DEC-156](../project/04-decision-log.md#decisions) item 5; mandate spec §6.4 once M7's change lands), in this precedence: the agent's 10 requests in the risk day are spent; the owner skipped this instrument earlier in the risk day and no version has applied since; an approval for it timed out less than `timeout_s` ago. `null` for every other decision, including an `ask` that was asked. Non-null only when `autonomy` is `ask` and no approval was requested: rule 7 |
+| `ask_suppressed` | `budget` \| `skipped_today` \| `recent_timeout`, or `null` | Why an `ask` was classified but not asked, with the reasons and precedence of [mandate spec §6.4](mandate.md#64-approvals) ("Asking is bounded"; [DEC-156](../project/04-decision-log.md#decisions) item 5). `null` for every other decision, including an `ask` that was asked. Non-null only when `autonomy` is `ask` and no approval was requested: rule 7 |
 
 **`IntentProposed`**: exactly the `IntentReceived` vector's intent fields less `intent_id`, which is
 this event's `event_id` (§2), and `agent_id`, which is the stream's. The executor's `IntentReceived`
@@ -513,7 +512,8 @@ step-up still stops the agent and flattens as an automated flatten does, and onl
 privileges beyond that need `valid`. A correct writer can meet every rule here for every owner
 exit, whatever its step-up: no member is required that only valid step-up or a confirmed bid would
 supply, and a confirmed bid with `absent` or `stale` step-up is valid, recorded as given, and
-unlocks nothing (mandate spec §6.1) while the exit proceeds. So no step-up state can hold a
+unlocks nothing while the exit proceeds ([mandate spec §6.1](mandate.md#61-purposes), "Owner
+controls and step-up": owner exit and kill switch). So no step-up state can hold a
 reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cases.
 
 | Member | Type | Meaning |
@@ -541,8 +541,8 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
 7. `DecisionMade`: a non-null `autonomy` is `auto` unless `purpose` is `open` or `increase` (built-in
    AUTO, §6.2 step 3) — `payload.autonomy`; and `ask_suppressed` is non-null only when `autonomy` is
    `ask` — `payload.ask_suppressed`. So a suppression only ever skips an opening or an increase,
-   never an exit. That no `ApprovalRequested` names a suppressed decision is checked with the
-   approval events (M7).
+   never an exit. That no `ApprovalRequested` names a suppressed decision is checked when the
+   approval events' schemas close here.
 8. `DecisionMade`: `exit_origin` is non-null exactly when `purpose` is `discretionary_exit` —
    `payload.exit_origin`. A decision was produced by a §8.3 evaluation exactly when `purpose` is
    `open` or `increase` or `exit_origin` is `signal`; `exit_conviction`, `buy_conviction`, and
