@@ -656,7 +656,7 @@
   ]
  },
  "agent_stream": {
-  "spec": "docs/specs/journal.md v0.5 §9.1 (DEC-177)",
+  "spec": "docs/specs/journal.md v0.6 §9.1 (DEC-177)",
   "stream_id": "agent:ws_01J8Z2:agent_a",
   "artifacts": [
    {
@@ -942,7 +942,7 @@
      "event_time": "2026-09-21T15:00:00.000000000Z",
      "recorded_at": "2026-09-21T15:00:00.000100000Z",
      "clock_source": "scheduler",
-     "causation_id": null,
+     "causation_id": "01J8Z6A00000000000000000C1",
      "correlation_id": null,
      "actor": {
       "kind": "agent",
@@ -972,8 +972,8 @@
      "pii_refs": [],
      "prev_hash": "b243a0b42458802d18cda807865dd2e16ce81262a263d8c95c1d520218c6f478"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z6A0A000000000000000E1\",\"event_time\":\"2026-09-21T15:00:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":null,\"bid_size\":null,\"confirmed\":false,\"floor\":null,\"scope\":\"instrument\",\"step_up\":{\"assertion_id\":\"stepup_4b2d\",\"authenticated_at\":\"2026-09-21T14:59:52.000000000Z\",\"method\":\"webauthn\"},\"step_up_status\":\"valid\",\"subject\":\"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"b243a0b42458802d18cda807865dd2e16ce81262a263d8c95c1d520218c6f478\",\"recorded_at\":\"2026-09-21T15:00:00.000100000Z\",\"schema_version\":1,\"seq\":6,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "ce4a10368e358bb90d8538bf4557f0e94a28b30a87a6cc3e5b788205d82c1788"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8Z6A00000000000000000C1\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z6A0A000000000000000E1\",\"event_time\":\"2026-09-21T15:00:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":null,\"bid_size\":null,\"confirmed\":false,\"floor\":null,\"scope\":\"instrument\",\"step_up\":{\"assertion_id\":\"stepup_4b2d\",\"authenticated_at\":\"2026-09-21T14:59:52.000000000Z\",\"method\":\"webauthn\"},\"step_up_status\":\"valid\",\"subject\":\"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"b243a0b42458802d18cda807865dd2e16ce81262a263d8c95c1d520218c6f478\",\"recorded_at\":\"2026-09-21T15:00:00.000100000Z\",\"schema_version\":1,\"seq\":6,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "551ee69e57f31d69c74c3d15626bf7bab1ea3d866afa5f9ac58a354965430c31"
    },
    {
     "seq": 7,
@@ -1011,10 +1011,10 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "ce4a10368e358bb90d8538bf4557f0e94a28b30a87a6cc3e5b788205d82c1788"
+     "prev_hash": "551ee69e57f31d69c74c3d15626bf7bab1ea3d866afa5f9ac58a354965430c31"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8Z6A0A000000000000000E1\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z6A0M000000000000000P1\",\"event_time\":\"2026-09-21T15:00:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f\",\"limit_price\":null,\"purpose\":\"owner_exit\",\"qty\":\"5\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"market\"},\"pii_refs\":[],\"prev_hash\":\"ce4a10368e358bb90d8538bf4557f0e94a28b30a87a6cc3e5b788205d82c1788\",\"recorded_at\":\"2026-09-21T15:00:00.000200000Z\",\"schema_version\":1,\"seq\":7,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "88ddf7ed73e94088150f971b0fd1ee55f04df8d0f30f15dd864ef5a36c4fc493"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8Z6A0A000000000000000E1\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z6A0M000000000000000P1\",\"event_time\":\"2026-09-21T15:00:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f\",\"limit_price\":null,\"purpose\":\"owner_exit\",\"qty\":\"5\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"market\"},\"pii_refs\":[],\"prev_hash\":\"551ee69e57f31d69c74c3d15626bf7bab1ea3d866afa5f9ac58a354965430c31\",\"recorded_at\":\"2026-09-21T15:00:00.000200000Z\",\"schema_version\":1,\"seq\":7,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "56e334f5630297d0d7fa987c9b62017194603ab597693824c515a0238602fb89"
    },
    {
     "seq": 8,
@@ -1067,10 +1067,10 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "88ddf7ed73e94088150f971b0fd1ee55f04df8d0f30f15dd864ef5a36c4fc493"
+     "prev_hash": "56e334f5630297d0d7fa987c9b62017194603ab597693824c515a0238602fb89"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMA0A000000000000000D2\",\"event_time\":\"2026-09-21T20:05:00.000000000Z\",\"event_type\":\"DecisionMade\",\"payload\":{\"ask_suppressed\":null,\"autonomy\":null,\"buy_conviction\":null,\"client_id\":null,\"clips_applied\":[],\"combined_score\":null,\"decided_by\":null,\"delegation_id\":null,\"dry_run\":\"defer\",\"exit_conviction\":null,\"exit_origin\":\"goal_completion\",\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"150.25\",\"model_weights\":[],\"outputs_used\":[],\"purpose\":\"discretionary_exit\",\"qty\":\"10\",\"reason_code\":\"discretionary_exit_regular_session_only\",\"requested_by\":\"agent\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"88ddf7ed73e94088150f971b0fd1ee55f04df8d0f30f15dd864ef5a36c4fc493\",\"recorded_at\":\"2026-09-21T20:05:00.000100000Z\",\"schema_version\":1,\"seq\":8,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "312d5c09ba8356cb477d68b4ef952dfc2a8cab630c35f6775010d32eb21ac8ff"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMA0A000000000000000D2\",\"event_time\":\"2026-09-21T20:05:00.000000000Z\",\"event_type\":\"DecisionMade\",\"payload\":{\"ask_suppressed\":null,\"autonomy\":null,\"buy_conviction\":null,\"client_id\":null,\"clips_applied\":[],\"combined_score\":null,\"decided_by\":null,\"delegation_id\":null,\"dry_run\":\"defer\",\"exit_conviction\":null,\"exit_origin\":\"goal_completion\",\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"150.25\",\"model_weights\":[],\"outputs_used\":[],\"purpose\":\"discretionary_exit\",\"qty\":\"10\",\"reason_code\":\"discretionary_exit_regular_session_only\",\"requested_by\":\"agent\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"56e334f5630297d0d7fa987c9b62017194603ab597693824c515a0238602fb89\",\"recorded_at\":\"2026-09-21T20:05:00.000100000Z\",\"schema_version\":1,\"seq\":8,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "8255b882b589e10d0461a93bf47f33fdf75ed01b45e6a6352a9e16585980c220"
    },
    {
     "seq": 9,
@@ -1086,7 +1086,7 @@
      "event_time": "2026-09-21T20:10:00.000000000Z",
      "recorded_at": "2026-09-21T20:10:00.000100000Z",
      "clock_source": "scheduler",
-     "causation_id": null,
+     "causation_id": "01J8ZMR00000000000000000C2",
      "correlation_id": null,
      "actor": {
       "kind": "agent",
@@ -1114,10 +1114,10 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "312d5c09ba8356cb477d68b4ef952dfc2a8cab630c35f6775010d32eb21ac8ff"
+     "prev_hash": "8255b882b589e10d0461a93bf47f33fdf75ed01b45e6a6352a9e16585980c220"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMR0A000000000000000E2\",\"event_time\":\"2026-09-21T20:10:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":\"151\",\"bid_size\":\"300\",\"confirmed\":true,\"floor\":\"146.47\",\"scope\":\"instrument\",\"step_up\":{\"assertion_id\":\"stepup_9c1e\",\"authenticated_at\":\"2026-09-21T20:09:45.000000000Z\",\"method\":\"webauthn\"},\"step_up_status\":\"valid\",\"subject\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"312d5c09ba8356cb477d68b4ef952dfc2a8cab630c35f6775010d32eb21ac8ff\",\"recorded_at\":\"2026-09-21T20:10:00.000100000Z\",\"schema_version\":1,\"seq\":9,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "d3fc8b020646412e13d7b182fd74c0a51407fd6f830afbbd04a1708ff20042fa"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZMR00000000000000000C2\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMR0A000000000000000E2\",\"event_time\":\"2026-09-21T20:10:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":\"151\",\"bid_size\":\"300\",\"confirmed\":true,\"floor\":\"146.47\",\"scope\":\"instrument\",\"step_up\":{\"assertion_id\":\"stepup_9c1e\",\"authenticated_at\":\"2026-09-21T20:09:45.000000000Z\",\"method\":\"webauthn\"},\"step_up_status\":\"valid\",\"subject\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"8255b882b589e10d0461a93bf47f33fdf75ed01b45e6a6352a9e16585980c220\",\"recorded_at\":\"2026-09-21T20:10:00.000100000Z\",\"schema_version\":1,\"seq\":9,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "4ffc7d4255ff4ea5b3be3bd25d718ab826f60fc448fd630e76cc62e08cf7a1ac"
    },
    {
     "seq": 10,
@@ -1155,10 +1155,10 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "d3fc8b020646412e13d7b182fd74c0a51407fd6f830afbbd04a1708ff20042fa"
+     "prev_hash": "4ffc7d4255ff4ea5b3be3bd25d718ab826f60fc448fd630e76cc62e08cf7a1ac"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZMR0A000000000000000E2\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMR0M000000000000000P2\",\"event_time\":\"2026-09-21T20:10:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"146.47\",\"purpose\":\"owner_exit\",\"qty\":\"10\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"d3fc8b020646412e13d7b182fd74c0a51407fd6f830afbbd04a1708ff20042fa\",\"recorded_at\":\"2026-09-21T20:10:00.000200000Z\",\"schema_version\":1,\"seq\":10,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "6ae71378e2bfeff1763732e2f50df496ab4cf6f6f9f64e441949eb0b96e21fd1"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZMR0A000000000000000E2\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMR0M000000000000000P2\",\"event_time\":\"2026-09-21T20:10:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"146.47\",\"purpose\":\"owner_exit\",\"qty\":\"10\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"4ffc7d4255ff4ea5b3be3bd25d718ab826f60fc448fd630e76cc62e08cf7a1ac\",\"recorded_at\":\"2026-09-21T20:10:00.000200000Z\",\"schema_version\":1,\"seq\":10,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "a619a9deadaeded0c4f93536d94baaa67f90952809c17905492327e32945a1ad"
    },
    {
     "seq": 11,
@@ -1191,10 +1191,10 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "6ae71378e2bfeff1763732e2f50df496ab4cf6f6f9f64e441949eb0b96e21fd1"
+     "prev_hash": "a619a9deadaeded0c4f93536d94baaa67f90952809c17905492327e32945a1ad"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0A000000000000000M1\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"AgentModeChanged\",\"payload\":{\"from\":\"normal\",\"lifecycle\":\"normal\",\"reason\":\"kill_switch\",\"to\":\"stopped\"},\"pii_refs\":[],\"prev_hash\":\"6ae71378e2bfeff1763732e2f50df496ab4cf6f6f9f64e441949eb0b96e21fd1\",\"recorded_at\":\"2026-09-21T20:30:00.000100000Z\",\"schema_version\":1,\"seq\":11,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "4434b174201618eb5a306163e4fda33f8fb257c86172ab298f9bedd1869ac25c"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0A000000000000000M1\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"AgentModeChanged\",\"payload\":{\"from\":\"normal\",\"lifecycle\":\"normal\",\"reason\":\"kill_switch\",\"to\":\"stopped\"},\"pii_refs\":[],\"prev_hash\":\"a619a9deadaeded0c4f93536d94baaa67f90952809c17905492327e32945a1ad\",\"recorded_at\":\"2026-09-21T20:30:00.000100000Z\",\"schema_version\":1,\"seq\":11,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "2ce0cf183bae1d0c0f763e44f599bba932400f49e301206076e92198ba891817"
    },
    {
     "seq": 12,
@@ -1210,7 +1210,7 @@
      "event_time": "2026-09-21T20:30:00.000000000Z",
      "recorded_at": "2026-09-21T20:30:00.000200000Z",
      "clock_source": "scheduler",
-     "causation_id": null,
+     "causation_id": "01J8ZNB00000000000000000C3",
      "correlation_id": null,
      "actor": {
       "kind": "agent",
@@ -1234,10 +1234,10 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "4434b174201618eb5a306163e4fda33f8fb257c86172ab298f9bedd1869ac25c"
+     "prev_hash": "2ce0cf183bae1d0c0f763e44f599bba932400f49e301206076e92198ba891817"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0M000000000000000K1\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":null,\"bid_size\":null,\"confirmed\":false,\"floor\":null,\"scope\":\"agent\",\"step_up\":null,\"step_up_status\":\"absent\",\"subject\":\"agent_a\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"4434b174201618eb5a306163e4fda33f8fb257c86172ab298f9bedd1869ac25c\",\"recorded_at\":\"2026-09-21T20:30:00.000200000Z\",\"schema_version\":1,\"seq\":12,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "e0dbe0f7db75496249c1c8e5347f0c0e773af146a52a063c6b732336c225c2a6"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZNB00000000000000000C3\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0M000000000000000K1\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":null,\"bid_size\":null,\"confirmed\":false,\"floor\":null,\"scope\":\"agent\",\"step_up\":null,\"step_up_status\":\"absent\",\"subject\":\"agent_a\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"2ce0cf183bae1d0c0f763e44f599bba932400f49e301206076e92198ba891817\",\"recorded_at\":\"2026-09-21T20:30:00.000200000Z\",\"schema_version\":1,\"seq\":12,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "527d5e79da716c6916a58d3391a179f8799f7827c91f14cd019e48e9bf716947"
    },
    {
     "seq": 13,
@@ -1253,7 +1253,7 @@
      "event_time": "2026-09-21T20:30:00.000000000Z",
      "recorded_at": "2026-09-21T20:30:00.000300000Z",
      "clock_source": "scheduler",
-     "causation_id": null,
+     "causation_id": "01J8ZNB00000000000000000C3",
      "correlation_id": null,
      "actor": {
       "kind": "agent",
@@ -1270,14 +1270,64 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "e0dbe0f7db75496249c1c8e5347f0c0e773af146a52a063c6b732336c225c2a6"
+     "prev_hash": "527d5e79da716c6916a58d3391a179f8799f7827c91f14cd019e48e9bf716947"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0R000000000000000K2\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"KillSwitchActivated\",\"payload\":{\"initiator\":\"owner\",\"mode_event\":\"01J8ZNB0A000000000000000M1\",\"scope\":\"agent\",\"subject\":\"agent_a\"},\"pii_refs\":[],\"prev_hash\":\"e0dbe0f7db75496249c1c8e5347f0c0e773af146a52a063c6b732336c225c2a6\",\"recorded_at\":\"2026-09-21T20:30:00.000300000Z\",\"schema_version\":1,\"seq\":13,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "e402aa790600314da7b2aa2083143e422799c7bf1a8c640a87a31dc310d8e778"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZNB00000000000000000C3\",\"clock_source\":\"scheduler\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0R000000000000000K2\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"KillSwitchActivated\",\"payload\":{\"initiator\":\"owner\",\"mode_event\":\"01J8ZNB0A000000000000000M1\",\"scope\":\"agent\",\"subject\":\"agent_a\"},\"pii_refs\":[],\"prev_hash\":\"527d5e79da716c6916a58d3391a179f8799f7827c91f14cd019e48e9bf716947\",\"recorded_at\":\"2026-09-21T20:30:00.000300000Z\",\"schema_version\":1,\"seq\":13,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "aa505349cfa88b177604b688393985d403c8be1bb29830994c4ce0f90302412c"
    }
   ],
   "derivation": {
-   "note": "Illustrative mandate and account values the DecisionMade vector is recomputed from (mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no fresh output, so it counts as missing. The ask is the observed quote's (artifact quote_snapshot). The gate dry run, the autonomy result and its decided_by label, and who requested the order are inputs. Gross exposure is the held position's quantity x mark. After the session closes the profit_stop goal is reached, whose completion is a discretionary exit of every position (mandate spec §3.1), deferred until the session (trading spec §9.6) with nothing proposed (mandate spec §6.2). Outside the session an exit is a limit order (trading spec §9.4), priced at the exit price ladder's first rung: the reference bid x (1 - exit_offset) for the >= 50 M USD tier, a sell rounded up to the tick (trading spec §2.1, §5.6). The owner closes the held position in the regular session without a confirmed bid, and after the session closes the opened position (taken as filled) with a confirmed bid, whose floor is the default, bid x (1 - max_exit_offset), for the instrument's >= 50 M USD tier (trading spec §5.5, §5.6); that close's own limit is the floor. Step-up is valid for 300 s after authentication (DEC-156 item 8). The regular session is 09:30 to 16:00 America/New_York (EDT, UTC-4, on this date).",
+   "note": "Illustrative mandate and account values the DecisionMade vector is recomputed from (mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no fresh output, so it counts as missing. The ask is the observed quote's (artifact quote_snapshot). The gate dry run, the autonomy result and its decided_by label, and who requested the order are inputs. Gross exposure is the held position's quantity x mark. After the session closes the profit_stop goal is reached, whose completion is a discretionary exit of every position (mandate spec §3.1), deferred until the session (trading spec §9.6) with nothing proposed (mandate spec §6.2). Outside the session an exit is a limit order (trading spec §9.4), priced at the exit price ladder's first rung: the reference bid x (1 - exit_offset) for the >= 50 M USD tier, a sell rounded up to the tick (trading spec §2.1, §5.6). The owner closes the held position in the regular session without a confirmed bid, and after the session closes the opened position (taken as filled) with a confirmed bid, whose floor is the default, bid x (1 - max_exit_offset), for the instrument's >= 50 M USD tier (trading spec §5.5, §5.6); that close's own limit is the floor. Step-up is valid for 300 s after authentication (DEC-156 item 8). The regular session is 09:30 to 16:00 America/New_York (EDT, UTC-4, on this date). The owner commands are the control stream's OwnerCommandIssued events that the owner copies name as their cause (spec §2, §9.1 rule 16); they are on another stream, so only the members the copies are checked against are listed.",
+   "owner_commands": [
+    {
+     "event_id": "01J8Z6A00000000000000000C1",
+     "stream_id": "ctl:ws_01J8Z2",
+     "command": "owner_exit",
+     "scope": "instrument",
+     "subject": "5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f",
+     "submitted_at": "2026-09-21T14:59:59.500000000Z"
+    },
+    {
+     "event_id": "01J8ZMR00000000000000000C2",
+     "stream_id": "ctl:ws_01J8Z2",
+     "command": "owner_exit",
+     "scope": "instrument",
+     "subject": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "submitted_at": "2026-09-21T20:09:59.500000000Z"
+    },
+    {
+     "event_id": "01J8ZNB00000000000000000C3",
+     "stream_id": "ctl:ws_01J8Z2",
+     "command": "kill_switch",
+     "scope": "agent",
+     "subject": "agent_a",
+     "submitted_at": "2026-09-21T20:29:59.500000000Z"
+    },
+    {
+     "event_id": "01J8ZNB00000000000000000C4",
+     "stream_id": "ctl:ws_01J8Z2",
+     "command": "pause",
+     "scope": "agent",
+     "subject": "agent_a",
+     "submitted_at": "2026-09-21T20:29:59.500000000Z"
+    },
+    {
+     "event_id": "01J8ZNB00000000000000000C5",
+     "stream_id": "ctl:ws_01J8Z2",
+     "command": "resume",
+     "scope": "agent",
+     "subject": "agent_a",
+     "submitted_at": "2026-09-21T20:29:59.500000000Z"
+    },
+    {
+     "event_id": "01J8ZNB00000000000000000C6",
+     "stream_id": "ctl:ws_01J8Z2",
+     "command": "stop",
+     "scope": "agent",
+     "subject": "agent_a",
+     "submitted_at": "2026-09-21T20:29:59.500000000Z"
+    }
+   ],
    "owner_bid": "151",
    "goal_exit_reference_bid": "151",
    "exit_offset": "0.005",
@@ -2476,6 +2526,114 @@
      "reason": "stream_mismatch",
      "path": "payload.subject"
     }
+   },
+   {
+    "name": "owner_exit_without_its_command",
+    "clause": "§9.1 rule 16",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "owner_kill_switch_without_its_command",
+    "clause": "§9.1 rule 16",
+    "base_seq": 13,
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "owner_pause_without_its_command",
+    "clause": "§9.1 rule 16",
+    "base_seq": 11,
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": "paused"
+     },
+     {
+      "path": "payload.reason",
+      "value": "owner_pause"
+     },
+     {
+      "path": "payload.lifecycle",
+      "value": "paused"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "owner_resume_without_its_command",
+    "clause": "§9.1 rule 16",
+    "base_seq": 11,
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": "paused"
+     },
+     {
+      "path": "payload.to",
+      "value": "normal"
+     },
+     {
+      "path": "payload.reason",
+      "value": "owner_resume"
+     },
+     {
+      "path": "payload.lifecycle",
+      "value": "normal"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "owner_stop_without_its_command",
+    "clause": "§9.1 rule 16",
+    "base_seq": 11,
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": "stopped"
+     },
+     {
+      "path": "payload.reason",
+      "value": "owner_stop"
+     },
+     {
+      "path": "payload.lifecycle",
+      "value": "stopped"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
    }
   ],
   "valid_drafts": [
@@ -2495,6 +2653,10 @@
      {
       "path": "payload.lifecycle",
       "value": "paused"
+     },
+     {
+      "path": "causation_id",
+      "value": "01J8ZNB00000000000000000C4"
      }
     ],
     "expect": {
@@ -2521,6 +2683,10 @@
      {
       "path": "payload.lifecycle",
       "value": "normal"
+     },
+     {
+      "path": "causation_id",
+      "value": "01J8ZNB00000000000000000C5"
      }
     ],
     "expect": {
@@ -2543,6 +2709,28 @@
      {
       "path": "payload.lifecycle",
       "value": "stopped"
+     },
+     {
+      "path": "causation_id",
+      "value": "01J8ZNB00000000000000000C6"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "kill_switch_automated_without_a_command",
+    "clause": "§9.1 rule 16",
+    "base_seq": 13,
+    "changes": [
+     {
+      "path": "payload.initiator",
+      "value": "risk_limit"
+     },
+     {
+      "path": "causation_id",
+      "value": null
      }
     ],
     "expect": {
@@ -2970,6 +3158,11 @@
       "seq": 11,
       "path": "payload.lifecycle",
       "value": "paused"
+     },
+     {
+      "seq": 11,
+      "path": "causation_id",
+      "value": "01J8ZNB00000000000000000C4"
      }
     ],
     "expect": {

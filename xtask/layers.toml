@@ -7,6 +7,8 @@
 # `safety_critical = true` crates must:
 #   - list every external (non-workspace) dependency in `allowed_external`;
 #   - start `src/lib.rs` with the safety-critical lint header (see REQUIRED_HEADER in xtask).
+# The flag governs whatever the layer (DEC-253): a safety-critical `tool` crate is also mutated on
+# the diff by `cargo xtask ci mutants`, and ES-13's 400-line change limit applies to it.
 # `pure = true` crates (the core) may not depend on any crate in `impure_crates`.
 #
 # Planned crates and layers, created only when a story needs them:
