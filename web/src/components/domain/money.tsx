@@ -1,42 +1,76 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import NumberFlow from "@number-flow/react";
 import { cn } from "@/lib/utils";
 import type { Dec } from "@/lib/decimal";
 import { direction, directionWord, signedUsd, usd } from "@/lib/format";
 
+const USD = /^([+\u2212-]?)\$(\d{1,3}(?:,\d{3})*)(?:\.(\d+))?$/;
+
+/** A formatted dollar figure ("+$1,234.50", "−$5.55") as Number Flow's parts; anything else is null. */
+export function parseUsd(value: string): { sign: string; amount: number; places: number } | null {
+  const m = USD.exec(value);
+  if (!m) return null;
+  const places = m[3]?.length ?? 0;
+  return { sign: m[1] === "-" ? "\u2212" : m[1], amount: Number(`${m[2].replaceAll(",", "")}.${m[3] ?? "0"}`), places };
+}
+
+/** Digits roll on the spring the rest of the app settles on; Number Flow's soft edge mask is set to nothing, so edges stay flat. */
+const ROLL = { duration: 520, easing: "cubic-bezier(0.23, 1, 0.32, 1)" };
+const FADE = { duration: 260, easing: "ease-out" };
+
 /**
- * A changed value rolls whole: the old figure leaves upward as the new one arrives, 240 ms. Nothing
- * counts up through intermediate figures that were never true. Assistive technology reads the
- * value once, not the two copies that overlap while it changes. `instant` is for a value that
- * follows the owner's finger (a scrubbed chart), which must never lag behind it.
+ * Number Flow's server render leaves a copy of the value in the element's light DOM, which the
+ * client never updates once the shadow DOM draws it, so the copy would go stale in `textContent`.
+ */
+function dropServerCopy(el: HTMLElement | null) {
+  if (el?.shadowRoot) el.replaceChildren();
+}
+
+/**
+ * A changed figure rolls digit by digit (Number Flow, DEC-216): only the digits that change move,
+ * upward when the value rises and downward when it falls, so the eye lands on what changed.
+ * Assistive technology reads the whole value once from a plain copy. `instant` is for a value that
+ * follows the owner's finger (a scrubbed chart), which must never lag behind it. With reduced motion,
+ * the figure changes in place.
  */
 export function AnimatedValue({
   value,
   className,
   instant = false,
-  format,
+  cents = false,
 }: {
   value: string;
   className?: string;
   instant?: boolean;
-  /** Draws the visible copy in parts; the screen-reader copy stays the whole value. */
-  format?: (value: string) => ReactNode;
+  /** Draws the cents half size, muted, and raised to the digits' cap height. */
+  cents?: boolean;
 }) {
-  // MotionConfig's reducedMotion covers named transform keys only, not a raw `transform` string.
   const shift = useReducedMotion() ? 0 : 40;
-  const shown = format ? format(value) : value;
-  if (instant) {
-    // Some screen readers read each inline element on its own, so a value drawn in parts gets a whole copy.
-    return format ? (
-      <span data-instant="" className={cn("relative inline-grid", className)}>
+  const parsed = parseUsd(value);
+  if (parsed) {
+    return (
+      <span data-slot="figure" data-instant={instant ? "" : undefined} className={cn("relative inline-grid", className)}>
         <span className="sr-only">{value}</span>
-        <span aria-hidden className="[grid-area:1/1]">
-          {shown}
-        </span>
+        <NumberFlow
+          ref={dropServerCopy}
+          aria-hidden="true"
+          value={parsed.amount}
+          prefix={parsed.sign}
+          locales="en-US"
+          format={{ style: "currency", currency: "USD", minimumFractionDigits: parsed.places, maximumFractionDigits: parsed.places }}
+          animated={!instant}
+          transformTiming={ROLL}
+          spinTiming={ROLL}
+          opacityTiming={FADE}
+          className={cn("number-flow [grid-area:1/1]", cents && "number-flow-cents")}
+        />
       </span>
-    ) : (
+    );
+  }
+  if (instant) {
+    return (
       <span data-instant="" className={cn("inline-grid", className)}>
         {value}
       </span>
@@ -55,24 +89,10 @@ export function AnimatedValue({
           transition={{ duration: 0.24, ease: [0.23, 1, 0.32, 1] }}
           className="[grid-area:1/1]"
         >
-          {shown}
+          {value}
         </motion.span>
       </AnimatePresence>
     </span>
-  );
-}
-
-/** "$28,478" and ".36": the cents are drawn smaller, muted, and raised to the digits' cap height. */
-function withCents(value: string): ReactNode {
-  const dot = value.lastIndexOf(".");
-  if (dot < 0) return value;
-  return (
-    <>
-      {value.slice(0, dot)}
-      <span data-slot="cents" className="align-[1cap] text-[0.5em] leading-0 tracking-normal text-muted-foreground">
-        {value.slice(dot)}
-      </span>
-    </>
   );
 }
 
@@ -81,7 +101,7 @@ function withCents(value: string): ReactNode {
  * size. It rolls like any figure, or follows a scrub at once with `instant`.
  */
 export function HeroFigure({ value, instant = false }: { value: string; instant?: boolean }) {
-  return <AnimatedValue value={value} instant={instant} format={withCents} />;
+  return <AnimatedValue value={value} instant={instant} cents />;
 }
 
 export function Money({ value, places, className }: { value: string | Dec; places?: number; className?: string }) {

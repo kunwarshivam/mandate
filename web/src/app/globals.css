@@ -203,6 +203,28 @@ html:has([data-slot="response-bar"]) [role="region"][aria-label="Notifications"]
   }
 }
 
+/*
+ * Number Flow (DEC-216) fades a rolling digit's edges with a mask; at zero the edges are flat, as
+ * everything here is. A hero figure draws its cents half size, muted, raised to the cap height.
+ */
+.number-flow {
+  --number-flow-mask-height: 0px;
+  --number-flow-mask-width: 0px;
+  font-variant-numeric: inherit;
+}
+/* Public Sans draws a digit between 0.125em and 0.875em of its 1em line, so the clip stops the
+   digits rolling in and out from showing above and below the figure. Commas dip lower, so the
+   clip is per digit. */
+.number-flow::part(digit) {
+  clip-path: inset(calc(0.125em - 1px) -0.05em);
+}
+.number-flow-cents::part(fraction) {
+  font-size: 0.5em;
+  color: var(--muted-foreground);
+  vertical-align: 1cap;
+  letter-spacing: normal;
+}
+
 /* Scrims darken the page in both modes; an off-white ink scrim would light it up. */
 .dark [data-slot="sheet-backdrop"] {
   background-color: var(--backdrop);

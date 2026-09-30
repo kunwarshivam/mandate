@@ -9,7 +9,7 @@ import { agentLimits } from "@/lib/limits";
 import { PALETTE, PALETTE_DARK } from "@/lib/palette";
 import { type MockChart, chartControl, chartIn, liveCharts, pointerTime } from "@/test/chart-mock";
 import { renderWithRuntime } from "@/test/harness";
-import { spoken } from "@/test/spoken";
+import { drawn, spoken } from "@/test/spoken";
 import { AccountEquityChart, AgentEquityChart, unmanagedEquity } from "./equity-chart";
 import { CHART_COLOR, CHART_TOKEN, type ChartLevel, LABEL_GAP, type Tone, areaOptions, baseOptions, candleOptions, crowdedLevels, lineOptions, priceLineFor, setChartMode, usdLabel } from "./options";
 import { ApprovalChart, PositionChart } from "./price-chart";
@@ -228,7 +228,7 @@ describe("the hero chart scrubs", () => {
     hover(chart, point);
     const h = hero(container);
     expect(spoken(h.value)).toBe(usdLabel(point.value));
-    expect(h.value.querySelector("[data-slot=cents]")).toHaveTextContent(usdLabel(point.value).slice(-3));
+    expect(h.value.querySelector("[data-part=fraction]")).toHaveTextContent(usdLabel(point.value).slice(-3));
     expect(h.when).toHaveTextContent(/^Sep 28, \d{2}:\d{2} ET$/);
     expect(h.section).toHaveAttribute("data-scrubbing");
     const change = Math.round((point.value - data[0].value) * 100) / 100;
@@ -277,7 +277,8 @@ describe("the hero chart scrubs", () => {
       hover(chart, point);
       const signed = hero(container).change.querySelector("[data-direction]")!;
       expect(signed).toHaveAttribute("data-direction", word);
-      expect(signed.textContent).toMatch(new RegExp(`^\\${sign}\\$[\\d,]+\\.\\d{2}${word}$`));
+      expect(spoken(signed)).toMatch(new RegExp(`^\\${sign}\\$[\\d,]+\\.\\d{2}${word}$`));
+      expect(drawn(signed)).toMatch(new RegExp(`^\\${sign}\\$[\\d,]+\\.\\d{2}${word}$`));
       expect(hero(container).section.querySelector("[data-placeholder=performance]")).toHaveTextContent("[[DISCLOSURE-PERFORMANCE]]");
     }
   });
@@ -308,7 +309,8 @@ describe("the hero chart scrubs", () => {
       expect(pill.parentElement!.className).not.toMatch(/flex-col/);
     }
     expect(spoken(hero(container).value)).toBe(usdLabel(data[0].value));
-    expect(hero(container).change).toHaveTextContent(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);
+    expect(spoken(hero(container).change)).toMatch(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);
+    expect(drawn(hero(container).change)).toMatch(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);
   });
 
   it("follows a finger: the crosshair is pinned to the nearest point and let go on release", () => {
