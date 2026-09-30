@@ -316,17 +316,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E8-3 (Must, M7)** As an owner, I want approved actions re-validated for drift so that stale
   approvals are not executed blindly ([task brief](tasks/M7-escalation-v0.md),
   [DEC-156](04-decision-log.md#decisions)). The same brief covers M7's CLI owner control.
-  *Follow-up (#240 review, round 2, minor 2):* the step-up generators in
-  `tests/grant_properties.rs` reach an age of exactly 300 s only by chance. Those generators are
-  `-350..20` and `-400..60`. A planted exclusive window is caught under `ci pending`'s pinned seed,
-  but not under about half of other seeds. Add -300 to both generators explicitly (a tests
-  correction). The hand tests already pin that edge.
-  *Follow-up (E8-3 implementation, the do-nothing sweep):* two drift tests check the drift result
-  of `revalidate` in one direction only: `drift_exactly_at_the_band_is_inside_and_one_unit_over_either_way_is_not`
-  and `no_mark_is_outside_the_band`. With `within_band` real and `revalidate` returning a constant
-  `Skip(Drift)`, both pass. `a_grant_acts_with_the_bound_order_only_while_every_check_passes` and
-  the re-validation property still catch that constant. Give each of the two tests the paired
-  positive, "the unchanged fixture acts", in a tests correction.
+  *Done (#240 review, round 2, minor 2; the M7 tests correction, DEC-173 item 14):* the step-up
+  generators in `tests/grant_properties.rs` reached an age of exactly 300 s only by chance
+  (`-350..20` and `-400..60`), so a planted exclusive window survived about half of all seeds.
+  Both now draw -300 one time in five (`at_the_window_edge_or`); the same planted window fails both
+  properties it reaches on every one of 20 seeds, where the old generators missed it on 10.
+  *Done (E8-3 implementation, the do-nothing sweep; the M7 tests correction, DEC-173 item 14):*
+  `drift_exactly_at_the_band_is_inside_and_one_unit_over_either_way_is_not` and
+  `no_mark_is_outside_the_band` checked the drift result of `revalidate` in one direction only, so
+  a constant `Skip(Drift)` passed both. Each now opens with the paired positive, "the unchanged
+  fixture acts", and that constant fails both.
   *Follow-up (#275 review, minor 2; the coordinator's ruling, rule 13):* when
   `owner_command(OwnerExit, …)` returns `CommandAuthority::Refused`, only the owner-exit
   privilege is withdrawn: selling equities outside the regular session at the confirmed bid.
@@ -366,12 +365,18 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
   (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
   journal them.
-  *Follow-up (#321 review, major; DEC-173 item 13), owned by the M7 tests correction:*
-  `mandate-approval`'s admission (`src/admit.rs`, `quorum`) reads only the bound
+  *Tests done (#321 review, major; DEC-173 items 13 to 15; the M7 tests correction); the
+  implementation follows:* `mandate-approval`'s admission read only the bound
   `approvers_required` and `independent_required`. It must judge check 7 against the stricter of
   those and the workspace policy overlay current at the effective time: independence if either
   requires it, the larger approver count, and an author's earlier `counted` grant not counting once
-  independence is required. Tests first, against `reference/mandate/ref.py`'s `approval_quorum`.
+  independence is required. `AdmissionContext.policy` now carries the overlay and
+  `mandate_approval::quorum` names the requirement; `quorum` is a stub, and `admit` fails closed
+  with its `Unimplemented` for a grant that reaches check 7 under any overlay but
+  `PolicyOverlay::NONE`. `tests/quorum.rs` holds eight tests pending E8-3 against
+  `reference/mandate/ref.py`'s `approval_quorum`. **The implementation PR** implements `quorum`,
+  calls it for every overlay, drops the author from the grants that count while independence is
+  required, and deletes the eight `#[ignore]` lines.
   *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
   control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
   would make MI-24 true as written.

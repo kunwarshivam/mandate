@@ -14,8 +14,8 @@ use std::num::NonZeroU8;
 use mandate_approval::{
     ActorKind, AdmissionContext, ApprovalRef, AskablePurpose, AssertionId, AssetClass, BoundAction,
     Classification, ContentHash, Current, DryRun, Environment, EvidenceAuthor, EvidenceRef,
-    ModeNow, OpaqueUser, ReferenceMark, Request, RequestContent, Response, RiskClock, RiskField,
-    RiskFigure, StepUp, StepUpMethod, Verdict,
+    ModeNow, OpaqueUser, PolicyOverlay, ReferenceMark, Request, RequestContent, Response,
+    RiskClock, RiskField, RiskFigure, StepUp, StepUpMethod, Verdict,
 };
 use mandate_canon::{DecStr, Digest};
 use mandate_num::{Price, Qty, Signed};
@@ -120,6 +120,7 @@ pub fn ctx() -> AdmissionContext {
         author: user(AUTHOR),
         environment: Environment::Paper,
         used_assertions: BTreeSet::new(),
+        policy: PolicyOverlay::NONE,
     }
 }
 
