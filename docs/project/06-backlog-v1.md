@@ -338,8 +338,8 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   risk reduction. The mandate spec §6.1 wording is in ("Owner controls and step-up", DEC-173
   item 5).
   *Follow-up (M7 spec PR, DEC-173 item 1):* the MC-E cases (MC-E01 to MC-E31) are not yet in
-  `mandate.yaml`. Two changes, in order. *Done (the tests correction, branch
-  `cursor/mandate-harness-counts-138b`):* `mandate_harness.rs` counts only the seven families it
+  `mandate.yaml`. Two changes, in order. *Done (the tests correction,
+  [#343](https://github.com/kunwarshivam/mandate/pull/343)):* `mandate_harness.rs` counts only the seven families it
   owns, by case-ID prefix (MC-S, MC-V, MC-P, MC-C, MC-R, MC-T, MC-L), and
   `a_kind_no_arm_interprets_fails_naming_it` accepts a kind no arm interprets as long as its cases
   fail, so a new family changes no harness test while a case added to or dropped from an owned
