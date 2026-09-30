@@ -574,6 +574,65 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     return out
 
 
+ACTION = ("instrument_id", "side", "type", "tif", "qty", "limit_price", "purpose")
+DECIMAL_ACTION = ("qty", "limit_price")
+
+
+def action_of(payload: dict) -> dict:
+    """`IntentProposed`'s members as values: decimals compared by their normalized form (§4.6)."""
+    return {
+        m: normalize_decimal(payload[m]) if m in DECIMAL_ACTION and payload[m] is not None else payload[m]
+        for m in ACTION
+    }
+
+
+def batch_violations(drafts: list[dict], skip: frozenset[str] = frozenset()) -> list[tuple[int, Violation]]:
+    """An `append` batch (§5.1), refused whole on any violation: each draft's own, in draft order,
+    then rule 10's second clause, on an `IntentProposed` whose `DecisionMade` is in the batch."""
+    out = [(i, v) for i, draft in enumerate(drafts) for v in violations(draft, skip)]
+    if out or "rule.10.batch" in skip:
+        return out
+    decisions = {d["event_id"]: d for d in drafts if d["event_type"] == "DecisionMade"}
+    for i, draft in enumerate(drafts):
+        cause = decisions.get(draft["causation_id"]) if draft["event_type"] == "IntentProposed" else None
+        if cause is None:
+            continue
+        mine, theirs = action_of(draft["payload"]), action_of(cause["payload"])
+        differs = [m for m in ACTION if mine[m] != theirs[m]]
+        if differs:
+            out.append((i, Violation("rule.10.batch", "schema", f"payload.{differs[0]}")))
+    return out
+
+
+def verify_range(entries: list[dict], from_seq: int, skip: frozenset[str] = frozenset()) -> list[tuple[int, str]]:
+    """§11's per-range checks that span agent-stream events, over a range whose earlier events are
+    not in hand: a reference to an event before `from_seq` is not checked."""
+    seen: dict[str, dict] = {}
+    out = []
+    for entry in entries:
+        body = entry["body"]
+        p = body["payload"]
+        if body["event_type"] == "IntentProposed" and "verify.intent_action_mismatch" not in skip:
+            cause = seen.get(body["causation_id"])
+            if cause is not None and cause["event_type"] == "DecisionMade" and action_of(cause["payload"]) != action_of(p):
+                out.append((body["seq"], "intent_action_mismatch"))
+        if (
+            body["event_type"] == "KillSwitchActivated"
+            and p["mode_event"] is not None
+            and "verify.mode_event_mismatch" not in skip
+        ):
+            named = seen.get(p["mode_event"])
+            unresolved = named is None and from_seq == 1
+            wrong = named is not None and (named["event_type"], named["payload"].get("reason")) != (
+                "AgentModeChanged",
+                "kill_switch",
+            )
+            if unresolved or wrong:
+                out.append((body["seq"], "mode_event_mismatch"))
+        seen[body["event_id"]] = body
+    return out
+
+
 # --------------------------------------------------------------------------- the agent stream
 
 WORKSPACE = "ws_01J8Z2"
@@ -1450,6 +1509,101 @@ def valid_drafts() -> list[dict]:
     ]
 
 
+def batch(name, clause, members, expect):
+    return {
+        "name": name,
+        "clause": clause,
+        "drafts": [{"base_seq": SEQ[base], "changes": changes} for base, changes in members],
+        "expect": expect,
+    }
+
+
+def batches() -> tuple[list[dict], list[dict]]:
+    """Rule 10's second clause: a `DecisionMade` and its `IntentProposed` in one `append` batch."""
+
+    def refused(path: str) -> dict:
+        return {"outcome": "Invalid", "reason": "schema", "path": path, "draft_index": 1}
+
+    accepted = [batch("decision_and_its_intent", "§9.1 rule 10", [("decision", []), ("intent", [])], {"outcome": "Valid"})]
+    rejected = [
+        batch(
+            "intent_quantity_differs_from_its_decision",
+            "§9.1 rule 10",
+            [("decision", []), ("intent", [change("payload.qty", "11")])],
+            refused("payload.qty"),
+        ),
+        batch(
+            "intent_limit_differs_from_its_decision",
+            "§9.1 rule 10",
+            [("decision", []), ("intent", [change("payload.limit_price", "150.01")])],
+            refused("payload.limit_price"),
+        ),
+        batch(
+            "intent_purpose_differs_from_its_decision",
+            "§9.1 rule 10",
+            [("decision", []), ("intent", [change("payload.purpose", "increase")])],
+            refused("payload.purpose"),
+        ),
+    ]
+    return accepted, rejected
+
+
+def range_case(name, clause, base, path, value, code):
+    return {
+        "name": name,
+        "clause": clause,
+        "from_seq": 1,
+        "changes": [{"seq": SEQ[base], "path": path, "value": value}],
+        "expect": {"code": code, "seq": SEQ[base]},
+    }
+
+
+def range_verification() -> list[dict]:
+    """§11's per-range checks across agent-stream events. Each case applies its changes to the
+    chain's bodies, re-chains from the genesis hash, and verifies from `from_seq`: every per-event
+    check passes and the range check fails once, at the listed seq, with the listed code."""
+    return [
+        range_case(
+            "intent_repeats_another_action",
+            "§11 intent_action_mismatch",
+            "intent",
+            "payload.qty",
+            "11",
+            "intent_action_mismatch",
+        ),
+        range_case(
+            "kill_switch_names_the_owner_command",
+            "§11 mode_event_mismatch",
+            "kill_switch",
+            "payload.mode_event",
+            ID["owner_kill_switch"],
+            "mode_event_mismatch",
+        ),
+    ]
+
+
+def tampered_chain(chain: list[dict], case: dict) -> list[dict]:
+    entries = copy.deepcopy(chain)
+    for item in case["changes"]:
+        apply_change(entries[item["seq"] - 1]["body"], item)
+    rechain(entries)
+    return entries
+
+
+def batch_drafts(chain: list[dict], case: dict) -> list[dict]:
+    return [apply_changes(chain, member) for member in case["drafts"]]
+
+
+def batch_matches(got: list[tuple[int, Violation]], want: dict) -> bool:
+    if want["outcome"] == "Valid":
+        return not got
+    return len(got) == 1 and (got[0][0], got[0][1].reason, got[0][1].path) == (
+        want["draft_index"],
+        want["reason"],
+        want["path"],
+    )
+
+
 def apply_changes(chain: list[dict], case: dict) -> dict:
     draft = draft_of(chain[case["base_seq"] - 1]["body"])
     for item in case["changes"]:
@@ -1685,6 +1839,17 @@ def check_chain(section: dict, v3: dict) -> list[str]:
         got = violations(apply_changes(chain, case))
         if got:
             problems.append(f"{case['name']}: expected Valid, got {got}")
+    for case in section["valid_batches"] + section["invalid_batches"]:
+        got = batch_violations(batch_drafts(chain, case))
+        if not batch_matches(got, case["expect"]):
+            problems.append(f"batch {case['name']}: expected {case['expect']}, got {got}")
+    if verify_range(chain, 1):
+        problems.append(f"the chain fails §11's range checks: {verify_range(chain, 1)}")
+    for case in section["range_verification"]:
+        want = [(case["expect"]["seq"], case["expect"]["code"])]
+        got = verify_range(tampered_chain(chain, case), case["from_seq"])
+        if got != want:
+            problems.append(f"range case {case['name']}: expected {want}, got {got}")
     for entry in chain:
         got = violations(draft_of(entry["body"]))
         if got:
@@ -1708,6 +1873,9 @@ VALIDATOR_MUTANTS = (
     *REGRESSIONS,
     "regress.rule_12_ties_evidence_to_the_bid",
     "regress.rule_8_numbers_on_every_exit_but_risk",
+    "rule.10.batch",
+    "verify.intent_action_mismatch",
+    "verify.mode_event_mismatch",
 )
 
 
@@ -1821,6 +1989,8 @@ def run_mutants(section: dict, v3: dict) -> list[str]:
     cases = [(draft_of(e["body"]), None) for e in chain]
     cases += [(apply_changes(chain, c), None) for c in section["valid_drafts"]]
     cases += [(apply_changes(chain, c), c["expect"]) for c in section["invalid_drafts"]]
+    batch_cases = [(batch_drafts(chain, c), c["expect"]) for c in section["valid_batches"] + section["invalid_batches"]]
+    range_cases = [(tampered_chain(chain, c), c) for c in section["range_verification"]]
     for mutant in VALIDATOR_MUTANTS:
         skip = frozenset([mutant])
         caught = False
@@ -1830,6 +2000,12 @@ def run_mutants(section: dict, v3: dict) -> list[str]:
                 caught |= bool(got)
             else:
                 caught |= len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"])
+        for drafts, want in batch_cases:
+            caught |= not batch_matches(batch_violations(drafts, skip), want)
+        for entries, case in range_cases:
+            want = [(case["expect"]["seq"], case["expect"]["code"])]
+            caught |= verify_range(entries, case["from_seq"], skip) != want
+        caught |= bool(verify_range(chain, 1, skip))
         if not caught:
             escaped.append(f"validator mutant {mutant}")
     for name, mutated in vector_mutants(section):
@@ -1855,6 +2031,9 @@ def build_section(v3: dict) -> dict:
         "derivation": DERIVATION,
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
+        "valid_batches": batches()[0],
+        "invalid_batches": batches()[1],
+        "range_verification": range_verification(),
     }
 
 
@@ -1914,7 +2093,9 @@ def main(argv: list[str] | None = None) -> int:
         vectors.write_text(rendered, encoding="utf-8")
     print(
         f"ok: v3 vectors reproduced; {len(section['chain'])} agent-stream events, "
-        f"{len(section['invalid_drafts'])} invalid drafts, {len(VALIDATOR_MUTANTS)} validator and "
+        f"{len(section['invalid_drafts'])} invalid and {len(section['valid_drafts'])} valid drafts, "
+        f"{len(section['invalid_batches']) + len(section['valid_batches'])} batches, "
+        f"{len(section['range_verification'])} range cases; {len(VALIDATOR_MUTANTS)} validator and "
         f"{len(vector_mutants(section))} vector mutants caught"
     )
     return 0

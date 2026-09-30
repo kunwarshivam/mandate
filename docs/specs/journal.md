@@ -513,7 +513,11 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
    rule 13).
 9. `DecisionMade`: `outputs_used` strictly ascending, `model_weights` keys strictly ascending by bytes,
    and `clips_applied` strictly in the table's order — `non_canonical` at the list.
-10. `IntentProposed`: `causation_id` is non-null — `causation_id`.
+10. `IntentProposed`: `causation_id` is non-null — `causation_id`; and when the `DecisionMade` it
+    names is in the same `append` batch, its action members (`instrument_id`, `side`, `type`,
+    `tif`, `qty`, `limit_price`, `purpose`, decimals compared by value) equal that decision's — on
+    the `IntentProposed`, the first member that differs, in that order. Like any invalid draft, it
+    refuses the whole batch (§5.1).
 11. `AgentModeChanged`: `to` is at least as strict as `lifecycle` (`normal` < `exits_only` < `paused` <
     `stopped`) — `payload.to`.
 12. `OwnerExitRequested`: `confirmed` is `true` exactly when `bid`, `bid_size`, and `floor` are all
@@ -528,9 +532,11 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
 15. `KillSwitchActivated`, `OwnerExitRequested`: scope `agent` names the stream's agent and scope
     `workspace` its workspace — `payload.subject`.
 
-Facts that span events are the writer's to keep and are checked by the vectors, not at `append`:
-`IntentProposed` repeats its `DecisionMade`'s action, and `mode_event` names this stream's
-`AgentModeChanged` with reason `kill_switch`.
+Two facts span events. `IntentProposed` repeats its `DecisionMade`'s action, which `append`
+checks when both are in one batch (rule 10), and `mode_event` names this stream's
+`AgentModeChanged` with reason `kill_switch`. Across batches `append` cannot see the other event,
+so §11's per-range checks `intent_action_mismatch` and `mode_event_mismatch` verify both on the
+stored chain, and `mandate journal verify` reports them.
 
 ## 10. Anchoring
 
@@ -563,7 +569,17 @@ line order for exports), reading `seq` from the body.
 
 **Per-range checks:** `anchor_head_mismatch` (the event at each anchored `seq` exists with the
 anchored hash), `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`,
-`segment_gap`.
+`segment_gap`, and on an agent stream ([§9.1](#91-agent-stream-payload-schemas-dec-177)):
+
+- `intent_action_mismatch` — an `IntentProposed` whose `causation_id` names a `DecisionMade` has
+  that decision's action members (rule 10), reported at the `IntentProposed`;
+- `mode_event_mismatch` — a `KillSwitchActivated` whose `mode_event` is non-null names an earlier
+  `AgentModeChanged` on this stream with reason `kill_switch`, reported at the
+  `KillSwitchActivated`.
+
+A reference to an event before the range's trusted start is not checked by that range; the weekly
+full-chain run checks every one, and there a `mode_event` that names no earlier event fails. The
+test vectors' `agent_stream.range_verification` holds a case for each.
 
 **Schedule:** the tail of every stream at startup and before each segment export; the full chain
 weekly; results journaled as `VerificationRun`.

@@ -17,7 +17,11 @@
 # draft of `chain[base_seq - 1].body` (without `seq`, `prev_hash`, `recorded_at`) with each change
 # setting the dotted `path` to `value`, or removing it where the change has `delete: true`; `append`
 # refuses it as `Invalid` with the listed reason and path. Each `valid_drafts` case is built the
-# same way and `append` accepts it. `derivation` holds the inputs the chain is recomputed from. The
+# same way and `append` accepts it. Each `valid_batches` and `invalid_batches` case is one `append`
+# of its `drafts`, each built the same way; an invalid one is refused whole, at `draft_index`. Each
+# `range_verification` case applies its changes to the chain's bodies at `seq`, re-chains from the
+# genesis hash, and verifies from `from_seq`: only the listed spec §11 per-range check fails, once,
+# at the listed seq. `derivation` holds the inputs the chain is recomputed from. The
 # section is additive: `version` stays 3 until the harness reads it (DEC-177).
 
 version: 3
@@ -1609,3 +1613,77 @@ agent_stream:
       value: stale
     expect:
       outcome: Valid
+  valid_batches:
+  - name: decision_and_its_intent
+    clause: §9.1 rule 10
+    drafts:
+    - base_seq: 4
+      changes: []
+    - base_seq: 5
+      changes: []
+    expect:
+      outcome: Valid
+  invalid_batches:
+  - name: intent_quantity_differs_from_its_decision
+    clause: §9.1 rule 10
+    drafts:
+    - base_seq: 4
+      changes: []
+    - base_seq: 5
+      changes:
+      - path: payload.qty
+        value: '11'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+      draft_index: 1
+  - name: intent_limit_differs_from_its_decision
+    clause: §9.1 rule 10
+    drafts:
+    - base_seq: 4
+      changes: []
+    - base_seq: 5
+      changes:
+      - path: payload.limit_price
+        value: '150.01'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.limit_price
+      draft_index: 1
+  - name: intent_purpose_differs_from_its_decision
+    clause: §9.1 rule 10
+    drafts:
+    - base_seq: 4
+      changes: []
+    - base_seq: 5
+      changes:
+      - path: payload.purpose
+        value: increase
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.purpose
+      draft_index: 1
+  range_verification:
+  - name: intent_repeats_another_action
+    clause: §11 intent_action_mismatch
+    from_seq: 1
+    changes:
+    - seq: 5
+      path: payload.qty
+      value: '11'
+    expect:
+      code: intent_action_mismatch
+      seq: 5
+  - name: kill_switch_names_the_owner_command
+    clause: §11 mode_event_mismatch
+    from_seq: 1
+    changes:
+    - seq: 13
+      path: payload.mode_event
+      value: 01J8ZNB0M000000000000000K1
+    expect:
+      code: mode_event_mismatch
+      seq: 13

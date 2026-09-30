@@ -2244,6 +2244,136 @@
      "outcome": "Valid"
     }
    }
+  ],
+  "valid_batches": [
+   {
+    "name": "decision_and_its_intent",
+    "clause": "§9.1 rule 10",
+    "drafts": [
+     {
+      "base_seq": 4,
+      "changes": []
+     },
+     {
+      "base_seq": 5,
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ],
+  "invalid_batches": [
+   {
+    "name": "intent_quantity_differs_from_its_decision",
+    "clause": "§9.1 rule 10",
+    "drafts": [
+     {
+      "base_seq": 4,
+      "changes": []
+     },
+     {
+      "base_seq": 5,
+      "changes": [
+       {
+        "path": "payload.qty",
+        "value": "11"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty",
+     "draft_index": 1
+    }
+   },
+   {
+    "name": "intent_limit_differs_from_its_decision",
+    "clause": "§9.1 rule 10",
+    "drafts": [
+     {
+      "base_seq": 4,
+      "changes": []
+     },
+     {
+      "base_seq": 5,
+      "changes": [
+       {
+        "path": "payload.limit_price",
+        "value": "150.01"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit_price",
+     "draft_index": 1
+    }
+   },
+   {
+    "name": "intent_purpose_differs_from_its_decision",
+    "clause": "§9.1 rule 10",
+    "drafts": [
+     {
+      "base_seq": 4,
+      "changes": []
+     },
+     {
+      "base_seq": 5,
+      "changes": [
+       {
+        "path": "payload.purpose",
+        "value": "increase"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.purpose",
+     "draft_index": 1
+    }
+   }
+  ],
+  "range_verification": [
+   {
+    "name": "intent_repeats_another_action",
+    "clause": "§11 intent_action_mismatch",
+    "from_seq": 1,
+    "changes": [
+     {
+      "seq": 5,
+      "path": "payload.qty",
+      "value": "11"
+     }
+    ],
+    "expect": {
+     "code": "intent_action_mismatch",
+     "seq": 5
+    }
+   },
+   {
+    "name": "kill_switch_names_the_owner_command",
+    "clause": "§11 mode_event_mismatch",
+    "from_seq": 1,
+    "changes": [
+     {
+      "seq": 13,
+      "path": "payload.mode_event",
+      "value": "01J8ZNB0M000000000000000K1"
+     }
+    ],
+    "expect": {
+     "code": "mode_event_mismatch",
+     "seq": 13
+    }
+   }
   ]
  }
 }
