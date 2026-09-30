@@ -1042,22 +1042,22 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   - `docs/specs/journal.md`'s rule-16 prose has a 107-character line; rewrap it (nit).
 - **Family B's clock fix follow-ups** (#351 and #347 reviews, minors and nits; the fold-back row
   from #347 removes `CLOCKED` and closes the first two):
-  - `labels_agree_with_calendar` in `crates/mandate-refcases/src/mandate/order_builder.rs` reaches
+  - *done ([#359](https://github.com/kunwarshivam/mandate/pull/359), which deletes the function):* `labels_agree_with_calendar` in `crates/mandate-refcases/src/mandate/order_builder.rs` reaches
     its answer through the harness's own `mandate_risk::session_at`, `test_default_gate_config()`
     and `market_session`, so a bug in any of them (the close window set to 0, `AfterHours` mapped to
     `Regular`, or `session::derive` reporting `Regular` after hours) flips oracle and harness
     together; only the literal-clock test caught them. Compute the expected session from a literal
     New York clock, or give each `CLOCKED` row its agreeing instant (#351 review, minor);
-  - `labels_agree_with_calendar` re-walks `family_b` for a case its caller holds; take `&case`
+  - *done ([#359](https://github.com/kunwarshivam/mandate/pull/359)):* `labels_agree_with_calendar` re-walks `family_b` for a case its caller holds; take `&case`
     (#351 review, nit);
-  - `reference/mandate/check_cases.py`'s `calendar_at` assumes a full trading day for every builder
+  - **open:** `reference/mandate/check_cases.py`'s `calendar_at` assumes a full trading day for every builder
     case. On 2026-11-26 (closed) and 2026-11-27 (early close 13:00, after hours to 17:00) it
     disagrees with `crates/mandate-time/data/us-equities.calendar` both ways. Refuse, naming the
     case, when `now`'s date is not a full day in that calendar, or read the calendar (#347 review,
     minor);
-  - `.cursor/skills/verify-mandate/feature-map.md`'s family-B bullet still says 23 pass and that
+  - *done ([#359](https://github.com/kunwarshivam/mandate/pull/359), now 25):* `.cursor/skills/verify-mandate/feature-map.md`'s family-B bullet said 23 pass and that
     MC-B22 and MC-B23 fail on a contradicting label; after #347 both pass (#347 review, minor);
-  - `reference/mandate/generate.py`'s `at_now` moves only the outputs' `as_of` and `expires_at`,
+  - **open:** `reference/mandate/generate.py`'s `at_now` moves only the outputs' `as_of` and `expires_at`,
     not `gate_state.last_exit_fill_at`; assert that map is empty, so a later caller cannot move
     `now` past a re-entry cooldown unnoticed (#347 review, nit).
 - **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
@@ -1329,7 +1329,7 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
     clock. DEC-250 item 3's label-against-clock comparison stays proved by
     `the_builder_and_the_gate_see_one_scene`'s doctored MC-B01.
 
-  *Done (E6-2, `cursor/family-b-fold-back-138b`; DEC-250's 2026-09-30 amendment):* MC-B22 and
+  *Done (E6-2, [#359](https://github.com/kunwarshivam/mandate/pull/359); DEC-250's 2026-09-30 amendment):* MC-B22 and
   MC-B23 are in `PASSING`, `CLOCKED` and `labels_agree_with_calendar` are gone, and the renamed
   `the_two_session_cases_pass_as_stated_and_compare_every_sibling` runs its sibling swap on the
   fixture as stated. The sweeps' counts, recomputed from the fixture, grow with the two cases (768
