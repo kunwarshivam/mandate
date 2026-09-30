@@ -170,12 +170,19 @@ the crate is pending.
   than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. Family A also runs in
   the shared harness, through `crates/mandate-refcases/src/mandate/autonomy.rs` on the parsed
   mandate's own `autonomy` block (DEC-162); its `status.toml` rows move in a status-only PR, since
-  the spec guard keeps that file apart from code (ES-22). Family B moves in a later
-  harness-and-status PR, once stream G's gate (E6-8) supplies the `gate_dry_run` verdict each of
-  those cases states.
-- **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; family A in the shared harness with
-  `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A mandate::autonomy` (the
-  flag runs cases `status.toml` does not yet list as passing).
+  the spec guard keeps that file apart from code (ES-22). Family B (all 32 `MC-B` cases) runs in the
+  shared harness through `crates/mandate-refcases/src/mandate/order_builder.rs` (DEC-181): `propose`,
+  then `mandate_risk::evaluate` on the proposed order as §6.2 step 2's dry run, then `decide` on
+  that verdict, with the session and close window from `mandate_risk::session_at`. 23 pass; the
+  four `trim_to_target` cases fail at `mandate_risk::trim_proposals` (E6-4), the three crypto buys
+  at the gate's owed check 2 (E6-10), and `MC-B22` and `MC-B23` on a `session` or
+  `in_close_window` label their `now` contradicts (DEC-181's open question). Its in-module tests
+  doctor the fixture to prove every member is read and the two session cases pass once their clock
+  agrees.
+- **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; families A and B in the shared
+  harness with `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A
+  mandate::autonomy mandate::MC-B mandate::order_builder` (the flag runs cases `status.toml` does
+  not yet list as passing).
 
 ## Agent runtime and kill switches
 
@@ -644,8 +651,9 @@ proves each pending test fails on them (DEC-110).
   (the harness reads the account type and checks `buying_power`: RC-08 and RC-18's cash variant
   without their gate step), `crates/mandate-refcases/src/mandate/research.rs` (family N of the
   mandate suite, through `mandate-research`), `crates/mandate-refcases/src/mandate/autonomy.rs`
-  (family A, through `mandate-builder`'s `classify`), `crates/mandate-refcases/status.toml`
-  (founder-owned).
+  (family A, through `mandate-builder`'s `classify`), `crates/mandate-refcases/src/mandate/order_builder.rs`
+  (family B, through `mandate-builder`'s `propose` and `decide` and `mandate-risk`'s `evaluate`),
+  `crates/mandate-refcases/status.toml` (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
   pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L harnessed by stream F; the rest pending their streams).
