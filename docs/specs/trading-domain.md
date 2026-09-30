@@ -2,13 +2,18 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.12 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.12 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.13:** §3.2 item 7's "USD pairs only" gets a reason code of its own, `crypto_pair_not_usd`,
+  registered in the reference-case file beside the floor's other codes. A pair the research agent
+  admitted is in the working universe, so reporting it as `not_in_working_universe` would say
+  something false ([DEC-255](../project/04-decision-log.md#decisions)). No existing code changes
+  (ES-09), and every reference case is unchanged.
 - **v0.12:** each exit-ladder rung after the first, and the triggered-stop watchdog's exit, get a
   deterministic `client_order_id` (§2.3); a watchdog exit no single agent holds is cancelled by
   every kill switch covering its instrument, and no agent's own (§5.5). An exit with nothing to
@@ -218,7 +223,8 @@ An **opening or increasing** order is allowed only if all hold, checked in this 
    source that flags all ETFs (for example, the Nasdaq Trader symbol directory's ETF column) plus an
    ETN list; **an ETP not yet classified is treated as complex** (fails closed). If the
    classification data is older than the configured age, ETP openings are denied.
-7. Crypto: USD pairs only; account `crypto_status = ACTIVE`; 30-day median daily dollar volume ≥
+7. Crypto: USD pairs only (an opening in a pair quoted in anything else is denied
+   `crypto_pair_not_usd`); account `crypto_status = ACTIVE`; 30-day median daily dollar volume ≥
    the crypto liquidity floor (organization setting; platform minimum 1,000,000 USD).
 
 Risk-reducing orders for held positions are allowed regardless of the floor or universe. A held
