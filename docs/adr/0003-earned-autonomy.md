@@ -146,6 +146,30 @@ grow.
    are safety-critical and follow the DEC-77 sequence, claimed only after the approval-escalation
    (M7) and autonomy (E6-2) pull requests now open have merged. A web prototype on fixture data may
    start at once under DEC-200.
+10. **Guardrails that keep autonomy running** ([DEC-185](../project/04-decision-log.md#decisions)
+    to [DEC-197](../project/04-decision-log.md#decisions); added on 2026-09-30 at the founder's
+    request for "all kinds of protections and guardrails while making sure we can still work
+    autonomously"). More autonomy needs more guardrails, but a guardrail that asks the owner about
+    everything turns an autonomous agent back into a nagging one. So every guardrail here follows
+    one rule (DEC-197): it is deterministic, recorded in the journal, only ever reduces risk, engages
+    without anyone's approval, narrows only the scope where the trouble is (one delegation, one
+    client, one agent), and lifts only through the envelope's own rules. Silence and ambiguity end
+    autonomy; they never extend it. The guardrails:
+
+    | Guardrail | What it stops | Decision |
+    |---|---|---|
+    | **Client ceiling:** an order a connected agent asked for is never `auto` | A prompt-injected Dots, Muse, or Grok Bot trading through a delegation or an `auto` rule | DEC-185 |
+    | **What would change:** replay the journal under a proposed version before confirming it | Widening autonomy blind | DEC-186 |
+    | **Tripwires:** owner-set conditions that end delegations or hold new openings | Trust outliving the conditions it was given under | DEC-187 |
+    | **Review date:** unconfirmed past it, every `auto` and delegation reads as `ask` | A mandate nobody has looked at in months still acting alone | DEC-188 |
+    | **Unasked dollars:** one figure for what can trade without asking right now | Autonomy the owner cannot size | DEC-189 |
+    | **"Can I?" dry run** for connected agents | Connected agents flooding the owner with asks the gate would deny | DEC-190 |
+    | **Hold new openings** from a connected agent (`exits_only`, never pause) | An owner away from Owlhead unable to stop new risk from where they are | DEC-191 (founder) |
+    | **Explanations from the record:** "why" answered from journaled events | A model inventing its reasons after the fact | DEC-192 |
+    | **A statement you can verify:** the hash chain proves every action was within the mandate | Trust resting on the platform's word | DEC-193 (founder) |
+    | **Away mode:** a reducing version with an end date; restoring asks the owner | Autonomy running while the owner cannot answer | DEC-194 |
+    | **Ask budget:** a daily cap on asks per agent and per client; beyond it, asks are skipped | Approval fatigue, and an agent or client wearing the owner down | DEC-195 |
+    | **Delegation total:** all of a version's delegations together stay within the allocation | Twenty small delegations adding up to one large one | DEC-196 |
 
 ## Consequences
 
@@ -180,3 +204,6 @@ grow.
 | Hand general agents broker credentials or a broker MCP | Breaks rule 12 and journal before acting; the brokers do not supervise |
 | Name the concept "grant", as Muse does | "Grant" already means an approver's response in the approval escalation work (DEC-173) |
 | Do nothing | The general agents set the expectation that trust grows; without it Mandate reads as either nagging or reckless |
+| Make it safe by asking more (every connected-agent call, every delegation use, every tripwire lift) | Approval fatigue makes the yes automatic, which is less safe than a bounded `auto`; DEC-197 narrows only where the trouble is |
+| Let a connected agent pause an agent | `paused` holds the agent's own exits (`AGENTS.md` rule 13), so an injected pause during a fall adds risk; `exits_only` stops new risk and keeps exits running (DEC-191) |
+| Away mode that restores itself at its end date | Restoring autonomy is risk-increasing and needs the owner's confirmation (§9.2); silence must not re-arm it |
