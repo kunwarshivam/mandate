@@ -1495,6 +1495,113 @@ mod tests {
         }
     }
 
+    /// §8.3's hold reasons, §6.1's purposes, the order shapes, the verdicts, and the decisions a
+    /// case can state, spelt here so a sibling is chosen without the harness's parsers.
+    const HOLD_REASONS: [&str; 9] = [
+        "no_fresh_outputs",
+        "no_position",
+        "discretionary_exits_disabled",
+        "between_thresholds",
+        "at_or_above_target",
+        "within_rebalance_band",
+        "below_band_after_clipping",
+        "would_exceed_max_avg_price",
+        "below_minimum_after_clipping",
+    ];
+    const PURPOSES: [&str; 6] = [
+        "open",
+        "increase",
+        "discretionary_exit",
+        "owner_exit",
+        "risk_exit",
+        "protective",
+    ];
+    const ORDER_TYPES: [&str; 2] = ["limit", "marketable_limit"];
+    const VERDICTS: [&str; 4] = ["allow", "deny", "defer", "hold"];
+    const DECISIONS: [&str; 5] = ["auto", "ask", "deny", "skipped", "deferred"];
+    /// Two registered reason codes, so a stated code has a sibling that is also one.
+    const GATE_REASONS: [&str; 2] = [
+        "max_orders_per_day",
+        "discretionary_exit_regular_session_only",
+    ];
+
+    /// The member after `value` in a closed vocabulary, wrapping round.
+    fn next_in(vocabulary: &[&str], value: &Json) -> Option<Json> {
+        let position = vocabulary.iter().position(|v| value == *v)?;
+        let next = vocabulary
+            .get(position.saturating_add(1))
+            .or(vocabulary.first())?;
+        Some(json!(next))
+    }
+
+    /// A different *valid* value of the same closed vocabulary as the enum-valued member `member`
+    /// of the object at `at`, or `None` for a member that has no such vocabulary. [`changed`]
+    /// makes a word no parser accepts, so an enum-valued member whose comparison were deleted
+    /// would still fail, at its parse; a sibling parses, so only the comparison can refuse it.
+    /// `on_timeout` has one variant, `skip`, and so no sibling.
+    fn sibling(at: &str, member: &str, value: &Json) -> Option<Json> {
+        match (at, member) {
+            ("/expect", "reason") => next_in(&HOLD_REASONS, value),
+            ("/expect", "purpose") => next_in(&PURPOSES, value),
+            ("/expect", "order_type") => next_in(&ORDER_TYPES, value),
+            ("/expect", "clipped_by") => {
+                let stated: Vec<&str> = value.as_array()?.iter().filter_map(Json::as_str).collect();
+                let other = [vec!["limits"], vec!["goal"]]
+                    .into_iter()
+                    .find(|clips| *clips != stated)?;
+                Some(json!(other))
+            }
+            ("/expect/gate_dry_run", "verdict") => next_in(&VERDICTS, value),
+            ("/expect/gate_dry_run", "reason") => match value {
+                Json::Null => GATE_REASONS.first().map(|code| json!(code)),
+                _ => next_in(&GATE_REASONS, value),
+            },
+            ("/expect/autonomy", "decision") => next_in(&DECISIONS, value),
+            ("/expect/autonomy", "by") => Some(if value == "default" {
+                json!("builtin_risk_reducing")
+            } else {
+                json!("default")
+            }),
+            _ => None,
+        }
+    }
+
+    /// Every enum-valued expectation of case `id` in `fixture`, swapped for its sibling, fails the
+    /// case at that member's comparison, whose message starts `<member>: expected`. Returns how
+    /// many were swapped.
+    fn every_sibling_fails_its_comparison(fixture: &Json, id: &str) -> Result<usize, String> {
+        let case = family_b(fixture)?
+            .into_iter()
+            .find(|c| c["id"] == id)
+            .ok_or_else(|| format!("no case {id}"))?;
+        let expect = crate::at(&case, "expect")?;
+        let mut objects = vec![("/expect".to_owned(), expect.clone())];
+        for nested in ["gate_dry_run", "autonomy"] {
+            if let Some(value) = expect.get(nested) {
+                objects.push((format!("/expect/{nested}"), value.clone()));
+            }
+        }
+        let mut swapped = 0_usize;
+        for (at, object) in objects {
+            for (member, value) in members(&object)? {
+                let Some(other) = sibling(&at, &member, &value) else {
+                    continue;
+                };
+                crate::ensure(other != value, || {
+                    format!("{id}: {at}/{member}'s sibling is its own value")
+                })?;
+                let edited = doctored(fixture, id, &format!("{at}/{member}"), |v| *v = other)?;
+                fails_naming(
+                    run(edited, id),
+                    &format!("{member}: expected"),
+                    &format!("{id}: {at}/{member} swapped for a sibling variant"),
+                )?;
+                swapped = swapped.saturating_add(1);
+            }
+        }
+        Ok(swapped)
+    }
+
     fn members(value: &Json) -> Result<Vec<(String, Json)>, String> {
         Ok(value
             .as_object()
@@ -1528,14 +1635,18 @@ mod tests {
     }
 
     /// Every expected member, and every member of a dry run and an outcome, is compared and none is
-    /// optional: each one edited, and each one dropped, fails the case naming it, and a member
-    /// planted beside them fails naming the plant.
+    /// optional: each one edited, and each one dropped, fails the case naming it, a member planted
+    /// beside them fails naming the plant, and each enum-valued one swapped for a sibling variant
+    /// fails at its own comparison, so the gate's verdict and reason, a hold's reason, an order's
+    /// purpose and its clips are each compared rather than only parsed.
     #[test]
     fn every_expected_member_is_compared_and_required() -> Result<(), String> {
         let fixture = fixture()?;
         let mut doctorings = 0_usize;
+        let mut siblings = 0_usize;
         for case in passing(&fixture)? {
             let id = id(&case)?;
+            siblings = siblings.saturating_add(every_sibling_fails_its_comparison(&fixture, &id)?);
             let expect = crate::at(&case, "expect")?;
             let mut objects = vec![("/expect".to_owned(), expect.clone())];
             for nested in ["gate_dry_run", "autonomy"] {
@@ -1569,7 +1680,13 @@ mod tests {
                 )?;
             }
         }
-        crate::expect_eq("doctorings, counted from the fixture", doctorings, 698)
+        crate::expect_eq("doctorings, counted from the fixture", doctorings, 698)?;
+        crate::expect_eq(
+            "siblings: ten hold reasons, one hold's and eleven buys' clips, and each of thirteen \
+             orders' purpose, verdict, reason, decision and decider",
+            siblings,
+            10 + 1 + 11 + 13 * 5,
+        )
     }
 
     /// A hold reaches neither the gate nor approval, so a hold that states either fails naming it,
@@ -1859,10 +1976,14 @@ mod tests {
     }
 
     /// MC-B22 and MC-B23 fail only because their labels contradict their clock: moved to an
-    /// instant where the calendar agrees with the label, each passes as stated.
+    /// instant where the calendar agrees with the label, each passes as stated, and each
+    /// enum-valued expectation swapped for a sibling fails at its comparison. MC-B23 is the only
+    /// case that states a sell's `order_type` and MC-B22 the only deferred one, so this is where
+    /// those two comparisons are proved.
     #[test]
     fn the_two_session_cases_pass_once_now_agrees_with_their_labels() -> Result<(), String> {
         let fixture = fixture()?;
+        let mut siblings = 0_usize;
         for (id, now, as_of, expires_at) in [
             (
                 "MC-B22",
@@ -1889,8 +2010,14 @@ mod tests {
                     set(output, "/expires_at", json!(expires_at));
                 }
             })?;
-            run(moved, id).map_err(|e| format!("{id} at {now}: {e}"))?;
+            run(moved.clone(), id).map_err(|e| format!("{id} at {now}: {e}"))?;
+            siblings = siblings.saturating_add(every_sibling_fails_its_comparison(&moved, id)?);
         }
-        Ok(())
+        crate::expect_eq(
+            "siblings: each case's purpose, verdict, reason, decision and decider, and MC-B23's \
+             order type",
+            siblings,
+            11,
+        )
     }
 }
