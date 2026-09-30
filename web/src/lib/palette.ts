@@ -250,10 +250,11 @@ export const TOKEN_REFS: Record<TokenName, RampRef> = {
 };
 
 /**
- * Dark: midnight surfaces and paper type. The primary action is a bright azure-400 fill under ink
+ * Dark: near-black surfaces and paper type. The primary action is a bright azure-400 fill under ink
  * type; the Stop control and stopped states turn to a paper fill with ink type. Azure turns bright:
- * azure-400 rules and markers, azure-300 labels, a calm azure-850 field, and the same sun-300
- * highlight under ink type. Crimson keeps its fill; its edge lightens so the kill switch still clears
+ * azure-400 rules and markers, azure-300 labels, a calm azure-850 mandate field, and the same sun-300
+ * highlight under ink type. The account's field is a raised ink-850 charcoal, so an approval card sits
+ * on the page without a blue cast. Crimson keeps its fill; its edge lightens so the kill switch still clears
  * 3:1 on the dark sheet while its label keeps 7:1 on the fill.
  */
 export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
@@ -268,7 +269,7 @@ export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
   lapis: "paper-100",
   "lapis-foreground": "ink-950",
   "lapis-muted": "ink-850",
-  "lapis-soft": "azure-850",
+  "lapis-soft": "ink-850",
   "lapis-strong": "azure-200",
   "lapis-line": "azure-400",
   mandate: "azure-850",

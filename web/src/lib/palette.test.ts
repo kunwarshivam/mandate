@@ -75,7 +75,7 @@ const CHROMATIC: RampId[] = ["azure", "sun", "teal", "sky", "green", "red", "amb
 /** The tokens that may carry azure: actions and links, the mandate's and the account's accent roles, the selection, and the first asset series. */
 const AZURE_TOKENS: TokenName[] = ["primary", "mandate", "mandate-soft", "mandate-strong", "mandate-marker", "mandate-edge", "lapis-line", "selection", "series-1"];
 /** In dark, the account's approval card and its quiet field are calm azure too; in light they are sun and ink. */
-const DARK_AZURE: TokenName[] = ["lapis-soft", "lapis-strong"];
+const DARK_AZURE: TokenName[] = ["lapis-strong"];
 /** Sun: the highlight, the second asset series and, in light, the approval card. Dark mode's approval card is a calm azure field. */
 const SUN_TOKENS: Record<ThemeName, TokenName[]> = { light: ["highlight", "lapis-soft", "series-2"], dark: ["highlight", "series-2"] };
 /** Sun as a fill, always under ink type. */
@@ -199,6 +199,7 @@ describe.each(THEMES)("Azure and Sun, %s", (theme) => {
     expect(rampOf(refs.primary)).toBe("azure");
     expect(refs.lapis).toBe(refs.ink);
     expect(refs.lapis).toBe(refs.foreground);
+    if (theme === "dark") expect(rampOf(refs["lapis-soft"]), "the account's field is a raised charcoal in dark, not navy").toBe("ink");
   });
 
   it("gives azure only to the azure tokens, and sun only to the sun tokens", () => {

@@ -28,7 +28,7 @@ export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> 
   lapis: { meaning: "account", role: "The account as a fill: the approvals count, its marker on the equity ladder, the paper hatch. Ink in light, paper in dark" },
   "lapis-foreground": { meaning: "account", role: "Text on the account fill" },
   "lapis-muted": { meaning: "account", role: "Secondary text on the account fill and on ink; a hovered account pill" },
-  "lapis-soft": { meaning: "account", role: "The account's pale tint, sun in light and azure in dark: the current tab and range pill, an approval card, an account notice" },
+  "lapis-soft": { meaning: "account", role: "The account's field, pale sun in light and a raised charcoal in dark: the current tab and range pill, an approval card, an account notice" },
   "lapis-strong": { meaning: "account", role: "A pressed primary action, and a quiet field inside an account surface" },
   "lapis-line": { meaning: "account", role: "The account's line: its equity chart, the current tab's bar and pill ring, its legend swatch" },
   mandate: { meaning: "mandate", role: "Your mandate: the pale azure field the envelope, limits and rails sit on" },

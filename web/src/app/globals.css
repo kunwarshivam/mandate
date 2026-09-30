@@ -146,7 +146,7 @@ html:root[data-mode="dark"] {
   --lapis: oklch(0.975 0.004 255);
   --lapis-foreground: oklch(0.175 0.006 255);
   --lapis-muted: oklch(0.29 0.008 255);
-  --lapis-soft: oklch(0.29 0.055 258);
+  --lapis-soft: oklch(0.29 0.008 255);
   --lapis-strong: oklch(0.91 0.042 258);
   --lapis-line: oklch(0.78 0.109 258);
   --mandate: oklch(0.29 0.055 258);
