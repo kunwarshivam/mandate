@@ -37,6 +37,9 @@ paths = ['''^crates/mandate-marketdata/tests/http\.rs$''']
 regexTarget = "match"
 regexes = ['''^PKSENTINELKEYID00000$''']
 
+# The trading redaction test sentinel comment above — recorded fixtures deliberately not
+# allowlisted — applies here too: nothing under `web/` is allowlisted wholesale.
+
 # The key-ID-shaped sentinel the trading connector's redaction tests check never reaches output
 # (E7-2, DEC-133), allowed only in the file that defines it. It is a planted test value, never a
 # credential and never a recording: the recorded fixtures under
@@ -49,3 +52,18 @@ condition = "AND"
 paths = ['''^crates/mandate-alpaca/tests/common/mod\.rs$''']
 regexTarget = "match"
 regexes = ['''^PKSENTINELTRADING000$''']
+
+# The web palette's `lapis` token rows (DEC-204 to DEC-217): `lapis` contains "api", so the
+# generic key heuristic reads the design-source table's quoted ramp refs as credentials —
+# `lapis-soft": "ultramarine-100"` in the old Ink-and-Ultramarine commits of 2026-09-28/29,
+# which sit in history for ever. The value is a colour ramp name. Allowed only in that one
+# file and only in the ramp-ref grammar, so a real key pasted into the file is still reported
+# and the same text anywhere else is still reported; `cargo xtask ci supply-chain` plants both
+# cases beside the allowed row.
+[[allowlists]]
+description = "Web palette ramp references"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^web/src/lib/palette\.ts$''']
+regexTarget = "match"
+regexes = ['''^"?lapis[a-z-]*": "[a-z]+(?:-[a-z]+)*-[0-9]{1,3}"$''']
