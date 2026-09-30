@@ -214,7 +214,7 @@ function Dashboard() {
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
       <h1 className="sr-only">Dashboard</h1>
-      <div className="grid grid-cols-1 gap-(--section-gap) max-lg:gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14">
+      <div className="grid grid-cols-1 gap-(--section-gap) max-lg:gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-x-16">
         <NeedsYou ws={ws} open={open} className="lg:hidden" />
         <div data-slot="account-board" data-layout="main" className="reveal grid min-w-0 gap-5">
           <AccountEquityChart />
@@ -240,7 +240,7 @@ function Dashboard() {
         </ul>
       </Section>
 
-      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-x-14">
+      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-x-16">
         <Section
           title="Recent activity"
           action={

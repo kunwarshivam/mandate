@@ -115,7 +115,7 @@ export const motionTokens = [
 
 /** The two densities (DEC-204): calm for the screens an owner lives in, dense for audit and admin. */
 export const spacingTokens = [
-  { name: "--content-max", calm: "68rem", dense: "90rem", use: "Widest content column" },
+  { name: "--content-max", calm: "80rem", dense: "90rem", use: "Widest content column" },
   { name: "--container-measure", calm: "58ch", dense: "58ch", use: "Reading measure (max-w-measure): under 80 characters a line" },
   { name: "--page-x", calm: "1.25rem / 1.75rem / 2.5rem", dense: "the same", use: "Page padding at phone / tablet / desktop" },
   { name: "--page-top", calm: "1.5rem / 2.25rem", dense: "the same", use: "Space above the first line of a screen" },

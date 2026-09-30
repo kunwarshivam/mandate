@@ -94,7 +94,7 @@
   --radius: 0.1875rem;
 
   /* Layout (web/DESIGN.md, Space). Calm is the default density; audit and admin opt into dense. */
-  --content-max: 68rem;
+  --content-max: 80rem;
   --page-x: 1.25rem;
   --page-top: 1.5rem;
   --page-bottom: 4rem;
