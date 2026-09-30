@@ -203,6 +203,40 @@ def worst_case(m):
             "flatten_trigger_loss_usd": norm(D(r["max_drawdown"]) * A),
             "lifetime_floor_loss_usd": norm(D(m["capital"]["max_loss_from_allocation"]) * A)}
 
+DELEGATION_MAX_SPAN_S = 30 * 86400
+
+def delegation_errors(m, prev):
+    """V-041, V-042, V-043 (§4.1, §6.5, DEC-181)."""
+    errs = set()
+    au = m["autonomy"]
+    ds = au.get("delegations", [])
+    if not ds:
+        return errs
+    ask_sources = {f"rule:{r['id']}" for r in au["rules"] if r["then"] == "ask"}
+    if au["default"] == "ask":
+        ask_sources.add("default")
+    ids = [d["id"] for d in ds]
+    if len(set(ids)) != len(ids):
+        errs.add("V-041")
+    for d in ds:
+        span = (T(d["expires_at"]) - T(d["starts_at"])).total_seconds()
+        if d["lifts"] not in ask_sources or not 0 < span <= DELEGATION_MAX_SPAN_S:
+            errs.add("V-041")
+        two = au["approval"]["two_approver_above_usd"]
+        if not (D(d["max_order_usd"]) <= D(m["risk"]["max_order_usd"]) and D(d["max_order_usd"]) <= D(d["max_total_usd"])
+                <= D(m["capital"]["allocation_usd"]) and (two is None or D(d["max_order_usd"]) <= D(two))):
+            errs.add("V-043")
+    if prev is not None and "autonomy" in prev:
+        carried = {d["id"] for d in prev["autonomy"].get("delegations", [])} & set(ids)
+        if carried and classify(without_delegations(prev), without_delegations(m))[0] == "risk_increasing":
+            errs.add("V-042")
+    return errs
+
+def without_delegations(m):
+    out = copy.deepcopy(m)
+    out["autonomy"].pop("delegations", None)
+    return out
+
 def semantic(m, ctx):
     errs, warns = set(), set()
     u = m["universe"]
@@ -266,7 +300,7 @@ def semantic(m, ctx):
     q = m["notifications"]["quiet_hours"]
     if q is not None and q["start"] == q["end"]:
         errs.add("V-016")
-    for rule in m["autonomy"]["rules"]:
+    for rule in m["autonomy"]["rules"] + m["autonomy"].get("delegations", []):
         for c, depth in comparisons(rule["when"]):
             if depth > 4:
                 errs.add("V-017")
@@ -291,6 +325,7 @@ def semantic(m, ctx):
     autos = ["/autonomy/default"] if m["autonomy"]["default"] == "auto" else []
     autos += ["/autonomy/admission"] if m["autonomy"]["admission"] == "auto" else []
     autos += [f"/autonomy/rules/{i}" for i, x in enumerate(m["autonomy"]["rules"]) if x["then"] == "auto"]
+    autos += [f"/autonomy/delegations/{i}" for i in range(len(m["autonomy"].get("delegations", [])))]
     for a in autos:
         pv = prov.get(a, {"source": "user_entered", "confirmed": True})
         if pv["source"] != "user_entered" or not pv["confirmed"]:
@@ -320,6 +355,7 @@ def semantic(m, ctx):
         errs.add("V-039")
     if sum(-D(x["factor"]).as_tuple().exponent for x in lad if x["action"] == "scale_sizes" and x["factor"] is not None) > 12:
         errs.add("V-040")
+    errs |= delegation_errors(m, prev)
     carry = D(ctx.get("connection_loss_carry_usd", "0"))
     if carry >= D(m["capital"]["max_loss_from_allocation"]) * D(m["capital"]["allocation_usd"]):
         errs.add("V-032")
@@ -377,7 +413,8 @@ def mandate_policy_values(m):
     v["exits_only_at_max"] = [x["at"] for x in m["risk"]["drawdown_ladder"] if x["action"] != "scale_sizes"][0]
     v["two_approver_above_usd"] = m["autonomy"]["approval"]["two_approver_above_usd"]
     v["leveraged_etps_allowed"] = m["universe"]["leveraged_etps_enabled"]
-    v["auto_allowed"] = m["autonomy"]["default"] == "auto" or any(r["then"] == "auto" for r in m["autonomy"]["rules"])
+    v["auto_allowed"] = m["autonomy"]["default"] == "auto" or any(r["then"] == "auto" for r in m["autonomy"]["rules"]) \
+        or bool(m["autonomy"].get("delegations"))
     v["protection_required"] = m["protection"]["enabled"]
     v["asset_classes"] = m["universe"]["asset_classes"]
     v["signal_model_types"] = sorted({s["id"].split(".")[0] for s in m["behavior"]["signal_models"]})
@@ -931,7 +968,27 @@ def order_decision(m, st, prop, mode, inst_restrictions, session, in_close_windo
 # ------------------------------------------------------------------ autonomy (§6)
 STRICT = {"auto": 0, "ask": 1, "deny": 2}
 
-def autonomy(m, a):
+def delegation_suspended(st):
+    """§6.5 condition 5 (MI-28): any sign of trouble suspends every delegation."""
+    return (st.get("mode", "normal") != "normal" or st.get("rungs_active", 0) > 0 or st.get("limit_pending", False)
+            or st.get("limit_latched", False) or st.get("kill_switch", False))
+
+def delegation_lift(m, a, res, st):
+    """§6.2 step 4a: the first live delegation naming the ask's source turns it into auto. `st` carries the risk
+    clock (`now`), usage per delegation id counted from journaled decisions, and the suspension state."""
+    if st is None or res["decision"] != "ask" or delegation_suspended(st):
+        return None
+    now = T(st["now"])
+    for d in m["autonomy"].get("delegations", []):
+        used = st.get("usage", {}).get(d["id"], {"orders": 0, "total_usd": "0"})
+        if (d["lifts"] == res["by"] and T(d["starts_at"]) <= now and now < T(d["expires_at"])
+                and cond(d["when"], a) and D(a["order_usd"]) <= D(d["max_order_usd"])
+                and used["orders"] < d["max_orders"]
+                and D(used["total_usd"]) + D(a["order_usd"]) <= D(d["max_total_usd"])):
+            return d["id"]
+    return None
+
+def autonomy(m, a, st=None):
     au = m["autonomy"]
     if a["purpose"] in REDUCING:
         return {"decision": "auto", "by": "builtin_risk_reducing"}
@@ -942,8 +999,13 @@ def autonomy(m, a):
             break
     if res is None:
         res = {"decision": au["default"], "by": "default"}
+    lifted_by = delegation_lift(m, a, res, st)
+    if lifted_by is not None:
+        res = {"decision": "auto", "by": f"delegation:{lifted_by}", "delegation_id": lifted_by, "lifted": res["by"]}
     if a.get("new_instrument", False) and STRICT[au["admission"]] > STRICT[res["decision"]]:
         res = {"decision": au["admission"], "by": "admission_ceiling"}
+    if a.get("requested_by", "agent") == "client" and STRICT[res["decision"]] < STRICT["ask"]:
+        res = {"decision": "ask", "by": "client_ceiling"}
     if res["decision"] == "ask":
         t = au["approval"]["two_approver_above_usd"]
         res["approvers_required"] = 2 if t is not None and D(a["order_usd"]) > D(t) else 1
@@ -1327,7 +1389,32 @@ def rule_widen(a, b):
         return 1 if more else (-1 if less else None)
     return None
 
+DELEGATION_CAPS = ("max_order_usd", "max_orders", "max_total_usd")
+
+def delegation_narrowed(a, b):
+    """§9.2: same id, lifts, when, and source; no cap larger; a window no wider."""
+    same = all(a[k] == b[k] for k in ("id", "lifts", "when", "source_approval_id"))
+    return (same and all(D(b[k]) <= D(a[k]) for k in DELEGATION_CAPS)
+            and T(b["starts_at"]) >= T(a["starts_at"]) and T(b["expires_at"]) <= T(a["expires_at"]))
+
+def classify_delegations(od, nd):
+    """§9.2 `autonomy.delegations`: reducing only if every change removes or narrows a delegation."""
+    oi, ni = {d["id"]: d for d in od}, {d["id"]: d for d in nd}
+    if [x for x in oi if x in ni] != [x for x in ni if x in oi]:
+        return "increasing"
+    for i, d in ni.items():
+        if i not in oi:
+            return "increasing"
+        if d != oi[i] and not delegation_narrowed(oi[i], d):
+            return "increasing"
+    return "reducing"
+
 def classify_autonomy(o, n):
+    od, nd = o.get("delegations", []), n.get("delegations", [])
+    if od or nd:
+        o, n = {k: v for k, v in o.items() if k != "delegations"}, {k: v for k, v in n.items() if k != "delegations"}
+        parts = ([classify_delegations(od, nd)] if od != nd else []) + ([classify_autonomy(o, n)] if o != n else [])
+        return "increasing" if "increasing" in parts else "reducing"
     oa, na = o["approval"], n["approval"]
     if oa["approvers"] != na["approvers"] or oa["timeout_s"] != na["timeout_s"] or oa["on_timeout"] != na["on_timeout"]:
         return "increasing"
