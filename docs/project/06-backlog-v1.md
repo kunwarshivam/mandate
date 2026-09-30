@@ -978,6 +978,20 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   code unasserted" option; and `cargo xtask ci pending` accepts any `Unimplemented` report rather
   than the story its `#[ignore]` label names, which is how `hand::crypto_never_counts` sat labelled
   E6-6 while failing at E6-10's stub. Compare the stub's story with the label if it recurs.
+- **`crypto_pair_not_usd`'s wording follow-ups** (#352 review, minors 2 to 4 and nits), in one
+  docs change after #352 merges:
+  - DEC-255's opening parenthetical says DEC-254 item 3 is "not yet on `main`"; #342 merged as
+    `e7c870b` before DEC-255 was written. Drop the clause (minor 2);
+  - `docs/project/08-work-tracker.md` still names trading-domain spec v0.12; every earlier bump
+    updated it in the same PR. Say v0.13 and cite DEC-255 (minor 3);
+  - trading-domain §3.2 item 7 names the code only for a pair "quoted in anything else", but
+    DEC-254 item 1 and `usd_pairs.rs`'s `NOT_USD = [Some(Other), None]` deny an unstated quote
+    currency the same way. Say "quoted in anything other than USD, or whose quote currency is not
+    stated" (minor 4);
+  - the v0.13 change-history entry's "No existing code changes (ES-09)" means no registered reason
+    code changes; say so (nit);
+  - the E6-3 brief's check-2 row carries an inline parenthetical in an otherwise bare list of
+    codes; the Story column already names E6-10 (nit).
 - **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
   properties. 29 of the 33 pass when every reachable stub returns `Ok(())`, so a no-op executor
   would satisfy them; each property must also assert a positive effect a no-op cannot produce
