@@ -1,0 +1,77 @@
+# The web app's Playwright suite (DEC-200, split from `web.yml` by DEC-256): computed styles in
+# Chromium against `next start`, in light and dark, plus the signed-out suite (DEC-211). The
+# suite's own webServer builds into `.next-e2e` with the scenario switch on
+# (`web/scripts/e2e-build.mjs`); the signed-out one builds with sign-in on against a stub Supabase
+# address into `.next-auth-e2e`. Only the Chromium headless shell is installed, cached per
+# Playwright version; on a cache hit only its system libraries are installed.
+# It does not run per pull request: a 2-core runner needs about half an hour for it, and a private
+# repository's Actions minutes cannot afford that on every push (DEC-256, the founder, 2026-09-30).
+# It runs here Sunday 04:17 UTC, to catch drift between the specs and the design, and on demand —
+# the coordinator dispatches it on a branch before merging a risky web change:
+#   gh workflow run web-e2e.yml --ref <branch>
+name: web-e2e
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 0"
+
+permissions: {}
+
+concurrency:
+  group: web-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-e2e:
+    runs-on: ubuntu-24.04
+    # 40 minutes: a clean run is about 30 (the 2026-09-30 runs took 19-34); the cap clears the
+    # suite with retries, not cancels it.
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      DO_NOT_TRACK: "1"
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: browsers
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # Chromium's libraries come from Ubuntu's archive. The runner also lists packages.microsoft.com,
+      # which has answered 403 for noble; one failing source fails `apt-get update` and the install.
+      - name: Drop the runner's Microsoft package source
+        run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f
+      - name: Install Chromium
+        if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Install Chromium's system libraries
+        if: steps.browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - name: Computed styles in Chromium (DEC-200)
+        run: npm run test:e2e
+      - name: Sign-in on, signed out (DEC-211)
+        if: hashFiles('web/playwright.auth.config.ts') != ''
+        run: npm run test:e2e:auth
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: playwright-traces
+          path: web/test-results/
+          retention-days: 7
