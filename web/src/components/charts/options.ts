@@ -185,7 +185,9 @@ function heroOptions(valueFormat: (value: number) => string, axis: boolean): Dee
       secondsVisible: false,
       tickMarkFormatter: tickMark,
       fixLeftEdge: true,
-      fixRightEdge: true,
+      /* The line stops short of the edge, so the pulse on its last point is whole. A hero chart never scrolls (`handleScroll: false`). */
+      fixRightEdge: false,
+      rightOffsetPixels: 14,
       lockVisibleTimeRangeOnResize: true,
     },
     crosshair: {

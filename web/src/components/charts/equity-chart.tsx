@@ -97,6 +97,7 @@ function EquityHero({
   rangeLabel,
   empty,
   footer,
+  pulse,
 }: {
   slot: string;
   titleId: string;
@@ -114,6 +115,7 @@ function EquityHero({
   rangeLabel: string;
   empty?: ReactNode;
   footer: ReactNode;
+  pulse: boolean;
 }) {
   const [scrub, setScrub] = useState<ScrubPoint>(null);
   const [levelsOpen, setLevelsOpen] = useState(false);
@@ -163,6 +165,7 @@ function EquityHero({
           levels={levels}
           axis={(levels?.length ?? 0) > 0}
           onScrub={onScrub}
+          pulse={pulse}
           height={tone === "account" ? 260 : 280}
           phoneHeight={tone === "account" ? ACCOUNT_PHONE_HEIGHT : undefined}
           className="-mx-1"
@@ -223,6 +226,7 @@ export function AccountEquityChart() {
       range={range}
       onRange={setRange}
       rangeLabel="Account equity range"
+      pulse={!stale}
       footer={
         <>
           <span>Simulated funds on paper.</span>
@@ -263,6 +267,7 @@ export function AgentEquityChart({ agent }: { agent: Agent }) {
       range={range}
       onRange={setRange}
       rangeLabel="Equity range"
+      pulse={!stale}
       empty={points.length < 2 ? <p className="rounded-lg bg-background px-4 py-6 text-sm text-muted-foreground">No equity history yet. It starts when the agent deploys.</p> : undefined}
       legend={drawn.length + offChart.length > 0 ? <LevelLegend levels={drawn} offChart={offChart} /> : undefined}
       footer={
