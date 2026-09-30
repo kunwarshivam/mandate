@@ -698,7 +698,9 @@ proves each pending test fails on them (DEC-110).
   harnessed by stream F, N by stream J, A and B by stream H, and G and F by stream G; a case whose
   own story is pending fails naming it).
 - **Run:** `cargo nextest run -p mandate-refcases`; pending cases with
-  `cargo test -p mandate-refcases -- --include-ignored`.
+  `cargo test -p mandate-refcases -- --include-ignored`; the mutation gate on a harness change,
+  `MANDATE_BASE_REF=$(git merge-base HEAD origin/main) cargo xtask ci mutants` (DEC-253: the
+  crate is `safety_critical = true`, so the gate covers it although it is a `tool` crate).
 
 ## Reference-case fixtures and the mandate reference implementation
 
@@ -853,7 +855,8 @@ proves each pending test fails on them (DEC-110).
   `unjudged_mutants`, which fail a mutated package with no live test to judge its mutants before the
   run, since `cargo mutants` would report every one of them caught, DEC-139; the job takes its
   repository as a parameter, so `Fixture::gated` drives the whole of it and neither it nor the
-  pre-flight can be deleted without a test failing),
+  pre-flight can be deleted without a test failing; `mutated_crates`, which gates every
+  `safety_critical = true` crate whatever its layer, DEC-253),
   `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
   equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.
