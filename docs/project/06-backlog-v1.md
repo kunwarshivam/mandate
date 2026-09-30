@@ -1141,7 +1141,7 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   nothing else is listed. The change touches the YAML,
   the reference implementation's checks, and the regenerated fixtures, so it cannot share a pull
   request with code (ES-22).
-- Done in the families G and F harness tightening (branch `cursor/harness-gf-tightening-138b`;
+- Done in the families G and F harness tightening ([#348](https://github.com/kunwarshivam/mandate/pull/348);
   `an_allowed_exit_the_gate_paces_fails_since_no_case_states_a_pacing`,
   `an_allow_fails_unless_it_reports_every_check_passed_in_order`; DEC-178 items 11, 12 and 14):
   the gate arm takes `Decision` apart whole and requires no `pacing` on every `gate` case, so the
