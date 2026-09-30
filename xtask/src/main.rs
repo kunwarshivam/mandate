@@ -1757,10 +1757,8 @@ const STUB_MARKERS: [&str; 5] = [
 ];
 
 /// The pending tests that fail on the answer a partly implemented crate gives rather than at a
-/// stub, named one by one so the exception cannot spread. `mandate-risk` decides an exit without
-/// E6-8's pacing, and AGENTS.md rule 13 forbids it to refuse an exit, so these two see an absent
-/// `pacing` instead of a stub's report; E6-6 retired the three its session rules and §5.3 rule 4
-/// decide.
+/// stub, named one by one so the exception cannot spread. E6-6 and E6-8 (DEC-163) retired the
+/// `mandate-risk` rows with the session rules, §5.3 rule 4 and the pacing that decided them.
 /// DEC-110's rule still holds for them: each must run and must fail. Each row goes when its story
 /// lands, and the gate names every row it applies (DEC-137).
 ///
@@ -1776,15 +1774,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// since #196 (the protected lead has no bracket); they passed only on a stub's report from a case
 /// shrinking moved past, which [`failure_cause`] no longer reads (DEC-164; #196 review, round 1,
 /// finding 5; #199 review, round 1, finding 4).
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
-    (
-        "crates/mandate-risk/tests/hand.rs",
-        "a_participation_cap_slices_and_never_denies",
-    ),
-    (
-        "crates/mandate-risk/tests/hand.rs",
-        "a_sliced_exit_reports_what_it_applied",
-    ),
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2532,11 +2522,13 @@ mod tests {
     use std::collections::BTreeMap;
     use std::env;
     use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::process::Command;
     use std::time::Duration;
 
     use anyhow::{Context, Result};
+    use serde_json::{Value, json};
 
     use super::{
         BEHAVIOUR_ONLY_TESTS, MUTANTS_OUT, MutatedCrate, PendingTest, PendingTestRun, TestOutcome,
@@ -4151,6 +4143,404 @@ mod tests {
             }
         }
         assert_eq!(compared, 36);
+        Ok(())
+    }
+
+    /// A stand-in for `gh` that answers `merge-approved.sh` from canned JSON beside it and appends
+    /// a merge's `-f` fields to `merge.log`, so the script's decisions run with no network. It
+    /// refuses a workflow-runs query that is not filtered to the pull request's head and to
+    /// `pull_request` events, and answers `mergeable: UNKNOWN` while `unknown_reads` counts down.
+    const STUB_GH: &str = r##"#!/usr/bin/env bash
+set -euo pipefail
+dir=$(dirname "$0")
+if [ "$1" = pr ]; then
+  left=$(cat "$dir/unknown_reads")
+  if [ "$left" -gt 0 ]; then
+    echo $((left - 1)) >"$dir/unknown_reads"
+    jq '.mergeable = "UNKNOWN"' "$dir/view.json"
+  else
+    cat "$dir/view.json"
+  fi
+  exit 0
+fi
+filter=.
+path=
+put=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --jq) filter=$2; shift 2 ;;
+    -X) if [ "$2" = PUT ]; then put=1; fi; shift 2 ;;
+    -f) printf '%s\n' "$2" >>"$dir/merge.log"; shift 2 ;;
+    api | --paginate) shift ;;
+    *) path=$1; shift ;;
+  esac
+done
+head=$(jq -r .headRefOid "$dir/view.json")
+if [ -n "$put" ]; then
+  src="$dir/reply.json"
+  echo '{"sha":"merged"}' >"$src"
+else
+  case "$path" in
+    */actions/workflows/*/runs\?*)
+      case "&${path#*\?}&" in *"&head_sha=$head&"*) ;; *) echo "runs not filtered to the head: $path" >&2; exit 1 ;; esac
+      case "&${path#*\?}&" in *"&event=pull_request&"*) ;; *) echo "runs not filtered to pull_request: $path" >&2; exit 1 ;; esac
+      ;;
+  esac
+  case "$path" in
+    */actions/workflows/ci.yml/runs*) src="$dir/ci.json" ;;
+    */actions/workflows/web.yml/runs*) src="$dir/web.json" ;;
+    */files*) src="$dir/files.json" ;;
+    *) echo "unexpected gh api $path" >&2; exit 1 ;;
+  esac
+fi
+jq -r "$filter" "$src"
+"##;
+
+    const APPROVED_HEAD: &str = "1111111111111111111111111111111111111111";
+
+    /// A case's name, the change that makes the script refuse it, and the reason it must print.
+    type Refusal<'a> = (&'a str, &'a dyn Fn(&mut MergeCase), &'a str);
+
+    /// What GitHub would answer `merge-approved.sh` about one pull request.
+    struct MergeCase {
+        view: Value,
+        ci: Value,
+        web: Value,
+        files: Vec<String>,
+        unknown_reads: u32,
+    }
+
+    fn workflow_runs(list: &[(u64, &str, Option<&str>)]) -> Value {
+        let runs: Vec<Value> = list
+            .iter()
+            .map(|(id, status, conclusion)| {
+                json!({ "id": id, "status": status, "conclusion": conclusion })
+            })
+            .collect();
+        json!({ "workflow_runs": runs })
+    }
+
+    fn approved_body(approval: &str) -> String {
+        format!(
+            "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\r\n## Story\n\nKept.\n\
+             Co-authored-by: Someone <someone@example.com>\n\n\
+             {approval}\n\
+             <!-- CURSOR_AGENT_PR_BODY_END -->\nAgent metadata, dropped."
+        )
+    }
+
+    impl MergeCase {
+        /// Approved at its head, mergeable, and `ci`'s latest run green after an earlier red one.
+        fn approved() -> Self {
+            Self {
+                view: json!({
+                    "number": 7,
+                    "state": "OPEN",
+                    "isDraft": false,
+                    "baseRefName": "main",
+                    "headRefOid": APPROVED_HEAD,
+                    "mergeable": "MERGEABLE",
+                    "labels": [{ "name": "coordinator-approved" }],
+                    "title": "E1-1: a story",
+                    "body": approved_body(&format!("Coordinator-approved-head: {APPROVED_HEAD}")),
+                }),
+                ci: workflow_runs(&[
+                    (1, "completed", Some("failure")),
+                    (2, "completed", Some("success")),
+                ]),
+                web: workflow_runs(&[]),
+                files: vec!["crates/c/src/lib.rs".to_owned()],
+                unknown_reads: 0,
+            }
+        }
+
+        fn with_body(mut self, body: String) -> Self {
+            self.view["body"] = json!(body);
+            self
+        }
+
+        /// Runs the script against this case: its standard output, and the merge's fields when it
+        /// merged.
+        fn run(&self, name: &str) -> Result<(String, Option<String>)> {
+            let dir =
+                env::temp_dir().join(format!("mandate-xtask-merge-{name}-{}", std::process::id()));
+            if dir.exists() {
+                fs::remove_dir_all(&dir)?;
+            }
+            fs::create_dir_all(&dir)?;
+            let files: Vec<Value> = self
+                .files
+                .iter()
+                .map(|f| json!({ "filename": f }))
+                .collect();
+            fs::write(dir.join("view.json"), self.view.to_string())?;
+            fs::write(dir.join("ci.json"), self.ci.to_string())?;
+            fs::write(dir.join("web.json"), self.web.to_string())?;
+            fs::write(dir.join("files.json"), Value::from(files).to_string())?;
+            fs::write(dir.join("unknown_reads"), self.unknown_reads.to_string())?;
+            let gh = dir.join("gh");
+            fs::write(&gh, STUB_GH)?;
+            fs::set_permissions(&gh, fs::Permissions::from_mode(0o755))?;
+            let path = format!("{}:{}", dir.display(), env::var("PATH")?);
+            let out = Command::new("bash")
+                .arg(repo_root()?.join(".github/scripts/merge-approved.sh"))
+                .arg("7")
+                .env("PATH", path)
+                .env("GITHUB_REPOSITORY", "owner/repo")
+                .env("GH_TOKEN", "unused")
+                .env("MERGE_RETRY_S", "0")
+                .env_remove("MERGE_DRY_RUN")
+                .output()?;
+            let stdout = String::from_utf8(out.stdout)?;
+            assert!(
+                out.status.success(),
+                "{name}: the script decides without failing: {stdout}{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let merged = fs::read_to_string(dir.join("merge.log")).ok();
+            fs::remove_dir_all(&dir)?;
+            Ok((stdout, merged))
+        }
+    }
+
+    #[test]
+    fn the_merge_script_merges_an_approved_head_with_its_description_as_the_message() -> Result<()>
+    {
+        let (out, merged) = MergeCase::approved().run("approved")?;
+        let merged = merged.context("an approved head with a green ci run merges")?;
+        assert!(out.contains("squash-merging"), "{out}");
+        for field in [
+            "merge_method=squash".to_owned(),
+            format!("sha={APPROVED_HEAD}"),
+            "commit_title=E1-1: a story (#7)".to_owned(),
+            "## Story".to_owned(),
+            "Kept.".to_owned(),
+        ] {
+            assert!(
+                merged.contains(&field),
+                "the merge carries {field:?}: {merged}"
+            );
+        }
+        assert!(
+            !merged.to_lowercase().contains("co-authored-by"),
+            "no trailer reaches main: {merged}"
+        );
+        assert!(
+            !merged.contains("Agent metadata") && !merged.contains('\r'),
+            "only the marked body, without carriage returns: {merged}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_merge_script_refuses_anything_short_of_an_approved_green_head() -> Result<()> {
+        let stale_head = "2".repeat(40);
+        let refusals: [Refusal<'_>; 18] = [
+            (
+                "closed",
+                &|c| c.view["state"] = json!("CLOSED"),
+                "is not open",
+            ),
+            ("draft", &|c| c.view["isDraft"] = json!(true), "is a draft"),
+            (
+                "base",
+                &|c| c.view["baseRefName"] = json!("release"),
+                "does not target main",
+            ),
+            (
+                "label",
+                &|c| c.view["labels"] = json!([]),
+                "does not carry coordinator-approved",
+            ),
+            (
+                "unnamed",
+                &|c| c.view["body"] = json!("## Story\n\nNo approval line."),
+                "names no Coordinator-approved-head",
+            ),
+            (
+                "trailing",
+                &|c| {
+                    c.view["body"] = json!(approved_body(&format!(
+                        "Coordinator-approved-head: {APPROVED_HEAD} (round 2)"
+                    )))
+                },
+                "names no Coordinator-approved-head",
+            ),
+            (
+                "mid-line",
+                &|c| {
+                    c.view["body"] = json!(approved_body(&format!(
+                        "Earlier rounds: Coordinator-approved-head: {APPROVED_HEAD}"
+                    )))
+                },
+                "names no Coordinator-approved-head",
+            ),
+            (
+                "fenced",
+                &|c| {
+                    c.view["body"] = json!(approved_body(&format!(
+                        "```\nCoordinator-approved-head: {APPROVED_HEAD}\n```"
+                    )))
+                },
+                "names no Coordinator-approved-head",
+            ),
+            (
+                "twice",
+                &|c| {
+                    c.view["body"] = json!(approved_body(&format!(
+                        "Coordinator-approved-head: {APPROVED_HEAD}\n\
+                         Coordinator-approved-head: {APPROVED_HEAD}"
+                    )))
+                },
+                "names more than one Coordinator-approved-head",
+            ),
+            (
+                "pushed",
+                &|c| c.view["headRefOid"] = json!(stale_head),
+                "was approved at 1111111111111111111111111111111111111111, but its head is 2222",
+            ),
+            (
+                "conflict",
+                &|c| c.view["mergeable"] = json!("CONFLICTING"),
+                "not mergeable yet (CONFLICTING)",
+            ),
+            (
+                "unknown",
+                &|c| c.unknown_reads = 3,
+                "not mergeable yet (UNKNOWN)",
+            ),
+            (
+                "no-ci",
+                &|c| c.ci = workflow_runs(&[]),
+                "has ci.yml at missing",
+            ),
+            (
+                "ci-red-last",
+                &|c| {
+                    c.ci = workflow_runs(&[
+                        (1, "completed", Some("success")),
+                        (2, "completed", Some("failure")),
+                    ])
+                },
+                "has ci.yml at failure",
+            ),
+            (
+                "ci-running",
+                &|c| {
+                    c.ci = workflow_runs(&[
+                        (1, "completed", Some("success")),
+                        (2, "in_progress", None),
+                    ])
+                },
+                "has ci.yml at in_progress",
+            ),
+            (
+                "web-red",
+                &|c| {
+                    c.files = vec![
+                        "crates/c/src/lib.rs".to_owned(),
+                        "web/app/page.tsx".to_owned(),
+                    ];
+                    c.web = workflow_runs(&[(3, "completed", Some("failure"))]);
+                },
+                "has web.yml at failure",
+            ),
+            (
+                "web-red-after-a-long-file-list",
+                &|c| {
+                    c.files = std::iter::once(".github/workflows/web.yml".to_owned())
+                        .chain((0..20_000).map(|i| format!("crates/c/src/f{i}.rs")))
+                        .collect();
+                    c.web = workflow_runs(&[(3, "completed", Some("failure"))]);
+                },
+                "has web.yml at failure",
+            ),
+            (
+                "empty",
+                &|c| {
+                    c.view["body"] = json!(format!(
+                        "Coordinator-approved-head: {APPROVED_HEAD}\n\
+                         <!-- CURSOR_AGENT_PR_BODY_BEGIN -->\n<!-- CURSOR_AGENT_PR_BODY_END -->"
+                    ))
+                },
+                "has an empty description",
+            ),
+        ];
+        for (name, change, reason) in refusals {
+            let mut case = MergeCase::approved();
+            change(&mut case);
+            let (out, merged) = case.run(name)?;
+            assert!(
+                out.contains(reason),
+                "{name}: expected {reason:?} in {out:?}"
+            );
+            assert_eq!(merged, None, "{name}: nothing merges");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_merge_script_accepts_the_approval_line_as_people_write_it() -> Result<()> {
+        let upper = "ABCDEF".repeat(6) + "ABCD";
+        let lower = upper.to_lowercase();
+        for (name, approval, head) in [
+            (
+                "bullet",
+                format!("- Coordinator-approved-head: {APPROVED_HEAD}"),
+                APPROVED_HEAD,
+            ),
+            (
+                "star",
+                format!("* Coordinator-approved-head:  {APPROVED_HEAD}  "),
+                APPROVED_HEAD,
+            ),
+            (
+                "upper",
+                format!("Coordinator-approved-head: {upper}"),
+                lower.as_str(),
+            ),
+        ] {
+            let mut case = MergeCase::approved().with_body(approved_body(&approval));
+            case.view["headRefOid"] = json!(head);
+            case.unknown_reads = 2;
+            let (out, merged) = case.run(name)?;
+            assert!(
+                merged.is_some(),
+                "{name}: {approval:?} approves the head once mergeability settles: {out}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_merge_script_needs_web_only_for_web_and_keeps_a_quoted_marker() -> Result<()> {
+        let mut case = MergeCase::approved().with_body(format!(
+            "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\n\
+             Quoted: `<!-- CURSOR_AGENT_PR_BODY_BEGIN -->` stays.\n\
+             Quoted: `<!-- CURSOR_AGENT_PR_BODY_END -->` stays.\nAfter the quote.\n\
+             Coordinator-approved-head: {APPROVED_HEAD}\n<!-- CURSOR_AGENT_PR_BODY_END -->"
+        ));
+        case.files = vec!["web/app/page.tsx".to_owned()];
+        case.web = workflow_runs(&[(4, "completed", Some("success"))]);
+        let (out, merged) = case.run("web-green")?;
+        let merged = merged.context("a web change with ci and web green merges")?;
+        assert!(out.contains("ci.yml web.yml green"), "{out}");
+        assert!(
+            merged.contains("Quoted: `<!-- CURSOR_AGENT_PR_BODY_BEGIN -->` stays.")
+                && merged.contains("After the quote."),
+            "a marker quoted inside a line neither starts nor ends the body: {merged}"
+        );
+
+        let mut case = MergeCase::approved();
+        case.files = vec![
+            "crates/web/src/lib.rs".to_owned(),
+            "docs/web/notes.md".to_owned(),
+        ];
+        let (out, merged) = case.run("not-web")?;
+        assert!(
+            merged.is_some() && out.contains("ci.yml green"),
+            "a path that only contains `web/` needs no web run: {out}"
+        );
         Ok(())
     }
 }

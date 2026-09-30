@@ -790,7 +790,6 @@ fn mc_g12() {
 
 /// `MC-G13`: Re-entry allowed once the cooldown has passed.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g13() {
     run_gate("MC-G13");
 }
