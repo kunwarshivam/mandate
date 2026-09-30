@@ -696,6 +696,17 @@ results table.
 | 4. **Implementation**, split | `agent/m7-impl-approval`, `agent/m7-impl-runtime`, `agent/m7-impl-cli` | (a) `mandate-approval`; (b) the runtime's grant path and the control-stream tail; (c) the CLI commands and the shell's notifier driver (with stream L). Test files change only by deleting `#[ignore]` lines (DEC-77 item 2) |
 | 5. **Status** | `agent/m7-status` | Flips the MC-E rows to `passing` (DEC-77 item 3) |
 
+**The coordinator's answers on stage 2a** (the #321 review):
+
+1. **The MC-E harness count correction** (the 298-case and 300-test pin in
+   `crates/mandate-refcases/tests/mandate_harness.rs`) is owned by stream M7. It lands as a small
+   tests-correction PR right after #321, followed by the MC-E spec PR generated from #321's model;
+   the coordinator lands the two back to back.
+2. **The `mandate-journal` catalogue entries** for `ApprovalResponseSubmitted`,
+   `OwnerCommandIssued`, and `ApprovalRevalidated` come in a tests-first PR after both #320 and
+   #321 merge, because #320 closes the payload schemas.
+3. **The runtime approval tests** (stage 3) wait for both #320 and #321.
+
 **Dependencies before stage 4 (b):** `mandate-builder`'s `classify` (stream H, DEC-152, in progress),
 `MandateView` carrying `autonomy.approval` and `notifications` (stream F's E10-1 implementation,
 claim [#124](https://github.com/kunwarshivam/mandate/issues/124), in progress), the gate dry run
