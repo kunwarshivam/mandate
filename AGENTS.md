@@ -186,8 +186,9 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
 - **New crates** get an entry in `xtask/layers.toml` in the same change; safety-critical crates also
   get a CODEOWNERS line and start `src/lib.rs` with the lint header `cargo xtask layers` checks.
 - **New dependencies** need a row in `docs/dependencies.md` in the same change (none by default).
-- **Reference-case fixtures** (`fixtures/refcases/`) are generated: after a founder-approved YAML
-  change, run `cargo xtask refcases --write`; never edit them by hand.
+- **Reference-case fixtures** (`fixtures/refcases/`) are generated: after a YAML change the founder
+  approved, or one DEC-176 lets an agent accept (it only tightens a rule or makes spec and code
+  agree), run `cargo xtask refcases --write`; never edit them by hand.
 - **Tasks** use `docs/project/templates/task.md`; PRs use `.github/pull_request_template.md`;
   decisions use `docs/adr/template.md` plus a decision-log row.
 - **Rust** for the core: runtime, risk, execution, connectors, market data, journal.
