@@ -21,10 +21,12 @@ Mandate never holds customer funds or any permission that can move them, never c
 or on profits, and trades paper only until securities counsel signs off on live trading
 ([compliance](docs/product/08-compliance-and-regulatory.md)).
 
-> **Where it stands:** exact arithmetic, market data, accounting, the fill model, and the journal's
-> hash chain and stores are built and verified; the backtest loop, the agent runtime, risk gate,
-> order builder, research agent, and the Alpaca paper connector are being built now, and the
-> journal's cold store is next. Nothing in this repository places a real order ([status](#status)).
+> **Where it stands:** exact arithmetic, market data, accounting, the fill model, the backtest
+> loop, and the journal's hash chain, hot store, artifact store, and verification are built and
+> verified; the agent runtime, order builder, approvals, and most of the risk gate and the mandate
+> document are in (346 reference cases pass), the Alpaca paper connector's implementation slices
+> and the research thin slice are landing, and the journal's cold store is next. Nothing in this
+> repository places a real order ([status](#status)).
 
 ## How it works
 
@@ -68,18 +70,18 @@ merged and the implementation is under way; planned means scheduled in the
 | Exact arithmetic, time, canonical JSON | Decimal money and quantity types, the NYSE calendar and sessions, the hashing format | M1 to M4 | Built |
 | Market data | Alpaca historical bars, trades, quotes, and corporate actions into verified datasets | M1 | Built |
 | Accounting | Positions, cash and settlement, fees, corporate actions, P&L, buying power | M2 | Built |
-| Simulated execution and backtest | The fill model, the backtest loop, a baseline strategy, an exact metrics report | M3 | Fill model built; backtest in progress |
+| Simulated execution and backtest | The fill model, the backtest loop, a baseline strategy, an exact metrics report | M3 | Built; the report is pinned by a committed golden digest |
 | Journal and verification | Hash chain, append protocol, Postgres hot store, artifact store, a verification command | M4 | Built; cold store next |
-| Mandate document | Parsing, validation, the policy hierarchy, change classification, risk state | M5 | In progress |
-| Risk gate | The ordered checks, US account rules, eligibility, conduct controls, forced flatten | M5 | In progress |
-| Order builder and autonomy | AUTO, ASK, or DENY per decision; deterministic sizing and order construction | M5 | In progress |
-| Agent runtime and kill switches | One writer per agent, the decision cycle, restarts, kill switches | M5 | In progress |
-| Research agent | Theses, corroboration, admission, revision lineages, expiry | M5 | In progress (thin slice) |
-| Executor and Alpaca paper connector | Idempotent intents, reconciliation after restart, protective exits at the broker | M6 | In progress |
-| Escalation | Approval requests with deadlines and safe defaults; email, one chat channel, CLI control | M7 | Planned |
+| Mandate document | Parsing, validation, the policy hierarchy, change classification, risk state | M5 | In progress (families S, V, P, C, T, L and 15 of 24 R passing; the fold's last slice and the envelope split remain) |
+| Risk gate | The ordered checks, US account rules, eligibility, conduct controls, forced flatten | M5 | In progress (spine, eligibility, conduct merged; US account rules and the mandate limits in review) |
+| Order builder and autonomy | AUTO, ASK, or DENY per decision; deterministic sizing and order construction | M5 | Built; the trim-to-target cases wait on the risk gate |
+| Agent runtime and kill switches | One writer per agent, the decision cycle, restarts, kill switches | M5 | Built |
+| Research agent | Theses, corroboration, admission, revision lineages, expiry | M5 | In progress (thin slice: admission and the lineage fold merged) |
+| Executor and Alpaca paper connector | Idempotent intents, reconciliation after restart, protective exits at the broker | M6 | In progress (implementation in stacked slices) |
+| Escalation | Approval requests with deadlines and safe defaults; email, one chat channel, CLI control | M7 | In progress (the pure `mandate-approval` crate merged; runtime, CLI, and spec follow) |
 | Robinhood connector | Agentic trading accounts for retail users, the second connector | M8 | Planned |
 | Control plane and workspace services | Organizations and workspaces, SSO, roles, step-up auth, OAuth broker connections, the policy service | M8 | Planned |
-| Web app | Mandate authoring, backtest and paper views, dashboard, audit explorer | M9 | Planned |
+| Web app | Mandate authoring, backtest and paper views, dashboard, audit explorer | M9 | In progress (foundation under DEC-200) |
 | Private approvals and channels | Notifications carrying only opaque IDs, details served from the workspace; push, email, chat | M10 | Planned |
 | Hybrid installer | Helm chart and Docker Compose, outbound-only connectivity, signed releases | M11 | Planned |
 | Billing | Organization plans and agent counts, with no per-trade or outcome-based pricing | M12 | Planned |
@@ -143,52 +145,67 @@ flowchart BT
     time[mandate-time]
     canon[mandate-canon]
     domain[mandate-domain]
+    approval[mandate-approval] --> canon
     acct[mandate-accounting] --> num
     acct --> domain
     journal[mandate-journal] --> canon
     spec[mandate-spec] --> domain
     spec --> canon
+    risk[mandate-risk] --> acct
+    builder[mandate-builder] --> spec
+    research[mandate-research] --> canon
     runtime[mandate-runtime] --> journal
     runtime --> acct
+    executor[mandate-executor] --> journal
+    executor --> acct
     sim[mandate-sim] --> acct
     md[mandate-marketdata] --> time
     pg[mandate-journal-pg] --> journal
     fs[mandate-artifacts-fs] --> journal
     bt[mandate-backtest] --> sim
+    alpaca[mandate-alpaca] --> executor
     cli[mandate-cli] --> md
     cli --> fs
+    shell[mandate-shell] --> runtime
+    shell --> executor
+    shell --> alpaca
 ```
 
 | Layer | Crate | Responsibility | Safety-critical | Pure |
 |---|---|---|---|---|
-| 0 | `mandate-num` | `Usd`, `Price`, `Qty`, `Bps`, `Fraction` with exact-or-error arithmetic, square-root impact and integer roots; `Ratio`, tick rounding, money-to-shares sizing, and the metric arithmetic are stubs with their tests merged, pending E4-2 | yes | yes |
+| 0 | `mandate-num` | `Usd`, `Price`, `Qty`, `Bps`, `Fraction`, `Ratio` with exact-or-error arithmetic; square-root impact and integer roots, the metric, gate, and sizing arithmetic, tick rounding, and money-to-shares sizing | yes | yes |
 | 0 | `mandate-time` | `UtcNanos` (RFC 3339 with fractional seconds), dates, the NYSE calendar, trading sessions, trade-date rules | yes | yes |
 | 0 | `mandate-canon` | Canonical JSON, the decimal grammar, SHA-256 digests | yes | yes |
 | 1 | `mandate-domain` | The shared vocabulary: asset identifiers, the working universe, autonomy decisions, agent modes, purposes, market sessions | yes | yes |
+| 1 | `mandate-approval` | The pure approvals crate: request content, the ask budget, admission checks, step-up, re-validation and drift, quiet hours (E8-1 to E8-3 merged; the runtime grant path and CLI follow) | yes | yes |
 | 2 | `mandate-accounting` | The account fold: positions, cost basis, cash and settlement, fees with per-order caps, marks, realized and unrealized P&L, corporate actions, buying power | yes | yes |
 | 2 | `mandate-journal` | Drafts, the append protocol (idempotency, fencing, heads), verification, anchoring, the artifact core | yes | yes |
-| 3 | `mandate-spec` | The mandate document as code: parsing against the schema's decimal grammars, validation, the policy hierarchy, change classification, risk state (API and the S, V, P tests merged; the remaining families and the implementation in progress) | yes | yes |
-| 6 | `mandate-runtime` | The agent runtime core: one writer per agent, the decision cycle as a pure fold and handler, the startup hold, kill switches (API and tests merged, implementation in progress) | yes | yes |
+| 3 | `mandate-spec` | The mandate document as code: parsing against the schema's decimal grammars, validation, the policy hierarchy, change classification, the condition language, risk state, goals (families S, V, P, C, T, L and 15 of 24 R cases passing) | yes | yes |
+| 4 | `mandate-risk` | The independent risk gate: trading-domain §9.1's ordered checks, US account rules, the eligibility floor, market-conduct controls, the agent-scoped flatten (spine, eligibility, conduct merged; the rest in review) | yes | yes |
+| 5 | `mandate-builder` | Autonomy classification (AUTO, ASK, DENY) and the conviction-linear order builder: combine, size, clip (families A and 25 of 32 B passing; the trim cases wait on the gate) | yes | yes |
+| 5 | `mandate-research` | The research-agent thin slice: the thesis contract, the seventeen ordered admission checks, expiry, revision lineages (the family-N harness slices follow) | yes | yes |
+| 6 | `mandate-runtime` | The agent runtime core: one writer per agent, the decision cycle as a pure fold and handler, the startup hold, kill switches | yes | yes |
+| 6 | `mandate-executor` | The account stream's single writer: journal-first idempotent intents, client order ids derived from the intent id, the order state machine, reconciliation, protective exits (implementation in stacked slices) | yes | yes |
 | 6 | `mandate-sim` | The backtest fill model as a pure function: eligibility, touch and through, marketable limits, volume caps with square-root impact, stops, stop-limits, OCO, gaps, auctions | yes | yes |
 | 6 | `mandate-marketdata` | Alpaca historical bars, trades, and quotes as exact vendor numbers in idempotent Parquet datasets; corporate actions; sessions; data-quality inspection; header-driven rate limiting | no | no |
 | 6 | `mandate-journal-pg` | The Postgres hot store: canonical bytes with a hash check, append-only roles and triggers, stream heads with writer fencing | yes | no |
 | 6 | `mandate-artifacts-fs` | Write-once objects under their SHA-256, atomic publish, checked reads | yes | no |
-| 7 | `mandate-backtest` | The backtest loop, a moving-average baseline, and an exact-decimal metrics report (tests merged; implementation in progress) | yes | yes |
+| 7 | `mandate-backtest` | The backtest loop, a moving-average baseline, and an exact-decimal metrics report, pinned by a committed golden report | yes | yes |
+| 7 | `mandate-alpaca` | The Alpaca paper connector behind transport traits: trading and data clients, wire parsing with no floats, the instrument snapshot and latest quote, recorded fixtures | yes | no |
 | 7 | `mandate-cli` | `mandate download`, `mandate inspect`, `mandate journal verify`, `mandate artifact put` and `get` | no | no |
+| 8 | `mandate-shell` | The composition crate and `mandate-tracer` binary: adapters and stages that wire the core crates together; it holds no trading logic (every tracer stage refuses until its upstream source lands) | yes | no |
 | tool | `mandate-refcases` | One named test per reference case, driven by `fixtures/refcases/*.json`; `status.toml` records which cases pass | yes | no |
 | tool | `xtask` | The CI pipeline as a binary: `cargo xtask check` | no | no |
 
-Phase 1 adds `mandate-risk` (the gate), `mandate-builder` (autonomy and the order builder),
-`mandate-research` (admission and lineages), and `mandate-executor` with `mandate-alpaca`
-([ADR-0001 ES-02](docs/adr/0001-engineering-setup.md), [HLD](docs/HLD.md)).
+`xtask/layers.toml` is the binding crate inventory and dependency declaration.
 
 ### Specifications and reference cases
 
 | Spec | Version | Reference cases | How the code is held to it |
 |---|---|---|---|
 | [Trading domain](docs/specs/trading-domain.md) | v0.13, approved | 26 worked cases (RC-01 onward) and 41 registered reason codes over accounting, settlement, corporate actions, fills, US account rules | `mandate-refcases` runs each case as a test; `status.toml` marks the ones that pass and a passing case may never regress |
-| [Journal](docs/specs/journal.md) | v0.4 | Byte-exact vectors: decimal normalization, string escaping, a 5-event chain, the export line, the Merkle anchor, 9 append-protocol cases (idempotent retry, stale head, fenced writer, rejected float), 9 tamper cases with their expected first failure | Conformance tests reproduce every vector byte for byte; `mandate journal verify` reports the tamper cases' codes |
-| [Mandate](docs/specs/mandate.md) | v0.6 | 298 generated cases across schema, validation, policy, change classification, risk state, autonomy, the order builder, the gate, admission, lineage, and expiry | A Python reference implementation (`reference/mandate`) generates the cases; CI regenerates them and diffs, runs the checker, a fuzzer over the invariants MI-1 to MI-20, and a seeded-mutant check. The Rust harness runs every case, with each family pending until its implementation lands |
+| [Journal](docs/specs/journal.md) | v0.6 | Byte-exact vectors: decimal normalization, string escaping, a 5-event chain, the export line, the Merkle anchor, 9 append-protocol cases (idempotent retry, stale head, fenced writer, rejected float), 9 tamper cases with their expected first failure, and the generated agent-stream payload vectors of §9.1 | Conformance tests reproduce every vector byte for byte; `mandate journal verify` reports the tamper cases' codes |
+| [Mandate](docs/specs/mandate.md) | v0.6 | 298 generated cases across schema, validation, policy, change classification, risk state, autonomy, the order builder, the gate, admission, lineage, and expiry | A Python reference implementation (`reference/mandate`) generates the cases; CI regenerates them and diffs, runs the checker, a fuzzer over the invariants MI-1 to MI-30, and a seeded-mutant check. The Rust harness runs every case; 284 of 298 pass, the rest pending on their owning stories |
 
 ### Verification pipeline
 
@@ -236,11 +253,12 @@ historical endpoints with keys you supply in the environment.
 | M0 Foundations | Done: workspace, CI, conventions, the agent workflow |
 | M1 Market data | Done: bars, trades, quotes, sessions and early closes, corporate actions, safe concurrent writes, data-quality reporting, proactive rate limiting; exit run on real data passed 2026-09-26 |
 | M2 Accounting | Done: verified against the hand-calculated reference cases including splits, dividends, partial fills, settlement |
-| M3 Simulated execution and backtest | Fill model done (RC-10, RC-12, RC-19 passing); the backtest loop and metrics report have their tests merged, implementation in progress |
+| M3 Simulated execution and backtest | Done: the fill model (RC-10, RC-12, RC-19 passing) and the baseline backtest with an exact-decimal metrics report, reproducible bit for bit from a committed golden report |
 | M4 Journal | In progress: done except the cold store and segment manifests, which are next: hash chain, verification, Postgres hot store, artifact store, the verification command |
-| M5 Agent runtime and risk | In progress: the mandate document, risk gate, order builder, runtime, and research thin slice each run as brief, tests, and implementation pull requests. All five briefs are merged; the runtime tests (#134) and the first mandate-document tests (#140) are merged; the risk-gate and research tests are in review |
-| M6 Alpaca connector | In progress: the executor and connector brief is merged (#139); its tests pull request is being written |
-| M7 to M13 | Planned ([milestones](docs/project/02-milestones-and-wbs.md)) |
+| M5 Agent runtime and risk | In progress: the runtime and kill switches are built (#151); the mandate document's parse, validation, policy, change classification, and risk-state fold are merged (families S, V, P, C, T, L, and 15 of 24 R passing); the order builder and autonomy are built (#216, #234); the risk gate's spine, eligibility floor, and conduct controls are merged, with US account rules and the remaining mandate limits in review; the research thin slice's admission and lineage fold are merged, its harness slices next |
+| M6 Alpaca connector | In progress: tests merged (#152: 310 tests, twelve submission crash points, 23 recorded Alpaca paper scenarios); the implementation lands as stacked slices (#184, #194, #196, #198, and the E7-4 slices), with fault-injected reconciliation as the exit criterion |
+| M7 Escalation | In progress: E8-1 to E8-3 (approval content, the ask budget, admission, re-validation, drift) implemented in `mandate-approval` (#250, #254, #275); the runtime grant path, the CLI, and the M7 spec change follow |
+| M8 to M13 | Planned ([milestones](docs/project/02-milestones-and-wbs.md)); the web app's foundation started early under DEC-200 |
 
 The [work tracker](docs/project/08-work-tracker.md) records every story, claim, and decision with
 its PR numbers. Nothing trades live with real money until securities counsel has signed off
