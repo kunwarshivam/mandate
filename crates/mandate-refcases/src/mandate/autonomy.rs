@@ -304,12 +304,16 @@ mod tests {
         Ok(copy)
     }
 
-    /// The doctored case must fail, and its failure must name `named`.
-    fn fails_naming(result: Result<(), String>, named: &str, what: &str) -> Result<(), String> {
+    /// The doctored case must fail with exactly `expected`, never a message that merely contains
+    /// it. A member name alone is too generic a needle: `on_timeout` is in its edited, dropped, and
+    /// stated failures alike, so a test of one would pass on either of the others.
+    fn fails_with(result: Result<(), String>, expected: &str, what: &str) -> Result<(), String> {
         match result {
             Ok(()) => Err(format!("{what}: the case still passed")),
-            Err(e) if e.contains(named) => Ok(()),
-            Err(e) => Err(format!("{what}: the failure does not name `{named}`: {e}")),
+            Err(e) if e == expected => Ok(()),
+            Err(e) => Err(format!(
+                "{what}: expected the failure `{expected}`, got `{e}`"
+            )),
         }
     }
 
@@ -347,14 +351,19 @@ mod tests {
                 .ok_or("an expectation object")?;
             for (member, value) in expect {
                 let pointer = format!("/expect/{member}");
-                let edited = doctored(&fixture, &id, &pointer, |v| *v = changed(value))?;
-                fails_naming(run(edited, &id), member, &format!("{id}: {member} edited"))?;
+                let edit = changed(value);
+                let edited = doctored(&fixture, &id, &pointer, |v| *v = edit.clone())?;
+                fails_with(
+                    run(edited, &id),
+                    &format!("{member}: expected {edit}, got {value}"),
+                    &format!("{id}: {member} edited"),
+                )?;
                 let dropped = doctored(&fixture, &id, "/expect", |e| {
                     e.as_object_mut().map(|m| m.remove(member));
                 })?;
-                fails_naming(
+                fails_with(
                     run(dropped, &id),
-                    member,
+                    &format!("fixture has no `{member}`"),
                     &format!("{id}: {member} dropped"),
                 )?;
                 doctorings = doctorings.saturating_add(2);
@@ -363,10 +372,15 @@ mod tests {
                 e.as_object_mut()
                     .map(|m| m.insert(PLANTED.to_owned(), Json::Null));
             })?;
-            fails_naming(run(planted, &id), PLANTED, &format!("{id}: a plant"))?;
+            fails_with(
+                run(planted, &id),
+                &format!("expectations not interpreted: {PLANTED}"),
+                &format!("{id}: a plant"),
+            )?;
             if expect.contains_key("approvers_required") {
                 continue;
             }
+            let decision = crate::str_at(&case, "expect.decision")?;
             for (member, value) in [
                 ("approvers_required", json!(1)),
                 ("on_timeout", json!("skip")),
@@ -375,7 +389,13 @@ mod tests {
                     e.as_object_mut()
                         .map(|m| m.insert(member.to_owned(), value.clone()));
                 })?;
-                fails_naming(run(stated, &id), member, &format!("{id}: {member} stated"))?;
+                fails_with(
+                    run(stated, &id),
+                    &format!(
+                        "`{member}`: the case states one, but a `{decision}` carries no approval"
+                    ),
+                    &format!("{id}: {member} stated"),
+                )?;
                 doctorings = doctorings.saturating_add(1);
             }
         }
@@ -415,24 +435,39 @@ mod tests {
                     let dropped = doctored(&fixture, &id, "/action", |a| {
                         a.as_object_mut().map(|m| m.remove(member));
                     })?;
-                    fails_naming(
+                    fails_with(
                         run(dropped, &id),
-                        member,
+                        &format!("fixture has no `{member}`"),
                         &format!("{id}: {member} dropped"),
                     )?;
                 }
             }
-            let plant = if reducing { "order_usd" } else { PLANTED };
+            let (plant, refusal) = if reducing {
+                (
+                    "order_usd",
+                    "`action` states facts a risk-reducing purpose never reads: order_usd",
+                )
+            } else {
+                (PLANTED, "`action` members not interpreted: input")
+            };
             let planted = doctored(&fixture, &id, "/action", |a| {
                 a.as_object_mut()
                     .map(|m| m.insert(plant.to_owned(), json!("1")));
             })?;
-            fails_naming(run(planted, &id), plant, &format!("{id}: {plant} planted"))?;
+            fails_with(
+                run(planted, &id),
+                refusal,
+                &format!("{id}: {plant} planted"),
+            )?;
             let top = doctored(&fixture, &id, "", |c| {
                 c.as_object_mut()
                     .map(|m| m.insert(PLANTED.to_owned(), Json::Null));
             })?;
-            fails_naming(run(top, &id), PLANTED, &format!("{id}: a top-level plant"))?;
+            fails_with(
+                run(top, &id),
+                &format!("case keys not interpreted: {PLANTED}"),
+                &format!("{id}: a top-level plant"),
+            )?;
         }
         crate::expect_eq("openings", openings, 12)
     }
@@ -451,7 +486,7 @@ mod tests {
             let named = doctored(&fixture, &id, "/action/instrument", |i| {
                 *i = json!("00000000-0000-4000-8000-000000000000");
             })?;
-            fails_naming(
+            fails_with(
                 run(named, &id),
                 &format!(
                     "{id}: `instrument` names the harness's placeholder \
