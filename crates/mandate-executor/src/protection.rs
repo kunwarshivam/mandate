@@ -11,7 +11,7 @@ use mandate_canon::Value;
 use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
-use crate::intent::{gate_and_submit, intent_of, journal_submission};
+use crate::intent::{abandon, gate_and_submit, intent_of, journal_submission};
 use crate::orders::transition;
 use crate::payload::text;
 use crate::ports::Ports;
@@ -368,7 +368,10 @@ pub(crate) fn protection_cancelled(
 /// exit is terminal, denied or abandoned **and** no other exit there is working or waiting, the
 /// position is re-protected and the interval ends — so Σ resting sells never exceeds the position.
 /// A passive sequence is ended the same way when its exit is denied or abandoned rather than
-/// placed as the new OCO, so the position never stays unprotected with no interval open (rule 3).
+/// placed as the new OCO. While its exit still waits once nothing rests — on an opening, or held
+/// at the gate — the passive sequence opens its interval, once, so `max_unprotected_s` bounds and
+/// alerts it like any other ([`bound`]); [`passive_exit`]'s placement or [`replace`] ends it, and
+/// the old OCO is never re-placed while the exit waits (#286 round 2, M2′; rule 3).
 pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     release_waiting(batch)?;
     let sequences: Vec<(InstrumentId, ExitSequence)> = batch
@@ -395,6 +398,12 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                     )
                 }),
         };
+        if sequence.passive && !finished {
+            if !interval_open(&batch.view, &instrument) {
+                changed(batch, &instrument, "unprotected_start", Vec::new())?;
+            }
+            continue;
+        }
         let working = batch.view.orders.values().any(|order| {
             order.instrument == instrument && exits(order.purpose) && !order.state.is_terminal()
         });
@@ -457,6 +466,12 @@ fn waiting_exits(view: &ExecutorState) -> Vec<WaitingExit> {
             _ => None,
         })
         .collect()
+}
+
+fn interval_open(view: &ExecutorState, instrument: &InstrumentId) -> bool {
+    view.unprotected
+        .iter()
+        .any(|interval| &interval.instrument == instrument && interval.ended_at.is_none())
 }
 
 /// The received exits in `instrument` with no order yet: those waiting on their cancels.
@@ -566,7 +581,8 @@ fn place(
 /// §5.4's passive exit, once its cancel is confirmed: the exit rests as the take-profit leg of a
 /// new GTC OCO for its own quantity, keeping the stop; the rest of the position keeps protection at
 /// the recorded prices, so nothing sells beyond the intent and the whole position keeps its stop
-/// (#174 ruling (c), 5862934909; rule 3). Answers whether the intent was this passive sequence's.
+/// (#174 ruling (c), 5862934909; rule 3), and the interval its wait opened, if any, ends ([`settle`]).
+/// Answers whether the intent was this passive sequence's.
 /// A passive sequence on the journal with no take-profit, which [`begin_exit`] never starts,
 /// answers slice 5's stub rather than an OCO without one or a remainder left unprotected (#286
 /// round 1, M1).
@@ -615,6 +631,9 @@ pub(crate) fn passive_exit(
         place(batch, &request, None, &sequence.agent, prices)?;
         requests.push(request);
     }
+    if interval_open(&batch.view, instrument) {
+        changed(batch, instrument, "unprotected_end", Vec::new())?;
+    }
     for request in requests {
         batch.broker(BrokerRequest::Submit(request));
     }
@@ -640,7 +659,10 @@ fn oco(id: ClientOrderId, instrument: &InstrumentId, legs: OcoLegs) -> SubmitOrd
 }
 
 /// §5.4's bound: at `max_unprotected_s` the exit is cancelled (its confirmation re-places
-/// protection through [`settle`]) and the owner alerted once.
+/// protection through [`settle`]) and the owner alerted once. An exit with no order yet — waiting
+/// on an opening, or held at the gate — has nothing to cancel at the broker and is abandoned
+/// instead, so [`settle`] re-places protection in the same step rather than leaving the position
+/// unprotected for as long as the hold lasts (#286 round 2, M2′; rule 3).
 pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let limit = batch.ports.config.max_unprotected_s;
@@ -663,10 +685,19 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             .map(|sequence| sequence.intent.clone());
         if let Some(intent) = exit {
             let id = ClientOrderId::for_intent(&intent)?;
-            if ask_cancel(batch, &id)? {
-                batch.broker(BrokerRequest::Cancel {
-                    client_order_id: id,
-                });
+            let received = batch
+                .view
+                .intents
+                .get(&intent)
+                .is_some_and(|record| record.outcome == IntentOutcome::Received);
+            if batch.view.orders.contains_key(&id) {
+                if ask_cancel(batch, &id)? {
+                    batch.broker(BrokerRequest::Cancel {
+                        client_order_id: id,
+                    });
+                }
+            } else if received {
+                abandon(batch, &intent, "unprotected_interval_limit")?;
             }
         }
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
@@ -1429,10 +1460,10 @@ mod sequence_tests {
         Everything, Executor, Ids, aapl, account, drafted, executor_config, fees, submitted,
     };
     use crate::types::{
-        AgentId, BrokerFill, BrokerOrder, BrokerOutcome, BrokerReject, BrokerRequest, BrokerUpdate,
-        Effect, EventDraft, EventId, ExitTier, FillId, Input, IntentBody, IntentHandoff,
-        MandateVersion, MarketObservation, OcoLegs, OrderState, OrderType, Purpose,
-        ReconcileReason, RiskClock, SubmitOrder, TimeInForce,
+        AgentId, BrokerFill, BrokerOrder, BrokerOutcome, BrokerReject, BrokerRequest,
+        BrokerUnknown, BrokerUpdate, Effect, EventDraft, EventId, ExecutorConfig, ExitTier, FillId,
+        Input, IntentBody, IntentHandoff, MandateVersion, MarketObservation, OcoLegs, OrderState,
+        OrderType, Purpose, ReconcileReason, RiskClock, SubmitOrder, TimeInForce,
     };
 
     const OCO: &str = "md-held-1-p1";
@@ -1827,11 +1858,25 @@ mod sequence_tests {
     }
 
     /// An exit that grew too old while its cancel was confirmed is abandoned, and the position it
-    /// never reduced is protected again in full.
+    /// never reduced is protected again in full. The interval's own bound is set past the exit's
+    /// age here, so that the age, not the bound, abandons it.
     #[test]
     fn an_abandoned_exit_re_places_protection_for_the_whole_position() -> Result<(), ExecutorError>
     {
-        with_ports!(ports);
+        let (config, fees) = (
+            ExecutorConfig {
+                max_unprotected_s: 600,
+                ..executor_config()
+            },
+            fees()?,
+        );
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
         let mut executor = protected(&ports)?;
         executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
         executor.run(Input::Tick(RiskClock::from_secs(500)), &ports)?;
@@ -3562,6 +3607,212 @@ mod sequence_tests {
             let answered = executor.run(buy_reported(status, filled)?, &ports)?;
             assert_eq!(submitted(&answered), 0, "{status}");
         }
+        Ok(())
+    }
+
+    /// The protected ten AAPL with an opening buy of 5 by `agent`, acknowledged or not.
+    fn protected_with_an_opening(
+        ports: &Ports<'_>,
+        agent: &str,
+        acknowledged: bool,
+    ) -> Result<Executor, ExecutorError> {
+        let mut executor = protected(ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(BUY)),
+                ("agent", text(agent)),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("5")),
+                ("limit", text("150")),
+                ("purpose", text("open")),
+            ],
+        )?;
+        if acknowledged {
+            committed(
+                &mut executor,
+                "OrderStateChanged",
+                vec![("client_order_id", text(BUY)), ("state", text("accepted"))],
+            )?;
+        }
+        executor.run(quote("150")?, ports)?;
+        Ok(executor)
+    }
+
+    /// The instrument's open interval: when it started, and whether it has been alerted.
+    fn open_interval(executor: &Executor) -> Option<(i64, bool)> {
+        executor
+            .state
+            .unprotected
+            .iter()
+            .find(|interval| interval.ended_at.is_none())
+            .map(|interval| (interval.started_at.secs(), interval.alerted))
+    }
+
+    fn abandoned_for(effects: &[Effect]) -> Vec<&str> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "OrderAbandoned" => {
+                    draft.payload.get("reason").and_then(Value::as_str)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// §5.4's bound, reached by a passive exit that waited with nothing resting: the exit is
+    /// abandoned, the owner alerted, and the recorded OCO re-placed for the whole position in the
+    /// same step, which ends the interval.
+    fn assert_bound_fired_at_30(
+        executor: &mut Executor,
+        ports: &Ports<'_>,
+    ) -> Result<(), ExecutorError> {
+        let early = executor.run(Input::Tick(RiskClock::from_secs(29)), ports)?;
+        assert!(
+            actions(&early).is_empty() && ocos(&early).is_empty(),
+            "no bound, and the old OCO is never re-placed while the exit waits: {:?}",
+            drafted(&early)
+        );
+        let due = executor.run(Input::Tick(RiskClock::from_secs(30)), ports)?;
+        assert_eq!(abandoned_for(&due), vec!["unprotected_interval_limit"]);
+        assert_eq!(
+            actions(&due),
+            vec!["interval_limit", "placed", "unprotected_end"]
+        );
+        assert!(due.iter().any(|effect| matches!(
+            effect,
+            Effect::Notify(note) if note.message_key == "unprotected_interval_limit"
+        )));
+        assert_eq!(
+            ocos(&due)
+                .into_iter()
+                .map(|(_, qty, legs, purpose)| (qty, legs, purpose))
+                .collect::<Vec<_>>(),
+            vec![(
+                Qty::parse("10")?,
+                legs("170", "140", "10")?,
+                Purpose::Protective
+            )]
+        );
+        assert_eq!(open_interval(executor), None);
+        assert!(executor.state.exiting.is_empty(), "no stale sequence");
+        assert_eq!(stop_covered(executor)?, position(executor)?);
+        Ok(())
+    }
+
+    /// #286 round 2, M2′, the reviewer's first path: a passive exit waits on its agent's opening,
+    /// which the broker never had. Once the OCO's cancel is confirmed the passive sequence opens
+    /// its interval; at rule 5's bound the opening is queried as an `Unknown`, the query 404s and
+    /// the gate holds the exit on the `Unknown`; at `max_unprotected_s` the bound fires.
+    #[test]
+    fn a_passive_exit_waiting_on_an_opening_that_404s_is_bounded() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Tiered,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected_with_an_opening(&ports, "agent-a", false)?;
+        let asked = executor.run(sell(EXIT, "5", "160", Purpose::DiscretionaryExit)?, &ports)?;
+        assert_eq!(actions(&asked), vec!["passive_start"]);
+        assert_eq!(open_interval(&executor), None, "the OCO still rests");
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(actions(&confirmed), vec!["cancelled", "unprotected_start"]);
+        assert_eq!(submitted(&confirmed), 0, "the exit waits on the opening");
+        assert_eq!(open_interval(&executor), Some((0, false)));
+        let overdue = executor.run(Input::Tick(RiskClock::from_secs(15)), &ports)?;
+        assert_eq!(queried(&overdue), vec![BUY]);
+        assert_eq!(verdicts(&overdue), vec!["hold"]);
+        assert!(actions(&overdue).is_empty(), "{:?}", drafted(&overdue));
+        let absent = executor.run(
+            Input::Broker(Ok(BrokerOutcome::Absent {
+                client_order_id: BUY.to_owned(),
+            })),
+            &ports,
+        )?;
+        assert!(submitted(&absent) == 0 && actions(&absent).is_empty());
+        assert_eq!(open_interval(&executor), Some((0, false)), "opened once");
+        assert_bound_fired_at_30(&mut executor, &ports)
+    }
+
+    /// #286 round 2, M2′, the reviewer's second path: another agent's opening in the instrument
+    /// goes `Unknown` on a transport failure while the passive exit's cancel is outstanding, and
+    /// the query's answer is lost. The confirmation re-gates the exit, which rule 5 does not hold
+    /// back, and the gate holds it on the `Unknown`; the interval opens in that step, and the bound
+    /// fires at `max_unprotected_s`.
+    #[test]
+    fn a_passive_exit_held_on_an_unknown_is_bounded() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Tiered,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected_with_an_opening(&ports, "agent-b", false)?;
+        executor.run(sell(EXIT, "5", "160", Purpose::DiscretionaryExit)?, &ports)?;
+        let lost = executor.run(Input::Broker(Err(BrokerUnknown::Transport)), &ports)?;
+        assert_eq!(queried(&lost), vec![BUY]);
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(verdicts(&confirmed), vec!["hold"]);
+        assert_eq!(actions(&confirmed), vec!["cancelled", "unprotected_start"]);
+        assert!(
+            executor
+                .state
+                .held
+                .contains(&IntentId(EventId(EXIT.to_owned())))
+        );
+        assert_eq!(open_interval(&executor), Some((0, false)));
+        assert_bound_fired_at_30(&mut executor, &ports)
+    }
+
+    /// #286 round 2, M2′: a passive exit waiting on an opening the broker acknowledged and then
+    /// lost goes at rule 5's bound, and its placement ends the interval the wait opened; the
+    /// interval's own bound never fires.
+    #[test]
+    fn a_passive_exits_placement_ends_the_interval_its_wait_opened() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Tiered,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected_with_an_opening(&ports, "agent-a", true)?;
+        let asked = executor.run(sell(EXIT, "5", "160", Purpose::DiscretionaryExit)?, &ports)?;
+        assert_eq!(cancels(&asked), vec![BUY, OCO]);
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(actions(&confirmed), vec!["cancelled", "unprotected_start"]);
+        let placed = executor.run(Input::Tick(RiskClock::from_secs(15)), &ports)?;
+        assert_eq!(queried(&placed), vec![BUY]);
+        assert_eq!(
+            actions(&placed),
+            vec!["placed", "placed", "unprotected_end"]
+        );
+        assert_eq!(
+            executor
+                .state
+                .unprotected
+                .last()
+                .map(|interval| (interval.started_at.secs(), interval.ended_at)),
+            Some((0, Some(RiskClock::from_secs(15))))
+        );
+        executor.run(
+            Input::Broker(Ok(BrokerOutcome::Absent {
+                client_order_id: BUY.to_owned(),
+            })),
+            &ports,
+        )?;
+        let later = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
+        assert!(actions(&later).is_empty(), "{:?}", drafted(&later));
+        assert_eq!(stop_covered(&executor)?, position(&executor)?);
         Ok(())
     }
 

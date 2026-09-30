@@ -280,9 +280,10 @@ pub(crate) fn journal_submission(
 }
 
 /// `OrderAbandoned`: one of §5.7's two cases — a gate re-check that does not allow, or an intent
-/// older than `max_intent_age`. Terminal, so the reservation is released and a later re-hand of
+/// older than `max_intent_age` — or §5.4's bound cancelling an exit that has no order yet
+/// ([`crate::protection::bound`]). Terminal, so the reservation is released and a later re-hand of
 /// the intent hits the fold lookup and produces nothing.
-fn abandon(
+pub(crate) fn abandon(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
     reason: &str,
