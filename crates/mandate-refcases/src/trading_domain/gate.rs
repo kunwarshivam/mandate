@@ -1,10 +1,10 @@
-//! The gate driver of the `trading_domain` suite (E6-9, DEC-180): each `propose_order` step is
+//! The gate driver of the `trading_domain` suite (E6-9, DEC-199): each `propose_order` step is
 //! decided by `mandate_risk::evaluate` and its `decision` compared, and the account's trading
 //! status — trading-domain spec §7.3's first row, from `initial.account` and from
 //! `broker_account_update` steps — is the account state the gate's check 1 reads. Nothing the gate
 //! decides is computed here.
 //!
-//! **What the harness fills, and why (DEC-180).** The case file's header states the scene every
+//! **What the harness fills, and why (DEC-199).** The case file's header states the scene every
 //! gate case assumes, and the harness builds that scene and nothing more:
 //!
 //! - **The account's status** is §7.3's first row: any `status` other than `ACTIVE`, or any of

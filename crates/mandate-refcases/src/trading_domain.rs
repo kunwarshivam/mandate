@@ -11,7 +11,7 @@
 //! adds the backtest cases — `bars`, `orders`, `isolation`, and the `fills` and `canceled_legs`
 //! expectations, run through `mandate-sim` (DEC-106 item 11); E6-9 adds `propose_order` steps and
 //! the `decision` expectation, decided by `mandate_risk::evaluate`, and the account's §7.3 status
-//! fields from `initial.account` and `broker_account_update` steps ([`gate`], DEC-180). A case
+//! fields from `initial.account` and `broker_account_update` steps ([`gate`], DEC-199). A case
 //! that uses anything owned by a later story fails with "not interpreted until <story>" for each
 //! such item; anything the vocabulary does not know fails as unknown. Every key of every
 //! interpreted expectation is checked.
@@ -73,7 +73,7 @@ const PENDING_EXPECT: &[(&str, &str)] = &[
     ("protective_sell_qty", "E7-4"),
 ];
 
-/// Who moves the agents' mode after each kind of step (DEC-180): the executor's restriction and
+/// Who moves the agents' mode after each kind of step (DEC-199): the executor's restriction and
 /// reconciliation handling for broker events (its RC-15 driver is pending E7-3), the account
 /// ledger for external activity (E7-5), the kill switch (E6-5), and the conduct-breach transition
 /// (E6-11). A broker update carrying a fill for an order the case never named is external.

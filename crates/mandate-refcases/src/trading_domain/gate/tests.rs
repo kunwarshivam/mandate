@@ -3,7 +3,7 @@
 //! test runs the founder's steps 3 and 4 unchanged, with the account in the state §7.3's second row
 //! gives that reject (`closing_only`), and with AAPL marked at step 4's own limit price, since the
 //! case holds AAPL with no mark and the harness refuses to value an unmarked position it is not
-//! deciding on (DEC-180). The same steps under an active account show the state is what decides.
+//! deciding on (DEC-199). The same steps under an active account show the state is what decides.
 
 use std::path::Path;
 use std::sync::Arc;

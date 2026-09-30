@@ -1,4 +1,4 @@
-//! The `trading_domain` gate driver (E6-9, DEC-180) reads every key it claims and refuses what it
+//! The `trading_domain` gate driver (E6-9, DEC-199) reads every key it claims and refuses what it
 //! cannot read. RC-15's `status_not_active` variant, with the `agent_mode` and `actions`
 //! expectations its later stories own taken out, passes as the founder wrote it; editing its
 //! decision, its status or its flags makes it fail. Scenes built on RC-15's account show that each
