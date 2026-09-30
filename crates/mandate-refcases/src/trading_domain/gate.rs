@@ -52,8 +52,8 @@ use mandate_risk::{
     AccountSnapshot, AccountState, AgentId, AgentMode, AgentSnapshot, AssetId, ClientOrderId,
     ConductState, DayTradeLedger, DayTradeRegime, Decision, EtpClass, Exchange, GateConfig,
     GateError, GateInput, GatePass, InstrumentSnapshot, MarketSnapshot, Origin, ProposedKind,
-    ProposedOrder, ReasonCode, RiskSnapshot, SaneQuote, TimeInForce, ValidatedMandate, Verdict,
-    WorkingUniverse, evaluate,
+    ProposedOrder, QuoteCurrency, ReasonCode, RiskSnapshot, SaneQuote, TimeInForce,
+    ValidatedMandate, Verdict, WorkingUniverse, evaluate,
 };
 use mandate_time::UtcNanos;
 
@@ -467,6 +467,7 @@ fn listing(
         ptp_no_exception: false,
         etp: EtpClass::Plain,
         etp_classified_at: Some(now),
+        quote_currency: Some(QuoteCurrency::Usd),
         prior_close: Some(limit_price),
         median_dollar_volume_20d: Some(num(Usd::parse("90000000"), "median_dollar_volume_20d")?),
         median_dollar_volume_30d: None,

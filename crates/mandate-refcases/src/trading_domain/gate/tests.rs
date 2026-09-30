@@ -11,7 +11,7 @@ use std::sync::Arc;
 use mandate_num::{Price, Qty, Usd};
 use mandate_risk::{
     AccountState, AssetClass, AssetId, EtpClass, Exchange, InstrumentSnapshot, MarketSnapshot,
-    SaneQuote,
+    QuoteCurrency, SaneQuote,
 };
 use mandate_time::UtcNanos;
 use serde_json::json;
@@ -119,6 +119,7 @@ fn the_listing_and_market_are_dec_199_item_6s() -> Result<(), String> {
         ptp_no_exception,
         etp,
         etp_classified_at,
+        quote_currency,
         prior_close,
         median_dollar_volume_20d,
         median_dollar_volume_30d,
@@ -136,6 +137,7 @@ fn the_listing_and_market_are_dec_199_item_6s() -> Result<(), String> {
     expect_eq("ptp_no_exception", ptp_no_exception, false)?;
     expect_eq("etp", etp, EtpClass::Plain)?;
     expect_eq("etp_classified_at", etp_classified_at, Some(at))?;
+    expect_eq("quote_currency", quote_currency, Some(QuoteCurrency::Usd))?;
     expect_eq("prior_close", prior_close, Some(limit))?;
     expect_eq(
         "median_dollar_volume_20d",
