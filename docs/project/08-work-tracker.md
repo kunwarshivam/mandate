@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-09-30: a Cursor session, at the founder's request, researched Meta Muse, SpaceXAI Grok Bot, and OpenAI Dots and drafted the earned-autonomy direction: ADR-0003 with DEC-180 to DEC-197, including the guardrails of part 10 ([#326](https://github.com/kunwarshivam/mandate/pull/326)); the delegations and client-ceiling spec change ([#328](https://github.com/kunwarshivam/mandate/pull/328)); and backlog stories E6-12 to E6-14, E8-8, E10-7 to E10-9, E11-4 to E11-8, and E12-5 (this PR). Mandate stays the internal name and every public surface says Owlhead (DEC-171). The founder accepted every recommendation the same day: DEC-180, DEC-181, DEC-183, DEC-191, DEC-193, and PX-15 to PX-18 (DEC-198); earlier, 2026-09-29, night: the Cursor session, acting as merge coordinator for the backend queue on the founder's direction (#165), merged E7-8 ([#288](https://github.com/kunwarshivam/mandate/pull/288)), the E10-3 tests ([#290](https://github.com/kunwarshivam/mandate/pull/290)) and the nightly cargo-mutants fix ([#306](https://github.com/kunwarshivam/mandate/pull/306)), took #289's round-1 fixes, and dispatched six parallel cloud builders and one reviewer (see "Work graph, 2026-09-29 night"); earlier, 2026-09-26, night: the four M5 briefs merged after multi-round reviews (F #129, G #127, H #128, I #126) and their tests PRs are go; the E4-2 tests PR #118 merged and its implementation is in progress; Cursor's #119 and #121 merged; the repository is public until the Actions quota resets on 2026-10-01 (interaction limits on, collaborators only) and the README (#130) is the technical front door; earlier that evening: the five parallel streams merged in one queue (E2-3 slice 2 #107, E5-4 #108, E4-1 implementation #111 and status #113, the E4-2 brief #112 with DEC-127, the mandate spec v0.6 #109 with DEC-117 to DEC-126 proposed to the founder), so E4-1, E5-4, and E2-3 are complete and Track C's spec rewrite is in; DEC-113 (up-to-date rule off) and DEC-114 to DEC-116 recorded; earlier that day (work graph added; Cursor paused, everything on `claude-code`): E2-4 and E5-3 complete, E2-3 slice 1, safe dataset writes, fractional seconds, DEC-111 (thesis revision loop), DEC-112 (CI short path for docs); earlier that day: E2-4 sessions and corporate actions merged, E4-1 tests merged, E5-2 complete, E5-3 tests merged, the pending-tests gate in `fast`; direction follow-ups: evidence loop, correlated-flow controls, input hardening, counsel now, and the Phase 1 thin slice (DEC-99 to DEC-103), after the direction change (DEC-97, DEC-98, ADR-0002) |
+| **Last updated** | 2026-09-30, morning: the Cursor merge coordinator landed eighteen backend PRs under DEC-175's approval label, each after an independent review on a different model (see "Work graph, 2026-09-30 morning"); earlier, 2026-09-30: a Cursor session, at the founder's request, researched Meta Muse, SpaceXAI Grok Bot, and OpenAI Dots and drafted the earned-autonomy direction: ADR-0003 with DEC-180 to DEC-197, including the guardrails of part 10 ([#326](https://github.com/kunwarshivam/mandate/pull/326)); the delegations and client-ceiling spec change ([#328](https://github.com/kunwarshivam/mandate/pull/328)); and backlog stories E6-12 to E6-14, E8-8, E10-7 to E10-9, E11-4 to E11-8, and E12-5 (this PR). Mandate stays the internal name and every public surface says Owlhead (DEC-171). The founder accepted every recommendation the same day: DEC-180, DEC-181, DEC-183, DEC-191, DEC-193, and PX-15 to PX-18 (DEC-198); earlier, 2026-09-29, night: the Cursor session, acting as merge coordinator for the backend queue on the founder's direction (#165), merged E7-8 ([#288](https://github.com/kunwarshivam/mandate/pull/288)), the E10-3 tests ([#290](https://github.com/kunwarshivam/mandate/pull/290)) and the nightly cargo-mutants fix ([#306](https://github.com/kunwarshivam/mandate/pull/306)), took #289's round-1 fixes, and dispatched six parallel cloud builders and one reviewer (see "Work graph, 2026-09-29 night"); earlier, 2026-09-26, night: the four M5 briefs merged after multi-round reviews (F #129, G #127, H #128, I #126) and their tests PRs are go; the E4-2 tests PR #118 merged and its implementation is in progress; Cursor's #119 and #121 merged; the repository is public until the Actions quota resets on 2026-10-01 (interaction limits on, collaborators only) and the README (#130) is the technical front door; earlier that evening: the five parallel streams merged in one queue (E2-3 slice 2 #107, E5-4 #108, E4-1 implementation #111 and status #113, the E4-2 brief #112 with DEC-127, the mandate spec v0.6 #109 with DEC-117 to DEC-126 proposed to the founder), so E4-1, E5-4, and E2-3 are complete and Track C's spec rewrite is in; DEC-113 (up-to-date rule off) and DEC-114 to DEC-116 recorded; earlier that day (work graph added; Cursor paused, everything on `claude-code`): E2-4 and E5-3 complete, E2-3 slice 1, safe dataset writes, fractional seconds, DEC-111 (thesis revision loop), DEC-112 (CI short path for docs); earlier that day: E2-4 sessions and corporate actions merged, E4-1 tests merged, E5-2 complete, E5-3 tests merged, the pending-tests gate in `fast`; direction follow-ups: evidence loop, correlated-flow controls, input hardening, counsel now, and the Phase 1 thin slice (DEC-99 to DEC-103), after the direction change (DEC-97, DEC-98, ADR-0002) |
 
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
@@ -295,6 +295,38 @@ crates. `docs/project/04-decision-log.md` and `crates/mandate-refcases/status.to
 files; the coordinator resolves their conflicts by keeping both sides. Next after these: E6-4 R2
 (after #289), E6-6's second slice (the `legacy_pdt` ledger fold) if G reports it still fails closed,
 the MC-B family after E6-8, E7-10 after E7-9, and the M7 steps that follow.
+
+## Work graph, 2026-09-30 morning (Cursor coordinator, merge on label)
+
+The coordinator dispatched builders (Claude Opus 5.5) and independent reviewers (Claude Opus 5
+thinking) in parallel. It approved each PR by writing `Coordinator-approved-head: <sha>` in the PR
+body and adding the `coordinator-approved` label, and the merge workflow landed it once `fast` and
+`full` passed (DEC-175). Each review's blockers were fixed before approval; its minors and nits went
+to the backlog.
+
+| Area | Merged |
+|---|---|
+| E6-4 slice R3 | [#344](https://github.com/kunwarshivam/mandate/pull/344) (implementation), [#357](https://github.com/kunwarshivam/mandate/pull/357) (tests correction), [#356](https://github.com/kunwarshivam/mandate/pull/356) (status: fifteen MC-R cases passing) |
+| E6-2 family B | [#346](https://github.com/kunwarshivam/mandate/pull/346) (harness tightening), [#351](https://github.com/kunwarshivam/mandate/pull/351) (judge MC-B22 and MC-B23 by their clocks), [#347](https://github.com/kunwarshivam/mandate/pull/347) (the three clocks moved, reference cases), [#358](https://github.com/kunwarshivam/mandate/pull/358) (status: MC-B22 and MC-B23 passing), [#359](https://github.com/kunwarshivam/mandate/pull/359) (fold-back: `CLOCKED` deleted) |
+| E6-2 families A, F and G | [#348](https://github.com/kunwarshivam/mandate/pull/348) (G and F harness: pacing compared, `Decision` destructured, the allow and denial pins), [#360](https://github.com/kunwarshivam/mandate/pull/360) (family A: exact failure messages, the placeholder instrument refused, DEC-162 item 4 narrowed) |
+| E6-3 and E6-10 | [#349](https://github.com/kunwarshivam/mandate/pull/349) (trading-domain gate driver: one proposal per case, `agent_mode`'s owner), [#352](https://github.com/kunwarshivam/mandate/pull/352) (`crypto_pair_not_usd`, DEC-255) |
+| E8-3 (M7) | [#354](https://github.com/kunwarshivam/mandate/pull/354) (tests correction: check 7 against the policy overlay, `quorum` stubbed and failing closed), [#355](https://github.com/kunwarshivam/mandate/pull/355) (the escalation fuzz asserts the recorded quorum) |
+| Journal and tooling | [#340](https://github.com/kunwarshivam/mandate/pull/340) (journal spec v0.6 reconciliation, DEC-177 items 21 to 24), [#345](https://github.com/kunwarshivam/mandate/pull/345) (the mutation gate covers every safety-critical crate, DEC-253) |
+| Backlog | [#353](https://github.com/kunwarshivam/mandate/pull/353) and [#361](https://github.com/kunwarshivam/mandate/pull/361): every minor and nit these reviews deferred under the freeze rule |
+
+Next: E8-3's implementation (`quorum`, then removing its eight `#[ignore]` lines); MC-B31 once
+E6-4's `trim_proposals` lands; the backlog rows #353 and #361 added, each a small tests or docs
+change; and the founder question DEC-250 leaves Proposed (whether `session` and `in_close_window`
+stay case-file inputs).
+
+Lessons from this wave:
+
+- Parallel builders must each work in their own `git worktree`. Two builders sharing one checkout
+  committed onto each other's branch, and one reported a push that had not happened. The
+  coordinator now checks every reported branch with `git ls-remote` and `git log origin/main..`
+  before opening its PR.
+- The merge workflow reads the approval line from the PR body only; a line in a comment is ignored,
+  and a draft PR is skipped even when labelled.
 
 ## Next, in order
 
