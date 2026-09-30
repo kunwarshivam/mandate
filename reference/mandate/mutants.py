@@ -143,6 +143,13 @@ MUTANTS = {
     "the author's earlier grant counts toward an independent quorum": (
         '    counting = {g for g in req["grants"] if not (q["independent"] and g == ctx["author"])}',
         '    counting = req["grants"]'),
+    "ApprovalResponded drops the quorum check 7 applied": (
+        '    judged = lambda result, reason=None: out(result, reason) | {"quorum": q}',
+        '    judged = lambda result, reason=None: out(result, reason)'),
+    "ApprovalResponded records the bound quorum, not the one check 7 applied": (
+        '    judged = lambda result, reason=None: out(result, reason) | {"quorum": q}',
+        '    judged = lambda result, reason=None: out(result, reason) | '
+        '{"quorum": {"required": req["approvers_required"], "independent": req["independent_required"]}}'),
     "an undelivered request is grantable": ('    if not req["delivered"]:', '    if False:'),
     "admission reads the pending set before the batch's cancellations": (
         '            out = escalation_step(after, {"kind": "response"', '            out = escalation_step(st, {"kind": "response"'),

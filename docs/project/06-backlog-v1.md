@@ -316,17 +316,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E8-3 (Must, M7)** As an owner, I want approved actions re-validated for drift so that stale
   approvals are not executed blindly ([task brief](tasks/M7-escalation-v0.md),
   [DEC-156](04-decision-log.md#decisions)). The same brief covers M7's CLI owner control.
-  *Follow-up (#240 review, round 2, minor 2):* the step-up generators in
-  `tests/grant_properties.rs` reach an age of exactly 300 s only by chance. Those generators are
-  `-350..20` and `-400..60`. A planted exclusive window is caught under `ci pending`'s pinned seed,
-  but not under about half of other seeds. Add -300 to both generators explicitly (a tests
-  correction). The hand tests already pin that edge.
-  *Follow-up (E8-3 implementation, the do-nothing sweep):* two drift tests check the drift result
-  of `revalidate` in one direction only: `drift_exactly_at_the_band_is_inside_and_one_unit_over_either_way_is_not`
-  and `no_mark_is_outside_the_band`. With `within_band` real and `revalidate` returning a constant
-  `Skip(Drift)`, both pass. `a_grant_acts_with_the_bound_order_only_while_every_check_passes` and
-  the re-validation property still catch that constant. Give each of the two tests the paired
-  positive, "the unchanged fixture acts", in a tests correction.
+  *Done (#240 review, round 2, minor 2; the M7 tests correction, DEC-173 item 14):* the step-up
+  generators in `tests/grant_properties.rs` reached an age of exactly 300 s only by chance
+  (`-350..20` and `-400..60`), so a planted exclusive window survived about half of all seeds.
+  Both now draw -300 one time in five (`at_the_window_edge_or`); the same planted window fails both
+  properties it reaches on every one of 20 seeds, where the old generators missed it on 10.
+  *Done (E8-3 implementation, the do-nothing sweep; the M7 tests correction, DEC-173 item 14):*
+  `drift_exactly_at_the_band_is_inside_and_one_unit_over_either_way_is_not` and
+  `no_mark_is_outside_the_band` checked the drift result of `revalidate` in one direction only, so
+  a constant `Skip(Drift)` passed both. Each now opens with the paired positive, "the unchanged
+  fixture acts", and that constant fails both.
   *Follow-up (#275 review, minor 2; the coordinator's ruling, rule 13):* when
   `owner_command(OwnerExit, …)` returns `CommandAuthority::Refused`, only the owner-exit
   privilege is withdrawn: selling equities outside the regular session at the confirmed bid.
@@ -366,12 +365,18 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
   (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
   journal them.
-  *Follow-up (#321 review, major; DEC-173 item 13), owned by the M7 tests correction:*
-  `mandate-approval`'s admission (`src/admit.rs`, `quorum`) reads only the bound
+  *Tests done (#321 review, major; DEC-173 items 13 to 15; the M7 tests correction); the
+  implementation follows:* `mandate-approval`'s admission read only the bound
   `approvers_required` and `independent_required`. It must judge check 7 against the stricter of
   those and the workspace policy overlay current at the effective time: independence if either
   requires it, the larger approver count, and an author's earlier `counted` grant not counting once
-  independence is required. Tests first, against `reference/mandate/ref.py`'s `approval_quorum`.
+  independence is required. `AdmissionContext.policy` now carries the overlay and
+  `mandate_approval::quorum` names the requirement; `quorum` is a stub, and `admit` fails closed
+  with its `Unimplemented` for a grant that reaches check 7 under any overlay but
+  `PolicyOverlay::NONE`. `tests/quorum.rs` holds eight tests pending E8-3 against
+  `reference/mandate/ref.py`'s `approval_quorum`. **The implementation PR** implements `quorum`,
+  calls it for every overlay, drops the author from the grants that count while independence is
+  required, and deletes the eight `#[ignore]` lines.
   *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
   control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
   would make MI-24 true as written.
@@ -389,10 +394,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Follow-up (#321 review, minor 8):* `recent_timeout` does not say whose `timeout_s` it uses.
   *Follow-up (#321 review, minor 9):* `reference/mandate/mutants.py` runs only in
   `cargo xtask ci nightly`, not in `cargo xtask check`.
-  *Follow-up (#321 round 2, minor 1), owned by the M7 tests correction:* nothing tests that
-  `ApprovalResponded` records the approver count and independence check 7 applied; dropping the
-  member survives the whole fuzz. Assert the recorded quorum against the fuzz's own `own_quorum`,
-  and add a mutant.
+  *Done (#321 round 2, minor 1; the M7 tests correction's reference half, DEC-173 item 13):*
+  nothing tested that `ApprovalResponded` records the approver count and independence check 7
+  applied, so dropping the member survived the whole fuzz. `fuzz_escalation` now asserts that every
+  grant reaching check 7, and no other response, records its own `own_quorum`, and `mutants.py`
+  gains two planted bugs, the member dropped and the bound quorum recorded in place of the applied
+  one, which `origin/main`'s fuzz let through and this one catches.
   *Follow-up (#321 round 2, minor 2):* say which stream the policy overlay is folded from.
   `PolicyChanged` is on the workspace control stream, and §2's copy list for the agent runtime does
   not include it. State either that the runtime copies it into the agent stream, or that replay
@@ -980,6 +987,79 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   code unasserted" option; and `cargo xtask ci pending` accepts any `Unimplemented` report rather
   than the story its `#[ignore]` label names, which is how `hand::crypto_never_counts` sat labelled
   E6-6 while failing at E6-10's stub. Compare the stub's story with the label if it recurs.
+- **`crypto_pair_not_usd`'s wording follow-ups** (#352 review, minors 2 to 4 and nits), in one
+  docs change after #352 merges:
+  - DEC-255's opening parenthetical says DEC-254 item 3 is "not yet on `main`"; #342 merged as
+    `e7c870b` before DEC-255 was written. Drop the clause (minor 2);
+  - `docs/project/08-work-tracker.md` still names trading-domain spec v0.12; every earlier bump
+    updated it in the same PR. Say v0.13 and cite DEC-255 (minor 3);
+  - trading-domain §3.2 item 7 names the code only for a pair "quoted in anything else", but
+    DEC-254 item 1 and `usd_pairs.rs`'s `NOT_USD = [Some(Other), None]` deny an unstated quote
+    currency the same way. Say "quoted in anything other than USD, or whose quote currency is not
+    stated" (minor 4);
+  - the v0.13 change-history entry's "No existing code changes (ES-09)" means no registered reason
+    code changes; say so (nit);
+  - the E6-3 brief's check-2 row carries an inline parenthetical in an otherwise bare list of
+    codes; the Story column already names E6-10 (nit).
+- **DEC-253's mutation-scope wording** (#345 review, minors and nits), one docs change:
+  - ADR-0001 ES-13 names `risk_gate.rs` and `order_builder.rs` as the recorded exceptions, but
+    ES-13's limit is per change, so read alone it licenses a later 900-line change to either file.
+    Say the exceptions are the two merged changes that added them, and that neither exempts a
+    later change (minor 1);
+  - the `verify-mandate` skill's rule 5 states that pending-only harness lines survive the gate but
+    not the remedy. Add: drive the line from a live doctored-case test in
+    `crates/mandate-refcases/tests/`, as `mandate_gate_harness.rs` does (DEC-253 item 2) (minor 2);
+  - DEC-253 item 3 splits a large harness arm into stacked 400-line PRs without saying each slice
+    must carry the doctored-case tests item 2 requires, or the gate fails it (minor 3);
+  - the family-B survivors row calls the `listing` site `qty_increment < 1`; the code reads
+    `stated.increment < one` (nit);
+  - "the 14 mutants that survive in merged harness code" is what two sampled diffs found, not a
+    census; say so where it is repeated (nit);
+  - the xtask fixture names a crate `core`, shadowing `std`'s; `base` or `product` reads better
+    (nit);
+  - `mutated_crates` no longer parses `layer`, so a typo there surfaces in `lint`, not `mutants`;
+    intended, recorded so it is not mistaken for an oversight (nit).
+  Also worth knowing: a change that touches only `crates/mandate-refcases/tests/` never starts the
+  gate, so a tests correction that kills survivors proves it by re-running the gate over the
+  original diff locally.
+- **The journal generator's mutant coverage** (#340 round-2 review, minors and nits), one change to
+  `reference/journal/generate.py` and its docs:
+  - the "every oracle check has a registered vector mutant" guard filters on
+    `check.startswith("owner_copies.")`, so 20 of the 44 `ORACLE_CHECKS` entries (for example
+    `kill_switch.stopped`, `goal_exit.origin`, `owner_exits.sell`, `owner_exits.user`) can be deleted
+    with `--check` still green. Require a mutant for every entry, with an explicit allow-list for
+    the chain checks that re-verify the generator with its own `canon` and `sha256_hex`
+    (`chain.seq`, `chain.canonical`, `chain.hash`, `chain.stream`, `chain.opened`) (minor 1);
+  - `received.intent` is its own family, which silences the masking rule rather than isolating a
+    mutant, and it has no mutant of its own, so deleting its oracle leaves `--check` green. Add
+    one only it catches; the review showed "intent recorded after the account stream copied it"
+    (`recorded_at` of the `intent` body moved to `2026-09-21T14:00:00.900000000Z`) does (minor 2);
+  - `VALIDATOR_MUTANTS` lists `rule.16.mode.owner_pause`, `owner_resume`, and `owner_stop` by hand
+    while the skip key derives from the reason, so a fourth `OWNER_MODE_REASONS` entry would get no
+    mutant. Generate the entries from `OWNER_MODE_REASONS` (minor 3);
+  - DEC-177 item 25(b) and #340's description say three mutants were re-seeded; two were, and the
+    third was renamed into `received.intent`'s family, its own mutant still owed (nit);
+  - `docs/specs/journal.md`'s rule-16 prose has a 107-character line; rewrap it (nit).
+- **Family B's clock fix follow-ups** (#351 and #347 reviews, minors and nits; the fold-back row
+  from #347 removes `CLOCKED` and closes the first two):
+  - `labels_agree_with_calendar` in `crates/mandate-refcases/src/mandate/order_builder.rs` reaches
+    its answer through the harness's own `mandate_risk::session_at`, `test_default_gate_config()`
+    and `market_session`, so a bug in any of them (the close window set to 0, `AfterHours` mapped to
+    `Regular`, or `session::derive` reporting `Regular` after hours) flips oracle and harness
+    together; only the literal-clock test caught them. Compute the expected session from a literal
+    New York clock, or give each `CLOCKED` row its agreeing instant (#351 review, minor);
+  - `labels_agree_with_calendar` re-walks `family_b` for a case its caller holds; take `&case`
+    (#351 review, nit);
+  - `reference/mandate/check_cases.py`'s `calendar_at` assumes a full trading day for every builder
+    case. On 2026-11-26 (closed) and 2026-11-27 (early close 13:00, after hours to 17:00) it
+    disagrees with `crates/mandate-time/data/us-equities.calendar` both ways. Refuse, naming the
+    case, when `now`'s date is not a full day in that calendar, or read the calendar (#347 review,
+    minor);
+  - `.cursor/skills/verify-mandate/feature-map.md`'s family-B bullet still says 23 pass and that
+    MC-B22 and MC-B23 fail on a contradicting label; after #347 both pass (#347 review, minor);
+  - `reference/mandate/generate.py`'s `at_now` moves only the outputs' `as_of` and `expires_at`,
+    not `gate_state.last_exit_fill_at`; assert that map is empty, so a later caller cannot move
+    `now` past a re-entry cooldown unnoticed (#347 review, nit).
 - **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
   properties. 29 of the 33 pass when every reachable stub returns `Ok(())`, so a no-op executor
   would satisfy them; each property must also assert a positive effect a no-op cannot produce
@@ -1261,6 +1341,22 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   states (a word, a null, or a non-empty list of words in some family-B case) has a `sibling` arm,
   `on_timeout` and `action` excepted, so a case that gains or loses an enum expectation needs no
   count edit.
+- Give the family-B sibling classifier its own oracle, in a tests correction of
+  `crates/mandate-refcases/src/mandate/order_builder.rs` (#346 review, minor and nits):
+  - `every_sibling_fails_its_comparison` trusts `is_enum_value` with nothing checking it: blinding
+    the classifier to `false` and dropping a `sibling` arm together leaves the suite green, which
+    the old `siblings == 87` would have caught. Pin the enum-valued member count the fixture yields
+    (12 today) beside the derived assertion, as the file already pins 899 and 698 (minor);
+  - `NO_SIBLING` exempts the bare member names `on_timeout` and `action`, so it would also exempt
+    a future `/expect/gate_dry_run/action`. Key it on the `(pointer, member)` pair, as
+    `enum_valued` is (nit);
+  - reading `gate_state.working_universe` reports a missing member as "is not a list"; say "fixture
+    has no" for a missing one, as `list_at` did (nit);
+  - DEC-250 item 15's ES-13 exception records 1,338 non-test `src` lines; the file has 1,352 since
+    #346. Refresh the figure or state that the exception is not tied to an exact count (nit);
+  - DEC-250 item 18 names `origin` and `trim_withheld` as the enum-valued members the trim cases
+    will need `sibling` arms for; MC-B17's `reason: trim_to_target` is a third, not in
+    `HOLD_REASONS`, so the guard fires when E6-4 turns MC-B17 green (nit; it fails safe).
 - **Settle what `safety_critical = true` means for a `tool`-layer crate** (#331 round-2 review, for
   the founder's after-the-fact look). `xtask/layers.toml` marks `mandate-refcases`
   `safety_critical = true`, and CODEOWNERS lists it, but two checks read it as not safety-critical:
@@ -1476,6 +1572,39 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
 - **R3's status PR: fifteen MC-R cases pass.** MC-R01 to MC-R08, MC-R13, MC-R15, MC-R18 to MC-R20,
   MC-R22, and MC-R24 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` on R3 (DEC-167 item 7 (l)); proposing them for `status.toml` is founder-owned.
+  *Done ([#356](https://github.com/kunwarshivam/mandate/pull/356), under DEC-77 item 3 as #335
+  and #337 were):* exactly these fifteen are marked; the other nine stop at R4's inputs.
+- **DEC-167's wording after R3's tests correction** (#357 review, nits). Item 6(c) keeps the
+  superseded sentence "so it stands when the step's own sale leaves the book flat, as in
+  `ref.py`", whose attribution is wrong (`ref.py` discards `stale_mark` on a flat book); strike the
+  clause now that 7(e) supersedes it. Item 7(a)'s "only the latch can come earlier" should say
+  earlier than what: a wait restarted at the rollover.
+- **The families G and F harness after its tightening** (#348 review, nits), one tests change to
+  `crates/mandate-refcases/src/mandate/risk_gate.rs`: (1) compare `pacing` after the verdict and
+  reason, so a case whose verdict is wrong fails naming the verdict rather than a pacing the wrong
+  verdict brought; (2) name `compare_computed`'s `c` parameter for what it holds (the gate's
+  figures); (3) extend the group-id test to a case with two groups, so the rank of a name among
+  several is pinned, not only the one group's id; (4) shorten the done row's verbatim "The row as it
+  was" copy to a pointer at #317's re-review.
+- **The trading-domain gate driver after its tightening** (#349 review, nits), one tests change to
+  `crates/mandate-refcases/src/trading_domain.rs` and its gate tests, plus DEC-199's wording:
+  (1) `pending()` counts the second `propose_order` before a backtest case is dispatched, so say in
+  `SUBMISSION_STORIES`'s doc that the refusal applies to every case kind; (2) a case whose earlier
+  proposals are all denied is refused too, though a denial leaves no working order, so either admit
+  it or record why the refusal stays uniform; (3) DEC-199 item 6 says the gate harness shows "four"
+  members deciding at their edge where it lists three (the median, the trailing volume, and the
+  minimum order; the ADV is shown only as at least 1,000,000); (4) rename the `num` closure in
+  `the_listing_and_market_are_dec_199_item_6s`, which shadows the crate's `num`; (5) shorten the
+  done row's verbatim "The row as it was" copy to a pointer at its review.
+- **E8-3's check 7 tests after the overlay correction** (#354 and #355 review, nits), for E8-3's
+  implementation PR: (1) `crates/mandate-approval/tests/quorum.rs` draws a `two_approver_above_usd`
+  of `"0"`, which `schemas/policy.schema.json` excludes (`positive_decimal`); draw only ceilings a
+  workspace can hold, as DEC-173 item 15 already does for grant sets; (2) `quorum`'s doc in
+  `crates/mandate-approval/src/admit.rs` promises `ApprovalError::Unrepresentable` for an order
+  value that overflows, which `content.rs` already refuses when the request is built; say so in the
+  doc or pin it with a test; (3) document `Quorum`'s two public fields as `PolicyOverlay`'s are;
+  (4) rewrap the 165-character line the M7 bullet of `.cursor/skills/verify-mandate/feature-map.md`
+  gained; (5) DEC-173 item 12 still says `mutants.py` has 50 escalation mutants, which #355 made 52.
 
 From E6-4's slice R3 (stream H2; DEC-167 item 7):
 

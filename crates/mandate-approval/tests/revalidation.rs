@@ -176,6 +176,7 @@ fn band(req: &str, now: &str, class: AssetClass) -> bool {
 /// MC-E21, MC-E22, PB-7: exactly at the band is inside; one unit over, either way, is outside.
 #[test]
 fn drift_exactly_at_the_band_is_inside_and_one_unit_over_either_way_is_not() {
+    the_unchanged_fixture_acts();
     assert!(band("100", "101", AssetClass::UsEquity));
     assert!(band("100", "99", AssetClass::UsEquity));
     assert!(!band("100", "101.000000001", AssetClass::UsEquity));
@@ -188,6 +189,7 @@ fn drift_exactly_at_the_band_is_inside_and_one_unit_over_either_way_is_not() {
 /// MC-E23: no mark at the request or now is outside the band (fail closed).
 #[test]
 fn no_mark_is_outside_the_band() {
+    the_unchanged_fixture_acts();
     let p = Some(price("100"));
     assert!(!answer(
         "within_band",
