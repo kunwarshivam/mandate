@@ -9,9 +9,12 @@
 //! and `income` expectations (DEC-96); E3-3 adds the account type (`initial.account.type`) and the
 //! `buying_power` expectation, the fold's model buying power with no reservations (DEC-105); E4-1
 //! adds the backtest cases — `bars`, `orders`, `isolation`, and the `fills` and `canceled_legs`
-//! expectations, run through `mandate-sim` (DEC-106 item 11). A case that uses anything owned by a
-//! later story fails with "not interpreted until <story>" for each such item; anything the
-//! vocabulary does not know fails as unknown. Every key of every interpreted expectation is checked.
+//! expectations, run through `mandate-sim` (DEC-106 item 11); E6-9 adds `propose_order` steps and
+//! the `decision` expectation, decided by `mandate_risk::evaluate`, and the account's §7.3 status
+//! fields from `initial.account` and `broker_account_update` steps ([`gate`], DEC-180). A case
+//! that uses anything owned by a later story fails with "not interpreted until <story>" for each
+//! such item; anything the vocabulary does not know fails as unknown. Every key of every
+//! interpreted expectation is checked.
 
 use core::fmt::Display;
 use std::collections::BTreeSet;
@@ -27,6 +30,7 @@ use mandate_num::{
     Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Fraction, Price, Qty, Rounding, ShareIncrement,
     SignedQty, SplitRatio, Usd,
 };
+use mandate_risk::Decision;
 use mandate_sim::{
     Eligibility, FirstBarVolumes, Instrument, Nanos, OcoLeg, OrderKind, OrderRef, Session, SimBar,
     SimConfig, SimError, SimFill, SimOrder, SimOutcome, Slippage, TimeInForce, simulate,
@@ -35,6 +39,8 @@ use mandate_time::{Date, TradingCalendar, UtcNanos, new_york_date_and_hour, new_
 use serde_json::{Map, json};
 
 use crate::{Case, Json, at, ensure, expect_eq, list_at, str_at, u64_at};
+
+mod gate;
 
 const SUITE: &str = "trading_domain";
 /// The broker profile of a backtest case (spec §6.4): no broker, only bars.
@@ -47,27 +53,52 @@ const AVG_COST_SCALE: u32 = 12;
 
 /// Step events owned by later stories.
 const PENDING_EVENTS: &[(&str, &str)] = &[
-    ("propose_order", "E6-3"),
     ("broker_order_update", "E7-2"),
     ("corporate_action_prepare", "E7-4"),
     ("reconciliation", "E7-3"),
     ("broker_position_update", "E7-3"),
-    ("broker_account_update", "E6-9"),
     ("deploy_agent", "E7-5"),
     ("owner_ack", "E7-5"),
     ("kill_switch", "E6-5"),
     ("conduct_breach", "E6-8"),
 ];
 
-/// Expectation keys owned by later stories.
+/// Expectation keys owned by later stories. `agent_mode` is owned by whatever moves the mode after
+/// the step's event ([`MODE_OWNERS`]).
 const PENDING_EXPECT: &[(&str, &str)] = &[
-    ("decision", "E6-3"),
     ("orders", "E7-2"),
     ("actions", "E7-4"),
-    ("agent_mode", "E6-9"),
     ("day_trade_count", "E6-6"),
     ("reconciliation", "E7-3"),
     ("protective_sell_qty", "E7-4"),
+];
+
+/// Who moves the agents' mode after each kind of step (DEC-180): the executor's restriction and
+/// reconciliation handling for broker events (its RC-15 driver is pending E7-3), the account
+/// ledger for external activity (E7-5), the kill switch (E6-5), and the conduct-breach transition
+/// (E6-11). A broker update carrying a fill for an order the case never named is external.
+const MODE_OWNERS: &[(&str, &str)] = &[
+    ("broker_order_update", "E7-3"),
+    ("broker_account_update", "E7-3"),
+    ("broker_position_update", "E7-3"),
+    ("reconciliation", "E7-3"),
+    ("fill", "E7-5"),
+    ("kill_switch", "E6-5"),
+    ("conduct_breach", "E6-11"),
+];
+
+/// `propose_order` members that later stories' arms read: another agent (the account ledger),
+/// brackets and the exit ladder's pricing and status inputs (the exit sequences), and an owner's
+/// confirmed bid (the owner-exit pacing, RC-25's arm).
+const PENDING_PROPOSAL: &[(&str, &str)] = &[
+    ("agent", "E7-5"),
+    ("entry", "E7-4"),
+    ("stop_loss", "E7-4"),
+    ("take_profit", "E7-4"),
+    ("pricing", "E7-4"),
+    ("status_feed", "E7-4"),
+    ("last_good_quote", "E7-4"),
+    ("owner_confirmed_bid", "E6-8"),
 ];
 
 const PENDING_INITIAL: &[(&str, &str)] = &[("open_orders", "E7-4"), ("agents", "E7-5")];
@@ -77,11 +108,7 @@ const PENDING_ACCOUNT: &[(&str, &str)] = &[
     ("prior_day_trades", "E6-6"),
     ("last_equity", "E6-6"),
     ("multiplier", "E6-6"),
-    ("status", "E6-9"),
-    ("crypto_status", "E6-9"),
-    ("trading_blocked", "E6-9"),
-    ("account_blocked", "E6-9"),
-    ("trade_suspended_by_user", "E6-9"),
+    ("crypto_status", "E6-10"),
 ];
 
 /// Instrument fields read only by the eligibility floor.
@@ -310,8 +337,66 @@ fn pending(case: &Json) -> BTreeSet<String> {
                 note(format!("expectation `{key}`"), story);
             }
         }
+        let external = event == "broker_order_update"
+            && data.is_some_and(|d| d.get("fill").is_some() && d.get("name").is_none());
+        let mode_owner = if external {
+            Some("E7-5")
+        } else {
+            owner(MODE_OWNERS, event)
+        };
+        if let Some(story) = mode_owner.filter(|_| expect.contains_key("agent_mode")) {
+            note(format!("expectation `agent_mode` after `{event}`"), story);
+        }
+        if event == "propose_order" {
+            pending_proposal(case, data, expect, &mut note);
+        }
     }
     out
+}
+
+/// What a `propose_order` step needs beyond [`gate`]: a later story's member, a crypto instrument
+/// (check 2's USD pairs, E6-10), a margin account at a broker other than alpaca, whose day-trade
+/// regime the case must state (E6-6; check 8 reads no regime for a cash account), and the
+/// `buying_power` after the proposal, which counts the submitted order's reservation (the account
+/// ledger, E7-5).
+fn pending_proposal(
+    case: &Json,
+    data: Option<&Json>,
+    expect: &Map<String, Json>,
+    note: &mut impl FnMut(String, &str),
+) {
+    let empty = Map::new();
+    let data = data.and_then(Json::as_object).unwrap_or(&empty);
+    for key in data.keys() {
+        if let Some(story) = owner(PENDING_PROPOSAL, key) {
+            note(format!("proposal field `{key}`"), story);
+        }
+    }
+    let class = data
+        .get("instrument")
+        .and_then(Json::as_str)
+        .and_then(|name| case.get("instruments")?.get(name)?.get("asset_class"))
+        .and_then(Json::as_str);
+    if class == Some("crypto") {
+        note("`propose_order` on a crypto instrument".to_owned(), "E6-10");
+    }
+    let profile = case.get("broker_profile").and_then(Json::as_str);
+    let account_type = case
+        .get("initial")
+        .and_then(|i| i.get("account")?.get("type"))
+        .and_then(Json::as_str);
+    if let Some(profile) = profile.filter(|p| *p != "alpaca" && account_type != Some("cash")) {
+        note(
+            format!("`propose_order` on a `{profile}` margin account's day-trade regime"),
+            "E6-6",
+        );
+    }
+    if expect.contains_key("buying_power") {
+        note(
+            "expectation `buying_power` after `propose_order`".to_owned(),
+            "E7-5",
+        );
+    }
 }
 
 fn run_case(fixture: &Json, case: &Json) -> Result<(), String> {
@@ -342,15 +427,17 @@ fn run_case(fixture: &Json, case: &Json) -> Result<(), String> {
     let config = config(fixture, case)?;
     let instruments = instruments(case)?;
     let mut account = initial(case, profile, &instruments)?;
+    let mut gate = gate::Gate::read(fixture, case)?;
     let mut baseline = Baseline::of(&account);
     for (n, step) in list_at(case, "steps")?.iter().enumerate() {
         let label = format!("step {}", n.saturating_add(1));
-        let record = run_step(&mut account, step, n, &instruments, &config)
+        let (record, decision) = run_step(&mut account, &mut gate, step, n, &instruments, &config)
             .map_err(|e| format!("{label}: {e}"))?;
         if let Some(expect) = step.get("expect") {
             check(
                 &account,
-                record.as_ref(),
+                (record.as_ref(), decision.as_ref()),
+                &gate,
                 baseline.as_ref(),
                 &instruments,
                 expect,
@@ -657,7 +744,9 @@ fn initial(
     let initial = at(case, "initial")?;
     fields(initial, "initial", &["account", "positions"])?;
     let account = at(initial, "account")?;
-    fields(account, "initial account", &["cash", "type"])?;
+    let mut account_keys = vec!["cash", "type"];
+    account_keys.extend_from_slice(gate::STATUS_FIELDS);
+    fields(account, "initial account", &account_keys)?;
     let account_type = account_type(account, profile)?;
     let cash = at(account, "cash")?;
     fields(cash, "initial cash", &["settled"])?;
@@ -681,18 +770,31 @@ fn initial(
     Ok(Account::opening(account_type, settled, positions))
 }
 
+/// What one step did: the accounting record of its last input, and the gate's decision on a
+/// `propose_order` step.
+type StepOutcome = (Option<Record>, Option<Decision>);
+
 fn run_step(
     account: &mut Account,
+    gate: &mut gate::Gate,
     step: &Json,
     n: usize,
     instruments: &Instruments,
     config: &Config,
-) -> Result<Option<Record>, String> {
+) -> Result<StepOutcome, String> {
     fields(step, "step", &["at", "event", "data", "expect"])?;
     let when = UtcNanos::parse_rfc3339(str_at(step, "at")?).map_err(|e| format!("`at`: {e}"))?;
     let empty = Json::Object(Map::new());
     let data = step.get("data").unwrap_or(&empty);
     let inputs = match str_at(step, "event")? {
+        "propose_order" => {
+            let decision = gate.decide(account, config, instruments, data, n, when)?;
+            return Ok((None, Some(decision)));
+        }
+        "broker_account_update" => {
+            gate.account_update(data)?;
+            Vec::new()
+        }
         "fill" => {
             let d = fields(
                 data,
@@ -799,7 +901,7 @@ fn run_step(
         *account = applied.account;
         record = Some(applied.record);
     }
-    Ok(record)
+    Ok((record, None))
 }
 
 /// Values at the first state of the case where every one is defined (the start, or after the
@@ -914,7 +1016,8 @@ fn delta(what: &str, now: Result<Usd, AccountingError>, then: Usd) -> Result<Usd
 
 fn check(
     account: &Account,
-    record: Option<&Record>,
+    (record, decision): (Option<&Record>, Option<&Decision>),
+    gate: &gate::Gate,
     baseline: Option<&Baseline>,
     instruments: &Instruments,
     expect: &Json,
@@ -923,6 +1026,7 @@ fn check(
         expect,
         "expect",
         &[
+            "decision",
             "positions",
             "cash",
             "fees",
@@ -941,6 +1045,7 @@ fn check(
     )?;
     for (key, expected) in expect {
         match key.as_str() {
+            "decision" => gate.check_decision(decision, expected)?,
             "positions" => {
                 let listed = expected.as_object().ok_or("`positions` is not an object")?;
                 for (name, e) in listed {
