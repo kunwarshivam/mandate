@@ -177,8 +177,8 @@ the crate is pending.
   four `trim_to_target` cases fail at `mandate_risk::trim_proposals` (E6-4), the three crypto buys
   at the gate's owed check 2 (E6-10), and `MC-B22` and `MC-B23` on a `session` or
   `in_close_window` label their `now` contradicts (DEC-250's open question). Its in-module tests
-  doctor the fixture to prove every member is read and the two session cases pass once their clock
-  agrees.
+  doctor the fixture to prove every member is read, a cash fee rate the gate would not reserve is
+  refused, and the two session cases pass once their clock agrees.
 - **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; families A and B in the shared
   harness with `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A
   mandate::autonomy mandate::MC-B mandate::order_builder` (the flag runs cases `status.toml` does
