@@ -626,6 +626,10 @@ From the independent reviews of stream J's implementation (`mandate-research`, #
 From E10-3's implementation (DEC-172 items 1 and 12):
 
 - Align `reference/mandate/ref.py`'s `classify` with the crate where the crate reads more strictly or more exactly: pinned instruments compared by whole entry (a symbol or asset-class change is an added instrument), an absent member and a `null` one reported as a changed path, and a same-set reordering of `asset_classes` neutral. No MC-C case exercises any of the three, and the reference's reading of the first is the one that could skip step-up.
+- From the review of #318 and #319, three minors for the next `mandate-spec` tests correction:
+  - replace the four near-identical `ValidationContext` fixtures in `tests/change.rs`, `tests/validate.rs`, `tests/goal.rs` and `tests/risk.rs` with one `validation_context()` in `tests/common/mod.rs`;
+  - give `tests/change.rs` a `runner_with(cases)` instead of the MI-11 property's inline copy of `runner()`'s four fields;
+  - `ChangeClass`'s derived `Ord` is now what `join` relies on (DEC-172 item 8). Only `the_class_order_is_the_severity_order` and four MC-C cases catch a reorder, so either give the variants explicit discriminants or point the enum's doc at that test.
 
 From the independent review of E10-1's slice-S implementation ([#225](https://github.com/kunwarshivam/mandate/pull/225)
 round 1), as the coordinator ruled there:
@@ -955,19 +959,66 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   where it is configured or plans the flatten without a floor.
 - Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
   row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.
-- **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163).
-  `crates/mandate-refcases/src/trading_domain.rs` has no gate driver: `propose_order` steps and the
-  `decision` expectation are pending on E6-3, and the crate does not depend on `mandate-risk`. An
-  arm that builds a `GateInput` from a case, calls `mandate_risk::evaluate`, and compares verdict
-  and reason code is the first step, and it does not run RC-25 by itself: RC-25's steps carry no
-  `quote`, `trailing_5m_volume` or `adv_20d`, so its openings would be denied `stale_mark` at check 5
-  or `conduct_limit_breached` at check 6, and they name a `purpose` where the gate assigns one from
-  an `Origin`. The arm must also state, with its own tests, the market data a case omits and the
-  origin each purpose maps to; only then does RC-25 run, and RC-15, RC-16 and RC-09's gate steps
-  with it. RC-22 needs more: `broker_order_update` (E7-2), the exit sequence's `actions` (E7-4), and
-  the `conduct_breach` step's switch to `exits_only` with an owner alert, a mode transition the
-  runtime owns (§5.9, §9.6's "breach → agent `exits_only`", E6-11); the pure gate only denies the
-  breaching opening `conduct_limit_breached`.
+- Delete `crates/mandate-risk/tests/refcases.rs` once the families G and F status rows (DEC-178)
+  have merged: `crates/mandate-refcases/src/mandate/risk_gate.rs` now runs MC-G01 to MC-G16 and
+  MC-F01 to MC-F04 against the same `evaluate` and `agent_flatten`, and the file's own doc says it
+  moves there. Its doc on `FULL_GATE_ONLY` still calls MC-G13 pending on E6-8, which #311 made
+  live; deleting the file retires that too, and moving any figure it pins that
+  `crates/mandate-risk/tests/hand.rs` does not goes in the same tests correction.
+- Reconcile MC-G02 with its header under DEC-176: the header says "every other check passes", yet
+  its working opening order in the proposal's own instrument trips trading-domain §5.3 rule 6
+  (`working_order_limit`), which is why [DEC-150](04-decision-log.md#decisions) item 1 lists it on
+  `FULL_GATE_ONLY`. Stating the same $1,300 as a position (`positions_mv` 1300, no working order in
+  that instrument) keeps `instrument_total` and `gross` at 1500, so the case would pin `gross` on an
+  allow path, the window DEC-150 records, and the entry could expire. Restated, MC-G02 becomes an
+  allowed opening (an increase), so like MC-G13 it runs through checks 5 and 6 and check 7, and the
+  full gate allows it: against the restated state the harness reports the entry expired
+  (DEC-178 item 11). The same pull request deletes the entry, and `FULL_GATE_ONLY` with it if
+  nothing else is listed. The change touches the YAML,
+  the reference implementation's checks, and the regenerated fixtures, so it cannot share a pull
+  request with code (ES-22).
+- Tighten the families G and F harness (#317 re-review, minor 2 and nits 1 to 4), in one tests
+  correction of `crates/mandate-refcases/src/mandate/risk_gate.rs` and DEC-178:
+  - compare `pacing` as `None` on every allowed `gate` case and destructure `Decision`, so a new
+    member does not compile until it is compared; today a `pacing` that always sets
+    `marketable_limit_required` leaves every F, G and L case green, and only `mandate-risk`'s own
+    tests catch it (DEC-178 item 14);
+  - reword DEC-178 item 12: the five non-fixture fields are compared with the same values typed
+    again, because `mandate-risk`'s `test_default_config` is test-only and another crate cannot
+    call it;
+  - add an edit test for item 11's pin on an allowed order's whole `checks` list, which today no
+    harness test of its own guards;
+  - note in item 11 that the pin is only meaningful for an allowed opening (MC-G13), since the gate
+    reports checks 5 to 8 as `Passed` for an exit without running them;
+  - drop the unreachable typed error for an unknown group rank in `Scene::read`, or state why it
+    stays.
+- **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163;
+  the gate driver since E6-9, DEC-199). `crates/mandate-refcases/src/trading_domain/gate.rs` now
+  decides `propose_order` steps with `mandate_risk::evaluate`, states the market data a case omits
+  (a quote at the limit price, volumes that pass check 6) and the origin each purpose maps to, each
+  with its own tests. RC-25 still waits for the instrument fields `prior_close` and
+  `median_dollar_volume_20d` (E6-7's rows in the harness) and for `owner_confirmed_bid`, which the
+  header writes as `true` and the gate takes as a price (DEC-199 Q3). RC-22 needs more:
+  `broker_order_update` (E7-2), the exit sequence's `actions` (E7-4), and the `conduct_breach`
+  step's switch to `exits_only` with an owner alert, a mode transition the runtime owns (§5.9,
+  §9.6's "breach → agent `exits_only`", E6-11); the pure gate only denies the breaching opening
+  `conduct_limit_breached`. RC-16 also needs the case file's `not_in_universe` reconciled with the
+  gate's `not_in_working_universe` (DEC-199 Q1).
+- Tighten the trading-domain gate driver (#333 review, minors 1 and 2 and nit 2), in one tests
+  correction of `crates/mandate-refcases/src/trading_domain/gate.rs` and DEC-199:
+  - pin, or better, show taking effect, the values DEC-199 item 6 fills: `median_dollar_volume_20d`
+    (the collar tier), `min_order_size`, and the two participation volumes. Today changing any of
+    them leaves every test green, although none of the three changes is looser than the spec;
+  - refuse a second `propose_order` step in the same case until E7-4 and E7-5 land. DEC-199 item 3
+    decides each proposal alone, against an account with no working, unknown or related resting
+    orders, and nothing fails if a case adds a second proposal;
+  - add `agent_mode` to `check()`'s allowed keys, so that an `agent_mode` expectation on an event
+    outside `MODE_OWNERS` fails naming its owning story rather than as `expect: unknown key`.
+- The case-file side of DEC-199 Q1 to Q3, in one reference-case change for the founder:
+  - RC-16 says `not_in_working_universe`, the registered code mandate spec §5.3 defines;
+  - the header says the eligibility floor is checked against the limit price when no
+    `prior_close` is given (or a case below $5 states its own);
+  - RC-25 carries `owner_confirmed_bid` as the displayed bid's price rather than `true`.
 - **trading-domain §9.6: state that the opposite-fill interval includes its last instant**
   (DEC-163 item 3; DEC-176 clarification). §9.6's "within 60 seconds after" an opposite-side fill
   is read inclusively, so an opening exactly 60 s after the fill is denied; the spec text should

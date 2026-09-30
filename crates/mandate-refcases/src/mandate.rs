@@ -5,9 +5,10 @@
 //! Stream F owns 202: the families `schema` (S), `semantic` (V), `policy` (P), `change` (C),
 //! `risk_state` (R), `risk_day` (T), and `goal` (L). Stream J's family N — `admission`, `lineage`,
 //! `thesis_expiry`, and `stagger` — is interpreted in [`research`], and stream H's family A,
-//! `autonomy`, in [`autonomy`], and its family B, `builder`, in [`order_builder`]. The rest belong
-//! to other streams and **fail** with "not interpreted until `<story>`" rather than passing quietly,
-//! the DEC-85 rule: `gate` and `agent_flatten` to E6-3.
+//! `autonomy`, in [`autonomy`], and its family B, `builder`, in [`order_builder`] (DEC-250). Stream
+//! G's families G (`gate`) and F (`agent_flatten`) are interpreted in [`risk_gate`] against
+//! `mandate-risk` (DEC-178). That is every kind the fixture holds; a kind no arm interprets **fails**
+//! naming it rather than passing quietly, the DEC-85 rule.
 //!
 //! The same rule holds inside an owned family. Every key of every owned case is read, and a case that
 //! carries a key this harness does not know fails naming it, so no case can pass while part of it is
@@ -40,13 +41,11 @@ use crate::{Case, Json, at, ensure, expect_eq, list_at, str_at, to_canon, u64_at
 mod autonomy;
 mod order_builder;
 mod research;
+mod risk_gate;
 
 const SUITE: &str = "mandate";
 /// The fixture version this harness reads (`version: 4`, spec v0.6).
 const FIXTURE_VERSION: u64 = 4;
-
-/// Case kinds another stream owns, with the story that will interpret them.
-const PENDING_KINDS: &[(&str, &str)] = &[("gate", "E6-3"), ("agent_flatten", "E6-3")];
 
 /// Every key an owned case may carry at its top level.
 const CASE_KEYS: &[&str] = &[
@@ -62,6 +61,7 @@ const CASE_KEYS: &[&str] = &[
     "initial",
     "steps",
     "state",
+    "proposed",
     "input",
     "at",
     "action",
@@ -121,9 +121,6 @@ fn run_listed(fixture: &Json, index: usize) -> Result<(), String> {
         .get(index)
         .ok_or("case index out of range")?;
     let kind = str_at(case, "kind")?;
-    if let Some((_, story)) = PENDING_KINDS.iter().find(|(k, _)| *k == kind) {
-        return Err(format!("`{kind}` is not interpreted until {story}"));
-    }
     unread_keys(case)?;
     match kind {
         "schema" => schema_case(fixture, case),
@@ -133,6 +130,8 @@ fn run_listed(fixture: &Json, index: usize) -> Result<(), String> {
         "risk_state" => risk_state_case(fixture, case),
         "risk_day" => risk_day_case(case),
         "goal" => goal_case(fixture, case),
+        "gate" => risk_gate::gate_case(fixture, case),
+        "agent_flatten" => risk_gate::agent_flatten_case(case),
         "admission" => research::admission_case(fixture, case),
         "lineage" => research::lineage_case(fixture, case),
         "thesis_expiry" => research::thesis_expiry_case(case),
@@ -165,6 +164,8 @@ const EXPECT_KEYS: &[(&str, &[&str])] = &[
         &["risk_day", "starts_at", "ends_at", "length_s"],
     ),
     ("goal", &["done", "reason", "then", "stop_reason"]),
+    ("gate", risk_gate::GATE_EXPECT_KEYS),
+    ("agent_flatten", risk_gate::FLATTEN_EXPECT_KEYS),
     (
         "admission",
         &[
