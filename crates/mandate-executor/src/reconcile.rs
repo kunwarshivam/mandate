@@ -488,7 +488,7 @@ pub(crate) mod tests {
     };
     use mandate_time::{Date, TradingCalendar};
 
-    use super::reconcile;
+    use super::{agents, reconcile};
     use crate::error::ExecutorError;
     use crate::ids::{ClientOrderId, IntentId};
     use crate::payload::object;
@@ -581,7 +581,7 @@ pub(crate) mod tests {
         Ok(InstrumentId::new("AAPL")?)
     }
 
-    fn account(cash: &str) -> Result<BrokerAccount, ExecutorError> {
+    pub(crate) fn account(cash: &str) -> Result<BrokerAccount, ExecutorError> {
         Ok(BrokerAccount {
             status: "ACTIVE".to_owned(),
             crypto_status: "ACTIVE".to_owned(),
@@ -1859,10 +1859,10 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    /// `agent-a`'s 10 AAPL, protected by one resting OCO (`md-oco-1`) at 170 over 140 that its lots
+    /// Reconciled since its start, `agent-a`'s 10 AAPL, protected by one resting OCO (`md-oco-1`) at 170 over 140 that its lots
     /// own.
     pub(crate) fn protected_by_an_oco(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
-        let mut executor = Executor::opened(ports)?;
+        let mut executor = reporting(ports)?;
         let clock = || crate::payload::clock(crate::types::RiskClock::from_secs(0));
         let text = |raw: &str| Value::Str(raw.to_owned());
         executor.commit_one(
@@ -1890,7 +1890,7 @@ pub(crate) mod tests {
             ])?,
         )?;
         executor.commit_one(
-            concat!("Protection", "Changed"),
+            "ProtectionChanged",
             object(vec![
                 ("instrument", text("AAPL")),
                 ("action", text("placed")),
@@ -1944,7 +1944,7 @@ pub(crate) mod tests {
             )?;
         }
         executor.commit_one(
-            concat!("Protection", "Changed"),
+            "ProtectionChanged",
             object(vec![
                 ("instrument", Value::Str("AAPL".to_owned())),
                 ("action", Value::Str("placed".to_owned())),
@@ -2038,7 +2038,7 @@ pub(crate) mod tests {
         )?;
         assert_eq!(
             drafted(&confirmed),
-            vec!["OrderStateChanged", concat!("Protection", "Changed")],
+            vec!["OrderStateChanged", "ProtectionChanged"],
             "and, a protective order, it leaves the instrument's protection (slice 3a)"
         );
         assert!(
@@ -2060,6 +2060,81 @@ pub(crate) mod tests {
             .order(&ClientOrderId::parse("md-oco-1")?)
             .ok_or_else(|| missing("the leg"))?;
         assert_eq!((leg.state, leg.agent.clone()), (OrderState::Canceled, None));
+        Ok(())
+    }
+
+    /// #258 round 2, minor 1: an ownerless leg names no agent to restrict — never an empty `""`
+    /// one — so a mismatch in its instrument falls to every agent (`*`), and an owned order there
+    /// still names its own.
+    #[test]
+    fn an_ownerless_leg_names_no_agent_to_restrict() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = two_holders_and_an_ownerless_leg(&ports)?;
+        assert_eq!(
+            agents(&executor.state, Some(&aapl()?)),
+            vec!["agent-a".to_owned(), "agent-b".to_owned()]
+        );
+        executor
+            .state
+            .orders
+            .retain(|_, order| order.agent.is_none());
+        assert_eq!(
+            agents(&executor.state, Some(&aapl()?)),
+            vec!["*".to_owned()]
+        );
+        Ok(())
+    }
+
+    /// #258 round 2, minor 1: a status outside §5.7's table on an ownerless leg restricts every
+    /// agent to `exits_only` — openings held, exits untouched — rather than pausing a named agent.
+    #[test]
+    fn an_unmapped_status_on_an_ownerless_leg_holds_every_agents_openings()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = two_holders_and_an_ownerless_leg(&ports)?;
+        let ran = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(BrokerOrder {
+                broker_order_id: "b-oco".to_owned(),
+                client_order_id: Some("md-oco-1".to_owned()),
+                instrument: aapl()?,
+                side: Side::Sell,
+                qty: Qty::parse("10")?,
+                filled_qty: Qty::ZERO,
+                limit_price: None,
+                stop_price: None,
+                status: "teleported".to_owned(),
+                reject_code: None,
+                replaced_by_broker_order_id: None,
+                legs: Vec::new(),
+                created_on: None,
+            })),
+            &ports,
+        )?;
+        let applied: Vec<(Option<&str>, Option<&str>)> = ran
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "AgentModeApplied" => Some((
+                    draft.payload.get("agent").and_then(Value::as_str),
+                    draft.payload.get("to").and_then(Value::as_str),
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(applied, vec![(Some("*"), Some("exits_only"))]);
         Ok(())
     }
 }

@@ -6,13 +6,14 @@ use crate::intent::{received, release_held, resume};
 use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
 };
+use crate::payload::optional_text;
 use crate::ports::Ports;
-use crate::protection::{bound, settle, watched};
+use crate::protection::{bound, cancel_openings, overdue_openings, settle, watched};
 use crate::reconcile::run;
-use crate::state::{ExecutorState, UnresolvedAppend};
+use crate::state::{EVERY_AGENT, ExecutorState, UnresolvedAppend};
 use crate::types::{
-    BrokerOutcome, BrokerRequest, BrokerUpdate, Command, Effect, Input, OrderState,
-    ReconcileReason, WriterEpoch,
+    AgentId, BrokerOutcome, BrokerRequest, BrokerUpdate, Command, Effect, FoldedEvent, Input,
+    OrderState, ReconcileReason, WriterEpoch,
 };
 
 /// One step of the executor (ADR-0001 ES-06).
@@ -135,11 +136,12 @@ fn started(
 fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
     match input {
         Input::Started(_) => Err(ExecutorError::AlreadyStarted),
-        Input::Journal(_) => copied_facts(),
+        Input::Journal(event) => copied(batch, &event),
         Input::Market(observation) => watched(&batch.view, &observation),
         Input::Tick(_) => {
             lookups_due(batch);
             release_held(batch)?;
+            overdue_openings(batch)?;
             bound(batch)
         }
         Input::Intent(handoff) => received(batch, handoff),
@@ -186,8 +188,21 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
 /// `ClockAdvanced` crossing midnight New York, `OwnerAcknowledged` (journal spec §2). That copy is
 /// E7-4 slice 5's (the trading day, DEC-160); until it lands the input answers its stub, never a
 /// silent `Ok(())` that drops the fact (#244 round 1, the coordinator's ruling 5861479849).
-fn copied_facts() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-4" })
+///
+/// Slice 3b takes one: an `AgentModeApplied` on this account's stream to `exits_only`, `paused` or
+/// `stopped` cancels that agent's working openings, or every agent's for `*` (mandate spec §5.9,
+/// interpretation 19). Protective orders stay. Any `to` other than `normal` is read as stricter,
+/// one of §7.4's three or a string that names no mode: cancelling openings only reduces risk
+/// (rule 3), so an unrecognised mode fails in that direction (#286 round 1, minor 4).
+fn copied(batch: &mut Batch<'_, '_>, event: &FoldedEvent) -> Result<(), ExecutorError> {
+    let strict = event.stream == batch.view.account_stream()
+        && event.event_type == "AgentModeApplied"
+        && optional_text(&event.payload, "to").is_some_and(|to| to != "normal");
+    let Some(agent) = optional_text(&event.payload, "agent").filter(|_| strict) else {
+        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    };
+    let agent = (agent != EVERY_AGENT).then(|| AgentId(agent.to_owned()));
+    cancel_openings(batch, agent.as_ref(), None)
 }
 
 /// Reconciliation's broker reads and the kill switch (trading-domain spec §5.5, §11): the later
@@ -240,6 +255,198 @@ mod watch_call_tests {
         );
         assert_eq!(executor.run(quote("AAPL", "150")?, &ports), Ok(Vec::new()));
         assert_eq!(executor.run(quote("MSFT", "100")?, &ports), Ok(Vec::new()));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod copied_tests {
+    use mandate_canon::Value;
+
+    use crate::error::ExecutorError;
+    use crate::payload::{clock, object};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Executor, Ids, executor_config, fees};
+    use crate::types::{BrokerRequest, Effect, EventId, FoldedEvent, Input, RiskClock, Seq};
+
+    fn resting_buy(executor: &mut Executor, id: &str, agent: &str) -> Result<(), ExecutorError> {
+        let text = |raw: &str| Value::Str(raw.to_owned());
+        executor.commit_one(
+            "OrderSubmitted",
+            object(vec![
+                ("client_order_id", text(id)),
+                ("agent", text(agent)),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("5")),
+                ("limit", text("150")),
+                ("purpose", text("open")),
+                ("risk_clock", clock(RiskClock::from_secs(0))?),
+            ])?,
+        )?;
+        executor.commit_one(
+            "OrderStateChanged",
+            object(vec![
+                ("client_order_id", text(id)),
+                ("state", text("accepted")),
+                ("risk_clock", clock(RiskClock::from_secs(0))?),
+            ])?,
+        )
+    }
+
+    /// Slice 3b copies one fact: an `AgentModeApplied` on this account's stream to a stricter mode
+    /// cancels that agent's working openings (mandate spec §5.9). Another stream, another fact, or
+    /// a return to `normal` still answers slice 5's stub, never a silent `Ok`.
+    fn cancelled(effects: &[Effect]) -> Vec<&str> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Broker(BrokerRequest::Cancel { client_order_id }) => {
+                    Some(client_order_id.as_str())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A stricter mode for one agent cancels that agent's openings only; one for every agent
+    /// (`*`) cancels all of them (mandate spec §5.9).
+    #[test]
+    fn a_stricter_mode_cancels_only_its_agents_openings() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        for (agent, expected) in [
+            ("agent-a", vec!["md-buy-1"]),
+            ("*", vec!["md-buy-1", "md-buy-2"]),
+        ] {
+            let mut executor = Executor::opened(&ports)?;
+            resting_buy(&mut executor, "md-buy-1", "agent-a")?;
+            resting_buy(&mut executor, "md-buy-2", "agent-b")?;
+            let event = FoldedEvent {
+                stream: executor.state.account_stream(),
+                seq: Seq(1),
+                event_id: EventId("copied-1".to_owned()),
+                event_type: "AgentModeApplied".to_owned(),
+                causation_id: None,
+                payload: object(vec![
+                    ("agent", Value::Str(agent.to_owned())),
+                    ("to", Value::Str("exits_only".to_owned())),
+                ])?,
+            };
+            let ran = executor.run(Input::Journal(event), &ports)?;
+            assert_eq!(cancelled(&ran), expected, "{agent}");
+        }
+        Ok(())
+    }
+
+    /// #286 round 1, minor 4: every mode string but `normal` — §7.4's three stricter modes, and
+    /// strings that name no mode at all — is read as stricter and cancels the agent's openings,
+    /// the risk-reducing direction; only `normal` does not.
+    #[test]
+    fn any_mode_but_normal_is_read_as_stricter() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        for to in [
+            "exits_only",
+            "paused",
+            "stopped",
+            "Normal",
+            "normal ",
+            "",
+            "halted",
+            "normal",
+        ] {
+            let mut executor = Executor::opened(&ports)?;
+            resting_buy(&mut executor, "md-buy-1", "agent-a")?;
+            let event = FoldedEvent {
+                stream: executor.state.account_stream(),
+                seq: Seq(1),
+                event_id: EventId("copied-1".to_owned()),
+                event_type: "AgentModeApplied".to_owned(),
+                causation_id: None,
+                payload: object(vec![
+                    ("agent", Value::Str("agent-a".to_owned())),
+                    ("to", Value::Str(to.to_owned())),
+                ])?,
+            };
+            let answer = executor.run(Input::Journal(event), &ports);
+            if to == "normal" {
+                assert_eq!(
+                    answer,
+                    Err(ExecutorError::Unimplemented { story: "E7-4" }),
+                    "a return to normal is slice 5's copy"
+                );
+            } else {
+                assert_eq!(cancelled(&answer?), vec!["md-buy-1"], "{to:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn only_a_stricter_mode_on_this_account_cancels_openings() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let stub = Err(ExecutorError::Unimplemented { story: "E7-4" });
+        let account = |executor: &Executor| executor.state.account_stream();
+        for (other_stream, event_type, to, cancels) in [
+            (false, "AgentModeApplied", "exits_only", true),
+            (false, "AgentModeApplied", "paused", true),
+            (false, "AgentModeApplied", "normal", false),
+            (true, "AgentModeApplied", "exits_only", false),
+            (false, "TradingDayStarted", "exits_only", false),
+        ] {
+            let mut executor = Executor::opened(&ports)?;
+            resting_buy(&mut executor, "md-buy-1", "agent-a")?;
+            let stream = if other_stream {
+                "agent:ws1:agent-a".to_owned()
+            } else {
+                account(&executor)
+            };
+            let event = FoldedEvent {
+                stream,
+                seq: Seq(1),
+                event_id: EventId("copied-1".to_owned()),
+                event_type: event_type.to_owned(),
+                causation_id: None,
+                payload: object(vec![
+                    ("agent", Value::Str("agent-a".to_owned())),
+                    ("to", Value::Str(to.to_owned())),
+                ])?,
+            };
+            let answer = executor.run(Input::Journal(event), &ports);
+            let case = format!("{other_stream} {event_type} {to}");
+            if cancels {
+                assert!(
+                    answer?.iter().any(|effect| matches!(
+                        effect,
+                        Effect::Broker(BrokerRequest::Cancel { client_order_id })
+                            if client_order_id.as_str() == "md-buy-1"
+                    )),
+                    "{case}"
+                );
+            } else {
+                assert_eq!(answer, stub.clone(), "{case}");
+            }
+        }
         Ok(())
     }
 }
