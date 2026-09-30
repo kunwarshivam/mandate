@@ -39,8 +39,12 @@ decides.
      `interrogate` skill on the diff;
    - return PASS or FAIL with file and line evidence for each finding.
 4. On FAIL, fix the findings in the same PR and repeat from step 2.
-5. On PASS, squash-merge through the GitHub API with the story ID in the title and an explicit
-   `commit_message` (the PR description). GitHub's default squash message copies every commit
-   message, including `Co-authored-by` trailers, which must not reach `main`. Never force-push
-   `main`, never enable auto-merge on a PR that has not passed step 3.
+5. On PASS, the coordinating session adds the `coordinator-approved` label (DEC-175). The `merge`
+   workflow squash-merges when `fast` and `full` are green on the head, with the PR title and
+   description as the commit message, and ignores anything else. A push after the label removes it;
+   label again after the next PASS. A session that can merge directly squash-merges through the
+   GitHub API with the story ID in the title and an explicit `commit_message` (the PR
+   description): GitHub's default squash message copies every commit message, including
+   `Co-authored-by` trailers, which must not reach `main`. Never force-push `main`, never label or
+   enable auto-merge on a PR that has not passed step 3.
 6. Report the merge, the review verdict, and anything the founder should look at after the fact.
