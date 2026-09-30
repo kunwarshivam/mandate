@@ -171,12 +171,12 @@ the crate is pending.
   the shared harness, through `crates/mandate-refcases/src/mandate/autonomy.rs` on the parsed
   mandate's own `autonomy` block (DEC-162); its `status.toml` rows move in a status-only PR, since
   the spec guard keeps that file apart from code (ES-22). Family B (all 32 `MC-B` cases) runs in the
-  shared harness through `crates/mandate-refcases/src/mandate/order_builder.rs` (DEC-181): `propose`,
+  shared harness through `crates/mandate-refcases/src/mandate/order_builder.rs` (DEC-250): `propose`,
   then `mandate_risk::evaluate` on the proposed order as §6.2 step 2's dry run, then `decide` on
   that verdict, with the session and close window from `mandate_risk::session_at`. 23 pass; the
   four `trim_to_target` cases fail at `mandate_risk::trim_proposals` (E6-4), the three crypto buys
   at the gate's owed check 2 (E6-10), and `MC-B22` and `MC-B23` on a `session` or
-  `in_close_window` label their `now` contradicts (DEC-181's open question). Its in-module tests
+  `in_close_window` label their `now` contradicts (DEC-250's open question). Its in-module tests
   doctor the fixture to prove every member is read and the two session cases pass once their clock
   agrees.
 - **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; families A and B in the shared

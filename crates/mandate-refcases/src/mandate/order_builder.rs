@@ -1,6 +1,6 @@
 //! Family B of the `mandate` suite: the thirty-two `builder` cases (spec §6.2, §8.1 to §8.3), run
 //! through `mandate_builder::propose`, `mandate_risk::evaluate` as §6.2 step 2's dry run, and
-//! `mandate_builder::decide` (E6-2, DEC-130, DEC-181).
+//! `mandate_builder::decide` (E6-2, DEC-130, DEC-250).
 //!
 //! **The dry run is the gate's, never the case's.** A case's `gate_dry_run` is what the real gate
 //! must answer about the order the builder proposed, and `decide` is handed that answer. Nothing a
@@ -9,7 +9,7 @@
 //! reaches neither: the case may state no dry run or autonomy for one, and `decide` must refuse it
 //! with `nothing_proposed`.
 //!
-//! **One scene for the builder and the gate** (DEC-181 items 3 to 5). The session and the close
+//! **One scene for the builder and the gate** (DEC-250 items 3 to 5). The session and the close
 //! window come from `mandate_risk::session_at` at the case's `now`, for both, because a caller never
 //! labels the session (DEC-129 item 9); the case's `session` and `in_close_window` are claims about
 //! that clock, compared once everything else has been. The agent's exposure is one set of figures:

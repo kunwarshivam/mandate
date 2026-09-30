@@ -79,7 +79,7 @@ fn every_owned_case_key_is_read() {
 /// harness interpreted it (E17-3, DEC-77 stage 4); its own oracle is in `src/mandate/research.rs`.
 /// Family A (`autonomy`) left it when stream H's did (E6-2, DEC-162); its oracle is in
 /// `src/mandate/autonomy.rs`. Family B (`builder`) left it when stream H's harness interpreted it
-/// too (E6-2, DEC-181); its oracle is in `src/mandate/order_builder.rs`.
+/// too (E6-2, DEC-250); its oracle is in `src/mandate/order_builder.rs`.
 #[test]
 fn a_family_another_stream_owns_fails_with_its_story() {
     let fixture = fixture();
