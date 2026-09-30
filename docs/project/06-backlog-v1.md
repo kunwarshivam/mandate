@@ -1226,6 +1226,22 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   states (a word, a null, or a non-empty list of words in some family-B case) has a `sibling` arm,
   `on_timeout` and `action` excepted, so a case that gains or loses an enum expectation needs no
   count edit.
+- Give the family-B sibling classifier its own oracle, in a tests correction of
+  `crates/mandate-refcases/src/mandate/order_builder.rs` (#346 review, minor and nits):
+  - `every_sibling_fails_its_comparison` trusts `is_enum_value` with nothing checking it: blinding
+    the classifier to `false` and dropping a `sibling` arm together leaves the suite green, which
+    the old `siblings == 87` would have caught. Pin the enum-valued member count the fixture yields
+    (12 today) beside the derived assertion, as the file already pins 899 and 698 (minor);
+  - `NO_SIBLING` exempts the bare member names `on_timeout` and `action`, so it would also exempt
+    a future `/expect/gate_dry_run/action`. Key it on the `(pointer, member)` pair, as
+    `enum_valued` is (nit);
+  - reading `gate_state.working_universe` reports a missing member as "is not a list"; say "fixture
+    has no" for a missing one, as `list_at` did (nit);
+  - DEC-250 item 15's ES-13 exception records 1,338 non-test `src` lines; the file has 1,352 since
+    #346. Refresh the figure or state that the exception is not tied to an exact count (nit);
+  - DEC-250 item 18 names `origin` and `trim_withheld` as the enum-valued members the trim cases
+    will need `sibling` arms for; MC-B17's `reason: trim_to_target` is a third, not in
+    `HOLD_REASONS`, so the guard fires when E6-4 turns MC-B17 green (nit; it fails safe).
 - **Settle what `safety_critical = true` means for a `tool`-layer crate** (#331 round-2 review, for
   the founder's after-the-fact look). `xtask/layers.toml` marks `mandate-refcases`
   `safety_critical = true`, and CODEOWNERS lists it, but two checks read it as not safety-critical:
