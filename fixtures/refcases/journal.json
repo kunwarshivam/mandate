@@ -851,6 +851,7 @@
       "qty": "10",
       "limit_price": "150",
       "purpose": "open",
+      "exit_origin": null,
       "exit_conviction": "0.85554",
       "buy_conviction": "0.75554",
       "combined_score": "0.882",
@@ -879,8 +880,8 @@
      "pii_refs": [],
      "prev_hash": "c606de7984ca762a89d4be3b710004f7014b9b50ee9e6ef53ab02a809fca51bb"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z3M1A000000000000000G4\",\"event_time\":\"2026-09-21T14:00:00.000000000Z\",\"event_type\":\"DecisionMade\",\"payload\":{\"ask_suppressed\":null,\"autonomy\":\"auto\",\"buy_conviction\":\"0.75554\",\"clips_applied\":[\"max_order_usd\"],\"combined_score\":\"0.882\",\"dry_run\":\"allow\",\"exit_conviction\":\"0.85554\",\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"150\",\"model_weights\":[{\"key\":\"quant.mean_reversion\",\"value\":\"0.9\"},{\"key\":\"quant.momentum\",\"value\":\"0.1\"}],\"outputs_used\":[\"01J8Z3M0R000000000000000G3\"],\"purpose\":\"open\",\"qty\":\"10\",\"reason_code\":null,\"side\":\"buy\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"c606de7984ca762a89d4be3b710004f7014b9b50ee9e6ef53ab02a809fca51bb\",\"recorded_at\":\"2026-09-21T14:00:00.000100000Z\",\"schema_version\":1,\"seq\":4,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "5e3ac212bb43c1771da42025071b573f2a5665092661af09ce118bb6cf2b3fe8"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z3M1A000000000000000G4\",\"event_time\":\"2026-09-21T14:00:00.000000000Z\",\"event_type\":\"DecisionMade\",\"payload\":{\"ask_suppressed\":null,\"autonomy\":\"auto\",\"buy_conviction\":\"0.75554\",\"clips_applied\":[\"max_order_usd\"],\"combined_score\":\"0.882\",\"dry_run\":\"allow\",\"exit_conviction\":\"0.85554\",\"exit_origin\":null,\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"150\",\"model_weights\":[{\"key\":\"quant.mean_reversion\",\"value\":\"0.9\"},{\"key\":\"quant.momentum\",\"value\":\"0.1\"}],\"outputs_used\":[\"01J8Z3M0R000000000000000G3\"],\"purpose\":\"open\",\"qty\":\"10\",\"reason_code\":null,\"side\":\"buy\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"c606de7984ca762a89d4be3b710004f7014b9b50ee9e6ef53ab02a809fca51bb\",\"recorded_at\":\"2026-09-21T14:00:00.000100000Z\",\"schema_version\":1,\"seq\":4,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "bf7160475889673e54f64f90bb9d84ed822b5ca24c94aeb4ad98b51e4d555cfa"
    },
    {
     "seq": 5,
@@ -918,10 +919,10 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "5e3ac212bb43c1771da42025071b573f2a5665092661af09ce118bb6cf2b3fe8"
+     "prev_hash": "bf7160475889673e54f64f90bb9d84ed822b5ca24c94aeb4ad98b51e4d555cfa"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8Z3M1A000000000000000G4\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z3M1P0000000000000000X\",\"event_time\":\"2026-09-21T14:00:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"150\",\"purpose\":\"open\",\"qty\":\"10\",\"side\":\"buy\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"5e3ac212bb43c1771da42025071b573f2a5665092661af09ce118bb6cf2b3fe8\",\"recorded_at\":\"2026-09-21T14:00:00.000200000Z\",\"schema_version\":1,\"seq\":5,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "4d3f3a8255c66d4a974856ea7b4266eef98b6bfcde65e00240967fb2e020e573"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8Z3M1A000000000000000G4\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z3M1P0000000000000000X\",\"event_time\":\"2026-09-21T14:00:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"150\",\"purpose\":\"open\",\"qty\":\"10\",\"side\":\"buy\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"bf7160475889673e54f64f90bb9d84ed822b5ca24c94aeb4ad98b51e4d555cfa\",\"recorded_at\":\"2026-09-21T14:00:00.000200000Z\",\"schema_version\":1,\"seq\":5,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "1d9f274efc079326bac8d0c15578e02281ecfc3bdc6f62d0c75cec08a0648c5f"
    },
    {
     "seq": 6,
@@ -965,10 +966,10 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "4d3f3a8255c66d4a974856ea7b4266eef98b6bfcde65e00240967fb2e020e573"
+     "prev_hash": "1d9f274efc079326bac8d0c15578e02281ecfc3bdc6f62d0c75cec08a0648c5f"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z6A0A000000000000000E1\",\"event_time\":\"2026-09-21T15:00:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":null,\"bid_size\":null,\"confirmed\":false,\"floor\":null,\"scope\":\"instrument\",\"step_up\":{\"assertion_id\":\"stepup_4b2d\",\"authenticated_at\":\"2026-09-21T14:59:52.000000000Z\",\"method\":\"webauthn\"},\"step_up_status\":\"valid\",\"subject\":\"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"4d3f3a8255c66d4a974856ea7b4266eef98b6bfcde65e00240967fb2e020e573\",\"recorded_at\":\"2026-09-21T15:00:00.000100000Z\",\"schema_version\":1,\"seq\":6,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "4e1a9083832aa6ed8ef4a87821b3cd357c72477a8a54c70d3829d2c7558b2026"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z6A0A000000000000000E1\",\"event_time\":\"2026-09-21T15:00:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":null,\"bid_size\":null,\"confirmed\":false,\"floor\":null,\"scope\":\"instrument\",\"step_up\":{\"assertion_id\":\"stepup_4b2d\",\"authenticated_at\":\"2026-09-21T14:59:52.000000000Z\",\"method\":\"webauthn\"},\"step_up_status\":\"valid\",\"subject\":\"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"1d9f274efc079326bac8d0c15578e02281ecfc3bdc6f62d0c75cec08a0648c5f\",\"recorded_at\":\"2026-09-21T15:00:00.000100000Z\",\"schema_version\":1,\"seq\":6,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "adbd3f6635b4a48b12550ef10da67af9a3a42268150a11da6ca30b1b09923cf4"
    },
    {
     "seq": 7,
@@ -1006,20 +1007,72 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "4e1a9083832aa6ed8ef4a87821b3cd357c72477a8a54c70d3829d2c7558b2026"
+     "prev_hash": "adbd3f6635b4a48b12550ef10da67af9a3a42268150a11da6ca30b1b09923cf4"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8Z6A0A000000000000000E1\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z6A0M000000000000000P1\",\"event_time\":\"2026-09-21T15:00:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f\",\"limit_price\":null,\"purpose\":\"owner_exit\",\"qty\":\"5\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"market\"},\"pii_refs\":[],\"prev_hash\":\"4e1a9083832aa6ed8ef4a87821b3cd357c72477a8a54c70d3829d2c7558b2026\",\"recorded_at\":\"2026-09-21T15:00:00.000200000Z\",\"schema_version\":1,\"seq\":7,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "3dff0afcbae13579771046705482417bc5543bd9f3b9b3ea175f0d1c762fd3ee"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8Z6A0A000000000000000E1\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z6A0M000000000000000P1\",\"event_time\":\"2026-09-21T15:00:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f\",\"limit_price\":null,\"purpose\":\"owner_exit\",\"qty\":\"5\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"market\"},\"pii_refs\":[],\"prev_hash\":\"adbd3f6635b4a48b12550ef10da67af9a3a42268150a11da6ca30b1b09923cf4\",\"recorded_at\":\"2026-09-21T15:00:00.000200000Z\",\"schema_version\":1,\"seq\":7,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "6a9df6ec22438a13c592c0cc3d03aa7c6816c5454fc904819785c30e205b6b1b"
    },
    {
     "seq": 8,
+    "event_type": "DecisionMade",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZMA0A000000000000000D2",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 8,
+     "event_type": "DecisionMade",
+     "schema_version": 1,
+     "event_time": "2026-09-21T20:05:00.000000000Z",
+     "recorded_at": "2026-09-21T20:05:00.000100000Z",
+     "clock_source": "scheduler",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "side": "sell",
+      "type": "market",
+      "tif": "day",
+      "qty": "10",
+      "limit_price": null,
+      "purpose": "discretionary_exit",
+      "exit_origin": "goal_completion",
+      "exit_conviction": null,
+      "buy_conviction": null,
+      "combined_score": null,
+      "outputs_used": [],
+      "model_weights": [],
+      "clips_applied": [],
+      "dry_run": "defer",
+      "reason_code": "session_not_allowed",
+      "autonomy": null,
+      "ask_suppressed": null
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "6a9df6ec22438a13c592c0cc3d03aa7c6816c5454fc904819785c30e205b6b1b"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMA0A000000000000000D2\",\"event_time\":\"2026-09-21T20:05:00.000000000Z\",\"event_type\":\"DecisionMade\",\"payload\":{\"ask_suppressed\":null,\"autonomy\":null,\"buy_conviction\":null,\"clips_applied\":[],\"combined_score\":null,\"dry_run\":\"defer\",\"exit_conviction\":null,\"exit_origin\":\"goal_completion\",\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":null,\"model_weights\":[],\"outputs_used\":[],\"purpose\":\"discretionary_exit\",\"qty\":\"10\",\"reason_code\":\"session_not_allowed\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"market\"},\"pii_refs\":[],\"prev_hash\":\"6a9df6ec22438a13c592c0cc3d03aa7c6816c5454fc904819785c30e205b6b1b\",\"recorded_at\":\"2026-09-21T20:05:00.000100000Z\",\"schema_version\":1,\"seq\":8,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "5e80c7599245f6e88c770d36b630a3d7aa1e525863047dfb54b6472a7d32b6d5"
+   },
+   {
+    "seq": 9,
     "event_type": "OwnerExitRequested",
     "body": {
      "envelope_version": 1,
      "environment": "paper",
      "event_id": "01J8ZMR0A000000000000000E2",
      "stream_id": "agent:ws_01J8Z2:agent_a",
-     "seq": 8,
+     "seq": 9,
      "event_type": "OwnerExitRequested",
      "schema_version": 1,
      "event_time": "2026-09-21T20:10:00.000000000Z",
@@ -1053,20 +1106,20 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "3dff0afcbae13579771046705482417bc5543bd9f3b9b3ea175f0d1c762fd3ee"
+     "prev_hash": "5e80c7599245f6e88c770d36b630a3d7aa1e525863047dfb54b6472a7d32b6d5"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMR0A000000000000000E2\",\"event_time\":\"2026-09-21T20:10:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":\"151\",\"bid_size\":\"300\",\"confirmed\":true,\"floor\":\"146.47\",\"scope\":\"instrument\",\"step_up\":{\"assertion_id\":\"stepup_9c1e\",\"authenticated_at\":\"2026-09-21T20:09:45.000000000Z\",\"method\":\"webauthn\"},\"step_up_status\":\"valid\",\"subject\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"3dff0afcbae13579771046705482417bc5543bd9f3b9b3ea175f0d1c762fd3ee\",\"recorded_at\":\"2026-09-21T20:10:00.000100000Z\",\"schema_version\":1,\"seq\":8,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "5a48a65858f348938b94bc4ec829fd760c156c9dcd0f2239148bef72864a42fd"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMR0A000000000000000E2\",\"event_time\":\"2026-09-21T20:10:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":\"151\",\"bid_size\":\"300\",\"confirmed\":true,\"floor\":\"146.47\",\"scope\":\"instrument\",\"step_up\":{\"assertion_id\":\"stepup_9c1e\",\"authenticated_at\":\"2026-09-21T20:09:45.000000000Z\",\"method\":\"webauthn\"},\"step_up_status\":\"valid\",\"subject\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"5e80c7599245f6e88c770d36b630a3d7aa1e525863047dfb54b6472a7d32b6d5\",\"recorded_at\":\"2026-09-21T20:10:00.000100000Z\",\"schema_version\":1,\"seq\":9,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "f12e7f965edf995a4eda91c9bfc0a6841ad7be65affdedc020847f3a53ae565e"
    },
    {
-    "seq": 9,
+    "seq": 10,
     "event_type": "IntentProposed",
     "body": {
      "envelope_version": 1,
      "environment": "paper",
      "event_id": "01J8ZMR0M000000000000000P2",
      "stream_id": "agent:ws_01J8Z2:agent_a",
-     "seq": 9,
+     "seq": 10,
      "event_type": "IntentProposed",
      "schema_version": 1,
      "event_time": "2026-09-21T20:10:00.000000000Z",
@@ -1094,20 +1147,20 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "5a48a65858f348938b94bc4ec829fd760c156c9dcd0f2239148bef72864a42fd"
+     "prev_hash": "f12e7f965edf995a4eda91c9bfc0a6841ad7be65affdedc020847f3a53ae565e"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZMR0A000000000000000E2\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMR0M000000000000000P2\",\"event_time\":\"2026-09-21T20:10:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"146.47\",\"purpose\":\"owner_exit\",\"qty\":\"10\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"5a48a65858f348938b94bc4ec829fd760c156c9dcd0f2239148bef72864a42fd\",\"recorded_at\":\"2026-09-21T20:10:00.000200000Z\",\"schema_version\":1,\"seq\":9,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "13fd39cd6caa905f5f180db4564b05dffc35e2968e3f231a6b9b99f83e36c078"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZMR0A000000000000000E2\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMR0M000000000000000P2\",\"event_time\":\"2026-09-21T20:10:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"146.47\",\"purpose\":\"owner_exit\",\"qty\":\"10\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"f12e7f965edf995a4eda91c9bfc0a6841ad7be65affdedc020847f3a53ae565e\",\"recorded_at\":\"2026-09-21T20:10:00.000200000Z\",\"schema_version\":1,\"seq\":10,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "92b0a22c5ef280cab121b1dc37a29ce72b87bbd39efbe03e95fb1ac8b4ce7526"
    },
    {
-    "seq": 10,
+    "seq": 11,
     "event_type": "AgentModeChanged",
     "body": {
      "envelope_version": 1,
      "environment": "paper",
      "event_id": "01J8ZNB0A000000000000000M1",
      "stream_id": "agent:ws_01J8Z2:agent_a",
-     "seq": 10,
+     "seq": 11,
      "event_type": "AgentModeChanged",
      "schema_version": 1,
      "event_time": "2026-09-21T20:30:00.000000000Z",
@@ -1130,20 +1183,20 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "13fd39cd6caa905f5f180db4564b05dffc35e2968e3f231a6b9b99f83e36c078"
+     "prev_hash": "92b0a22c5ef280cab121b1dc37a29ce72b87bbd39efbe03e95fb1ac8b4ce7526"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0A000000000000000M1\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"AgentModeChanged\",\"payload\":{\"from\":\"normal\",\"lifecycle\":\"normal\",\"reason\":\"kill_switch\",\"to\":\"stopped\"},\"pii_refs\":[],\"prev_hash\":\"13fd39cd6caa905f5f180db4564b05dffc35e2968e3f231a6b9b99f83e36c078\",\"recorded_at\":\"2026-09-21T20:30:00.000100000Z\",\"schema_version\":1,\"seq\":10,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "86009eb24f9d6bd655fc6edb443b81281295412cd2b5c6541bec0f09c3711cf6"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0A000000000000000M1\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"AgentModeChanged\",\"payload\":{\"from\":\"normal\",\"lifecycle\":\"normal\",\"reason\":\"kill_switch\",\"to\":\"stopped\"},\"pii_refs\":[],\"prev_hash\":\"92b0a22c5ef280cab121b1dc37a29ce72b87bbd39efbe03e95fb1ac8b4ce7526\",\"recorded_at\":\"2026-09-21T20:30:00.000100000Z\",\"schema_version\":1,\"seq\":11,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "49356bf6096724b5fa19924bb46d5f68b48f34643e3db5a9e0619e5a62e8ecda"
    },
    {
-    "seq": 11,
+    "seq": 12,
     "event_type": "OwnerExitRequested",
     "body": {
      "envelope_version": 1,
      "environment": "paper",
      "event_id": "01J8ZNB0M000000000000000K1",
      "stream_id": "agent:ws_01J8Z2:agent_a",
-     "seq": 11,
+     "seq": 12,
      "event_type": "OwnerExitRequested",
      "schema_version": 1,
      "event_time": "2026-09-21T20:30:00.000000000Z",
@@ -1173,20 +1226,20 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "86009eb24f9d6bd655fc6edb443b81281295412cd2b5c6541bec0f09c3711cf6"
+     "prev_hash": "49356bf6096724b5fa19924bb46d5f68b48f34643e3db5a9e0619e5a62e8ecda"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0M000000000000000K1\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":null,\"bid_size\":null,\"confirmed\":false,\"floor\":null,\"scope\":\"agent\",\"step_up\":null,\"step_up_status\":\"absent\",\"subject\":\"agent_a\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"86009eb24f9d6bd655fc6edb443b81281295412cd2b5c6541bec0f09c3711cf6\",\"recorded_at\":\"2026-09-21T20:30:00.000200000Z\",\"schema_version\":1,\"seq\":11,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "0c1ed280d0d22f755413008dc00a57612c6124e0fce92228204a7d87ff9c49a2"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0M000000000000000K1\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":null,\"bid_size\":null,\"confirmed\":false,\"floor\":null,\"scope\":\"agent\",\"step_up\":null,\"step_up_status\":\"absent\",\"subject\":\"agent_a\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"49356bf6096724b5fa19924bb46d5f68b48f34643e3db5a9e0619e5a62e8ecda\",\"recorded_at\":\"2026-09-21T20:30:00.000200000Z\",\"schema_version\":1,\"seq\":12,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "a825c38375c5c6ae5b5f914fb07b749adc119a0b89f33ced18b87e8fcf14e0b4"
    },
    {
-    "seq": 12,
+    "seq": 13,
     "event_type": "KillSwitchActivated",
     "body": {
      "envelope_version": 1,
      "environment": "paper",
      "event_id": "01J8ZNB0R000000000000000K2",
      "stream_id": "agent:ws_01J8Z2:agent_a",
-     "seq": 12,
+     "seq": 13,
      "event_type": "KillSwitchActivated",
      "schema_version": 1,
      "event_time": "2026-09-21T20:30:00.000000000Z",
@@ -1209,17 +1262,18 @@
      },
      "artifact_refs": [],
      "pii_refs": [],
-     "prev_hash": "0c1ed280d0d22f755413008dc00a57612c6124e0fce92228204a7d87ff9c49a2"
+     "prev_hash": "a825c38375c5c6ae5b5f914fb07b749adc119a0b89f33ced18b87e8fcf14e0b4"
     },
-    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0R000000000000000K2\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"KillSwitchActivated\",\"payload\":{\"initiator\":\"owner\",\"mode_event\":\"01J8ZNB0A000000000000000M1\",\"scope\":\"agent\",\"subject\":\"agent_a\"},\"pii_refs\":[],\"prev_hash\":\"0c1ed280d0d22f755413008dc00a57612c6124e0fce92228204a7d87ff9c49a2\",\"recorded_at\":\"2026-09-21T20:30:00.000300000Z\",\"schema_version\":1,\"seq\":12,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
-    "hash": "01939c3e4ff8b893636cff651c0801de72b3ed936afcaf71ac76c68fa433f97c"
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0R000000000000000K2\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"KillSwitchActivated\",\"payload\":{\"initiator\":\"owner\",\"mode_event\":\"01J8ZNB0A000000000000000M1\",\"scope\":\"agent\",\"subject\":\"agent_a\"},\"pii_refs\":[],\"prev_hash\":\"a825c38375c5c6ae5b5f914fb07b749adc119a0b89f33ced18b87e8fcf14e0b4\",\"recorded_at\":\"2026-09-21T20:30:00.000300000Z\",\"schema_version\":1,\"seq\":13,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "5bb2fea9a28f9b5fce2fd6c6e0c5bf411d931731ec0c10eacba7b72bf55acf82"
    }
   ],
   "derivation": {
-   "note": "Illustrative mandate and account values the DecisionMade vector is recomputed from (mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no fresh output, so it counts as missing. The ask is the observed quote's (artifact quote_snapshot). The gate dry run and the autonomy result are inputs. Gross exposure is the held position's quantity x mark. The owner then closes the held position in the regular session without a confirmed bid, and after the session closes the opened position (taken as filled) with a confirmed bid, whose floor is the default, bid x (1 - max_exit_offset), for the instrument's >= 50 M USD tier (trading spec §5.5, §5.6); that close's own limit is the floor. Step-up is valid for 300 s after authentication (DEC-156 item 8). The regular session is 09:30 to 16:00 America/New_York (EDT, UTC-4, on this date).",
+   "note": "Illustrative mandate and account values the DecisionMade vector is recomputed from (mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no fresh output, so it counts as missing. The ask is the observed quote's (artifact quote_snapshot). The gate dry run and the autonomy result are inputs. Gross exposure is the held position's quantity x mark. After the session closes the profit_stop goal is reached, whose completion is a discretionary exit of every position (mandate spec §3.1), deferred until the session (trading spec §9.6) with nothing proposed (mandate spec §6.2). The owner closes the held position in the regular session without a confirmed bid, and after the session closes the opened position (taken as filled) with a confirmed bid, whose floor is the default, bid x (1 - max_exit_offset), for the instrument's >= 50 M USD tier (trading spec §5.5, §5.6); that close's own limit is the floor. Step-up is valid for 300 s after authentication (DEC-156 item 8). The regular session is 09:30 to 16:00 America/New_York (EDT, UTC-4, on this date).",
    "owner_bid": "151",
    "max_exit_offset": "0.03",
    "step_up_max_age_s": 300,
+   "goal": "profit_stop",
    "regular_session_utc": {
     "open": "2026-09-21T13:30:00.000000000Z",
     "close": "2026-09-21T20:00:00.000000000Z"
@@ -1263,7 +1317,7 @@
    {
     "name": "owner_exit_floor_absent",
     "clause": "§9.1 absent member",
-    "base_seq": 8,
+    "base_seq": 9,
     "changes": [
      {
       "path": "payload.floor",
@@ -1311,7 +1365,7 @@
    {
     "name": "owner_exit_unconfirmed_empty_user",
     "clause": "§4.2",
-    "base_seq": 11,
+    "base_seq": 12,
     "changes": [
      {
       "path": "payload.user",
@@ -1343,7 +1397,7 @@
    {
     "name": "owner_exit_step_up_status_unknown",
     "clause": "§9.1 OwnerExitRequested",
-    "base_seq": 11,
+    "base_seq": 12,
     "changes": [
      {
       "path": "payload.step_up_status",
@@ -1359,7 +1413,7 @@
    {
     "name": "owner_kill_switch_valid_without_evidence",
     "clause": "§9.1 rule 12",
-    "base_seq": 11,
+    "base_seq": 12,
     "changes": [
      {
       "path": "payload.step_up_status",
@@ -1439,7 +1493,7 @@
    {
     "name": "step_up_time_in_seconds",
     "clause": "§4.7",
-    "base_seq": 8,
+    "base_seq": 9,
     "changes": [
      {
       "path": "payload.step_up.authenticated_at",
@@ -1593,6 +1647,10 @@
      {
       "path": "payload.purpose",
       "value": "discretionary_exit"
+     },
+     {
+      "path": "payload.exit_origin",
+      "value": "signal"
      }
     ],
     "expect": {
@@ -1695,6 +1753,10 @@
       "value": "discretionary_exit"
      },
      {
+      "path": "payload.exit_origin",
+      "value": "signal"
+     },
+     {
       "path": "payload.autonomy",
       "value": "ask"
      }
@@ -1739,6 +1801,104 @@
      "outcome": "Invalid",
      "reason": "non_canonical",
      "path": "payload.ask_suppressed"
+    }
+   },
+   {
+    "name": "decision_discretionary_exit_without_origin",
+    "clause": "§9.1 rule 8",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.exit_origin",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_origin"
+    }
+   },
+   {
+    "name": "decision_open_with_exit_origin",
+    "clause": "§9.1 rule 8",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.exit_origin",
+      "value": "signal"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_origin"
+    }
+   },
+   {
+    "name": "decision_exit_origin_unknown",
+    "clause": "§9.1 DecisionMade",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.exit_origin",
+      "value": "profit_stop"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.exit_origin"
+    }
+   },
+   {
+    "name": "decision_goal_exit_with_conviction",
+    "clause": "§9.1 rule 8",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.exit_conviction",
+      "value": "0.1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_conviction"
+    }
+   },
+   {
+    "name": "decision_goal_exit_with_outputs",
+    "clause": "§9.1 rule 8",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.outputs_used",
+      "value": [
+       "01J8Z3M0R000000000000000G3"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.outputs_used"
+    }
+   },
+   {
+    "name": "decision_signal_exit_without_convictions",
+    "clause": "§9.1 rule 8",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.exit_origin",
+      "value": "signal"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_conviction"
     }
    },
    {
@@ -1843,7 +2003,7 @@
    {
     "name": "mode_looser_than_lifecycle",
     "clause": "§9.1 rule 11",
-    "base_seq": 10,
+    "base_seq": 11,
     "changes": [
      {
       "path": "payload.to",
@@ -1863,7 +2023,7 @@
    {
     "name": "mode_lifecycle_exits_only",
     "clause": "§9.1 AgentModeChanged",
-    "base_seq": 10,
+    "base_seq": 11,
     "changes": [
      {
       "path": "payload.lifecycle",
@@ -1879,7 +2039,7 @@
    {
     "name": "owner_exit_confirmed_without_floor",
     "clause": "§9.1 rule 12",
-    "base_seq": 8,
+    "base_seq": 9,
     "changes": [
      {
       "path": "payload.floor",
@@ -1895,7 +2055,7 @@
    {
     "name": "owner_exit_unconfirmed_with_bid",
     "clause": "§9.1 rule 12",
-    "base_seq": 8,
+    "base_seq": 9,
     "changes": [
      {
       "path": "payload.confirmed",
@@ -1943,7 +2103,7 @@
    {
     "name": "kill_switch_other_agent",
     "clause": "§9.1 rule 15",
-    "base_seq": 12,
+    "base_seq": 13,
     "changes": [
      {
       "path": "payload.subject",
@@ -1959,7 +2119,7 @@
    {
     "name": "kill_switch_other_workspace",
     "clause": "§9.1 rule 15",
-    "base_seq": 12,
+    "base_seq": 13,
     "changes": [
      {
       "path": "payload.scope",
@@ -1979,7 +2139,7 @@
    {
     "name": "owner_exit_other_agent",
     "clause": "§9.1 rule 15",
-    "base_seq": 11,
+    "base_seq": 12,
     "changes": [
      {
       "path": "payload.subject",
@@ -2013,9 +2173,23 @@
     }
    },
    {
+    "name": "decision_removed_instrument_exit_without_numbers",
+    "clause": "§9.1 rule 8",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.exit_origin",
+      "value": "removed_instrument"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "owner_close_confirmed_bid_stale_step_up",
     "clause": "§9.1 OwnerExitRequested",
-    "base_seq": 8,
+    "base_seq": 9,
     "changes": [
      {
       "path": "payload.step_up_status",
@@ -2033,7 +2207,7 @@
    {
     "name": "owner_kill_switch_confirmed_bid_without_step_up",
     "clause": "§9.1 OwnerExitRequested",
-    "base_seq": 11,
+    "base_seq": 12,
     "changes": [
      {
       "path": "payload.confirmed",
@@ -2059,7 +2233,7 @@
    {
     "name": "owner_kill_switch_stale_step_up",
     "clause": "§9.1 OwnerExitRequested",
-    "base_seq": 11,
+    "base_seq": 12,
     "changes": [
      {
       "path": "payload.step_up_status",

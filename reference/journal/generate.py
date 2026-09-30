@@ -236,6 +236,7 @@ IGNORED = one_of(
     "horizon_mismatch",
     "revision_without_predecessor",
 )
+EXIT_ORIGIN = one_of("signal", "goal_completion", "removed_instrument")
 ASK_SUPPRESSED = one_of("budget", "skipped_today", "recent_timeout")
 STEP_UP = rec(("assertion_id", STR), ("authenticated_at", TS), ("method", STR))
 
@@ -270,6 +271,7 @@ SCHEMAS: dict[tuple[str, str], T] = {
         ("qty", DEC),
         ("limit_price", opt(DEC)),
         ("purpose", DECISION_PURPOSE),
+        ("exit_origin", opt(EXIT_ORIGIN)),
         ("exit_conviction", opt(DEC)),
         ("buy_conviction", opt(DEC)),
         ("combined_score", opt(DEC)),
@@ -479,10 +481,16 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         rule(7, p["autonomy"] in (None, "auto") or p["purpose"] in RISK_ADDING, "schema", "payload.autonomy")
         asked = p["autonomy"] == "ask"
         rule("7.ask_suppressed", p["ask_suppressed"] is None or asked, "schema", "payload.ask_suppressed")
-        risk_exit = p["purpose"] == "risk_exit"
+        discretionary = p["purpose"] == "discretionary_exit"
+        rule("8.exit_origin", (p["exit_origin"] is not None) == discretionary, "schema", "payload.exit_origin")
+        evaluated = adds_risk or p["exit_origin"] == "signal"
+        if "regress.rule_8_numbers_on_every_exit_but_risk" in skip:
+            evaluated = p["purpose"] != "risk_exit"
         wrong = [
-            m for m in ("exit_conviction", "buy_conviction", "combined_score") if (p[m] is None) != risk_exit
+            m for m in ("exit_conviction", "buy_conviction", "combined_score") if (p[m] is not None) != evaluated
         ]
+        if not evaluated and "regress.rule_8_numbers_on_every_exit_but_risk" not in skip:
+            wrong += [m for m in ("outputs_used", "model_weights", "clips_applied") if p[m]]
         rule(8, not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
         rule(9, ascending(p["outputs_used"]), "non_canonical", "payload.outputs_used")
         keys = [w["key"].encode() for w in p["model_weights"]]
@@ -584,6 +592,7 @@ CHAIN = (
     ("intent", INTENT_ID),
     ("owner_close_in_session", "01J8Z6A0A000000000000000E1"),
     ("owner_close_in_session_intent", "01J8Z6A0M000000000000000P1"),
+    ("goal_exit", "01J8ZMA0A000000000000000D2"),
     ("owner_close_confirmed", "01J8ZMR0A000000000000000E2"),
     ("owner_close_confirmed_intent", "01J8ZMR0M000000000000000P2"),
     ("kill_switch_mode", "01J8ZNB0A000000000000000M1"),
@@ -619,7 +628,9 @@ DERIVATION = {
         "(mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no "
         "fresh output, so it counts as missing. The ask is the observed quote's (artifact quote_snapshot). "
         "The gate dry run and the autonomy result are inputs. Gross exposure is the held position's "
-        "quantity x mark. The owner then closes the held position in the regular session without a "
+        "quantity x mark. After the session closes the profit_stop goal is reached, whose completion "
+        "is a discretionary exit of every position (mandate spec §3.1), deferred until the session "
+        "(trading spec §9.6) with nothing proposed (mandate spec §6.2). The owner closes the held position in the regular session without a "
         "confirmed bid, and after the session closes the opened position (taken as filled) with a "
         "confirmed bid, whose floor is the default, bid x (1 - max_exit_offset), for the instrument's "
         ">= 50 M USD tier (trading spec §5.5, §5.6); that close's own limit is the floor. Step-up is "
@@ -629,6 +640,7 @@ DERIVATION = {
     "owner_bid": "151",
     "max_exit_offset": "0.03",
     "step_up_max_age_s": 300,
+    "goal": "profit_stop",
     "regular_session_utc": {"open": "2026-09-21T13:30:00.000000000Z", "close": "2026-09-21T20:00:00.000000000Z"},
     "held": {"instrument_id": HELD_INSTRUMENT, "qty": "5", "mark": "100"},
     "now": "2026-09-21T14:00:00.000000000Z",
@@ -700,6 +712,14 @@ def chain_bodies() -> list[dict]:
         "limit_price": "150",
         "purpose": "open",
     }
+    not_evaluated = {
+        "exit_conviction": None,
+        "buy_conviction": None,
+        "combined_score": None,
+        "outputs_used": [],
+        "model_weights": [],
+        "clips_applied": [],
+    }
     floor = default_floor(DERIVATION)
     bodies = [
         event(
@@ -753,6 +773,7 @@ def chain_bodies() -> list[dict]:
             f"{day}14:00:00.000100000Z",
             {
                 **decision_action,
+                "exit_origin": None,
                 "exit_conviction": "0.85554",
                 "buy_conviction": "0.75554",
                 "combined_score": "0.882",
@@ -812,6 +833,27 @@ def chain_bodies() -> list[dict]:
                 "purpose": "owner_exit",
             },
             causation_id=ID["owner_close_in_session"],
+        ),
+        event(
+            "goal_exit",
+            "DecisionMade",
+            f"{day}20:05:00.000000000Z",
+            f"{day}20:05:00.000100000Z",
+            {
+                "instrument_id": INSTRUMENT,
+                "side": "sell",
+                "type": "market",
+                "tif": "day",
+                "qty": decision_action["qty"],
+                "limit_price": None,
+                "purpose": "discretionary_exit",
+                "exit_origin": "goal_completion",
+                **not_evaluated,
+                "dry_run": "defer",
+                "reason_code": "session_not_allowed",
+                "autonomy": None,
+                "ask_suppressed": None,
+            },
         ),
         event(
             "owner_close_confirmed",
@@ -1114,6 +1156,7 @@ def invalid_drafts() -> list[dict]:
                 change("payload.side", "sell"),
                 change("payload.type", "market"),
                 change("payload.purpose", "discretionary_exit"),
+                change("payload.exit_origin", "signal"),
             ],
             "schema",
             "payload.limit_price",
@@ -1161,6 +1204,7 @@ def invalid_drafts() -> list[dict]:
             [
                 change("payload.side", "sell"),
                 change("payload.purpose", "discretionary_exit"),
+                change("payload.exit_origin", "signal"),
                 change("payload.autonomy", "ask"),
             ],
             "schema",
@@ -1181,6 +1225,54 @@ def invalid_drafts() -> list[dict]:
             [change("payload.autonomy", "ask"), change("payload.ask_suppressed", "quiet_hours")],
             "non_canonical",
             "payload.ask_suppressed",
+        ),
+        invalid(
+            "decision_discretionary_exit_without_origin",
+            "§9.1 rule 8",
+            "goal_exit",
+            [change("payload.exit_origin", None)],
+            "schema",
+            "payload.exit_origin",
+        ),
+        invalid(
+            "decision_open_with_exit_origin",
+            "§9.1 rule 8",
+            "decision",
+            [change("payload.exit_origin", "signal")],
+            "schema",
+            "payload.exit_origin",
+        ),
+        invalid(
+            "decision_exit_origin_unknown",
+            "§9.1 DecisionMade",
+            "goal_exit",
+            [change("payload.exit_origin", "profit_stop")],
+            "non_canonical",
+            "payload.exit_origin",
+        ),
+        invalid(
+            "decision_goal_exit_with_conviction",
+            "§9.1 rule 8",
+            "goal_exit",
+            [change("payload.exit_conviction", "0.1")],
+            "schema",
+            "payload.exit_conviction",
+        ),
+        invalid(
+            "decision_goal_exit_with_outputs",
+            "§9.1 rule 8",
+            "goal_exit",
+            [change("payload.outputs_used", [ID["model_output"]])],
+            "schema",
+            "payload.outputs_used",
+        ),
+        invalid(
+            "decision_signal_exit_without_convictions",
+            "§9.1 rule 8",
+            "goal_exit",
+            [change("payload.exit_origin", "signal")],
+            "schema",
+            "payload.exit_conviction",
         ),
         invalid(
             "decision_risk_exit_with_convictions",
@@ -1327,6 +1419,12 @@ def valid_drafts() -> list[dict]:
             [change("payload.autonomy", "ask"), change("payload.ask_suppressed", "budget")],
         ),
         valid(
+            "decision_removed_instrument_exit_without_numbers",
+            "§9.1 rule 8",
+            "goal_exit",
+            [change("payload.exit_origin", "removed_instrument")],
+        ),
+        valid(
             "owner_close_confirmed_bid_stale_step_up",
             "§9.1 OwnerExitRequested",
             "owner_close_confirmed",
@@ -1436,6 +1534,7 @@ def recompute_decision(chain: list[dict], artifacts: list[dict], d: dict) -> dic
         "outputs_used": sorted(event_id for event_id, _ in fresh.values()),
         "model_weights": [{"key": k, "value": normalize_decimal(str(weights[k]))} for k in sorted(weights)],
         "clips_applied": clips,
+        "exit_origin": None,
         "dry_run": d["dry_run"],
         "reason_code": None,
         "autonomy": d["autonomy"],
@@ -1446,6 +1545,27 @@ def recompute_decision(chain: list[dict], artifacts: list[dict], d: dict) -> dic
 def nanos(text: str) -> int:
     instant, fraction = parse_instant(text)
     return calendar.timegm(instant.timetuple()) * 10**9 + fraction
+
+
+def check_goal_exit(chain: list[dict], d: dict, decision: dict, goal: dict) -> list[str]:
+    """Mandate spec §3.1, §6.2 and trading spec §9.6 for the goal-completion exit, from the
+    derivation: what it sells, that it is deferred after the session, and that nothing is proposed."""
+    problems = []
+    p = goal["payload"]
+    whole = (decision["payload"]["instrument_id"], "sell", decision["payload"]["qty"])
+    if d["goal"] != "profit_stop" or (p["instrument_id"], p["side"], p["qty"]) != whole:
+        problems.append("the profit_stop completion does not exit the whole position")
+    if (p["purpose"], p["exit_origin"]) != ("discretionary_exit", "goal_completion"):
+        problems.append("a goal completion's exit is a discretionary exit of origin goal_completion")
+    close = nanos(d["regular_session_utc"]["close"])
+    if nanos(goal["event_time"]) >= close and (p["dry_run"], p["reason_code"]) != ("defer", "session_not_allowed"):
+        problems.append("after the session a discretionary equity exit is deferred (session_not_allowed)")
+    if any(e["body"]["causation_id"] == goal["event_id"] for e in chain):
+        problems.append("a deferred decision proposes nothing (mandate spec §6.2)")
+    evaluated = ("exit_conviction", "buy_conviction", "combined_score", "outputs_used", "model_weights", "clips_applied")
+    if any(p[m] not in (None, []) for m in evaluated):
+        problems.append("no order-builder evaluation produced the goal exit, so it carries none of its results")
+    return problems
 
 
 def check_owner_exits(chain: list[dict], d: dict, decision: dict) -> list[str]:
@@ -1554,6 +1674,7 @@ def check_chain(section: dict, v3: dict) -> list[str]:
         problems.append("KillSwitchActivated.mode_event does not name its AgentModeChanged")
     if mode["payload"]["to"] != "stopped":
         problems.append("an owner kill switch's final mode is stopped (trading spec §5.5)")
+    problems += check_goal_exit(chain, section["derivation"], decision, named["goal_exit"])
     problems += check_owner_exits(chain, section["derivation"], decision)
     for case in section["invalid_drafts"]:
         got = violations(apply_changes(chain, case))
@@ -1580,11 +1701,13 @@ VALIDATOR_MUTANTS = (
     "config_refs.required",
     *(f"rule.{n}" for n in range(1, 15)),
     "rule.7.ask_suppressed",
+    "rule.8.exit_origin",
     "rule.12.step_up",
     "rule.15.agent",
     "rule.15.workspace",
     *REGRESSIONS,
     "regress.rule_12_ties_evidence_to_the_bid",
+    "regress.rule_8_numbers_on_every_exit_but_risk",
 )
 
 
@@ -1644,6 +1767,19 @@ def vector_mutants(section: dict) -> list[tuple[str, dict]]:
         (
             "mode_event names another event",
             lambda s: payload_named(s, "kill_switch").update(mode_event=ID["owner_kill_switch"]),
+        ),
+        ("goal exit of part of the position", lambda s: payload_named(s, "goal_exit").update(qty="4")),
+        (
+            "goal exit allowed after the session",
+            lambda s: payload_named(s, "goal_exit").update(dry_run="allow", reason_code=None, autonomy="auto"),
+        ),
+        (
+            "goal exit carries the order builder's weights",
+            lambda s: payload_named(s, "goal_exit").update(model_weights=decision(s)["model_weights"]),
+        ),
+        (
+            "deferred goal exit proposes an intent",
+            lambda s: body_named(s, "owner_close_confirmed_intent").update(causation_id=ID["goal_exit"]),
         ),
         (
             "confirmed close priced below its floor",

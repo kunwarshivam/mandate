@@ -423,11 +423,12 @@ model gave it; one the agent does not use carries the reason in `ignored`.
 | `tif` | `day` \| `gtc` \| `ioc` | [Trading spec §5.1, §5.2](trading-domain.md#51-v1-order-policy-dec-29-dec-37) |
 | `qty` | `decimal` | |
 | `limit_price` | `decimal?` | Rule 2 |
-| `purpose` | `open` \| `increase` \| `discretionary_exit` \| `risk_exit` | The proposer's label: the order builder's, or the risk engine's `trim_to_target`. The gate assigns the purpose it enforces ([trading spec §9.1](trading-domain.md#91-evaluation-order-and-reason-codes)) |
-| `exit_conviction`, `buy_conviction`, `combined_score` | `decimal?` | c, b, and s of §8.3 step 1: rule 8 |
-| `outputs_used` | `[ulid]` | The `ModelOutputRecorded` event IDs of the fresh outputs combined: rule 9 |
-| `model_weights` | `[{key: text, value: decimal}]` | The weight of **every** configured model, fresh or not (§4.1): rule 9 |
-| `clips_applied` | `[max_order_usd` \| `position_cap` \| `gross_exposure_cap` \| `target_qty` \| `max_spend_usd` \| `max_avg_price]` | Each §8.3 bound that reduced the proposal (the position cap is cap − MV − working): rule 9 |
+| `purpose` | `open` \| `increase` \| `discretionary_exit` \| `risk_exit` | The proposer's label: the order builder's, a goal completion's or a removed instrument's (`exit_origin`), or the risk engine's `trim_to_target`. The gate assigns the purpose it enforces ([trading spec §9.1](trading-domain.md#91-evaluation-order-and-reason-codes)) |
+| `exit_origin` | `signal` \| `goal_completion` \| `removed_instrument`, or `null` | Which of the three origins mandate spec §6.1 gives a `discretionary_exit`: the order builder's signal exit (§8.3 step 2), a goal's completion (§3.1), or a removed instrument (§2.2, §2.3). `null` for every other purpose: rule 8 |
+| `exit_conviction`, `buy_conviction`, `combined_score` | `decimal?` | c, b, and s of §8.3 step 1, for a decision a §8.3 evaluation produced (an opening, an increase, or a signal exit); `null` for every other: rule 8 |
+| `outputs_used` | `[ulid]` | The `ModelOutputRecorded` event IDs of the fresh outputs combined; empty for a decision no §8.3 evaluation produced: rules 8 and 9 |
+| `model_weights` | `[{key: text, value: decimal}]` | The weight of **every** configured model, fresh or not (§4.1); empty for a decision no §8.3 evaluation produced: rules 8 and 9 |
+| `clips_applied` | `[max_order_usd` \| `position_cap` \| `gross_exposure_cap` \| `target_qty` \| `max_spend_usd` \| `max_avg_price]` | Each §8.3 bound that reduced the proposal (the position cap is cap − MV − working); empty for a decision no §8.3 evaluation produced: rules 8 and 9 |
 | `dry_run` | `allow` \| `deny` \| `defer` | The gate dry run: rules 4 to 6 |
 | `reason_code` | `id?` | The gate's reason code (trading spec §9.1): rule 4 |
 | `autonomy` | `auto` \| `ask` \| `deny`, or `null` | The §6.2 classification, reached only after an `allow`: rules 5 and 7 |
@@ -502,8 +503,14 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
    `ask` — `payload.ask_suppressed`. So a suppression only ever skips an opening or an increase,
    never an exit. That no `ApprovalRequested` names a suppressed decision is checked with the
    approval events (M7).
-8. `DecisionMade`: `exit_conviction`, `buy_conviction`, and `combined_score` are each `null` exactly
-   when `purpose` is `risk_exit` — the first offending, in that order.
+8. `DecisionMade`: `exit_origin` is non-null exactly when `purpose` is `discretionary_exit` —
+   `payload.exit_origin`. A decision was produced by a §8.3 evaluation exactly when `purpose` is
+   `open` or `increase` or `exit_origin` is `signal`; `exit_conviction`, `buy_conviction`, and
+   `combined_score` are each non-null exactly then, and otherwise `outputs_used`, `model_weights`,
+   and `clips_applied` are also empty — the first offending, in that order. Every exit's writer
+   holds what this needs: a signal exit has its evaluation's numbers, and a risk exit, a goal
+   completion, or a removed instrument needs none, so the rule never holds an exit (`AGENTS.md`
+   rule 13).
 9. `DecisionMade`: `outputs_used` strictly ascending, `model_weights` keys strictly ascending by bytes,
    and `clips_applied` strictly in the table's order — `non_canonical` at the list.
 10. `IntentProposed`: `causation_id` is non-null — `causation_id`.
