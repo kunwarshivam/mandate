@@ -167,10 +167,22 @@ the crate is pending.
   two `mandate-num` additions in `crates/mandate-num/tests/num.rs`. Planted bugs per test: the task
   brief and the tests PR's body.
 - **Reference cases:** the 16 `mandate::MC-A` cases and the 28 `mandate::MC-B` builder cases other
-  than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. They move in a
-  harness-and-status PR after stream F's tests PR adds the `mandate` harness module and, for the `B`
-  family, stream G's gate supplies the `gate_dry_run` verdict each of those cases states.
-- **Run:** `cargo nextest run -p mandate-builder -p mandate-num`.
+  than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. Family A also runs in
+  the shared harness, through `crates/mandate-refcases/src/mandate/autonomy.rs` on the parsed
+  mandate's own `autonomy` block (DEC-162); its `status.toml` rows move in a status-only PR, since
+  the spec guard keeps that file apart from code (ES-22). Family B (all 32 `MC-B` cases) runs in the
+  shared harness through `crates/mandate-refcases/src/mandate/order_builder.rs` (DEC-250): `propose`,
+  then `mandate_risk::evaluate` on the proposed order as §6.2 step 2's dry run, then `decide` on
+  that verdict, with the session and close window from `mandate_risk::session_at`. 25 pass,
+  `MC-B22` after hours and `MC-B23` in the close window among them since #347 moved their clocks;
+  the four `trim_to_target` cases fail at `mandate_risk::trim_proposals` (E6-4) and the three
+  crypto buys at the gate's owed check 2 (E6-10). Its in-module tests doctor the fixture to prove
+  every member is read, a cash fee rate the gate would not reserve is refused, and a `session` or
+  `in_close_window` label that contradicts `now` fails the case.
+- **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; families A and B in the shared
+  harness with `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A
+  mandate::autonomy mandate::MC-B mandate::order_builder` (the flag runs cases `status.toml` does
+  not yet list as passing).
 
 ## Agent runtime and kill switches
 
@@ -342,6 +354,14 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `a_run_from_before_the_restart_does_not_release_an_opening`, and
   `the_hold_lifts_on_an_account_and_a_run_in_either_order`. Run: `cargo nextest run -p
   mandate-executor --lib reconcile::tests`.
+- **Rule 5's bounded wait:** an exit waits on its agent's opening in the instrument, in any state,
+  for at most `unknown_absent_window_s` from the `GateDecided` that allowed it, and every waiting
+  exit is re-evaluated after every step (`protection::overdue_openings`,
+  `protection::release_waiting`; [DEC-160](../../../docs/project/04-decision-log.md) (7), (13)). Its
+  cases are in-module in `crates/mandate-executor/src/protection.rs` (`sequence_tests`): the
+  reviewer's three paths, and `no_exit_waits_past_the_bound_but_under_a_rule_13_hold`, a property
+  over random scripts against an oracle read from the drafts. Run: `cargo nextest run -p
+  mandate-executor --lib protection::sequence_tests`.
 - **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
   `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
   `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they
@@ -355,11 +375,12 @@ implementation PR turns the pending tests green without editing them (DEC-77).
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
 implementation PRs fill the crate in story by story: E6-3 has landed `evaluate` and `agent_flatten`,
 E6-9 check 3's halt and no market orders under a presumed halt (a market exit is re-priced),
-E6-7 check 2's eligibility floor, and E6-6 `session_at`, check 3's sessions, the rest of check 4,
-check 7's buying power and check 8's `legacy_pdt` budget.
-Until every check exists the gate fails closed for adding risk (DEC-129 item 29): an opening the
-implemented checks would allow is `GateError::Unimplemented`, while a reducing purpose passes a
-check still owed.
+E6-7 check 2's eligibility floor, E6-6 `session_at`, check 3's sessions, the rest of check 4,
+check 7's buying power and check 8's `legacy_pdt` budget, and E6-8 check 5's mark and collar,
+check 6's conduct controls, the pacing of an allowed exit, `evaluate_cancel` and `surveillance`
+(DEC-163). Until every check exists the gate fails closed for adding risk (DEC-129 item 29): a
+crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by reading
+`InstrumentSnapshot::quote_currency` (DEC-254), while a reducing purpose passes a check still owed.
 
 - **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
   §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
@@ -368,7 +389,7 @@ check still owed.
   §5.1 to §5.6 (the v1 order policy, the constraints before submission, the kill switch,
   exit pricing), §7.2 to §7.4 (buying power, account restrictions, agent modes), §8.2
   (risk marks); `docs/specs/mandate.md` §1.1 (MI-1 to MI-20), §2.3 (the working universe),
-  §5.3, §5.5, §5.9; backlog E6-3, E6-4, E6-6 to E6-9.
+  §5.3, §5.5, §5.9; backlog E6-3, E6-4, E6-6 to E6-10.
 - **Code:** `mandate-risk`: `crates/mandate-risk/src/lib.rs` (the gate's inputs, the eight §9.1
   checks as `Check`, the four verdicts, `ReasonCode` with the registered spelling of each, `Origin`
   and the `Purpose` it maps to, `GateError`, and the signatures of `evaluate`, `evaluate_cancel`,
@@ -384,7 +405,11 @@ check still owed.
   `crates/mandate-risk/src/session.rs` (`session_at` from the committed calendar and check 3's
   session and auction-window rules), `crates/mandate-risk/src/account_rules.rs` (§5.3 rules 2 and
   4 to 8, buying power with the fee reservation, and the `legacy_pdt` day-trade budget),
-  `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
+  `crates/mandate-risk/src/conduct.rs` (check 5's fresh quote and collar, check 6's conduct
+  controls, the collar, participation and close-window pacing of an allowed exit, and
+  `evaluate_cancel`'s minimum resting time, trading spec §8.2 and §9.6),
+  `crates/mandate-risk/src/surveillance.rs` (§9.6's daily surveillance report: figures and flagged
+  thresholds, concentration a figure only, no judgement), `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
   `AccountType`, `AssetClass` and `Side` and changes neither them nor `mandate-time`.
@@ -393,13 +418,28 @@ check still owed.
   check that every reason code the gate can emit is registered in the founder-owned case file),
   `crates/mandate-risk/tests/properties.rs` (one property per invariant and per "never" or "always"
   in §9, including MI-1 scoped to its own words, the mode rule, MI-8, and a shadow-ledger sequence
-  property), `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
-  oracle, which never calls the crate's arithmetic). Planted bugs per test: the task brief.
+  property), `crates/mandate-risk/tests/usd_pairs.rs` (§3.2 item 7's USD pairs for crypto, E6-10:
+  a non-USD or unstated pair denied at check 2, a USD pair passing, check 2 whole for crypto, an
+  exit in any pair and a US equity never judged by the rule, and a property whose oracle is
+  `opening ∧ crypto ∧ quote ≠ USD`; pending E6-10 except the exit, equity and check-1 cases),
+  `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
+  oracle, which never calls the crate's arithmetic), and the in-module tests in `gate.rs` and
+  `surveillance.rs` for the boundaries the files above cannot pin. Planted bugs per test: the task
+  brief.
 - **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
-  `fixtures/refcases/mandate.json`; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
+  `fixtures/refcases/mandate.json`, through `crates/mandate-refcases/src/mandate/risk_gate.rs`
+  (DEC-178; MC-G13 stays pending on E6-8's checks 5 and 6), with
+  `crates/mandate-refcases/tests/mandate_gate_harness.rs` proving the two arms read and compare
+  every member; `crates/mandate-risk/tests/refcases.rs` is the crate-local copy it replaces, kept
+  until a follow-up deletes it; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
   and `RC-25` with their variants, and the `propose_order` steps of `RC-03`, `RC-08` and `RC-18`,
-  in `fixtures/refcases/trading-domain.json`.
-- **Run:** `cargo nextest run -p mandate-risk`.
+  in `fixtures/refcases/trading-domain.json`. The trading-domain harness decides them through
+  `evaluate` (E6-9, DEC-199): RC-03's `gate_rejects_zero_crossing_order`, RC-08 and RC-18's
+  `generic_cash_account` run; the rest fail naming the stories they still wait for (RC-15 on E7-2,
+  E7-3, E7-4 and E7-5).
+- **Run:** `cargo nextest run -p mandate-risk`, and
+  `cargo test -p mandate-refcases --test refcases -- --include-ignored mandate::MC-G` (and
+  `mandate::MC-F`).
 
 ## Journal drafts and the event catalogue
 
@@ -501,7 +541,12 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `crates/mandate-spec/src/document.rs` (the hashed envelope document and the strict parse),
   `crates/mandate-spec/src/validate.rs` (the V-rules, the warnings, the closed platform-default list,
   `ValidatedMandate`), `crates/mandate-spec/src/policy.rs` (the hierarchy and its runtime overlay),
-  `crates/mandate-spec/src/risk.rs` (the risk-state fold, breach confirmation, risk days),
+  `crates/mandate-spec/src/risk.rs` (the risk-state types, breach confirmation, risk days),
+  `crates/mandate-spec/src/risk/limits.rs` (the §5.2 and §5.6 comparisons),
+  `crates/mandate-spec/src/risk/fold.rs` (the fold over marks, fills, clock ticks, universe changes,
+  staleness, and a `profit_stop` goal, slices R2 and R3; the rest of §5 is `unimplemented` until R4,
+  DEC-167 items 5 to 7), `crates/mandate-spec/src/risk/fold/daily.rs` (the daily loss over risk
+  days: the rollover, a breach carried over it, the renewal, and the lift),
   `crates/mandate-spec/src/goal.rs`, `crates/mandate-spec/src/change.rs` (the version and §9.2
   classification), `crates/mandate-spec/src/condition.rs` (the §6.3 language, owned here and nowhere
   else), `crates/mandate-spec/src/context.rs` (`ValidationContext::from_journal`, the fold over
@@ -525,11 +570,27 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   refusing default, the base refused without any one required fact, and a property against an oracle
   that reads the journal backwards),
   `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand);
-  `crates/mandate-domain/tests/domain.rs` (live). The classification tests arrive with the last tests
-  PR. Planted bugs per test: the task brief.
+  `crates/mandate-spec/tests/change.rs` (§9.2 row by row in both directions, the DEC-121 pinning
+  switch as a whole and each way it fails to be one, the autonomy shapes, the literal version-vector
+  digest, and four properties: step-up exactly when some path increases risk, the join over changed
+  paths against hand-written per-edit classes, an allocation-only change classified by its direction,
+  and MI-11 against a first-match evaluator of the test's own; DEC-172),
+  `crates/mandate-spec/src/change/tests.rs` (the `not_in` shapes no other test reaches, DEC-172
+  item 13); `crates/mandate-spec/src/risk/limits.rs`'s tests (the comparisons against an integer
+  oracle, the exact set of limits they read, and the profit stop's level);
+  `crates/mandate-spec/src/risk/fold/tests.rs` (the fold's edges: the lift delay's boundary,
+  restart, and a clock that over-reports, severe rungs that a receding drawdown does not lift, the
+  whole-second monotone risk clock, staleness, the crypto and equity clocks, the floor's carry,
+  fills, the daily action, a breach carried over the rollover, the renewal, the daily hard wait
+  across midnight, the profit stop, every input left to R4, and a lift property whose oracle is a
+  run rule);
+  `crates/mandate-domain/tests/domain.rs` (live). Planted bugs per test: the task brief and the E10-3
+  tests and implementation PRs.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
-  through `crates/mandate-refcases/src/mandate.rs`; families G, A, and B stay with streams G and H
-  and fail as "not interpreted until" their owning story, and family N is stream J's (below). A rejection that carries no reason
+  through `crates/mandate-refcases/src/mandate.rs`; families G and F are stream G's, through
+  `crates/mandate-refcases/src/mandate/risk_gate.rs` (Risk gate, above); families A and B stay
+  with stream H and fail as "not interpreted until" their owning story, and family N is stream J's
+  (below). A rejection that carries no reason
   fails its case, so the thirty cases expecting `schema_valid: false` cannot pass on a parse that
   refuses everything.
 - **Run:** `cargo nextest run -p mandate-spec`, `cargo nextest run -p mandate-domain`, and
@@ -575,19 +636,31 @@ proves each pending test fails on them (DEC-110).
   brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` family N (28 cases: admission, lineage,
   thesis expiry, stagger), through `crates/mandate-refcases/src/mandate/research.rs` in the
-  `mandate` suite (DEC-154). All four kinds are interpreted; MC-N01, MC-N14 and MC-N26 compare
-  everything and then fail naming E6-2's `classify`, so 25 of the 28 pass. The module's in-module tests doctor every expected member of every interpreted
-  case and require it to fail.
+  `mandate` suite (DEC-154). All four kinds are interpreted, and MC-N01, MC-N14 and MC-N26 decide
+  their first order through `mandate-builder`'s `classify` (DEC-179), so all 28 run; the status rows
+  of those three move in a status-only PR. The module's in-module tests doctor every expected member
+  of every interpreted case and require it to fail, and read every first-order fact back from its
+  own §6.3 field.
 - **Run:** `cargo nextest run -p mandate-research` and
   `cargo test -p mandate-refcases -- --include-ignored mandate::MC-N`.
 
 ## Approval core: content, admission, re-validation, and step-up (E8-1 to E8-3)
 
-- **Spec:** the [M7 brief](../../../docs/project/tasks/M7-escalation-v0.md); mandate spec §6.4;
-  DEC-155, DEC-156, DEC-158 (option (c)), DEC-165. The MC-E cases arrive with the M7 spec PR.
-- **Code:** `mandate-approval` (layer 1; E8-1, E8-2 and E8-3 implemented):
+- **Spec:** the [M7 brief](../../../docs/project/tasks/M7-escalation-v0.md); mandate spec §6.1
+  (owner controls and step-up), §6.4, and MI-21 to MI-25; journal spec v0.5 §9; DEC-155, DEC-156,
+  DEC-158 (option (c)), DEC-165, DEC-173. The MC-E cases follow the harness count correction
+  (DEC-173 item 1).
+- **Reference model:** the escalation section of `reference/mandate/ref.py`, fuzzed by
+  `reference/mandate/fuzz.py` (`fuzz_escalation`, `fuzz_policy_quorum`, `fuzz_drift`,
+  `fuzz_ask_budget`, `fuzz_quiet_hours`, `fuzz_owner_controls`, `fuzz_content`) and
+  mutation-checked by `reference/mandate/mutants.py`. Check 7's quorum is the stricter of the bound
+  requirement and the policy overlay (DEC-173 item 13).
+- **Code:** `mandate-approval` (layer 1; E8-1, E8-2 and E8-3 implemented but check 7's policy
+  overlay, DEC-173 item 14):
   `crates/mandate-approval/src/content.rs` (`BoundAction`, `content_object`, `content_hash`,
-  `confirmation_code`), `crates/mandate-approval/src/admit.rs` (`admit`: checks 1 to 7),
+  `confirmation_code`), `crates/mandate-approval/src/admit.rs` (`admit`: checks 1 to 7;
+  `PolicyOverlay`, and `quorum`, a stub that `admit` fails closed on under any overlay but
+  `PolicyOverlay::NONE`),
   `crates/mandate-approval/src/revalidate.rs` (`revalidate`: checks 8 to 12, `GrantedOrder`),
   `crates/mandate-approval/src/drift.rs`, `crates/mandate-approval/src/budget.rs`,
   `crates/mandate-approval/src/notify.rs` (the closed `Notification`),
@@ -602,7 +675,8 @@ proves each pending test fails on them (DEC-110).
   the kill switch), `crates/mandate-approval/tests/revalidation.rs` (checks 8 to 12 and drift),
   and `crates/mandate-approval/tests/grant_properties.rs` (the check-table, clock-accumulator,
   principal, assertion-ledger, scaled-integer drift, field-comparer and kill-switch oracles), all
-  live. In-module tests in `src/stepup.rs` probe step-up evidence at the clock's extremes against an
+  live; and `crates/mandate-approval/tests/quorum.rs` (check 7 against the policy overlay, with
+  its own scaled-integer oracle), pending E8-3 but for three live tests. In-module tests in `src/stepup.rs` probe step-up evidence at the clock's extremes against an
   `i128` oracle, and `src/drift.rs` a drift too large to compute.
 - **Run:** `cargo nextest run -p mandate-approval`; `cargo xtask ci pending`.
 
@@ -613,16 +687,31 @@ proves each pending test fails on them (DEC-110).
   prose case), `crates/mandate-refcases/src/trading_domain.rs` (fills, marks, fee charges,
   settlement, corporate actions, dividends, cash-in-lieu postings, the account type, and buying
   power; every other step type and expectation key fails as "not interpreted until" its owning
-  story), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/tests/harness.rs`
+  story), `crates/mandate-refcases/src/trading_domain/gate.rs` (E6-9's gate driver, DEC-199:
+  `propose_order` steps and the `decision` expectation through `mandate_risk::evaluate`, and the
+  account's §7.3 status from `initial.account` and `broker_account_update`; its in-module tests
+  run RC-15's steps 3 and 4 in a `closing_only` account),
+  `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/tests/harness.rs`
   (the harness reads the account type and checks `buying_power`: RC-08 and RC-18's cash variant
-  without their gate step), `crates/mandate-refcases/src/mandate/research.rs` (family N of the
-  mandate suite, through `mandate-research`), `crates/mandate-refcases/status.toml`
-  (founder-owned).
+  without their gate step), `crates/mandate-refcases/tests/trading_domain_gate_harness.rs` (the gate
+  driver reads every key it claims, an edited decision fails, and what it cannot read is refused;
+  RC-15's `status_not_active` without its later stories' expectations passes),
+  `crates/mandate-refcases/src/mandate/research.rs` (family N of the
+  mandate suite, through `mandate-research`), `crates/mandate-refcases/src/mandate/autonomy.rs`
+  (family A, through `mandate-builder`'s `classify`), `crates/mandate-refcases/src/mandate/order_builder.rs`
+  (family B, through `mandate-builder`'s `propose` and `decide` and `mandate-risk`'s `evaluate`),
+  `crates/mandate-refcases/src/mandate/risk_gate.rs` (families G and F, through `mandate-risk`,
+  with `crates/mandate-refcases/tests/mandate_gate_harness.rs`; DEC-178),
+  `crates/mandate-refcases/status.toml` (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
-  pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L harnessed by stream F; the rest pending their streams).
+  pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L
+  harnessed by stream F, N by stream J, A and B by stream H, and G and F by stream G; a case whose
+  own story is pending fails naming it).
 - **Run:** `cargo nextest run -p mandate-refcases`; pending cases with
-  `cargo test -p mandate-refcases -- --include-ignored`.
+  `cargo test -p mandate-refcases -- --include-ignored`; the mutation gate on a harness change,
+  `MANDATE_BASE_REF=$(git merge-base HEAD origin/main) cargo xtask ci mutants` (DEC-253: the
+  crate is `safety_critical = true`, so the gate covers it although it is a `tool` crate).
 
 ## Reference-case fixtures and the mandate reference implementation
 
@@ -777,7 +866,8 @@ proves each pending test fails on them (DEC-110).
   `unjudged_mutants`, which fail a mutated package with no live test to judge its mutants before the
   run, since `cargo mutants` would report every one of them caught, DEC-139; the job takes its
   repository as a parameter, so `Fixture::gated` drives the whole of it and neither it nor the
-  pre-flight can be deleted without a test failing),
+  pre-flight can be deleted without a test failing; `mutated_crates`, which gates every
+  `safety_critical = true` crate whatever its layer, DEC-253),
   `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
   equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.

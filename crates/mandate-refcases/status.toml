@@ -63,10 +63,55 @@
 'RC-10' = { status = "passing", story = "E4-1" }
 'RC-12' = { status = "passing", story = "E4-1" }
 'RC-19' = { status = "passing", story = "E4-1" }
+'RC-03::gate_rejects_zero_crossing_order' = { status = "passing", story = "E6-3" }
+'RC-08' = { status = "passing", story = "E6-3" }
+'RC-18::generic_cash_account' = { status = "passing", story = "E6-3" }
 
-# Family N (stream J, DEC-77 item 3, DEC-154). MC-N01, MC-N14 and MC-N26 stay pending until
-# E6-2's classify decides their first_order_autonomy.
+# Family N (stream J, DEC-77 item 3, DEC-154). MC-N01, MC-N14 and MC-N26 decide their
+# first_order_autonomy through E6-2's classify (DEC-179).
 [mandate]
+'MC-A01' = { status = "passing", story = "E6-2" }
+'MC-A02' = { status = "passing", story = "E6-2" }
+'MC-A03' = { status = "passing", story = "E6-2" }
+'MC-A04' = { status = "passing", story = "E6-2" }
+'MC-A05' = { status = "passing", story = "E6-2" }
+'MC-A06' = { status = "passing", story = "E6-2" }
+'MC-A07' = { status = "passing", story = "E6-2" }
+'MC-A08' = { status = "passing", story = "E6-2" }
+'MC-A09' = { status = "passing", story = "E6-2" }
+'MC-A10' = { status = "passing", story = "E6-2" }
+'MC-A11' = { status = "passing", story = "E6-2" }
+'MC-A12' = { status = "passing", story = "E6-2" }
+'MC-A13' = { status = "passing", story = "E6-2" }
+'MC-A14' = { status = "passing", story = "E6-2" }
+'MC-A15' = { status = "passing", story = "E6-2" }
+'MC-A16' = { status = "passing", story = "E6-2" }
+'MC-B01' = { status = "passing", story = "E6-2" }
+'MC-B02' = { status = "passing", story = "E6-2" }
+'MC-B03' = { status = "passing", story = "E6-2" }
+'MC-B04' = { status = "passing", story = "E6-2" }
+'MC-B05' = { status = "passing", story = "E6-2" }
+'MC-B06' = { status = "passing", story = "E6-2" }
+'MC-B07' = { status = "passing", story = "E6-2" }
+'MC-B08' = { status = "passing", story = "E6-2" }
+'MC-B09' = { status = "passing", story = "E6-2" }
+'MC-B10' = { status = "passing", story = "E6-2" }
+'MC-B11' = { status = "passing", story = "E6-2" }
+'MC-B12' = { status = "passing", story = "E6-2" }
+'MC-B13' = { status = "passing", story = "E6-2" }
+'MC-B14' = { status = "passing", story = "E6-2" }
+'MC-B15' = { status = "passing", story = "E6-2" }
+'MC-B16' = { status = "passing", story = "E6-2" }
+'MC-B18' = { status = "passing", story = "E6-2" }
+'MC-B19' = { status = "passing", story = "E6-2" }
+'MC-B20' = { status = "passing", story = "E6-2" }
+'MC-B21' = { status = "passing", story = "E6-2" }
+'MC-B22' = { status = "passing", story = "E6-2" }
+'MC-B23' = { status = "passing", story = "E6-2" }
+'MC-B24' = { status = "passing", story = "E6-2" }
+'MC-B25' = { status = "passing", story = "E6-2" }
+'MC-B29' = { status = "passing", story = "E6-2" }
+'MC-N01' = { status = "passing", story = "E6-2" }
 'MC-N02' = { status = "passing", story = "E17-3" }
 'MC-N03' = { status = "passing", story = "E17-3" }
 'MC-N04' = { status = "passing", story = "E17-3" }
@@ -79,6 +124,7 @@
 'MC-N11' = { status = "passing", story = "E17-3" }
 'MC-N12' = { status = "passing", story = "E17-3" }
 'MC-N13' = { status = "passing", story = "E17-3" }
+'MC-N14' = { status = "passing", story = "E6-2" }
 'MC-N15' = { status = "passing", story = "E17-3" }
 'MC-N16' = { status = "passing", story = "E17-3" }
 'MC-N17' = { status = "passing", story = "E17-9" }
@@ -90,6 +136,7 @@
 'MC-N23' = { status = "passing", story = "E17-3" }
 'MC-N24' = { status = "passing", story = "E17-9" }
 'MC-N25' = { status = "passing", story = "E17-3" }
+'MC-N26' = { status = "passing", story = "E6-2" }
 'MC-N27' = { status = "passing", story = "E17-9" }
 'MC-N28' = { status = "passing", story = "E17-9" }
 
@@ -224,3 +271,103 @@
 'MC-P20' = { status = "passing", story = "E10-1" }
 'MC-P21' = { status = "passing", story = "E10-1" }
 'MC-P22' = { status = "passing", story = "E10-1" }
+
+# Family F (stream G, E6-3; DEC-77 item 3, DEC-178).
+'MC-F01' = { status = "passing", story = "E6-3" }
+'MC-F02' = { status = "passing", story = "E6-3" }
+'MC-F03' = { status = "passing", story = "E6-3" }
+'MC-F04' = { status = "passing", story = "E6-3" }
+
+# Family G (stream G, E6-3; DEC-77 item 3, DEC-178). MC-G02 passes under DEC-150's FULL_GATE_ONLY
+# entry. MC-G13, an allowed reopen, reaches checks 5 and 6, which pass since E6-8 (#311).
+'MC-G01' = { status = "passing", story = "E6-3" }
+'MC-G02' = { status = "passing", story = "E6-3" }
+'MC-G03' = { status = "passing", story = "E6-3" }
+'MC-G04' = { status = "passing", story = "E6-3" }
+'MC-G05' = { status = "passing", story = "E6-3" }
+'MC-G06' = { status = "passing", story = "E6-3" }
+'MC-G07' = { status = "passing", story = "E6-3" }
+'MC-G08' = { status = "passing", story = "E6-3" }
+'MC-G09' = { status = "passing", story = "E6-3" }
+'MC-G10' = { status = "passing", story = "E6-3" }
+'MC-G11' = { status = "passing", story = "E6-3" }
+'MC-G12' = { status = "passing", story = "E6-3" }
+'MC-G13' = { status = "passing", story = "E6-3" }
+'MC-G14' = { status = "passing", story = "E6-3" }
+'MC-G15' = { status = "passing", story = "E6-3" }
+'MC-G16' = { status = "passing", story = "E6-3" }
+
+# Family L (stream F, E6-4; DEC-77 item 3, DEC-178).
+'MC-L01' = { status = "passing", story = "E6-4" }
+'MC-L02' = { status = "passing", story = "E6-4" }
+'MC-L03' = { status = "passing", story = "E6-4" }
+'MC-L04' = { status = "passing", story = "E6-4" }
+'MC-L05' = { status = "passing", story = "E6-4" }
+
+# Family R (stream H, E6-4 slice R3; DEC-77 item 3, DEC-167 item 7 (l)). The other nine stop at
+# an input slice R4 folds.
+'MC-R01' = { status = "passing", story = "E6-4" }
+'MC-R02' = { status = "passing", story = "E6-4" }
+'MC-R03' = { status = "passing", story = "E6-4" }
+'MC-R04' = { status = "passing", story = "E6-4" }
+'MC-R05' = { status = "passing", story = "E6-4" }
+'MC-R06' = { status = "passing", story = "E6-4" }
+'MC-R07' = { status = "passing", story = "E6-4" }
+'MC-R08' = { status = "passing", story = "E6-4" }
+'MC-R13' = { status = "passing", story = "E6-4" }
+'MC-R15' = { status = "passing", story = "E6-4" }
+'MC-R18' = { status = "passing", story = "E6-4" }
+'MC-R19' = { status = "passing", story = "E6-4" }
+'MC-R20' = { status = "passing", story = "E6-4" }
+'MC-R22' = { status = "passing", story = "E6-4" }
+'MC-R24' = { status = "passing", story = "E6-4" }
+
+# Family C (stream F, E10-3; DEC-77 item 3, DEC-172).
+'MC-C01' = { status = "passing", story = "E10-3" }
+'MC-C02' = { status = "passing", story = "E10-3" }
+'MC-C03' = { status = "passing", story = "E10-3" }
+'MC-C04' = { status = "passing", story = "E10-3" }
+'MC-C05' = { status = "passing", story = "E10-3" }
+'MC-C06' = { status = "passing", story = "E10-3" }
+'MC-C07' = { status = "passing", story = "E10-3" }
+'MC-C08' = { status = "passing", story = "E10-3" }
+'MC-C09' = { status = "passing", story = "E10-3" }
+'MC-C10' = { status = "passing", story = "E10-3" }
+'MC-C11' = { status = "passing", story = "E10-3" }
+'MC-C12' = { status = "passing", story = "E10-3" }
+'MC-C13' = { status = "passing", story = "E10-3" }
+'MC-C14' = { status = "passing", story = "E10-3" }
+'MC-C15' = { status = "passing", story = "E10-3" }
+'MC-C16' = { status = "passing", story = "E10-3" }
+'MC-C17' = { status = "passing", story = "E10-3" }
+'MC-C18' = { status = "passing", story = "E10-3" }
+'MC-C19' = { status = "passing", story = "E10-3" }
+'MC-C20' = { status = "passing", story = "E10-3" }
+'MC-C21' = { status = "passing", story = "E10-3" }
+'MC-C22' = { status = "passing", story = "E10-3" }
+'MC-C23' = { status = "passing", story = "E10-3" }
+'MC-C24' = { status = "passing", story = "E10-3" }
+'MC-C25' = { status = "passing", story = "E10-3" }
+'MC-C26' = { status = "passing", story = "E10-3" }
+'MC-C27' = { status = "passing", story = "E10-3" }
+'MC-C28' = { status = "passing", story = "E10-3" }
+'MC-C29' = { status = "passing", story = "E10-3" }
+'MC-C30' = { status = "passing", story = "E10-3" }
+'MC-C31' = { status = "passing", story = "E10-3" }
+'MC-C32' = { status = "passing", story = "E10-3" }
+'MC-C33' = { status = "passing", story = "E10-3" }
+'MC-C34' = { status = "passing", story = "E10-3" }
+'MC-C35' = { status = "passing", story = "E10-3" }
+'MC-C36' = { status = "passing", story = "E10-3" }
+'MC-C37' = { status = "passing", story = "E10-3" }
+'MC-C38' = { status = "passing", story = "E10-3" }
+'MC-C39' = { status = "passing", story = "E10-3" }
+'MC-C40' = { status = "passing", story = "E10-3" }
+'MC-C41' = { status = "passing", story = "E10-3" }
+'MC-C42' = { status = "passing", story = "E10-3" }
+'MC-C43' = { status = "passing", story = "E10-3" }
+'MC-C44' = { status = "passing", story = "E10-3" }
+'MC-C45' = { status = "passing", story = "E10-3" }
+'MC-C46' = { status = "passing", story = "E10-3" }
+'MC-C47' = { status = "passing", story = "E10-3" }
+'MC-C48' = { status = "passing", story = "E10-3" }

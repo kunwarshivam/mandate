@@ -287,12 +287,12 @@ pub fn validate(
     })
 }
 
-/// The system fields, which carry no provenance rule (§7).
 /// The places of the size fraction the order builder multiplies its targets by (§8.3 step 2), which
 /// V-040 bounds the scale factors' digits by: the product of any set of them has at most the sum of
 /// their places. It is tighter than the 24 the risk state reports the factor at (§5.5, DEC-167).
-const SIZE_FACTOR_PLACES: usize = 12;
+const BUILDER_SIZE_FRACTION_PLACES: usize = 12;
 
+/// The system fields, which carry no provenance rule (§7).
 pub(crate) const SYSTEM_FIELDS: [&str; 2] = ["/mandate_schema_version", "/source_text_ref"];
 
 /// True when `path` is `prefix` or lies under it, the JSON Pointer sense of "this entry is about that
@@ -566,7 +566,11 @@ fn document_rules(m: &Mandate, document: &Value, out: &mut BTreeSet<Violation>) 
                 .map_or(0, |(_, fraction)| fraction.len())
         })
         .sum();
-    flag(out, scale_places > SIZE_FACTOR_PLACES, Violation::V040);
+    flag(
+        out,
+        scale_places > BUILDER_SIZE_FRACTION_PLACES,
+        Violation::V040,
+    );
     let flattens = ladder
         .iter()
         .filter(|rung| rung.action == LadderAction::FlattenAndPause)

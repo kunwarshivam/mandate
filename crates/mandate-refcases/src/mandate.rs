@@ -1,12 +1,14 @@
 //! The `mandate` suite: `fixtures/refcases/mandate.json`, the JSON form of
 //! [the mandate reference cases](../../../docs/specs/reference-cases/mandate.yaml) (spec §11). One
-//! named test per case id (`mandate::MC-S01`), 298 of them.
+//! named test per case id (`mandate::MC-S01`), plus `version` and `version_vector`.
 //!
 //! Stream F owns 202: the families `schema` (S), `semantic` (V), `policy` (P), `change` (C),
 //! `risk_state` (R), `risk_day` (T), and `goal` (L). Stream J's family N — `admission`, `lineage`,
-//! `thesis_expiry`, and `stagger` — is interpreted in [`research`]. The rest belong to other streams
-//! and **fail** with "not interpreted until `<story>`" rather than passing quietly, the DEC-85 rule:
-//! `gate` and `agent_flatten` to E6-3, and `builder` and `autonomy` to E6-2.
+//! `thesis_expiry`, and `stagger` — is interpreted in [`research`], and stream H's family A,
+//! `autonomy`, in [`autonomy`], and its family B, `builder`, in [`order_builder`] (DEC-250). Stream
+//! G's families G (`gate`) and F (`agent_flatten`) are interpreted in [`risk_gate`] against
+//! `mandate-risk` (DEC-178). That is every kind the fixture holds; a kind no arm interprets **fails**
+//! naming it rather than passing quietly, the DEC-85 rule.
 //!
 //! The same rule holds inside an owned family. Every key of every owned case is read, and a case that
 //! carries a key this harness does not know fails naming it, so no case can pass while part of it is
@@ -19,6 +21,7 @@ use mandate_canon::Digest;
 use mandate_canon::Value;
 use mandate_domain::{AgentMode, AssetClass, AssetId, Environment, MarketSession, Side};
 use mandate_num::{Price, Qty, Usd};
+use mandate_spec::change;
 use mandate_spec::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
 use mandate_spec::goal::{self, GoalInputs, GoalStatus};
 use mandate_spec::policy::{self, LevelName, PolicyKey, PolicyLevel, PolicyValue};
@@ -35,19 +38,14 @@ use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
 
 use crate::{Case, Json, at, ensure, expect_eq, list_at, str_at, to_canon, u64_at};
 
+mod autonomy;
+mod order_builder;
 mod research;
+mod risk_gate;
 
 const SUITE: &str = "mandate";
 /// The fixture version this harness reads (`version: 4`, spec v0.6).
 const FIXTURE_VERSION: u64 = 4;
-
-/// Case kinds another stream owns, with the story that will interpret them.
-const PENDING_KINDS: &[(&str, &str)] = &[
-    ("gate", "E6-3"),
-    ("agent_flatten", "E6-3"),
-    ("builder", "E6-2"),
-    ("autonomy", "E6-2"),
-];
 
 /// Every key an owned case may carry at its top level.
 const CASE_KEYS: &[&str] = &[
@@ -63,8 +61,10 @@ const CASE_KEYS: &[&str] = &[
     "initial",
     "steps",
     "state",
+    "proposed",
     "input",
     "at",
+    "action",
     "expect",
 ];
 
@@ -121,9 +121,6 @@ fn run_listed(fixture: &Json, index: usize) -> Result<(), String> {
         .get(index)
         .ok_or("case index out of range")?;
     let kind = str_at(case, "kind")?;
-    if let Some((_, story)) = PENDING_KINDS.iter().find(|(k, _)| *k == kind) {
-        return Err(format!("`{kind}` is not interpreted until {story}"));
-    }
     unread_keys(case)?;
     match kind {
         "schema" => schema_case(fixture, case),
@@ -133,10 +130,14 @@ fn run_listed(fixture: &Json, index: usize) -> Result<(), String> {
         "risk_state" => risk_state_case(fixture, case),
         "risk_day" => risk_day_case(case),
         "goal" => goal_case(fixture, case),
+        "gate" => risk_gate::gate_case(fixture, case),
+        "agent_flatten" => risk_gate::agent_flatten_case(case),
         "admission" => research::admission_case(fixture, case),
         "lineage" => research::lineage_case(fixture, case),
         "thesis_expiry" => research::thesis_expiry_case(case),
         "stagger" => research::stagger_case(case),
+        "autonomy" => autonomy::autonomy_case(fixture, case),
+        "builder" => order_builder::builder_case(fixture, case),
         other => Err(format!("unknown case kind `{other}`")),
     }
 }
@@ -163,6 +164,8 @@ const EXPECT_KEYS: &[(&str, &[&str])] = &[
         &["risk_day", "starts_at", "ends_at", "length_s"],
     ),
     ("goal", &["done", "reason", "then", "stop_reason"]),
+    ("gate", risk_gate::GATE_EXPECT_KEYS),
+    ("agent_flatten", risk_gate::FLATTEN_EXPECT_KEYS),
     (
         "admission",
         &[
@@ -195,6 +198,11 @@ const EXPECT_KEYS: &[(&str, &[&str])] = &[
         ],
     ),
     ("stagger", &["offsets", "window_s"]),
+    (
+        "autonomy",
+        &["decision", "by", "approvers_required", "on_timeout"],
+    ),
+    ("builder", order_builder::EXPECT_KEYS),
 ];
 
 /// A `risk_state` case expects per step, not once, so its keys are swept on every step's `expect`.
@@ -836,12 +844,55 @@ fn policy_level(level: &Json) -> Result<PolicyLevel, String> {
 }
 
 /// `kind: change` — the classification, the changed paths, both version hashes, and step-up (§9.2).
+///
+/// All five members are compared, the paths as an ordered list. `step_up_required` is absent from
+/// exactly one kind of case, an invalid change, which §9.2 refuses rather than classifies; there the
+/// harness requires the classification to say `invalid` and step-up to be `false`, so a case cannot
+/// pass by leaving the member out (DEC-172 item 4).
 fn change_case(fixture: &Json, case: &Json) -> Result<(), String> {
-    let _ = (
-        base_value(fixture, str_at(case, "base")?)?,
-        patched(fixture, case)?,
-    );
-    Err(not_implemented("`mandate_spec::change::classify`"))
+    let old = Mandate::parse(&base_value(fixture, str_at(case, "base")?)?)
+        .map_err(|e| format!("the base does not parse: {}", e.code()))?;
+    let new = Mandate::parse(&patched(fixture, case)?)
+        .map_err(|e| format!("the patched mandate does not parse: {}", e.code()))?;
+    let result = spec(
+        change::classify(&old, &new),
+        "mandate_spec::change::classify",
+    )?;
+    let expect = at_of(case, "expect")?;
+    let expected_class = str_at(expect, "classification")?;
+    expect_eq("classification", result.class.as_str(), expected_class)?;
+    let expected_paths = list_at(expect, "changed_paths")?
+        .iter()
+        .map(|p| text_of(p, "a changed path"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let paths: Vec<String> = result
+        .changed_paths
+        .iter()
+        .map(|p| p.as_str().to_owned())
+        .collect();
+    expect_eq("changed_paths", paths, expected_paths)?;
+    for (member, mandate) in [("old_version", &old), ("new_version", &new)] {
+        let version = mandate
+            .version()
+            .map_err(|e| format!("`{member}`: {}", e.code()))?;
+        expect_eq(
+            member,
+            format!("sha256:{}", version.digest()),
+            str_at(expect, member)?.to_owned(),
+        )?;
+    }
+    let expected_step_up = match expect.get("step_up_required") {
+        Some(flag) => flag.as_bool().ok_or("`step_up_required` is not a flag")?,
+        None if expected_class == "invalid" => false,
+        None => {
+            return Err("`step_up_required` is missing from a case that is not invalid".to_owned());
+        }
+    };
+    expect_eq(
+        "step_up_required",
+        result.step_up_required,
+        expected_step_up,
+    )
 }
 
 /// `kind: risk_state` — the fold of §5.2's inputs, each step's snapshot, its journal in order, and the

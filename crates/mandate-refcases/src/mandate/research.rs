@@ -9,8 +9,8 @@
 //! object built from the crate's event, so a row that grew a member fails as a difference.
 //!
 //! **What the harness fills and why.** The envelope comes from the case's patched base, projected
-//! onto `mandate_research::MandateEnvelope` field by field, because `mandate_spec::Mandate::parse`
-//! is still a stub and the research crate reads its own stand-in types (DEC-132 item 24). The
+//! onto `mandate_research::MandateEnvelope` field by field, because the research crate reads its own
+//! stand-in types (DEC-132 item 24). The
 //! thesis's `asset_class` and `leveraged_etp` fill `InstrumentFacts`, and `corroboration.kind` fills
 //! the platform's corroboration, because the fixture keeps instrument reference data and what the
 //! platform found in the thesis dictionary (DEC-132 items 6 and 7). The output envelope's model
@@ -19,12 +19,15 @@
 //! applies none.
 //!
 //! **`first_order_autonomy`.** Three cases state the first order's autonomy decision, which is
-//! `mandate_builder::classify` over the facts admission reports (DEC-132 item 3). Until E6-2 ships
-//! `classify`, those cases compare everything else and then fail naming E6-2. Where the expectation
-//! is `null`, the admission must report no first-order facts, which is why `admission_action`, the
-//! input only `classify` reads, has nothing to decide there. Its members are swept, but no passing
-//! case reads their values, so the E6-2 change must wire `classify` to them rather than count the
-//! sweep as coverage.
+//! `mandate_builder::classify` over the facts admission reports (DEC-132 item 3, DEC-179). The
+//! policy is the case's patched base through the strict parse, unvalidated, as family A's is
+//! (DEC-162 item 1), and admission's reported `admission_ceiling` must equal that policy's
+//! `admission`, since no overlay applies. The action is `admission_action` as stated, with `purpose`
+//! `open` and `new_instrument` and `thesis_confidence` from admission's facts, as `ref.py`'s `admit`
+//! composes it; the classification is compared whole, so an approval member stated or omitted
+//! wrongly fails. Where the expectation is `null`, the admission must report no first-order facts,
+//! which is why `admission_action`, the input only `classify` reads, has nothing to decide there;
+//! its members are still swept.
 //!
 //! **One invented value.** The source allowlist's version is `AllowlistVersion(1)`: no case states
 //! one and no check reads it; it reaches only the thesis entry's `allowlist_version`, which the
@@ -32,21 +35,24 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_builder::{ActionContext, BuilderError, Classification, classify};
 use mandate_canon::{DecStr, Digest};
-use mandate_num::Usd;
+use mandate_domain::{MarketSession, Purpose};
+use mandate_num::{Signed, Unit, Usd};
 use mandate_research::{
     AdmissionChange, AdmissionDecision, AdmissionFacts, AdmissionInput, AllowlistVersion,
-    AssetClass, AssetId, AutonomyDecision, ContentHash, Corroboration, Direction, FoldInput,
-    GroupId, InstrumentFacts, InstrumentRestriction, Invalidation, Lineage, LineageId,
+    AssetClass, AssetId, AutonomyDecision, ContentHash, Corroboration, Direction, FirstOrderFacts,
+    FoldInput, GroupId, InstrumentFacts, InstrumentRestriction, Invalidation, Lineage, LineageId,
     LineageState, MandateEnvelope, ModelId, ModelVersion, OutputEnvelope, PolicyOverlay,
     ProposedThesis, ResearchEnvelope, ResearchEvent, SchemaDec, SourceAllowlist, SourceId,
     StaggerWindow, Thesis, ThesisId, UniverseChange, UniverseEntry, ValidatedMandate,
     WorkingUniverse, WorkspaceId, admit, expire_theses, fold_theses, stagger_offset,
 };
+use mandate_spec::document::OnTimeout;
 use mandate_time::UtcNanos;
 use serde_json::json;
 
-use super::{patched_json, u32_of, unknown_members};
+use super::{must_parse, not_implemented, num, patched, patched_json, u32_of, unknown_members};
 use crate::{Json, at, ensure, expect_eq, list_at, str_at};
 
 /// The facts every `admission` and `lineage` input states besides its thesis or theses.
@@ -63,8 +69,6 @@ const ACTION_KEYS: &str = "order_usd combined_score instrument asset_class sessi
 const STEP_KEYS: &str = "thesis_id admitted reason score_carried_forward lineage_revisions \
     lineage_retired universe_size_after journal";
 const ENTRY_KEYS: &str = "instrument thesis_id lineage_id revision expires_at invalidated";
-const PENDING_CLASSIFY: &str =
-    "`first_order_autonomy` is not interpreted until E6-2 (`mandate_builder::classify`)";
 
 type ModelIdentity = (ModelId, ModelVersion, ContentHash);
 
@@ -112,10 +116,108 @@ pub(super) fn admission_case(fixture: &Json, case: &Json) -> Result<(), String> 
         "decision by approvers_required on_timeout",
         "first_order_autonomy",
     )?;
-    ensure(a.first_order.is_some(), || {
-        "first_order_autonomy: expected a decision, but admission reported no first order".into()
+    let first_order = a.first_order.as_ref().ok_or_else(|| {
+        "first_order_autonomy: expected a decision, but admission reported no first order"
+            .to_owned()
     })?;
-    Err(PENDING_CLASSIFY.to_owned())
+    let mandate = must_parse(&patched(fixture, case)?)?;
+    expect_eq(
+        "first_order admission_ceiling against the parsed mandate's `autonomy.admission`",
+        research_decision_name(first_order.admission_ceiling),
+        decision_name(mandate.autonomy.admission),
+    )?;
+    let action = first_order_action(at(input, "admission_action")?, first_order)?;
+    let decided = classify(&mandate.autonomy, &action).map_err(builder)?;
+    expect_eq(
+        "first_order_autonomy",
+        classification_json(&decided),
+        wanted.clone(),
+    )
+}
+
+/// The first order's §6.3 facts: the case's `admission_action` as stated, with `purpose` `open`
+/// and `new_instrument` and `thesis_confidence` from the facts admission reported, as `ref.py`'s
+/// `admit` composes them. `unusual_input` must be `false`: V-018 reserves the field until the
+/// input-drift detector ships, `ActionContext` has no place for it, and a `true` would be an input
+/// no v1 decision can read.
+fn first_order_action(
+    stated: &Json,
+    first_order: &FirstOrderFacts,
+) -> Result<ActionContext, String> {
+    ensure(!bool_of(stated, "unusual_input")?, || {
+        "`admission_action.unusual_input` is true, which no v1 decision reads (V-018)".to_owned()
+    })?;
+    let usd = |key: &str| num(Usd::parse(str_at(stated, key)?), key);
+    let unit = |key: &str| num(Unit::parse(str_at(stated, key)?), key);
+    let signed = |key: &str| num(Signed::parse(str_at(stated, key)?), key);
+    Ok(ActionContext {
+        purpose: Purpose::Open,
+        order_usd: usd("order_usd")?,
+        combined_score: unit("combined_score")?,
+        instrument: mandate_domain::AssetId::parse(str_at(stated, "instrument")?)
+            .map_err(|e| format!("`instrument`: {}", e.code()))?,
+        asset_class: mandate_domain::AssetClass::parse(str_at(stated, "asset_class")?)
+            .map_err(|e| format!("`asset_class`: {}", e.code()))?,
+        session: MarketSession::parse_condition_form(str_at(stated, "session")?)
+            .map_err(|e| format!("`session`: {}", e.code()))?,
+        first_trade_in_instrument: bool_of(stated, "first_trade_in_instrument")?,
+        new_instrument: first_order.new_instrument,
+        thesis_confidence: num(
+            Unit::parse(first_order.thesis_confidence.as_str()),
+            "thesis_confidence",
+        )?,
+        drawdown: unit("drawdown")?,
+        daily_pnl_fraction: signed("daily_pnl_fraction")?,
+        position_usd_after: usd("position_usd_after")?,
+        gross_usd_after: usd("gross_usd_after")?,
+        bought_today_usd: usd("bought_today_usd")?,
+        position_pnl_fraction: signed("position_pnl_fraction")?,
+    })
+}
+
+/// A classification as the fixture writes one: the approval members appear exactly when §6.4
+/// gives the decision an approval, so comparing the whole object checks them both ways.
+fn classification_json(decided: &Classification) -> Json {
+    let mut out = json!({ "decision": decision_name(decided.decision), "by": decided.by.label() });
+    if let (Some(approval), Some(members)) = (decided.approval, out.as_object_mut()) {
+        members.insert(
+            "approvers_required".to_owned(),
+            u64::from(approval.approvers_required.get()).into(),
+        );
+        let on_timeout = match approval.on_timeout {
+            OnTimeout::Skip => "skip",
+        };
+        members.insert("on_timeout".to_owned(), on_timeout.into());
+    }
+    out
+}
+
+/// The §6.2 spelling, written here rather than taken from a crate: the fixture's word is the
+/// expectation, so the harness must know it independently.
+fn decision_name(decision: mandate_domain::AutonomyDecision) -> &'static str {
+    match decision {
+        mandate_domain::AutonomyDecision::Auto => "auto",
+        mandate_domain::AutonomyDecision::Ask => "ask",
+        mandate_domain::AutonomyDecision::Deny => "deny",
+    }
+}
+
+/// [`decision_name`] for the research crate's own stand-in type (DEC-132 item 24).
+fn research_decision_name(decision: AutonomyDecision) -> &'static str {
+    match decision {
+        AutonomyDecision::Auto => "auto",
+        AutonomyDecision::Ask => "ask",
+        AutonomyDecision::Deny => "deny",
+    }
+}
+
+/// A `mandate-builder` refusal, with `unimplemented` turned into the message DEC-77 requires.
+fn builder(error: BuilderError) -> String {
+    if error.code() == "unimplemented" {
+        not_implemented("`mandate_builder::classify`")
+    } else {
+        format!("`mandate_builder::classify`: {error} ({})", error.code())
+    }
 }
 
 /// `kind: lineage` — a sequence of theses folded through §8.6, step by step.
@@ -593,11 +695,33 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
+    use mandate_num::Ratio;
+    use mandate_spec::condition::{ConditionField, Facts, FieldKind};
+    use serde_json::json;
+
     use crate::{Json, mandate, read_fixture};
 
-    /// Where `first_order_autonomy` waits on E6-2; any other failure of these three is a real one.
-    const PENDING: &str = super::PENDING_CLASSIFY;
-    const WAITING_ON_CLASSIFY: [&str; 3] = ["MC-N01", "MC-N14", "MC-N26"];
+    /// §6.3's fields, less the reserved `unusual_input` (V-018).
+    const FIELDS: [ConditionField; 15] = [
+        ConditionField::Purpose,
+        ConditionField::OrderUsd,
+        ConditionField::CombinedScore,
+        ConditionField::Instrument,
+        ConditionField::AssetClass,
+        ConditionField::Session,
+        ConditionField::FirstTradeInInstrument,
+        ConditionField::NewInstrument,
+        ConditionField::ThesisConfidence,
+        ConditionField::Drawdown,
+        ConditionField::DailyPnlFraction,
+        ConditionField::PositionUsdAfter,
+        ConditionField::GrossUsdAfter,
+        ConditionField::BoughtTodayUsd,
+        ConditionField::PositionPnlFraction,
+    ];
+
+    /// The cases that state a first order's autonomy decision.
+    const CLASSIFIED: [&str; 3] = ["MC-N01", "MC-N14", "MC-N26"];
     /// Input members that are data maps, whose keys are ids rather than field names.
     const DATA_MAPS: [&str; 2] = ["instrument_groups", "lineages"];
     const PLANTED: &str = "zz_planted";
@@ -607,24 +731,16 @@ mod tests {
         read_fixture(&dir, "mandate.json").map(Arc::unwrap_or_clone)
     }
 
-    /// The family-N cases whose kind this module interprets now; the rest still name their story.
+    /// The family-N cases, every one of which this module interprets.
     fn family_n(fixture: &Json) -> Result<Vec<String>, String> {
-        let all: Vec<&Json> = crate::list_at(fixture, "cases")?
+        let ids: Vec<String> = crate::list_at(fixture, "cases")?
             .iter()
-            .filter(|c| c["id"].as_str().is_some_and(|id| id.starts_with("MC-N")))
+            .filter_map(|c| c["id"].as_str())
+            .filter(|id| id.starts_with("MC-N"))
+            .map(str::to_owned)
             .collect();
-        let pending = |c: &&Json| {
-            super::super::PENDING_KINDS
-                .iter()
-                .any(|(k, _)| c["kind"] == *k)
-        };
-        let ids: Vec<String> = all
-            .iter()
-            .filter(|c| !pending(c))
-            .filter_map(|c| c["id"].as_str().map(str::to_owned))
-            .collect();
-        crate::ensure(all.len() == 28 && !ids.is_empty(), || {
-            format!("family N holds 28 cases, {} interpreted here", ids.len())
+        crate::ensure(ids.len() == 28, || {
+            format!("family N holds 28 cases, found {}", ids.len())
         })?;
         Ok(ids)
     }
@@ -688,31 +804,95 @@ mod tests {
         }
     }
 
-    /// A doctored case must fail, and for the three waiting on `classify`, for another reason unless
-    /// a value inside `first_order_autonomy` itself was changed; a member added there must fail at
-    /// the sweep, before the classify step.
+    /// A doctored case must fail.
     fn must_fail(result: Result<(), String>, id: &str, what: &str) -> Result<(), String> {
-        let classify_side =
-            what.starts_with("/expect/first_order_autonomy/") && !what.ends_with(PLANTED);
         match result {
             Ok(()) => Err(format!(
                 "{id}: {what} was doctored and the case still passed"
-            )),
-            Err(e) if e.starts_with(PENDING) && !classify_side => Err(format!(
-                "{id}: {what} was doctored and the case reached the classify step anyway"
             )),
             Err(_) => Ok(()),
         }
     }
 
     #[test]
-    fn every_interpreted_case_passes_and_three_wait_only_on_classify() -> Result<(), String> {
+    fn every_interpreted_case_passes() -> Result<(), String> {
         let fixture = fixture()?;
         for id in family_n(&fixture)? {
-            match run(fixture.clone(), &id) {
-                Ok(()) if !WAITING_ON_CLASSIFY.contains(&id.as_str()) => {}
-                Err(e) if WAITING_ON_CLASSIFY.contains(&id.as_str()) && e.starts_with(PENDING) => {}
-                other => return Err(format!("{id}: {other:?}")),
+            run(fixture.clone(), &id).map_err(|e| format!("{id}: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// Each of the three first orders reaches `classify` with every fact in its own §6.3 field: the
+    /// stated `admission_action` members, `purpose` `open`, and `new_instrument` and
+    /// `thesis_confidence` from the facts admission reported, read back through the `Facts`
+    /// projection a rule reads. The reported facts here are `false` and a confidence no stated
+    /// member holds (the fixture's thesis confidence equals its `combined_score`), so a harness that
+    /// fixed `new_instrument` or took the confidence from another field fails, even where no base's
+    /// rules would notice.
+    #[test]
+    fn every_first_order_fact_reaches_its_own_field() -> Result<(), String> {
+        const CONFIDENCE: &str = "0.31";
+        let fixture = fixture()?;
+        let mut compared = 0_usize;
+        for id in CLASSIFIED {
+            let case = crate::list_at(&fixture, "cases")?
+                .iter()
+                .find(|c| c.get("id").and_then(Json::as_str) == Some(id))
+                .ok_or("the case")?;
+            let stated = crate::at(case, "input.admission_action")?;
+            crate::ensure(
+                stated
+                    .as_object()
+                    .is_some_and(|m| m.values().all(|v| v != CONFIDENCE)),
+                || format!("{id}: a stated member holds {CONFIDENCE}"),
+            )?;
+            let first_order = mandate_research::FirstOrderFacts {
+                new_instrument: false,
+                thesis_confidence: mandate_research::SchemaDec::from_checked_text(CONFIDENCE),
+                admission_ceiling: mandate_research::AutonomyDecision::Ask,
+            };
+            let facts = super::first_order_action(stated, &first_order)?;
+            let mut wanted = stated.clone();
+            let members = wanted.as_object_mut().ok_or("an action object")?;
+            members.remove("unusual_input");
+            members.insert("purpose".to_owned(), json!("open"));
+            members.insert("new_instrument".to_owned(), json!(false));
+            members.insert("thesis_confidence".to_owned(), json!(CONFIDENCE));
+            crate::expect_eq("the facts stated", members.len(), FIELDS.len())?;
+            for field in FIELDS {
+                let name = field.as_str();
+                let want = members.get(name).ok_or_else(|| format!("{id}: {name}"))?;
+                let same = match field.kind() {
+                    FieldKind::Bool => facts.bool_field(field) == want.as_bool(),
+                    FieldKind::Enum | FieldKind::Text => facts.enum_field(field) == want.as_str(),
+                    FieldKind::Decimal => {
+                        let text = want.as_str().ok_or_else(|| format!("{id}: {name}"))?;
+                        facts.decimal_field(field)
+                            == Some(Ratio::parse(text).map_err(|e| format!("{id}: {e}"))?)
+                    }
+                };
+                crate::ensure(same, || {
+                    format!("{id}: `{name}` did not reach its own field")
+                })?;
+                compared = compared.saturating_add(1);
+            }
+        }
+        crate::expect_eq("facts compared", compared, 3 * FIELDS.len())
+    }
+
+    /// A first order whose `unusual_input` is true fails naming it, rather than being classified as
+    /// if the reserved field were false.
+    #[test]
+    fn an_unusual_first_order_input_fails_naming_it() -> Result<(), String> {
+        let fixture = fixture()?;
+        for id in CLASSIFIED {
+            let doctored = doctored(&fixture, id, "/input/admission_action/unusual_input", |v| {
+                *v = Json::Bool(true);
+            })?;
+            match run(doctored, id) {
+                Err(e) if e.contains("unusual_input") => {}
+                other => return Err(format!("{id}: an unusual input gave {other:?}")),
             }
         }
         Ok(())

@@ -44,7 +44,10 @@
 //! and 28). E6-7 adds check 2's eligibility floor (§3.2, items 1 to 7 in list order), which makes
 //! checks 1 and 2 whole. E6-6 adds [`session_at`] and check 3's session rules, the rest of check 4
 //! (§5.3 rules 2 and 4 to 8, and §5.1's limit-only openings), check 7's buying power with the fee
-//! reservation, and check 8's `legacy_pdt` budget, which makes checks 3, 4, 7 and 8 whole.
+//! reservation, and check 8's `legacy_pdt` budget, which makes checks 3, 4, 7 and 8 whole. E6-8
+//! adds check 5 (mark freshness and the collar), check 6's market-conduct controls, the pacing an
+//! allowed exit is sent with, [`evaluate_cancel`]'s minimum resting time and the [`surveillance`]
+//! report (§9.6, DEC-163), which leaves only check 2 for crypto owed, to E6-10.
 //! **Until every check exists the gate fails closed for adding risk** (DEC-129 item 29): an
 //! opening or increasing order the implemented checks would allow returns
 //! [`GateError::Unimplemented`] naming the story still owed, a denial or hold from an implemented
@@ -60,6 +63,7 @@ use mandate_time::{Date, UtcNanos};
 use thiserror::Error;
 
 mod account_rules;
+mod conduct;
 mod flatten;
 mod floor;
 mod gate;
@@ -67,6 +71,7 @@ mod limits;
 mod session;
 #[doc(hidden)]
 pub mod spec_types;
+mod surveillance;
 
 pub use mandate_accounting::{AccountType, AssetClass, Side};
 pub use spec_types::{
@@ -506,6 +511,19 @@ pub enum EtpClass {
     Unclassified,
 }
 
+/// What a pair is quoted in, for §3.2 item 7's "USD pairs only" (DEC-254).
+///
+/// `Usd` is the only value that can admit a crypto opening, and nothing produces it by default:
+/// the type has no `Default`, [`InstrumentSnapshot::quote_currency`] is `None` when the instrument
+/// master stated no quote currency, and every stated code but exactly `USD` is `Other` — a
+/// stablecoin (USDT, USDC), a fiat other than USD, a crypto asset, or a code the loader does not
+/// recognise. A USD-pegged stablecoin is not USD: the floor's dollar figures were written for USD.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuoteCurrency {
+    Usd,
+    Other,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SaneQuote {
     pub bid: Price,
@@ -571,6 +589,12 @@ pub struct AccountSnapshot {
     pub market_values: BTreeMap<AssetId, Usd>,
     pub working_orders: BTreeMap<ClientOrderId, WorkingOrder>,
     pub unknown_orders: BTreeSet<AssetId>,
+    /// §9.6's self-trade input: per instrument, every side on which an order rests in any account
+    /// of the owner's related-accounts group (by default every account in the workspace), this
+    /// account included, whichever agent placed it, the deciding agent's own included, and of any
+    /// purpose, protective included. The gate filters nothing: any listed side opposite an opening
+    /// denies it. In this account a non-protective order already denies an opening at check 4
+    /// (§5.3 rule 6), so here the set adds the resting protective orders (DEC-163 item 11).
     pub related_account_resting: BTreeMap<AssetId, BTreeSet<RestingSide>>,
 }
 
@@ -600,6 +624,10 @@ pub struct InstrumentSnapshot {
     pub ptp_no_exception: bool,
     pub etp: EtpClass,
     pub etp_classified_at: Option<UtcNanos>,
+    /// The quote half of the pair (the `USD` of `BTC/USD`), which §3.2 item 7 reads for crypto
+    /// only; `None` when the instrument master did not state it, which admits no crypto opening. A
+    /// US equity is quoted in USD and the gate never reads the field for one.
+    pub quote_currency: Option<QuoteCurrency>,
     pub prior_close: Option<Price>,
     pub median_dollar_volume_20d: Option<Usd>,
     pub median_dollar_volume_30d: Option<Usd>,
@@ -616,12 +644,31 @@ pub struct MarketSnapshot {
     pub adv_20d: Option<Qty>,
 }
 
+/// What the executor folds from the account streams for §9.6 (DEC-163 item 11). "Today" is the
+/// risk day, 00:00 to 00:00 America/New_York (mandate §5.3), which holds an equity's whole trading
+/// day; a per-day field starts from empty at its first instant.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConductState {
+    /// Per instrument, the deciding agent's orders that filled at least in part today, each order
+    /// once however many fills it took, so partial fills cannot dilute the ratio. Only this agent's
+    /// orders, in the account it trades (§9.6: "per agent per instrument per day"); reset daily.
     pub filled_today: BTreeMap<AssetId, u32>,
+    /// Per instrument, the deciding agent's orders submitted today, of any purpose, each
+    /// `client_order_id` once, rejected ones included, less those an exit sequence or a kill switch
+    /// canceled (§9.6); the proposal being decided is not among them. Only this agent's orders, in
+    /// the account it trades; reset daily.
     pub orders_today_per_instrument: BTreeMap<AssetId, u32>,
+    /// Per instrument and side, the latest fill on that side by any agent in any account of the
+    /// related-accounts group. Never reset: a fill older than `opposite_fill_interval_s` simply no
+    /// longer blocks, across midnight too.
     pub last_opposite_fill_at: BTreeMap<(AssetId, RestingSide), UtcNanos>,
+    /// Per instrument, the quantity filled today on both sides by every agent in every account of
+    /// the related-accounts group, plus the open quantity of their working orders in it; the
+    /// proposal being decided is not included. Reset daily.
     pub participation_today: BTreeMap<AssetId, Qty>,
+    /// Per working order in this account, the instant the broker accepted it, kept until the order
+    /// is done. [`evaluate`] does not read it; the executor passes the canceled order's instant to
+    /// [`evaluate_cancel`] as [`CancelInput::resting_since`].
     pub resting_since: BTreeMap<ClientOrderId, UtcNanos>,
 }
 
@@ -684,11 +731,21 @@ pub struct GateInput<'a> {
 /// item 20).
 #[derive(Debug, Clone)]
 pub struct CancelInput<'a> {
+    /// The risk clock's latest tick, as for [`GateInput::now`].
     pub now: UtcNanos,
     pub config: &'a GateConfig,
+    /// The working order to cancel, as it stands in [`AccountSnapshot::working_orders`].
     pub order: &'a WorkingOrder,
+    /// The instant the broker accepted `order`, from [`ConductState::resting_since`].
     pub resting_since: UtcNanos,
+    /// Whether the cancel is a step toward a risk-reducing order: an exit sequence, a kill switch,
+    /// or clearing the way for a risk exit, a protective order or an owner exit. §9.6 exempts it,
+    /// and it is the only way an exit sequence's or kill switch's cancel is exempt, since the
+    /// executor sets it and this input has no cause field (DEC-163 item 7).
     pub precedes_risk_reducing_order: bool,
+    /// Whether `order`'s limit trades against the current quote (a buy at or above the ask, a sell
+    /// at or below the bid). With no usable quote it is `false`, so an order not known to be
+    /// marketable is held to the resting time.
     pub marketable: bool,
 }
 
@@ -716,8 +773,7 @@ pub fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
 /// # Errors
 /// Returns [`GateError`] when the input cannot be evaluated.
 pub fn evaluate_cancel(input: &CancelInput<'_>) -> Result<Decision, GateError> {
-    let _ = input;
-    Err(GateError::Unimplemented("evaluate_cancel", "E6-8"))
+    conduct::evaluate_cancel(input)
 }
 
 /// The purpose §9.1 assigns to a proposal, from its origin, side and the agent's position. A sell
@@ -882,10 +938,14 @@ pub enum SurveillanceBreach {
     OrderToFill,
     SelfTrade,
     CloseWindow,
+    /// Not raised in v1: §3.3 supplies no concentration threshold, and one the platform chose
+    /// would be compliance-visible, so the report states concentration as a figure only (DEC-163
+    /// item 8).
     Concentration,
 }
 
-/// The §9.6 daily surveillance report.
+/// The §9.6 daily surveillance report: the day's figures, each threshold crossed flagged, and no
+/// judgement.
 ///
 /// # Errors
 /// Returns [`GateError`] when a ratio cannot be computed exactly.
@@ -894,6 +954,5 @@ pub fn surveillance(
     config: &GateConfig,
     input: &SurveillanceInput,
 ) -> Result<SurveillanceReport, GateError> {
-    let _ = (day, config, input);
-    Err(GateError::Unimplemented("surveillance", "E6-8"))
+    surveillance::report(day, config, input)
 }

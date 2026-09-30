@@ -4,7 +4,8 @@
 |---|---|
 | **Owner** | Product (web stream W1) |
 | **Status** | Draft v0.1. The founder decided to start web design ahead of M9 ([DEC-134](../project/04-decision-log.md#decisions)); the product decisions in §6 were decided by the founder on 2026-09-27 ([DEC-135](../project/04-decision-log.md#decisions), [DEC-136](../project/04-decision-log.md#decisions)) |
-| **Related** | [PRD](04-prd-v1.md) · [Personas](02-personas-and-journeys.md) · [Compliance](08-compliance-and-regulatory.md) · [HLD](../HLD.md) · [Mandate spec](../specs/mandate.md) · [Trading domain spec](../specs/trading-domain.md) · [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) |
+| **Related** | [PRD](04-prd-v1.md) · [Personas](02-personas-and-journeys.md) · [Compliance](08-compliance-and-regulatory.md) · [HLD](../HLD.md) · [Mandate spec](../specs/mandate.md) · [Trading domain spec](../specs/trading-domain.md) · [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) · [ADR-0003](../adr/0003-earned-autonomy.md) |
+| **Additions** | 2026-09-30, from [ADR-0003](../adr/0003-earned-autonomy.md): goal-first onboarding (A0, the contract card on A2), delegations on the approval screen (D6), the plan view (D12), the daily brief (D13), the chat thread (D14), autonomy settings (D15), and PX-15 to PX-18. The founder accepted [DEC-181](../project/04-decision-log.md#decisions) (delegations) and PX-15 to PX-18 ([DEC-198](../project/04-decision-log.md#decisions)) on 2026-09-30 |
 
 This brief records the product-experience decisions that the designs and, later, the web code are
 built from: the principles that settle trade-offs, the journeys, every screen with its states, the
@@ -36,7 +37,7 @@ These principles decide trade-offs. When two of them conflict, the lower number 
 | # | Principle | What it means on screen | Traced to |
 |---|---|---|---|
 | P1 | **Reducing risk is always within reach and never blocked by the interface.** | Pause, close, and the kill switch are on every screen where they apply, and loading, stale data, errors, and pending approvals never disable them. The spec requires step-up for an owner exit; nothing else stands in front of it | [AGENTS.md](../../AGENTS.md) rules 2 and 13; [trading §1](../specs/trading-domain.md#1-principles) principle 4; [trading §5.5](../specs/trading-domain.md#55-kill-switch); DEC-05, DEC-48 |
-| P2 | **The owner sets the envelope, and can see that they did.** | Every envelope field shows where its value came from: the owner's words (with the quoted span), the owner's entry, a template, a platform proposal, or a platform default. A proposed value looks inactive until the owner confirms it. `auto` is never proposed, never preselected, and never offered as a chip | Rule 11; [mandate §2.1](../specs/mandate.md#21-provenance-and-confirmation), [§7](../specs/mandate.md#7-compiler-and-platform-proposals-dec-97); V-020, V-022, MI-12; DEC-97 |
+| P2 | **The owner sets the envelope, and can see that they did.** | Every envelope field shows where its value came from: the owner's words (with the quoted span), the owner's entry, a template, a platform proposal, or a platform default. A proposed value looks inactive until the owner confirms it. `auto` is never proposed, never preselected, and never offered as a chip. The one offer is a delegation scope on an approval screen (D6), which the owner picks or ignores, with none preselected (mandate §6.4, DEC-181) | Rule 11; [mandate §2.1](../specs/mandate.md#21-provenance-and-confirmation), [§7](../specs/mandate.md#7-compiler-and-platform-proposals-dec-97); V-020, V-022, MI-12; DEC-97 |
 | P3 | **The platform explains and never persuades.** | The platform does originate ideas (DEC-97), so the interface does not pretend otherwise: a thesis is labeled platform-authored. But no screen says "recommended", estimates profit, sets a price target, ranks models, or shows a scorecard beside a decision. Approve and Skip carry equal weight | [mandate §6.4](../specs/mandate.md#64-approvals), [§8.1](../specs/mandate.md#81-signal-model-contract-dec-52-dec-97); DEC-52, DEC-126; compliance questions 26 and 35 |
 | P4 | **Silence is safe, and the screen says so.** | Every request shows what happens if the owner does nothing ("If you do nothing, this action is skipped"). A timeout, a lost connection, or a failed step-up never turns into an approval | Rule 3; DEC-06; FR-6.6 |
 | P5 | **Notifications carry nothing about trading.** | Push, email, SMS, and chat carry an opaque ID and generic text only: no instrument, size, price, thesis, or agent name. The same applies to anything a browser or operating system may copy elsewhere: URLs, page titles, and cached pages | Rule 6; DEC-11; FR-6.4 |
@@ -45,6 +46,7 @@ These principles decide trade-offs. When two of them conflict, the lower number 
 | P8 | **What the owner saw is what gets recorded.** | The confirmation, go-live, approval, owner-exit, kill-switch, and release screens are *record screens*: rendered deterministically, stored as an artifact with the UI build, and frozen once shown (§4.1) | [mandate §10](../specs/mandate.md#10-records-dec-51-dec-97); `MandateConfirmed`, `AgentDeployed`, `OwnerExitRequested` |
 | P9 | **Paper and live can never be confused.** | The environment is on every screen that shows an agent, a connection, or money. No live path is built into any flow until counsel signs off; in the designs, live exists only as a blocked state | Rule 8; DEC-98; V-031 |
 | P10 | **Ask only when it matters, and make the answer fast.** | An approval is decidable in under a minute on a phone. Escalations are few, so each one gets the evidence it needs and nothing else | [Vision](01-vision-and-strategy.md#product-principles) principle 3; journey J2; PRD §8 (median response under 5 minutes) |
+| P11 | **Every surface compiles to the mandate or is checked against it.** | The goal questions, the contract card, a delegation, the dial, away mode, and a chat message asking for a change each produce a mandate version the owner confirms. An approval, an owner request from chat or a connected agent, the plan view, and the brief act under the current version or read it. No screen holds state that steers the agent, and each shows which mandate field it reads or writes | Rule 11; [mandate §2](../specs/mandate.md), [§6.5](../specs/mandate.md#65-delegations-dec-181-adr-0003), [§7](../specs/mandate.md#7-compiler-and-platform-proposals-dec-97); ADR-0003 |
 
 ## 2. Personas and journeys
 
@@ -82,14 +84,20 @@ Each journey lists its steps with the screens of §3 in brackets, and the moment
    account read, never transfers) and the 1× check. A rejected connection says why and what to do,
    without echoing any secret. Robinhood users get the simulated broker with Robinhood's rules as
    their paper stage (DEC-124), labeled as simulated.
-3. Land on an empty dashboard whose one action is "Describe your first agent" [D1].
+3. Land on an empty dashboard whose one action is "Set up your first agent" [D1], which opens the
+   three goal questions [A0] (ADR-0003, DEC-182).
 
 *Moment that matters:* the owner sees, in words, that the platform cannot move their money.
 
 **J-B. Authoring a mandate** (Alex, Jordan)
 
-1. Describe the agent in plain language, optionally from a template [A1].
-2. The compiler returns the mandate [A2]. Each field carries a provenance badge: *stated by you* (the
+1. **Goal first** [A0] (DEC-182): three questions, how much money, what the goal is, and how much the
+   owner can stand to lose, each answered in the owner's own words or numbers. "Describe it yourself"
+   [A1] and templates stay available for owners who want to write it.
+2. The compiler returns the mandate [A2], led by the **contract card**: the whole envelope in plain
+   language on one card, with the three answers quoted, every value the compiler drafted marked
+   *proposed*, and the dollar figures of step 5. Nothing proposed is active until confirmed. Below
+   the card, each field carries a provenance badge: *stated by you* (the
    quoted span of the owner's words), *entered by you*, *from template* (`template_structure`, present
    because the template included the field or rule), *proposed by the platform — confirm or change*,
    or *platform default*. Constraints the mandate cannot express are flagged **not enforced**
@@ -105,7 +113,8 @@ Each journey lists its steps with the screens of §3 in brackets, and the moment
    then step-up [G3]. The confirmation binds the version hash.
 
 *Moment that matters:* the compiled mandate reads exactly like what the owner meant, and nothing the
-platform proposed became active without the owner's hand on it.
+platform proposed became active without the owner's hand on it. In the goal-first path, the owner
+answered three questions and still confirmed every value the platform drafted.
 
 **J-C. Backtest, paper, go-live** (Alex)
 
@@ -148,9 +157,29 @@ platform proposed became active without the owner's hand on it.
    exists in the spec; the only path is a version that loosens `max_loss_from_allocation`, with
    independent approval and, in a single-user workspace, a waiting period
    ([mandate §5.7](../specs/mandate.md#57-lifetime-loss-floor-dec-44-dec-55)).
+7. **Stop asking me about this** [D6, D15] (DEC-181): beside Approve and Skip, the approval
+   screen offers to approve this one and let the agent go ahead with the same kind of action for a
+   while, within caps the screen states in dollars, orders, and days. "Approve just this" comes
+   first; no scope is preselected. Later actions under the delegation run without asking and show
+   the delegation on their record; the owner sees every delegation, its use so far, and its expiry
+   on D15 and ends any of them there with one action, no step-up (ending one reduces risk).
+8. **What is it doing?** [D12]: the plan view says, in words, what the agent is watching, what it
+   would do next and under which rule, whether that would run automatically or ask, and what would
+   stop it.
+9. **The daily brief** [D13]: one summary a day of what ran, what was skipped, what the delegations
+   let through, and what changed. Everything that does not need the owner waits for it (PX-16).
+10. **Talking to the agent** [D14]: the owner writes in a chat thread. A message becomes either an
+   owner request, shown as a card with the gate's verdict and the autonomy outcome before anything is
+   sent, or a proposed envelope change, which opens A6 with step-up. The agent's replies are quoted
+   model output, never the platform's voice (rule 4).
+11. **From another agent** (E10-6, DEC-183): an owner who works in OpenAI Dots, Meta Muse, or Grok
+   Bot connects Owlhead there. That agent can read status, the plan, and the brief, ask for an
+   order, and propose an envelope change, exactly like step 10; it can never approve, confirm, or
+   pick a delegation, so every such request lands in the owner's approvals inbox [D5] or on A6.
 
 *Moment that matters:* the system protected capital before the owner read the message, and the
-screen says exactly what the owner may now do.
+screen says exactly what the owner may now do. As the owner delegates more, they still see what ran
+without them and why, and can take it back in one tap.
 
 **J-E. Stopping** (any operator)
 
@@ -300,6 +329,18 @@ exists.
 
 #### Authoring
 
+**A0 Goal questions** ⚠ (DEC-182)
+- *Shows:* three questions, one per step: how much money, what the goal is, and how much the owner
+  can stand to lose, each in the owner's words or numbers, and "Describe it yourself" (A1) as an
+  equal choice. No example returns, no suggested amounts.
+- *Writes:* `capital.allocation_usd`, `goal` (one of the goal types, with `on_complete`), and
+  `capital.max_loss_from_allocation`, each `user_stated` with its quoted span; the compiler drafts
+  the rest as `platform_proposed` (never `auto` or a delegation, V-022).
+- *Primary action:* Continue, to A2 with the contract card on top.
+- *States:* A goal the types cannot express: kept as description text and flagged **not enforced**
+  on A2. A loss answer above the policy ceiling: the ceiling shown as a limit, never substituted.
+- *Governs:* mandate §2.1, §7; V-020, V-022, V-038; compliance question 36.
+
 **A1 Describe**: a text box for the description and an optional template (FR-3.8). Empty state
 explains what a mandate is, without example returns.
 
@@ -314,6 +355,10 @@ explains what a mandate is, without example returns.
   Error (compiler output fails the schema): "we could not compile this", and the form stays
   available. Degraded (model gateway down): the form is available; the description is kept.
 - *Governs:* mandate §2.1, §7; V-020, V-022, V-038; FR-3.1, FR-3.4; PX-1, PX-2.
+- *Contract card* (DEC-182): the whole envelope in plain language on one card above the fields: the
+  three answers quoted, every drafted value marked *proposed*, the dollar figures of A5, and the
+  **unasked dollars** (DEC-189): what could trade without asking once confirmed. It is a rendering
+  of the mandate, not a separate object.
 
 **A3 Form and YAML editor**: both views of one document (FR-3.2). The model picker lists
 methodology only, with no ranking, no "recommended", no scorecard (FR-8.4, DEC-52); parameters have
@@ -440,6 +485,17 @@ mode change).
   persuasive language.
 - *Governs:* mandate §6.4; FR-6.2, FR-6.5, FR-6.6, FR-6.7; HLD flow C; PX-6, PX-7.
 
+- *Delegation variant* (DEC-181; mandate §6.4, §6.5; laid out as PX-15 (b)): beside Approve and Skip, "Approve just
+  this" first and the three fixed shapes (like this until the close, this instrument for a set time,
+  this kind of order for a set time), none selected, each with the same weight as Skip. Choosing a
+  shape shows every field it will write to `autonomy.delegations` (caps in dollars and orders,
+  start, expiry) and the unasked dollars after it, then one step-up approves this action and confirms
+  the new version, which applies at the next safe point. Counts only (asks approved, skipped, timed
+  out; orders under each delegation), never profit or outcome (compliance question 37). Not offered
+  for an admission, a two-approver ask, a live environment, or a client session (PX-15).
+- *Client-requested variant* (DEC-185): "Requested by your connected agent" with the name the owner
+  gave the client; never offers a delegation; answerable only here, never in the client's own app.
+
 **D7 Acknowledgments** ⚠ (record screens, pending the spec change of §7 question 7). One pattern,
 several variants; each shows what happened and what acknowledging changes. The spec requires step-up
 for the drawdown acknowledgment (mandate §5.8), the daily-loss flatten acknowledgment (§5.4), and the
@@ -499,6 +555,45 @@ activity, account restriction, surveillance), because each acknowledgment restor
   Close (as D9).
 - *Governs:* mandate §3.1; `PositionReleased`.
 
+**D12 Plan view** (DEC-184)
+- *Shows:* what the agent is watching (the working universe or pinned list), what it would do next
+  and under which mandate rule, whether that would run automatically, ask, or be denied (and why:
+  the rule, a delegation, the admission ceiling, the client ceiling), and what would stop it (the
+  limits with headroom, tripwires, the review date).
+- *Reads:* the mandate and the runtime's state; writes nothing. Model text is quoted and attributed
+  (rule 4).
+- *Governs:* mandate §6.2; P6, P11.
+
+**D13 Daily brief** (DEC-184; PX-16)
+- *Shows:* what ran and under which source (rule, default, delegation), what was skipped and why
+  (deadline, gate, ask budget), what each delegation let through and what remains, which guardrails
+  fired (tripwires, suspensions, the review date), what changed (versions, theses, the universe), and
+  anything waiting for the owner.
+- *Delivery:* one notification a day, "Your daily brief is ready", with an opaque ID (rule 6).
+- *Governs:* DEC-184, DEC-195; FR-8.3; P4, P5.
+
+**D14 Chat thread** (DEC-184, DEC-192; PX-18)
+- *Shows:* the owner's messages and the agent's replies. A reply is quoted model output and never
+  renders a button. When a message asks for an action, deterministic code shows one of two cards: an
+  **owner request** (the order the builder would propose, the gate's verdict, and the autonomy
+  outcome, before anything is sent) or a **proposed version** (opens A6 with its classification and
+  step-up). "Why" answers are assembled from the journal with links to each event, and a missing
+  fact reads "not recorded" (E12-5).
+- *Never:* an order placed from a message alone; a change to the envelope without A6.
+- *Governs:* rules 4 and 11; DEC-141; compliance question 41.
+
+**D15 Autonomy** (DEC-181, DEC-187 to DEC-189, DEC-194; PX-17)
+- *Shows:* the dial as a read-out (Supervised, Co-pilot, Autopilot) derived from `autonomy.default`,
+  the rules, and the live delegations; the unasked dollars; every delegation with its use, remaining
+  caps, expiry, and state (live, suspended and why, spent, expired); tripwires and when each last
+  fired; the review date; away mode; and connected clients with their scopes.
+- *Primary actions:* End a delegation (one tap, no step-up: it reduces risk); Away mode (a reducing
+  version, at once; at its end date the owner is asked to restore, and silence keeps it on); Change
+  (opens the exact field on A3 with nothing pre-filled; widening goes through A6 with step-up); the
+  "what would change" replay before confirming a widening (DEC-186, counts only, compliance question
+  39); Revoke a client.
+- *Governs:* mandate §6.5, §9.2; DEC-180; P2, P7, P11.
+
 #### Audit
 
 **J1 Agent timeline**: events with filters by type, time, and outcome (FR-7.3). **J2 Causal trace**:
@@ -514,9 +609,9 @@ Auditors see these screens and nothing that acts.
 **X1 Policies** ⚠: the organization and workspace policy editors. A value looser than its parent is
 rejected with a message naming the parent limit (FR-1.5; the nearest ancestor per mandate §4.3); a change shows the agents it makes
 nonconforming (mandate §4.3). **X2 Members and roles**, with separation of duties (FR-1.3, FR-1.6).
-**X3 Notifications**: channels, escalation chain, quiet hours; the screen states that approval
-requests are not delivered in quiet hours and so time out, while risk-limit alerts ignore quiet hours
-(mandate §6.4). **X4 Deployment health** (hybrid and on-prem, where the customer is the deployment's
+**X3 Notifications**: channels, escalation chain, quiet hours; the screen states that quiet hours
+hold back push notifications of approval requests, which stay listed in the inbox and can still be
+answered before their deadline, while risk-limit alerts ignore quiet hours (mandate §6.4, DEC-173). **X4 Deployment health** (hybrid and on-prem, where the customer is the deployment's
 operator; journey J4): versions, heartbeats, reachability, and the DEC-100 operator surface, which
 shows the aggregate-flow monitor's alerts (research-agent exposure per instrument over the
 deployment's workspaces above the DEC-123 threshold; the monitor never halts by itself) and the active
@@ -617,16 +712,22 @@ A rung whose breach is still confirming is shown as `pending` with its time in b
 | DEC-111; MI-18 | A revision shows the lineage's revision count and never a predecessor's score |
 | DEC-124 | Robinhood's paper stage is labeled as the simulated broker |
 | HLD, control-plane outage | Workspace screens keep working; only relay push is lost, and the status strip says so |
+| DEC-171 | Every screen, notification, email, listing, and consent screen names the product **Owlhead** and links owlhead.ai; "Mandate", the internal name, never appears in interface copy. The lowercase noun "mandate" for the agent's contract is a separate term |
+| DEC-181; mandate §6.4 | Delegation shapes: "Approve just this" first, none pre-selected, equal weight with Skip, every field shown before confirming, counts only |
+| DEC-185 | A client-requested order always asks, names the client, offers no delegation, and is answered only in Owlhead |
+| DEC-189 | The unasked-dollars figure appears wherever autonomy is set or shown: A2, D6's delegation variant, D13, D15 |
+| DEC-195 | Asks past the daily budget never notify; the brief lists them once |
+| DEC-197 | A guardrail that fires narrows only its scope and says what lifts it; ending a delegation or turning on away mode needs no step-up |
 
 ## 6. Open product decisions for the founder
 
-Decided by the founder on 2026-09-27: every recommendation below is accepted as written (DEC-135).
+Decided by the founder: PX-1 to PX-14 on 2026-09-27 (DEC-135) and PX-15 to PX-18 on 2026-09-30 (DEC-198), every recommendation accepted as written.
 PX-13 (a) amends DEC-131 (DEC-136).
 
 Each question has options, a recommendation, and the reason. Before the founder answered, designs
 followed the recommendation, because each is the more conservative option (rule 9), except PX-13, where
 they followed DEC-131's rule (b); they now follow every recommendation, PX-13 (a) included (DEC-136).
-Answers are recorded as decision-log rows. The labels PX-1 to PX-14 are local to this brief.
+Answers are recorded as decision-log rows. The labels PX-1 to PX-18 are local to this brief.
 
 **PX-1. How much of the compiled mandate the confirmation screen shows by default.**
 (a) Every field expanded. (b) The plain-language summary and dollar figures on top; below, every
@@ -668,6 +769,10 @@ undone and leaves positions without further management (DEC-131), so it gets the
 kill switch. Needs a line in the runtime brief or the mandate spec.
 
 *Decision: (b), accepted; the owner Stop in it is as amended by DEC-136 (offered only when flat).*
+*Spec line:* mandate spec §6.1, "Owner controls and step-up" (DEC-173). The kill switch is as
+DEC-158 option (c) leaves it: without valid step-up it still stops the agent and flattens as an
+automated flatten does, and only its privileges beyond the stop (selling equities outside the regular
+session at a confirmed bid) need step-up. The web kill switch inherits the same rule.
 
 **PX-5. What the owner sees while reconciliation holds an agent.**
 (a) "Paused: reconciliation mismatch" and a resume button. (b) The difference (ledger against broker,
@@ -792,6 +897,48 @@ critical path.
 
 *Decision: (c), accepted.*
 
+**PX-15 to PX-18** come from [ADR-0003](../adr/0003-earned-autonomy.md). The founder accepted each
+recommendation on 2026-09-30 (DEC-198).
+
+**PX-15. How delegation shapes appear on the approval screen.**
+(a) All four choices as equal buttons in one row. (b) Approve just this and Skip as the two equal
+buttons, then one equal-weight row, "Approve and stop asking about this for a while", that opens the
+three shapes with every field shown. (c) No shapes on the card; delegations only from D15.
+*Recommendation: (b).* It keeps the one-minute decision of P10 for the common case, gives the offer
+the same weight as Skip without making it the first thing seen, and shows every field before the
+step-up. (a) crowds a phone screen and makes a standing yes as easy to hit as a single one; (c) loses
+the moment the owner has the most context.
+
+*Decision: (b), accepted (DEC-198).*
+
+**PX-16. What may interrupt the owner, and what waits for the brief.**
+(a) Everything notifies. (b) Only asks with a deadline, risk-limit alerts, restrictions and
+reconciliation holds that need an acknowledgment, a fired tripwire, and a kill switch interrupt;
+everything else (delegation use, a delegation ending, admissions, fills, skipped asks) waits for D13.
+(c) Only risk-limit alerts interrupt; asks wait for the brief.
+*Recommendation: (b).* An ask that waits for the brief times out and is skipped, so (c) quietly turns
+every ask into a skip; (a) is the fatigue DEC-195 guards against.
+
+*Decision: (b), accepted (DEC-198).*
+
+**PX-17. Is the autonomy dial a control or a read-out?**
+(a) A slider that sets the mode. (b) A read-out of what the owner's own choices add up to, with
+"Change" opening the exact field, empty, and widening through A6 with step-up. (c) No dial.
+*Recommendation: (b).* A slider would write `auto` from one gesture, which V-022 forbids the platform
+to pre-fill and rule 11 requires the owner to enter; (c) hides how much runs without the owner.
+
+*Decision: (b), accepted (DEC-198).*
+
+**PX-18. What a chat message may turn into.**
+(a) Anything, including an order placed from the message. (b) An owner request card (builder, gate,
+and autonomy rules, shown before sending) or a proposed version (A6 with step-up); replies never
+render buttons. (c) Chat is read-only.
+*Recommendation: (b).* It keeps rule 4 (the model gives opinions, deterministic code builds orders)
+and rule 11 (the envelope changes only by a confirmed version) while making the agent easy to talk
+to; (c) forces the owner back into forms for everything.
+
+*Decision: (b), accepted (DEC-198).*
+
 ## 7. Questions for the specs
 
 Designing the screens found places where the specs are silent, disagree, or need a change. They are for the spec
@@ -820,7 +967,7 @@ owners, with a recommended reading; none is decided here.
    run of a mandate whose envelope is identical except for those two fields (PX-8).
 4. **The owner pause as a restriction.** Should §5.9 list an owner pause, and does resuming from it
    need step-up? (Runtime DEC-131 raises the first part in its Decisions needed 4; PX-4 bears on the
-   second.)
+   second, which mandate §6.1 now answers: resume needs step-up, DEC-173.)
 5. **Account-wide close-position scope.** Trading §5.5 says "close-position endpoint per instrument"
    without saying which instruments. Recommended: the confirmation lists every position it will close,
    including those no agent manages (PX-12).
@@ -856,6 +1003,9 @@ screens where a wrong design adds risk and those on journeys J1 and J2.
 10. **J2 causal trace** and **J6 gate decision**, then J1, J3 to J5.
 11. **A6 versions and diff**, **D11 holding**, **A3 editor**.
 12. **Administration** X1 to X6.
+13. **A0 goal questions and A2's contract card** (E10-7), then **D6's delegation and client
+    variants** and **D15 autonomy**, then **D12 plan view**, **D13 daily brief**,
+    and **D14 chat** (ADR-0003).
 
 ## 9. Convergence with the designs
 

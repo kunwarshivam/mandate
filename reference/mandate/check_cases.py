@@ -1,5 +1,8 @@
 """Asserts that every reference case demonstrates what its title claims (AGENTS.md: validate fixtures)."""
 import pathlib
+import sys
+from datetime import datetime, time, timezone
+from zoneinfo import ZoneInfo
 import yaml
 d = yaml.safe_load(open(pathlib.Path(__file__).resolve().parents[2] / "docs/specs/reference-cases/mandate.yaml"))
 C = {c["id"]: c for c in d["cases"]}
@@ -134,6 +137,27 @@ for cid in ("MC-G02", "MC-G08", "MC-G09", "MC-G10", "MC-G13", "MC-G15"):
 
 # builder
 B = {cid: C[cid]["expect"] for cid in C if cid.startswith("MC-B")}
+
+def calendar_at(now, asset_class):
+    """Trading spec §4.3's session and §9.6's close window (15:50-16:00 ET on a full day) at `now`."""
+    if asset_class == "crypto":
+        return "crypto", False
+    local = datetime.strptime(now[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).astimezone(ZoneInfo("America/New_York"))
+    t = local.time()
+    if local.weekday() >= 5 or not time(4) <= t < time(20):
+        return "overnight", False
+    if t < time(9, 30):
+        return "pre_market", False
+    if t < time(16):
+        return "regular", t >= time(15, 50)
+    return "after_hours", False
+
+for c in d["cases"]:
+    if c["kind"] == "builder":
+        inp = c["input"]
+        session, window = calendar_at(inp["now"], inp["asset_class"])
+        req(c["id"], inp.get("session", "regular") == session, f"`session` {inp.get('session', 'regular')} but `now` is {session}")
+        req(c["id"], inp.get("in_close_window", False) == window, f"`in_close_window` {inp.get('in_close_window', False)} but `now` gives {window}")
 req("MC-B01", B["MC-B01"]["action"] == "buy" and B["MC-B01"]["autonomy"]["decision"] == "auto", "auto open")
 req("MC-B02", B["MC-B02"]["order_usd"] == "300", "factor halves")
 req("MC-B03", B["MC-B03"]["reason"] == "between_thresholds", "hold")
@@ -279,3 +303,4 @@ req("MC-T04", C["MC-T04"]["expect"]["length_s"] == 90000, "25 h")
 print("cases", len(C), "title assertion failures", len(bad))
 for b in bad:
     print(" ", b)
+sys.exit(1 if bad else 0)

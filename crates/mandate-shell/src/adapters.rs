@@ -95,11 +95,21 @@ impl Bars for StoredBars {
     fn closes(&self, symbol: &str) -> Result<Vec<Price>, Cause> {
         let inspection = inspect::inspect(&self.dir)?;
         trusted(&inspection, symbol)?;
+        self.listed_closes(inspection.dataset.kind())
+    }
+}
+
+impl StoredBars {
+    /// One close per day the manifest lists with a file, in the manifest's date order, each read
+    /// from that day's own partition. The loop walks the manifest, never the directory, so a
+    /// partition the manifest does not list is not opened even if `trusted` were to let it pass
+    /// (#248 review, minor 1).
+    fn listed_closes(&self, kind: Kind) -> Result<Vec<Price>, Cause> {
         let (_, days) = dataset::read_manifest(&self.dir)?;
         let mut closes = Vec::new();
         for listed in days.iter().filter(|listed| listed.file.is_some()) {
             let path = self.dir.join(dataset::partition_name(listed.day));
-            match dataset::read(&path, inspection.dataset.kind())? {
+            match dataset::read(&path, kind)? {
                 Records::Bars(bars) => match bars.as_slice() {
                     [bar] => closes.push(Price::parse(bar.close.as_str())?),
                     [] | [_, _, ..] => {
@@ -408,10 +418,10 @@ mod tests {
     use mandate_canon::DecStr;
     use mandate_marketdata::actions::{RecordedActions, write_actions};
     use mandate_marketdata::dataset::{Store, partition_name};
-    use mandate_marketdata::inspect::{self, ActionsReport};
+    use mandate_marketdata::inspect::{self, ActionsReport, Problem};
     use mandate_marketdata::model::{
         AssetClass, Bar, CorporateActions, DatasetId, DayRange, Feed, Kind, Records, Split,
-        SplitRatio, Symbol,
+        SplitRatio, Symbol, TimeUnit, Timeframe,
     };
     use mandate_num::{Price, Qty};
     use mandate_time::{Date, UtcNanos};
@@ -553,10 +563,7 @@ mod tests {
         }
         .closes("AAPL")
         .map_err(|e| e.to_string())?;
-        let expected: Vec<String> = closes
-            .iter()
-            .map(|c| c.trim_end_matches('0').to_owned())
-            .collect();
+        let expected: Vec<String> = closes.iter().map(|c| canonical(c)).collect();
         let read: Vec<String> = read.iter().map(ToString::to_string).collect();
         assert_eq!(read, expected);
         Ok(())
@@ -788,12 +795,34 @@ mod tests {
         }
     }
 
-    /// The closes as prices, in canonical text (`Price` refuses a trailing zero).
+    /// `mandate-num`'s canonical text of a decimal: trailing fractional zeros and a bare point
+    /// dropped, and nothing else, so `"100"` stays `"100"` (#248 review, minor 2).
+    fn canonical(text: &str) -> String {
+        match text.split_once('.') {
+            Some((whole, places)) => match places.trim_end_matches('0') {
+                "" => whole.to_owned(),
+                kept => format!("{whole}.{kept}"),
+            },
+            None => text.to_owned(),
+        }
+    }
+
+    /// The closes as prices, in canonical text (`Price` refuses a trailing fractional zero).
     fn prices(closes: &[String]) -> Result<Vec<Price>, String> {
         closes
             .iter()
-            .map(|close| Price::parse(close.trim_end_matches('0')).map_err(|e| e.to_string()))
+            .map(|close| Price::parse(&canonical(close)).map_err(|e| e.to_string()))
             .collect()
+    }
+
+    /// #248 review, minor 2: a close whose digits end in 0 is read as itself. The old helper
+    /// trimmed every trailing `0`, so `"100"` became `"1"`.
+    #[test]
+    fn a_close_ending_in_zero_keeps_its_value() -> Result<(), String> {
+        let closes = ["100", "250.50", "1000.000", "0.10", "99.9"].map(str::to_owned);
+        let read: Vec<String> = prices(&closes)?.iter().map(ToString::to_string).collect();
+        assert_eq!(read, ["100", "250.5", "1000", "0.1", "99.9"]);
+        Ok(())
     }
 
     #[test]
@@ -856,8 +885,42 @@ mod tests {
         let listed = dir.join(partition_name(day("2026-08-26")?));
         let stray = dir.join(partition_name(day("2026-08-29")?));
         fs::copy(&listed, &stray).map_err(|e| e.to_string())?;
+        let problems = inspect::inspect(&dir).map_err(|e| e.to_string())?.problems;
+        assert_eq!(
+            problems,
+            vec![Problem::Unlisted {
+                file: "2026-08-29.parquet".to_owned()
+            }],
+            "the one problem `inspect` finds is the unlisted partition (#248 review, minor 1)"
+        );
         let what = untrusted(StoredBars { dir }.closes("AAPL"))?;
         assert_eq!(what, "a partition cannot be trusted");
+        Ok(())
+    }
+
+    /// #248 review, minor 1: the loop in `closes` walks the manifest, not the directory. Called
+    /// past `trusted`, over a directory holding an unlisted partition with a close of its own,
+    /// it reads the listed closes and never the stray.
+    #[test]
+    fn the_closes_are_read_from_the_manifest_and_never_the_directory() -> Result<(), String> {
+        let scratch = Scratch::new("manifest-only")?;
+        let dir = aapl(&scratch.0, &[], &[])?;
+        let elsewhere = Scratch::new("manifest-only-stray")?;
+        let stray = write(&elsewhere.0, &dataset("AAPL", "1Day")?, &["1.23"], &[], &[])?;
+        fs::copy(
+            stray.join(partition_name(day("2026-08-24")?)),
+            dir.join(partition_name(day("2026-08-29")?)),
+        )
+        .map_err(|e| e.to_string())?;
+        let daily = Kind::Bars(Timeframe::new(1, TimeUnit::Day).map_err(|e| e.to_string())?);
+        let read: Vec<String> = StoredBars { dir }
+            .listed_closes(daily)
+            .map_err(|e| e.to_string())?
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let expected: Vec<String> = rising().iter().map(|c| canonical(c)).collect();
+        assert_eq!(read, expected, "the stray 1.23 is never read");
         Ok(())
     }
 

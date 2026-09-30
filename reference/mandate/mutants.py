@@ -57,10 +57,137 @@ MUTANTS = {
     "admission ignores the leveraged-ETP disclosure": (
         '        u["leveraged_etps_enabled"] and u["leveraged_etp_disclosure_version"] in inp.get("disclosures_accepted", []))',
         '        u["leveraged_etps_enabled"])'),
+    "a delegation lifts a deny": ('if st is None or res["decision"] != "ask" or', 'if st is None or res["decision"] == "auto" or'),
+    "a delegation ignores the ask it names": ('if (d["lifts"] == res["by"] and T(d["starts_at"])', 'if (T(d["starts_at"])'),
+    "a delegation ignores its condition": ('                and cond(d["when"], a) and D(a["order_usd"])', '                and D(a["order_usd"])'),
+    "a delegation ignores max_order_usd": (' and D(a["order_usd"]) <= D(d["max_order_usd"])', ''),
+    "a delegation ignores max_orders": ('used["orders"] < d["max_orders"]', 'True'),
+    "a delegation ignores max_total_usd": ('D(used["total_usd"]) + D(a["order_usd"]) <= D(d["max_total_usd"])', 'True'),
+    "a delegation ignores its expiry": ('now < T(d["expires_at"])', 'True'),
+    "a delegation ignores its start": ('T(d["starts_at"]) <= now', 'True'),
+    "a delegation ignores suspension": (' or delegation_suspended(st):', ':'),
+    "a delegation ignores a latched limit": ('\n            or st.get("limit_latched", False)', '\n            or False'),
+    "a delegation bypasses the admission ceiling": (
+        '    if a.get("new_instrument", False) and STRICT[au["admission"]] > STRICT[res["decision"]]:',
+        '    if a.get("new_instrument", False) and lifted_by is None and STRICT[au["admission"]] > STRICT[res["decision"]]:'),
+    "adding a delegation is reducing": ('        if i not in oi:\n            return "increasing"', '        if i not in oi:\n            continue'),
+    "raising a delegation's cap is reducing": ('all(D(b[k]) <= D(a[k]) for k in DELEGATION_CAPS)', 'True'),
+    "extending a delegation's expiry is reducing": (' and T(b["expires_at"]) <= T(a["expires_at"])', ''),
+    "V-041 accepts a span past 30 days": ('not 0 < span <= DELEGATION_MAX_SPAN_S', 'not 0 < span'),
+    "V-042 is never raised": ('            errs.add("V-042")', '            pass'),
+    "V-043 ignores the second approver": ('(two is None or D(d["max_order_usd"]) <= D(two))', 'True'),
+    "the client ceiling is skipped": ('a.get("requested_by", "agent") == "client" and ', 'False and '),
+    "the client ceiling turns a deny into an ask": (
+        'a.get("requested_by", "agent") == "client" and STRICT[res["decision"]] < STRICT["ask"]',
+        'a.get("requested_by", "agent") == "client"'),
+    "a delegation lifts a client request": (
+        '    lifted_by = delegation_lift(m, a, res, st)',
+        '    lifted_by = delegation_lift(m, a, res, st)\n'
+        '    if lifted_by is not None and a.get("requested_by") == "client":\n'
+        '        return {"decision": "auto", "by": f"delegation:{lifted_by}", "delegation_id": lifted_by}'),
+    "the client ceiling reaches owner requests": ('a.get("requested_by", "agent") == "client"', 'a.get("requested_by", "agent") != "agent"'),
+    "the approval content drops the client": ('"client": req.get("client") if req.get("requested_by") == "client" else None',
+                                               '"client": None'),
+    "the approval content shows every requester as the agent": ('"requested_by": req.get("requested_by", "agent"),', '"requested_by": "agent",'),
+    "the approval content hides the delegation shapes": ('["approve", "skip"] + list(req.get("delegation_shapes", []))', '["approve", "skip"]'),
+    "a timeout acts": ('                drafts.append({"type": "ApprovalTimedOut", "approval": a, "on_timeout": "skip", "clock": c})',
+                       '                drafts.append({"type": "ApprovalTimedOut", "approval": a, "on_timeout": "skip", "clock": c}); '
+                       'drafts.append(dict({k: st["pending"][a][k] for k in BOUND_FIELDS}, type="IntentProposed", approval=a, clock=c))'),
+    "lateness uses the submitted time alone": ('    eff = max(T(resp["submitted_at"]), T(ctx["clock"]))', '    eff = T(resp["submitted_at"])'),
+    "a response exactly at the deadline is timely": ('    if eff >= T(req["deadline"]):', '    if eff > T(req["deadline"]):'),
+    "the fold keeps an acted approval pending": ('    elif t in ("ApprovalRevalidated", "ApprovalTimedOut", "ApprovalCanceled"):',
+                                                 '    elif t in ("ApprovalTimedOut", "ApprovalCanceled"):'),
+    "a re-tailed response is judged again": ('        if resp["source"] in st["copied"]:\n            return drafts',
+                                             '        if False:\n            return drafts'),
+    "a version change does not cancel": ('        for a in sorted(st["pending"]):\n            drafts.append({"type": "ApprovalCanceled"',
+                                         '        for a in (sorted(st["pending"]) if inp["reason"] != "version_applied" else []):\n'
+                                         '            drafts.append({"type": "ApprovalCanceled"'),
+    "re-validation overrides a deny": ('    if c["decision"] == "deny":\n        return skip("reclassified_deny")',
+                                       '    if False:\n        return skip("reclassified_deny")'),
+    "re-validation accepts an ask by another trigger": ('    if c["decision"] == "ask" and c["by"] != req["decided_by"]:', '    if False:'),
+    "re-validation skips the gate dry run": ('    if now["dry_run"]["verdict"] != "allow":', '    if False:'),
+    "re-validation ignores the mode": ('    if now["mode"] != "normal":\n        return skip("mode")', '    if False:\n        return skip("mode")'),
+    "drift without the absolute value": ('abs(D(m_now) - D(m_req)) * 10000', '(D(m_now) - D(m_req)) * 10000'),
+    "drift uses the crypto band for equities": ('<= DRIFT_BAND_BP[asset_class] * D(m_req)', '<= 200 * D(m_req)'),
+    "no mark is inside the band": ('    if m_req is None or m_now is None:\n        return False\n    return abs(',
+                                   '    if m_req is None or m_now is None:\n        return True\n    return abs('),
+    "a grant re-prices at the current mark": ('"intent": {k: req[k] for k in BOUND_FIELDS}}',
+                                              '"intent": {k: req[k] for k in BOUND_FIELDS} | {"limit_price": now["mark"]}}'),
+    "the notification carries the instrument": ('return {"subject": req["approval"], "text": "approval_needed"}',
+                                                'return {"subject": req["approval"], "text": "approval_needed " + req["instrument"]}'),
+    "an agent actor is admitted": ('    if resp["actor_kind"] != "user" or resp["responder"] not in ctx["approvers"]:',
+                                   '    if resp["responder"] not in ctx["approvers"]:'),
+    "a responder outside approvers is admitted": ('    if resp["actor_kind"] != "user" or resp["responder"] not in ctx["approvers"]:',
+                                                  '    if resp["actor_kind"] != "user":'),
+    "step-up freshness is exclusive": ('    if not 0 <= age <= STEP_UP_WINDOW_S:', '    if not 0 <= age < STEP_UP_WINDOW_S:'),
+    "step-up accepts evidence from the future": ('    if not 0 <= age <= STEP_UP_WINDOW_S:', '    if not age <= STEP_UP_WINDOW_S:'),
+    "step-up is judged at the submitted time": ('evidence_fault(resp["step_up"], fmt(eff), ', 'evidence_fault(resp["step_up"], resp["submitted_at"], '),
+    "assertion reuse accepted": ('    if ev["assertion"] in used:', '    if False:'),
+    "CliConfirm accepted for live": ('    if not (ev["method"] == "cli_confirm" and environment == "paper"):', '    if not ev["method"] == "cli_confirm":'),
+    "the content hash is not compared": ('    if resp["content_hash"] != req["content_hash"]:', '    if False:'),
+    "the same approver counts twice": ('    if resp["responder"] in req["grants"]:', '    if False:'),
+    "a counted grant acts": ('    return judged("admitted" if len(counting) + 1 >= q["required"] else "counted")', '    return judged("admitted")'),
+    "independence is not enforced": ('    if q["independent"] and resp["responder"] == ctx["author"]:', '    if False:'),
+    "check 7 reads only the bound approver requirement": (
+        '    return {"required": max(req["approvers_required"], by_policy),\n'
+        '            "independent": req["independent_required"] or policy["independent_approval_required"]}',
+        '    return {"required": req["approvers_required"], "independent": req["independent_required"]}'),
+    "check 7 takes the looser of the bound and policy requirement": (
+        '    return {"required": max(req["approvers_required"], by_policy),\n'
+        '            "independent": req["independent_required"] or policy["independent_approval_required"]}',
+        '    return {"required": min(req["approvers_required"], by_policy),\n'
+        '            "independent": req["independent_required"] and policy["independent_approval_required"]}'),
+    "a lowered policy ceiling does not raise the approver count": (
+        '    by_policy = 2 if ceiling is not None and D(req["qty"]) * D(req["limit_price"]) > D(ceiling) else 1',
+        '    by_policy = 1'),
+    "the author's earlier grant counts toward an independent quorum": (
+        '    counting = {g for g in req["grants"] if not (q["independent"] and g == ctx["author"])}',
+        '    counting = req["grants"]'),
+    "ApprovalResponded drops the quorum check 7 applied": (
+        '    judged = lambda result, reason=None: out(result, reason) | {"quorum": q}',
+        '    judged = lambda result, reason=None: out(result, reason)'),
+    "ApprovalResponded records the bound quorum, not the one check 7 applied": (
+        '    judged = lambda result, reason=None: out(result, reason) | {"quorum": q}',
+        '    judged = lambda result, reason=None: out(result, reason) | '
+        '{"quorum": {"required": req["approvers_required"], "independent": req["independent_required"]}}'),
+    "an undelivered request is grantable": ('    if not req["delivered"]:', '    if False:'),
+    "admission reads the pending set before the batch's cancellations": (
+        '            out = escalation_step(after, {"kind": "response"', '            out = escalation_step(st, {"kind": "response"'),
+    "a pending approval holds an exit": ('    if purpose in REDUCING:\n        return "handed"\n    return "awaiting_approval" if pending else "evaluate"',
+                                         '    if pending:\n        return "awaiting_approval"\n    return "handed" if purpose in REDUCING else "evaluate"'),
+    "a second approval is asked while one is pending": ('    return "awaiting_approval" if pending else "evaluate"', '    return "evaluate"'),
+    "pause demands step-up": ('    if kind == "pause":\n        return {"result": "apply", "reason": None}', '    if False:\n        return {"result": "apply", "reason": None}'),
+    "an owner exit is judged when processed": ('    at = committed_at if kind == "owner_exit" else processed_at', '    at = processed_at'),
+    "resume is judged when committed": ('    at = committed_at if kind == "owner_exit" else processed_at', '    at = committed_at'),
+    "a refused owner exit is dropped": ('    privilege = confirmed_bid and authority["result"] == "apply"\n',
+                                        '    privilege = confirmed_bid and authority["result"] == "apply"\n'
+                                        '    if authority["result"] != "apply":\n        return {"verdict": "refused", "reason": authority["reason"]}\n'),
+    "a refused owner exit keeps its privilege": ('    privilege = confirmed_bid and authority["result"] == "apply"\n', '    privilege = confirmed_bid\n'),
+    "a kill switch without valid step-up keeps the privilege": ('owner_confirmed_bid=inp.get("owner_confirmed_bid", False) and fault is None',
+                                                               'owner_confirmed_bid=inp.get("owner_confirmed_bid", False)'),
+    "a kill switch without valid step-up is refused": ('    fault = evidence_fault(ev, committed_at, environment, used)\n    out = agent_flatten(',
+                                                       '    fault = evidence_fault(ev, committed_at, environment, used)\n'
+                                                       '    if fault is not None:\n        return {"mode_applied_first": None, "sells": [], "deferred_sells": [], "step_up": fault}\n'
+                                                       '    out = agent_flatten('),
+    "the ask budget resets at UTC midnight": ('    today = risk_day(at)["risk_day"]\n    asked, skipped, timed_out = 0, False, False\n    for e in ledger:\n'
+                                              '        if e["event"] == "requested" and risk_day(e["at"])["risk_day"] == today:',
+                                              '    today = at[:10]\n    asked, skipped, timed_out = 0, False, False\n    for e in ledger:\n'
+                                              '        if e["event"] == "requested" and e["at"][:10] == today:'),
+    "the ask budget allows an eleventh": ('    if asked >= ASK_BUDGET_PER_RISK_DAY:', '    if asked > ASK_BUDGET_PER_RISK_DAY:'),
+    "a version does not lift a skip": ('        elif e["event"] == "version_applied":\n            skipped = False',
+                                       '        elif e["event"] == "version_applied":\n            pass'),
+    "the timeout window includes its end": ('(T(at) - T(e["at"])).total_seconds() < e["timeout_s"]:', '(T(at) - T(e["at"])).total_seconds() <= e["timeout_s"]:'),
+    "quiet hours in UTC": ('    local = T(at).astimezone(NY)\n    minute = local.hour', '    local = T(at)\n    minute = local.hour'),
+    "quiet hours suppress the inbox": ('    if channel == "cli_inbox" or quiet_hours is None:', '    if quiet_hours is None:'),
+    "quiet hours include their end": ('% 1440 < (end - start) % 1440', '% 1440 <= (end - start) % 1440'),
+    "the trigger drops the owner's rule": ('"rule": None if rule is None else {"id": rule["id"], "when": rule["when"], "then": rule["then"]}', '"rule": None'),
+    "a bound field does not move the content hash": ('content_hash({k: req[k] for k in sorted(req)})', 'content_hash({k: req[k] for k in sorted(req) if k != "limit_price"})'),
 }
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
+         "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_client_ceiling(300); "
+         "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
          "print(len(FAIL))")
 
 def main():

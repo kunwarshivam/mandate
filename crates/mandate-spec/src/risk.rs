@@ -10,7 +10,11 @@
 //! the interval between inputs by the state at the interval's **start** (§5.2), and for an equity the
 //! clocks that matter run in regular-session time, which the caller's calendar supplies.
 
+mod fold;
+mod limits;
+
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
 use mandate_num::{NumError, Price, Qty, Ratio, Rounding, Usd, UsdExact};
@@ -88,6 +92,11 @@ impl Restriction {
     }
 
     /// The mode this restriction asks for (§5.4, §5.5, §5.7, §5.9, §3.1).
+    ///
+    /// `daily_loss` is `exits_only` here, the mode its `exits_only` action asks for. A
+    /// `flatten_and_pause` daily loss pauses the agent until the owner acknowledges it once flat
+    /// (§5.4), so the risk state takes that restriction's mode from the mandate's `daily_loss_action`
+    /// rather than from this.
     pub fn mode(self) -> AgentMode {
         match self {
             Self::DailyLoss | Self::DrawdownExitsOnly | Self::HardBreach | Self::GoalComplete => {
@@ -477,34 +486,85 @@ pub trait SessionClock {
 }
 
 /// The agent's risk state (§5).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RiskState {
+///
+/// It borrows the [`SessionClock`] it opened with, and every step counts an equity's lift delays and
+/// staleness on it (DEC-167 item 5). The clock is not state: two states that folded the same inputs
+/// are equal whichever clock each holds.
+///
+/// Slices R2 and R3 fold marks, fills, clock ticks, the risk day, universe changes, a held
+/// instrument's staleness, and a `profit_stop` goal. Acknowledgments, allocation changes, floor
+/// loosening, goal completion, and retirement (slice R4) are [`SpecError::Unimplemented`].
+#[derive(Clone)]
+pub struct RiskState<'c> {
+    clock: &'c dyn SessionClock,
+    fold: fold::Fold,
     snapshot: Snapshot,
 }
 
-impl RiskState {
+impl<'c> RiskState<'c> {
     /// Opens the state at `opening.at` with E = H = E0 = C = the allocation and mode `normal` (§5.2).
+    ///
+    /// # Errors
+    /// `invalid_input` for a negative inherited loss, which would lower the floor (§5.7), and for an
+    /// instant between two whole seconds, which the risk clock never reads (§5.2).
     pub fn open(
         mandate: &ValidatedMandate,
         opening: &Opening,
-        clock: &dyn SessionClock,
+        clock: &'c dyn SessionClock,
     ) -> Result<Self, SpecError> {
-        let _ = (mandate, opening, clock);
-        Err(SpecError::Unimplemented)
+        let fold = fold::Fold::open(mandate, opening)?;
+        Ok(Self {
+            clock,
+            snapshot: fold.snapshot()?,
+            fold,
+        })
     }
 
     /// Applies one input in the §5.2 order: settle time, apply the input, update E then H, the ladder
-    /// rungs in ascending `at`, the daily loss, the lifetime floor, then the effective mode. The
-    /// journal follows that order.
+    /// rungs in ascending `at`, the daily loss (a breach carried over the rollover, then the trigger,
+    /// the renewal, or the lift), the lifetime floor, a `profit_stop` goal, the instrument's
+    /// restrictions, then the effective mode. The journal follows that order.
     ///
-    /// A step at or before the previous step's time is [`SpecError::ClockWentBackwards`].
+    /// A step at the previous step's instant is folded with no time passing.
+    ///
+    /// # Errors
+    /// A step before the previous step's time is [`SpecError::ClockWentBackwards`]. A step between two
+    /// whole seconds of the risk clock (§5.2), a sale of more than the agent holds, and a risk day
+    /// that starts while a breach carried over the previous rollover is still undecided are
+    /// `invalid_input`. An input slice R4 folds is [`SpecError::Unimplemented`]. A step that fails
+    /// leaves the state as it was.
+    ///
+    /// An error is never an answer, neither "nothing happened" nor a refusal of the input: it is a
+    /// refusal to decide. The caller must fail closed, as the gate's caller does with a `GateError`
+    /// (E6-3's task brief, rule 3 of `AGENTS.md`): stop stepping this agent's state, admit no new
+    /// risk, keep its exit paths open, and escalate. It must never skip the input and step the next
+    /// one, since every later figure would then be folded over a stream that is not the journal's.
     pub fn step(&mut self, step: &Step) -> Result<Outcome, SpecError> {
-        let _ = step;
-        Err(SpecError::Unimplemented)
+        let (fold, outcome) = self.fold.step(self.clock, step)?;
+        self.fold = fold;
+        self.snapshot = outcome.snapshot.clone();
+        Ok(outcome)
     }
 
     pub fn snapshot(&self) -> &Snapshot {
         &self.snapshot
+    }
+}
+
+impl PartialEq for RiskState<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.fold == other.fold
+    }
+}
+
+impl Eq for RiskState<'_> {}
+
+impl fmt::Debug for RiskState<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RiskState")
+            .field("fold", &self.fold)
+            .field("snapshot", &self.snapshot)
+            .finish_non_exhaustive()
     }
 }
 
@@ -630,7 +690,7 @@ pub fn size_factor(
             &format!("/risk/drawdown_ladder/{index}/factor"),
         )?)?;
     }
-    let exact = narrow(product, SIZE_FACTOR_PLACES).map_err(|error| match error {
+    let exact = narrow(product, REPORTED_SIZE_FACTOR_PLACES).map_err(|error| match error {
         SpecError::Num(cause) => SpecError::OutOfRange {
             path: Pointer::new("/risk/drawdown_ladder"),
             cause,
@@ -653,13 +713,22 @@ pub fn reset_lift_order(ladder: &[crate::document::LadderRung]) -> Result<Vec<u8
     Ok(scale.into_iter().map(|(index, _)| index).collect())
 }
 
-/// Every limit's condition at a state, and whether its 1.25x hard level is reached (§5.2, §5.6).
+/// Each rung's, the daily loss's, and the lifetime floor's condition at a state, and whether its 1.25x
+/// hard level is reached (§5.2, §5.6), compared as exact products.
+///
+/// [`LimitKey::ProfitStop`] is never returned: it is a goal's stop condition (§3.1), which the risk
+/// state confirms like a limit but with no hard level. Each rung's lift comparison is made in the same
+/// place and read by the fold, not returned here.
+///
+/// The floor is read at the mandate's own `max_loss_from_allocation`, so after a loosening version the
+/// caller passes the mandate that version applied.
 pub fn conditions(
     mandate: &ValidatedMandate,
     snapshot: &Snapshot,
 ) -> Result<BTreeMap<LimitKey, (bool, bool)>, SpecError> {
-    let _ = (mandate, snapshot);
-    Err(SpecError::Unimplemented)
+    Ok(limits::Limits::of(mandate)?
+        .conditions(&limits::Figures::of(snapshot))?
+        .limits)
 }
 
 fn decimal(value: &SchemaDec, path: &str) -> Result<UsdExact, SpecError> {
@@ -681,8 +750,9 @@ fn add_seconds(total: u64, more: u64) -> Result<u64, SpecError> {
         .ok_or(SpecError::Num(NumError::Overflow))
 }
 
-/// The places a size factor is reported at: `Ratio`'s 24, which V-040 bounds the ladder's factors by.
-const SIZE_FACTOR_PLACES: u32 = 24;
+/// The places the risk state reports a size factor at: `Ratio`'s 24. V-040's bound of 12 on the
+/// builder's size fraction is the tighter of the two, so a validated ladder never reaches this one.
+const REPORTED_SIZE_FACTOR_PLACES: u32 = 24;
 
 /// An exact value as a [`Usd`] of at most `places` places, or [`NumError::TooPrecise`] if it needs
 /// more: the check is that rounding at `places` changes nothing.
@@ -789,6 +859,20 @@ mod tests {
                 cause: NumError::TooPrecise
             }),
             "V-040 refuses this ladder, so the fold never sees it; the error names the ladder anyway"
+        );
+        let one_rung = vec![rung(
+            "0.01",
+            LadderAction::ScaleSizes,
+            Some("0.9999999999999999999999999"),
+        )?];
+        assert_eq!(
+            size_factor(&one_rung, &active(&[0])),
+            Err(SpecError::OutOfRange {
+                path: Pointer::new("/risk/drawdown_ladder"),
+                cause: NumError::TooPrecise
+            }),
+            "one 25-place factor is past the 24 places reported, and the refusal names the ladder: \
+             narrowing at 28 would let it through to a pathless ratio error (#261 review, minor 3)"
         );
         Ok(())
     }

@@ -317,11 +317,11 @@ pub fn decimal_text(raw: &serde_json::Value, field: &'static str) -> Result<Stri
 
 /// The most fractional digits a broker decimal may carry: the 9 places of a price or a quantity
 /// (trading-domain spec §2.1).
-const MAX_PLACES: usize = 9;
+pub(crate) const MAX_PLACES: usize = 9;
 
 /// `mandate-num`'s canonical form of text [`decimal_text`] accepted: trailing fractional zeros,
 /// and a point left with nothing after it, are dropped. Nothing else changes, so no value moves.
-fn canonical(text: &str) -> String {
+pub(crate) fn canonical(text: &str) -> String {
     match text.split_once('.') {
         Some((whole, places)) => match places.trim_end_matches('0') {
             "" => whole.to_owned(),
@@ -331,11 +331,14 @@ fn canonical(text: &str) -> String {
     }
 }
 
-fn json(body: &[u8]) -> Result<Value, WireError> {
+pub(crate) fn json(body: &[u8]) -> Result<Value, WireError> {
     serde_json::from_slice(body).map_err(|_| WireError::NotJson)
 }
 
-fn object<'a>(value: &'a Value, field: &'static str) -> Result<&'a Map<String, Value>, WireError> {
+pub(crate) fn object<'a>(
+    value: &'a Value,
+    field: &'static str,
+) -> Result<&'a Map<String, Value>, WireError> {
     value.as_object().ok_or(WireError::WrongType { field })
 }
 
@@ -343,7 +346,10 @@ fn list<'a>(value: &'a Value, field: &'static str) -> Result<&'a Vec<Value>, Wir
     value.as_array().ok_or(WireError::WrongType { field })
 }
 
-fn text<'a>(fields: &'a Map<String, Value>, field: &'static str) -> Result<&'a str, WireError> {
+pub(crate) fn text<'a>(
+    fields: &'a Map<String, Value>,
+    field: &'static str,
+) -> Result<&'a str, WireError> {
     fields
         .get(field)
         .ok_or(WireError::MissingField { field })?
@@ -363,7 +369,7 @@ fn optional_text<'a>(
     }
 }
 
-fn flag(fields: &Map<String, Value>, field: &'static str) -> Result<bool, WireError> {
+pub(crate) fn flag(fields: &Map<String, Value>, field: &'static str) -> Result<bool, WireError> {
     fields
         .get(field)
         .ok_or(WireError::MissingField { field })?
@@ -372,16 +378,19 @@ fn flag(fields: &Map<String, Value>, field: &'static str) -> Result<bool, WireEr
 }
 
 /// The canonical text of a decimal field that must be present.
-fn number(fields: &Map<String, Value>, field: &'static str) -> Result<String, WireError> {
+pub(crate) fn number(
+    fields: &Map<String, Value>,
+    field: &'static str,
+) -> Result<String, WireError> {
     let raw = fields.get(field).ok_or(WireError::MissingField { field })?;
     Ok(canonical(&decimal_text(raw, field)?))
 }
 
-fn qty(fields: &Map<String, Value>, field: &'static str) -> Result<Qty, WireError> {
+pub(crate) fn qty(fields: &Map<String, Value>, field: &'static str) -> Result<Qty, WireError> {
     Ok(Qty::parse(&number(fields, field)?)?)
 }
 
-fn price(fields: &Map<String, Value>, field: &'static str) -> Result<Price, WireError> {
+pub(crate) fn price(fields: &Map<String, Value>, field: &'static str) -> Result<Price, WireError> {
     Ok(Price::parse(&number(fields, field)?)?)
 }
 
@@ -405,7 +414,7 @@ fn optional_price(
 /// `BTC/USD`), each starting with a letter or a digit and holding only letters, digits and `.`. A
 /// dot segment, a percent sign, a query, or an empty segment is not a symbol this crate can read
 /// (#191 review, round 3).
-fn instrument(fields: &Map<String, Value>) -> Result<InstrumentId, WireError> {
+pub(crate) fn instrument(fields: &Map<String, Value>) -> Result<InstrumentId, WireError> {
     let raw = text(fields, "symbol")?;
     let segments: Vec<&str> = raw.split('/').collect();
     let symbol_like = segments.len() <= 2
@@ -455,7 +464,7 @@ fn new_york_date(fields: &Map<String, Value>, field: &'static str) -> Result<Dat
 /// each in a path (`/v2/orders/{id}`), and Alpaca's is a UUID, so an id outside `[A-Za-z0-9-]+`
 /// is not one this crate can read: a dot, a percent sign or a slash never reaches path building,
 /// behind the allowlist's own dot-segment rule (#174, #189).
-fn broker_id(raw: &str, field: &'static str) -> Result<String, WireError> {
+pub(crate) fn broker_id(raw: &str, field: &'static str) -> Result<String, WireError> {
     checked_id(raw, field, b"")
 }
 

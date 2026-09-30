@@ -217,7 +217,13 @@ pub fn with(path: &str, value: Option<Value>) -> Value {
 
 /// The base with several pointers changed at once, applied in order.
 pub fn with_all(changes: &[(&str, Option<Value>)]) -> Value {
-    let mut document = base();
+    edit(&base(), changes)
+}
+
+/// `document` with several pointers changed at once, applied in order, for a test whose starting
+/// point is not the base: the old version of a change.
+pub fn edit(document: &Value, changes: &[(&str, Option<Value>)]) -> Value {
+    let mut document = document.clone();
     for (path, value) in changes {
         set(&mut document, path, value.clone());
     }

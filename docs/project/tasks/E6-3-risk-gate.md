@@ -8,7 +8,7 @@ PR, and reference cases.
 
 ## Story
 
-- **Stories:** E6-3, E6-4, E6-6, E6-7, E6-8, E6-9
+- **Stories:** E6-3, E6-4, E6-6, E6-7, E6-8, E6-9, E6-10
   ([backlog](../06-backlog-v1.md#e6-agent-runtime-and-risk)).
 - **Acceptance criteria (verbatim):**
   - **E6-3** "As an owner, I want an independent risk gate enforcing all limits so that no agent
@@ -33,6 +33,11 @@ PR, and reference cases.
   - **E6-9** "As an owner, I want account restrictions and trading halts checked before every
     order, so that agents stop adding risk when the broker restricts the account. *Accepted when:*
     RC-15 passes."
+  - **E6-10** "As an owner, I want the gate to admit crypto **USD pairs only** (trading-domain §3.2
+    item 7), so that an agent cannot open a stablecoin-quoted pair the floor was never written for.
+    *Accepted when:* a crypto opening in a non-USD pair is denied, a USD pair passes the floor, and
+    check 2 is whole for crypto." Its readings are DEC-254, and its tests are
+    `crates/mandate-risk/tests/usd_pairs.rs`.
 - **PRD / HLD / spec anchors:** trading-domain spec §9 (the gate: §9.1 evaluation order and reason
   codes, §9.2 day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5 buying power,
   §9.6 market-conduct controls, §9.7 order-rate limits, §9.8 wash sales), §3.1 and §3.2 (instrument
@@ -135,6 +140,10 @@ Each is one PR on the coordinator's signal, and each ends with the status PR mov
    report — RC-22, RC-25.
 6. **E6-4** the ladder and the daily loss as the order path consumes them: the size factor, the
    `trim_to_target` proposals, and the mode effects. No new reference cases (they are stream F's).
+7. **E6-10** check 2's "USD pairs only" for crypto (§3.2 item 7), read from
+   `InstrumentSnapshot::quote_currency` (DEC-254), which makes check 2 whole for crypto and leaves
+   no check owed. No reference case moves in `mandate-risk`; MC-B26 to MC-B28 and the
+   trading-domain harness's crypto proposals need the harness to read the pair (DEC-254 item 7).
 
 ## Data shapes
 
@@ -341,8 +350,10 @@ ES-04 keeps exact arithmetic in `mandate-num`, so the gate adds, under claim #12
 comparison of its own, and `Price::collar_bound(Fraction, Adverse)` (one rounding, at the 9 places a
 price holds, each bound rounded so the constraint gets **stricter** — a buy's ceiling truncates down
 and a sell's floor rounds up — so a bound never admits a price the exact comparison would refuse).
-`Qty::times_fraction` for the participation caps (truncated to the increment, like `Qty::portion`)
-arrives with E6-8's implementation PR. Nothing here rounds a limit in the order's favour.
+The participation caps need no new function: `Qty::portion(Fraction, ShareIncrement)` is already
+`truncate(fraction × self, increment)`, which is the cap this paragraph once called
+`Qty::times_fraction`, so E6-8's implementation PR adds nothing to `mandate-num` (DEC-163 item 9).
+Nothing here rounds a limit in the order's favour.
 
 ## The evaluation order
 
@@ -353,7 +364,7 @@ story that implements it and the reason codes it can emit.
 | §9.1 | Check | Story | Reason codes |
 |---|---|---|---|
 | 1 | Account status (§7.3), then agent mode (§7.4) | E6-9 | `account_trading_blocked`, `account_restricted`, `crypto_account_inactive`, `agent_exits_only`, `agent_paused`, `agent_stopped` |
-| 2 | The working universe (mandate §2.3, §5.3) — which is also where a `removed_instrument` restriction lands, interpretation 23 — then the eligibility floor (§3.2 items 1 to 7, in list order), then concentration (§3.3 and the mandate per-instrument cap), then mandate order size, then the re-entry cooldown | E6-3 (universe, concentration, size, cooldown), E6-7 (floor) | `not_in_working_universe`, `not_in_universe`, `ineligible_exchange`, `ipo_not_tradable`, `below_price_floor`, `below_liquidity_floor`, `leveraged_etp_not_enabled`, `concentration_limit`, `max_order_size`, `reentry_cooldown` |
+| 2 | The working universe (mandate §2.3, §5.3) — which is also where a `removed_instrument` restriction lands, interpretation 23 — then the eligibility floor (§3.2 items 1 to 7, in list order), then concentration (§3.3 and the mandate per-instrument cap), then mandate order size, then the re-entry cooldown | E6-3 (universe, concentration, size, cooldown), E6-7 (floor), E6-10 (item 7's USD pairs) | `not_in_working_universe`, `not_in_universe`, `ineligible_exchange`, `ipo_not_tradable`, `below_price_floor`, `below_liquidity_floor`, `leveraged_etp_not_enabled`, `crypto_pair_not_usd` (item 7's pair rule, registered by DEC-255; the gate reports it once E6-10's implementation lands), `concentration_limit`, `max_order_size`, `reentry_cooldown` |
 | 3 | Session, auction window, halt (§4.3, §4.4) | E6-6 (sessions), E6-9 (halts) | `session_not_allowed`, `extended_hours_opening_not_allowed`, `auction_window` (the opening auction and market orders only — interpretation 18), `instrument_halted`, and the defers `discretionary_exit_regular_session_only` and `owner_confirmation_required` |
 | 4 | Order constraints (§5.3 rules 1 to 9, in list order); `GateInput::pass` decides whether rules 4 to 6 exclude the agent's own protective and resting opening orders (`First`) or apply in full (`BeforeSubmission`) | E6-6 | `would_cross_zero`, `sell_exceeds_available`, `working_order_limit`, `add_blocked_by_protective_order`, `unknown_order_in_flight` (**deny** for an opening, **hold** for a reduction — interpretation 22), `market_order_not_allowed`, and — pending the founder's registry entry, Decisions needed item 3 — rule 2's minimum size and increment |
 | 5 | Mark freshness and the price collar (§8.2, §9.6) | E6-8 | `stale_mark`, `price_outside_collar` |
@@ -512,7 +523,7 @@ folds from the account stream:
 | Order size vs trailing 5-minute volume (≤ 5%) | `MarketSnapshot::trailing_5m_volume` | Supplied, never derived here |
 | Daily participation vs 20-day ADV (≤ 5%) | `ConductState::participation_today` and `MarketSnapshot::adv_20d` | Exact `Qty` comparison |
 | Order-to-fill ratio (≤ 10 after ≥ 20 orders) | `ConductState::orders_today_per_instrument`, `filled_today` | `orders ÷ max(fills, 1)`, compared without dividing: `orders > 10 × max(fills, 1)` |
-| No opening order within 60 s after an opposite-side fill | `ConductState::last_opposite_fill_at` | `now − last < 60 s` |
+| No opening order within 60 s after an opposite-side fill | `ConductState::last_opposite_fill_at` | `now − last ≤ 60 s` (the interval includes its last instant, DEC-163 item 3) |
 | Close window (last 10 minutes of the regular session) | the `SessionAt` the gate derives from `now` | `now ≥ session_end − close_window_minutes`, with the early-close calendar giving `session_end` |
 | Self-trade prevention across related accounts | `AccountSnapshot::related_account_resting` | Set membership; the executor supplies the group |
 
@@ -587,6 +598,7 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
 | mandate §5.5 `trim_to_target` sells down to factor × cap, rounded up, regular session only, never while Holding | `hand::a_trim_rounds_up_to_the_increment`, `hand::a_trim_waits_for_the_regular_session`, `hand::no_trim_while_holding`, `properties::a_trim_never_sells_below_the_target` |
 | mandate §5.9 the effective mode is the strictest restriction, and openings stop at `exits_only` | `RC-22` last step, `properties::a_stricter_mode_is_never_more_permissive` |
 | trading §3.2 the eligibility floor, items 1 to 7 in list order | `RC-16` steps 1 to 7, `hand::the_floor_reports_the_first_failing_item` |
+| trading §3.2 item 7 a crypto opening needs a USD pair: another or an unstated quote currency is denied at check 2, after items 1 and 3 and before the 30-day volume; an exit in any pair and a US equity are never judged by it (DEC-254) | `usd_pairs::a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2`, `usd_pairs::a_crypto_opening_in_a_usd_pair_passes_the_floor`, `usd_pairs::check_2_is_whole_for_crypto`, `usd_pairs::a_crypto_exit_in_any_pair_is_never_denied_by_the_pair_rule`, `usd_pairs::a_us_equity_is_not_judged_by_its_quote_currency`, `usd_pairs::an_inactive_crypto_account_is_reported_before_the_pair`, `usd_pairs::the_pair_rule_denies_exactly_a_crypto_opening_not_quoted_in_usd` |
 | trading §3.2 item 6 an unclassified or stale ETP fails closed | `hand::an_unclassified_etp_is_complex`, `hand::a_stale_classification_denies_an_etp_opening`, `properties::etp_fails_closed`, `RC-16::leveraged_etps_enabled` |
 | trading §3.2 the floor never applies to a risk-reducing order in a held instrument | `RC-16` step 8, `fuzz::no_allowed_sequence_ever_exceeds_a_drawn_mandates_limits`, `hand::the_floor_never_blocks_an_exit_in_a_held_instrument`, and in-module `gate::tests::no_floor_breach_denies_an_exit_from_any_origin` (every sell origin, all ten, against every universe and floor breach) |
 | trading §4.3 sessions: regular-session openings, extended-hours exits as limit orders, nothing overnight | `hand::an_opening_outside_the_regular_session_is_denied`, `hand::an_extended_hours_opening_needs_a_limit`, `RC-25` |
@@ -599,10 +611,10 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
 | trading §9.2 `intraday_margin` denies no 1× long-only opening | `RC-09::alpaca_intraday_margin`, `hand::a_reported_deficit_is_an_account_state_not_a_denial` |
 | trading §9.3 1× gross exposure including the proposed order; no short sales | `MC-G04`, `MC-G06`, `hand::a_sell_above_the_position_is_would_cross_zero` |
 | trading §9.5 buying power is the lower of model and broker, with the fee reservation, subtracted once | `RC-08` step 3, `RC-18` step 3, `RC-18::generic_cash_account`, `properties::buying_power_is_the_lower_of_the_two`, `hand::a_reservation_includes_the_rounded_fee` |
-| trading §9.6 the collar binds aggressive prices only, within the passive band, by tier | `RC-22` steps 1 and 2, `hand::a_passive_price_inside_the_band_is_allowed`, `hand::a_median_dollar_volume_exactly_at_the_threshold_is_liquid` |
-| trading §9.6 the opposite-fill interval | `RC-22` steps 5 and 6, `properties::only_an_opposite_side_fill_starts_the_interval` |
+| trading §9.6 the collar binds aggressive prices only, within the passive band, by tier; an unknown median takes the narrower tier | `RC-22` steps 1 and 2, `hand::a_passive_price_inside_the_band_is_allowed`, `hand::a_median_dollar_volume_exactly_at_the_threshold_is_liquid`, and in-module `gate::tests::an_unknown_median_volume_takes_the_narrower_collar` (DEC-163 item 2) |
+| trading §9.6 the opposite-fill interval, its last instant included | `RC-22` steps 5 and 6, `properties::only_an_opposite_side_fill_starts_the_interval`, and in-module `gate::tests::the_opposite_fill_interval_includes_its_last_instant` (DEC-163 item 3) |
 | trading §9.6 minimum resting time on a cancel, exempt before a risk-reducing order | `hand::a_cancel_inside_the_resting_window_is_denied`, `hand::a_cancel_before_a_risk_reducing_order_is_exempt` |
-| trading §9.6 participation caps slice a discretionary exit rather than denying it | `properties::a_participation_cap_slices_and_never_denies`, `hand::a_sliced_exit_reports_what_it_applied` |
+| trading §9.6 participation caps slice a discretionary exit rather than denying it; a zero cap slices nothing and no slice is below `min_order_size` | `properties::a_participation_cap_slices_and_never_denies`, `hand::a_sliced_exit_reports_what_it_applied`, and in-module `gate::tests::a_zero_cap_slices_no_exit_of_any_kind`, `gate::tests::a_cap_below_the_minimum_slices_at_the_minimum` and `gate::tests::an_allowed_exit_is_never_below_its_minimum_or_zero` (DEC-163 item 4) |
 | trading §9.6 order-to-fill after 20 orders, compared without dividing | `hand::the_order_to_fill_ratio_needs_twenty_orders`, `properties::the_ratio_is_compared_without_dividing` |
 | trading §9.6 self-trade prevention across related accounts | `hand::an_opposite_side_rest_in_a_related_account_blocks_an_opening` |
 | trading §9.6 the daily surveillance report states figures and makes no judgement | `hand::the_surveillance_report_matches_a_hand_computed_day`, `properties::the_report_flags_every_threshold_it_crosses` |
@@ -974,6 +986,14 @@ missing test, and the tests PR does not merge with one.
 | 46 | The `kind: gate` harness reassigns the case's `purpose` from side and position, turning `MC-G15` into a denial | `MC-G15`, `harness::a_gate_case_purpose_is_passed_through` |
 | 47 | An owner's ordinary close is treated as a kill switch, so `paused` lets it through | `hand::a_paused_agent_holds_an_owner_close_but_not_an_owner_kill_switch`, `properties::a_hold_follows_the_mode_rule_exactly` |
 | 48 | A flatten prices every sell `market_or_ladder`, ignoring the session | `MC-F02`, `MC-F03` (both crypto sells), `hand::a_flatten_prices_by_session_alone` |
+| 49 | E6-10: an unstated quote currency (`None`) is admitted as USD | `usd_pairs::a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2`, `usd_pairs::the_pair_rule_denies_exactly_a_crypto_opening_not_quoted_in_usd` |
+| 50 | E6-10: only an unstated quote currency is denied, so a stablecoin pair (`Other`) opens | the same two |
+| 51 | E6-10: the pair rule judges a US equity | `usd_pairs::a_us_equity_is_not_judged_by_its_quote_currency`, `usd_pairs::the_pair_rule_denies_exactly_a_crypto_opening_not_quoted_in_usd` |
+| 52 | E6-10: the pair rule runs after item 7's 30-day volume, so an illiquid non-USD pair reports `below_liquidity_floor` | `usd_pairs::a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2` |
+| 53 | E6-10: the pair rule runs before item 3, so an `ipo` non-USD pair reports the pair | `usd_pairs::a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2` |
+| 54 | E6-10: the pair rule reports another registered code (`ineligible_exchange`) | `usd_pairs::a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2`, `usd_pairs::the_pair_rule_denies_exactly_a_crypto_opening_not_quoted_in_usd` |
+| 55 | E6-10: the pair rule is placed at check 1 for every purpose, so it denies a crypto exit | `usd_pairs::a_crypto_exit_in_any_pair_is_never_denied_by_the_pair_rule`, `usd_pairs::an_inactive_crypto_account_is_reported_before_the_pair`, `usd_pairs::check_2_is_whole_for_crypto`, and the two above |
+| 56 | E6-10: check 2 is left owed for crypto after the rule exists | `usd_pairs::a_crypto_opening_in_a_usd_pair_passes_the_floor`, `usd_pairs::check_2_is_whole_for_crypto`, `usd_pairs::the_pair_rule_denies_exactly_a_crypto_opening_not_quoted_in_usd`, `hand::crypto_never_counts` |
 
 ## Not done
 
