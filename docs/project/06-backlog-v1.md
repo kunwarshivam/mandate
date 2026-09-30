@@ -58,6 +58,26 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   than waiting for a reviewer (the #316 reviews).
   *Accepted when:* both run in `ci lint`, pinned in `.github/workflows/ci.yml` and `install.sh`,
   and a planted `SC2086` or an unknown workflow key fails the job.
+- **E1-5 (Should)** As an engineer, I want the merge script's remaining gaps from #316's
+  round-3 review closed, so that the only path from approval to `main` (DEC-175) is tested as
+  GitHub actually answers it. The items:
+  - The stub `gh` serves only the first page unless `--paginate` is passed, and a case lists
+    `web.yml` past file 100.
+  - A fixture lists workflow runs newest first, as GitHub does, so that `.[-1]` in place of
+    `max_by(.id)` fails.
+  - A merge GitHub refuses is a skip, not a failed job. That covers a sweep and a per-PR run racing
+    after one of them has merged, a ruleset block, and a head that moved between the read and the
+    merge call.
+  - The approval line is not read inside an HTML comment, an indented code block (four or more
+    leading spaces; a bullet indented up to three spaces is still read, as DEC-175 allows), or a
+    four-backtick fence.
+  - The web path rule comes from `web.yml`'s `paths` filter, not a second copy, and a file renamed
+    out of `web/` counts by its `previous_filename` too.
+  - Optionally, the latest `labeled coordinator-approved` event must be newer than the head
+    commit, so that a description line alone approves nothing.
+
+  *Accepted when:* each item has a refusal or merge case in `xtask`'s merge-script tests, and each
+  fails when its fix is reverted.
 
 ### E2 Market data
 
@@ -832,17 +852,37 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   among the executor's drafts, but it is a control-stream event the executor never writes; the
   executor's alert is its own record (`ProtectionChanged interval_limit`) plus `Effect::Notify`.
   Correct the oracle before slice 2 un-ignores it (found building slice 3a, #267).
-- **E7-4 slice 3b (stream K), from #258's round 2 (comment 5862870455):** (1) pin with tests the
-  three fail-open paths whose code is right but unclaimed: `reconcile::agents` counting an ownerless
-  order as `""`, `orders::unmapped`'s ownerless (`Some(None)`) arm, and `reattribute` without its
-  instrument filter; (2) make the pins' `sources()` skip `#[cfg(test)]` regions and drop the
-  `concat!` idiom that dodges them.
+- **E7-4 slice 2 (stream K), #242's plants that go live with it:** plant 7 (held quantity 10 → 5)
+  and plant 8 (held limit 150 → 100), and plant 9 (`fault::protected` on a plain `restart`), which
+  the coordinator moved from 3a to slice 2 (#267, comment 5862923162): under rule 13 no exit waits
+  for the startup reconciliation, so the plant gets weight only with the first opening through
+  `fault::protected` (slice 2's add). Slice 2's PR shows each of the three red.
 - **E7-4 slice 4 (stream K), from #264's review (comment 5862761692):** (a) name the do-nothing
   finding in slice 4's PR: a permissive `ladder_price` turns `fault::crash_at_confirmation_before_exit_submit`
   green, and only `protection::sequence_tests::an_unprotected_exit_never_reaches_the_ladder_stub`
   catches it; (b) pin the fault fixture's exact recovered cash rather than §11's ±15.40 band;
   (c) make the fault fixture's `equity` and `buying_power` consistent with its cash before any
   slice reads buying power from it.
+- **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
+  `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
+  outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
+  rule 5's ruled carve-out: an exit that goes once its opening's cancel is overdue, answered or not,
+  with the opening still resting ([DEC-160](04-decision-log.md#decisions) (7), (13), (18)).
+  Carve that case out through a DEC-77 tests correction before slice 5 or 6 lets the property run.
+- **Trading-domain spec §5.7's missing `PendingCancel` edges (stream K), from #286 round 2
+  (minor 3):** a spec PR that adds `PendingCancel → Expired` and `PendingCancel → Rejected` to
+  §5.7's transition table, with reference cases, and then the executor change that follows it.
+  Until then such a report is journaled and ignored ([DEC-160](04-decision-log.md#decisions)
+  (13)), so an exit waiting on the order goes at rule 5's bound (item (18)), but the residue
+  stays: a day order that expired, or was rejected, while its cancel was outstanding is left in
+  `PendingCancel` and keeps its buying-power reservation until reconciliation or a later report
+  moves it.
+- **`mandate-executor`, from #286 round 2 (nit 1):** marking an accepted order's cancel overdue
+  (`protection::overdue`) journals a self-transition, which `orders::transition` records as an
+  attempted edge with `ignored: true` so the fold applies only `cancel_overdue`. The record reads
+  as a refused transition. A dedicated flag-only record needs the fold's `Unknown` branch
+  (which resets `unknown_since` and the absence count) kept out of it, so it is not a one-line
+  change; do it with the §5.7 edges above.
 - **`mandate-executor` fees (stream K), from #259 round 1:** (1) a typed `Environment` in place of
   the stream's environment text, so `paper_only_fee_config` refuses a live stream by its type
   (rung 1) rather than by a string comparison; (2) `mandate_accounting::Config` carries the
@@ -953,9 +993,43 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   where it is configured or plans the flatten without a floor.
 - Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
   row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.
+- Delete `crates/mandate-risk/tests/refcases.rs` once the families G and F status rows (DEC-178)
+  have merged: `crates/mandate-refcases/src/mandate/risk_gate.rs` now runs MC-G01 to MC-G16 and
+  MC-F01 to MC-F04 against the same `evaluate` and `agent_flatten`, and the file's own doc says it
+  moves there. Its doc on `FULL_GATE_ONLY` still calls MC-G13 pending on E6-8, which #311 made
+  live; deleting the file retires that too, and moving any figure it pins that
+  `crates/mandate-risk/tests/hand.rs` does not goes in the same tests correction.
+- Reconcile MC-G02 with its header under DEC-176: the header says "every other check passes", yet
+  its working opening order in the proposal's own instrument trips trading-domain §5.3 rule 6
+  (`working_order_limit`), which is why [DEC-150](04-decision-log.md#decisions) item 1 lists it on
+  `FULL_GATE_ONLY`. Stating the same $1,300 as a position (`positions_mv` 1300, no working order in
+  that instrument) keeps `instrument_total` and `gross` at 1500, so the case would pin `gross` on an
+  allow path, the window DEC-150 records, and the entry could expire. Restated, MC-G02 becomes an
+  allowed opening (an increase), so like MC-G13 it runs through checks 5 and 6 and check 7, and the
+  full gate allows it: against the restated state the harness reports the entry expired
+  (DEC-178 item 11). The same pull request deletes the entry, and `FULL_GATE_ONLY` with it if
+  nothing else is listed. The change touches the YAML,
+  the reference implementation's checks, and the regenerated fixtures, so it cannot share a pull
+  request with code (ES-22).
+- Tighten the families G and F harness (#317 re-review, minor 2 and nits 1 to 4), in one tests
+  correction of `crates/mandate-refcases/src/mandate/risk_gate.rs` and DEC-178:
+  - compare `pacing` as `None` on every allowed `gate` case and destructure `Decision`, so a new
+    member does not compile until it is compared; today a `pacing` that always sets
+    `marketable_limit_required` leaves every F, G and L case green, and only `mandate-risk`'s own
+    tests catch it (DEC-178 item 14);
+  - reword DEC-178 item 12: the five non-fixture fields are compared with the same values typed
+    again, because `mandate-risk`'s `test_default_config` is test-only and another crate cannot
+    call it;
+  - add an edit test for item 11's pin on an allowed order's whole `checks` list, which today no
+    harness test of its own guards;
+  - note in item 11 that the pin is only meaningful for an allowed opening (MC-G13), since the gate
+    reports checks 5 to 8 as `Passed` for an exit without running them;
+  - drop the unreachable typed error for an unknown group rank in `Scene::read`, or state why it
+    stays.
 - **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163).
   `crates/mandate-refcases/src/trading_domain.rs` has no gate driver: `propose_order` steps and the
-  `decision` expectation are pending on E6-3, and the crate does not depend on `mandate-risk`. An
+  `decision` expectation are pending on E6-3. The crate depends on `mandate-risk` for the mandate
+  suite's families G and F (DEC-178), but the trading-domain arm does not call it. An
   arm that builds a `GateInput` from a case, calls `mandate_risk::evaluate`, and compares verdict
   and reason code is the first step, and it does not run RC-25 by itself: RC-25's steps carry no
   `quote`, `trailing_5m_volume` or `adv_20d`, so its openings would be denied `stale_mark` at check 5
