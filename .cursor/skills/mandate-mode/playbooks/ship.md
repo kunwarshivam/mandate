@@ -40,7 +40,8 @@ decides.
    - return PASS or FAIL with file and line evidence for each finding.
 4. On FAIL, fix the findings in the same PR and repeat from step 2.
 5. On PASS, the coordinating session approves the head the review passed (DEC-175). It writes
-   `Coordinator-approved-head: <full sha>` into the PR description and adds the
+   `Coordinator-approved-head: <full sha>` into the PR description, marks the PR ready for review
+   (the PR tool opens drafts, and the workflow never merges a draft), and adds the
    `coordinator-approved` label. Put the line on its own inside the description's body (the part
    the PR tool wraps in its body markers), outside any code fence, once; write the key exactly as
    shown and the sha in full (either case; a leading `- ` or `* ` is fine). Anything else and the

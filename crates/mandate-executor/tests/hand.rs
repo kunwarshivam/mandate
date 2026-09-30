@@ -2779,7 +2779,6 @@ fn an_order_submitted_without_protection_is_marketable() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_passive_exit_becomes_a_new_oco_keeping_the_stop() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2818,7 +2817,6 @@ fn a_passive_exit_becomes_a_new_oco_keeping_the_stop() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_passive_exit_never_leaves_the_position_unprotected() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4393,7 +4391,6 @@ fn an_unknown_order_holds_an_exit_in_that_instrument_alone() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn entering_exits_only_cancels_the_working_opening_orders() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4431,7 +4428,6 @@ fn entering_exits_only_cancels_the_working_opening_orders() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn entering_exits_only_leaves_protective_orders_resting() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4472,7 +4468,6 @@ fn entering_exits_only_leaves_protective_orders_resting() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_reducing_sell_cancels_the_resting_opening_buys_first() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

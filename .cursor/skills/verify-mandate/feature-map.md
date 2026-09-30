@@ -347,6 +347,14 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `a_run_from_before_the_restart_does_not_release_an_opening`, and
   `the_hold_lifts_on_an_account_and_a_run_in_either_order`. Run: `cargo nextest run -p
   mandate-executor --lib reconcile::tests`.
+- **Rule 5's bounded wait:** an exit waits on its agent's opening in the instrument, in any state,
+  for at most `unknown_absent_window_s` from the `GateDecided` that allowed it, and every waiting
+  exit is re-evaluated after every step (`protection::overdue_openings`,
+  `protection::release_waiting`; [DEC-160](../../../docs/project/04-decision-log.md) (7), (13)). Its
+  cases are in-module in `crates/mandate-executor/src/protection.rs` (`sequence_tests`): the
+  reviewer's three paths, and `no_exit_waits_past_the_bound_but_under_a_rule_13_hold`, a property
+  over random scripts against an oracle read from the drafts. Run: `cargo nextest run -p
+  mandate-executor --lib protection::sequence_tests`.
 - **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
   `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
   `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they
@@ -408,10 +416,16 @@ passes a check still owed.
   `surveillance.rs` for the boundaries the files above cannot pin. Planted bugs per test: the task
   brief.
 - **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
-  `fixtures/refcases/mandate.json`; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
+  `fixtures/refcases/mandate.json`, through `crates/mandate-refcases/src/mandate/risk_gate.rs`
+  (DEC-178; MC-G13 stays pending on E6-8's checks 5 and 6), with
+  `crates/mandate-refcases/tests/mandate_gate_harness.rs` proving the two arms read and compare
+  every member; `crates/mandate-risk/tests/refcases.rs` is the crate-local copy it replaces, kept
+  until a follow-up deletes it; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
   and `RC-25` with their variants, and the `propose_order` steps of `RC-03`, `RC-08` and `RC-18`,
   in `fixtures/refcases/trading-domain.json`.
-- **Run:** `cargo nextest run -p mandate-risk`.
+- **Run:** `cargo nextest run -p mandate-risk`, and
+  `cargo test -p mandate-refcases --test refcases -- --include-ignored mandate::MC-G` (and
+  `mandate::MC-F`).
 
 ## Journal drafts and the event catalogue
 
@@ -555,8 +569,10 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `crates/mandate-domain/tests/domain.rs` (live). Planted bugs per test: the task brief and the E10-3
   tests and implementation PRs.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
-  through `crates/mandate-refcases/src/mandate.rs`; families G, A, and B stay with streams G and H
-  and fail as "not interpreted until" their owning story, and family N is stream J's (below). A rejection that carries no reason
+  through `crates/mandate-refcases/src/mandate.rs`; families G and F are stream G's, through
+  `crates/mandate-refcases/src/mandate/risk_gate.rs` (Risk gate, above); families A and B stay
+  with stream H and fail as "not interpreted until" their owning story, and family N is stream J's
+  (below). A rejection that carries no reason
   fails its case, so the thirty cases expecting `schema_valid: false` cannot pass on a parse that
   refuses everything.
 - **Run:** `cargo nextest run -p mandate-spec`, `cargo nextest run -p mandate-domain`, and
@@ -602,9 +618,11 @@ proves each pending test fails on them (DEC-110).
   brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` family N (28 cases: admission, lineage,
   thesis expiry, stagger), through `crates/mandate-refcases/src/mandate/research.rs` in the
-  `mandate` suite (DEC-154). All four kinds are interpreted; MC-N01, MC-N14 and MC-N26 compare
-  everything and then fail naming E6-2's `classify`, so 25 of the 28 pass. The module's in-module tests doctor every expected member of every interpreted
-  case and require it to fail.
+  `mandate` suite (DEC-154). All four kinds are interpreted, and MC-N01, MC-N14 and MC-N26 decide
+  their first order through `mandate-builder`'s `classify` (DEC-179), so all 28 run; the status rows
+  of those three move in a status-only PR. The module's in-module tests doctor every expected member
+  of every interpreted case and require it to fail, and read every first-order fact back from its
+  own §6.3 field.
 - **Run:** `cargo nextest run -p mandate-research` and
   `cargo test -p mandate-refcases -- --include-ignored mandate::MC-N`.
 
@@ -644,11 +662,14 @@ proves each pending test fails on them (DEC-110).
   (the harness reads the account type and checks `buying_power`: RC-08 and RC-18's cash variant
   without their gate step), `crates/mandate-refcases/src/mandate/research.rs` (family N of the
   mandate suite, through `mandate-research`), `crates/mandate-refcases/src/mandate/autonomy.rs`
-  (family A, through `mandate-builder`'s `classify`), `crates/mandate-refcases/status.toml`
-  (founder-owned).
+  (family A, through `mandate-builder`'s `classify`),
+  `crates/mandate-refcases/src/mandate/risk_gate.rs` (families G and F, through `mandate-risk`,
+  with `crates/mandate-refcases/tests/mandate_gate_harness.rs`; DEC-178),
+  `crates/mandate-refcases/status.toml` (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
-  pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L harnessed by stream F; the rest pending their streams).
+  pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L
+  harnessed by stream F, N by stream J, and G and F by stream G; the rest pending their streams).
 - **Run:** `cargo nextest run -p mandate-refcases`; pending cases with
   `cargo test -p mandate-refcases -- --include-ignored`.
 
