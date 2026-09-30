@@ -168,7 +168,7 @@ grow.
     | **Explanations from the record:** "why" answered from journaled events | A model inventing its reasons after the fact | DEC-192 |
     | **A statement you can verify:** the hash chain proves every action was within the mandate | Trust resting on the platform's word | DEC-193 |
     | **Away mode:** a reducing version with an end date; restoring asks the owner | Autonomy running while the owner cannot answer | DEC-194 |
-    | **Ask budget:** a daily cap on asks per agent and per client; beyond it, asks are skipped | Approval fatigue, and an agent or client wearing the owner down | DEC-195 |
+    | **Ask budget:** a daily cap on asks per client, on top of §6.4's 10 per agent; beyond it, asks are skipped | Approval fatigue, and an agent or client wearing the owner down | DEC-195, DEC-251 |
     | **Delegation total:** all of a version's delegations together stay within the allocation | Twenty small delegations adding up to one large one | DEC-196 |
 
 ## Consequences
