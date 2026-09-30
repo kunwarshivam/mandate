@@ -432,7 +432,9 @@ fn the_risk_clock_is_monotone_and_whole_second_and_a_refused_step_changes_nothin
 /// `stale_mark` at exactly `mark_max_age_s`, as is a held instrument whose counted mark fails its
 /// checks. A counted sane mark clears it and resets the age, a fill does neither, an equity's
 /// extended-hours mark is not counted, a sale that leaves the book flat clears it, and a flat book
-/// never goes stale. Each change is one event, and the agent's mode never moves (§5.9).
+/// never goes stale: its seconds flat never count towards the age, so a book bought again goes stale
+/// on the held seconds alone. A re-admission lifts only `removed_instrument`. Each change is one
+/// event, and the agent's mode never moves (§5.9).
 #[test]
 fn a_held_instrument_goes_stale_on_its_age_or_a_failed_mark_and_a_flat_book_never_does()
 -> Result<(), String> {
@@ -454,6 +456,9 @@ fn a_held_instrument_goes_stale_on_its_age_or_a_failed_mark_and_a_flat_book_neve
             fill(245, Side::Sell, "101", "100")?,
             tick(100_000)?,
             quote(100_001, "100", MarketSession::Regular, false)?,
+            fill(100_100, Side::Buy, "1", "100")?,
+            tick(100_216)?,
+            tick(100_217)?,
         ],
     )?
     .into_iter()
@@ -479,9 +484,14 @@ fn a_held_instrument_goes_stale_on_its_age_or_a_failed_mark_and_a_flat_book_neve
             vec![stale(false)],
             none(),
             none(),
+            none(),
+            none(),
+            vec![stale(true)],
         ],
         "119 s is fresh and 120 s is stale; the fill at 200 s did not reset the age, the after-hours \
-         marks count for nothing, and the sale to flat clears it"
+         marks count for nothing, and the sale to flat clears it; bought again, the book is stale at \
+         120 held seconds without a sane mark, 3 before the sale and 117 after the buy, and the \
+         99,855 s it sat flat count for nothing"
     );
 
     let mut shut = open(&mandate, &held, &Shut)?;
@@ -519,6 +529,30 @@ fn a_held_instrument_goes_stale_on_its_age_or_a_failed_mark_and_a_flat_book_neve
             InstrumentRestriction::StaleMark,
             InstrumentRestriction::RemovedInstrument
         ])
+    );
+    let admitted = one(
+        &mut both,
+        universe(121, UniverseChange::Admitted, RemovalReason::ThesisAdmitted),
+    )?;
+    assert_eq!(
+        admitted.journal,
+        [
+            RiskEvent::UniverseChanged {
+                instrument: instrument()?,
+                change: UniverseChange::Admitted,
+                reason: RemovalReason::ThesisAdmitted,
+            },
+            RiskEvent::InstrumentRestrictionChanged {
+                restriction: InstrumentRestriction::RemovedInstrument,
+                reason: RestrictionReason::Removal(RemovalReason::ThesisAdmitted),
+                active: false,
+            },
+        ],
+        "a re-admission lifts removed_instrument alone; stale_mark waits for a sane mark"
+    );
+    assert_eq!(
+        admitted.snapshot.instrument_restrictions,
+        BTreeSet::from([InstrumentRestriction::StaleMark])
     );
     Ok(())
 }
