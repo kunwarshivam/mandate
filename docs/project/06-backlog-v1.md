@@ -180,10 +180,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   RC-15 passes.
 - **E6-10 (Must)** As an owner, I want the gate to admit crypto **USD pairs only** (trading-domain
   §3.2 item 7), so that an agent cannot open a stablecoin-quoted pair the floor was never written
-  for. Needs a quote-currency input: `InstrumentSnapshot` carries none and `AssetId` is a UUID, so
-  today nothing tells BTC/USD from BTC/USDT. Until it lands the gate keeps a crypto opening owed at
-  check 2 and refuses it fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a
-  non-USD pair is denied, a USD pair passes the floor, and check 2 is whole for crypto.
+  for. `AssetId` is a UUID, so the quote currency is its own input,
+  `InstrumentSnapshot::quote_currency`, where only a stated USD admits (DEC-254). Until the
+  implementation reads it the gate keeps a crypto opening owed at check 2 and refuses it
+  fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a non-USD pair is denied, a
+  USD pair passes the floor, and check 2 is whole for crypto (`crates/mandate-risk/tests/usd_pairs.rs`).
 - **E6-11 (Must)** As an owner, I want the daily surveillance report delivered to me and a conduct
   breach to move the agent to `exits_only`, so that §9.6's "breach → agent `exits_only`" and its
   "threshold breaches are routed to the owner, whose acknowledgment is journaled" hold. E6-8 computes
@@ -338,13 +339,29 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   risk reduction. The mandate spec §6.1 wording is in ("Owner controls and step-up", DEC-173
   item 5).
   *Follow-up (M7 spec PR, DEC-173 item 1):* the MC-E cases (MC-E01 to MC-E31) are not yet in
-  `mandate.yaml`, because `mandate_harness.rs`'s
-  `the_fixture_holds_the_families_this_stream_expects` pins the fixture's total at 298 cases and
-  300 tests, and the spec guard keeps that `crates/` fix out of a spec PR. Two changes, in order:
-  first a tests correction that makes the harness count only the families it owns, or read §11's
-  stated count; then an MC-E spec PR that generates the cases from `reference/mandate/ref.py`'s
-  escalation model (already fuzzed and mutation-checked), with `cargo xtask refcases --write`, and
-  no `status.toml` row.
+  `mandate.yaml`. Two changes, in order. *Done (the tests correction,
+  [#343](https://github.com/kunwarshivam/mandate/pull/343)):* `mandate_harness.rs` counts only the seven families it
+  owns, by case-ID prefix (MC-S, MC-V, MC-P, MC-C, MC-R, MC-T, MC-L), and
+  `a_kind_no_arm_interprets_fails_naming_it` accepts a kind no arm interprets as long as its cases
+  fail, so a new family changes no harness test while a case added to or dropped from an owned
+  family still fails. Still open: an MC-E spec PR that generates the cases from
+  `reference/mandate/ref.py`'s escalation model (already fuzzed and mutation-checked), with
+  `cargo xtask refcases --write`, and no `status.toml` row. Give the family a kind of its own: the
+  family A, B, G, F, and P count tests select their cases by kind, so a new family reusing one of
+  those kinds would change their counts. The same PR corrects mandate spec §11's and §1's sentences
+  that MC-U "lands in its own tests-first change, because the shared harness pins the case count":
+  since #343 it no longer does (#343 review, minor 4).
+  *Follow-up (#343 review, minor 1; a tests correction):* a new family that reuses an owned family's
+  kind (for example an `MC-E01` of kind `semantic`) now moves no count in `mandate_harness.rs` and
+  runs through that family's arm, where on `main` before #343 it failed two counts. `unread_keys`
+  still refuses any member it ignores, so it cannot pass half-read, but the loud failure is gone.
+  Assert that the owned-by-kind id set equals the owned-by-prefix set in
+  `the_fixture_holds_the_families_this_stream_expects`; the reviewer's four-line version passes on
+  today's fixture and fails on that scenario.
+  *Follow-up (#343 review, nits):* make `INTERPRETED` a `pub const` in `src/mandate.rs` that
+  `run_listed`'s dispatch and the test both read; the `{prefix}{n:02}` ids with a lexicographic sort
+  break past 99 cases in a family; the uninterpreted-kind branch asserts only `is_err()`, not that
+  the message names the kind.
   *Follow-up (M7 spec PR, DEC-173 item 11):* the `mandate-journal` catalogue (`src/catalogue.rs`,
   `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
   (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
@@ -944,6 +961,23 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   outside the registry, beside `instrument_not_in_universe` and `broker`, so ES-09's stable reason
   codes do not yet cover what the partial gate journals ([DEC-129](04-decision-log.md#decisions)
   items 23 and 27, ADR-0001 ES-09; #206 review).
+- **Before E6-10's implementation merges:** register `crypto_pair_not_usd` in the trading-domain
+  `reason_codes` registry and name it in §3.2 item 7, or record why `not_in_working_universe`
+  stands. Mandate spec §5.3 defines that code as "the instrument is in the working universe", which
+  a BTC/USDT pair the research agent admitted is, so the journaled denial would say something false
+  about it. Registering a code adds no risk and closes a gap, so DEC-176 lets an agent do it in its
+  own spec PR; the tests' `PAIR_CODE` constant flips with it ([DEC-254](04-decision-log.md#decisions)
+  item 3; DEC-129 items 25 and 27; #342 review, minors 1 and 2).
+- **The broker symbol's quote currency is read exactly** (E6-10; #342 review, minor 3). The gate's
+  USD-pair rule rests on the §3.1 loader mapping a pair to `QuoteCurrency`, and E7-8's
+  `TradingClient::asset` criterion does not name it. The loader matches `USD` exactly and
+  case-sensitively, with tests that `usd`, `USDT`, `USDC`, a padded code, and an absent symbol all
+  land on `Other` or `None` (DEC-254 item 1).
+- **E6-10's tests nits** (#342 review): `usd_pairs.rs`'s property sets `quote_currency` twice for a
+  crypto draw; DEC-254 item 3's alternatives omit DEC-129 item 27's "assert the verdict, leave the
+  code unasserted" option; and `cargo xtask ci pending` accepts any `Unimplemented` report rather
+  than the story its `#[ignore]` label names, which is how `hand::crypto_never_counts` sat labelled
+  E6-6 while failing at E6-10's stub. Compare the stub's story with the label if it recurs.
 - **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
   properties. 29 of the 33 pass when every reachable stub returns `Ok(())`, so a no-op executor
   would satisfy them; each property must also assert a positive effect a no-op cannot produce
@@ -1325,8 +1359,8 @@ From E6-4's V-040 spec change (stream H; the coordinator's ruling on #251, round
   (V-040). The 2¹³ × 5¹³ ladder, where the whole product fits and a subset does not, belongs there
   too. For now all three are pinned in `reference/mandate/fuzz.py::fuzz_ladder_precision`, which runs
   on every seed, and as in-module rows in `crates/mandate-spec/src/validate/tests.rs`. They are not
-  reference cases because a case changes counts that live `mandate_harness.rs` tests assert (298
-  cases, 67 semantic, 202 owned, and the member sweeps), and the spec guard keeps the fixture and
+  reference cases because a case changes counts that live `mandate_harness.rs` tests assert (67
+  semantic, 202 owned, and the member sweeps), and the spec guard keeps the fixture and
   those tests in separate PRs. The founder-owned YAML (ES-22) and the counts must change together.
 - **Three minors from #251's round 2, deferred by the freeze rule.** (1) `docs/specs/mandate.md`'s
   front matter still says a change needs founder approval with no qualification; DEC-167 item 3
