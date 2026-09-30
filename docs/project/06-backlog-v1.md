@@ -992,6 +992,36 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
     reports checks 5 to 8 as `Passed` for an exit without running them;
   - drop the unreachable typed error for an unknown group rank in `Scene::read`, or state why it
     stays.
+- Tighten the family-B harness (#331 review, minors 4 and 5 and the nits), in one tests correction
+  of `crates/mandate-refcases/src/mandate/order_builder.rs` and DEC-250:
+  - `an_unreadable_input_is_refused_naming_it` says every scalar the harness reads is parsed, but
+    its sweep leaves out the `gate_state.positions_mv` values, `gate_state.last_exit_fill_at`,
+    `gate_state.working_universe`, and the working orders' own `instrument` and `max_cost`. Extend
+    the sweep to them, or narrow the doc to what it covers (minor 4);
+  - the gate's `fee_reservation` is hardcoded `Usd::ZERO`, while a non-zero crypto
+    `fee_rate_cash` is accepted (DEC-250 item 6 refuses only an equity fee rate). Refuse a non-zero
+    cash fee rate, or derive the reservation from it, before any crypto B case states one
+    (minor 5);
+  - `crates/mandate-builder/tests/refcases.rs`'s module doc still says the harness hands `decide`
+    the case's own verdict until stream G's gate lands; the shared harness now composes propose,
+    gate and `decide`, so the doc is stale (nit);
+  - `test_default_gate_config` and `gate_mandate` are a third copy of the gate helpers, beside
+    `risk_gate.rs` and `trading_domain/gate.rs`. Share them, and when they are shared, add
+    DEC-178 item 12's check against `configs.test_default.gate` to the family-B arm (nit);
+  - `INPUT_KEYS` declares `fee_rate_cash`, `drawdown`, `daily_pnl_fraction` and
+    `bought_today_usd`, which no B case states, so no test shows any of them read. Drop them until a
+    case states one, or add a doctoring that does (nit).
+- **Family B's three contradicting clocks, as a reference-case PR under DEC-176** (DEC-250 item 12,
+  #331 review). MC-B22 (`session: after_hours`), MC-B23 (`in_close_window: true`) and MC-B31
+  (`session: after_hours`) all put `now` at 2026-09-22T14:00Z, the regular session, so the harness
+  fails them naming the conflict. Move `now`, and each output's `as_of` and `expires_at` with it, to
+  21:00Z for MC-B22, 19:55Z for MC-B23, and an after-hours instant for MC-B31. No expectation
+  changes, and each case then tests the condition its title claims;
+  `the_two_session_cases_pass_once_now_agrees_with_their_labels` already shows MC-B22 and MC-B23
+  pass so moved on unmodified code, and their status rows follow. The YAML,
+  `cargo xtask refcases --write`, and the reference checks land together, apart from code (ES-22).
+  Whether `session` and `in_close_window` stay case-file inputs at all is a separate question,
+  Proposed to the founder in DEC-250.
 - **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163;
   the gate driver since E6-9, DEC-199). `crates/mandate-refcases/src/trading_domain/gate.rs` now
   decides `propose_order` steps with `mandate_risk::evaluate`, states the market data a case omits
