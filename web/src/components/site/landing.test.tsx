@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { contrastRatio } from "@/lib/color";
 import { tokenValue } from "@/lib/tokens";
 import { HEADLINE, Landing, QUESTIONS, SECTIONS, SUBHEAD } from "./landing";
+import { PLAYLIST } from "./music";
 import { EDITED, TRACE } from "./record-trace";
 
 /**
@@ -232,7 +233,7 @@ describe("the desktop", () => {
     scroll.mockRestore();
   });
 
-  it("changes the wallpaper in Display, credits the painting, and remembers the choice", async () => {
+  it("changes the wallpaper in Display, credits the painting, and keeps the choice out of browser storage", async () => {
     const { container } = renderLanding();
     const wallpaper = container.querySelector("[data-slot=wallpaper]")!;
     expect(wallpaper).toHaveAttribute("data-wallpaper", "auto");
@@ -240,8 +241,10 @@ describe("the desktop", () => {
     const display = win("Display Properties");
     await act(async () => fireEvent.click(within(display).getByRole("radio", { name: "Wheat Field with Cypresses" })));
     expect(wallpaper).toHaveAttribute("data-wallpaper", "wheat-field-cypresses");
-    expect(localStorage.getItem("owlhead-wallpaper")).toBe("wheat-field-cypresses");
+    expect(localStorage.length).toBe(0);
     expect(display).toHaveTextContent("Vincent van Gogh, Wheat Field with Cypresses, 1889.");
+    await act(async () => fireEvent.click(within(display).getByRole("radio", { name: "Day and night" })));
+    expect(wallpaper).toHaveAttribute("data-wallpaper", "auto");
     await press(within(display).getByRole("button", { name: "OK" }));
     expect(screen.queryByRole("region", { name: "Display Properties" })).toBeNull();
   });
@@ -273,6 +276,18 @@ describe("the desktop", () => {
     await press(off);
     expect(screen.queryByRole("button", { name: /safe to turn off/ })).toBeNull();
     expect(win("Owlhead Home Page")).toBeVisible();
+  });
+});
+
+describe("Winamp's playlist", () => {
+  it("streams public domain MP3s from Wikimedia Commons instead of shipping them with the app", () => {
+    expect(PLAYLIST.length).toBeGreaterThanOrEqual(20);
+    for (const song of PLAYLIST) {
+      expect(song.url).toMatch(/^https:\/\/upload\.wikimedia\.org\/wikipedia\/commons\/.+\.mp3$/);
+      expect(song.metaData.title && song.metaData.artist).toBeTruthy();
+      expect(song.duration).toBeGreaterThan(60);
+    }
+    expect(new Set(PLAYLIST.map((s) => s.url)).size).toBe(PLAYLIST.length);
   });
 });
 

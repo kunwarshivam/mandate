@@ -5,33 +5,23 @@ import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { type Artwork, DAY, NIGHT, WALLPAPERS, artwork } from "./art";
 import { BOLD, BUTTON, LINK, PIXEL, SUNKEN } from "./letter";
+import styles from "./letter.module.css";
 
-const KEY = "owlhead-wallpaper";
 const AUTO = "auto";
 
+// The site keeps nothing in browser storage, so a picked wallpaper lasts until the page is reloaded.
+let picked = AUTO;
 const listeners = new Set<() => void>();
 
 function subscribe(onChange: () => void): () => void {
   listeners.add(onChange);
-  window.addEventListener("storage", onChange);
-  return () => {
-    listeners.delete(onChange);
-    window.removeEventListener("storage", onChange);
-  };
+  return () => listeners.delete(onChange);
 }
 
-function stored(): string {
-  try {
-    return localStorage.getItem(KEY) ?? AUTO;
-  } catch {
-    return AUTO;
-  }
-}
+const stored = () => picked;
 
 function choose(id: string) {
-  try {
-    localStorage.setItem(KEY, id);
-  } catch {}
+  picked = id;
   for (const l of listeners) l();
 }
 
@@ -51,13 +41,13 @@ export function Wallpaper() {
     <div aria-hidden className="absolute inset-0 -z-10 bg-muted" data-slot="wallpaper" data-wallpaper={choice}>
       {choice === AUTO ? (
         <>
-          <Picture art={artwork(DAY)} sizes="100vw" className="dark:hidden" />
-          <Picture art={artwork(NIGHT)} sizes="100vw" className="hidden dark:block" />
+          <Picture art={artwork(DAY)} sizes="100vw" className={styles.day} />
+          <Picture art={artwork(NIGHT)} sizes="100vw" className={styles.night} />
         </>
       ) : (
         <Picture art={artwork(choice)} sizes="100vw" />
       )}
-      <div className="absolute inset-0 dark:bg-background/30" />
+      <div className={cn(styles.dim, "absolute inset-0")} />
     </div>
   );
 }
@@ -80,13 +70,13 @@ export function DisplayProperties({ onDone }: { onDone: () => void }) {
   return (
     <div className="grid gap-3 p-3 sm:p-4">
       <div aria-hidden className="grid justify-items-center">
-        <div className="bg-foreground p-2 pb-3 dark:bg-muted-foreground">
+        <div className={cn(styles.monitor, "p-2 pb-3")}>
           <div className={cn(SUNKEN, "relative h-28 w-44 overflow-hidden bg-muted")}>
             <Picture art={shown} sizes="176px" />
           </div>
         </div>
-        <div className="h-2 w-10 bg-foreground dark:bg-muted-foreground" />
-        <div className="h-1.5 w-24 bg-foreground dark:bg-muted-foreground" />
+        <div className={cn(styles.monitor, "h-2 w-10")} />
+        <div className={cn(styles.monitor, "h-1.5 w-24")} />
       </div>
 
       <fieldset className="grid gap-1">

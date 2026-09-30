@@ -39,3 +39,29 @@
     opacity: 0;
   }
 }
+
+/* The wallpaper in "Day and night": one painting per theme, and night turns the monitor down a little. */
+.night {
+  display: none;
+}
+
+:global(.dark) .day {
+  display: none;
+}
+
+:global(.dark) .night {
+  display: block;
+}
+
+:global(.dark) .dim {
+  background: color-mix(in oklab, var(--background) 30%, transparent);
+}
+
+/* The Display Properties monitor keeps a dark case in both themes. */
+.monitor {
+  background: var(--foreground);
+}
+
+:global(.dark) .monitor {
+  background: var(--muted-foreground);
+}

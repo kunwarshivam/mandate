@@ -532,7 +532,7 @@ export function Desktop({ home }: { home: ReactNode }) {
             setOff(false);
             dispatch({ type: "reset" });
           }}
-          className={cn(MONO, "fixed inset-0 z-[100] grid cursor-pointer place-content-center gap-4 bg-foreground p-6 text-center text-[clamp(1.75rem,4.5vw,3rem)] leading-tight text-highlight outline-none dark:bg-background")}
+          className={cn(MONO, "fixed inset-0 z-[100] grid cursor-pointer place-content-center gap-4 bg-ink p-6 text-center text-[clamp(1.75rem,4.5vw,3rem)] leading-tight text-highlight outline-none")}
           data-slot="shut-down"
         >
           <span>
@@ -540,7 +540,7 @@ export function Desktop({ home }: { home: ReactNode }) {
             <br />
             your computer.
           </span>
-          <span className="text-xl text-card dark:text-foreground">Click anywhere to start Owlhead again.</span>
+          <span className="text-xl text-ink-foreground">Click anywhere to start Owlhead again.</span>
         </button>
       )}
     </div>
