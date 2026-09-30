@@ -654,5 +654,1841 @@
     }
    }
   ]
+ },
+ "agent_stream": {
+  "spec": "docs/specs/journal.md v0.5 §9.1 (DEC-177)",
+  "stream_id": "agent:ws_01J8Z2:agent_a",
+  "artifacts": [
+   {
+    "name": "quote_snapshot",
+    "ref": "sha256:8b7c2f893ea54b83cbbad125b9d8efe09e8c3c5aedcb62df0f1ddb75fbd101bc",
+    "object": {
+     "kind": "quote_snapshot",
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "feed": "iex",
+     "as_of": "2026-09-21T13:59:58.000000000Z",
+     "bid": "149.98",
+     "bid_size": "300",
+     "ask": "150",
+     "ask_size": "200"
+    },
+    "canonical": "{\"as_of\":\"2026-09-21T13:59:58.000000000Z\",\"ask\":\"150\",\"ask_size\":\"200\",\"bid\":\"149.98\",\"bid_size\":\"300\",\"feed\":\"iex\",\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"kind\":\"quote_snapshot\"}"
+   },
+   {
+    "name": "model_content",
+    "ref": "sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513",
+    "object": {
+     "kind": "signal_model",
+     "model_id": "quant.mean_reversion",
+     "model_version": "1.0.0",
+     "authorship": "platform",
+     "code": "reference fixture: stands for the model code, prompt, and parameter schema (mandate spec §8.1)",
+     "parameter_schema": {
+      "lookback_days": "integer"
+     }
+    },
+    "canonical": "{\"authorship\":\"platform\",\"code\":\"reference fixture: stands for the model code, prompt, and parameter schema (mandate spec §8.1)\",\"kind\":\"signal_model\",\"model_id\":\"quant.mean_reversion\",\"model_version\":\"1.0.0\",\"parameter_schema\":{\"lookback_days\":\"integer\"}}"
+   }
+  ],
+  "chain": [
+   {
+    "seq": 1,
+    "event_type": "StreamOpened",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Z3JYA000000000000000G1",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 1,
+     "event_type": "StreamOpened",
+     "schema_version": 1,
+     "event_time": "2026-09-21T13:00:00.000000000Z",
+     "recorded_at": "2026-09-21T13:00:00.000150000Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {},
+     "payload": {
+      "stream_type": "agent",
+      "workspace_id": "ws_01J8Z2",
+      "agent_id": "agent_a"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z3JYA000000000000000G1\",\"event_time\":\"2026-09-21T13:00:00.000000000Z\",\"event_type\":\"StreamOpened\",\"payload\":{\"agent_id\":\"agent_a\",\"stream_type\":\"agent\",\"workspace_id\":\"ws_01J8Z2\"},\"pii_refs\":[],\"prev_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorded_at\":\"2026-09-21T13:00:00.000150000Z\",\"schema_version\":1,\"seq\":1,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "1d83bd4608b3e57663490676fcf1334a32b2181bc476d66ab2d529c40e898928"
+   },
+   {
+    "seq": 2,
+    "event_type": "ObservationRecorded",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Z3M0A000000000000000G2",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 2,
+     "event_type": "ObservationRecorded",
+     "schema_version": 1,
+     "event_time": "2026-09-21T13:59:58.000000000Z",
+     "recorded_at": "2026-09-21T13:59:58.000200000Z",
+     "clock_source": "scheduler",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {},
+     "payload": {
+      "source": "alpaca.iex.quotes",
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "as_of": "2026-09-21T13:59:58.000000000Z",
+      "data_ref": "sha256:8b7c2f893ea54b83cbbad125b9d8efe09e8c3c5aedcb62df0f1ddb75fbd101bc"
+     },
+     "artifact_refs": [
+      "sha256:8b7c2f893ea54b83cbbad125b9d8efe09e8c3c5aedcb62df0f1ddb75fbd101bc"
+     ],
+     "pii_refs": [],
+     "prev_hash": "1d83bd4608b3e57663490676fcf1334a32b2181bc476d66ab2d529c40e898928"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[\"sha256:8b7c2f893ea54b83cbbad125b9d8efe09e8c3c5aedcb62df0f1ddb75fbd101bc\"],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z3M0A000000000000000G2\",\"event_time\":\"2026-09-21T13:59:58.000000000Z\",\"event_type\":\"ObservationRecorded\",\"payload\":{\"as_of\":\"2026-09-21T13:59:58.000000000Z\",\"data_ref\":\"sha256:8b7c2f893ea54b83cbbad125b9d8efe09e8c3c5aedcb62df0f1ddb75fbd101bc\",\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"source\":\"alpaca.iex.quotes\"},\"pii_refs\":[],\"prev_hash\":\"1d83bd4608b3e57663490676fcf1334a32b2181bc476d66ab2d529c40e898928\",\"recorded_at\":\"2026-09-21T13:59:58.000200000Z\",\"schema_version\":1,\"seq\":2,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "dfdd16ca7e0612899521c4e6b8ec6514f7bec157f9a114444bdaa54003c6b376"
+   },
+   {
+    "seq": 3,
+    "event_type": "ModelOutputRecorded",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Z3M0R000000000000000G3",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 3,
+     "event_type": "ModelOutputRecorded",
+     "schema_version": 1,
+     "event_time": "2026-09-21T13:59:59.000000000Z",
+     "recorded_at": "2026-09-21T13:59:59.000200000Z",
+     "clock_source": "scheduler",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "model_id": "quant.mean_reversion",
+      "model_version": "1.0.0",
+      "content_hash": "sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513",
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "as_of": "2026-09-21T13:59:58.000000000Z",
+      "expires_at": "2026-09-22T13:59:58.000000000Z",
+      "direction": "long",
+      "conviction": "0.97",
+      "confidence": "0.98",
+      "horizon_s": 86400,
+      "thesis_ref": null,
+      "evidence": [
+       "01J8Z3M0A000000000000000G2"
+      ],
+      "invalidation": null,
+      "thesis_id": null,
+      "lineage_id": null,
+      "ignored": null
+     },
+     "artifact_refs": [
+      "sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513"
+     ],
+     "pii_refs": [],
+     "prev_hash": "dfdd16ca7e0612899521c4e6b8ec6514f7bec157f9a114444bdaa54003c6b376"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[\"sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513\"],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z3M0R000000000000000G3\",\"event_time\":\"2026-09-21T13:59:59.000000000Z\",\"event_type\":\"ModelOutputRecorded\",\"payload\":{\"as_of\":\"2026-09-21T13:59:58.000000000Z\",\"confidence\":\"0.98\",\"content_hash\":\"sha256:9d5af4f591e6f36ab65cf86f256be0a8457646e126391aca7560203fc73e8513\",\"conviction\":\"0.97\",\"direction\":\"long\",\"evidence\":[\"01J8Z3M0A000000000000000G2\"],\"expires_at\":\"2026-09-22T13:59:58.000000000Z\",\"horizon_s\":86400,\"ignored\":null,\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"invalidation\":null,\"lineage_id\":null,\"model_id\":\"quant.mean_reversion\",\"model_version\":\"1.0.0\",\"thesis_id\":null,\"thesis_ref\":null},\"pii_refs\":[],\"prev_hash\":\"dfdd16ca7e0612899521c4e6b8ec6514f7bec157f9a114444bdaa54003c6b376\",\"recorded_at\":\"2026-09-21T13:59:59.000200000Z\",\"schema_version\":1,\"seq\":3,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "c606de7984ca762a89d4be3b710004f7014b9b50ee9e6ef53ab02a809fca51bb"
+   },
+   {
+    "seq": 4,
+    "event_type": "DecisionMade",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Z3M1A000000000000000G4",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 4,
+     "event_type": "DecisionMade",
+     "schema_version": 1,
+     "event_time": "2026-09-21T14:00:00.000000000Z",
+     "recorded_at": "2026-09-21T14:00:00.000100000Z",
+     "clock_source": "scheduler",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "side": "buy",
+      "type": "limit",
+      "tif": "day",
+      "qty": "10",
+      "limit_price": "150",
+      "purpose": "open",
+      "exit_origin": null,
+      "exit_conviction": "0.85554",
+      "buy_conviction": "0.75554",
+      "combined_score": "0.882",
+      "outputs_used": [
+       "01J8Z3M0R000000000000000G3"
+      ],
+      "model_weights": [
+       {
+        "key": "quant.mean_reversion",
+        "value": "0.9"
+       },
+       {
+        "key": "quant.momentum",
+        "value": "0.1"
+       }
+      ],
+      "clips_applied": [
+       "max_order_usd"
+      ],
+      "dry_run": "allow",
+      "reason_code": null,
+      "autonomy": "auto",
+      "ask_suppressed": null
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "c606de7984ca762a89d4be3b710004f7014b9b50ee9e6ef53ab02a809fca51bb"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z3M1A000000000000000G4\",\"event_time\":\"2026-09-21T14:00:00.000000000Z\",\"event_type\":\"DecisionMade\",\"payload\":{\"ask_suppressed\":null,\"autonomy\":\"auto\",\"buy_conviction\":\"0.75554\",\"clips_applied\":[\"max_order_usd\"],\"combined_score\":\"0.882\",\"dry_run\":\"allow\",\"exit_conviction\":\"0.85554\",\"exit_origin\":null,\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"150\",\"model_weights\":[{\"key\":\"quant.mean_reversion\",\"value\":\"0.9\"},{\"key\":\"quant.momentum\",\"value\":\"0.1\"}],\"outputs_used\":[\"01J8Z3M0R000000000000000G3\"],\"purpose\":\"open\",\"qty\":\"10\",\"reason_code\":null,\"side\":\"buy\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"c606de7984ca762a89d4be3b710004f7014b9b50ee9e6ef53ab02a809fca51bb\",\"recorded_at\":\"2026-09-21T14:00:00.000100000Z\",\"schema_version\":1,\"seq\":4,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "bf7160475889673e54f64f90bb9d84ed822b5ca24c94aeb4ad98b51e4d555cfa"
+   },
+   {
+    "seq": 5,
+    "event_type": "IntentProposed",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Z3M1P0000000000000000X",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 5,
+     "event_type": "IntentProposed",
+     "schema_version": 1,
+     "event_time": "2026-09-21T14:00:00.000000000Z",
+     "recorded_at": "2026-09-21T14:00:00.000200000Z",
+     "clock_source": "scheduler",
+     "causation_id": "01J8Z3M1A000000000000000G4",
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "side": "buy",
+      "type": "limit",
+      "tif": "day",
+      "qty": "10",
+      "limit_price": "150",
+      "purpose": "open"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "bf7160475889673e54f64f90bb9d84ed822b5ca24c94aeb4ad98b51e4d555cfa"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8Z3M1A000000000000000G4\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z3M1P0000000000000000X\",\"event_time\":\"2026-09-21T14:00:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"150\",\"purpose\":\"open\",\"qty\":\"10\",\"side\":\"buy\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"bf7160475889673e54f64f90bb9d84ed822b5ca24c94aeb4ad98b51e4d555cfa\",\"recorded_at\":\"2026-09-21T14:00:00.000200000Z\",\"schema_version\":1,\"seq\":5,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "1d9f274efc079326bac8d0c15578e02281ecfc3bdc6f62d0c75cec08a0648c5f"
+   },
+   {
+    "seq": 6,
+    "event_type": "OwnerExitRequested",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Z6A0A000000000000000E1",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 6,
+     "event_type": "OwnerExitRequested",
+     "schema_version": 1,
+     "event_time": "2026-09-21T15:00:00.000000000Z",
+     "recorded_at": "2026-09-21T15:00:00.000100000Z",
+     "clock_source": "scheduler",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "scope": "instrument",
+      "subject": "5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f",
+      "confirmed": false,
+      "bid": null,
+      "bid_size": null,
+      "floor": null,
+      "user": "user_7f3a",
+      "step_up_status": "valid",
+      "step_up": {
+       "assertion_id": "stepup_4b2d",
+       "authenticated_at": "2026-09-21T14:59:52.000000000Z",
+       "method": "webauthn"
+      }
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "1d9f274efc079326bac8d0c15578e02281ecfc3bdc6f62d0c75cec08a0648c5f"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z6A0A000000000000000E1\",\"event_time\":\"2026-09-21T15:00:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":null,\"bid_size\":null,\"confirmed\":false,\"floor\":null,\"scope\":\"instrument\",\"step_up\":{\"assertion_id\":\"stepup_4b2d\",\"authenticated_at\":\"2026-09-21T14:59:52.000000000Z\",\"method\":\"webauthn\"},\"step_up_status\":\"valid\",\"subject\":\"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"1d9f274efc079326bac8d0c15578e02281ecfc3bdc6f62d0c75cec08a0648c5f\",\"recorded_at\":\"2026-09-21T15:00:00.000100000Z\",\"schema_version\":1,\"seq\":6,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "adbd3f6635b4a48b12550ef10da67af9a3a42268150a11da6ca30b1b09923cf4"
+   },
+   {
+    "seq": 7,
+    "event_type": "IntentProposed",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Z6A0M000000000000000P1",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 7,
+     "event_type": "IntentProposed",
+     "schema_version": 1,
+     "event_time": "2026-09-21T15:00:00.000000000Z",
+     "recorded_at": "2026-09-21T15:00:00.000200000Z",
+     "clock_source": "scheduler",
+     "causation_id": "01J8Z6A0A000000000000000E1",
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "instrument_id": "5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f",
+      "side": "sell",
+      "type": "market",
+      "tif": "day",
+      "qty": "5",
+      "limit_price": null,
+      "purpose": "owner_exit"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "adbd3f6635b4a48b12550ef10da67af9a3a42268150a11da6ca30b1b09923cf4"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8Z6A0A000000000000000E1\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Z6A0M000000000000000P1\",\"event_time\":\"2026-09-21T15:00:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f\",\"limit_price\":null,\"purpose\":\"owner_exit\",\"qty\":\"5\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"market\"},\"pii_refs\":[],\"prev_hash\":\"adbd3f6635b4a48b12550ef10da67af9a3a42268150a11da6ca30b1b09923cf4\",\"recorded_at\":\"2026-09-21T15:00:00.000200000Z\",\"schema_version\":1,\"seq\":7,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "6a9df6ec22438a13c592c0cc3d03aa7c6816c5454fc904819785c30e205b6b1b"
+   },
+   {
+    "seq": 8,
+    "event_type": "DecisionMade",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZMA0A000000000000000D2",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 8,
+     "event_type": "DecisionMade",
+     "schema_version": 1,
+     "event_time": "2026-09-21T20:05:00.000000000Z",
+     "recorded_at": "2026-09-21T20:05:00.000100000Z",
+     "clock_source": "scheduler",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "side": "sell",
+      "type": "limit",
+      "tif": "day",
+      "qty": "10",
+      "limit_price": "150.25",
+      "purpose": "discretionary_exit",
+      "exit_origin": "goal_completion",
+      "exit_conviction": null,
+      "buy_conviction": null,
+      "combined_score": null,
+      "outputs_used": [],
+      "model_weights": [],
+      "clips_applied": [],
+      "dry_run": "defer",
+      "reason_code": "discretionary_exit_regular_session_only",
+      "autonomy": null,
+      "ask_suppressed": null
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "6a9df6ec22438a13c592c0cc3d03aa7c6816c5454fc904819785c30e205b6b1b"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMA0A000000000000000D2\",\"event_time\":\"2026-09-21T20:05:00.000000000Z\",\"event_type\":\"DecisionMade\",\"payload\":{\"ask_suppressed\":null,\"autonomy\":null,\"buy_conviction\":null,\"clips_applied\":[],\"combined_score\":null,\"dry_run\":\"defer\",\"exit_conviction\":null,\"exit_origin\":\"goal_completion\",\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"150.25\",\"model_weights\":[],\"outputs_used\":[],\"purpose\":\"discretionary_exit\",\"qty\":\"10\",\"reason_code\":\"discretionary_exit_regular_session_only\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"6a9df6ec22438a13c592c0cc3d03aa7c6816c5454fc904819785c30e205b6b1b\",\"recorded_at\":\"2026-09-21T20:05:00.000100000Z\",\"schema_version\":1,\"seq\":8,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "edfd3c8ef2e773f80702d97dd7f9e3856f9cb948a391501ca7b54d6d85bec853"
+   },
+   {
+    "seq": 9,
+    "event_type": "OwnerExitRequested",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZMR0A000000000000000E2",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 9,
+     "event_type": "OwnerExitRequested",
+     "schema_version": 1,
+     "event_time": "2026-09-21T20:10:00.000000000Z",
+     "recorded_at": "2026-09-21T20:10:00.000100000Z",
+     "clock_source": "scheduler",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "scope": "instrument",
+      "subject": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "confirmed": true,
+      "bid": "151",
+      "bid_size": "300",
+      "floor": "146.47",
+      "user": "user_7f3a",
+      "step_up_status": "valid",
+      "step_up": {
+       "assertion_id": "stepup_9c1e",
+       "authenticated_at": "2026-09-21T20:09:45.000000000Z",
+       "method": "webauthn"
+      }
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "edfd3c8ef2e773f80702d97dd7f9e3856f9cb948a391501ca7b54d6d85bec853"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMR0A000000000000000E2\",\"event_time\":\"2026-09-21T20:10:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":\"151\",\"bid_size\":\"300\",\"confirmed\":true,\"floor\":\"146.47\",\"scope\":\"instrument\",\"step_up\":{\"assertion_id\":\"stepup_9c1e\",\"authenticated_at\":\"2026-09-21T20:09:45.000000000Z\",\"method\":\"webauthn\"},\"step_up_status\":\"valid\",\"subject\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"edfd3c8ef2e773f80702d97dd7f9e3856f9cb948a391501ca7b54d6d85bec853\",\"recorded_at\":\"2026-09-21T20:10:00.000100000Z\",\"schema_version\":1,\"seq\":9,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "0eb9e08d81000a3fb34c0f36e489324a2dadf826842ba4e49fb0c871a71b44ed"
+   },
+   {
+    "seq": 10,
+    "event_type": "IntentProposed",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZMR0M000000000000000P2",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 10,
+     "event_type": "IntentProposed",
+     "schema_version": 1,
+     "event_time": "2026-09-21T20:10:00.000000000Z",
+     "recorded_at": "2026-09-21T20:10:00.000200000Z",
+     "clock_source": "scheduler",
+     "causation_id": "01J8ZMR0A000000000000000E2",
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "side": "sell",
+      "type": "limit",
+      "tif": "day",
+      "qty": "10",
+      "limit_price": "146.47",
+      "purpose": "owner_exit"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "0eb9e08d81000a3fb34c0f36e489324a2dadf826842ba4e49fb0c871a71b44ed"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZMR0A000000000000000E2\",\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZMR0M000000000000000P2\",\"event_time\":\"2026-09-21T20:10:00.000000000Z\",\"event_type\":\"IntentProposed\",\"payload\":{\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"146.47\",\"purpose\":\"owner_exit\",\"qty\":\"10\",\"side\":\"sell\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"0eb9e08d81000a3fb34c0f36e489324a2dadf826842ba4e49fb0c871a71b44ed\",\"recorded_at\":\"2026-09-21T20:10:00.000200000Z\",\"schema_version\":1,\"seq\":10,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "2762cead65f79a1b54852ae5a922ecc791dbf8ce7b33d80971ea1d2724c412aa"
+   },
+   {
+    "seq": 11,
+    "event_type": "AgentModeChanged",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZNB0A000000000000000M1",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 11,
+     "event_type": "AgentModeChanged",
+     "schema_version": 1,
+     "event_time": "2026-09-21T20:30:00.000000000Z",
+     "recorded_at": "2026-09-21T20:30:00.000100000Z",
+     "clock_source": "scheduler",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {},
+     "payload": {
+      "from": "normal",
+      "to": "stopped",
+      "reason": "kill_switch",
+      "lifecycle": "normal"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "2762cead65f79a1b54852ae5a922ecc791dbf8ce7b33d80971ea1d2724c412aa"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0A000000000000000M1\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"AgentModeChanged\",\"payload\":{\"from\":\"normal\",\"lifecycle\":\"normal\",\"reason\":\"kill_switch\",\"to\":\"stopped\"},\"pii_refs\":[],\"prev_hash\":\"2762cead65f79a1b54852ae5a922ecc791dbf8ce7b33d80971ea1d2724c412aa\",\"recorded_at\":\"2026-09-21T20:30:00.000100000Z\",\"schema_version\":1,\"seq\":11,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "2476c9d12a42524e13c53d626bfcf84be3af28ddc35731e75b798a0f795212ba"
+   },
+   {
+    "seq": 12,
+    "event_type": "OwnerExitRequested",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZNB0M000000000000000K1",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 12,
+     "event_type": "OwnerExitRequested",
+     "schema_version": 1,
+     "event_time": "2026-09-21T20:30:00.000000000Z",
+     "recorded_at": "2026-09-21T20:30:00.000200000Z",
+     "clock_source": "scheduler",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "scope": "agent",
+      "subject": "agent_a",
+      "confirmed": false,
+      "bid": null,
+      "bid_size": null,
+      "floor": null,
+      "user": "user_7f3a",
+      "step_up_status": "absent",
+      "step_up": null
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "2476c9d12a42524e13c53d626bfcf84be3af28ddc35731e75b798a0f795212ba"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0M000000000000000K1\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"OwnerExitRequested\",\"payload\":{\"bid\":null,\"bid_size\":null,\"confirmed\":false,\"floor\":null,\"scope\":\"agent\",\"step_up\":null,\"step_up_status\":\"absent\",\"subject\":\"agent_a\",\"user\":\"user_7f3a\"},\"pii_refs\":[],\"prev_hash\":\"2476c9d12a42524e13c53d626bfcf84be3af28ddc35731e75b798a0f795212ba\",\"recorded_at\":\"2026-09-21T20:30:00.000200000Z\",\"schema_version\":1,\"seq\":12,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "696b16d7781ba3738297907c94f5af3062b52bbc8cec775113a6ec0ede179e62"
+   },
+   {
+    "seq": 13,
+    "event_type": "KillSwitchActivated",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZNB0R000000000000000K2",
+     "stream_id": "agent:ws_01J8Z2:agent_a",
+     "seq": 13,
+     "event_type": "KillSwitchActivated",
+     "schema_version": 1,
+     "event_time": "2026-09-21T20:30:00.000000000Z",
+     "recorded_at": "2026-09-21T20:30:00.000300000Z",
+     "clock_source": "scheduler",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "agent",
+      "id": "agent_a",
+      "version": "0.1.0",
+      "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "config_refs": {},
+     "payload": {
+      "scope": "agent",
+      "subject": "agent_a",
+      "initiator": "owner",
+      "mode_event": "01J8ZNB0A000000000000000M1"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "696b16d7781ba3738297907c94f5af3062b52bbc8cec775113a6ec0ede179e62"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"id\":\"agent_a\",\"kind\":\"agent\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"scheduler\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZNB0R000000000000000K2\",\"event_time\":\"2026-09-21T20:30:00.000000000Z\",\"event_type\":\"KillSwitchActivated\",\"payload\":{\"initiator\":\"owner\",\"mode_event\":\"01J8ZNB0A000000000000000M1\",\"scope\":\"agent\",\"subject\":\"agent_a\"},\"pii_refs\":[],\"prev_hash\":\"696b16d7781ba3738297907c94f5af3062b52bbc8cec775113a6ec0ede179e62\",\"recorded_at\":\"2026-09-21T20:30:00.000300000Z\",\"schema_version\":1,\"seq\":13,\"stream_id\":\"agent:ws_01J8Z2:agent_a\"}",
+    "hash": "7d530d29e89e8eb5c7205a1ffb2b036039c714879f547a3919c45fe3d9410c98"
+   }
+  ],
+  "derivation": {
+   "note": "Illustrative mandate and account values the DecisionMade vector is recomputed from (mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no fresh output, so it counts as missing. The ask is the observed quote's (artifact quote_snapshot). The gate dry run and the autonomy result are inputs. Gross exposure is the held position's quantity x mark. After the session closes the profit_stop goal is reached, whose completion is a discretionary exit of every position (mandate spec §3.1), deferred until the session (trading spec §9.6) with nothing proposed (mandate spec §6.2). Outside the session an exit is a limit order (trading spec §9.4), priced at the exit price ladder's first rung: the reference bid x (1 - exit_offset) for the >= 50 M USD tier, a sell rounded up to the tick (trading spec §2.1, §5.6). The owner closes the held position in the regular session without a confirmed bid, and after the session closes the opened position (taken as filled) with a confirmed bid, whose floor is the default, bid x (1 - max_exit_offset), for the instrument's >= 50 M USD tier (trading spec §5.5, §5.6); that close's own limit is the floor. Step-up is valid for 300 s after authentication (DEC-156 item 8). The regular session is 09:30 to 16:00 America/New_York (EDT, UTC-4, on this date).",
+   "owner_bid": "151",
+   "goal_exit_reference_bid": "151",
+   "exit_offset": "0.005",
+   "equity_tick": "0.01",
+   "max_exit_offset": "0.03",
+   "step_up_max_age_s": 300,
+   "goal": "profit_stop",
+   "regular_session_utc": {
+    "open": "2026-09-21T13:30:00.000000000Z",
+    "close": "2026-09-21T20:00:00.000000000Z"
+   },
+   "held": {
+    "instrument_id": "5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f",
+    "qty": "5",
+    "mark": "100"
+   },
+   "now": "2026-09-21T14:00:00.000000000Z",
+   "models": [
+    {
+     "model_id": "quant.mean_reversion",
+     "weight": "0.9",
+     "max_output_age_s": 300
+    },
+    {
+     "model_id": "quant.momentum",
+     "weight": "0.1",
+     "max_output_age_s": 300
+    }
+   ],
+   "equity": "10000",
+   "market_value": "0",
+   "working_opening_cost": "0",
+   "max_position_usd": "5000",
+   "max_position_fraction": "0.2",
+   "size_factor": "1",
+   "entry_threshold": "0.3",
+   "exit_threshold": "0.3",
+   "rebalance_band": "0.05",
+   "max_order_usd": "1500",
+   "max_gross_exposure_usd": "10000",
+   "increment": "1",
+   "min_order_qty": "1",
+   "tif": "day",
+   "dry_run": "allow",
+   "autonomy": "auto"
+  },
+  "invalid_drafts": [
+   {
+    "name": "owner_exit_floor_absent",
+    "clause": "§9.1 absent member",
+    "base_seq": 9,
+    "changes": [
+     {
+      "path": "payload.floor",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.floor"
+    }
+   },
+   {
+    "name": "decision_reason_code_absent_on_allow",
+    "clause": "§9.1 absent member",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.reason_code",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason_code"
+    }
+   },
+   {
+    "name": "reason_code_empty_string_on_allow",
+    "clause": "§4.2",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.reason_code",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason_code"
+    }
+   },
+   {
+    "name": "owner_exit_unconfirmed_empty_user",
+    "clause": "§4.2",
+    "base_seq": 12,
+    "changes": [
+     {
+      "path": "payload.user",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.user"
+    }
+   },
+   {
+    "name": "owner_exit_unconfirmed_without_user",
+    "clause": "§9.1 OwnerExitRequested",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.user",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.user"
+    }
+   },
+   {
+    "name": "owner_exit_step_up_status_unknown",
+    "clause": "§9.1 OwnerExitRequested",
+    "base_seq": 12,
+    "changes": [
+     {
+      "path": "payload.step_up_status",
+      "value": "failed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.step_up_status"
+    }
+   },
+   {
+    "name": "owner_kill_switch_valid_without_evidence",
+    "clause": "§9.1 rule 12",
+    "base_seq": 12,
+    "changes": [
+     {
+      "path": "payload.step_up_status",
+      "value": "valid"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "owner_exit_stale_with_evidence",
+    "clause": "§9.1 rule 12",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.step_up_status",
+      "value": "stale"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "owner_exit_unconfirmed_with_floor",
+    "clause": "§9.1 rule 12",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.floor",
+      "value": "146.47"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.floor"
+    }
+   },
+   {
+    "name": "model_output_as_of_in_seconds",
+    "clause": "§4.7",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.as_of",
+      "value": "1789999198"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.as_of"
+    }
+   },
+   {
+    "name": "observation_as_of_as_integer",
+    "clause": "§4.4",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.as_of",
+      "value": 1789999198
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.as_of"
+    }
+   },
+   {
+    "name": "step_up_time_in_seconds",
+    "clause": "§4.7",
+    "base_seq": 9,
+    "changes": [
+     {
+      "path": "payload.step_up.authenticated_at",
+      "value": "1790021385"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.step_up.authenticated_at"
+    }
+   },
+   {
+    "name": "observation_data_inline",
+    "clause": "§9.1 artifacts",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.data_ref",
+      "value": {
+       "kind": "quote_snapshot",
+       "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+       "feed": "iex",
+       "as_of": "2026-09-21T13:59:58.000000000Z",
+       "bid": "149.98",
+       "bid_size": "300",
+       "ask": "150",
+       "ask_size": "200"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.data_ref"
+    }
+   },
+   {
+    "name": "observation_artifact_not_listed",
+    "clause": "§3 artifact_refs",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "artifact_refs",
+     "path": "artifact_refs"
+    }
+   },
+   {
+    "name": "intent_proposed_carries_intent_id",
+    "clause": "§9.1 IntentProposed",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "01J8Z3M1P0000000000000000X"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "intent_proposed_protective",
+    "clause": "§9.1 IntentProposed",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.purpose",
+      "value": "protective"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.purpose"
+    }
+   },
+   {
+    "name": "decision_without_mandate_version",
+    "clause": "§9 required refs",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "intent_sell_labelled_open",
+    "clause": "§9.1 rule 1",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "sell"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.side"
+    }
+   },
+   {
+    "name": "intent_limit_without_price",
+    "clause": "§9.1 rule 2",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.limit_price",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit_price"
+    }
+   },
+   {
+    "name": "decision_market_exit_with_price",
+    "clause": "§9.1 rule 2",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "sell"
+     },
+     {
+      "path": "payload.type",
+      "value": "market"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "discretionary_exit"
+     },
+     {
+      "path": "payload.exit_origin",
+      "value": "signal"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit_price"
+    }
+   },
+   {
+    "name": "intent_market_open",
+    "clause": "§9.1 rule 3",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.type",
+      "value": "market"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.type"
+    }
+   },
+   {
+    "name": "decision_allow_with_reason_code",
+    "clause": "§9.1 rule 4",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.reason_code",
+      "value": "insufficient_buying_power"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason_code"
+    }
+   },
+   {
+    "name": "decision_deny_with_autonomy",
+    "clause": "§9.1 rule 5",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.dry_run",
+      "value": "deny"
+     },
+     {
+      "path": "payload.reason_code",
+      "value": "insufficient_buying_power"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.autonomy"
+    }
+   },
+   {
+    "name": "decision_defer_on_open",
+    "clause": "§9.1 rule 6",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.dry_run",
+      "value": "defer"
+     },
+     {
+      "path": "payload.reason_code",
+      "value": "session_not_allowed"
+     },
+     {
+      "path": "payload.autonomy",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.dry_run"
+    }
+   },
+   {
+    "name": "decision_exit_classified_ask",
+    "clause": "§9.1 rule 7",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "sell"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "discretionary_exit"
+     },
+     {
+      "path": "payload.exit_origin",
+      "value": "signal"
+     },
+     {
+      "path": "payload.autonomy",
+      "value": "ask"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.autonomy"
+    }
+   },
+   {
+    "name": "decision_auto_with_ask_suppressed",
+    "clause": "§9.1 rule 7",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.ask_suppressed",
+      "value": "budget"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ask_suppressed"
+    }
+   },
+   {
+    "name": "decision_ask_suppressed_unknown_reason",
+    "clause": "§9.1 DecisionMade",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.autonomy",
+      "value": "ask"
+     },
+     {
+      "path": "payload.ask_suppressed",
+      "value": "quiet_hours"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.ask_suppressed"
+    }
+   },
+   {
+    "name": "decision_discretionary_exit_without_origin",
+    "clause": "§9.1 rule 8",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.exit_origin",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_origin"
+    }
+   },
+   {
+    "name": "decision_open_with_exit_origin",
+    "clause": "§9.1 rule 8",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.exit_origin",
+      "value": "signal"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_origin"
+    }
+   },
+   {
+    "name": "decision_exit_origin_unknown",
+    "clause": "§9.1 DecisionMade",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.exit_origin",
+      "value": "profit_stop"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.exit_origin"
+    }
+   },
+   {
+    "name": "decision_goal_exit_with_conviction",
+    "clause": "§9.1 rule 8",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.exit_conviction",
+      "value": "0.1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_conviction"
+    }
+   },
+   {
+    "name": "decision_goal_exit_with_outputs",
+    "clause": "§9.1 rule 8",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.outputs_used",
+      "value": [
+       "01J8Z3M0R000000000000000G3"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.outputs_used"
+    }
+   },
+   {
+    "name": "decision_signal_exit_without_convictions",
+    "clause": "§9.1 rule 8",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.exit_origin",
+      "value": "signal"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_conviction"
+    }
+   },
+   {
+    "name": "decision_risk_exit_with_convictions",
+    "clause": "§9.1 rule 8",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "sell"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "risk_exit"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.exit_conviction"
+    }
+   },
+   {
+    "name": "decision_outputs_repeated",
+    "clause": "§9.1 rule 9",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.outputs_used",
+      "value": [
+       "01J8Z3M0R000000000000000G3",
+       "01J8Z3M0R000000000000000G3"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.outputs_used"
+    }
+   },
+   {
+    "name": "decision_weights_unsorted",
+    "clause": "§9.1 rule 9",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.model_weights",
+      "value": [
+       {
+        "key": "quant.momentum",
+        "value": "0.1"
+       },
+       {
+        "key": "quant.mean_reversion",
+        "value": "0.9"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.model_weights"
+    }
+   },
+   {
+    "name": "decision_clips_out_of_order",
+    "clause": "§9.1 rule 9",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.clips_applied",
+      "value": [
+       "position_cap",
+       "max_order_usd"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.clips_applied"
+    }
+   },
+   {
+    "name": "intent_without_causation",
+    "clause": "§9.1 rule 10",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "mode_looser_than_lifecycle",
+    "clause": "§9.1 rule 11",
+    "base_seq": 11,
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": "exits_only"
+     },
+     {
+      "path": "payload.lifecycle",
+      "value": "paused"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.to"
+    }
+   },
+   {
+    "name": "mode_lifecycle_exits_only",
+    "clause": "§9.1 AgentModeChanged",
+    "base_seq": 11,
+    "changes": [
+     {
+      "path": "payload.lifecycle",
+      "value": "exits_only"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.lifecycle"
+    }
+   },
+   {
+    "name": "owner_exit_confirmed_without_floor",
+    "clause": "§9.1 rule 12",
+    "base_seq": 9,
+    "changes": [
+     {
+      "path": "payload.floor",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.floor"
+    }
+   },
+   {
+    "name": "owner_exit_unconfirmed_with_bid",
+    "clause": "§9.1 rule 12",
+    "base_seq": 9,
+    "changes": [
+     {
+      "path": "payload.confirmed",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "model_output_lineage_without_thesis",
+    "clause": "§9.1 rule 13",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.lineage_id",
+      "value": "lin_01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.thesis_id"
+    }
+   },
+   {
+    "name": "stream_opened_other_agent",
+    "clause": "§9.1 rule 14",
+    "base_seq": 1,
+    "changes": [
+     {
+      "path": "payload.agent_id",
+      "value": "agent_b"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "stream_mismatch",
+     "path": "stream_id"
+    }
+   },
+   {
+    "name": "kill_switch_other_agent",
+    "clause": "§9.1 rule 15",
+    "base_seq": 13,
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "agent_b"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "stream_mismatch",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "kill_switch_other_workspace",
+    "clause": "§9.1 rule 15",
+    "base_seq": 13,
+    "changes": [
+     {
+      "path": "payload.scope",
+      "value": "workspace"
+     },
+     {
+      "path": "payload.subject",
+      "value": "ws_01J8Z9"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "stream_mismatch",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "owner_exit_other_agent",
+    "clause": "§9.1 rule 15",
+    "base_seq": 12,
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "agent_b"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "stream_mismatch",
+     "path": "payload.subject"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "mode_owner_pause",
+    "clause": "§9.1 rule 11",
+    "base_seq": 11,
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": "paused"
+     },
+     {
+      "path": "payload.reason",
+      "value": "owner_pause"
+     },
+     {
+      "path": "payload.lifecycle",
+      "value": "paused"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "mode_owner_resume",
+    "clause": "§9.1 rule 11",
+    "base_seq": 11,
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": "paused"
+     },
+     {
+      "path": "payload.to",
+      "value": "normal"
+     },
+     {
+      "path": "payload.reason",
+      "value": "owner_resume"
+     },
+     {
+      "path": "payload.lifecycle",
+      "value": "normal"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "mode_owner_stop",
+    "clause": "§9.1 rule 11",
+    "base_seq": 11,
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": "stopped"
+     },
+     {
+      "path": "payload.reason",
+      "value": "owner_stop"
+     },
+     {
+      "path": "payload.lifecycle",
+      "value": "stopped"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "decision_ask_suppressed_by_budget",
+    "clause": "§9.1 rule 7",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.autonomy",
+      "value": "ask"
+     },
+     {
+      "path": "payload.ask_suppressed",
+      "value": "budget"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "decision_removed_instrument_exit_without_numbers",
+    "clause": "§9.1 rule 8",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.exit_origin",
+      "value": "removed_instrument"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_close_confirmed_bid_stale_step_up",
+    "clause": "§9.1 OwnerExitRequested",
+    "base_seq": 9,
+    "changes": [
+     {
+      "path": "payload.step_up_status",
+      "value": "stale"
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_kill_switch_confirmed_bid_without_step_up",
+    "clause": "§9.1 OwnerExitRequested",
+    "base_seq": 12,
+    "changes": [
+     {
+      "path": "payload.confirmed",
+      "value": true
+     },
+     {
+      "path": "payload.bid",
+      "value": "151"
+     },
+     {
+      "path": "payload.bid_size",
+      "value": "300"
+     },
+     {
+      "path": "payload.floor",
+      "value": "146.47"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_kill_switch_stale_step_up",
+    "clause": "§9.1 OwnerExitRequested",
+    "base_seq": 12,
+    "changes": [
+     {
+      "path": "payload.step_up_status",
+      "value": "stale"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ],
+  "valid_batches": [
+   {
+    "name": "decision_and_its_intent",
+    "clause": "§9.1 rule 10",
+    "drafts": [
+     {
+      "base_seq": 4,
+      "changes": []
+     },
+     {
+      "base_seq": 5,
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ],
+  "invalid_batches": [
+   {
+    "name": "intent_quantity_differs_from_its_decision",
+    "clause": "§9.1 rule 10",
+    "drafts": [
+     {
+      "base_seq": 4,
+      "changes": []
+     },
+     {
+      "base_seq": 5,
+      "changes": [
+       {
+        "path": "payload.qty",
+        "value": "11"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty",
+     "draft_index": 1
+    }
+   },
+   {
+    "name": "intent_limit_differs_from_its_decision",
+    "clause": "§9.1 rule 10",
+    "drafts": [
+     {
+      "base_seq": 4,
+      "changes": []
+     },
+     {
+      "base_seq": 5,
+      "changes": [
+       {
+        "path": "payload.limit_price",
+        "value": "150.01"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit_price",
+     "draft_index": 1
+    }
+   },
+   {
+    "name": "intent_purpose_differs_from_its_decision",
+    "clause": "§9.1 rule 10",
+    "drafts": [
+     {
+      "base_seq": 4,
+      "changes": []
+     },
+     {
+      "base_seq": 5,
+      "changes": [
+       {
+        "path": "payload.purpose",
+        "value": "increase"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.purpose",
+     "draft_index": 1
+    }
+   }
+  ],
+  "range_verification": [
+   {
+    "name": "intent_repeats_another_action",
+    "clause": "§11 intent_action_mismatch",
+    "from_seq": 1,
+    "changes": [
+     {
+      "seq": 5,
+      "path": "payload.qty",
+      "value": "11"
+     }
+    ],
+    "expect": {
+     "code": "intent_action_mismatch",
+     "seq": 5
+    }
+   },
+   {
+    "name": "kill_switch_names_the_owner_command",
+    "clause": "§11 mode_event_mismatch",
+    "from_seq": 1,
+    "changes": [
+     {
+      "seq": 13,
+      "path": "payload.mode_event",
+      "value": "01J8ZNB0M000000000000000K1"
+     }
+    ],
+    "expect": {
+     "code": "mode_event_mismatch",
+     "seq": 13
+    }
+   },
+   {
+    "name": "kill_switch_names_an_owner_pause",
+    "clause": "§11 mode_event_mismatch",
+    "from_seq": 1,
+    "changes": [
+     {
+      "seq": 11,
+      "path": "payload.to",
+      "value": "paused"
+     },
+     {
+      "seq": 11,
+      "path": "payload.reason",
+      "value": "owner_pause"
+     },
+     {
+      "seq": 11,
+      "path": "payload.lifecycle",
+      "value": "paused"
+     }
+    ],
+    "expect": {
+     "code": "mode_event_mismatch",
+     "seq": 13
+    }
+   },
+   {
+    "name": "kill_switch_names_no_event_on_the_full_chain",
+    "clause": "§11 mode_event_mismatch",
+    "from_seq": 1,
+    "changes": [
+     {
+      "seq": 13,
+      "path": "payload.mode_event",
+      "value": "01J8ZNB0A000000000000000Z9"
+     }
+    ],
+    "expect": {
+     "code": "mode_event_mismatch",
+     "seq": 13
+    }
+   }
+  ]
  }
 }
