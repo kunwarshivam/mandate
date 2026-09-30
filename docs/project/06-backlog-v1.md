@@ -338,13 +338,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   risk reduction. The mandate spec §6.1 wording is in ("Owner controls and step-up", DEC-173
   item 5).
   *Follow-up (M7 spec PR, DEC-173 item 1):* the MC-E cases (MC-E01 to MC-E31) are not yet in
-  `mandate.yaml`, because `mandate_harness.rs`'s
-  `the_fixture_holds_the_families_this_stream_expects` pins the fixture's total at 298 cases and
-  300 tests, and the spec guard keeps that `crates/` fix out of a spec PR. Two changes, in order:
-  first a tests correction that makes the harness count only the families it owns, or read §11's
-  stated count; then an MC-E spec PR that generates the cases from `reference/mandate/ref.py`'s
-  escalation model (already fuzzed and mutation-checked), with `cargo xtask refcases --write`, and
-  no `status.toml` row.
+  `mandate.yaml`. Two changes, in order. *Done (the tests correction, branch
+  `cursor/mandate-harness-counts-138b`):* `mandate_harness.rs` counts only the seven families it
+  owns, by case-ID prefix (MC-S, MC-V, MC-P, MC-C, MC-R, MC-T, MC-L), and
+  `a_kind_no_arm_interprets_fails_naming_it` accepts a kind no arm interprets as long as its cases
+  fail, so a new family changes no harness test while a case added to or dropped from an owned
+  family still fails. Still open: an MC-E spec PR that generates the cases from
+  `reference/mandate/ref.py`'s escalation model (already fuzzed and mutation-checked), with
+  `cargo xtask refcases --write`, and no `status.toml` row. Give the family a kind of its own: the
+  family A, B, G, F, and P count tests select their cases by kind, so a new family reusing one of
+  those kinds would change their counts.
   *Follow-up (M7 spec PR, DEC-173 item 11):* the `mandate-journal` catalogue (`src/catalogue.rs`,
   `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
   (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
@@ -1309,8 +1312,8 @@ From E6-4's V-040 spec change (stream H; the coordinator's ruling on #251, round
   (V-040). The 2¹³ × 5¹³ ladder, where the whole product fits and a subset does not, belongs there
   too. For now all three are pinned in `reference/mandate/fuzz.py::fuzz_ladder_precision`, which runs
   on every seed, and as in-module rows in `crates/mandate-spec/src/validate/tests.rs`. They are not
-  reference cases because a case changes counts that live `mandate_harness.rs` tests assert (298
-  cases, 67 semantic, 202 owned, and the member sweeps), and the spec guard keeps the fixture and
+  reference cases because a case changes counts that live `mandate_harness.rs` tests assert (67
+  semantic, 202 owned, and the member sweeps), and the spec guard keeps the fixture and
   those tests in separate PRs. The founder-owned YAML (ES-22) and the counts must change together.
 - **Three minors from #251's round 2, deferred by the freeze rule.** (1) `docs/specs/mandate.md`'s
   front matter still says a change needs founder approval with no qualification; DEC-167 item 3
