@@ -34,7 +34,7 @@ export default function Winamp({ anchor, state, onState }: { anchor: HTMLElement
       windowLayout: {
         main: { position: { top: 0, left: 0 } },
         equalizer: { position: { top: 116, left: 0 } },
-        playlist: { position: { top: 232, left: 0 }, size: { extraHeight: 1, extraWidth: 0 } },
+        playlist: { position: { top: 232, left: 0 }, size: { extraHeight: 4, extraWidth: 0 } },
       },
       zIndex: LAYER,
     });

@@ -15,5 +15,5 @@ License. Copyright (c) Jordan Eldredge.
 
 The landing page's wallpapers are from The Metropolitan Museum of Art's Open
 Access collection, public domain (CC0); each is credited where it is shown.
-Its music is public domain recordings from Wikimedia Commons, credited in
-readme.txt and listed with their sources in src/components/site/music.ts.
+Its music is public domain recordings streamed from Wikimedia Commons, credited
+in readme.txt and linked from src/components/site/music.ts.

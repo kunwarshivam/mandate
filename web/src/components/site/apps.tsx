@@ -27,7 +27,7 @@ Owlhead is a trading agent for your own brokerage account. It works inside rules
 
 The wallpapers are paintings and prints from The Metropolitan Museum of Art, which shares them as public domain. Pick one in Display.
 
-Winamp is Webamp, the open source Winamp 2 for the browser. Its playlist is public domain recordings from Wikimedia Commons: Scott Joplin's The Entertainer, played by James Brigham; Maple Leaf Rag, by the US Air Force Strolling Strings; Sunflower Slow Drag, by the US Marine Band; Clair de Lune, by the US Air Force Wright Brass; and Chopin's Waltz in E minor, from Musopen.`;
+Winamp is Webamp, the open source Winamp 2 for the browser. Its playlist is public domain recordings from Wikimedia Commons: records made from 1916 to 1925 by Bessie Smith and Louis Armstrong, George Gershwin with Paul Whiteman, Scott Joplin, Mamie Smith, Al Jolson, the Original Dixieland Jass Band and Enrico Caruso, and classics played by the US Air Force and Marine bands.`;
 
 /** Notepad, open on the readme. */
 export function Notepad() {
