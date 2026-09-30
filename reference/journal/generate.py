@@ -504,7 +504,10 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     if event_type == "IntentProposed":
         rule(10, draft["causation_id"] is not None, "schema", "causation_id")
     if event_type == "AgentModeChanged":
-        rule(11, strictness(p["to"]) >= strictness(p["lifecycle"]), "schema", "payload.to")
+        at_least = strictness(p["to"]) >= strictness(p["lifecycle"])
+        if "boundary.rule_11_strictly_stricter" in skip:
+            at_least = strictness(p["to"]) > strictness(p["lifecycle"])
+        rule(11, at_least, "schema", "payload.to")
     if event_type == "OwnerExitRequested":
         members = ("bid", "bid_size", "floor")
         if "regress.rule_12_ties_evidence_to_the_bid" in skip:
@@ -1482,10 +1485,42 @@ def valid(name, clause, base, changes):
 
 
 def valid_drafts() -> list[dict]:
-    """Drafts a rule might be misread to refuse. Each must be accepted: refusing an owner exit would
-    hold a reduction (`AGENTS.md` rule 13), and refusing a suppressed ask would leave the skip
-    unrecorded (DEC-156 item 5)."""
+    """Drafts a rule might be misread to refuse. Each must be accepted: refusing an owner exit, or the
+    owner's pause or Stop, would hold a reduction (`AGENTS.md` rule 13), and refusing a suppressed
+    ask would leave the skip unrecorded (DEC-156 item 5). The owner's mode changes put `to` equal to
+    `lifecycle`, rule 11's boundary."""
     return [
+        valid(
+            "mode_owner_pause",
+            "§9.1 rule 11",
+            "kill_switch_mode",
+            [
+                change("payload.to", "paused"),
+                change("payload.reason", "owner_pause"),
+                change("payload.lifecycle", "paused"),
+            ],
+        ),
+        valid(
+            "mode_owner_resume",
+            "§9.1 rule 11",
+            "kill_switch_mode",
+            [
+                change("payload.from", "paused"),
+                change("payload.to", "normal"),
+                change("payload.reason", "owner_resume"),
+                change("payload.lifecycle", "normal"),
+            ],
+        ),
+        valid(
+            "mode_owner_stop",
+            "§9.1 rule 11",
+            "kill_switch_mode",
+            [
+                change("payload.to", "stopped"),
+                change("payload.reason", "owner_stop"),
+                change("payload.lifecycle", "stopped"),
+            ],
+        ),
         valid(
             "decision_ask_suppressed_by_budget",
             "§9.1 rule 7",
@@ -1935,6 +1970,7 @@ VALIDATOR_MUTANTS = (
     *REGRESSIONS,
     "regress.rule_12_ties_evidence_to_the_bid",
     "regress.rule_8_numbers_on_every_exit_but_risk",
+    "boundary.rule_11_strictly_stricter",
     "rule.10.batch",
     "verify.intent_action_mismatch",
     "verify.mode_event_mismatch.event_type",

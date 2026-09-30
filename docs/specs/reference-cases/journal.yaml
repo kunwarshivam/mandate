@@ -1566,6 +1566,44 @@ agent_stream:
       reason: stream_mismatch
       path: payload.subject
   valid_drafts:
+  - name: mode_owner_pause
+    clause: §9.1 rule 11
+    base_seq: 11
+    changes:
+    - path: payload.to
+      value: paused
+    - path: payload.reason
+      value: owner_pause
+    - path: payload.lifecycle
+      value: paused
+    expect:
+      outcome: Valid
+  - name: mode_owner_resume
+    clause: §9.1 rule 11
+    base_seq: 11
+    changes:
+    - path: payload.from
+      value: paused
+    - path: payload.to
+      value: normal
+    - path: payload.reason
+      value: owner_resume
+    - path: payload.lifecycle
+      value: normal
+    expect:
+      outcome: Valid
+  - name: mode_owner_stop
+    clause: §9.1 rule 11
+    base_seq: 11
+    changes:
+    - path: payload.to
+      value: stopped
+    - path: payload.reason
+      value: owner_stop
+    - path: payload.lifecycle
+      value: stopped
+    expect:
+      outcome: Valid
   - name: decision_ask_suppressed_by_budget
     clause: §9.1 rule 7
     base_seq: 4
