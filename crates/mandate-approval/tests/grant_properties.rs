@@ -57,7 +57,8 @@ fn fail<E: std::fmt::Debug>(what: &str) -> impl FnOnce(E) -> TestCaseError + '_ 
 const WINDOW: i64 = 300;
 
 /// An evidence age offset: authenticated exactly `WINDOW` seconds before the basis in one draw
-/// of five, so the inclusive 300 s edge is drawn on every seed, and otherwise from `range`.
+/// of five, and otherwise from `range`, so a seed whose cases never reach the inclusive 300 s
+/// edge is rare rather than about half of them.
 fn at_the_window_edge_or(range: Range<i64>) -> impl Strategy<Value = i64> {
     prop_oneof![1 => Just(-WINDOW), 4 => range]
 }
