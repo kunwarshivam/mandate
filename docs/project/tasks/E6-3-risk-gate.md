@@ -514,7 +514,7 @@ folds from the account stream:
 | Order size vs trailing 5-minute volume (≤ 5%) | `MarketSnapshot::trailing_5m_volume` | Supplied, never derived here |
 | Daily participation vs 20-day ADV (≤ 5%) | `ConductState::participation_today` and `MarketSnapshot::adv_20d` | Exact `Qty` comparison |
 | Order-to-fill ratio (≤ 10 after ≥ 20 orders) | `ConductState::orders_today_per_instrument`, `filled_today` | `orders ÷ max(fills, 1)`, compared without dividing: `orders > 10 × max(fills, 1)` |
-| No opening order within 60 s after an opposite-side fill | `ConductState::last_opposite_fill_at` | `now − last < 60 s` |
+| No opening order within 60 s after an opposite-side fill | `ConductState::last_opposite_fill_at` | `now − last ≤ 60 s` (the interval includes its last instant, DEC-163 item 3) |
 | Close window (last 10 minutes of the regular session) | the `SessionAt` the gate derives from `now` | `now ≥ session_end − close_window_minutes`, with the early-close calendar giving `session_end` |
 | Self-trade prevention across related accounts | `AccountSnapshot::related_account_resting` | Set membership; the executor supplies the group |
 
