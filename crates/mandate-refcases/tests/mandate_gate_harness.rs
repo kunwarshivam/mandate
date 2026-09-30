@@ -337,6 +337,26 @@ fn the_allowed_reopen_passes_the_conduct_checks_e6_8_made_whole() {
     }
 }
 
+/// No `gate` case states a pacing, so the arm requires the gate to put none on any of them. MC-G08,
+/// an allowed discretionary exit, passes at 15:00Z; moved five minutes before the close it is
+/// still allowed, but the gate now paces it as a marketable limit (trading-domain §9.6's close
+/// window), and the case fails naming `pacing`.
+#[test]
+fn an_allowed_exit_the_gate_paces_fails_since_no_case_states_a_pacing() {
+    let fixture = fixture();
+    if let Err(failure) = run(fixture.clone(), "MC-G08") {
+        panic!("MC-G08 must pass as the fixture states it: {failure}");
+    }
+    fails_naming(
+        &fixture,
+        "MC-G08",
+        "pacing: expected None, got Some(",
+        |case| {
+            case["state"]["now"] = json!("2026-09-21T19:55:00.000000000Z");
+        },
+    );
+}
+
 /// The `index`th member of the expected plan's `list`.
 fn nth<'a>(case: &'a mut Json, list: &str, index: usize) -> &'a mut Json {
     &mut case["expect"][list][index]
