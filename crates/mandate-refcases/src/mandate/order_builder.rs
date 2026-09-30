@@ -815,7 +815,10 @@ impl GateState {
                 instant(when, "gate_state.last_exit_fill_at")?,
             );
         }
-        let listed = list_at(state, "working_universe")?;
+        let listed = state
+            .get("working_universe")
+            .and_then(Json::as_array)
+            .ok_or("`gate_state.working_universe` is not a list")?;
         let working_universe = listed
             .iter()
             .map(|i| {
@@ -851,12 +854,20 @@ fn working_orders(listed: &Json, what: &str) -> Result<Vec<(gate::AssetId, Usd)>
         .as_array()
         .ok_or_else(|| format!("`{what}` is not a list"))?
         .iter()
-        .map(|order| {
+        .enumerate()
+        .map(|(index, order)| {
             unknown_members(order, WORKING_ORDER_KEYS)
                 .map_err(|unknown| format!("`{what}` order members not interpreted: {unknown}"))?;
+            let member = |key: &str| format!("{what}[{index}].{key}");
+            let text = |key: &str| {
+                order
+                    .get(key)
+                    .and_then(Json::as_str)
+                    .ok_or_else(|| format!("`{}` is not a string", member(key)))
+            };
             Ok((
-                gate_asset(&asset(str_at(order, "instrument")?, what)?)?,
-                num(Usd::parse(str_at(order, "max_cost")?), what)?,
+                gate_asset(&asset(text("instrument")?, &member("instrument"))?)?,
+                num(Usd::parse(text("max_cost")?), &member("max_cost"))?,
             ))
         })
         .collect()
@@ -1783,8 +1794,14 @@ mod tests {
         )
     }
 
-    /// Every scalar the harness reads is parsed, never defaulted: each one replaced by a value of
-    /// the wrong type fails the case naming it.
+    /// Every input the harness reads is parsed, never defaulted: each one replaced by an unreadable
+    /// word, and each one replaced by a value of the wrong type, fails the case naming it. That is
+    /// the input's own scalars, the quote's bid and ask, the gate state's `agent_equity` and
+    /// `orders_today`, its `positions_mv` and `last_exit_fill_at` maps whole and each value, its
+    /// `working_universe` whole and each entry, each working order's `instrument` and `max_cost`,
+    /// in the gate state and in a restated `working_opening_orders`, and each output's members. An
+    /// entry planted in either map with an unreadable key or value fails naming the map, since no
+    /// family-B case states a `last_exit_fill_at` entry for the sweep to replace.
     #[test]
     fn an_unreadable_input_is_refused_naming_it() -> Result<(), String> {
         let fixture = fixture()?;
@@ -1803,6 +1820,41 @@ mod tests {
             for key in ["agent_equity", "orders_today"] {
                 scalars.push((format!("/input/gate_state/{key}"), key.to_owned()));
             }
+            for map in ["positions_mv", "last_exit_fill_at"] {
+                let named = format!("gate_state.{map}");
+                scalars.push((format!("/input/gate_state/{map}"), named.clone()));
+                for (key, _) in members(crate::at(input, &named)?)? {
+                    scalars.push((format!("/input/gate_state/{map}/{key}"), named.clone()));
+                }
+            }
+            let universe = "gate_state.working_universe";
+            scalars.push((
+                "/input/gate_state/working_universe".to_owned(),
+                universe.to_owned(),
+            ));
+            for (index, _) in crate::list_at(input, universe)?.iter().enumerate() {
+                scalars.push((
+                    format!("/input/gate_state/working_universe/{index}"),
+                    universe.to_owned(),
+                ));
+            }
+            for (pointer, what) in [
+                (
+                    "/input/gate_state/working_opening_orders",
+                    "gate_state.working_opening_orders",
+                ),
+                ("/input/working_opening_orders", "working_opening_orders"),
+            ] {
+                let listed = case.pointer(pointer).and_then(Json::as_array);
+                for (index, _) in listed.into_iter().flatten().enumerate() {
+                    for key in ["instrument", "max_cost"] {
+                        scalars.push((
+                            format!("{pointer}/{index}/{key}"),
+                            format!("`{what}[{index}].{key}`"),
+                        ));
+                    }
+                }
+            }
             for (index, output) in crate::list_at(input, "outputs")?.iter().enumerate() {
                 for (key, _) in members(output)? {
                     scalars.push((
@@ -1815,7 +1867,11 @@ mod tests {
                 let unreadable = doctored(&fixture, &id, &pointer, |v| *v = json!(PLANTED))?;
                 fails_naming(run(unreadable, &id), &named, &format!("{id}: {pointer}"))?;
                 let mistyped = doctored(&fixture, &id, &pointer, |v| {
-                    *v = if v.is_string() { json!(7) } else { json!([]) };
+                    *v = if v.is_string() || v.is_array() {
+                        json!(7)
+                    } else {
+                        json!([])
+                    };
                 })?;
                 fails_naming(
                     run(mistyped, &id),
@@ -1824,8 +1880,28 @@ mod tests {
                 )?;
                 refused = refused.saturating_add(1);
             }
+            let instrument = crate::str_at(input, "instrument")?;
+            for (map, readable) in [
+                ("positions_mv", json!("1")),
+                ("last_exit_fill_at", json!("2026-09-01T00:00:00.000000000Z")),
+            ] {
+                let pointer = format!("/input/gate_state/{map}");
+                for (key, value) in [
+                    (PLANTED, readable),
+                    (instrument, json!(PLANTED)),
+                    (instrument, json!(7)),
+                ] {
+                    let planted = doctored(&fixture, &id, &pointer, insert(key, value.clone()))?;
+                    fails_naming(
+                        run(planted, &id),
+                        &format!("gate_state.{map}"),
+                        &format!("{id}: {pointer} given {key}: {value}"),
+                    )?;
+                    refused = refused.saturating_add(1);
+                }
+            }
         }
-        crate::expect_eq("scalars refused, counted from the fixture", refused, 611)
+        crate::expect_eq("inputs refused, counted from the fixture", refused, 899)
     }
 
     /// The builder and the gate see one account: the gate state's equity, the instrument's market
