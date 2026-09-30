@@ -143,7 +143,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E6-8 (Must)** As an owner, I want market-conduct controls (one working order per side,
   minimum resting time, price collars, participation caps, order-to-fill limits, close-window
   rules, workspace self-trade prevention) and a daily surveillance report, so that agents cannot
-  produce manipulation-like patterns. *Accepted when:* RC-22 and RC-25 pass.
+  produce manipulation-like patterns. *Accepted when:* the gate's checks 5 and 6, the pacing of an
+  allowed exit, the cancel rule and the surveillance report pass their `tests/` suites and in-module
+  boundary tests with zero missed mutants (#311, DEC-163). RC-22 and RC-25 cannot run yet: the
+  trading-domain harness has no gate driver, RC-25's steps carry no `quote` or volumes, and RC-22
+  also needs E7-2, E7-4 and E6-11; each passes when those land (the "RC-22 and RC-25, blocked in the
+  trading-domain harness" follow-up).
 - **E6-9 (Must)** As an owner, I want account restrictions and trading halts checked before every
   order, so that agents stop adding risk when the broker restricts the account. *Accepted when:*
   RC-15 passes.
@@ -153,6 +158,15 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   today nothing tells BTC/USD from BTC/USDT. Until it lands the gate keeps a crypto opening owed at
   check 2 and refuses it fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a
   non-USD pair is denied, a USD pair passes the floor, and check 2 is whole for crypto.
+- **E6-11 (Must)** As an owner, I want the daily surveillance report delivered to me and a conduct
+  breach to move the agent to `exits_only`, so that §9.6's "breach → agent `exits_only`" and its
+  "threshold breaches are routed to the owner, whose acknowledgment is journaled" hold. E6-8 computes
+  the report (`mandate_risk::surveillance`) and denies the breaching opening; nothing consumes
+  either yet. The runtime owns the mode transition (mandate §5.9), and the notification carries only
+  opaque IDs (`AGENTS.md` rule 6). *Accepted when:* an order-to-fill breach switches the agent to
+  `exits_only` with an owner alert, risk-reducing orders continue, the day's report is journaled and
+  routed per workspace, the owner's acknowledgment is journaled, and RC-22's `conduct_breach` step
+  passes.
 
 ### E7 Alpaca connector and recovery
 
@@ -894,28 +908,38 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
 - **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163).
   `crates/mandate-refcases/src/trading_domain.rs` has no gate driver: `propose_order` steps and the
   `decision` expectation are pending on E6-3, and the crate does not depend on `mandate-risk`. An
-  arm that builds a `GateInput` from a case's account, positions, step quote and clock, calls
-  `mandate_risk::evaluate`, and compares verdict and reason code would move RC-25 whole and RC-15,
-  RC-16 and RC-09's gate steps with it. RC-22 needs more: `broker_order_update` (E7-2), the exit
-  sequence's `actions` (E7-4), and the `conduct_breach` step's switch to `exits_only` with an owner
-  alert, a mode transition the runtime owns (§5.9, §9.6's "breach → agent `exits_only`"); the pure
-  gate only denies the breaching opening `conduct_limit_breached`.
+  arm that builds a `GateInput` from a case, calls `mandate_risk::evaluate`, and compares verdict
+  and reason code is the first step, and it does not run RC-25 by itself: RC-25's steps carry no
+  `quote`, `trailing_5m_volume` or `adv_20d`, so its openings would be denied `stale_mark` at check 5
+  or `conduct_limit_breached` at check 6, and they name a `purpose` where the gate assigns one from
+  an `Origin`. The arm must also state, with its own tests, the market data a case omits and the
+  origin each purpose maps to; only then does RC-25 run, and RC-15, RC-16 and RC-09's gate steps
+  with it. RC-22 needs more: `broker_order_update` (E7-2), the exit sequence's `actions` (E7-4), and
+  the `conduct_breach` step's switch to `exits_only` with an owner alert, a mode transition the
+  runtime owns (§5.9, §9.6's "breach → agent `exits_only`", E6-11); the pure gate only denies the
+  breaching opening `conduct_limit_breached`.
+- **trading-domain §9.6: state that the opposite-fill interval includes its last instant**
+  (DEC-163 item 3; DEC-176 clarification). §9.6's "within 60 seconds after" an opposite-side fill
+  is read inclusively, so an opening exactly 60 s after the fill is denied; the spec text should
+  say so, as a clarification that tightens nothing the code does not already enforce.
 - **`Ratio` to `Fraction` in `mandate-num`.** The surveillance report turns a concentration
   `Ratio` into a `Fraction` by printing and re-parsing it (`surveillance.rs`'s `share_of_equity`),
   because `mandate-num` has no exact conversion. The text round trip is exact, but a typed
   `Fraction::try_from(Ratio)` with its own tests would retire it (DEC-163 item 8).
-- **A defer code for a slice of zero** (founder: the reason-code registry is compliance-visible
-  text). When the day's participation is used up, a discretionary or owner exit is allowed with
-  `Pacing::qty` 0 and the control named in `applied`, because §9.6 says "slice, never deny" and no
-  registered code says "wait for the next interval" (DEC-163 item 6). A registered defer code would
-  let the executor journal the wait as a verdict rather than as an empty order.
-- **A concentration threshold for the surveillance report** (founder). §9.6 lists concentration
-  among the report's checks but configures no threshold, so the report flags only a position worth
-  more than the agent's equity, or any position when equity is not positive (DEC-163 item 8).
-- **Name the cancel's reason explicitly** (coordinator). `CancelInput` tells an exit-sequence or
-  kill-switch cancel by `precedes_risk_reducing_order` alone, which the executor sets; §9.6 exempts
-  both, and a typed cause (exit sequence, kill switch, owner, agent) would let the journal say which
-  (DEC-163 item 7).
+- **A concentration threshold for the surveillance report** (founder: compliance-visible). §9.6
+  lists concentration among the report's checks and §3.3 supplies no number, so the report states
+  each concentration figure and flags none; `SurveillanceBreach::Concentration` is not raised
+  (DEC-163 item 8). A founder-set threshold would let it be.
+- **`CancelCause` in place of `CancelInput`'s two booleans** (a follow-up story, with its own tests
+  correction). `CancelInput` tells an exempt cancel by `precedes_risk_reducing_order` and a
+  marketable order by `marketable`, both set by the executor. A required
+  `CancelCause { RiskReducing, Replace { marketable }, Discretionary }` would make the cause
+  explicit and let the journal say which (DEC-163 item 7).
+- **Does a resting protective order count for self-trade prevention?** `related_account_resting`
+  lists protective orders too (DEC-163 item 11), the conservative reading, so a bracket opening
+  beside a resting protective sell in the same instrument is denied `conduct_limit_breached` though
+  §5.3 rule 8 lets a bracket add a tranche. A stop is not in the book until triggered; deciding
+  whether it counts would reopen that path.
 - **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
   every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
   held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;

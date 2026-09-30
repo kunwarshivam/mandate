@@ -389,7 +389,7 @@ passes a check still owed.
   controls, the collar, participation and close-window pacing of an allowed exit, and
   `evaluate_cancel`'s minimum resting time, trading spec §8.2 and §9.6),
   `crates/mandate-risk/src/surveillance.rs` (§9.6's daily surveillance report: figures and flagged
-  thresholds, no judgement), `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
+  thresholds, concentration a figure only, no judgement), `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
   `AccountType`, `AssetClass` and `Side` and changes neither them nor `mandate-time`.
