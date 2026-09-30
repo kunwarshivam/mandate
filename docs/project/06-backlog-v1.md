@@ -1519,6 +1519,13 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
 - **R3's status PR: fifteen MC-R cases pass.** MC-R01 to MC-R08, MC-R13, MC-R15, MC-R18 to MC-R20,
   MC-R22, and MC-R24 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` on R3 (DEC-167 item 7 (l)); proposing them for `status.toml` is founder-owned.
+  *Done ([#356](https://github.com/kunwarshivam/mandate/pull/356), under DEC-77 item 3 as #335
+  and #337 were):* exactly these fifteen are marked; the other nine stop at R4's inputs.
+- **DEC-167's wording after R3's tests correction** (#357 review, nits). Item 6(c) keeps the
+  superseded sentence "so it stands when the step's own sale leaves the book flat, as in
+  `ref.py`", whose attribution is wrong (`ref.py` discards `stale_mark` on a flat book); strike the
+  clause now that 7(e) supersedes it. Item 7(a)'s "only the latch can come earlier" should say
+  earlier than what: a wait restarted at the rollover.
 
 From E6-4's slice R3 (stream H2; DEC-167 item 7):
 
