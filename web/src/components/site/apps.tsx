@@ -25,7 +25,9 @@ Click an icon to open it. Drag a window by its title bar. The three buttons at i
 
 Owlhead is a trading agent for your own brokerage account. It works inside rules you write, and it writes down every decision it makes. It is in private beta, trading on paper.
 
-The wallpapers are paintings and prints from The Metropolitan Museum of Art, which shares them as public domain. Pick one in Display.`;
+The wallpapers are paintings and prints from The Metropolitan Museum of Art, which shares them as public domain. Pick one in Display.
+
+Winamp is Webamp, the open source Winamp 2 for the browser. Its playlist is public domain recordings from Wikimedia Commons: Scott Joplin's The Entertainer, played by James Brigham; Maple Leaf Rag, by the US Air Force Strolling Strings; Sunflower Slow Drag, by the US Marine Band; Clair de Lune, by the US Air Force Wright Brass; and Chopin's Waltz in E minor, from Musopen.`;
 
 /** Notepad, open on the readme. */
 export function Notepad() {

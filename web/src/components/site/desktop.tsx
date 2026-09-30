@@ -1,16 +1,21 @@
 "use client";
 
 import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { OwlheadMark } from "@/components/brand/Logo";
 import { Owl } from "@/components/domain/owl";
 import { cn } from "@/lib/utils";
 import { Notepad, PictureViewer } from "./apps";
 import { MONO, PIXEL, RAISED, SUNKEN } from "./letter";
-import { BOOK, HELP, KEY, LEDGER, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
+import { BOLT, BOOK, HELP, KEY, LEDGER, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
 import { TitleBar, WINDOW_BUTTON } from "./retro";
 import { ThemeSwitch } from "./theme-switch";
 import { DisplayProperties, Wallpaper } from "./wallpaper";
+import type { AmpState } from "./winamp";
+
+/** Webamp is a megabyte of player, so it loads only when someone opens Winamp. */
+const Winamp = dynamic(() => import("./winamp"), { ssr: false });
 
 export type AppId = "home" | "readme" | "owl" | "display";
 
@@ -110,7 +115,7 @@ const APPS: Record<AppId, App> = {
   },
 };
 
-type Shortcut = { id: string; label: string; icon: ReactNode } & ({ app: AppId; hash?: string } | { href: string });
+type Shortcut = { id: string; label: string; icon: ReactNode } & ({ app: AppId; hash?: string } | { href: string } | { amp: true });
 
 const sprite = (s: Sprite) => <PixelIcon sprite={s} />;
 
@@ -122,6 +127,7 @@ const SHORTCUTS: Shortcut[] = [
   { id: "readme", label: "readme.txt", icon: sprite(NOTE), app: "readme" },
   { id: "owl", label: "owl.jpg", icon: sprite(PICTURE), app: "owl" },
   { id: "display", label: "Display", icon: sprite(MONITOR), app: "display" },
+  { id: "winamp", label: "Winamp", icon: sprite(BOLT), amp: true },
   { id: "signin", label: "Sign in", icon: sprite(KEY), href: "/login" },
 ];
 
@@ -270,7 +276,7 @@ const now = () => new Date().toLocaleTimeString("en-US", { hour: "numeric", minu
 function Clock() {
   const time = useSyncExternalStore(subscribeClock, now, () => "");
   return (
-    <span aria-hidden className="w-[4.75rem] text-center text-[0.9375rem] max-sm:hidden" data-slot="clock">
+    <span aria-hidden className="w-[4.25rem] text-center text-[0.875rem] sm:w-[4.75rem] sm:text-[0.9375rem]" data-slot="clock">
       {time}
     </span>
   );
@@ -313,6 +319,9 @@ export function Desktop({ home }: { home: ReactNode }) {
   const [start, setStart] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [off, setOff] = useState(false);
+  const [amp, setAmp] = useState<AmpState>("off");
+  const [ampLoaded, setAmpLoaded] = useState(false);
+  const [ampAnchor, setAmpAnchor] = useState<HTMLElement | null>(null);
   const front = frontmost(state);
   const startRef = useRef<HTMLDivElement>(null);
 
@@ -352,7 +361,12 @@ export function Desktop({ home }: { home: ReactNode }) {
 
   const launch = (s: Shortcut) => {
     setSelected(s.id);
+    setStart(false);
     if ("app" in s) openApp(s.app, s.hash);
+    if ("amp" in s) {
+      setAmpLoaded(true);
+      setAmp("open");
+    }
   };
 
   const bodies: Record<AppId, ReactNode> = {
@@ -380,8 +394,10 @@ export function Desktop({ home }: { home: ReactNode }) {
         }}
       >
         <Wallpaper />
+        <div ref={setAmpAnchor} aria-hidden className="pointer-events-none absolute inset-y-0 right-4 w-[275px] max-sm:inset-x-0 max-sm:mx-auto" />
+        {ampLoaded && ampAnchor && <Winamp anchor={ampAnchor} state={amp} onState={setAmp} />}
 
-        <ul aria-label="Desktop" className="grid content-start gap-1 p-2 max-sm:grid-cols-4 sm:h-full sm:grid-flow-col sm:auto-cols-[6.5rem] sm:grid-rows-[repeat(auto-fill,5.75rem)]" data-slot="desktop-icons">
+        <ul aria-label="Desktop" className="grid content-start gap-1 p-2 max-sm:grid-cols-4 sm:h-full sm:grid-flow-col sm:auto-cols-[6.5rem] sm:grid-rows-[repeat(auto-fill,5.25rem)]" data-slot="desktop-icons">
           {SHORTCUTS.map((s) => {
             const on = selected === s.id;
             return (
@@ -487,6 +503,19 @@ export function Desktop({ home }: { home: ReactNode }) {
               </button>
             </li>
           ))}
+          {amp !== "off" && (
+            <li className="min-w-0 max-w-44 flex-1">
+              <button
+                type="button"
+                aria-pressed={amp === "open"}
+                onClick={() => setAmp(amp === "open" ? "minimized" : "open")}
+                className={cn(amp === "open" ? cn(SUNKEN, "bg-card") : cn(RAISED, "bg-muted"), "flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 px-1.5 text-[0.875rem] outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground")}
+              >
+                <PixelIcon sprite={BOLT} className="size-4" />
+                <span className="truncate">Winamp</span>
+              </button>
+            </li>
+          )}
         </ul>
 
         <div className={cn(SUNKEN, "flex h-8 shrink-0 items-center gap-1 px-0.5")} data-slot="tray">

@@ -260,6 +260,7 @@ describe("the desktop", () => {
       "readme.txt",
       "owl.jpg",
       "Display",
+      "Winamp",
       "Sign in",
       "Shut down…",
     ]);

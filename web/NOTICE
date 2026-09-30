@@ -9,3 +9,11 @@ Copyright (с) 2025 TradingView, Inc. https://www.tradingview.com/
 The charts link to https://www.tradingview.com/ where they appear (the
 dashboard's account chart and /design), as the library's attribution notice
 asks; the logo inside the chart is turned off (`attributionLogo: false`).
+
+This product includes Webamp (https://webamp.org), licensed under the MIT
+License. Copyright (c) Jordan Eldredge.
+
+The landing page's wallpapers are from The Metropolitan Museum of Art's Open
+Access collection, public domain (CC0); each is credited where it is shown.
+Its music is public domain recordings from Wikimedia Commons, credited in
+readme.txt and listed with their sources in src/components/site/music.ts.

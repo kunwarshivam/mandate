@@ -150,6 +150,25 @@ export const PICTURE: Sprite = [
   "................",
 ];
 
+export const BOLT: Sprite = [
+  "................",
+  ".kkkkkkkkkkkkkk.",
+  ".kkkkkkkkyykkkk.",
+  ".kkkkkkkyykkkkk.",
+  ".kkkkkkyykkkkkk.",
+  ".kkkkkyyykkkkkk.",
+  ".kkkkyyykkkkkkk.",
+  ".kkkyyyyyyykkkk.",
+  ".kkkkkkyyykkkkk.",
+  ".kkkkkyyykkkkkk.",
+  ".kkkkyyykkkkkkk.",
+  ".kkkyykkkkkkkkk.",
+  ".kkkykkkkkkkkkk.",
+  ".kkkkkkkkkkkkkk.",
+  ".kkkkkkkkkkkkkk.",
+  "................",
+];
+
 /** One run of same-coloured pixels per rect, so a sprite is a few dozen rects. */
 function runs(sprite: Sprite) {
   const out: { x: number; y: number; w: number; fill: string }[] = [];
