@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.5 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.6 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions); v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -12,18 +12,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
-- **v0.5, amended ([DEC-181](../project/04-decision-log.md#decisions)):** `DecisionMade` names the
-  source of its autonomy decision and, when a delegation lifted it, the `delegation_id` that
-  delegation usage is counted from ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003));
-  `ApprovalRequested`'s content object lists the delegation shapes offered in `choices`, and
-  `ApprovalResponded` records the shape chosen.
-  `DecisionMade` also records `requested_by`, and the client's id for a client-requested order, and the
-  content object's `trigger` carries both
-  ([DEC-185](../project/04-decision-log.md#decisions)).
-  No new event type; test vectors are unchanged. §9.1's closed `DecisionMade` schema does not list
-  these members yet: they join it, with generated vectors, in their own change before E8-8 or E6-12
-  writes them, and until then no writer emits them.
-- **v0.5 ([DEC-177](../project/04-decision-log.md#decisions)):** §9.1 closes the payload schemas of
+- **v0.6 ([DEC-177](../project/04-decision-log.md#decisions)):** §9.1 closes the payload schemas of
   the agent stream's `StreamOpened`, `ObservationRecorded`, `ModelOutputRecorded`, `DecisionMade`,
   `IntentProposed`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`, and rules on
   every contradiction [DEC-174](../project/04-decision-log.md#decisions) item 3 found in them: `null`,
@@ -36,6 +25,17 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   invalid draft for every rule, valid drafts, batches, and range-verification cases) and stay
   version 3 until the harness reads it. The approval events close with the escalation spec change
   (M7).
+- **v0.5, amended ([DEC-181](../project/04-decision-log.md#decisions)):** `DecisionMade` names the
+  source of its autonomy decision and, when a delegation lifted it, the `delegation_id` that
+  delegation usage is counted from ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003));
+  `ApprovalRequested`'s content object lists the delegation shapes offered in `choices`, and
+  `ApprovalResponded` records the shape chosen.
+  `DecisionMade` also records `requested_by`, and the client's id for a client-requested order, and the
+  content object's `trigger` carries both
+  ([DEC-185](../project/04-decision-log.md#decisions)).
+  No new event type; test vectors are unchanged. §9.1's closed `DecisionMade` schema does not list
+  these members yet: they join it, with generated vectors, in their own change before E8-8 or E6-12
+  writes them, and until then no writer emits them.
 - **v0.5 ([DEC-173](../project/04-decision-log.md#decisions), with [DEC-155](../project/04-decision-log.md#decisions),
   [DEC-156](../project/04-decision-log.md#decisions), and [DEC-158](../project/04-decision-log.md#decisions)):**
   approval escalation v0 ([mandate spec §6.1, §6.4](mandate.md#64-approvals)). The workspace
@@ -383,7 +383,10 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 This subsection closes the payload schemas of the agent stream's `StreamOpened`,
 `ObservationRecorded`, `ModelOutputRecorded`, `DecisionMade`, `IntentProposed`, `AgentModeChanged`,
 `KillSwitchActivated`, and `OwnerExitRequested`. For these events it replaces the "Key payload fields"
-column of §9, and the required `config_refs` stay as §9 lists them. Each schema is `schema_version` 1:
+column of §9, and the required `config_refs` stay as §9 lists them. §9's `DecisionMade` row also
+names [DEC-181](../project/04-decision-log.md#decisions)'s autonomy source, `delegation_id`, and
+`requested_by`: they are not members here until their own change adds them (v0.5, amended), and a
+draft carrying one is refused as an unlisted member. Each schema is `schema_version` 1:
 a record with exactly the listed members, every one present (§4.2). The test vectors' `agent_stream`
 section holds at least one chain event per schema, an invalid draft for every rule below, and valid
 drafts for the cases a rule might be misread to refuse. The other agent-stream events are not

@@ -2136,7 +2136,7 @@ def build_section(v3: dict) -> dict:
         for name, obj in ARTIFACTS.items()
     ]
     return {
-        "spec": "docs/specs/journal.md v0.5 §9.1 (DEC-177)",
+        "spec": "docs/specs/journal.md v0.6 §9.1 (DEC-177)",
         "stream_id": STREAM,
         "artifacts": artifacts,
         "chain": chain,

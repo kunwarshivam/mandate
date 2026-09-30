@@ -656,7 +656,7 @@
   ]
  },
  "agent_stream": {
-  "spec": "docs/specs/journal.md v0.5 §9.1 (DEC-177)",
+  "spec": "docs/specs/journal.md v0.6 §9.1 (DEC-177)",
   "stream_id": "agent:ws_01J8Z2:agent_a",
   "artifacts": [
    {

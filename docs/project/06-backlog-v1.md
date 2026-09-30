@@ -268,7 +268,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   (DEC-168, the coordinator's ruling on #171). *Accepted when:* each agent-stream event the runtime
   and the executor write has a registered schema, tested first against the journal spec's vectors.
   *Unblocked in half* ([DEC-177](04-decision-log.md#decisions)): journal spec v0.4 closed none of the
-  eleven agent-stream schemas the runtime writes (DEC-174). Journal spec v0.5 §9.1 closes the agent
+  eleven agent-stream schemas the runtime writes (DEC-174). Journal spec v0.6 §9.1 closes the agent
   stream's `StreamOpened`, `ObservationRecorded`, `ModelOutputRecorded`, `DecisionMade`,
   `IntentProposed`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`, with
   vectors in `journal.yaml`'s `agent_stream` section, so their tests can be written first now. The
@@ -1346,7 +1346,7 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   R2's spine. R3's PR runs `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` and proposes the passing ones for `status.toml` (founder-owned).
 
-From journal spec v0.5 §9.1, the agent-stream payload schemas ([DEC-177](04-decision-log.md#decisions);
+From journal spec v0.6 §9.1, the agent-stream payload schemas ([DEC-177](04-decision-log.md#decisions);
 DEC-174 items 4 and 5). Until each lands, the drafts it names stay refused at `append`, which adds no
 risk (rule 3):
 
