@@ -204,6 +204,7 @@ def rec(*fields: tuple[str, T]) -> T:
 
 MODES = ("normal", "exits_only", "paused", "stopped")
 MODE = one_of(*MODES)
+LIFECYCLE = one_of("normal", "paused", "stopped")
 MODE_REASONS = one_of(
     "restriction_changed",
     "awaiting_reconciliation",
@@ -288,7 +289,7 @@ SCHEMAS: dict[tuple[str, str], T] = {
         ("purpose", INTENT_PURPOSE),
     ),
     ("agent", "AgentModeChanged"): rec(
-        ("from", MODE), ("to", MODE), ("reason", MODE_REASONS), ("lifecycle", MODE)
+        ("from", MODE), ("to", MODE), ("reason", MODE_REASONS), ("lifecycle", LIFECYCLE)
     ),
     ("agent", "KillSwitchActivated"): rec(
         ("scope", one_of("agent", "connection", "workspace")),
@@ -353,6 +354,19 @@ ENVELOPE = rec(
     ("pii_refs", list_of(STR)),
 )
 JOURNAL_FIELDS = ("seq", "prev_hash", "recorded_at")
+
+REGRESSIONS = {
+    "regress.lifecycle_as_mode": (("agent", "AgentModeChanged"), "lifecycle", MODE),
+}
+
+
+def schema_for(event_type: str, skip: frozenset[str]) -> T:
+    """The closed schema, or for a regression mutant the reviewed head's wider one."""
+    schema = SCHEMAS[("agent", event_type)]
+    for name, (key, member, wider) in REGRESSIONS.items():
+        if name in skip and key == ("agent", event_type):
+            schema = rec(*((m, wider if m == member else t) for m, t in schema.fields))
+    return schema
 
 
 @dataclass(frozen=True)
@@ -527,7 +541,7 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         ]
     if draft["schema_version"] != 1:
         return [*out, Violation("catalogue", "unknown_schema", "payload")]
-    payload_types = type_violations(SCHEMAS[("agent", event_type)], draft["payload"], "payload", skip)
+    payload_types = type_violations(schema_for(event_type, skip), draft["payload"], "payload", skip)
     out += payload_types
     if not payload_types:
         out += consistency_violations(event_type, draft, skip)
@@ -1043,6 +1057,14 @@ def invalid_drafts() -> list[dict]:
             "payload.to",
         ),
         invalid(
+            "mode_lifecycle_exits_only",
+            "§9.1 AgentModeChanged",
+            6,
+            [change("payload.lifecycle", "exits_only")],
+            "non_canonical",
+            "payload.lifecycle",
+        ),
+        invalid(
             "owner_exit_confirmed_without_floor",
             "§9.1 rule 12",
             7,
@@ -1279,6 +1301,7 @@ VALIDATOR_MUTANTS = (
     *(f"rule.{n}" for n in range(1, 15)),
     "rule.15.agent",
     "rule.15.workspace",
+    *REGRESSIONS,
 )
 
 

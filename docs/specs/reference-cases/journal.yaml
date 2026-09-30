@@ -1124,6 +1124,16 @@ agent_stream:
       outcome: Invalid
       reason: schema
       path: payload.to
+  - name: mode_lifecycle_exits_only
+    clause: §9.1 AgentModeChanged
+    base_seq: 6
+    changes:
+    - path: payload.lifecycle
+      value: exits_only
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.lifecycle
   - name: owner_exit_confirmed_without_floor
     clause: §9.1 rule 12
     base_seq: 7
