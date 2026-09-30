@@ -173,7 +173,7 @@ export default function DesignPage() {
             <li key={m.name} data-meaning={m.meaning} className={`reveal grid min-h-40 content-between gap-6 rounded-2xl p-5 ${m.className}`} style={{ "--i": i } as CSSProperties}>
               <span className="grid gap-2">
                 <span className="text-label font-medium">{m.name}</span>
-                {m.line ? <span aria-hidden className="h-0.5 w-12 rounded-full bg-lapis-line" /> : null}
+                {m.line ? <span aria-hidden className="h-0.5 w-12 rounded-xs bg-lapis-line" /> : null}
               </span>
               <span className="grid gap-1">
                 <span className="text-h2">{m.means}</span>
@@ -351,19 +351,19 @@ export default function DesignPage() {
           <div className="grid gap-(--block-gap)">
             <h3 className="text-h3">Actions</h3>
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="lg" variant="primary" className="h-11 rounded-full px-5">
+              <Button size="lg" variant="primary" className="h-11 rounded-lg px-5">
                 Primary
               </Button>
-              <Button size="lg" variant="secondary" className="h-11 rounded-full px-5">
+              <Button size="lg" variant="secondary" className="h-11 rounded-lg px-5">
                 Secondary
               </Button>
-              <Button size="lg" variant="outline" className="h-11 rounded-full px-5">
+              <Button size="lg" variant="outline" className="h-11 rounded-lg px-5">
                 Outline
               </Button>
-              <Button size="lg" variant="ghost" className="h-11 rounded-full px-5">
+              <Button size="lg" variant="ghost" className="h-11 rounded-lg px-5">
                 Ghost
               </Button>
-              <Button size="lg" variant="outline" className="h-11 rounded-full px-5" disabled>
+              <Button size="lg" variant="outline" className="h-11 rounded-lg px-5" disabled>
                 Disabled
               </Button>
             </div>
@@ -426,7 +426,7 @@ export default function DesignPage() {
           <ul className="grid content-start gap-2.5 text-sm">
             {CHART_RULES.map(([swatch, name, use]) => (
               <li key={name} className="grid grid-cols-[0.75rem_minmax(0,1fr)] items-baseline gap-2.5">
-                <span aria-hidden className={`h-0.5 w-3 self-center rounded-full ${swatch}`} />
+                <span aria-hidden className={`h-0.5 w-3 self-center rounded-xs ${swatch}`} />
                 <span>
                   <span className="font-semibold">{name}</span>: {use}
                 </span>

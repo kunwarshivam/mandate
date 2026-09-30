@@ -240,7 +240,7 @@ function OrderRecord({ agent, id }: { agent: Agent; id: string }) {
     >
       <section aria-label="Order" data-state={order.state} className={cn("reveal grid gap-3 px-3 py-3 sm:px-4 sm:py-4", unknown ? "bg-lapis-soft" : "bg-card")}>
         <p className="flex flex-wrap items-center gap-2">
-          <span data-slot="order-state" className={cn("inline-flex h-7 items-center rounded-full px-2.5 text-label", unknown ? "bg-card ring-1 ring-foreground ring-inset" : "bg-muted")}>
+          <span data-slot="order-state" className={cn("inline-flex h-7 items-center rounded-md px-2.5 text-label", unknown ? "bg-card ring-1 ring-foreground ring-inset" : "bg-muted")}>
             {ORDER_STATE_LABEL[order.state]}
           </span>
           {unknown ? <SourceTag source="account" /> : null}
@@ -368,7 +368,7 @@ function DecisionRecord({ agent, id }: { agent: Agent; id: string }) {
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <span
             data-slot="verdict"
-            className={cn("inline-flex h-7 items-center rounded-full px-2.5 text-label", decision.verdict === "allow" ? "bg-muted" : "bg-card ring-1 ring-foreground ring-inset")}
+            className={cn("inline-flex h-7 items-center rounded-md px-2.5 text-label", decision.verdict === "allow" ? "bg-muted" : "bg-card ring-1 ring-foreground ring-inset")}
           >
             {verdictLabel(decision)}
           </span>
@@ -390,7 +390,7 @@ function DecisionRecord({ agent, id }: { agent: Agent; id: string }) {
               <li key={c.key} data-check={c.key} data-result={c.result} className="grid gap-1 py-3">
                 <p className="flex flex-wrap items-center justify-between gap-2">
                   <span className={cn("font-semibold", c.result === "not_run" && "text-muted-foreground")}>{c.label}</span>
-                  <span className={cn("inline-flex h-6 items-center rounded-full px-2.5 text-label", CHECK_CHIP[c.result])}>{resultLabel(c)}</span>
+                  <span className={cn("inline-flex h-6 items-center rounded-md px-2.5 text-label", CHECK_CHIP[c.result])}>{resultLabel(c)}</span>
                 </p>
                 <p className="text-sm text-muted-foreground">{c.rule}</p>
               </li>

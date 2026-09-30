@@ -91,7 +91,7 @@
   --destructive: var(--loss);
   --input: var(--border);
   --ring: var(--mandate-strong);
-  --radius: 0.5rem;
+  --radius: 0.1875rem;
 
   /* Layout (web/DESIGN.md, Space). Calm is the default density; audit and admin opt into dense. */
   --content-max: 68rem;
@@ -371,14 +371,14 @@ html:root[data-cvd="on"] {
   /* ch is the width of a zero; Public Sans letters run narrower, so 58ch keeps prose under 80 characters (max-w-measure). */
   --container-measure: 58ch;
 
-  --radius-xs: 0.25rem;
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
-  --radius-2xl: 1.25rem;
-  --radius-3xl: 1.5rem;
-  --radius-4xl: 2rem;
+  --radius-xs: 0.0625rem;
+  --radius-sm: 0.125rem;
+  --radius-md: 0.1875rem;
+  --radius-lg: 0.25rem;
+  --radius-xl: 0.375rem;
+  --radius-2xl: 0.5rem;
+  --radius-3xl: 0.625rem;
+  --radius-4xl: 0.75rem;
 
   --ease-out: var(--ease-out);
   --ease-in-out: var(--ease-in-out);

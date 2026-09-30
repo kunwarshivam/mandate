@@ -54,7 +54,7 @@ export function EmptyBoard() {
       <p className="max-w-measure text-lg text-muted-foreground">An agent trades on paper within a mandate you describe and confirm, field by field.</p>
       <Link
         href="/agents/new"
-        className="press inline-flex h-12 w-fit items-center gap-2 rounded-full bg-lapis pr-5 pl-6 font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="press inline-flex h-12 w-fit items-center gap-2 rounded-lg bg-lapis pr-5 pl-6 font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         Describe your first agent <ArrowRight aria-hidden className="size-4" />
       </Link>

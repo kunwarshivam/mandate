@@ -23,8 +23,8 @@ import { cn } from "@/lib/utils";
 import { WorkspaceGate } from "./common";
 
 /** Approve and Skip share one variant and one size, and neither is focused or selected first (PX-10). */
-const CHOICE = "h-12 w-full justify-center rounded-full text-base font-semibold";
-const BACK = "-ml-2 inline-flex h-11 w-fit items-center gap-1.5 rounded-full px-2 text-sm text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:h-9";
+const CHOICE = "h-12 w-full justify-center rounded-lg text-base font-semibold";
+const BACK = "-ml-2 inline-flex h-11 w-fit items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:h-9";
 
 function ResponseStatus({ approval, response }: { approval: Approval; response: ApprovalResponse }) {
   if (response.phase === "sent") {
@@ -121,7 +121,7 @@ function NotFound() {
         No request with this ID
       </h1>
       <p className="max-w-measure text-muted-foreground">This workspace has no approval request with that ID.</p>
-      <LinkButton href="/approvals" variant="outline" size="lg" className="h-11 w-fit rounded-full px-5">
+      <LinkButton href="/approvals" variant="outline" size="lg" className="h-11 w-fit rounded-lg px-5">
         See all approvals
       </LinkButton>
     </section>
@@ -325,7 +325,7 @@ function Request({ approvalId }: { approvalId: string }) {
                   {e.author === "owner_selected" ? (
                     authorText(e.author)
                   ) : (
-                    <span className="inline-flex h-6 items-center rounded-full border border-dashed border-foreground px-2.5 text-label text-foreground">{authorText(e.author)}</span>
+                    <span className="inline-flex h-6 items-center rounded-md border border-dashed border-foreground px-2.5 text-label text-foreground">{authorText(e.author)}</span>
                   )}
                   <span>
                     {e.model_id} {e.version}, at {clock(e.produced_at)}
@@ -364,7 +364,7 @@ function Request({ approvalId }: { approvalId: string }) {
           ) : stale ? (
             <div data-slot="record-changed" className="grid gap-2">
               <p className="text-sm font-medium">This request changed since the page opened, so the record above is out of date. Nothing was sent.</p>
-              <Button variant="outline" size="lg" className="h-11 w-fit rounded-full px-5" onClick={refresh}>
+              <Button variant="outline" size="lg" className="h-11 w-fit rounded-lg px-5" onClick={refresh}>
                 Show the current version
               </Button>
             </div>

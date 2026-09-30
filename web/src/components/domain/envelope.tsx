@@ -38,14 +38,14 @@ export function LimitRail({ rail, caption, brief = false, className }: { rail: R
           <span className="font-medium">{usd(rail.used)}</span> <span className="text-mandate-muted">of {usd(rail.cap)}</span>
         </span>
       </div>
-      <div role="img" aria-label={`${rail.label}: ${usd(rail.used)} of a ${usd(rail.cap)} limit`} className="relative h-2 rounded-full bg-mandate-marker/15">
+      <div role="img" aria-label={`${rail.label}: ${usd(rail.used)} of a ${usd(rail.cap)} limit`} className="relative h-2 rounded-xs bg-mandate-marker/15">
         <motion.div
-          className="absolute inset-y-0 left-0 w-full origin-left rounded-full bg-mandate-marker"
+          className="absolute inset-y-0 left-0 w-full origin-left rounded-xs bg-mandate-marker"
           initial={false}
           animate={{ transform: `scaleX(${share})` }}
           transition={move}
         />
-        <div className="absolute -inset-y-1 right-0 w-0.5 rounded-full bg-mandate-strong" aria-hidden />
+        <div className="absolute -inset-y-1 right-0 w-0.5 rounded-xs bg-mandate-strong" aria-hidden />
       </div>
       <p className="text-caption text-mandate-muted">
         {over ? <span className="font-semibold text-mandate-strong">Over the limit. </span> : null}
@@ -83,7 +83,7 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
       <div className="relative h-8 overflow-hidden" aria-hidden>
         <div className="absolute inset-x-0 top-1/2 h-px bg-mandate-marker/40" />
         {levels.map((l) => (
-          <span key={l.key} className={cn("absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-mandate-marker", TICK[l.kind])} style={{ left: pos(l.at) }} />
+          <span key={l.key} className={cn("absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-xs bg-mandate-marker", TICK[l.kind])} style={{ left: pos(l.at) }} />
         ))}
         <motion.span
           className="absolute inset-0"
@@ -107,7 +107,7 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
               <span className="flex items-center gap-2">
                 <span className={cn("shrink-0 bg-mandate-marker", TICK[row.kind])} aria-hidden />
                 {row.label}
-                {row.reached ? <span className="rounded-full bg-ink px-2 text-label text-ink-foreground">Reached</span> : null}
+                {row.reached ? <span className="rounded-md bg-ink px-2 text-label text-ink-foreground">Reached</span> : null}
               </span>
               <span className="col-start-2 text-caption text-mandate-muted">{row.action}</span>
             </li>
@@ -158,7 +158,7 @@ export function Envelope({ agent, className }: { agent: Agent; className?: strin
               <dt className="text-mandate-muted">Largest order</dt>
               <dd className="font-mono font-medium tabular">
                 {usd(limits.orderCap)}
-                {scaled ? <span className="ml-1.5 rounded-full bg-ink px-2 font-sans text-label text-ink-foreground">Sizes scaled</span> : null}
+                {scaled ? <span className="ml-1.5 rounded-md bg-ink px-2 font-sans text-label text-ink-foreground">Sizes scaled</span> : null}
               </dd>
             </div>
             <div>
@@ -208,12 +208,12 @@ function headroomRows(limits: AgentLimits): HeadroomRowData[] {
 
 function HeadroomMeter({ label, share }: { label: string; share: number }) {
   return (
-    <div role="img" aria-label={label} data-slot="headroom-meter" className="relative h-1 rounded-full bg-muted">
+    <div role="img" aria-label={label} data-slot="headroom-meter" className="relative h-1 rounded-xs bg-muted">
       <div
-        className="absolute inset-y-0 left-0 w-full origin-left rounded-full bg-foreground transition-transform duration-(--duration-hover) motion-reduce:transition-none"
+        className="absolute inset-y-0 left-0 w-full origin-left rounded-xs bg-foreground transition-transform duration-(--duration-hover) motion-reduce:transition-none"
         style={{ transform: `scaleX(${share})` }}
       />
-      <div className="absolute -inset-y-1 right-0 w-0.5 rounded-full bg-mandate-strong" aria-hidden />
+      <div className="absolute -inset-y-1 right-0 w-0.5 rounded-xs bg-mandate-strong" aria-hidden />
     </div>
   );
 }
@@ -262,7 +262,7 @@ export function Headroom({ agent, className }: { agent: Agent; className?: strin
           <HeadroomMeter label={`Orders today: ${limits.ordersToday} of ${limits.ordersCap}`} share={Math.min(limits.ordersToday / Math.max(limits.ordersCap, 1), 1)} />
           <p className="text-caption text-muted-foreground">
             Limit <span className="font-mono tabular">{limits.ordersCap}</span> a day. Largest order <span className="font-mono tabular">{usd(limits.orderCap)}</span>.
-            {scaled ? <span className="ml-1.5 rounded-full bg-ink px-2 font-sans text-label text-ink-foreground">Sizes scaled</span> : null}
+            {scaled ? <span className="ml-1.5 rounded-md bg-ink px-2 font-sans text-label text-ink-foreground">Sizes scaled</span> : null}
           </p>
         </li>
       </ul>
@@ -329,7 +329,7 @@ export function MandateCard({ agent, className }: { agent: Agent; className?: st
       </div>
       {scaled ? (
         <p className="text-sm">
-          <span className="rounded-full bg-ink px-2 text-label text-ink-foreground">Sizes scaled</span> Largest order now{" "}
+          <span className="rounded-md bg-ink px-2 text-label text-ink-foreground">Sizes scaled</span> Largest order now{" "}
           <span className="font-mono font-medium tabular">{usd(limits.orderCap)}</span>.
         </p>
       ) : null}

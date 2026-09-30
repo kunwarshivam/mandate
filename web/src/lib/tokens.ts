@@ -128,9 +128,9 @@ export const spacingTokens = [
 ];
 
 export const radiusTokens = [
-  { name: "--radius-xs / sm", value: "0.25rem / 0.375rem", use: "Placeholder and fixture chips, keyboard hints, chart ticks" },
-  { name: "--radius-lg / xl", value: "0.75rem / 1rem", use: "Menus, restriction notes, the Stop sheet's choices, an unknown order" },
-  { name: "--radius-2xl", value: "1.25rem", use: "Panels: the mandate field, an approval card, a well, a hovered agent row" },
-  { name: "--radius-3xl", value: "1.5rem", use: "Sheets and dialogs, the desktop dock" },
-  { name: "full", value: "9999px", use: "Buttons, chips, the Stop control, the paper badge, the range pill" },
+  { name: "--radius-xs / sm", value: "1 px / 2 px", use: "Rails, ticks, swatches and the header's rule; a count on a tab" },
+  { name: "--radius-md / lg", value: "3 px / 4 px", use: "Chips and tags; buttons, the Stop control, the range pill and icon buttons" },
+  { name: "--radius-xl / 2xl", value: "6 px / 8 px", use: "Menus, restriction notes, the Stop sheet's choices; panels, an approval card, a well" },
+  { name: "--radius-3xl", value: "10 px", use: "Sheets and dialogs, the desktop dock" },
+  { name: "full", value: "9999px", use: "Only a dot: a timeline event, the envelope's position" },
 ];

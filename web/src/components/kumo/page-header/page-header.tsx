@@ -82,7 +82,7 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
                         layoutId={underline}
                         aria-hidden
                         data-slot="tab-underline"
-                        className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-lapis-line group-first/tab:left-0"
+                        className="absolute inset-x-3 -bottom-px h-0.5 rounded-xs bg-lapis-line group-first/tab:left-0"
                         transition={{ type: "spring", duration: 0.35, bounce: 0.2 }}
                       />
                     ) : null}

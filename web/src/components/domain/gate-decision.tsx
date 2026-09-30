@@ -42,7 +42,7 @@ export function GateDecisionRow({
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span
             data-slot="verdict"
-            className={cn("inline-flex h-6 items-center rounded-full px-2.5 text-label", allowed ? "bg-background text-muted-foreground" : "bg-card text-foreground ring-1 ring-foreground ring-inset")}
+            className={cn("inline-flex h-6 items-center rounded-md px-2.5 text-label", allowed ? "bg-background text-muted-foreground" : "bg-card text-foreground ring-1 ring-foreground ring-inset")}
           >
             {label}
           </span>

@@ -17,7 +17,7 @@ function Agents() {
         environment={ws.environment}
         description="Each agent trades on paper within its own confirmed mandate."
         actions={
-          <LinkButton href="/agents/new" variant="outline" size="lg" className="h-11 rounded-full px-5">
+          <LinkButton href="/agents/new" variant="outline" size="lg" className="h-11 rounded-lg px-5">
             Describe an agent
           </LinkButton>
         }

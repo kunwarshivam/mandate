@@ -71,7 +71,7 @@ export function RangePicker<T extends string>({
             aria-pressed={on}
             onClick={() => onChange(o.id)}
             className={cn(
-              "press relative h-11 min-w-11 flex-1 rounded-full px-3 font-mono text-sm font-medium tabular outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:h-9 sm:flex-none",
+              "press relative h-11 min-w-11 flex-1 rounded-lg px-3 font-mono text-sm font-medium tabular outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:h-9 sm:flex-none",
               on ? "text-highlight-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
@@ -80,7 +80,7 @@ export function RangePicker<T extends string>({
                 layoutId={pill}
                 aria-hidden
                 data-slot="range-pill"
-                className="absolute inset-0 rounded-full bg-highlight"
+                className="absolute inset-0 rounded-lg bg-highlight"
                 transition={{ type: "spring", duration: 0.35, bounce: 0.25 }}
               />
             ) : null}
@@ -106,7 +106,7 @@ export function LevelLegend({ levels, offChart = [], format = usdLabel, classNam
     <ul data-slot="level-legend" className={cn("grid gap-x-8 gap-y-1.5 text-caption @lg:grid-cols-2", className)}>
       {all.map(({ l, drawn }) => (
         <li key={l.key} data-level={l.key} data-drawn={drawn} className={cn("grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-baseline gap-2", !drawn && "text-muted-foreground")}>
-          <span aria-hidden className={cn("h-0.5 w-3 self-center rounded-full", SWATCH[l.tone])} />
+          <span aria-hidden className={cn("h-0.5 w-3 self-center rounded-xs", SWATCH[l.tone])} />
           <span>
             <span className="font-medium">{l.label}</span>
             {l.meaning ? <span className="text-muted-foreground">: {l.meaning}</span> : null}

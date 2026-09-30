@@ -64,7 +64,7 @@ function Waiting({ ws, open, now }: { ws: Workspace; open: Approval[]; now: stri
       <h2 id="waiting-title" className="flex items-center gap-2.5 text-h2">
         {open.length === 0 ? "Nothing waiting" : "Waiting for you"}
         {open.length > 0 ? (
-          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-lapis px-2 font-mono text-label text-lapis-foreground tabular">
+          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-sm bg-lapis px-2 font-mono text-label text-lapis-foreground tabular">
             {open.length}
             <span className="sr-only">{open.length === 1 ? " request" : " requests"}</span>
           </span>
@@ -85,7 +85,7 @@ function Waiting({ ws, open, now }: { ws: Workspace; open: Approval[]; now: stri
                 <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
                 <Link
                   href={`/approvals/${a.approval_id}`}
-                  className="press inline-flex h-11 w-fit items-center gap-2 rounded-full bg-lapis pr-4 pl-5 text-sm font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-lapis-soft"
+                  className="press inline-flex h-11 w-fit items-center gap-2 rounded-lg bg-lapis pr-4 pl-5 text-sm font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-lapis-soft"
                 >
                   Open request <ArrowRight aria-hidden className="size-4" />
                 </Link>
@@ -128,7 +128,7 @@ function NeedsYou({ ws, open, className }: { ws: Workspace; open: Approval[]; cl
       <h2 id="needs-you-title" className="flex items-center gap-2.5 text-h2">
         Needs you
         {count > 0 ? (
-          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-lapis px-2 font-mono text-label text-lapis-foreground tabular">
+          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-sm bg-lapis px-2 font-mono text-label text-lapis-foreground tabular">
             {count}
             <span className="sr-only">{count === 1 ? " item" : " items"}</span>
           </span>
