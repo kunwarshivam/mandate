@@ -369,7 +369,8 @@ agent-stream events are not closed yet: the approval events close with the escal
 | `a` \| `b` | One of the listed strings | As `id` |
 | `T?`, `[T]` | `T` or `null`; an array of `T` | The array itself: `schema` |
 
-A member not listed, or a listed member absent, is `schema` at that member. The first violation is
+A member not listed, or a listed member absent, is `schema` at that member; an absent member is
+never read as `null` (§4.2), even where `null` would be valid. The first violation is
 reported, in this order: unlisted members (in key order), then the listed members in the order given,
 then the numbered consistency rules (only on a payload whose members are all well typed), then
 `artifact_refs` and `pii_refs` (§3), then the subject rules 14 and 15 (`stream_mismatch`). Paths are

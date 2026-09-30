@@ -400,7 +400,8 @@ def type_violations(ty: T, value, path: str, skip: frozenset[str]) -> list[Viola
         for name, inner in ty.fields:
             member = f"{path}.{name}".lstrip(".")
             if name not in value:
-                out.append(Violation("record.missing", "schema", member))
+                if "record.missing" not in skip:
+                    out.append(Violation("record.missing", "schema", member))
             else:
                 out += type_violations(inner, value[name], member, skip)
         return out
@@ -541,16 +542,18 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         ]
     if draft["schema_version"] != 1:
         return [*out, Violation("catalogue", "unknown_schema", "payload")]
-    payload_types = type_violations(schema_for(event_type, skip), draft["payload"], "payload", skip)
+    schema = schema_for(event_type, skip)
+    payload_types = type_violations(schema, draft["payload"], "payload", skip)
     out += payload_types
+    as_read = {**draft, "payload": {name: draft["payload"].get(name) for name, _ in schema.fields}}
     if not payload_types:
-        out += consistency_violations(event_type, draft, skip)
+        out += consistency_violations(event_type, as_read, skip)
     if "artifact_refs" not in skip and draft["artifact_refs"] != sorted(digest_strings(draft["payload"])):
         out.append(Violation("artifact_refs", "artifact_refs", "artifact_refs"))
     if not ascending(draft["pii_refs"]):
         out.append(Violation("pii_refs", "pii_refs", "pii_refs"))
     if not payload_types:
-        out += subject_violations(event_type, draft, skip)
+        out += subject_violations(event_type, as_read, skip)
     return out
 
 
@@ -808,16 +811,24 @@ def draft_of(body: dict) -> dict:
     return {k: copy.deepcopy(v) for k, v in body.items() if k not in JOURNAL_FIELDS}
 
 
-def set_path(draft: dict, path: str, value) -> None:
-    *parents, last = path.split(".")
+def apply_change(draft: dict, item: dict) -> None:
+    *parents, last = item["path"].split(".")
     node = draft
     for name in parents:
         node = node[name]
-    node[last] = copy.deepcopy(value)
+    if item.get("delete"):
+        del node[last]
+    else:
+        node[last] = copy.deepcopy(item["value"])
 
 
 def change(path: str, value) -> dict:
     return {"path": path, "value": value}
+
+
+def delete(path: str) -> dict:
+    """The member is absent from the draft, which §4.2 distinguishes from `null`."""
+    return {"path": path, "delete": True}
 
 
 def invalid(name, clause, seq, changes, reason, path):
@@ -837,6 +848,22 @@ def invalid_drafts() -> list[dict]:
     as_of = epoch_seconds("2026-09-21T13:59:58.000000000Z")
     stepped_up = epoch_seconds("2026-09-21T20:29:45.000000000Z")
     return [
+        invalid(
+            "owner_exit_floor_absent",
+            "§9.1 absent member",
+            7,
+            [delete("payload.floor")],
+            "schema",
+            "payload.floor",
+        ),
+        invalid(
+            "decision_reason_code_absent_on_allow",
+            "§9.1 absent member",
+            4,
+            [delete("payload.reason_code")],
+            "schema",
+            "payload.reason_code",
+        ),
         invalid(
             "reason_code_empty_string_on_allow",
             "§4.2",
@@ -1126,7 +1153,7 @@ def invalid_drafts() -> list[dict]:
 def apply_changes(chain: list[dict], case: dict) -> dict:
     draft = draft_of(chain[case["base_seq"] - 1]["body"])
     for item in case["changes"]:
-        set_path(draft, item["path"], item["value"])
+        apply_change(draft, item)
     return draft
 
 
@@ -1294,6 +1321,7 @@ def check_chain(section: dict, v3: dict) -> list[str]:
 
 VALIDATOR_MUTANTS = (
     "record.extra",
+    "record.missing",
     "types.str_nonempty",
     "types.timestamp",
     "artifact_refs",
@@ -1303,6 +1331,10 @@ VALIDATOR_MUTANTS = (
     "rule.15.workspace",
     *REGRESSIONS,
 )
+
+
+def draft_named(section: dict, name: str) -> dict:
+    return next(d for d in section["invalid_drafts"] if d["name"] == name)
 
 
 def vector_mutants(section: dict) -> list[tuple[str, dict]]:
@@ -1349,7 +1381,7 @@ def vector_mutants(section: dict) -> list[tuple[str, dict]]:
         ),
         (
             "invalid draft expects the wrong reason",
-            lambda s: s["invalid_drafts"][0]["expect"].update(reason="schema"),
+            lambda s: draft_named(s, "reason_code_empty_string_on_allow")["expect"].update(reason="schema"),
         ),
     ]:
         out.append((name, mutated(fn)))
