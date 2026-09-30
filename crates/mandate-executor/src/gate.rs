@@ -16,6 +16,7 @@ use mandate_num::{Qty, SignedQty};
 use crate::error::ExecutorError;
 use crate::payload::{object, text};
 use crate::ports::Ports;
+use crate::protection::rests;
 use crate::state::ExecutorState;
 use crate::types::{AccountState, AgentId, GateCheck, GateVerdict, Mode, OrderState, Purpose};
 
@@ -74,6 +75,8 @@ pub(crate) struct Proposal<'s> {
     pub(crate) side: Side,
     pub(crate) qty: Qty,
     pub(crate) purpose: Purpose,
+    /// Whether the order carries protection prices: a bracket, never a plain add (§5.4).
+    pub(crate) bracketed: bool,
 }
 
 /// Runs the checks in trading-domain spec §9.1's evaluation order against fresh folded state.
@@ -127,6 +130,11 @@ pub(crate) fn account_stream_checks(
     record(
         "protection_attributed",
         unattributed.then_some(("protection_unattributed", true)),
+    );
+    let blocked = adds && !proposal.bracketed && rests(state, proposal.instrument);
+    record(
+        "protective_order",
+        blocked.then_some(("add_blocked_by_protective_order", false)),
     );
     let unreconciled = unreconciled_opening(state, adds);
     record(
@@ -346,6 +354,7 @@ mod attribution_tests {
                     side,
                     qty: Qty::parse("5")?,
                     purpose,
+                    bracketed: false,
                 },
                 &ports,
             )
@@ -364,6 +373,7 @@ mod attribution_tests {
                 ("universe", true),
                 ("sell_exceeds_available", true),
                 ("protection_attributed", false),
+                ("protective_order", true),
                 ("startup_reconciliation", false),
             ]
         );

@@ -88,6 +88,12 @@ pub(crate) struct OrderDetail {
     pub(crate) submitted_seq: Option<Seq>,
     pub(crate) unknown_since: Option<RiskClock>,
     pub(crate) last_absence: Option<RiskClock>,
+    /// An exit waited on the order past rule 5's bound, or the broker refused its cancel, and the
+    /// order was queried. From then on no exit waits on this submission attempt again, answered
+    /// or not: whatever the query finds is the gate's to hold (`unknown_order_in_flight`) and the
+    /// broker's to refuse. A resubmission after a confirmed absence is a new attempt, with a new
+    /// detail, which an exit waits on afresh (#174 ruling 5863046153, DEC-160 (18)).
+    pub(crate) cancel_overdue: bool,
 }
 
 /// An adoption on the journal (`OrderStateChanged` with `adopted`) whose `CompensatingEvent` has
@@ -121,6 +127,9 @@ pub struct IntentRecord {
     /// is measured from at **every** `Intent → Submitting` transition (interpretation 11).
     pub received_at: RiskClock,
     pub outcome: IntentOutcome,
+    /// The risk-clock second of the latest `GateDecided` that allowed the intent: for an exit,
+    /// the start of its wait on its cancels, which rule 5's bound runs from (§5.3, DEC-160 (13)).
+    pub(crate) allowed_at: Option<RiskClock>,
 }
 
 /// How far an intent has got. `Abandoned` and `Denied` are terminal: a later handoff of the same
@@ -448,6 +457,8 @@ pub(crate) struct ExitSequence {
     pub(crate) entry: ClientOrderId,
     pub(crate) agent: AgentId,
     pub(crate) prices: Option<ProtectionPrices>,
+    /// A passive exit's (`passive_start`): it keeps the stop, so no interval opens.
+    pub(crate) passive: bool,
 }
 
 /// The restriction a reconciliation places for one subject — an instrument, or external activity

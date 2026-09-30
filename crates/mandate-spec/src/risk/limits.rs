@@ -20,7 +20,9 @@ pub(super) struct Limits {
     hysteresis: UsdExact,
     max_daily_loss: UsdExact,
     /// The one level a version can change while a state lives: only a loosening version, which is
-    /// the one path that lifts the floor (§5.7).
+    /// the one path that lifts the floor (§5.7). It stays the mandate's text, not a `UsdExact`,
+    /// because §5.7's loosening check compares it with the new fraction, which arrives as a
+    /// [`SchemaDec`], and [`ApplyResult`](super::ApplyResult) journals that fraction as written.
     pub(super) max_loss_from_allocation: SchemaDec,
 }
 
@@ -29,8 +31,11 @@ pub(super) struct Limits {
 pub(super) struct Readings {
     /// Each limit's condition and whether its 1.25x hard level is reached (§5.6).
     pub(super) limits: BTreeMap<LimitKey, (bool, bool)>,
-    /// By rung index: H − E < (`at` − `hysteresis`) × H, the drawdown back past the rung's lift
-    /// level (§5.5).
+    /// By rung index, one entry for every rung: H − E < (`at` − `hysteresis`) × H, the drawdown back
+    /// past the rung's lift level (§5.5).
+    ///
+    /// Only a `scale_sizes` rung lifts on it (§5.5). A latched `exits_only` or `flatten_and_pause`
+    /// rung is read here too, but lifts only on the owner's acknowledgment (§5.8), whatever this says.
     pub(super) below_lift: BTreeMap<u8, bool>,
 }
 
@@ -104,18 +109,18 @@ impl Limits {
 }
 
 /// C × (1 − `fraction`) + L, the lifetime floor at a loss fraction (§5.7).
-pub(super) fn floor(figures: &Figures, fraction: UsdExact) -> Result<UsdExact, SpecError> {
+fn floor(figures: &Figures, fraction: UsdExact) -> Result<UsdExact, SpecError> {
     Ok(UsdExact::one()
         .checked_sub(fraction)?
         .checked_mul(UsdExact::of(figures.capital))?
         .checked_add(UsdExact::of(figures.inherited))?)
 }
 
-pub(super) fn at_least(value: UsdExact, level: UsdExact) -> Result<bool, SpecError> {
+fn at_least(value: UsdExact, level: UsdExact) -> Result<bool, SpecError> {
     Ok(!value.is_below(level)?)
 }
 
-pub(super) fn at_most(value: UsdExact, level: UsdExact) -> Result<bool, SpecError> {
+fn at_most(value: UsdExact, level: UsdExact) -> Result<bool, SpecError> {
     Ok(!level.is_below(value)?)
 }
 
@@ -127,6 +132,9 @@ fn negated(value: UsdExact) -> Result<UsdExact, SpecError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Figures {
     pub(super) equity: Usd,
+    /// H, the peak of a positive equity (§5.5). The fold opens it at the allocation, which the schema
+    /// makes positive, and only raises it. A negative H would put each rung's 1.25x hard level below
+    /// its soft one.
     pub(super) high_water: Usd,
     pub(super) day_start: Usd,
     pub(super) capital: Usd,
@@ -700,6 +708,43 @@ pub(super) mod tests {
         let flat = figures(["10000", "10000", "10000", "10000", "0"])?;
         assert_eq!(reported_readings(&mandate, &flat)?, lifted);
         assert_eq!(true_readings(&levels, &flat)?, lifted, "the oracle agrees");
+        Ok(())
+    }
+
+    /// The conditions read every limit whether or not it holds, and nothing else: the three rungs,
+    /// the daily loss, and the floor, never the profit stop (§3.1), and a lift reading for every rung
+    /// index. Checked at a state where nothing holds and at one where everything does, so an entry
+    /// left out when its readings are false, or one added as `(false, false)`, fails.
+    #[test]
+    fn the_conditions_read_exactly_every_rung_the_daily_loss_and_the_floor() -> Result<(), String> {
+        let limits = Limits::of(&base()?).map_err(|e| e.to_string())?;
+        let keys = BTreeSet::from([
+            LimitKey::DrawdownRung(0),
+            LimitKey::DrawdownRung(1),
+            LimitKey::DrawdownRung(2),
+            LimitKey::MaxDailyLoss,
+            LimitKey::LifetimeFloor,
+        ]);
+        let rungs = BTreeSet::from([0_u8, 1, 2]);
+        for values in [
+            ["10000", "10000", "10000", "10000", "0"],
+            ["8800", "10000", "10000", "11000", "0"],
+        ] {
+            let state = snapshot(&values.map(str::to_owned))?;
+            let readings = limits
+                .conditions(&Figures::of(&state))
+                .map_err(|e| e.to_string())?;
+            assert_eq!(
+                readings.limits.keys().copied().collect::<BTreeSet<_>>(),
+                keys,
+                "the limits read at {values:?}"
+            );
+            assert_eq!(
+                readings.below_lift.keys().copied().collect::<BTreeSet<_>>(),
+                rungs,
+                "the lifts read at {values:?}"
+            );
+        }
         Ok(())
     }
 
