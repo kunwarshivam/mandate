@@ -318,7 +318,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E8-7 (Should)** As an approver, I want SMS and phone escalation.
 - **E8-8 (Should)** As an owner, I want to answer an ask with "let it do this for a while", within
   caps I set in dollars, orders, and days, so that the agent stops asking me about what I have
-  already said yes to ([ADR-0003](../adr/0003-earned-autonomy.md) parts 2 and 3, [DEC-181](04-decision-log.md#decisions), pending the founder). The spec is
+  already said yes to ([ADR-0003](../adr/0003-earned-autonomy.md) parts 2 and 3, [DEC-181](04-decision-log.md#decisions)). The spec is
   mandate §6.4 and §6.5 ([#328](https://github.com/kunwarshivam/mandate/pull/328)); the MC-U
   reference cases come first, in their own tests-first change. Safety-critical (autonomy policy and
   the approval flow). *Accepted when:* the MC-U cases pass; a delegation lifts only the `ask` it
@@ -372,7 +372,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   authenticates with its own scoped, revocable token and no broker credential crosses MCP; every
   client call is journaled with the client's identity; and the owner can revoke the client at any
   time.
-  *Amended by [DEC-183](04-decision-log.md#decisions) (pending the founder):* packaged as the Owlhead plugin for OpenAI
+  *Amended by [DEC-183](04-decision-log.md#decisions) (founder, 2026-09-30):* packaged as the Owlhead plugin for OpenAI
   Dots, Meta Muse, and Grok Bot (E10-8), and every client-requested opening meets the client ceiling
   (E6-12).
 - **E10-7 (Must)** As a new owner, I want to answer three questions (how much money, what goal, how
@@ -386,7 +386,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   dollars ([DEC-189](04-decision-log.md#decisions)); and it binds the version hash on confirmation.
 - **E10-8 (Should, after E10-6 and E6-12)** As an owner who lives in OpenAI Dots, Meta Muse, or Grok
   Bot, I want Owlhead as a plugin there, so that my everyday agent can work with my money through
-  Owlhead's gate ([DEC-183](04-decision-log.md#decisions), pending the founder). Listed publicly as Owlhead, linking
+  Owlhead's gate ([DEC-183](04-decision-log.md#decisions)). Listed publicly as Owlhead, linking
   owlhead.ai (DEC-171). *Accepted when:* E10-6's acceptance holds for each host; the listing and its
   consent screen name the scopes in words; confirmations and approvals happen only in Owlhead's own
   app or CLI; each host's plugin terms are recorded in the competitive landscape.
@@ -394,7 +394,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   asking the owner, so that I do not flood them with asks the gate would deny ([DEC-190](04-decision-log.md#decisions)).
   *Accepted when:* the dry-run tool returns the decision and the gate's reason code with the client
   ceiling applied, places nothing, creates no approval, counts against the client's rate limit, and
-  is journaled. **Also, pending [DEC-191](04-decision-log.md#decisions) (founder):** a hold-new-openings tool that sets
+  is journaled. **Also ([DEC-191](04-decision-log.md#decisions)):** a hold-new-openings tool that sets
   `exits_only` and nothing else; lifting it is the owner's alone, with step-up.
 
 ### E11 Web app: dashboard and controls
@@ -436,7 +436,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   and near-breach on my account, derived from the journal and its anchors, so that I can see the
   mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
   DEC-145). Publishing it beyond the owner needs counsel's answer and the founder (DEC-79).
-  *Extended by [DEC-193](04-decision-log.md#decisions) (pending the founder):* the record is checked against the hash
+  *Extended by [DEC-193](04-decision-log.md#decisions) (founder, 2026-09-30):* the record is checked against the hash
   chain and lists the versions in force, the actions under each by purpose and autonomy source,
   every delegation used, and every guardrail that fired, with no performance figure; its text waits
   for compliance question 40.

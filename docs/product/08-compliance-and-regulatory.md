@@ -273,6 +273,31 @@ go-live screen.
     What must the onboarding and go-live screens say? *(Proposed by agents, 2026-09-26; awaiting
     the founder's acceptance, DEC-79.)*
 
+Questions 36 to 41 come from [ADR-0003](../adr/0003-earned-autonomy.md) (earned autonomy, DEC-180 to
+DEC-197). *(Proposed by agents, 2026-09-30; awaiting the founder's acceptance, DEC-79.)*
+
+36. When the owner answers three questions (money, goal, loss tolerance) and the platform drafts
+    every other envelope field as a proposal the owner confirms (DEC-182), does the drafted envelope
+    as a whole amount to individualized advice, beyond question 23's single proposed values? What
+    must the contract card say about who chose each value?
+37. May an approval card offer to extend a yes to similar future actions for a bounded time (a
+    delegation, DEC-181), with no option pre-selected, without that offer being a recommendation to
+    trade more? May the card show counts of the owner's past answers (approved, skipped, timed out)
+    and of orders run under each delegation?
+38. When a general-purpose agent from another company (OpenAI Dots, Meta Muse, Grok Bot) connects to
+    Owlhead as a plugin and asks for orders that the owner then approves (DEC-183), who is
+    responsible for that request, and does distribution through those hosts change the posture of
+    questions 31 and 32?
+39. May the product show, before the owner widens autonomy, how many of the agent's past asks would
+    have run automatically under the new version (counts only, no profit or loss, DEC-186), or is
+    that hypothetical performance under the Marketing Rule?
+40. May a monthly statement tell the owner, from the hash-chained journal, that every action was
+    within the confirmed mandate (DEC-193), and what must it say about what that does not
+    guarantee? May it be shared beyond the owner?
+41. When the agent explains a past decision in plain language assembled from recorded events
+    (DEC-192), what disclaimers does the explanation need, and does explaining the platform's own
+    research agent's reasoning change the answer to question 31?
+
 ## Data protection
 
 - Personal data minimized in the global control plane (IDs and roles only in hybrid mode).
