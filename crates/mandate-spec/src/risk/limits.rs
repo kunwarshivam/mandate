@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use mandate_num::{Usd, UsdExact};
 
 use super::{HARD_TRIGGER_MULTIPLE, LimitKey, Snapshot, decimal, rung_index};
+use crate::document::Goal;
 use crate::validate::ValidatedMandate;
 use crate::{SchemaDec, SpecError};
 
@@ -24,6 +25,8 @@ pub(super) struct Limits {
     /// because §5.7's loosening check compares it with the new fraction, which arrives as a
     /// [`SchemaDec`], and [`ApplyResult`](super::ApplyResult) journals that fraction as written.
     pub(super) max_loss_from_allocation: SchemaDec,
+    /// A `profit_stop` goal's `profit_level`, and nothing for any other goal (§3.1).
+    profit_level: Option<UsdExact>,
 }
 
 /// Every §5.2 comparison at one state, so the fold reads each from here and nowhere else.
@@ -31,6 +34,9 @@ pub(super) struct Limits {
 pub(super) struct Readings {
     /// Each limit's condition and whether its 1.25x hard level is reached (§5.6).
     pub(super) limits: BTreeMap<LimitKey, (bool, bool)>,
+    /// A `profit_stop` goal's condition, E − C ≥ `profit_level` × C, which has no hard level (§3.1,
+    /// §5.6); nothing for any other goal.
+    pub(super) profit: Option<bool>,
     /// By rung index, one entry for every rung: H − E < (`at` − `hysteresis`) × H, the drawdown back
     /// past the rung's lift level (§5.5).
     ///
@@ -55,12 +61,37 @@ impl Limits {
             hysteresis: decimal(&risk.hysteresis, "/risk/hysteresis")?,
             max_daily_loss: decimal(&risk.max_daily_loss, "/risk/max_daily_loss")?,
             max_loss_from_allocation: document.capital.max_loss_from_allocation.clone(),
+            profit_level: match &document.goal {
+                Goal::ProfitStop { profit_level, .. } => {
+                    Some(decimal(profit_level, "/goal/profit_level")?)
+                }
+                Goal::Continuous { .. } | Goal::Accumulate { .. } => None,
+            },
         })
     }
 
-    /// Every limit's condition, soft and at the 1.25x hard level, and each rung's lift, all as exact
-    /// products (§5.2, §5.6). The profit stop is not here: it is a goal's stop condition with no hard
-    /// level (§3.1), which the risk state confirms.
+    /// The daily loss's condition, soft and at the 1.25x hard level, against a day-start equity:
+    /// E − E₀ ≤ −`max_daily_loss` × E₀ (§5.4, §5.6). The fold also reads a breach carried over the
+    /// rollover against the previous day's E₀ with it.
+    pub(super) fn daily_loss(
+        &self,
+        equity: Usd,
+        day_start: Usd,
+    ) -> Result<(bool, bool), SpecError> {
+        let hard = UsdExact::parse(HARD_TRIGGER_MULTIPLE)?;
+        let day_start = UsdExact::of(day_start);
+        let daily_pnl = UsdExact::of(equity).checked_sub(day_start)?;
+        let daily_loss = self.max_daily_loss.checked_mul(day_start)?;
+        Ok((
+            at_most(daily_pnl, negated(daily_loss)?)?,
+            at_most(daily_pnl, negated(hard.checked_mul(daily_loss)?)?)?,
+        ))
+    }
+
+    /// Every limit's condition, soft and at the 1.25x hard level, each rung's lift, and a
+    /// `profit_stop` goal's condition, all as exact products (§5.2, §5.6). The profit stop is kept out
+    /// of `limits`: it is a goal's stop condition with no hard level (§3.1), which the risk state
+    /// confirms.
     pub(super) fn conditions(&self, figures: &Figures) -> Result<Readings, SpecError> {
         let hard = UsdExact::parse(HARD_TRIGGER_MULTIPLE)?;
         let equity = UsdExact::of(figures.equity);
@@ -83,15 +114,9 @@ impl Limits {
                 .checked_mul(high_water)?;
             below_lift.insert(rung, drawdown.is_below(lift)?);
         }
-        let day_start = UsdExact::of(figures.day_start);
-        let daily_pnl = equity.checked_sub(day_start)?;
-        let daily_loss = self.max_daily_loss.checked_mul(day_start)?;
         limits.insert(
             LimitKey::MaxDailyLoss,
-            (
-                at_most(daily_pnl, negated(daily_loss)?)?,
-                at_most(daily_pnl, negated(hard.checked_mul(daily_loss)?)?)?,
-            ),
+            self.daily_loss(figures.equity, figures.day_start)?,
         );
         let fraction = decimal(
             &self.max_loss_from_allocation,
@@ -104,7 +129,16 @@ impl Limits {
                 at_most(equity, floor(figures, hard.checked_mul(fraction)?)?)?,
             ),
         );
-        Ok(Readings { limits, below_lift })
+        let capital = UsdExact::of(figures.capital);
+        let profit = self
+            .profit_level
+            .map(|level| at_least(equity.checked_sub(capital)?, level.checked_mul(capital)?))
+            .transpose()?;
+        Ok(Readings {
+            limits,
+            below_lift,
+            profit,
+        })
     }
 }
 
@@ -745,6 +779,31 @@ pub(super) mod tests {
                 "the lifts read at {values:?}"
             );
         }
+        Ok(())
+    }
+
+    /// A `profit_stop` goal is read as E − C ≥ `profit_level` × C, exactly (§3.1): with C at 10,000
+    /// and a level of 0.1, equity on 11,000 holds it and one 10⁻²¹ below does not. A mandate with
+    /// any other goal has no profit reading at all.
+    #[test]
+    fn the_profit_stop_is_read_on_its_level_and_only_for_its_goal() -> Result<(), String> {
+        let goal = "{\"type\": \"profit_stop\", \"profit_level\": \"0.1\", \"end_date\": null}";
+        let stop = ValidatedMandate::new(mandate(&[("/goal", goal)])?, &context()?, &[])
+            .map_err(|e| e.to_string())?;
+        let read = |mandate: &ValidatedMandate, equity: &str| -> Result<Option<bool>, String> {
+            let state = snapshot(&[equity, "20000", "10000", "10000", "0"].map(str::to_owned))?;
+            Ok(Limits::of(mandate)
+                .and_then(|limits| limits.conditions(&Figures::of(&state)))
+                .map_err(|e| e.to_string())?
+                .profit)
+        };
+        assert_eq!(read(&stop, "11000")?, Some(true), "on the level");
+        assert_eq!(
+            read(&stop, "10999.999999999999999999999")?,
+            Some(false),
+            "one 10⁻²¹ below it"
+        );
+        assert_eq!(read(&base()?, "20000")?, None, "no profit_stop goal");
         Ok(())
     }
 

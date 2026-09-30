@@ -1400,41 +1400,34 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   a limit on one print, which DEC-63 rules out. The crate follows the spec (DEC-167 item 6), and no
   reference case changes either way. Drop `"fill"` from the tuple and regenerate with
   `reference/mandate/generate.py`, which must leave `fixtures/refcases/mandate.json` unchanged.
-- **The three `ref.py` readings the #124 handover left for R3 and R4.** (1) R3: a daily hard breach
-  pending at the rollover is popped into the rollover record and never read again, so `hard_breach`
-  can stay applied with nothing to clear it; keep it pending under the new day and record the reading
-  as a DEC-167 item. (2) R3: the renewal's `acked` is always false, since only a `flatten_and_pause`
-  daily is acknowledged; write it as false. (3) R4: settling time before an allocation change only
-  when `at > self.t` is equivalent to settling always; settle always. Handover items 4 (one cash sum)
-  and 5 (the post-loop lift reset) are R2's and are in `risk/fold.rs`.
-- **No MC-R case passes until R3 (R3's status PR).** Every equity case builds on `two_stock_swing`,
-  whose goal is `profit_stop` (R3), and every crypto case opens with `risk_day_started` (R3). With
-  the profit stop stubbed out locally, MC-R01 to MC-R04, MC-R18, and MC-R19 match every expectation on
-  R2's spine. R3's PR runs `cargo test -p mandate-refcases --test refcases -- --include-ignored
-  mandate::MC-R` and proposes the passing ones for `status.toml` (founder-owned).
+- **The `ref.py` reading the #124 handover left for R4.** Settling time before an allocation change
+  only when `at > self.t` is equivalent to settling always; settle always. Readings 1 and 2 were
+  R3's and are DEC-167 item 7 (a) and (c); handover items 4 (one cash sum) and 5 (the post-loop lift
+  reset) are R2's and are in `risk/fold.rs`.
+- **R3's status PR: fifteen MC-R cases pass.** MC-R01 to MC-R08, MC-R13, MC-R15, MC-R18 to MC-R20,
+  MC-R22, and MC-R24 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
+  mandate::MC-R` on R3 (DEC-167 item 7 (l)); proposing them for `status.toml` is founder-owned.
+
+From E6-4's slice R3 (stream H2; DEC-167 item 7):
+
+- **`ref.py` drops a daily hard wait at the rollover (reference fix).** `RiskState.step` pops
+  `hard_first["max_daily_loss"]` into the rollover record and never reads it again, so `hard_breach`
+  can stay applied with nothing to clear it. The crate keeps the wait under the new day (DEC-167
+  item 7 (a)). Keep it in `hard_first` and regenerate with `reference/mandate/generate.py`, which must
+  leave `fixtures/refcases/mandate.json` unchanged (checked from the crate's side: putting `ref.py`'s
+  reading into the fold leaves the same fifteen MC-R cases passing).
 
 Minor findings from the independent review of slice R2 ([#324](https://github.com/kunwarshivam/mandate/pull/324);
-held back by the freeze rule; R3's builder is asked to take 1, 2, 4, and 6 where they fit its code):
+held back by the freeze rule; R3 took minors 1, 2, and 4, DEC-167 item 7 (i) and (j), and minor 6,
+`SpecError::Unimplemented`'s doc):
 
-- **Say that a caller fails closed on a refused step** (#324, minor 1). `RiskState::step`'s
-  `# Errors` block lists the refusals and that the state is unchanged, but not what the caller does:
-  treat any `Err` as a refusal to decide (stop stepping the agent, admit no new risk, keep exits
-  open, escalate), never skip the input as though it had not happened. `E6-3-risk-gate.md` states
-  the same rule for `GateError`.
-- **Clamp session seconds by wall seconds** (#324, minor 2). The fold credits the caller's
-  `SessionClock` seconds to the lift delay unclamped, so a clock that over-reports lifts a
-  `scale_sizes` rung early. `session_s.min(wall_s)` only tightens, and is an identity for crypto.
 - **The `strictest` oracle reads the daily-loss mode by hand** (#324, minor 3; a tests correction).
   `tests/risk.rs`'s `strictest` maps `DailyLoss` to `exits_only`, while the fold reads
-  `daily_loss_action`. No walk triggers the daily loss today; R3's renewal walks could, so take the
-  action from the mandate before they do.
-- **Make a refused fold step inert by type** (#324, minor 4). `Fold` writes `self.at` and the mark
-  age before the staleness guard can refuse, and only `RiskState::step`'s clone keeps a refusal
-  inert. `Fold::step(&self) -> Result<(Self, Outcome)>` would hold it at rung 1.
+  `daily_loss_action`. Its property still walks `ladder_only`, whose daily action is the base's
+  `exits_only`, and R3's renewal walks are in-module tests that do not use it; take the action from
+  the mandate before a walk over a `flatten_and_pause` daily loss does.
 - **A `Qty::checked_sub` failure is always reported as a short sale** (#324, minor 5). True while a
   negative result is its only failure; name the error by its kind if `Qty` gains another.
-- **`SpecError::Unimplemented`'s doc is stale** (#324, minor 6). It says the implementation PR
-  removes the variant; DEC-167 item 5 makes it the answer for what R3 and R4 still own.
 - **Wrap `M5-F-mandate-spec.md`'s long line** (#324, minor 7), the R2 row that runs past the file's
   wrap width.
 
