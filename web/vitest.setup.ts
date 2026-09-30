@@ -21,6 +21,11 @@ vi.mock("lightweight-charts", async (importOriginal) => {
   return { ...actual, ...mockChartModule };
 });
 
+vi.mock("@number-flow/react", async () => {
+  const { NumberFlowMock } = await import("./src/test/number-flow-mock");
+  return { default: NumberFlowMock };
+});
+
 afterEach(() => {
   cleanup();
   resetCharts();

@@ -27,11 +27,26 @@ async function tokenColor(page: Page, token: string): Promise<string> {
   }, token);
 }
 
+declare global {
+  interface Window {
+    /** What a Number Flow figure draws: its shadow text, less the digits rolled out of view. */
+    drawnFigure(host: Element): string;
+  }
+}
+
 async function open(page: Page, path: string, width: number) {
+  await page.addInitScript(() => {
+    window.drawnFigure = (host) => {
+      const walk = document.createTreeWalker(host.shadowRoot!, NodeFilter.SHOW_TEXT);
+      let text = "";
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) if (!n.parentElement!.closest("style, [inert]")) text += n.textContent;
+      return text;
+    };
+  });
   await page.setViewportSize({ width, height: 900 });
   await page.goto(path, { waitUntil: "networkidle" });
   await page.evaluate(() => document.fonts.ready);
-  await expect(page.locator("[data-slot=cents]").first()).toBeVisible();
+  await expect(page.locator("[part~=fraction]").first()).toBeVisible();
 }
 
 /** Hovers the hero chart at a fraction of its width and returns what the figure reads then. */
@@ -62,7 +77,7 @@ for (const { name, path, value } of HEROES) {
     const figure = page.locator(value);
     const type = await figure.evaluate((el) => {
       const s = getComputedStyle(el);
-      const cents = el.querySelector("[data-slot=cents]")!;
+      const cents = el.querySelector("number-flow-react")!.shadowRoot!.querySelector("[part~=fraction]")!;
       const c = getComputedStyle(cents);
       return {
         size: parseFloat(s.fontSize),
@@ -73,7 +88,7 @@ for (const { name, path, value } of HEROES) {
         centsSize: parseFloat(c.fontSize),
         centsRaise: parseFloat(c.verticalAlign),
         centsColor: c.color,
-        centsText: cents.textContent,
+        centsText: window.drawnFigure(el.querySelector("number-flow-react")!).split(".").at(-1),
       };
     });
     expect(type.size).toBe(76);
@@ -85,7 +100,7 @@ for (const { name, path, value } of HEROES) {
     expect(type.numerals).toContain("lining-nums");
     expect(type.numerals).not.toContain("tabular-nums");
     expect(type.centsSize).toBe(38);
-    expect(type.centsText).toMatch(/^\.\d{2}$/);
+    expect(type.centsText).toMatch(/^\d{2}$/);
     // Raised by the cents' own cap height, so their tops meet the digits' tops.
     expect(type.centsRaise / type.centsSize).toBeGreaterThan(0.6);
     expect(type.centsRaise / type.centsSize).toBeLessThan(0.8);
@@ -120,7 +135,7 @@ for (const { name, path, value } of HEROES) {
         await expect(figure.locator("[data-instant]"), `${width} px at ${i}/24`).toHaveCount(1);
         const read = await figure.evaluate((el) => ({
           spoken: el.querySelector(".sr-only")!.textContent,
-          drawn: el.querySelector("[aria-hidden=true]")!.textContent,
+          drawn: window.drawnFigure(el.querySelector("number-flow-react")!),
         }));
         expect(read.drawn, `${width} px at ${i}/24`).toBe(read.spoken);
         seen.add(read.spoken!);
@@ -186,27 +201,39 @@ for (const width of [320, 360, 390]) {
       ["−$1,234,567", ".89"],
     ]) {
       const fit = await page.evaluate(
-        ({ whole, cents }) => {
+        async ({ whole, cents }) => {
+          type Part = { type: string; value: string | number; key: string; pos?: number };
           const figure = document.querySelector("[data-slot=account-equity-value]")!;
-          const copy = figure.querySelector("[aria-hidden=true]")!;
-          const part = copy.querySelector("[data-slot=cents]")!;
-          const main = [...copy.childNodes].find((n) => n.nodeType === Node.TEXT_NODE)!;
-          const before = { main: main.textContent, cents: part.textContent, height: figure.getBoundingClientRect().height };
-          main.textContent = whole;
-          part.textContent = cents;
-          const range = document.createRange();
-          range.selectNodeContents(copy);
-          const text = range.getBoundingClientRect();
+          // Number Flow's element takes `data` but only keeps it as `_data`.
+          const flow = figure.querySelector("number-flow-react") as Element & { data: unknown; _data: unknown; animated: boolean };
+          const negative = whole.startsWith("−");
+          const digits = whole.slice(negative ? 2 : 1);
+          const places = digits.replaceAll(",", "").length;
+          let pos = places;
+          let groups = 0;
+          const integer: Part[] = [...digits].map((ch) =>
+            ch === "," ? { type: "group", value: ",", key: `group:${groups++}` } : { type: "integer", value: Number(ch), key: `integer:${--pos}`, pos },
+          );
+          const fraction: Part[] = [
+            { type: "decimal", value: ".", key: "decimal:0" },
+            ...[...cents.slice(1)].map((ch, i) => ({ type: "fraction", value: Number(ch), key: `fraction:${i}`, pos: -1 - i })),
+          ];
+          const pre: Part[] = [...(negative ? [{ type: "prefix", value: "−", key: "prefix:0" }] : []), { type: "currency", value: "$", key: "currency:0" }];
+          const before = { data: flow._data, height: figure.getBoundingClientRect().height };
+          flow.animated = false;
+          flow.data = { pre, integer, fraction, post: [], valueAsString: whole + cents, value: Number(`${digits.replaceAll(",", "")}${cents}`) };
+          await new Promise(requestAnimationFrame);
+          const text = flow.getBoundingClientRect();
           const section = figure.closest("section")!.getBoundingClientRect();
           const result = {
             inSection: text.left >= section.left - 0.5 && text.right <= section.right + 0.5,
             inViewport: text.right <= window.innerWidth,
             pageScrolls: document.documentElement.scrollWidth > window.innerWidth,
             height: figure.getBoundingClientRect().height,
-            drawn: copy.textContent,
+            drawn: window.drawnFigure(flow),
           };
-          main.textContent = before.main;
-          part.textContent = before.cents;
+          flow.data = before.data;
+          flow.animated = true;
           return { ...result, heightBefore: before.height };
         },
         { whole, cents },

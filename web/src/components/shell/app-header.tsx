@@ -24,7 +24,7 @@ const WORKSPACES = [
 ] as const;
 
 const ICON_LINK =
-  "press relative inline-flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring";
+  "press relative inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring";
 
 /**
  * Where the trail is narrower than 20rem it keeps only the current page, which never truncates, and
@@ -62,7 +62,7 @@ export function ApprovalsCount({ n, className }: { n: number; className?: string
   return (
     <span
       data-slot="approvals-count"
-      className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-lapis px-1.5 font-mono text-xs font-semibold text-lapis-foreground tabular ${className ?? ""}`}
+      className={`inline-flex h-5 min-w-5 items-center justify-center rounded-sm bg-lapis px-1.5 font-mono text-xs font-semibold text-lapis-foreground tabular ${className ?? ""}`}
     >
       {n}
       <span className="sr-only"> open</span>

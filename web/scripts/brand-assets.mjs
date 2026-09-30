@@ -16,7 +16,7 @@ export const OG_SOURCE = path.join(WEB, "brand/og-image.svg");
 export const PUBLIC_DIR = path.join(WEB, "public");
 
 /** Ink and off-white from the palette (src/lib/brand-palette.ts); the icons are ink on off-white in every mode. */
-export const INK = "#14161A";
+export const INK = "#0F1113";
 export const OFF_WHITE = "#FBFDFE";
 
 const FAVICON_PNG_SIZES = [16, 32, 48];

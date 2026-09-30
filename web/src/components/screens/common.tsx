@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { ArrowRight, Plugs } from "@phosphor-icons/react";
+import { Owl } from "@/components/domain/owl";
 import { Skeleton } from "@/components/domain/skeleton";
 import { clock } from "@/lib/format";
 import { useRuntime } from "@/lib/mock-runtime";
@@ -48,13 +49,14 @@ export function Panel({ children, className, well = false }: { children: ReactNo
 export function EmptyBoard() {
   return (
     <section data-slot="empty" aria-labelledby="empty-title" className="reveal grid max-w-xl content-start gap-5 pt-6 sm:pt-12">
+      <Owl seed="owlhead" mood="awake" className="size-20" />
       <h1 id="empty-title" className="text-h1">
         No agents yet
       </h1>
       <p className="max-w-measure text-lg text-muted-foreground">An agent trades on paper within a mandate you describe and confirm, field by field.</p>
       <Link
         href="/agents/new"
-        className="press inline-flex h-12 w-fit items-center gap-2 rounded-full bg-lapis pr-5 pl-6 font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="press inline-flex h-12 w-fit items-center gap-2 rounded-lg bg-lapis pr-5 pl-6 font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         Describe your first agent <ArrowRight aria-hidden className="size-4" />
       </Link>

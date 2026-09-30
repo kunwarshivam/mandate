@@ -16,6 +16,17 @@
   font-family: "Pixelify Sans Variable", "MS Sans Serif", Tahoma, sans-serif;
 }
 
+/* Icons sit on a painting, so their outline stays the darkest ink and their paper the lightest. */
+.icon {
+  --icon-line: var(--foreground);
+  --icon-paper: var(--card);
+}
+
+:global(.dark) .icon {
+  --icon-line: var(--background);
+  --icon-paper: var(--foreground);
+}
+
 /* A <blink> for one word. It stays lit under reduced motion. */
 @media (prefers-reduced-motion: no-preference) {
   .blink {
@@ -27,4 +38,30 @@
   50% {
     opacity: 0;
   }
+}
+
+/* The wallpaper in "Day and night": one painting per theme, and night turns the monitor down a little. */
+.night {
+  display: none;
+}
+
+:global(.dark) .day {
+  display: none;
+}
+
+:global(.dark) .night {
+  display: block;
+}
+
+:global(.dark) .dim {
+  background: color-mix(in oklab, var(--background) 30%, transparent);
+}
+
+/* The Display Properties monitor keeps a dark case in both themes. */
+.monitor {
+  background: var(--foreground);
+}
+
+:global(.dark) .monitor {
+  background: var(--muted-foreground);
 }

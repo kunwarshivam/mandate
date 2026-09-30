@@ -103,7 +103,7 @@ function Count({ n }: { n: number }) {
   return (
     <span
       data-slot="approvals-count"
-      className="absolute top-0.5 left-[calc(50%+0.125rem)] inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-lapis px-1 font-mono text-[0.6875rem] font-semibold text-lapis-foreground tabular ring-2 ring-card"
+      className="absolute top-0.5 left-[calc(50%+0.125rem)] inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-sm bg-lapis px-1 font-mono text-[0.6875rem] font-semibold text-lapis-foreground tabular ring-2 ring-card"
     >
       {n}
       <span className="sr-only"> open</span>

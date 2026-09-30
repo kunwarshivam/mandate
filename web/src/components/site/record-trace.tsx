@@ -23,6 +23,9 @@ export const EDITED = { index: 2, text: "40 shares at a limit of $141.30, stop a
 const CELL = "border border-t-foreground/40 border-l-foreground/40 border-r-card border-b-card px-2 py-1 align-top";
 const HEAD = `border border-foreground bg-foreground px-2 py-1 text-start text-[0.9375rem] font-medium text-card ${PIXEL}`;
 
+/** On a phone the time moves under the step, so the table fits without scrolling sideways. */
+const NARROW_HIDDEN = "max-sm:hidden";
+
 /**
  * An example decision as the record keeps it, and a way to see why it can be trusted: edit one line
  * and its hash stops matching, and so does every line chained after it.
@@ -34,14 +37,14 @@ export function RecordTrace() {
   return (
     <div className="grid gap-4" data-slot="record-trace" data-edited={edited || undefined}>
       <div className="overflow-x-auto">
-        <table className={cn(RAISED, "w-full min-w-[36rem] border-separate border-spacing-[2px] bg-card text-[1rem] leading-snug")}>
+        <table className={cn(RAISED, "w-full border-separate border-spacing-[2px] bg-card text-[1rem] leading-snug sm:min-w-[36rem]")}>
           <caption className="pb-2 text-start">Agent 2, one decision. Example data.</caption>
           <thead>
             <tr>
               <th scope="col" className={HEAD}>
                 #
               </th>
-              <th scope="col" className={HEAD}>
+              <th scope="col" className={cn(HEAD, NARROW_HIDDEN)}>
                 Time
               </th>
               <th scope="col" className={HEAD}>
@@ -62,8 +65,11 @@ export function RecordTrace() {
               return (
                 <tr key={e.hash} className={cn(changed && "bg-warning-soft")}>
                   <td className={cn(CELL, "tabular-nums text-muted-foreground")}>{i + 1}</td>
-                  <td className={cn(CELL, MONO, "text-lg leading-tight whitespace-nowrap")}>{e.time}</td>
-                  <td className={cn(CELL, "whitespace-nowrap")}>{e.kind}</td>
+                  <td className={cn(CELL, NARROW_HIDDEN, MONO, "text-lg leading-tight whitespace-nowrap")}>{e.time}</td>
+                  <td className={cn(CELL, "sm:whitespace-nowrap")}>
+                    {e.kind}
+                    <span className={cn(MONO, "block text-lg leading-tight text-muted-foreground sm:hidden")}>{e.time}</span>
+                  </td>
                   <td className={CELL}>{changed ? EDITED.text : e.text}</td>
                   <td className={cn(CELL, MONO, "text-lg leading-tight whitespace-nowrap")}>
                     <span className={cn(broken && "line-through")}>{e.hash}</span>

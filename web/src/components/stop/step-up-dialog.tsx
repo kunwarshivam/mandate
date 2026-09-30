@@ -110,7 +110,7 @@ export function StepUpDialog({
             </Dialog.Description>
             <Dialog.Close
               aria-label="Close"
-              className="absolute top-3 right-3 grid size-11 place-items-center rounded-full text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
+              className="absolute top-3 right-3 grid size-11 place-items-center rounded-lg text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
             >
               <X className="size-5" aria-hidden />
             </Dialog.Close>
@@ -125,14 +125,14 @@ export function StepUpDialog({
             <button
               type="button"
               onClick={cancel}
-              className="press h-11 min-w-28 rounded-full border border-foreground/25 bg-card px-5 font-semibold outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="press h-11 min-w-28 rounded-lg border border-foreground/25 bg-card px-5 font-semibold outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={verify}
-              className="press h-11 min-w-28 rounded-full bg-lapis px-5 font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="press h-11 min-w-28 rounded-lg bg-lapis px-5 font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               Use passkey
             </button>

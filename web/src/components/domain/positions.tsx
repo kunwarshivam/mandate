@@ -109,7 +109,7 @@ export function orderPriceText(o: AnyOrder): string {
 /** Nothing more is sent in the instrument while an order's state is unknown: the stopped treatment. */
 export function SendingStopped({ symbol }: { symbol: string }) {
   return (
-    <span data-slot="sending-stopped" className="inline-flex h-6 items-center rounded-full bg-ink px-2.5 text-label text-ink-foreground">
+    <span data-slot="sending-stopped" className="inline-flex h-6 items-center rounded-md bg-ink px-2.5 text-label text-ink-foreground">
       Sending stopped in {symbol}
     </span>
   );
@@ -156,7 +156,7 @@ export function OrdersTable({ orders, hrefFor, empty = "No working orders." }: {
               <span className="flex flex-wrap items-center gap-1.5">
                 {unknown ? <SourceTag source="account" /> : null}
                 {unknown ? <SendingStopped symbol={o.instrument.symbol} /> : null}
-                <span className={cn("inline-flex h-6 items-center rounded-full px-2.5 text-label", unknown ? "bg-card ring-1 ring-foreground ring-inset" : past ? "bg-background text-muted-foreground" : "bg-background text-foreground")}>
+                <span className={cn("inline-flex h-6 items-center rounded-md px-2.5 text-label", unknown ? "bg-card ring-1 ring-foreground ring-inset" : past ? "bg-background text-muted-foreground" : "bg-background text-foreground")}>
                   {ORDER_STATE_LABEL[o.state]}
                 </span>
               </span>

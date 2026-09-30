@@ -1,12 +1,12 @@
 /**
- * The colour tokens in Ink and Volt (DEC-214), one entry per CSS custom property in `globals.css`
+ * The colour tokens in Azure and Sun (DEC-217), one entry per CSS custom property in `globals.css`
  * (the test `tokens.test.ts` keeps the two in step, in both themes). Values come from `palette.ts`;
  * this file adds what each token means. The design page and the contrast checks read it.
  */
 import { PAIRS } from "./contrast-pairs";
 import { PALETTES, type RampRef, type ThemeName, TOKEN_NAMES, type TokenName } from "./palette";
 
-export type Meaning = "surface" | "text" | "mandate" | "account" | "stopped" | "kill" | "result" | "status";
+export type Meaning = "surface" | "text" | "mandate" | "account" | "stopped" | "kill" | "result" | "status" | "series";
 
 export interface ColorToken {
   name: TokenName;
@@ -28,18 +28,18 @@ export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> 
   lapis: { meaning: "account", role: "The account as a fill: the approvals count, its marker on the equity ladder, the paper hatch. Ink in light, paper in dark" },
   "lapis-foreground": { meaning: "account", role: "Text on the account fill" },
   "lapis-muted": { meaning: "account", role: "Secondary text on the account fill and on ink; a hovered account pill" },
-  "lapis-soft": { meaning: "account", role: "The account's pale volt tint: the current tab and range pill, an approval card, an account notice" },
+  "lapis-soft": { meaning: "account", role: "The account's field, pale sun in light and a raised charcoal in dark: the current tab and range pill, an approval card, an account notice" },
   "lapis-strong": { meaning: "account", role: "A pressed primary action, and a quiet field inside an account surface" },
   "lapis-line": { meaning: "account", role: "The account's line: its equity chart, the current tab's bar and pill ring, its legend swatch" },
-  mandate: { meaning: "mandate", role: "Your mandate: the pale volt field the envelope, limits and rails sit on" },
+  mandate: { meaning: "mandate", role: "Your mandate: the field the envelope, limits and rails sit on, pale azure in light and a raised charcoal in dark" },
   "mandate-foreground": { meaning: "mandate", role: "Text on the mandate field" },
   "mandate-muted": { meaning: "mandate", role: "Secondary text on the mandate field" },
-  "mandate-strong": { meaning: "mandate", role: "Mandate headings, labels, the \"Your mandate\" tag, the limit post, a level's axis label: volt-700 in light, never lighter" },
+  "mandate-strong": { meaning: "mandate", role: "Mandate headings, labels, the \"Your mandate\" tag, the limit post, a level's axis label: azure-800 in light, never lighter" },
   "mandate-marker": { meaning: "mandate", role: "Rail fill and level marks on the envelope and the equity ladder" },
   "mandate-edge": { meaning: "mandate", role: "Lines inside the mandate field: Kumo's line and hairline roles there" },
   "mandate-soft": { meaning: "mandate", role: "A mandate notice: a limit acted (drawdown, daily loss, floor, goal)" },
   selection: { meaning: "mandate", role: "Selected text" },
-  highlight: { meaning: "mandate", role: "Neon volt: the one saturated fill, for a call to action or a highlighted mark, always under ink type. The same volt-300 in both themes" },
+  highlight: { meaning: "mandate", role: "Sun: the one warm fill, for a call to action or a highlighted mark, always under ink type. The same sun-300 in both themes" },
   "highlight-foreground": { meaning: "mandate", role: "Ink type on the highlight, in both themes" },
   ink: { meaning: "stopped", role: "A stopped or paused agent, and the Stop control: ink in light, paper in dark" },
   "ink-foreground": { meaning: "stopped", role: "Text on ink" },
@@ -59,6 +59,11 @@ export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> 
   "loss-cvd": { meaning: "result", role: "A loss when colour-blind friendly is on: raspberry in light, orange in dark" },
   "gain-cvd-soft": { meaning: "status", role: "Success tint when colour-blind friendly is on" },
   "loss-cvd-soft": { meaning: "status", role: "Loss tint when colour-blind friendly is on" },
+  "series-1": { meaning: "series", role: "The first asset in a chart of holdings: azure" },
+  "series-2": { meaning: "series", role: "The second asset: sun" },
+  "series-3": { meaning: "series", role: "The third asset: teal" },
+  "series-4": { meaning: "series", role: "The fourth asset: sky" },
+  "series-5": { meaning: "series", role: "Cash and everything else: a blue-grey" },
 };
 
 export function colorTokensFor(theme: ThemeName): ColorToken[] {
@@ -110,7 +115,7 @@ export const motionTokens = [
 
 /** The two densities (DEC-204): calm for the screens an owner lives in, dense for audit and admin. */
 export const spacingTokens = [
-  { name: "--content-max", calm: "68rem", dense: "90rem", use: "Widest content column" },
+  { name: "--content-max", calm: "80rem", dense: "90rem", use: "Widest content column" },
   { name: "--container-measure", calm: "58ch", dense: "58ch", use: "Reading measure (max-w-measure): under 80 characters a line" },
   { name: "--page-x", calm: "1.25rem / 1.75rem / 2.5rem", dense: "the same", use: "Page padding at phone / tablet / desktop" },
   { name: "--page-top", calm: "1.5rem / 2.25rem", dense: "the same", use: "Space above the first line of a screen" },
@@ -123,9 +128,9 @@ export const spacingTokens = [
 ];
 
 export const radiusTokens = [
-  { name: "--radius-xs / sm", value: "0.25rem / 0.375rem", use: "Placeholder and fixture chips, keyboard hints, chart ticks" },
-  { name: "--radius-lg / xl", value: "0.75rem / 1rem", use: "Menus, restriction notes, the Stop sheet's choices, an unknown order" },
-  { name: "--radius-2xl", value: "1.25rem", use: "Panels: the mandate field, an approval card, a well, a hovered agent row" },
-  { name: "--radius-3xl", value: "1.5rem", use: "Sheets and dialogs, the desktop dock" },
-  { name: "full", value: "9999px", use: "Buttons, chips, the Stop control, the paper badge, the range pill" },
+  { name: "--radius-xs / sm", value: "1 px / 2 px", use: "Rails, ticks, swatches and the header's rule; a count on a tab" },
+  { name: "--radius-md / lg", value: "3 px / 4 px", use: "Chips and tags; buttons, the Stop control, the range pill and icon buttons" },
+  { name: "--radius-xl / 2xl", value: "6 px / 8 px", use: "Menus, restriction notes, the Stop sheet's choices; panels, an approval card, a well" },
+  { name: "--radius-3xl", value: "10 px", use: "Sheets and dialogs, the desktop dock" },
+  { name: "full", value: "9999px", use: "Only a dot: a timeline event, the envelope's position" },
 ];

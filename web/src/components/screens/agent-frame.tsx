@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CaretRight, Octagon } from "@phosphor-icons/react";
 import { LinkButton } from "@cloudflare/kumo/components/button";
+import { AgentOwl } from "@/components/domain/owl";
 import { ModeBadge, ModeBanner } from "@/components/domain/mode";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { SECTION_ICON } from "@/components/shell/screen-icons";
@@ -22,7 +23,7 @@ export function AgentNotFound() {
         No agent with this ID
       </h1>
       <p className="max-w-measure text-muted-foreground">This workspace has no agent with that ID. It may belong to another workspace.</p>
-      <LinkButton href="/agents" variant="outline" size="lg" className="h-11 w-fit rounded-full px-5">
+      <LinkButton href="/agents" variant="outline" size="lg" className="h-11 w-fit rounded-lg px-5">
         See all agents
       </LinkButton>
     </section>
@@ -37,7 +38,7 @@ export function RecordNotFound({ title, text, back }: { title: string; text: str
         {title}
       </h2>
       <p className="max-w-measure text-muted-foreground">{text}</p>
-      <LinkButton href={back.href} variant="outline" size="lg" className="h-11 w-fit rounded-full px-5">
+      <LinkButton href={back.href} variant="outline" size="lg" className="h-11 w-fit rounded-lg px-5">
         {back.label}
       </LinkButton>
     </section>
@@ -106,6 +107,7 @@ export function AgentFrame({ agent, title, description, children }: { agent: Age
     <div className="grid grid-cols-1 gap-(--section-gap)">
       <PageHeader
         title={title ?? agent.label}
+        icon={<AgentOwl agent={agent} className="size-12 sm:size-16" />}
         environment={useRuntime().ws.environment}
         status={<ModeBadge mode={agent.mode} className="lg:hidden" />}
         description={description ?? agent.mandate.name}
@@ -119,7 +121,7 @@ export function AgentFrame({ agent, title, description, children }: { agent: Age
               type="button"
               onClick={() => window.dispatchEvent(new Event(OPEN_STOP_EVENT))}
               aria-haspopup="dialog"
-              className="press inline-flex h-11 items-center gap-2 rounded-full border border-ink bg-card pr-5 pl-4 text-sm font-semibold text-foreground outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="press inline-flex h-11 items-center gap-2 rounded-lg border border-ink bg-card pr-5 pl-4 text-sm font-semibold text-foreground outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <Octagon className="size-4.5" weight="fill" aria-hidden />
               Stop this agent…

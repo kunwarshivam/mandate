@@ -43,9 +43,10 @@ export function useChartMode(): ThemeMode {
 }
 
 /**
- * A quiet segmented control. The current range sits on a pale volt pill that glides to the next one
- * (a 300 ms spring; with reduced motion it jumps). Each option is a pressed-state button, so
- * the group reads as one control with one choice.
+ * A segmented control. The current range sits on the sun highlight, in ink type, and the pill
+ * springs to the next one (350 ms with a little bounce; with reduced motion it jumps). The focus ring
+ * stands off the button, so it never reads as a second selection. Each option is a pressed-state
+ * button, so the group reads as one control with one choice.
  */
 export function RangePicker<T extends string>({
   label,
@@ -70,16 +71,17 @@ export function RangePicker<T extends string>({
             aria-pressed={on}
             onClick={() => onChange(o.id)}
             className={cn(
-              "press relative h-11 min-w-11 flex-1 rounded-full px-3 font-mono text-sm font-medium tabular outline-none focus-visible:ring-3 focus-visible:ring-ring sm:h-9 sm:flex-none",
-              on ? "text-lapis" : "text-muted-foreground hover:text-foreground",
+              "press relative h-11 min-w-11 flex-1 rounded-lg px-3 font-mono text-sm font-medium tabular outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:h-9 sm:flex-none",
+              on ? "text-highlight-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
             {on ? (
               <motion.span
                 layoutId={pill}
                 aria-hidden
-                className="absolute inset-0 rounded-full bg-lapis-soft ring-1 ring-inset ring-lapis-line"
-                transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
+                data-slot="range-pill"
+                className="absolute inset-0 rounded-lg bg-highlight"
+                transition={{ type: "spring", duration: 0.35, bounce: 0.25 }}
               />
             ) : null}
             <span className="relative">{o.label}</span>
@@ -104,7 +106,7 @@ export function LevelLegend({ levels, offChart = [], format = usdLabel, classNam
     <ul data-slot="level-legend" className={cn("grid gap-x-8 gap-y-1.5 text-caption @lg:grid-cols-2", className)}>
       {all.map(({ l, drawn }) => (
         <li key={l.key} data-level={l.key} data-drawn={drawn} className={cn("grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-baseline gap-2", !drawn && "text-muted-foreground")}>
-          <span aria-hidden className={cn("h-0.5 w-3 self-center rounded-full", SWATCH[l.tone])} />
+          <span aria-hidden className={cn("h-0.5 w-3 self-center rounded-xs", SWATCH[l.tone])} />
           <span>
             <span className="font-medium">{l.label}</span>
             {l.meaning ? <span className="text-muted-foreground">: {l.meaning}</span> : null}

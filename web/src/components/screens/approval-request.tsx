@@ -1,11 +1,13 @@
 "use client";
 
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { motion, useReducedMotion } from "motion/react";
 import { ArrowLeft, CaretDown } from "@phosphor-icons/react";
 import { Button, LinkButton } from "@cloudflare/kumo/components/button";
 import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
 import { Deadline } from "@/components/approvals/deadline";
+import { ResponseProgress, responseSteps } from "@/components/approvals/response-progress";
 import { LimitRail } from "@/components/domain/envelope";
 import { ApprovalChart } from "@/components/charts/price-chart";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
@@ -21,8 +23,8 @@ import { cn } from "@/lib/utils";
 import { WorkspaceGate } from "./common";
 
 /** Approve and Skip share one variant and one size, and neither is focused or selected first (PX-10). */
-const CHOICE = "h-12 w-full justify-center rounded-full text-base font-semibold";
-const BACK = "-ml-2 inline-flex h-11 w-fit items-center gap-1.5 rounded-full px-2 text-sm text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:h-9";
+const CHOICE = "h-12 w-full justify-center rounded-lg text-base font-semibold";
+const BACK = "-ml-2 inline-flex h-11 w-fit items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:h-9";
 
 function ResponseStatus({ approval, response }: { approval: Approval; response: ApprovalResponse }) {
   if (response.phase === "sent") {
@@ -65,6 +67,40 @@ function Outcome({ approval }: { approval: Approval }) {
   );
 }
 
+/**
+ * The response bar once the owner has chosen: the choice takes the buttons' place, with where it
+ * stands and what happened, so nothing moves above it and the result lands where they were looking.
+ */
+function AfterResponse({ approval, response, focusOnShow }: { approval: Approval; response: ApprovalResponse; focusOnShow: boolean }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const reduceMotion = useReducedMotion();
+  useEffect(() => {
+    if (focusOnShow) heading.current?.focus({ preventScroll: true });
+  }, [focusOnShow]);
+  return (
+    <motion.div
+      data-slot="after-confirm"
+      className="grid gap-3"
+      initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+    >
+      <div className="grid gap-0.5">
+        <h2 id="after-response" ref={heading} tabIndex={-1} className="text-h3 outline-none">
+          {response.response === "approve" ? "You chose Approve" : "You chose Skip"}
+        </h2>
+        <p className="text-caption text-muted-foreground">Live progress. It is not part of the request above.</p>
+      </div>
+      <ResponseProgress steps={responseSteps(approval, response)} />
+      <div role="status" aria-live="polite" className="grid gap-2">
+        <ResponseStatus approval={approval} response={response} />
+        {approval.approvers_required > 1 ? <p className="text-sm">{approversText(approval)}</p> : null}
+        <Outcome approval={approval} />
+      </div>
+    </motion.div>
+  );
+}
+
 function RiskFigureRow({ figure }: { figure: RiskFigure }) {
   const label = RISK_FIGURE_LABEL[figure.field];
   if (!figure.cap) {
@@ -85,7 +121,7 @@ function NotFound() {
         No request with this ID
       </h1>
       <p className="max-w-measure text-muted-foreground">This workspace has no approval request with that ID.</p>
-      <LinkButton href="/approvals" variant="outline" size="lg" className="h-11 w-fit rounded-full px-5">
+      <LinkButton href="/approvals" variant="outline" size="lg" className="h-11 w-fit rounded-lg px-5">
         See all approvals
       </LinkButton>
     </section>
@@ -150,10 +186,23 @@ export function requestLines(snap: RequestSnapshot, modelOutputExpanded: boolean
   ];
 }
 
+/* The bar's height changes with its contents, so toasts read it to rise clear of it on a phone. */
+function publishBarHeight(el: HTMLElement | null) {
+  if (!el || typeof ResizeObserver === "undefined") return;
+  const root = document.documentElement;
+  const observer = new ResizeObserver(() => root.style.setProperty("--response-bar", `${el.offsetHeight}px`));
+  observer.observe(el);
+  return () => {
+    observer.disconnect();
+    root.style.removeProperty("--response-bar");
+  };
+}
+
 function Request({ approvalId }: { approvalId: string }) {
   const { ws, now, responses, respond } = useRuntime();
   const canRespond = useCan("approvals.respond");
   const [modelOutputExpanded, setModelOutputExpanded] = useState(false);
+  const [answered, setAnswered] = useState(false);
   const raw = ws.approvals.find((a) => a.approval_id === approvalId);
   const approval = raw ? approvalAt(raw, now) : null;
   const response = approval ? responses[approval.approval_id] : undefined;
@@ -164,8 +213,10 @@ function Request({ approvalId }: { approvalId: string }) {
   const b = a.bound;
   const capped = a.risk_impact.filter((f) => f.cap);
   const uncapped = a.risk_impact.filter((f) => !f.cap);
-  const answer = (choice: "approve" | "skip") =>
+  const answer = (choice: "approve" | "skip") => {
+    setAnswered(true);
     respond(approval.approval_id, choice, { screen: "D6", environment: snap.environment, shown: requestLines(snap, modelOutputExpanded), modelOutputExpanded });
+  };
 
   /*
    * A sticky bar cannot pass the end of its article. On a phone the shell leaves main's 2.5rem and the
@@ -173,7 +224,7 @@ function Request({ approvalId }: { approvalId: string }) {
    * thing on the page the article gives that space back and they stay on the tab bar to the very end.
    */
   return (
-    <article className={cn("mx-auto grid w-full max-w-2xl grid-cols-1 gap-6", open && !response && "max-lg:-mb-[calc(4.5rem-1px)]")} aria-labelledby="request-title">
+    <article className={cn("mx-auto grid w-full max-w-2xl grid-cols-1 gap-6", (open || response) && "max-lg:-mb-[calc(4.5rem-1px)]")} aria-labelledby="request-title">
       <Link href="/approvals" className={BACK}>
         <ArrowLeft className="size-4" aria-hidden />
         Approvals
@@ -274,7 +325,7 @@ function Request({ approvalId }: { approvalId: string }) {
                   {e.author === "owner_selected" ? (
                     authorText(e.author)
                   ) : (
-                    <span className="inline-flex h-6 items-center rounded-full border border-dashed border-foreground px-2.5 text-label text-foreground">{authorText(e.author)}</span>
+                    <span className="inline-flex h-6 items-center rounded-md border border-dashed border-foreground px-2.5 text-label text-foreground">{authorText(e.author)}</span>
                   )}
                   <span>
                     {e.model_id} {e.version}, at {clock(e.produced_at)}
@@ -291,15 +342,21 @@ function Request({ approvalId }: { approvalId: string }) {
         </Collapsible.Root>
       </div>
 
-      {open ? (
+      {open || response ? (
         <section
+          ref={publishBarHeight}
           aria-label="Your response"
+          data-slot="response-bar"
           className="sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-3 border-t border-border/70 bg-card px-(--page-x) pt-4 pb-4 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-[calc(var(--dock-clearance)+1.5rem)]"
         >
-          <div className="grid gap-1">
-            <p className="text-h3">If you do nothing, this action is skipped.</p>
-            <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
-          </div>
+          {response ? (
+            <AfterResponse approval={approval} response={response} focusOnShow={answered} />
+          ) : (
+            <div className="grid gap-1">
+              <p className="text-h3">If you do nothing, this action is skipped.</p>
+              <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
+            </div>
+          )}
           {response ? null : !canRespond ? (
             <p className="text-sm" data-slot="read-only">
               Your role can read requests. An owner, operator, or approver responds.
@@ -307,7 +364,7 @@ function Request({ approvalId }: { approvalId: string }) {
           ) : stale ? (
             <div data-slot="record-changed" className="grid gap-2">
               <p className="text-sm font-medium">This request changed since the page opened, so the record above is out of date. Nothing was sent.</p>
-              <Button variant="outline" size="lg" className="h-11 w-fit rounded-full px-5" onClick={refresh}>
+              <Button variant="outline" size="lg" className="h-11 w-fit rounded-lg px-5" onClick={refresh}>
                 Show the current version
               </Button>
             </div>
@@ -324,21 +381,7 @@ function Request({ approvalId }: { approvalId: string }) {
         </section>
       ) : null}
 
-      {response ? (
-        <section aria-labelledby="after-response" data-slot="after-confirm" className="grid gap-2 rounded-2xl border border-dashed border-muted-foreground px-5 py-4">
-          <h2 id="after-response" className="text-h3">
-            After you responded
-          </h2>
-          <p className="text-sm text-muted-foreground">Live progress. It is not part of the request above.</p>
-          <div role="status" aria-live="polite" className="grid gap-2">
-            <ResponseStatus approval={approval} response={response} />
-            {approval.approvers_required > 1 ? <p className="text-sm">{approversText(approval)}</p> : null}
-            <Outcome approval={approval} />
-          </div>
-        </section>
-      ) : open ? null : (
-        <Outcome approval={approval} />
-      )}
+      {response || open ? null : <Outcome approval={approval} />}
     </article>
   );
 }

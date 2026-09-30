@@ -24,14 +24,14 @@ export const SUNKEN = "border-2 border-t-foreground/60 border-l-foreground/60 bo
 
 export const RULE = "my-10 border-0 border-t border-b border-t-foreground/45 border-b-card sm:my-12";
 
-export const H2 = "scroll-mt-6 text-[1.875rem] leading-tight font-normal";
+export const H2 = "scroll-mt-6 text-[1.875rem] leading-tight font-normal text-balance";
 
 /** Bold, in the one face here that has it. */
 export const BOLD = `${styles.pixel} text-[1.1em] leading-none font-semibold`;
 
 const BEVEL = `press inline-flex cursor-pointer items-center justify-center gap-1.5 ${RAISED} ${styles.pixel} active:border-t-foreground/60 active:border-l-foreground/60 active:border-r-card active:border-b-card disabled:cursor-wait disabled:opacity-70 outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground`;
 
-/** The default button: volt, with the extra dark ring a window's default button had. */
+/** The default button: sun, with the extra dark ring a window's default button had. */
 export const BUTTON = `${BEVEL} h-9 min-w-32 bg-highlight px-4 text-[0.9375rem] text-highlight-foreground ring-1 ring-foreground`;
 
 export const PLAIN_BUTTON = `${BEVEL} h-8 bg-muted px-3 text-[0.9375rem] text-foreground`;

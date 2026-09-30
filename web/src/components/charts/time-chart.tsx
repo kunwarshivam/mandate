@@ -6,6 +6,7 @@ import {
   AreaSeries,
   CandlestickSeries,
   type IChartApi,
+  LastPriceAnimationMode,
   type ISeriesApi,
   LineSeries,
   type MouseEventParams,
@@ -17,6 +18,7 @@ import {
 } from "lightweight-charts";
 import type { Bar, DailyBar, Point } from "@/fixtures/market";
 import { nearestPoint } from "@/lib/chart-data";
+import type { Direction } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useChartMode, useColourBlind } from "./chart-parts";
 import {
@@ -32,15 +34,18 @@ import {
   candleOptions,
   crowdedLevels,
   formatTime,
+  heroAreaOptions,
   lineOptions,
   markersFor,
+  openLineFor,
   priceLineFor,
   setChartMode,
   usdLabel,
 } from "./options";
 
 export type ChartSeries =
-  | { kind: "area"; tone: Tone; points: Point[] }
+  /** `trend` makes a hero area follow its change: green up, red down (DEC-217). */
+  | { kind: "area"; tone: Tone; points: Point[]; trend?: Direction }
   | { kind: "line"; tone: Tone; points: Point[] }
   | { kind: "candles"; bars: Array<Bar | DailyBar> };
 
@@ -111,6 +116,7 @@ export function TimeChart({
   valueFormat = usdLabel,
   onScrub,
   axis = true,
+  pulse = false,
   className,
 }: {
   label: string;
@@ -126,9 +132,12 @@ export function TimeChart({
   onScrub?: (point: ScrubPoint) => void;
   /** A hero chart's price scale, which the mandate levels need for their labels. */
   axis?: boolean;
+  /** A hero line whose feed is current: its last point pulses, and stops the moment the feed goes stale. */
+  pulse?: boolean;
   className?: string;
 }) {
   const reducedMotion = useReducedMotion() ?? false;
+  const drawnOnce = useRef(false);
   const colourBlind = useColourBlind();
   const mode = useChartMode();
   const [readout, setReadout] = useState<Readout | null>(null);
@@ -155,8 +164,13 @@ export function TimeChart({
           candles.setData(candleData(series.bars));
           api = candles;
         } else if (series.kind === "area") {
-          const area = chart.addSeries(AreaSeries, { ...areaOptions(series.tone), ...(hero ? { lastValueVisible: false, crosshairMarkerRadius: 5 } : {}) });
+          const area = chart.addSeries(AreaSeries, {
+            ...(hero && series.trend ? heroAreaOptions(series.trend, colourBlind) : areaOptions(series.tone)),
+            ...(hero ? { lastValueVisible: false, crosshairMarkerRadius: 5 } : {}),
+            ...(hero && pulse && !reducedMotion ? { lastPriceAnimation: LastPriceAnimationMode.Continuous } : {}),
+          });
           area.setData(areaData(series.points));
+          if (hero && series.trend && series.points.length > 1) area.createPriceLine(openLineFor(series.points[0].value));
           api = area;
         } else {
           const line = chart.addSeries(LineSeries, lineOptions(series.tone));
@@ -168,6 +182,10 @@ export function TimeChart({
         if (levels.length > 0) api.applyOptions({ autoscaleInfoProvider: autoscaleWith(levels) });
         if (markers.length > 0) createSeriesMarkers(api, markersFor(markers));
         chart.timeScale().fitContent();
+        if (hero && drawnOnce.current && !reducedMotion && typeof el.animate === "function") {
+          el.animate([{ opacity: 0.2 }, { opacity: 1 }], { duration: 240, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
+        }
+        drawnOnce.current = true;
         live.current = { chart, api, points: series.kind === "candles" ? [] : series.points };
         chart.subscribeCrosshairMove((param) => {
           if (hero) scrubRef.current?.(scrubFor(param, api));
@@ -186,7 +204,7 @@ export function TimeChart({
         live.current = null;
       };
     },
-    [series, levels, markers, reducedMotion, compact, valueFormat, colourBlind, mode, hero, axis],
+    [series, levels, markers, reducedMotion, compact, valueFormat, colourBlind, mode, hero, axis, pulse],
   );
 
   /** Touch and pen: follow the finger along the line. A mouse already moves the crosshair. */

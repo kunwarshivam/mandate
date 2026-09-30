@@ -9,8 +9,8 @@ import { cn } from "@/lib/utils";
 export function Wordmark({ className }: { className?: string }) {
   return (
     <span className={cn("inline-flex items-center", className)} style={{ color: "var(--logo)" }}>
-      <OwlheadMark title="" className="h-7 w-auto lg:hidden" />
-      <OwlheadLockup title="" className="hidden h-7 w-auto lg:block" />
+      <OwlheadMark title="" className="h-9 w-auto lg:hidden" />
+      <OwlheadLockup title="" className="hidden h-11 w-auto lg:block" />
     </span>
   );
 }

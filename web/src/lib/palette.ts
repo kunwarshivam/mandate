@@ -1,7 +1,13 @@
 /**
- * Owlhead's palette, Ink and Volt (DEC-214, superseding DEC-205's hue; web/COLOR.md): OKLCH ramps on one lightness curve, and
+ * Owlhead's palette, Azure and Sun (DEC-217, superseding DEC-214's volt; web/COLOR.md): OKLCH ramps on one lightness curve, and
  * the semantic tokens of both themes mapped onto their steps. `globals.css` writes the same values,
  * and `tokens.test.ts` fails when the two drift. Components use only the semantic tokens.
+ *
+ * The colour theory: azure (258) is the brand, and gain green (150) and loss red (36) sit roughly a
+ * third of the wheel either side of it, a near-triad, so the three read as a set and never as each
+ * other. Sun (90), near azure's complement, is the one warm pop: the highlight, always under ink type.
+ * Asset series add teal and sky from azure's cool side, so a chart of holdings never borrows the
+ * gain or loss hue.
  */
 import { formatOklch, maxChroma } from "./color";
 
@@ -19,33 +25,37 @@ export const LIGHTNESS: Record<Step, number> = {
   100: 0.975,
   200: 0.91,
   300: 0.88,
-  400: 0.76,
+  400: 0.78,
   500: 0.62,
-  600: 0.52,
+  600: 0.48,
   700: 0.44,
   800: 0.38,
-  850: 0.31,
-  900: 0.24,
-  950: 0.2,
-  975: 0.16,
+  850: 0.29,
+  900: 0.215,
+  950: 0.175,
+  975: 0.135,
 };
 
 /** Chroma rises to a hump in the middle of the ramp and falls off toward white and black. */
 const HUMP: Record<Step, number> = { 50: 0.1, 100: 0.25, 200: 0.45, 300: 0.7, 400: 0.9, 500: 1, 600: 1, 700: 0.92, 800: 0.82, 850: 0.62, 900: 0.42, 950: 0.3, 975: 0.2 };
 
-/** Paper and ink share the cool hue 255, both between C 0.003 and 0.01: paper is a cool white, ink a cool near-black. */
+/**
+ * Paper and ink share the cool hue 255. Paper is a cool white; ink falls to a near-neutral black in
+ * dark mode's surfaces (850 to 975, C 0.008 and less), so the dark theme reads black rather than blue.
+ */
 const PAPER_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 300: 0.006, 400: 0.006, 500: 0.007, 600: 0.007, 700: 0.008, 800: 0.008, 850: 0.008, 900: 0.008, 950: 0.008, 975: 0.008 };
-const INK_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 300: 0.007, 400: 0.008, 500: 0.009, 600: 0.01, 700: 0.01, 800: 0.01, 850: 0.01, 900: 0.01, 950: 0.008, 975: 0.008 };
+const INK_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 300: 0.007, 400: 0.008, 500: 0.009, 600: 0.01, 700: 0.01, 800: 0.009, 850: 0.008, 900: 0.007, 950: 0.006, 975: 0.005 };
 
 /**
- * Volt is a yellow-green that sRGB can only make vivid when it is light: it peaks at 300, the neon
- * of the highlight and of dark mode's marks, and darkens toward olive below 500, where it can carry
- * a line or a label on paper. 800 to 975 fade fast, so the dark selection and the mandate's field
- * in dark mode are calm dark tints, not green blocks.
+ * Azure is vivid through the middle of the ramp, where it carries lines, links and labels, and
+ * fades at both ends, so the mandate's field is a pale sky in light mode and a calm deep blue in dark.
  */
-const VOLT_CHROMA: Record<Step, number> = { 50: 0.012, 100: 0.05, 200: 0.19, 300: 0.2, 400: 0.17, 500: 0.14, 600: 0.118, 700: 0.1, 800: 0.075, 850: 0.06, 900: 0.045, 950: 0.035, 975: 0.025 };
+const AZURE_CHROMA: Record<Step, number> = { 50: 0.012, 100: 0.03, 200: 0.075, 300: 0.11, 400: 0.15, 500: 0.19, 600: 0.2, 700: 0.18, 800: 0.14, 850: 0.055, 900: 0.04, 950: 0.03, 975: 0.02 };
 
-export type RampId = "paper" | "ink" | "volt" | "green" | "red" | "amber" | "cvd-teal" | "cvd-rose" | "cvd-orange" | "crimson";
+/** Sun is a sunflower that sRGB only makes vivid when it is light: it peaks at 300, the highlight. */
+const SUN_CHROMA: Record<Step, number> = { 50: 0.015, 100: 0.045, 200: 0.12, 300: 0.17, 400: 0.17, 500: 0.15, 600: 0.13, 700: 0.11, 800: 0.09, 850: 0.06, 900: 0.045, 950: 0.03, 975: 0.02 };
+
+export type RampId = "paper" | "ink" | "azure" | "sun" | "teal" | "sky" | "green" | "red" | "amber" | "cvd-teal" | "cvd-rose" | "cvd-orange" | "crimson";
 
 export interface Ramp {
   id: RampId;
@@ -68,8 +78,11 @@ function build(hue: number, chroma: (step: Step) => number): Record<Step, string
 }
 
 export const NEUTRAL_HUE = 255;
-export const VOLT_HUE = 120;
-export const STATUS_HUES = { green: 150, red: 12 } as const;
+export const AZURE_HUE = 258;
+export const SUN_HUE = 90;
+export const SERIES_HUES = { teal: 192, sky: 232 } as const;
+export const STATUS_HUES = { green: 150, red: 36 } as const;
+export const CRIMSON_HUE = 20;
 export const CVD_HUES = { "cvd-teal": 205, "cvd-rose": 350, "cvd-orange": 50 } as const;
 
 /**
@@ -79,7 +92,7 @@ export const CVD_HUES = { "cvd-teal": 205, "cvd-rose": 350, "cvd-orange": 50 } a
 function statusChroma(step: Step): number {
   const l = LIGHTNESS[step];
   const gamut = Math.min(...Object.values(STATUS_HUES).map((h) => maxChroma(l, h) * 0.97));
-  return floor3(Math.min(HUMP[step] * 0.15, gamut));
+  return floor3(Math.min(HUMP[step] * 0.21, gamut));
 }
 
 function ramp(id: RampId, name: string, hue: number, use: string, chroma: (step: Step) => number): Ramp {
@@ -89,14 +102,17 @@ function ramp(id: RampId, name: string, hue: number, use: string, chroma: (step:
 export const RAMPS: Record<RampId, Ramp> = {
   paper: ramp("paper", "Paper", NEUTRAL_HUE, "Light neutrals: the page, cards and hairlines in light mode, and the type in dark mode", (s) => PAPER_CHROMA[s]),
   ink: ramp("ink", "Ink", NEUTRAL_HUE, "Dark neutrals: type, primary actions, the Stop control and the mark in light mode, and the surfaces in dark mode", (s) => INK_CHROMA[s]),
-  volt: ramp("volt", "Volt", VOLT_HUE, "The one accent: your mandate's field, rules, markers and labels, the account's line, and the highlight", (s) => VOLT_CHROMA[s]),
-  green: ramp("green", "Green", STATUS_HUES.green, "Gain", statusChroma),
-  red: ramp("red", "Red", STATUS_HUES.red, "Loss, as text and candles only", statusChroma),
+  azure: ramp("azure", "Azure", AZURE_HUE, "The brand: primary actions, links, the focus ring, your mandate's field, rules, markers and labels, and the first asset series", (s) => AZURE_CHROMA[s]),
+  sun: ramp("sun", "Sun", SUN_HUE, "Azure's complement: the highlight, always under ink type, and an asset series", (s) => SUN_CHROMA[s]),
+  teal: ramp("teal", "Teal", SERIES_HUES.teal, "An asset series", (s) => HUMP[s] * 0.13),
+  sky: ramp("sky", "Sky", SERIES_HUES.sky, "An asset series", (s) => HUMP[s] * 0.13),
+  green: ramp("green", "Green", STATUS_HUES.green, "Gain, and the hero line on a day that is up", statusChroma),
+  red: ramp("red", "Red", STATUS_HUES.red, "Loss, and the hero line on a day that is down", statusChroma),
   amber: ramp("amber", "Amber", 70, "Kumo's warning role; on no screen", (s) => HUMP[s] * 0.15),
   "cvd-teal": ramp("cvd-teal", "Colour-blind teal", CVD_HUES["cvd-teal"], "Gain when colour-blind friendly is on, in both themes", (s) => HUMP[s] * 0.16),
   "cvd-rose": ramp("cvd-rose", "Colour-blind raspberry", CVD_HUES["cvd-rose"], "Loss when colour-blind friendly is on, light mode", (s) => HUMP[s] * 0.16),
   "cvd-orange": ramp("cvd-orange", "Colour-blind orange", CVD_HUES["cvd-orange"], "Loss when colour-blind friendly is on, dark mode", (s) => HUMP[s] * 0.16),
-  crimson: ramp("crimson", "Crimson", 27, "The kill switch, and nothing else", (s) => HUMP[s] * 0.2),
+  crimson: ramp("crimson", "Crimson", CRIMSON_HUE, "The kill switch, and nothing else", (s) => HUMP[s] * 0.2),
 };
 
 export const TOKEN_NAMES = [
@@ -142,6 +158,11 @@ export const TOKEN_NAMES = [
   "loss-cvd",
   "gain-cvd-soft",
   "loss-cvd-soft",
+  "series-1",
+  "series-2",
+  "series-3",
+  "series-4",
+  "series-5",
 ] as const;
 export type TokenName = (typeof TOKEN_NAMES)[number];
 
@@ -172,11 +193,11 @@ export function rampValue(ref: RampRef): string {
 }
 
 /**
- * Light: paper surfaces and ink type. Ink is the primary action, the account's fill, the Stop
- * control and a stopped agent. Volt is the mandate (a pale volt field under deep volt rules
- * and markers at 500, olive volt-700 labels) and the account's chart line. On paper, neon volt is
- * too light for a line or a label, so it appears only as the highlight: a volt-300 fill that always
- * carries ink type. `lapis` keeps its name as the account's role.
+ * Light: paper surfaces and ink type. Azure-600 is the primary action and links; ink is the
+ * account's fill, the Stop control and a stopped agent. Azure is the mandate (a pale azure field
+ * under azure-500 rules and markers, azure-700 labels). Sun is too light for a line or a label on
+ * paper, so it appears as the highlight, a sun-300 fill that always carries ink type, and as an
+ * asset series. `lapis` keeps its name as the account's role.
  */
 export const TOKEN_REFS: Record<TokenName, RampRef> = {
   background: "paper-100",
@@ -185,23 +206,23 @@ export const TOKEN_REFS: Record<TokenName, RampRef> = {
   border: "paper-200",
   foreground: "ink-950",
   "muted-foreground": "ink-800",
-  primary: "ink-950",
+  primary: "azure-600",
   "primary-foreground": "paper-50",
   lapis: "ink-950",
   "lapis-foreground": "paper-50",
   "lapis-muted": "paper-200",
-  "lapis-soft": "volt-100",
+  "lapis-soft": "sun-100",
   "lapis-strong": "ink-800",
-  "lapis-line": "volt-500",
-  mandate: "volt-100",
+  "lapis-line": "azure-600",
+  mandate: "azure-200",
   "mandate-foreground": "ink-950",
   "mandate-muted": "ink-800",
-  "mandate-strong": "volt-700",
-  "mandate-marker": "volt-500",
-  "mandate-edge": "volt-500",
-  "mandate-soft": "volt-100",
-  selection: "volt-200",
-  highlight: "volt-300",
+  "mandate-strong": "azure-800",
+  "mandate-marker": "azure-600",
+  "mandate-edge": "azure-600",
+  "mandate-soft": "azure-100",
+  selection: "azure-200",
+  highlight: "sun-300",
   "highlight-foreground": "ink-950",
   ink: "ink-950",
   "ink-foreground": "paper-50",
@@ -209,8 +230,8 @@ export const TOKEN_REFS: Record<TokenName, RampRef> = {
   crimson: "crimson-700",
   "crimson-foreground": "paper-50",
   "crimson-edge": "crimson-700",
-  gain: "green-700",
-  loss: "red-700",
+  gain: "green-600",
+  loss: "red-600",
   warning: "amber-700",
   info: "ink-800",
   "gain-soft": "green-100",
@@ -221,14 +242,21 @@ export const TOKEN_REFS: Record<TokenName, RampRef> = {
   "loss-cvd": "cvd-rose-850",
   "gain-cvd-soft": "cvd-teal-100",
   "loss-cvd-soft": "cvd-rose-100",
+  "series-1": "azure-500",
+  "series-2": "sun-400",
+  "series-3": "teal-500",
+  "series-4": "sky-400",
+  "series-5": "ink-500",
 };
 
 /**
- * Dark: ink surfaces and paper type. Primary actions, the Stop control and stopped states turn to a
- * paper fill with ink type. Volt turns bright: volt-400 for the account's line, rules and markers
- * (a step below neon, so a colour-blind candle never merges with them), volt-200 for labels, and the
- * same volt-300 highlight under ink type. Crimson keeps its fill; its edge lightens so the kill switch still clears 3:1 on
- * the dark sheet while its label keeps 7:1 on the fill.
+ * Dark: near-black surfaces and paper type. The primary action is a bright azure-400 fill under ink
+ * type; the Stop control and stopped states turn to a paper fill with ink type. Azure turns bright:
+ * azure-400 rules and markers, azure-300 labels, and the same sun-300 highlight under ink type. The
+ * mandate's field and the account's are a raised ink-850 charcoal, so a risk panel or an approval
+ * card sits on the near-black page without a blue cast; azure stays in their bars, rules and labels.
+ * Crimson keeps its fill; its edge lightens so the kill switch still clears 3:1 on the dark sheet
+ * while its label keeps 7:1 on the fill.
  */
 export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
   background: "ink-975",
@@ -237,23 +265,23 @@ export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
   border: "ink-850",
   foreground: "paper-100",
   "muted-foreground": "paper-300",
-  primary: "paper-100",
+  primary: "azure-300",
   "primary-foreground": "ink-950",
   lapis: "paper-100",
   "lapis-foreground": "ink-950",
   "lapis-muted": "ink-850",
-  "lapis-soft": "volt-850",
-  "lapis-strong": "paper-300",
-  "lapis-line": "volt-400",
-  mandate: "volt-850",
+  "lapis-soft": "ink-850",
+  "lapis-strong": "azure-200",
+  "lapis-line": "azure-400",
+  mandate: "ink-850",
   "mandate-foreground": "paper-100",
   "mandate-muted": "paper-300",
-  "mandate-strong": "volt-200",
-  "mandate-marker": "volt-400",
-  "mandate-edge": "volt-400",
-  "mandate-soft": "volt-900",
-  selection: "volt-800",
-  highlight: "volt-300",
+  "mandate-strong": "azure-300",
+  "mandate-marker": "azure-400",
+  "mandate-edge": "azure-400",
+  "mandate-soft": "ink-900",
+  selection: "azure-800",
+  highlight: "sun-300",
   "highlight-foreground": "ink-950",
   ink: "paper-100",
   "ink-foreground": "ink-950",
@@ -261,18 +289,23 @@ export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
   crimson: "crimson-700",
   "crimson-foreground": "paper-50",
   "crimson-edge": "crimson-400",
-  gain: "green-300",
-  loss: "red-300",
+  gain: "green-400",
+  loss: "red-400",
   warning: "amber-300",
   info: "paper-300",
-  "gain-soft": "green-900",
-  "loss-soft": "red-900",
+  "gain-soft": "green-950",
+  "loss-soft": "red-950",
   "warning-soft": "amber-900",
   "info-soft": "ink-900",
   "gain-cvd": "cvd-teal-300",
   "loss-cvd": "cvd-orange-300",
   "gain-cvd-soft": "cvd-teal-900",
   "loss-cvd-soft": "cvd-orange-900",
+  "series-1": "azure-400",
+  "series-2": "sun-300",
+  "series-3": "teal-400",
+  "series-4": "sky-300",
+  "series-5": "paper-500",
 };
 
 function tokensOf(refs: Record<TokenName, RampRef>): Record<TokenName, TokenValue> {
@@ -281,8 +314,8 @@ function tokensOf(refs: Record<TokenName, RampRef>): Record<TokenName, TokenValu
 
 export const PALETTE: Palette = {
   theme: "light",
-  name: "Ink and Volt",
-  summary: "Cool paper surfaces, ink type and actions, volt for your mandate and the account's line: a pale volt field, deep volt rules and markers, olive labels, and a neon volt highlight under ink type.",
+  name: "Azure and Sun",
+  summary: "Cool paper surfaces and ink type; azure for actions, links and your mandate; sun for the highlight under ink type; green and red for gains and losses.",
   refs: TOKEN_REFS,
   tokens: tokensOf(TOKEN_REFS),
   hatch: { ref: "lapis", alpha: 0.3 },
@@ -291,8 +324,8 @@ export const PALETTE: Palette = {
 /** The paper hatch in the dark is the mid grey, so it still reads as paper on an ink card. */
 export const PALETTE_DARK: Palette = {
   theme: "dark",
-  name: "Ink and Volt, dark",
-  summary: "Ink surfaces, paper type and paper primary actions; neon volt for your mandate's marks and the account's line.",
+  name: "Azure and Sun, dark",
+  summary: "Midnight surfaces and paper type; bright azure for actions and your mandate's marks; sun for the highlight; green and red for gains and losses.",
   refs: TOKEN_REFS_DARK,
   tokens: tokensOf(TOKEN_REFS_DARK),
   hatch: { ref: "ink-line", alpha: 0.4 },

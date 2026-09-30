@@ -1,6 +1,6 @@
 /** The sign-in pages' pills: the app's primary ink pill and its outline pill, full width and 48px tall. */
 const PILL =
-  "press inline-flex h-12 w-full items-center justify-center gap-2.5 rounded-full px-5 font-semibold outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60";
+  "press inline-flex h-12 w-full items-center justify-center gap-2.5 rounded-lg px-5 font-semibold outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60";
 
 export const PRIMARY_PILL = `${PILL} bg-lapis text-lapis-foreground hover:bg-lapis-strong`;
 

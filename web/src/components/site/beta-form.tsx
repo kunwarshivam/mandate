@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
+import { Warning } from "@phosphor-icons/react";
 import { BETA_REQUEST_PATH } from "@/lib/auth-routes";
 import { BETA_ROLES, type BetaRole } from "@/lib/beta";
 import { cn } from "@/lib/utils";
@@ -105,12 +106,20 @@ export function BetaForm({ className }: { className?: string }) {
         <input id="beta-website" type="text" name="website" tabIndex={-1} autoComplete="off" value={website} onChange={(event) => setWebsite(event.target.value)} />
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" disabled={status === "sending"} className={BUTTON}>
-          {status === "sending" ? "Sending..." : "Request access"}
-        </button>
-        <p id="beta-problem" role="status" className={message ? "font-semibold" : "sr-only"}>
-          {message ?? (status === "sending" ? "Sending your request" : "")}
+      <div className="grid gap-3">
+        <p>
+          <button type="submit" disabled={status === "sending"} className={BUTTON}>
+            {status === "sending" ? "Signing..." : "Sign the guestbook"}
+          </button>
+        </p>
+        <p
+          id="beta-problem"
+          role="status"
+          className={message ? "flex max-w-[22rem] items-start gap-2 border border-foreground bg-warning-soft px-3 py-2" : "sr-only"}
+          data-slot={message ? "beta-problem" : undefined}
+        >
+          {message && <Warning aria-hidden weight="fill" className="mt-0.5 size-5 shrink-0" />}
+          <span>{message ?? (status === "sending" ? "Sending your request" : "")}</span>
         </p>
       </div>
     </form>

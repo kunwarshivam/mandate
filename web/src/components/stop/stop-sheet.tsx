@@ -176,7 +176,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
             <Dialog.Description className="text-muted-foreground">Pausing is the least drastic and comes first. Paper account; simulated funds.</Dialog.Description>
             <Dialog.Close
               aria-label="Close"
-              className="absolute top-4 right-4 grid size-11 place-items-center rounded-full text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
+              className="absolute top-4 right-4 grid size-11 place-items-center rounded-lg text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
             >
               <X className="size-5" aria-hidden />
             </Dialog.Close>
@@ -229,7 +229,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
                 Everything on this account
               </h3>
               <p className="mb-1 flex items-center gap-2 text-caption text-muted-foreground">
-                <span className="inline-flex h-6 items-center rounded-full bg-lapis-soft px-2.5 text-label text-lapis">Account</span>
+                <span className="inline-flex h-6 items-center rounded-md bg-lapis-soft px-2.5 text-label text-lapis">Account</span>
                 {ws.connection.broker}
               </p>
               <Choice tone="ink" title="Pause all agents on this account" onClick={() => choose("pause_all", null)}>

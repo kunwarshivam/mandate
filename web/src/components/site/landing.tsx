@@ -6,14 +6,17 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { OWLHEAD_ASCII } from "./ascii";
 import { BetaForm } from "./beta-form";
-import { BODY, BOLD, H2, LINK, MONO, PIXEL, RAISED, RULE, SUNKEN } from "./letter";
+import { Contents } from "./contents";
+import { BODY, BOLD, BUTTON, H2, LINK, MONO, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
+import { ModeChart, Perch, TitleOwl } from "./owls";
 import { RecordTrace } from "./record-trace";
-import { Blink, Browser, Desktop, UnderConstruction, Window } from "./retro";
+import { Desktop } from "./desktop";
+import { Blink, Browser, UnderConstruction, Window } from "./retro";
 import { SiteFooter } from "./site-footer";
 
 export const HEADLINE = "Owlhead";
 export const SUBHEAD = "A trading agent for your own brokerage account. It works inside rules you write, and it writes down every decision it makes.";
-export const UPDATED = "29 September 2026";
+export const UPDATED = "30 September 2026";
 
 type Section = { id: string; title: string; body: ReactNode };
 
@@ -94,6 +97,7 @@ export const SECTIONS: Section[] = [
           <li>One Stop button halts every agent and cancels their open orders.</li>
           <li>If market data goes stale, or Owlhead&apos;s records and your broker&apos;s disagree, it stops adding risk and waits for you.</li>
         </ul>
+        <ModeChart />
         <p>
           Limits can&apos;t prevent every loss. When a market gaps or halts, prices can move past a limit before an order fills, so a loss can end up larger than the limit. Owlhead tells you this, in dollars, before you confirm your
           rules.
@@ -119,6 +123,7 @@ export const SECTIONS: Section[] = [
     id: "who",
     title: "Who it's for",
     body: (
+      <>
       <dl className="grid gap-4">
         {[
           ["You trade your own account.", "The agent does the watching, and asks you only what you've told it to."],
@@ -132,6 +137,13 @@ export const SECTIONS: Section[] = [
           </div>
         ))}
       </dl>
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <a href="#beta" className={BUTTON}>
+          Sign the guestbook
+        </a>
+        <span>and tell us which of these you are.</span>
+      </p>
+      </>
     ),
   },
   {
@@ -197,15 +209,15 @@ function Section({ id, n, title, children }: { id: string; n: number; title: str
 
 /**
  * The landing page at owlhead.ai (DEC-212), for signed-out visitors: one homepage, set as the web
- * looked in the late 1990s, that says what Owlhead is, why and how, and asks for an email. It brings
- * its own `<main>` and footer.
+ * looked in the late 1990s and open in a browser window on a desktop of the time, that says what
+ * Owlhead is, why and how, and asks for an email. It brings its own `<main>` and footer.
  */
 export function Landing() {
   return (
-    <Desktop className="flex-1">
-      <div id="top" className="mx-auto w-full max-w-[68rem] px-1.5 py-3 sm:px-6 sm:py-8" data-slot="landing-page">
+    <Desktop
+      home={
         <Browser address="http://www.owlhead.ai/">
-          <div className={cn("text-[1.125rem] leading-[1.65]", BODY)}>
+          <div id="top" className={cn("text-[1.125rem] leading-[1.65]", BODY)} data-slot="landing-page">
           <header className="grid justify-items-center gap-4 px-4 pt-8 pb-2 text-center sm:px-8 sm:pt-12">
             <h1>
               <span className="sr-only">{HEADLINE}</span>
@@ -213,46 +225,30 @@ export function Landing() {
                 {OWLHEAD_ASCII}
               </span>
             </h1>
+            <Perch />
             <p className="max-w-[34rem] pt-2 text-[1.3125rem] leading-snug text-balance">{SUBHEAD}</p>
             <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
               <span className={cn(RAISED, "bg-highlight px-1.5 text-sm tracking-wide text-highlight-foreground uppercase", PIXEL)}>
                 <Blink>New</Blink>
               </span>
-              <span>
-                Private beta, opening a few people at a time.{" "}
-                <a href="#beta" className={LINK}>
-                  Ask for a place
-                </a>
-                .
-              </span>
+              <span>Private beta, opening a few people at a time.</span>
             </p>
-            <p className="text-[0.9375rem] text-muted-foreground">
-              Last updated {UPDATED}. Already in?{" "}
-              <Link href="/login" className={LINK}>
+            <p className="flex flex-wrap items-center justify-center gap-2" data-slot="hero-actions">
+              <a href="#beta" className={BUTTON}>
+                Sign the guestbook
+              </a>
+              <Link href="/login" className={cn(PLAIN_BUTTON, "h-9")}>
                 Sign in
               </Link>
-              .
             </p>
+            <p className="text-[0.9375rem] text-muted-foreground">Last updated {UPDATED}.</p>
           </header>
 
           <hr className={cn(RULE, "mx-4 sm:mx-8")} />
 
           <div className="grid gap-8 px-4 pb-10 sm:px-8 lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-12">
             <aside>
-              <nav aria-labelledby="contents-title" className={cn(SUNKEN, "bg-muted px-4 py-3 lg:sticky lg:top-4")}>
-                <h2 id="contents-title" className={cn(B, "pb-1")}>
-                  Contents
-                </h2>
-                <ol className="grid list-decimal gap-0.5 ps-6 text-[1.0625rem]">
-                  {CONTENTS.map((c) => (
-                    <li key={c.id}>
-                      <a href={`#${c.id}`} className={LINK}>
-                        {c.title}
-                      </a>
-                    </li>
-                  ))}
-                </ol>
-              </nav>
+              <Contents items={CONTENTS} />
             </aside>
 
             <main id="main" tabIndex={-1} data-slot="landing" className="min-w-0 outline-none">
@@ -275,7 +271,7 @@ export function Landing() {
 
               <Section id="beta" n={SECTIONS.length + 2} title="Ask for a place">
                 <p>Sign the guestbook to ask for a place. Leave your email and we&apos;ll write once, when your place opens.</p>
-                <Window title="guestbook.cgi" className="max-w-[30rem]">
+                <Window title="guestbook.cgi" icon={<TitleOwl />} className="max-w-[30rem]">
                   <BetaForm />
                 </Window>
               </Section>
@@ -285,7 +281,7 @@ export function Landing() {
           <SiteFooter />
           </div>
         </Browser>
-      </div>
-    </Desktop>
+      }
+    />
   );
 }

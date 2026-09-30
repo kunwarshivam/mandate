@@ -15,7 +15,7 @@ import { colorTokensFor, tokenValue } from "./tokens";
 const KILL_SWITCH = /^(Kill switch: (close|cancel) and stop|Activate the kill switch|Stop all agents on this account|Close everything on this account)/;
 
 /** The kill switch's fill (both themes) and its dark-mode edge; in light mode the edge is the fill. */
-const CRIMSON_VALUE = /oklch\(\s*(0\.44[\s_]+0\.173|0\.76[\s_]+0\.138)[\s_]+27\b/;
+const CRIMSON_VALUE = /oklch\(\s*(0\.44[\s_]+0\.171|0\.78[\s_]+0\.124)[\s_]+20\b/;
 const CRIMSON_NAME = /-crimson\b/;
 
 const root = resolve(process.cwd(), "src");

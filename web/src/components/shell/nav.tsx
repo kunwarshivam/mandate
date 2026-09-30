@@ -20,7 +20,7 @@ function TabFace({ active, icon, label, badge }: { active: boolean; icon: ReactN
         {active ? (
           <motion.span
             layoutId="tab-pill"
-            className="absolute inset-0 rounded-full bg-lapis-soft ring-1 ring-inset ring-lapis-line"
+            className="absolute inset-0 rounded-lg bg-lapis-soft ring-1 ring-inset ring-lapis-line"
             transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
             aria-hidden
           />
@@ -36,7 +36,7 @@ function TabFace({ active, icon, label, badge }: { active: boolean; icon: ReactN
 /**
  * The phone's one navigation (DEC-207): Home, Approvals with its count, Agents, and More, a sheet
  * with every other screen. A role that sees no agents gets its home and More. The current tab's
- * icon fills and sits on a pale volt pill that glides between tabs; with reduced motion it jumps.
+ * icon fills and sits on a pale pill that glides between tabs; with reduced motion it jumps.
  */
 export function TabNav({ approvals }: { approvals: number }) {
   const pathname = usePathname();
@@ -64,7 +64,7 @@ export function TabNav({ approvals }: { approvals: number }) {
                 href === "/approvals" && approvals > 0 ? (
                   <span
                     data-slot="approvals-count"
-                    className="absolute -top-1 right-1 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-lapis px-1 font-mono text-[0.6875rem] font-semibold text-lapis-foreground tabular ring-2 ring-card"
+                    className="absolute -top-1 right-1 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-sm bg-lapis px-1 font-mono text-[0.6875rem] font-semibold text-lapis-foreground tabular ring-2 ring-card"
                   >
                     {approvals}
                     <span className="sr-only"> open</span>
