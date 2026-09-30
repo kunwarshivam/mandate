@@ -303,6 +303,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
   (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
   journal them.
+  *Follow-up (#321 review, major; DEC-173 item 13), owned by the M7 tests correction:*
+  `mandate-approval`'s admission (`src/admit.rs`, `quorum`) reads only the bound
+  `approvers_required` and `independent_required`. It must judge check 7 against the stricter of
+  those and the workspace policy overlay current at the effective time: independence if either
+  requires it, the larger approver count, and an author's earlier `counted` grant not counting once
+  independence is required. Tests first, against `reference/mandate/ref.py`'s `approval_quorum`.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded

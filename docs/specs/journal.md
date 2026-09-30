@@ -18,9 +18,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   control stream gains `ApprovalResponseSubmitted` and `OwnerCommandIssued`, and `OwnerAcknowledged`
   carries step-up evidence; owner input is journaled there first and copied by the agent runtime
   with causation (§2). The agent stream's approval rows are split: `ApprovalRequested` carries the
-  content object and its hash, `ApprovalResponded` the admission result, and the new
-  `ApprovalRevalidated` the re-validation result; `DecisionMade` gains `ask_suppressed`. Test vectors
-  are unchanged (version 3).
+  content object and its hash, `ApprovalResponded` the admission result with the quorum it
+  applied, and the new `ApprovalRevalidated` the re-validation result; `DecisionMade` gains
+  `ask_suppressed`. Test vectors are unchanged (version 3).
 - **v0.4 ([DEC-97](../project/04-decision-log.md#decisions), [DEC-111](../project/04-decision-log.md#decisions)):**
   `ThesisProposed` and `ThesisRevised` join the agent stream and `UniverseChanged` the account
   stream, where it is a risk input carrying `risk_clock` ([mandate spec §2.3, §8.4 to
@@ -326,7 +326,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `IntentProposed` | man | intent fields (its `event_id` is the intent ID); after a grant, `causation_id` is the `ApprovalRevalidated` |
 | `ApprovalRequested` | man | approval (its `event_id`), instrument, asset class, side, quantity, limit price, purpose, mandate version, `decided_by`, `approvers_required`, `independent_required`, `reference_mark` (`{price, seq}` or null), deadline, `timeout_s`, `on_timeout: skip`, the content object inline (large parts by artifact reference), `content_hash` |
 | `ApprovalDelivered` | man | approval, channel, delivery status (`delivered`, `suppressed_quiet_hours`, `failed`), message ID |
-| `ApprovalResponded` | man | approval, verdict (`approved`, `skipped`; a legacy `denied` reads as `skipped`), responder (opaque) and role, result (`admitted`, `counted`, `refused`; a legacy `recorded` or `refused` reads as terminal), reason, effective time, step-up evidence (assertion ID, authentication time, method), separation-of-duties result; `causation_id` is the `ApprovalResponseSubmitted`, copied at most once |
+| `ApprovalResponded` | man | approval, verdict (`approved`, `skipped`; a legacy `denied` reads as `skipped`), responder (opaque) and role, result (`admitted`, `counted`, `refused`; a legacy `recorded` or `refused` reads as terminal), reason, effective time, step-up evidence (assertion ID, authentication time, method), separation-of-duties result, and for a grant that reaches check 7 the approver count and independence it applied (the stricter of the bound values and the policy overlay, [mandate spec §6.4](mandate.md#64-approvals)); `causation_id` is the `ApprovalResponseSubmitted`, copied at most once |
 | `ApprovalRevalidated` | man | approval, result (`act`, `skip`), reason, and every value compared: bound and current mandate version, mode, instrument restriction, `decided_by` then and now, dry-run verdict and reason, `m_req`, `m_now`, `band_bp` |
 | `ApprovalTimedOut`, `ApprovalCanceled` | man | approval, `on_timeout: skip`; approval, cancel reason (`version_applied`, `mode_tightened`, `owner_pause`, `owner_stop`, `kill_switch`; a legacy `rebound` is a cancellation for either of the first two) |
 | `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator |

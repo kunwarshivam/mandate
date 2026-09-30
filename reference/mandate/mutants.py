@@ -93,8 +93,23 @@ MUTANTS = {
     "CliConfirm accepted for live": ('    if not (ev["method"] == "cli_confirm" and environment == "paper"):', '    if not ev["method"] == "cli_confirm":'),
     "the content hash is not compared": ('    if resp["content_hash"] != req["content_hash"]:', '    if False:'),
     "the same approver counts twice": ('    if resp["responder"] in req["grants"]:', '    if False:'),
-    "a counted grant acts": ('    return out("admitted" if len(req["grants"]) + 1 >= req["approvers_required"] else "counted")', '    return out("admitted")'),
-    "independence is not enforced": ('    if req["independent_required"] and resp["responder"] == ctx["author"]:', '    if False:'),
+    "a counted grant acts": ('    return judged("admitted" if len(counting) + 1 >= q["required"] else "counted")', '    return judged("admitted")'),
+    "independence is not enforced": ('    if q["independent"] and resp["responder"] == ctx["author"]:', '    if False:'),
+    "check 7 reads only the bound approver requirement": (
+        '    return {"required": max(req["approvers_required"], by_policy),\n'
+        '            "independent": req["independent_required"] or policy["independent_approval_required"]}',
+        '    return {"required": req["approvers_required"], "independent": req["independent_required"]}'),
+    "check 7 takes the looser of the bound and policy requirement": (
+        '    return {"required": max(req["approvers_required"], by_policy),\n'
+        '            "independent": req["independent_required"] or policy["independent_approval_required"]}',
+        '    return {"required": min(req["approvers_required"], by_policy),\n'
+        '            "independent": req["independent_required"] and policy["independent_approval_required"]}'),
+    "a lowered policy ceiling does not raise the approver count": (
+        '    by_policy = 2 if ceiling is not None and D(req["qty"]) * D(req["limit_price"]) > D(ceiling) else 1',
+        '    by_policy = 1'),
+    "the author's earlier grant counts toward an independent quorum": (
+        '    counting = {g for g in req["grants"] if not (q["independent"] and g == ctx["author"])}',
+        '    counting = req["grants"]'),
     "an undelivered request is grantable": ('    if not req["delivered"]:', '    if False:'),
     "admission reads the pending set before the batch's cancellations": (
         '            out = escalation_step(after, {"kind": "response"', '            out = escalation_step(st, {"kind": "response"'),
@@ -131,7 +146,7 @@ MUTANTS = {
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
-         "fuzz_escalation(1500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
+         "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
          "print(len(FAIL))")
 
 def main():

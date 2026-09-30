@@ -615,9 +615,11 @@ proves each pending test fails on them (DEC-110).
   DEC-158 (option (c)), DEC-165, DEC-173. The MC-E cases follow the harness count correction
   (DEC-173 item 1).
 - **Reference model:** the escalation section of `reference/mandate/ref.py`, fuzzed by
-  `reference/mandate/fuzz.py` (`fuzz_escalation`, `fuzz_drift`, `fuzz_ask_budget`,
-  `fuzz_quiet_hours`, `fuzz_owner_controls`, `fuzz_content`) and mutation-checked by
-  `reference/mandate/mutants.py`.
+  `reference/mandate/fuzz.py` (`fuzz_escalation`, `fuzz_policy_quorum`, `fuzz_drift`,
+  `fuzz_ask_budget`, `fuzz_quiet_hours`, `fuzz_owner_controls`, `fuzz_content`) and
+  mutation-checked by `reference/mandate/mutants.py`. Check 7's quorum is the stricter of the bound
+  requirement and the policy overlay (DEC-173 item 13); `admit.rs` still reads only the bound
+  values until the M7 tests correction.
 - **Code:** `mandate-approval` (layer 1; E8-1, E8-2 and E8-3 implemented):
   `crates/mandate-approval/src/content.rs` (`BoundAction`, `content_object`, `content_hash`,
   `confirmation_code`), `crates/mandate-approval/src/admit.rs` (`admit`: checks 1 to 7),

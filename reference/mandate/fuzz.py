@@ -716,6 +716,15 @@ def own_acts(bound, now):
             and now["dry_run"]["verdict"] == "allow"
             and own_drift_ok((bound["reference_mark"] or {}).get("price"), now["mark"], bound["asset_class"]))
 
+POLICY_CEILINGS = [None, None, "24.875", "100", "101", "303", "1000", "43000", "129000"]
+
+def own_quorum(bound, policy):
+    """Check 7's requirement, computed apart from the model: the order value and the policy ceiling in 10^-16 units,
+    independence if the request or the oracle's own record of the policy requires it, and the larger count."""
+    order = scaled(bound["qty"]) * scaled(bound["limit_price"])
+    over = policy["ceiling"] is not None and order > scaled(policy["ceiling"]) * 10 ** 8
+    return max(bound["approvers_required"], 2 if over else 1), bound["independent_required"] or policy["independent"]
+
 TABLE = {("open", "ApprovalDelivered"): "open", ("open", "refused"): "open", ("open", "counted"): "open",
          ("open", "skipped"): "done", ("open", "approved"): "granted", ("granted", "act"): "acted",
          ("granted", "skip"): "done", ("acted", "IntentProposed"): "done", ("open", "ApprovalTimedOut"): "done",
@@ -735,9 +744,11 @@ def transition_label(e):
 
 def fuzz_escalation(n):
     """MI-21 to MI-25 (EI-1 to EI-7, EI-10, EI-11, EI-13 to EI-16) over random asks, ticks, responses, re-tailed
-    responses, cancellations, and a cancellation batched with responses. Every response the oracle judges timely,
-    human, listed, delivered, matching, freshly and singly stepped-up, in quorum, and passing every re-validation
-    value must act, and no other may; every approval ends in exactly one terminal event of the transition table."""
+    responses, cancellations, a cancellation batched with responses, and workspace `PolicyChanged` events between a
+    request and its responses. Every response the oracle judges timely, human, listed, delivered, matching, freshly
+    and singly stepped-up, in the quorum of the stricter of the bound requirement and the oracle's own record of the
+    current policy, and passing every re-validation value must act, and no other may; every approval ends in exactly
+    one terminal event of the transition table."""
     for _ in range(n):
         env = "paper" if rng.random() < 0.85 else "live"
         timeout_s = rng.choice([30, 60, 300, 600])
@@ -747,9 +758,16 @@ def fuzz_escalation(n):
                "inbox": inbox, "push_channels": push, "quiet_hours": qh}
         st = escalation_fold([], ts(ESC_T0))
         journal, history, ids, fresh = [], [], itertools.count(1), itertools.count(1)
-        own = {"clock": ESC_T0, "pending": {}, "seen": [], "sources": set()}
-        bound_of, deadline_of, hash_of = {}, {}, {}
+        own = {"clock": ESC_T0, "pending": {}, "seen": [], "sources": set(), "policy": {"independent": False, "ceiling": None}}
+        bound_of, deadline_of, hash_of, drafts = {}, {}, {}, []
         for _ in range(rng.randint(4, 28)):
+            just_counted = any(d["type"] == "ApprovalResponded" and d["result"] == "counted" for d in drafts)
+            if rng.random() < (0.6 if just_counted else 0.1):
+                independent, ceiling = rng.random() < (0.8 if just_counted else 0.4), rng.choice(POLICY_CEILINGS)
+                journal.append({"type": "PolicyChanged", "independent_approval_required": independent,
+                                "two_approver_above_usd": ceiling, "clock": ts(own["clock"])})
+                escalation_apply(st, journal[-1])
+                own["policy"] = {"independent": independent, "ceiling": ceiling}
             k = rng.random()
             if k < 0.2:
                 inst = rng.choice(list(ESC_INSTRUMENTS))
@@ -804,7 +822,7 @@ def fuzz_escalation(n):
             for d in drafts:
                 escalation_apply(st, d)
             journal += drafts
-            expected, granted = {}, {}
+            expected, granted, quorate = {}, {}, {}
             if inp["kind"] == "ask":
                 asked = [d for d in drafts if d["type"] == "ApprovalRequested"]
                 check(bool(asked) == (not own["pending"]), "MI-25 one pending risk-adding approval per agent", (own["pending"], asked))
@@ -829,14 +847,16 @@ def fuzz_escalation(n):
                 p = own["pending"].get(a)
                 ok = (p is not None and eff < deadline_of[a] and r["actor_kind"] == "user" and r["responder"] in ("u1", "u2")
                       and p["delivered"] and r["content_hash"] == hash_of[a])
-                acts = granted[r["source"]] = False
+                acts = granted[r["source"]] = quorate[r["source"]] = False
+                need, independent = own_quorum(bound_of[a], own["policy"]) if a in bound_of else (1, False)
                 if ok and r["verdict"] == "skipped":
                     del own["pending"][a]
                 elif ok and own_step_up_ok(r["step_up"], eff, env, own["seen"]) and r["responder"] not in p["grants"] \
-                        and not (bound_of[a]["independent_required"] and r["responder"] == "u1"):
+                        and not (independent and r["responder"] == "u1"):
                     granted[r["source"]] = True
                     p["grants"].add(r["responder"])
-                    if len(p["grants"]) >= bound_of[a]["approvers_required"]:
+                    if len([g for g in p["grants"] if not (independent and g == "u1")]) >= need:
+                        quorate[r["source"]] = True
                         del own["pending"][a]
                         acts = own_acts(bound_of[a], inp["now"])
                 if isinstance(r["step_up"], dict) and isinstance(r["step_up"].get("assertion"), str):
@@ -848,6 +868,9 @@ def fuzz_escalation(n):
                     check((d["verdict"] == "approved" and d["result"] in ("admitted", "counted")) == granted.get(d["source"], False),
                           "MI-24 a grant counts exactly when a listed human shown this content steps up freshly and once",
                           (d, granted.get(d["source"])))
+                    check((d["verdict"] == "approved" and d["result"] == "admitted") == quorate.get(d["source"], False),
+                          "MI-24 a grant is admitted exactly at the stricter of the bound and the current policy quorum",
+                          (d, own["policy"], bound_of.get(d["approval"], {}).get("approvers_required"), quorate.get(d["source"])))
                     last, last_approval, reval_act = d["source"], d["approval"], False
                     produced.setdefault(last, False)
                 elif d["type"] == "ApprovalRevalidated":
@@ -890,7 +913,76 @@ def fuzz_escalation(n):
                 state = nxt or state
             check(state == "done", "MI-21 every approval ends in exactly one terminal event", (a, state))
         replay = escalation_fold(journal, ts(ESC_T0))
-        check(replay["pending"] == st["pending"] and replay["used"] == st["used"], "MI-21 replay folds to the same approvals", None)
+        check(replay["pending"] == st["pending"] and replay["used"] == st["used"] and replay["policy"] == st["policy"],
+              "MI-21 replay folds to the same approvals", None)
+
+def run_policy_quorum(bound, script):
+    """One approval through `script`, a list of ("policy", independent, ceiling) and ("grant", responder) moves, all
+    with fresh valid step-up and inside the deadline. Returns the model's results and the oracle's, move by move."""
+    ctx = {"approvers": {"u1", "u2"}, "author": "u1", "environment": "paper", "timeout_s": 600,
+           "inbox": 1, "push_channels": [], "quiet_hours": None}
+    st = escalation_fold([], ts(ESC_T0))
+    for d in escalation_step(st, {"kind": "ask", "approval": "ap1", "bound": bound}, ctx):
+        escalation_apply(st, d)
+    content_hash = next(iter(st["pending"].values()))["content_hash"]
+    policy, grants, open_, got, want = {"independent": False, "ceiling": None}, set(), True, [], []
+    for i, move in enumerate(script):
+        if move[0] == "policy":
+            escalation_apply(st, {"type": "PolicyChanged", "independent_approval_required": move[1],
+                                  "two_approver_above_usd": move[2], "clock": ts(ESC_T0)})
+            policy = {"independent": move[1], "ceiling": move[2]}
+            continue
+        who = move[1]
+        resp = {"source": f"ctl{i}", "approval": "ap1", "actor_kind": "user", "responder": who, "verdict": "approved",
+                "content_hash": content_hash, "submitted_at": ts(ESC_T0),
+                "step_up": {"assertion": f"q{i}", "authenticated_at": ts(ESC_T0), "method": "cli_confirm"}}
+        now = {"mandate_version": bound["mandate_version"], "mode": "normal", "instrument_restricted": False,
+               "in_working_universe": True, "classification": {"decision": "ask", "by": bound["decided_by"]},
+               "dry_run": {"verdict": "allow", "reason": None}, "mark": bound["reference_mark"]["price"]}
+        drafts = escalation_step(st, {"kind": "response", "response": resp, "now": now}, ctx)
+        for d in drafts:
+            escalation_apply(st, d)
+        got.append(next(d["result"] for d in drafts if d["type"] == "ApprovalResponded"))
+        need, independent = own_quorum(bound, policy)
+        if not open_:
+            want.append("refused")
+        elif who in grants or (independent and who == "u1"):
+            want.append("refused")
+        else:
+            grants.add(who)
+            quorate = len([g for g in grants if not (independent and g == "u1")]) >= need
+            want.append("admitted" if quorate else "counted")
+            open_ = not quorate
+    return got, want
+
+def fuzz_policy_quorum(n):
+    """MI-24 and DEC-173 item 13: check 7 takes the stricter of the bound requirement and the workspace policy overlay
+    current at the response, so no `PolicyChanged` between request and response loosens a pending approval. The oracle
+    keeps its own record of the policy and its own grant set; the pinned scripts are the review's three cases."""
+    base_bound = {"instrument": base.ABC, "asset_class": "us_equity", "side": "buy", "qty": "3", "limit_price": "101",
+                  "purpose": "open", "mandate_version": "sha256:v1", "decided_by": "default", "combined_score": "0.7",
+                  "reference_mark": {"price": "101", "seq": 1}, "timeout_s": 600}
+    pinned = [
+        ("maker-checker turned on while pending binds it, and the author's counted grant stops counting",
+         dict(base_bound, approvers_required=2, independent_required=False),
+         [("grant", "u1"), ("policy", True, None), ("grant", "u2")], ["counted", "counted"]),
+        ("a lowered ceiling while pending raises the count to two",
+         dict(base_bound, approvers_required=1, independent_required=False),
+         [("policy", False, "101"), ("grant", "u1")], ["counted"]),
+        ("a policy loosened while pending leaves the bound requirement in force",
+         dict(base_bound, approvers_required=2, independent_required=True),
+         [("policy", False, None), ("grant", "u1"), ("grant", "u2")], ["refused", "counted"]),
+    ]
+    for title, bound, script, want in pinned:
+        got, oracle = run_policy_quorum(bound, script)
+        check(got == want == oracle, f"DEC-173 item 13 {title}", (got, want, oracle))
+    for _ in range(n):
+        bound = dict(base_bound, qty=rng.choice(["1", "3", "0.25", "12"]), limit_price=rng.choice(["99.5", "101", "43000"]),
+                     approvers_required=rng.choice([1, 2]), independent_required=rng.random() < 0.4)
+        script = [("policy", rng.random() < 0.5, rng.choice(POLICY_CEILINGS)) if rng.random() < 0.4
+                  else ("grant", rng.choice(["u1", "u1", "u2"])) for _ in range(rng.randint(1, 6))]
+        got, want = run_policy_quorum(bound, script)
+        check(got == want, "MI-24 check 7 never loosens a pending approval under a policy change", (bound, script, got, want))
 
 def fuzz_drift(n):
     """MI-22's drift band against a scaled-integer oracle, with the exact band edge and one unit either side."""
@@ -1057,6 +1149,7 @@ if __name__ == "__main__":
     fuzz_gate_universe(200)
     fuzz_autonomy(3000)
     fuzz_escalation(3000)
+    fuzz_policy_quorum(1000)
     fuzz_drift(600)
     fuzz_ask_budget(600)
     fuzz_quiet_hours(600)

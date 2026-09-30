@@ -1516,6 +1516,17 @@ def evidence_fault(ev, at, environment, used):
     except (KeyError, TypeError, ValueError, AssertionError):
         return "step_up_missing"
 
+NO_POLICY = {"independent_approval_required": False, "two_approver_above_usd": None}
+
+def approval_quorum(req, policy):
+    """§6.4 check 7's requirement: the stricter of what the request bound and the workspace policy overlay (§4.3)
+    current at the response. Independence if either requires it; the larger approver count, where a policy ceiling
+    below the order value asks for two. A policy change can only tighten a pending approval (DEC-173 item 13)."""
+    ceiling = policy["two_approver_above_usd"]
+    by_policy = 2 if ceiling is not None and D(req["qty"]) * D(req["limit_price"]) > D(ceiling) else 1
+    return {"required": max(req["approvers_required"], by_policy),
+            "independent": req["independent_required"] or policy["independent_approval_required"]}
+
 def approval_admit(req, resp, ctx):
     """§6.4 admission, checks 1 to 7 in order. `req` is the request as the fold holds it after this step's own
     cancellations, or None when it is not pending. A skip runs checks 1 to 5 only."""
@@ -1536,11 +1547,14 @@ def approval_admit(req, resp, ctx):
     fault = evidence_fault(resp["step_up"], fmt(eff), ctx["environment"], ctx["used_assertions"])
     if fault:
         return out("refused", fault)
+    q = approval_quorum(req, ctx["policy"])
+    judged = lambda result, reason=None: out(result, reason) | {"quorum": q}
     if resp["responder"] in req["grants"]:
-        return out("refused", "duplicate_approver")
-    if req["independent_required"] and resp["responder"] == ctx["author"]:
-        return out("refused", "not_independent")
-    return out("admitted" if len(req["grants"]) + 1 >= req["approvers_required"] else "counted")
+        return judged("refused", "duplicate_approver")
+    if q["independent"] and resp["responder"] == ctx["author"]:
+        return judged("refused", "not_independent")
+    counting = {g for g in req["grants"] if not (q["independent"] and g == ctx["author"])}
+    return judged("admitted" if len(counting) + 1 >= q["required"] else "counted")
 
 def within_drift(m_req, m_now, asset_class):
     """§6.4 drift: |m_now − m_req| × 10 000 ≤ band_bp × m_req, exact, no division; no mark at either end is outside."""
@@ -1648,10 +1662,12 @@ def escalation_apply(st, e):
             del pending[a]
     elif t in ("ApprovalRevalidated", "ApprovalTimedOut", "ApprovalCanceled"):
         pending.pop(a, None)
+    elif t == "PolicyChanged":
+        st["policy"] = {k: e[k] for k in NO_POLICY}
     return st
 
 def escalation_fold(journal, t0):
-    st = {"clock": T(t0), "pending": {}, "copied": set(), "used": set()}
+    st = {"clock": T(t0), "pending": {}, "copied": set(), "used": set(), "policy": dict(NO_POLICY)}
     for e in journal:
         escalation_apply(st, e)
     return st
@@ -1693,7 +1709,7 @@ def escalation_step(st, inp, ctx):
         if resp["source"] in st["copied"]:
             return drafts
         req = st["pending"].get(resp["approval"])
-        adm = approval_admit(req, resp, dict(ctx, clock=c, used_assertions=st["used"]))
+        adm = approval_admit(req, resp, dict(ctx, clock=c, used_assertions=st["used"], policy=st["policy"]))
         drafts.append({"type": "ApprovalResponded", "approval": resp["approval"], "source": resp["source"],
                        "responder": resp["responder"], "verdict": resp["verdict"], "step_up": resp["step_up"],
                        "clock": c} | adm)

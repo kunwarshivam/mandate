@@ -24,8 +24,10 @@ builder, versioning, change classification, and the records kept.
   (M7; [DEC-155](../project/04-decision-log.md#decisions), [DEC-156](../project/04-decision-log.md#decisions),
   [DEC-158](../project/04-decision-log.md#decisions)). §6.4 specifies the request's content object
   and hash, the lifecycle, admission and re-validation in order, drift, lateness, step-up, two
-  approvers, the ask budget, quiet hours as push-only, and cancellation; §6.1 states the owner
-  controls, the step-up each needs and when it is judged, the kill switch under DEC-158 option (c),
+  approvers (at the stricter of the bound requirement and the current policy overlay, so a policy
+  change never loosens a pending approval), the ask budget, quiet hours as push-only, and
+  cancellation; §6.1 states the owner controls, the step-up each needs and when it is judged, the
+  kill switch under DEC-158 option (c),
   and what a refused owner exit loses; MI-1 names the owner exit's step-up and MI-21 to MI-25 join
   §1.1. The reference implementation models and fuzzes all of it; the MC-E cases follow in a later
   change, so §11 is unchanged.
@@ -104,7 +106,7 @@ changes, acknowledgments, version changes, approval requests and responses, and 
 | MI-21 | **Silence never acts** (§6.4). An `IntentProposed` follows an approval only when an admitted, timely grant was re-validated to `act`, at most once per approval; every approval ends in exactly one terminal event of the §6.4 lifecycle; no approval outlives the version or tightening that cancelled it, and a response processed in the same step as that cancellation is never admitted; each control-stream response is copied once, and replay folds to the same approvals |
 | MI-22 | **A grant never widens** (§6.4). The intent equals the bound instrument, side, quantity, limit price, purpose, and mandate version; re-validation can only skip; drift is inside the band exactly when \|m_now − m_req\| × 10 000 ≤ band_bp × m_req, and no mark is outside it (checked against scaled integers) |
 | MI-23 | **Risk reduction never waits on an approval or on step-up** (§6.1, rule 13). No exit, protective order, risk exit, or flatten waits on, or is cancelled by, any approval state; pause always applies; a kill switch always stops and flattens its agent, and only step-up valid as the owner committed it lets it sell equities outside the regular session; a refused owner exit loses only that privilege and is still routed; each owner control is judged at its own moment |
-| MI-24 | **Only a listed human approves what they were shown** (§6.4). A grant counts exactly when the response comes from a `user` actor in `autonomy.approval.approvers`, before the deadline, for a delivered request, repeats its content hash, and carries step-up evidence valid at the effective time whose assertion the workspace has never seen; each approver counts once, and not the mandate's author when independence is required |
+| MI-24 | **Only a listed human approves what they were shown** (§6.4). A grant counts exactly when the response comes from a `user` actor in `autonomy.approval.approvers`, before the deadline, for a delivered request, repeats its content hash, and carries step-up evidence valid at the effective time whose assertion the workspace has never seen; each approver counts once, and not the mandate's author when independence is required; the approver count and independence are the stricter of the bound values and the workspace policy overlay at the effective time, so no policy change loosens a pending approval |
 | MI-25 | **Asking is bounded** (§6.4). At most one risk-adding approval is pending per agent, and a risk-adding proposal waits exactly while one is; at most 10 requests per agent per risk day; a skipped instrument is not asked again that risk day until a version applies, nor a timed-out one within `timeout_s`; quiet hours suppress exactly the push deliveries inside [start, end) America/New_York wall time, in both DST states, and never the inbox |
 
 ## 2. Lifecycle
@@ -375,9 +377,10 @@ limits, never pre-filled as values.
   the requester.
 - **Policy changes** are journaled as `PolicyChanged` (level, diff, author, step-up evidence,
   affected agents). They apply to running agents at the next evaluation as an **overlay**: the
-  stricter value governs, and `auto` evaluates as `ask` when `auto_allowed` becomes false. Affected
-  agents are flagged `policy_nonconforming` and their owners are alerted; a conforming version is
-  required before any risk-increasing change.
+  stricter value governs, and `auto` evaluates as `ask` when `auto_allowed` becomes false. A pending
+  approval's quorum and independence follow the same overlay at §6.4 check 7, which only tightens
+  what the request bound. Affected agents are flagged `policy_nonconforming` and their owners are
+  alerted; a conforming version is required before any risk-increasing change.
 
 ## 5. Risk state and limits
 
@@ -696,7 +699,7 @@ has exactly these keys, and everything an approver is shown comes from it:
 | `deadline` | A UTC timestamp: the request's risk clock + `autonomy.approval.timeout_s` |
 | `default` | "If you do nothing, this action is skipped" |
 | `choices` | `approve` and `skip`, with equal weight and neither preselected (PX-10). These are the only "alternatives" an approval shows; it never shows a platform-authored alternative trade |
-| `approvers` | `required`: 2 when `two_approver_above_usd` is set and `order_usd` exceeds it, else 1; `independent`: `independent_approval_required` |
+| `approvers` | `required`: 2 when `two_approver_above_usd` is set and `order_usd` exceeds it, else 1; `independent`: `independent_approval_required`, the workspace policy's maker-checker requirement (a §4.3 policy key, not a mandate field). Both are the values at the request; check 7 can only raise them |
 
 Decimals are canonical strings (journal spec §4). The owner-written `trigger.rule` is the owner's
 own text, shown as theirs and never as the platform's.
@@ -754,12 +757,22 @@ journaled on `ApprovalResponded` with result `refused`:
 | 4 | The request was delivered on at least one channel | `not_delivered` |
 | 5 | The response repeats the request's content hash | `content_mismatch` |
 | 6 | Step-up evidence is valid at the effective time (§6.1) | `step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method` |
-| 7 | The responder is not already in the approval's grant set, and, with `independent_approval_required`, is not the mandate's author | `duplicate_approver`, `not_independent` |
+| 7 | The responder is not already in the approval's grant set, and, when independence is required, is not the mandate's author. The requirement is the **stricter** of the bound `approvers` and the workspace policy overlay (§4.3) current at the effective time: independence is required if either requires it, and the approver count is the larger of the bound `required` and the overlay's (2 when the overlay's `two_approver_above_usd` is set and `order_usd` exceeds it, else 1) | `duplicate_approver`, `not_independent` |
 
 A grant that passes all seven joins the approval's grant set. It is `admitted` if the set now holds
-`approvers.required` distinct approvers, and otherwise `counted`, and the approval stays pending. A
-skip runs checks 1 to 5 only: it needs no step-up, and one admitted skip from any listed approver
-ends the approval whatever the quorum.
+check 7's approver count of distinct approvers, none of them the mandate's author while check 7
+requires independence, and otherwise `counted`, and the approval stays pending. A skip runs checks 1
+to 5 only: it needs no step-up, and one admitted skip from any listed approver ends the approval
+whatever the quorum.
+
+**Policy changes only tighten a pending approval** (DEC-173 item 13). The overlay current at the
+effective time is every `PolicyChanged` the runtime folded before the step that judges the response;
+the runtime folds them as it folds `ClockAdvanced`, and `ApprovalResponded` records the count and
+independence check 7 applied. An admin who turns on `independent_approval_required` or lowers
+`two_approver_above_usd` while an approval is pending binds that approval: with maker-checker on,
+the author can no longer grant it and an author's earlier `counted` grant stops counting toward the
+quorum, and a lowered ceiling can only raise the count to 2. A `PolicyChanged` that turns either
+off or raises the ceiling leaves the bound values in force.
 
 **Re-validation** (checks 8 to 12). An admitted grant is re-validated in the same step, against the
 current state, and the result is journaled on `ApprovalRevalidated` with every value compared.
@@ -794,10 +807,11 @@ proposed again at a later evaluation at its own price.
 per approval and never one gesture for several. Paper grants use `cli_confirm`; live approvals wait
 for E9-4's step-up methods.
 
-**Two approvers.** An ASKed action with `order_usd` above `two_approver_above_usd` needs two
-distinct approvers; with `independent_approval_required`, neither may be the mandate's author. Each
-approver counts once. In a one-person workspace such an approval cannot reach its quorum, so it
-times out and is skipped. `deny` is never overridden.
+**Two approvers.** An ASKed action with `order_usd` above `two_approver_above_usd`, as bound or as
+the policy overlay lowers it while the approval is pending, needs two distinct approvers; when the
+request bound `independent_approval_required` or the overlay now requires it, neither may be the
+mandate's author (check 7). Each approver counts once. In a one-person workspace such an approval
+cannot reach its quorum, so it times out and is skipped. `deny` is never overridden.
 
 **Asking is bounded.** Besides the one pending risk-adding approval per agent, an `ask` is
 suppressed, in this precedence:
