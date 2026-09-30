@@ -58,6 +58,26 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   than waiting for a reviewer (the #316 reviews).
   *Accepted when:* both run in `ci lint`, pinned in `.github/workflows/ci.yml` and `install.sh`,
   and a planted `SC2086` or an unknown workflow key fails the job.
+- **E1-5 (Should)** As an engineer, I want the merge script's remaining gaps from #316's
+  round-3 review closed, so that the only path from approval to `main` (DEC-175) is tested as
+  GitHub actually answers it. The items:
+  - The stub `gh` serves only the first page unless `--paginate` is passed, and a case lists
+    `web.yml` past file 100.
+  - A fixture lists workflow runs newest first, as GitHub does, so that `.[-1]` in place of
+    `max_by(.id)` fails.
+  - A merge GitHub refuses is a skip, not a failed job. That covers a sweep and a per-PR run racing
+    after one of them has merged, a ruleset block, and a head that moved between the read and the
+    merge call.
+  - The approval line is not read inside an HTML comment, an indented code block (four or more
+    leading spaces; a bullet indented up to three spaces is still read, as DEC-175 allows), or a
+    four-backtick fence.
+  - The web path rule comes from `web.yml`'s `paths` filter, not a second copy, and a file renamed
+    out of `web/` counts by its `previous_filename` too.
+  - Optionally, the latest `labeled coordinator-approved` event must be newer than the head
+    commit, so that a description line alone approves nothing.
+
+  *Accepted when:* each item has a refusal or merge case in `xtask`'s merge-script tests, and each
+  fails when its fix is reverted.
 
 ### E2 Market data
 
