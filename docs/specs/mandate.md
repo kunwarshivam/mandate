@@ -613,9 +613,9 @@ stream with `causation_id` and judges it there; nothing the owner's client check
   *t* when 0 ≤ *t* − `authenticated_at` ≤ 300 s (evidence authenticated after *t* is stale, so
   clock skew fails closed); its assertion id appears on no earlier `ApprovalResponseSubmitted`,
   `OwnerCommandIssued`, or `OwnerAcknowledged` in the workspace's control stream, whatever that
-  event's outcome; and its
-  method is allowed for the environment. Missing or malformed evidence counts as missing. A refusal
-  is journaled with `step_up_missing`, `step_up_stale`, `step_up_reused`, or `step_up_method`.
+  event's outcome; and its method is allowed for the environment. Missing or malformed evidence
+  counts as missing. A refusal is journaled with `step_up_missing`, `step_up_stale`,
+  `step_up_reused`, or `step_up_method`.
 - **Methods.** v0's only method is `cli_confirm`: the owner re-types a confirmation code the CLI
   derives locally, with no network, runtime, or model state. It is allowed only in a `paper`
   environment (DEC-155 item 4); live step-up waits for E9-4's signed assertions.
@@ -696,7 +696,7 @@ has exactly these keys, and everything an approver is shown comes from it:
 | `deadline` | A UTC timestamp: the request's risk clock + `autonomy.approval.timeout_s` |
 | `default` | "If you do nothing, this action is skipped" |
 | `choices` | `approve` and `skip`, with equal weight and neither preselected (PX-10). These are the only "alternatives" an approval shows; it never shows a platform-authored alternative trade |
-| `approvers` | `required`: 2 when `order_usd` exceeds `two_approver_above_usd`, else 1; `independent`: `independent_approval_required` |
+| `approvers` | `required`: 2 when `two_approver_above_usd` is set and `order_usd` exceeds it, else 1; `independent`: `independent_approval_required` |
 
 Decimals are canonical strings (journal spec §4). The owner-written `trigger.rule` is the owner's
 own text, shown as theirs and never as the platform's.
@@ -714,7 +714,7 @@ own text, shown as theirs and never as the platform's.
 - Notification payloads are exactly the request's opaque approval id and one generic text
   (`AGENTS.md` rule 6): no instrument, side, quantity, price, order value, score, thesis, agent
   name, rule, or deadline ever reaches them.
-- Never persuasive language or profit estimates. The only fixed sentences are the two above.
+- Never persuasive language or profit estimates.
 
 **Lifecycle.** An approval is **pending** from its `ApprovalRequested` until exactly one terminal
 event:
