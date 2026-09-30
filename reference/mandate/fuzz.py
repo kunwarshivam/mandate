@@ -1,7 +1,7 @@
-"""Property-based fuzz of the reference implementation against the invariants of mandate spec §1.1 (MI-1 to MI-25)."""
+"""Property-based fuzz of the reference implementation against the invariants of mandate spec §1.1 (MI-1 to MI-30)."""
 import copy, itertools, json, random, sys
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from ref import *  # noqa: F401,F403
 from ref import D
@@ -634,6 +634,218 @@ def reduce_mul(xs):
         out *= x
     return out
 
+# ------------------------------------------------------------------ delegations (§6.5, MI-26 to MI-29, V-041 to V-043)
+DELEG_NOW = T("2026-09-22T14:00:00.000000000Z")
+SPAN_CAP_S = 30 * 24 * 3600
+TROUBLE = [{"mode": "exits_only"}, {"mode": "paused"}, {"mode": "stopped"}, {"rungs_active": 1},
+           {"limit_pending": True}, {"limit_latched": True}, {"kill_switch": True}]
+
+def rand_autonomy_action():
+    a = {"purpose": rng.choice(["open", "increase"]), "session": rng.choice(["regular", "crypto"]),
+         "instrument": base.BTC, "asset_class": "crypto", "unusual_input": False,
+         "first_trade_in_instrument": False, "drawdown": "0", "daily_pnl_fraction": "0",
+         "position_usd_after": "0", "gross_usd_after": "0",
+         "new_instrument": rng.random() < 0.2, "thesis_confidence": rng.choice(["0", "0.5", "0.9"])}
+    for f, vals in FIELDS_NUM.items():
+        a[f] = rng.choice(vals)
+    a["order_usd"] = rng.choice(["100", "300", "500", "900", "1000"])
+    return a
+
+def rand_delegation(i, sources):
+    start = DELEG_NOW + timedelta(seconds=rng.choice([-86400, -3600, 0, 3600]))
+    span = rng.choice([60, 3600, 86400, 7 * 86400, SPAN_CAP_S])
+    cap = rng.choice(["100", "500", "900", "1000"])
+    when = rng.choice([{"field": "purpose", "op": "in", "value": sorted(rng.sample(["open", "increase"], rng.randint(1, 2)))},
+                       {"field": "session", "op": "eq", "value": rng.choice(["regular", "crypto"])},
+                       {"field": "order_usd", "op": "lte", "value": rng.choice(["300", "900"])}])
+    return {"id": f"d{i}", "lifts": rng.choice(sorted(sources)), "when": when, "max_order_usd": cap,
+            "max_orders": rng.randint(1, 4), "max_total_usd": norm(D(cap) * rng.choice([1, 2, 3, 10])),
+            "starts_at": fmt(start), "expires_at": fmt(start + timedelta(seconds=span)), "source_approval_id": None}
+
+def rand_delegated_mandate(any_source=False):
+    """A mandate with delegations. With `any_source`, a delegation may name a source that is not an ask, which V-041
+    refuses; the runtime must still never lift it (defence in depth for MI-26)."""
+    m = copy.deepcopy(base.btc)
+    au = m["autonomy"]
+    au["rules"] = [rand_rule(i) for i in range(rng.randint(0, 4))]
+    au["default"] = rng.choice(["ask", "ask", "deny", "auto"])
+    au["admission"] = rng.choice(["ask", "deny", "auto"])
+    every = {f"rule:{r['id']}" for r in au["rules"]} | {"default"}
+    asks = {f"rule:{r['id']}" for r in au["rules"] if r["then"] == "ask"} | ({"default"} if au["default"] == "ask" else set())
+    sources = every if any_source else asks
+    if not sources:
+        return None
+    au["delegations"] = [rand_delegation(i, sources) for i in range(rng.randint(1, 3))]
+    V.validate(m)
+    return m
+
+def rand_state(t, usage, trouble_p=0.3):
+    st = {"now": fmt(t), "usage": usage}
+    if rng.random() < trouble_p:
+        st.update(rng.choice(TROUBLE))
+    return st
+
+def in_trouble(st):
+    return any(st.get(k) for k in ("rungs_active", "limit_pending", "limit_latched", "kill_switch")) \
+        or st.get("mode", "normal") != "normal"
+
+def fuzz_delegations(n):
+    """MI-26, MI-27, MI-28: a delegation only lifts the ask it names, within its caps and window, and never in trouble.
+    The oracle keeps its own decision log and derives usage and the caps' totals from it."""
+    for _ in range(n):
+        m = rand_delegated_mandate(any_source=rng.random() < 0.3)
+        if m is None:
+            continue
+        plain = copy.deepcopy(m)
+        del plain["autonomy"]["delegations"]
+        by_id = {d["id"]: d for d in m["autonomy"]["delegations"]}
+        log = []
+        t = DELEG_NOW - timedelta(hours=2)
+        for _ in range(rng.randint(5, 40)):
+            t += timedelta(seconds=rng.choice([1, 60, 1800, 3600, 86400, 5 * 86400]))
+            usage = {}
+            for did, _, v in log:
+                u = usage.setdefault(did, {"orders": 0, "total_usd": "0"})
+                u["orders"] += 1
+                u["total_usd"] = norm(D(u["total_usd"]) + v)
+            st = rand_state(t, usage)
+            a = rand_autonomy_action()
+            r0, r = autonomy(plain, a, st), autonomy(m, a, st)
+            ctx = (m["autonomy"], a, st, r0, r)
+            if r["decision"] != r0["decision"]:
+                dl = by_id.get(r.get("delegation_id"))
+                check(r0["decision"] == "ask" and r["decision"] == "auto" and dl is not None,
+                      "MI-26 a delegation only turns an ask into auto", ctx)
+                check(dl is not None and dl["lifts"] == r0["by"], "MI-26 a delegation lifts only the ask it names", ctx)
+                check(dl is not None and cond(dl["when"], a), "MI-26 a delegation lifts only orders matching its condition", ctx)
+            if a["new_instrument"]:
+                check(STRICT[r["decision"]] >= STRICT[m["autonomy"]["admission"]],
+                      "MI-26 no delegation makes an admission looser than the admission ceiling (MI-17)", ctx)
+            if in_trouble(st):
+                check(r["decision"] == r0["decision"], "MI-28 a delegation lifts nothing in trouble", ctx)
+            if r.get("delegation_id") is not None and r["decision"] == "auto":
+                log.append((r["delegation_id"], t, D(a["order_usd"])))
+        for did, dl in by_id.items():
+            mine = [(tt, v) for i, tt, v in log if i == did]
+            ctx = (dl, mine)
+            check(len(mine) <= dl["max_orders"], "MI-27 a delegation lifts at most max_orders", ctx)
+            check(sum((v for _, v in mine), D(0)) <= D(dl["max_total_usd"]), "MI-27 a delegation lifts at most max_total_usd", ctx)
+            check(all(v <= D(dl["max_order_usd"]) for _, v in mine), "MI-27 no lifted order exceeds max_order_usd", ctx)
+            check(all(T(dl["starts_at"]) <= tt < T(dl["expires_at"]) for tt, _ in mine),
+                  "MI-27 a delegation lifts only inside [starts_at, expires_at)", ctx)
+
+def fuzz_client_ceiling(n):
+    """MI-30: an order an owner-connected client requested is never auto, whatever the rules, default, or delegations
+    say; a deny still denies, and an order the owner or the agent requested is decided exactly as before."""
+    for _ in range(n):
+        m = rand_delegated_mandate(any_source=rng.random() < 0.3)
+        if m is None:
+            continue
+        m["autonomy"]["default"] = rng.choice(["auto", "ask", "deny"])
+        if rng.random() < 0.3:
+            m["autonomy"]["admission"] = "auto"
+        plain = copy.deepcopy(m)
+        plain["autonomy"]["delegations"] = []
+        for _ in range(20):
+            t = DELEG_NOW + timedelta(seconds=rng.randint(-86400, 35 * 86400))
+            st = rand_state(t, {}, trouble_p=0.2)
+            a = rand_autonomy_action()
+            base_decision = autonomy(m, a, st)["decision"]
+            without_delegations = autonomy(plain, a, st)["decision"]
+            client = autonomy(m, dict(a, requested_by="client"), st)
+            expected = "deny" if without_delegations == "deny" else "ask"
+            ctx = (m["autonomy"], a, st, base_decision, client)
+            check(client["decision"] != "auto", "MI-30 a client-requested order is never auto", ctx)
+            check(client["decision"] == expected,
+                  "MI-30 a client-requested order is ask, or deny when the rules deny, with no delegation lifting it", ctx)
+            check(autonomy(m, dict(a, requested_by="owner"), st)["decision"] == base_decision,
+                  "MI-30 the client ceiling leaves owner and agent requests unchanged", ctx)
+
+def mutate_delegations(ds):
+    """One random change to a delegation list; returns what kind of change it was."""
+    k = rng.random()
+    d = rng.choice(ds)
+    later = lambda s, sec: fmt(T(s) + timedelta(seconds=sec))
+    if k < 0.15:
+        ds.remove(d)
+    elif k < 0.3:
+        c = rng.choice(DELEGATION_CAPS)
+        d[c] = max(1, d[c] - 1) if c == "max_orders" else norm(D(d[c]) / 2)
+    elif k < 0.45:
+        d["expires_at"] = later(d["expires_at"], -rng.choice([30, 3600, 86400]))
+    elif k < 0.55:
+        d["starts_at"] = later(d["starts_at"], rng.choice([30, 3600]))
+    elif k < 0.65:
+        c = rng.choice(DELEGATION_CAPS)
+        d[c] = d[c] + 2 if c == "max_orders" else norm(D(d[c]) * 2)
+    elif k < 0.75:
+        d["expires_at"] = later(d["expires_at"], rng.choice([3600, 86400, 3 * 86400]))
+    elif k < 0.85:
+        ds.append(dict(copy.deepcopy(d), id=f"d{len(ds) + 20}", starts_at=fmt(DELEG_NOW - timedelta(days=1)),
+                       expires_at=fmt(DELEG_NOW + timedelta(days=10))))
+    elif k < 0.92:
+        d["when"] = {"field": "purpose", "op": "in", "value": ["increase", "open"]}
+    elif len(ds) > 1:
+        ds.reverse()
+
+def fuzz_delegation_changes(n):
+    """MI-29: a version classified risk-reducing or neutral never lets a delegation lift what the old one would not."""
+    for _ in range(n):
+        m = rand_delegated_mandate()
+        if m is None:
+            continue
+        new = copy.deepcopy(m)
+        mutate_delegations(new["autonomy"]["delegations"])
+        if rng.random() < 0.3 and new["autonomy"]["delegations"]:
+            mutate_delegations(new["autonomy"]["delegations"])
+        c, _ = classify(m, new)
+        if c not in ("risk_reducing", "neutral"):
+            continue
+        ids = sorted({d["id"] for d in m["autonomy"]["delegations"] + new["autonomy"]["delegations"]})
+        edges = [T(d[k]) for d in m["autonomy"]["delegations"] for k in ("starts_at", "expires_at")]
+        for _ in range(30):
+            if rng.random() < 0.5:
+                t = rng.choice(edges) + timedelta(seconds=rng.choice([-1800, -1, 0, 1, 1800, 43200, 2 * 86400]))
+            else:
+                t = DELEG_NOW + timedelta(seconds=rng.randint(-2 * 86400, 35 * 86400))
+            usage = {i: {"orders": rng.randint(0, 3), "total_usd": rng.choice(["0", "100", "900", "2000"])} for i in ids
+                     if rng.random() < 0.5}
+            st = rand_state(t, usage, trouble_p=0.1)
+            a = rand_autonomy_action()
+            d0, d1 = autonomy(m, a, st)["decision"], autonomy(new, a, st)["decision"]
+            check(STRICT[d1] >= STRICT[d0], "MI-29 a reducing delegation change never lifts more",
+                  (m["autonomy"]["delegations"], new["autonomy"]["delegations"], a, st, d0, d1))
+
+def fuzz_delegation_rules(n):
+    """V-041 (the 30-day span), V-042 (no carry-over past a risk-increasing version), V-043 (caps inside the envelope),
+    each against a value the oracle computes itself."""
+    for _ in range(n):
+        m = copy.deepcopy(base.btc)
+        two = rng.choice([None, "500", "1000"])
+        m["autonomy"]["approval"]["two_approver_above_usd"] = two
+        span = rng.choice([-10, 0, 1, 3600, SPAN_CAP_S - 1, SPAN_CAP_S, SPAN_CAP_S + 1, 40 * 86400])
+        cap = rng.choice(["100", "500", "999", "1000", "1001"])
+        total = rng.choice(["100", "1000", "10000", "10001"])
+        d = {"id": "d1", "lifts": "rule:large_orders", "when": {"field": "purpose", "op": "in", "value": ["increase", "open"]},
+             "max_order_usd": cap, "max_orders": 3, "max_total_usd": total, "starts_at": fmt(DELEG_NOW),
+             "expires_at": fmt(DELEG_NOW + timedelta(seconds=span)), "source_approval_id": None}
+        m["autonomy"]["delegations"] = [d]
+        errs = semantic(m, base.CTX)[0]
+        span_ok = 0 < span <= SPAN_CAP_S
+        caps_ok = int(cap) <= 1000 and int(cap) <= int(total) <= 10000 and (two is None or int(cap) <= int(two))
+        check(("V-041" in errs) != span_ok, "V-041 refuses exactly the spans outside (0, 30 days]", (span, errs))
+        check(("V-043" in errs) != caps_ok, "V-043 refuses exactly the caps outside the envelope", (cap, total, two, errs))
+        if not (span_ok and caps_ok):
+            continue
+        new = copy.deepcopy(m)
+        increasing = rng.random() < 0.5
+        new["risk"]["max_daily_loss"] = "0.03" if increasing else "0.01"
+        if rng.random() < 0.5:
+            new["autonomy"]["delegations"] = [dict(d, id="d2")]
+        carried = new["autonomy"]["delegations"][0]["id"] == "d1"
+        errs = semantic(new, dict(base.CTX, previous_version=m))[0]
+        check(("V-042" in errs) == (increasing and carried),
+              "V-042 refuses exactly a carried delegation in a version risk-increasing elsewhere", (increasing, carried, errs))
 # ------------------------------------------------------------------ escalation (§6.1, §6.4; MI-21 to MI-25)
 # The oracles below keep their own integer clock, deadlines, pending set, grant sets, and assertion ledger, and
 # compute New York wall time with datetime.fromtimestamp; none of them calls the admission or re-validation code.
@@ -1108,32 +1320,44 @@ def fuzz_owner_controls(n):
 
 def fuzz_content(n):
     """§6.4 content and rule 6: exactly the nine keys; the trigger's rule is the owner's confirmed rule verbatim, or
-    null for the default and the admission ceiling; every bound field moves the hash; a notification carries no
+    null for the default and both ceilings; the trigger names who asked and the client (DEC-185); the choices end
+    with exactly the delegation shapes offered (DEC-181); every bound field moves the hash; a notification carries no
     sentinel of the request."""
     m = copy.deepcopy(base.swing)
     for _ in range(n):
         m["autonomy"]["rules"] = [rand_rule(i) for i in range(rng.randint(0, 3))]
-        labels = [f"rule:{r['id']}" for r in m["autonomy"]["rules"]] + ["default", "admission_ceiling"]
+        labels = [f"rule:{r['id']}" for r in m["autonomy"]["rules"]] + ["default", "admission_ceiling", "client_ceiling"]
+        requested_by = rng.choice(["agent", "owner", "client"])
+        shapes = rng.choice([[], ["like_this_until_close"], ["like_this_until_close", "this_instrument", "this_kind"]])
         req = {"approval": "01J" + "SENTINELAPPROVAL"[:10].upper() + "0" * 13, "instrument": "SENTINELINSTR", "asset_class": "us_equity",
                "side": "buy", "qty": "777.77", "limit_price": "31415.9", "purpose": "open", "mandate_version": "sha256:sentinelversion",
                "decided_by": rng.choice(labels), "combined_score": "0.4242", "reference_mark": {"price": "27182.8", "seq": 4242},
-               "deadline": "2026-09-22T14:10:00.000000000Z", "approvers_required": rng.choice([1, 2]), "independent_required": rng.random() < 0.5}
+               "deadline": "2026-09-22T14:10:00.000000000Z", "approvers_required": rng.choice([1, 2]), "independent_required": rng.random() < 0.5,
+               "requested_by": requested_by, "client": rng.choice([None, "SENTINELCLIENT"]), "delegation_shapes": shapes}
         figures = {"agent_equity": "5000", "position_usd_after": "123456.7", "gross_usd_after": "234567.8", "bought_today_usd": "345678.9",
                    "drawdown": "0.0123", "daily_pnl_fraction": "-0.0456"}
         content = approval_content(m, req, figures)
         check(tuple(content) == CONTENT_KEYS, "§6.4 the content object has exactly the nine keys", list(content))
         rule = next((r for r in m["autonomy"]["rules"] if f"rule:{r['id']}" == req["decided_by"]), None)
         check(content["trigger"]["rule"] == rule, "§6.4 the trigger shows the owner's confirmed rule verbatim", (req["decided_by"], content["trigger"]))
+        expected_client = req["client"] if requested_by == "client" else None
+        check(content["trigger"]["requested_by"] == requested_by and content["trigger"]["client"] == expected_client,
+              "§6.4 the trigger names who asked, and the client only for a client-requested order (DEC-185)", content["trigger"])
+        check(content["choices"][:2] == ["approve", "skip"] and content["choices"][2:] == shapes,
+              "§6.4 choices are approve and skip, then exactly the delegation shapes offered (DEC-181)", content["choices"])
         note = canon(approval_notification(req))
         check(set(approval_notification(req)) == {"subject", "text"} and not any(
-              s in note for s in ("SENTINEL" + "INSTR", "777.77", "31415.9", "sentinelversion", "0.4242", "27182.8", "2026-09-22")),
+              s in note for s in ("SENTINEL" + "INSTR", "SENTINEL" + "CLIENT", "777.77", "31415.9", "sentinelversion", "0.4242", "27182.8", "2026-09-22")),
               "rule 6 a notification carries only the opaque id and generic text", note)
-        field = rng.choice(["instrument", "qty", "limit_price", "purpose", "mandate_version", "decided_by", "reference_mark", "approvers_required"])
+        field = rng.choice(["instrument", "qty", "limit_price", "purpose", "mandate_version", "decided_by", "reference_mark", "approvers_required",
+                            "requested_by", "client", "delegation_shapes"])
         ctx = {"timeout_s": 600, "inbox": 1, "push_channels": [], "quiet_hours": None}
         st = escalation_fold([], ts(ESC_T0))
         bound = {k: v for k, v in req.items() if k not in ("approval", "deadline")}
         other = dict(bound, **{field: {"instrument": "X2", "qty": "1", "limit_price": "2", "purpose": "increase", "mandate_version": "sha256:v9",
-                                       "decided_by": "rule:zz", "reference_mark": None, "approvers_required": 3}[field]})
+                                       "decided_by": "rule:zz", "reference_mark": None, "approvers_required": 3,
+                                       "requested_by": "owner" if requested_by != "owner" else "client",
+                                       "client": "OTHERCLIENT", "delegation_shapes": shapes + ["this_kind_extra"]}[field]})
         h = [escalation_step(st, {"kind": "ask", "approval": "ap1", "bound": b}, ctx)[0]["content_hash"] for b in (bound, other)]
         check(h[0] != h[1], "§6.4 every bound field moves the content hash", field)
 
@@ -1148,6 +1372,10 @@ if __name__ == "__main__":
     fuzz_pinning(400)
     fuzz_gate_universe(200)
     fuzz_autonomy(3000)
+    fuzz_delegations(600)
+    fuzz_delegation_changes(600)
+    fuzz_delegation_rules(400)
+    fuzz_client_ceiling(400)
     fuzz_escalation(3000)
     fuzz_policy_quorum(1000)
     fuzz_drift(600)

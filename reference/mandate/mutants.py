@@ -57,6 +57,39 @@ MUTANTS = {
     "admission ignores the leveraged-ETP disclosure": (
         '        u["leveraged_etps_enabled"] and u["leveraged_etp_disclosure_version"] in inp.get("disclosures_accepted", []))',
         '        u["leveraged_etps_enabled"])'),
+    "a delegation lifts a deny": ('if st is None or res["decision"] != "ask" or', 'if st is None or res["decision"] == "auto" or'),
+    "a delegation ignores the ask it names": ('if (d["lifts"] == res["by"] and T(d["starts_at"])', 'if (T(d["starts_at"])'),
+    "a delegation ignores its condition": ('                and cond(d["when"], a) and D(a["order_usd"])', '                and D(a["order_usd"])'),
+    "a delegation ignores max_order_usd": (' and D(a["order_usd"]) <= D(d["max_order_usd"])', ''),
+    "a delegation ignores max_orders": ('used["orders"] < d["max_orders"]', 'True'),
+    "a delegation ignores max_total_usd": ('D(used["total_usd"]) + D(a["order_usd"]) <= D(d["max_total_usd"])', 'True'),
+    "a delegation ignores its expiry": ('now < T(d["expires_at"])', 'True'),
+    "a delegation ignores its start": ('T(d["starts_at"]) <= now', 'True'),
+    "a delegation ignores suspension": (' or delegation_suspended(st):', ':'),
+    "a delegation ignores a latched limit": ('\n            or st.get("limit_latched", False)', '\n            or False'),
+    "a delegation bypasses the admission ceiling": (
+        '    if a.get("new_instrument", False) and STRICT[au["admission"]] > STRICT[res["decision"]]:',
+        '    if a.get("new_instrument", False) and lifted_by is None and STRICT[au["admission"]] > STRICT[res["decision"]]:'),
+    "adding a delegation is reducing": ('        if i not in oi:\n            return "increasing"', '        if i not in oi:\n            continue'),
+    "raising a delegation's cap is reducing": ('all(D(b[k]) <= D(a[k]) for k in DELEGATION_CAPS)', 'True'),
+    "extending a delegation's expiry is reducing": (' and T(b["expires_at"]) <= T(a["expires_at"])', ''),
+    "V-041 accepts a span past 30 days": ('not 0 < span <= DELEGATION_MAX_SPAN_S', 'not 0 < span'),
+    "V-042 is never raised": ('            errs.add("V-042")', '            pass'),
+    "V-043 ignores the second approver": ('(two is None or D(d["max_order_usd"]) <= D(two))', 'True'),
+    "the client ceiling is skipped": ('a.get("requested_by", "agent") == "client" and ', 'False and '),
+    "the client ceiling turns a deny into an ask": (
+        'a.get("requested_by", "agent") == "client" and STRICT[res["decision"]] < STRICT["ask"]',
+        'a.get("requested_by", "agent") == "client"'),
+    "a delegation lifts a client request": (
+        '    lifted_by = delegation_lift(m, a, res, st)',
+        '    lifted_by = delegation_lift(m, a, res, st)\n'
+        '    if lifted_by is not None and a.get("requested_by") == "client":\n'
+        '        return {"decision": "auto", "by": f"delegation:{lifted_by}", "delegation_id": lifted_by}'),
+    "the client ceiling reaches owner requests": ('a.get("requested_by", "agent") == "client"', 'a.get("requested_by", "agent") != "agent"'),
+    "the approval content drops the client": ('"client": req.get("client") if req.get("requested_by") == "client" else None',
+                                               '"client": None'),
+    "the approval content shows every requester as the agent": ('"requested_by": req.get("requested_by", "agent"),', '"requested_by": "agent",'),
+    "the approval content hides the delegation shapes": ('["approve", "skip"] + list(req.get("delegation_shapes", []))', '["approve", "skip"]'),
     "a timeout acts": ('                drafts.append({"type": "ApprovalTimedOut", "approval": a, "on_timeout": "skip", "clock": c})',
                        '                drafts.append({"type": "ApprovalTimedOut", "approval": a, "on_timeout": "skip", "clock": c}); '
                        'drafts.append(dict({k: st["pending"][a][k] for k in BOUND_FIELDS}, type="IntentProposed", approval=a, clock=c))'),
@@ -146,6 +179,7 @@ MUTANTS = {
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
+         "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_client_ceiling(300); "
          "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
          "print(len(FAIL))")
 
