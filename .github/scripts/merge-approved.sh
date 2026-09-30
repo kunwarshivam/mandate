@@ -1,35 +1,45 @@
 #!/usr/bin/env bash
 # Squash-merges one pull request the coordinator approved (DEC-175), or does nothing.
 #
-# The approval is bound to a commit: the pull request carries the `coordinator-approved` label and
-# its description holds a line `Coordinator-approved-head: <40-hex sha>` naming the head the
-# independent review passed. Builders cannot edit a description (they have no pull request tool), so
-# only the coordinator or the founder writes that line. A push moves the head away from it, which
-# withdraws the approval with nothing to cancel or retry.
+# An approval has two parts. The `coordinator-approved` label is the act of approval: GitHub lets
+# only people and apps with triage access or above apply it. The description line
+# `Coordinator-approved-head: <40-hex sha>` binds that approval to the head the independent review
+# passed, so a push moves the head off it and withdraws the approval with nothing to cancel. The
+# line's integrity rests on convention, not on a GitHub permission: a pull request's author can
+# edit its description. In this repository the builders have no pull request tool and the
+# coordinator writes the descriptions, so a builder's tooling can at worst drop the line or leave
+# a stale sha, and both refuse the merge.
 #
 # A pull request merges only when all of these hold, read here from GitHub and never from the event:
-# it is open, not a draft, targets `main`, is mergeable, carries the label, names its current head
-# as approved, and the latest `ci` run on that head succeeded (so `fast` and `full` did), plus the
-# latest `web` run when it touches `web/` (DEC-112 lets `fast` and `full` skip the web checks). The
-# merge names the head (`sha`), so a push after these reads makes GitHub refuse it. The commit
-# message is the description's own body with any `Co-authored-by` line removed, never GitHub's
-# default, which copies every commit message and its trailers onto `main` (ship playbook, step 5).
+# it is open, not a draft, targets `main`, and carries the label; its description names exactly one
+# approved head, outside any code fence, and that head is its current head; GitHub reports it
+# mergeable; and the latest `ci` run for that head from a `pull_request` event succeeded (so `fast`
+# and `full` did), plus the latest `web` run when it touches `web/`, since DEC-112 lets `fast` and
+# `full` skip the web checks. The merge names the head (`sha`), so a push after these reads makes
+# GitHub refuse it. The commit message is the description's own body with any `Co-authored-by`
+# line removed, never GitHub's default, which copies every commit message and its trailers onto
+# `main` (ship playbook, step 5).
 #
 # Usage: merge-approved.sh <pull request number>   (needs GH_TOKEN and GITHUB_REPOSITORY;
-# MERGE_DRY_RUN=1 reads everything and prints the merge instead of making it)
+# MERGE_DRY_RUN=1 reads everything and prints the merge instead of making it;
+# MERGE_RETRY_S sets the wait between reads while GitHub is still computing mergeability)
 set -euo pipefail
 
 pr=${1:?pull request number}
 repo=${GITHUB_REPOSITORY:?}
 label=coordinator-approved
 
-view=$(gh pr view "$pr" --repo "$repo" \
-  --json number,state,isDraft,baseRefName,headRefOid,mergeable,labels,title,body)
-
 skip() {
   echo "#$pr $1; not merging"
   exit 0
 }
+
+for attempt in 1 2 3; do
+  view=$(gh pr view "$pr" --repo "$repo" \
+    --json number,state,isDraft,baseRefName,headRefOid,mergeable,labels,title,body)
+  [ "$(jq -r .mergeable <<<"$view")" = UNKNOWN ] || break
+  [ "$attempt" -eq 3 ] || sleep "${MERGE_RETRY_S:-5}"
+done
 
 [ "$(jq -r .state <<<"$view")" = OPEN ] || skip "is not open"
 [ "$(jq -r .isDraft <<<"$view")" != true ] || skip "is a draft"
@@ -39,9 +49,13 @@ jq -e --arg l "$label" '.labels | any(.name == $l)' <<<"$view" >/dev/null ||
 
 sha=$(jq -r .headRefOid <<<"$view")
 body=$(jq -r '.body // ""' <<<"$view" | tr -d '\r')
-approved=$(sed -nE 's/^[[:space:]]*Coordinator-approved-head:[[:space:]]*([0-9a-f]{40})[[:space:]]*$/\1/p' <<<"$body" | tail -n 1)
-[ -n "$approved" ] || skip "names no Coordinator-approved-head"
-[ "$approved" = "$sha" ] || skip "was approved at $approved, but its head is $sha"
+approvals=$(awk '/^[[:space:]]*(```|~~~)/ { fenced = !fenced; next } !fenced' <<<"$body" |
+  sed -nE 's/^[[:space:]]*([-*][[:space:]]+)?Coordinator-approved-head:[[:space:]]*([0-9a-fA-F]{40})[[:space:]]*$/\2/p' |
+  tr 'A-F' 'a-f')
+count=$(grep -c . <<<"$approvals" || true)
+[ "$count" -gt 0 ] || skip "names no Coordinator-approved-head"
+[ "$count" -eq 1 ] || skip "names more than one Coordinator-approved-head"
+[ "$approvals" = "$sha" ] || skip "was approved at $approvals, but its head is $sha"
 
 mergeable=$(jq -r .mergeable <<<"$view")
 [ "$mergeable" = MERGEABLE ] || skip "is not mergeable yet ($mergeable)"
@@ -53,8 +67,8 @@ latest_run() {
 }
 
 workflows=(ci.yml)
-if gh api "repos/$repo/pulls/$pr/files?per_page=100" --paginate --jq '.[].filename' |
-  grep -qE '^(web/|\.github/workflows/web\.yml$)'; then
+files=$(gh api "repos/$repo/pulls/$pr/files?per_page=100" --paginate --jq '.[].filename')
+if grep -qE '^(web/|\.github/workflows/web\.yml$)' <<<"$files"; then
   workflows+=(web.yml)
 fi
 for workflow in "${workflows[@]}"; do

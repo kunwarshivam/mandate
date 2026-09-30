@@ -3,10 +3,12 @@
 # `Coordinator-approved-head: <sha>` into the description and adds the `coordinator-approved`
 # label. `.github/scripts/merge-approved.sh` re-checks everything against the pull request's
 # current head before it merges, and does nothing otherwise, so this file only decides when to look:
-# on the label, on a description edit (a new approved head), when the pull request leaves draft, and
-# whenever a `ci` or `web` run completes.
-# Nothing here checks out or runs the pull request's code: `pull_request_target` and `workflow_run`
-# run this file and the script as they are on the default branch.
+# on the label, on a description edit (a new approved head), when the pull request leaves draft,
+# whenever a `ci` or `web` run completes, and on a half-hourly sweep of every labelled pull request,
+# so that an event GitHub drops (a pending run replaced in its concurrency group, mergeability
+# still being computed) never leaves an approved pull request waiting for good.
+# Nothing here checks out or runs the pull request's code: `pull_request_target`, `workflow_run`
+# and `schedule` run this file and the script as they are on the default branch.
 name: merge
 
 on:
@@ -15,6 +17,8 @@ on:
   workflow_run:
     workflows: [ci, web]
     types: [completed]
+  schedule:
+    - cron: "17,47 * * * *"
 
 permissions: {}
 
@@ -27,8 +31,9 @@ jobs:
       || (github.event_name == 'workflow_run'
         && github.event.workflow_run.conclusion == 'success'
         && github.event.workflow_run.event == 'pull_request')
+      || github.event_name == 'schedule'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     concurrency:
       group: merge-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
       cancel-in-progress: false
@@ -40,18 +45,24 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.event.repository.default_branch || 'main' }}
           persist-credentials: false
       - name: Merge each approved pull request whose checks are green
         env:
+          EVENT: ${{ github.event_name }}
           LABELED_PR: ${{ github.event.pull_request.number }}
           RUN_PRS: ${{ toJSON(github.event.workflow_run.pull_requests.*.number) }}
         run: |
-          if [ -n "$LABELED_PR" ]; then
+          if [ "$EVENT" = schedule ]; then
+            prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \
+              --label coordinator-approved --json number --jq '.[].number')
+          elif [ -n "$LABELED_PR" ]; then
             prs=$LABELED_PR
           else
             prs=$(jq -r '.[]' <<<"$RUN_PRS")
           fi
+          failed=0
           for pr in $prs; do
-            .github/scripts/merge-approved.sh "$pr"
+            .github/scripts/merge-approved.sh "$pr" || failed=1
           done
+          exit "$failed"

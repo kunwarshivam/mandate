@@ -4157,11 +4157,22 @@ mod tests {
     }
 
     /// A stand-in for `gh` that answers `merge-approved.sh` from canned JSON beside it and appends
-    /// a merge's `-f` fields to `merge.log`, so the script's decisions run with no network.
+    /// a merge's `-f` fields to `merge.log`, so the script's decisions run with no network. It
+    /// refuses a workflow-runs query that is not filtered to the pull request's head and to
+    /// `pull_request` events, and answers `mergeable: UNKNOWN` while `unknown_reads` counts down.
     const STUB_GH: &str = r##"#!/usr/bin/env bash
 set -euo pipefail
 dir=$(dirname "$0")
-if [ "$1" = pr ]; then cat "$dir/view.json"; exit 0; fi
+if [ "$1" = pr ]; then
+  left=$(cat "$dir/unknown_reads")
+  if [ "$left" -gt 0 ]; then
+    echo $((left - 1)) >"$dir/unknown_reads"
+    jq '.mergeable = "UNKNOWN"' "$dir/view.json"
+  else
+    cat "$dir/view.json"
+  fi
+  exit 0
+fi
 filter=.
 path=
 put=
@@ -4174,10 +4185,17 @@ while [ $# -gt 0 ]; do
     *) path=$1; shift ;;
   esac
 done
+head=$(jq -r .headRefOid "$dir/view.json")
 if [ -n "$put" ]; then
   src="$dir/reply.json"
   echo '{"sha":"merged"}' >"$src"
 else
+  case "$path" in
+    */actions/workflows/*/runs\?*)
+      case "&${path#*\?}&" in *"&head_sha=$head&"*) ;; *) echo "runs not filtered to the head: $path" >&2; exit 1 ;; esac
+      case "&${path#*\?}&" in *"&event=pull_request&"*) ;; *) echo "runs not filtered to pull_request: $path" >&2; exit 1 ;; esac
+      ;;
+  esac
   case "$path" in
     */actions/workflows/ci.yml/runs*) src="$dir/ci.json" ;;
     */actions/workflows/web.yml/runs*) src="$dir/web.json" ;;
@@ -4198,7 +4216,8 @@ jq -r "$filter" "$src"
         view: Value,
         ci: Value,
         web: Value,
-        files: Vec<&'static str>,
+        files: Vec<String>,
+        unknown_reads: u32,
     }
 
     fn workflow_runs(list: &[(u64, &str, Option<&str>)]) -> Value {
@@ -4209,6 +4228,15 @@ jq -r "$filter" "$src"
             })
             .collect();
         json!({ "workflow_runs": runs })
+    }
+
+    fn approved_body(approval: &str) -> String {
+        format!(
+            "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\r\n## Story\n\nKept.\n\
+             Co-authored-by: Someone <someone@example.com>\n\n\
+             {approval}\n\
+             <!-- CURSOR_AGENT_PR_BODY_END -->\nAgent metadata, dropped."
+        )
     }
 
     impl MergeCase {
@@ -4224,20 +4252,21 @@ jq -r "$filter" "$src"
                     "mergeable": "MERGEABLE",
                     "labels": [{ "name": "coordinator-approved" }],
                     "title": "E1-1: a story",
-                    "body": format!(
-                        "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\r\n## Story\n\nKept.\n\
-                         Co-authored-by: Someone <someone@example.com>\n\n\
-                         Coordinator-approved-head: {APPROVED_HEAD}\n\
-                         <!-- CURSOR_AGENT_PR_BODY_END -->\nAgent metadata, dropped."
-                    ),
+                    "body": approved_body(&format!("Coordinator-approved-head: {APPROVED_HEAD}")),
                 }),
                 ci: workflow_runs(&[
                     (1, "completed", Some("failure")),
                     (2, "completed", Some("success")),
                 ]),
                 web: workflow_runs(&[]),
-                files: vec!["crates/c/src/lib.rs"],
+                files: vec!["crates/c/src/lib.rs".to_owned()],
+                unknown_reads: 0,
             }
+        }
+
+        fn with_body(mut self, body: String) -> Self {
+            self.view["body"] = json!(body);
+            self
         }
 
         /// Runs the script against this case: its standard output, and the merge's fields when it
@@ -4258,6 +4287,7 @@ jq -r "$filter" "$src"
             fs::write(dir.join("ci.json"), self.ci.to_string())?;
             fs::write(dir.join("web.json"), self.web.to_string())?;
             fs::write(dir.join("files.json"), Value::from(files).to_string())?;
+            fs::write(dir.join("unknown_reads"), self.unknown_reads.to_string())?;
             let gh = dir.join("gh");
             fs::write(&gh, STUB_GH)?;
             fs::set_permissions(&gh, fs::Permissions::from_mode(0o755))?;
@@ -4268,6 +4298,7 @@ jq -r "$filter" "$src"
                 .env("PATH", path)
                 .env("GITHUB_REPOSITORY", "owner/repo")
                 .env("GH_TOKEN", "unused")
+                .env("MERGE_RETRY_S", "0")
                 .env_remove("MERGE_DRY_RUN")
                 .output()?;
             let stdout = String::from_utf8(out.stdout)?;
@@ -4314,7 +4345,7 @@ jq -r "$filter" "$src"
     #[test]
     fn the_merge_script_refuses_anything_short_of_an_approved_green_head() -> Result<()> {
         let stale_head = "2".repeat(40);
-        let refusals: [Refusal<'_>; 13] = [
+        let refusals: [Refusal<'_>; 18] = [
             (
                 "closed",
                 &|c| c.view["state"] = json!("CLOSED"),
@@ -4337,6 +4368,43 @@ jq -r "$filter" "$src"
                 "names no Coordinator-approved-head",
             ),
             (
+                "trailing",
+                &|c| {
+                    c.view["body"] = json!(approved_body(&format!(
+                        "Coordinator-approved-head: {APPROVED_HEAD} (round 2)"
+                    )))
+                },
+                "names no Coordinator-approved-head",
+            ),
+            (
+                "mid-line",
+                &|c| {
+                    c.view["body"] = json!(approved_body(&format!(
+                        "Earlier rounds: Coordinator-approved-head: {APPROVED_HEAD}"
+                    )))
+                },
+                "names no Coordinator-approved-head",
+            ),
+            (
+                "fenced",
+                &|c| {
+                    c.view["body"] = json!(approved_body(&format!(
+                        "```\nCoordinator-approved-head: {APPROVED_HEAD}\n```"
+                    )))
+                },
+                "names no Coordinator-approved-head",
+            ),
+            (
+                "twice",
+                &|c| {
+                    c.view["body"] = json!(approved_body(&format!(
+                        "Coordinator-approved-head: {APPROVED_HEAD}\n\
+                         Coordinator-approved-head: {APPROVED_HEAD}"
+                    )))
+                },
+                "names more than one Coordinator-approved-head",
+            ),
+            (
                 "pushed",
                 &|c| c.view["headRefOid"] = json!(stale_head),
                 "was approved at 1111111111111111111111111111111111111111, but its head is 2222",
@@ -4348,7 +4416,7 @@ jq -r "$filter" "$src"
             ),
             (
                 "unknown",
-                &|c| c.view["mergeable"] = json!("UNKNOWN"),
+                &|c| c.unknown_reads = 3,
                 "not mergeable yet (UNKNOWN)",
             ),
             (
@@ -4379,7 +4447,20 @@ jq -r "$filter" "$src"
             (
                 "web-red",
                 &|c| {
-                    c.files = vec!["crates/c/src/lib.rs", "web/app/page.tsx"];
+                    c.files = vec![
+                        "crates/c/src/lib.rs".to_owned(),
+                        "web/app/page.tsx".to_owned(),
+                    ];
+                    c.web = workflow_runs(&[(3, "completed", Some("failure"))]);
+                },
+                "has web.yml at failure",
+            ),
+            (
+                "web-red-after-a-long-file-list",
+                &|c| {
+                    c.files = std::iter::once(".github/workflows/web.yml".to_owned())
+                        .chain((0..20_000).map(|i| format!("crates/c/src/f{i}.rs")))
+                        .collect();
                     c.web = workflow_runs(&[(3, "completed", Some("failure"))]);
                 },
                 "has web.yml at failure",
@@ -4409,21 +4490,66 @@ jq -r "$filter" "$src"
     }
 
     #[test]
+    fn the_merge_script_accepts_the_approval_line_as_people_write_it() -> Result<()> {
+        let upper = "ABCDEF".repeat(6) + "ABCD";
+        let lower = upper.to_lowercase();
+        for (name, approval, head) in [
+            (
+                "bullet",
+                format!("- Coordinator-approved-head: {APPROVED_HEAD}"),
+                APPROVED_HEAD,
+            ),
+            (
+                "star",
+                format!("* Coordinator-approved-head:  {APPROVED_HEAD}  "),
+                APPROVED_HEAD,
+            ),
+            (
+                "upper",
+                format!("Coordinator-approved-head: {upper}"),
+                lower.as_str(),
+            ),
+        ] {
+            let mut case = MergeCase::approved().with_body(approved_body(&approval));
+            case.view["headRefOid"] = json!(head);
+            case.unknown_reads = 2;
+            let (out, merged) = case.run(name)?;
+            assert!(
+                merged.is_some(),
+                "{name}: {approval:?} approves the head once mergeability settles: {out}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn the_merge_script_needs_web_only_for_web_and_keeps_a_quoted_marker() -> Result<()> {
-        let mut case = MergeCase::approved();
-        case.files = vec!["web/app/page.tsx"];
-        case.web = workflow_runs(&[(4, "completed", Some("success"))]);
-        case.view["body"] = json!(format!(
+        let mut case = MergeCase::approved().with_body(format!(
             "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\n\
+             Quoted: `<!-- CURSOR_AGENT_PR_BODY_BEGIN -->` stays.\n\
              Quoted: `<!-- CURSOR_AGENT_PR_BODY_END -->` stays.\nAfter the quote.\n\
              Coordinator-approved-head: {APPROVED_HEAD}\n<!-- CURSOR_AGENT_PR_BODY_END -->"
         ));
+        case.files = vec!["web/app/page.tsx".to_owned()];
+        case.web = workflow_runs(&[(4, "completed", Some("success"))]);
         let (out, merged) = case.run("web-green")?;
         let merged = merged.context("a web change with ci and web green merges")?;
         assert!(out.contains("ci.yml web.yml green"), "{out}");
         assert!(
-            merged.contains("After the quote."),
-            "a marker quoted inside a line does not end the body: {merged}"
+            merged.contains("Quoted: `<!-- CURSOR_AGENT_PR_BODY_BEGIN -->` stays.")
+                && merged.contains("After the quote."),
+            "a marker quoted inside a line neither starts nor ends the body: {merged}"
+        );
+
+        let mut case = MergeCase::approved();
+        case.files = vec![
+            "crates/web/src/lib.rs".to_owned(),
+            "docs/web/notes.md".to_owned(),
+        ];
+        let (out, merged) = case.run("not-web")?;
+        assert!(
+            merged.is_some() && out.contains("ci.yml green"),
+            "a path that only contains `web/` needs no web run: {out}"
         );
         Ok(())
     }
