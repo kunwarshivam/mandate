@@ -691,10 +691,21 @@ results table.
 | Stage | Branch | Contents |
 |---|---|---|
 | 1. **Brief** (this PR) | `agent/m7-brief` | This document, DEC-155 and DEC-156, DEC-158 (accepted by the founder as option (c)), their Reserved-identifiers row, the backlog's E8 rows, and the tracker's Claims row. No code, no spec, no schema; CI takes the documentation-only short path (DEC-112) |
-| 2. **Spec** (ES-22) | `agent/m7-spec` | Mandate spec §6.4 (the content list's three factual additions, the admission and re-validation order, drift, lateness, the ask budget and suppression, quiet hours as push-only, step-up v0), mandate spec §6.1 (the sentence reconciling "never denied" with the refusal of an owner exit whose step-up evidence is stale, and the kill switch's step-up line PX-4 asked for, as DEC-158 leaves it), journal spec §9 (the events of "Journal events"), the MC-E family through the reference implementation with its fuzz and mutants, and no `status.toml` row, because a case absent from `status.toml` is pending (DEC-77 item 1). Cites DEC-155 and DEC-156; no code. The case files say a new case needs the founder's approval; like Track C's cases (DEC-117 to DEC-126), they land under DEC-79 with the founder's veto after the fact (Decisions needed 4) |
+| 2. **Spec** (ES-22) | `agent/m7-spec` | Mandate spec §6.4 (the content list's three factual additions, the admission and re-validation order, drift, lateness, the ask budget and suppression, quiet hours as push-only, step-up v0), mandate spec §6.1 (the sentence reconciling "never denied" with the refusal of an owner exit whose step-up evidence is stale, and the kill switch's step-up line PX-4 asked for, as DEC-158 leaves it), journal spec §9 (the events of "Journal events"), the MC-E family through the reference implementation with its fuzz and mutants, and no `status.toml` row, because a case absent from `status.toml` is pending (DEC-77 item 1). Cites DEC-155 and DEC-156; no code. The case files say a new case needs the founder's approval; like Track C's cases (DEC-117 to DEC-126), they land under DEC-79 with the founder's veto after the fact (Decisions needed 4). **Delivered in two parts (DEC-173 item 1):** 2a, the spec text, MI-21 to MI-25, journal spec v0.5, and the reference model with its fuzz and 50 planted bugs; 2b, the MC-E cases, after a tests correction stops `mandate_harness.rs` pinning the fixture's total (backlog, E8-3's follow-up). Stage 3's runtime and CLI tests need 2a and the `mandate-journal` catalogue's three new types; the MC-E harness needs 2b |
 | 3. **Tests** | `agent/m7-tests` | The `mandate-approval` skeleton with every function returning its `Unimplemented` error, its `layers.toml` entry and CODEOWNERS line, the MC-E harness, the property tests with their oracles, the runtime tests for the grant path (retiring `Input::ApprovalResponse`), the CLI tests, and the planted-bug report. Pending tests carry `#[ignore = "pending E8-3"]` (or E8-1, E8-2) and fail on the stubs |
 | 4. **Implementation**, split | `agent/m7-impl-approval`, `agent/m7-impl-runtime`, `agent/m7-impl-cli` | (a) `mandate-approval`; (b) the runtime's grant path and the control-stream tail; (c) the CLI commands and the shell's notifier driver (with stream L). Test files change only by deleting `#[ignore]` lines (DEC-77 item 2) |
 | 5. **Status** | `agent/m7-status` | Flips the MC-E rows to `passing` (DEC-77 item 3) |
+
+**The coordinator's answers on stage 2a** (the #321 review):
+
+1. **The MC-E harness count correction** (the 298-case and 300-test pin in
+   `crates/mandate-refcases/tests/mandate_harness.rs`) is owned by stream M7. It lands as a small
+   tests-correction PR right after #321, followed by the MC-E spec PR generated from #321's model;
+   the coordinator lands the two back to back.
+2. **The `mandate-journal` catalogue entries** for `ApprovalResponseSubmitted`,
+   `OwnerCommandIssued`, and `ApprovalRevalidated` come in a tests-first PR after both #320 and
+   #321 merge, because #320 closes the payload schemas.
+3. **The runtime approval tests** (stage 3) wait for both #320 and #321.
 
 **Dependencies before stage 4 (b):** `mandate-builder`'s `classify` (stream H, DEC-152, in progress),
 `MandateView` carrying `autonomy.approval` and `notifications` (stream F's E10-1 implementation,

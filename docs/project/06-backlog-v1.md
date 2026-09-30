@@ -263,7 +263,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   means the owner's choices (approve or skip, with the default stated), never platform-authored
   alternative trades ([mandate spec §6.4](../specs/mandate.md#64-approvals), FR-6.2).
   *Follow-up (DEC-165 item 3, #236):* the content's Trigger row still lacks "the rule as the owner
-  wrote it". It joins the content object once the M7 spec PR fixes §6.4's list, with a test that
+  wrote it". §6.4 now fixes it (DEC-173 item 2): `trigger.rule` is the owner's confirmed rule
+  `{id, when, then}` exactly as the mandate holds it, or null for `default` and
+  `admission_ceiling`. It joins the content object in a tests correction, with a test that
   scans owner-written text apart from the platform's own in
   `the_content_never_carries_advice_wording`, so an owner's rule named `target_weight` is shown as
   written and never read as platform advice.
@@ -307,7 +309,62 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   runtime's tests PR (3 of 4):** a test commits an owner exit whose step-up is stale at commit
   and asserts two things. First, the refusal is journaled. Second, the exit is still routed as
   a regular-session exit and reaches the executor, so no step-up outcome can remove an owner's
-  risk reduction. The mandate spec §6.1 wording goes with the M7 spec PR.
+  risk reduction. The mandate spec §6.1 wording is in ("Owner controls and step-up", DEC-173
+  item 5).
+  *Follow-up (M7 spec PR, DEC-173 item 1):* the MC-E cases (MC-E01 to MC-E31) are not yet in
+  `mandate.yaml`, because `mandate_harness.rs`'s
+  `the_fixture_holds_the_families_this_stream_expects` pins the fixture's total at 298 cases and
+  300 tests, and the spec guard keeps that `crates/` fix out of a spec PR. Two changes, in order:
+  first a tests correction that makes the harness count only the families it owns, or read §11's
+  stated count; then an MC-E spec PR that generates the cases from `reference/mandate/ref.py`'s
+  escalation model (already fuzzed and mutation-checked), with `cargo xtask refcases --write`, and
+  no `status.toml` row.
+  *Follow-up (M7 spec PR, DEC-173 item 11):* the `mandate-journal` catalogue (`src/catalogue.rs`,
+  `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
+  (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
+  journal them.
+  *Follow-up (#321 review, major; DEC-173 item 13), owned by the M7 tests correction:*
+  `mandate-approval`'s admission (`src/admit.rs`, `quorum`) reads only the bound
+  `approvers_required` and `independent_required`. It must judge check 7 against the stricter of
+  those and the workspace policy overlay current at the effective time: independence if either
+  requires it, the larger approver count, and an author's earlier `counted` grant not counting once
+  independence is required. Tests first, against `reference/mandate/ref.py`'s `approval_quorum`.
+  *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
+  control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
+  would make MI-24 true as written.
+  *Follow-up (#321 review, minor 2):* §6.1's and §6.4's "one assertion per approval" should read "per grant",
+  because a two-approver approval takes two assertions.
+  *Follow-up (#321 review, minor 3):* §5.9 says the executor cancels pending approvals, but §6.4 and
+  journal spec §2 put that in the runtime's step; align them.
+  *Follow-up (#321 review, minor 4):* journal spec §9's `ApprovalRevalidated` row lacks the
+  working-universe membership that check 9 compares.
+  *Follow-up (#321 review, minor 5):* check 3's `role:` approver entries are resolved at an unstated
+  moment; state it.
+  *Follow-up (#321 review, minor 6):* the reference model's assertion ledger never fills `used` from
+  `OwnerCommandIssued` or `OwnerAcknowledged`.
+  *Follow-up (#321 review, minor 7):* `notifications.channels` cannot express `cli_inbox`.
+  *Follow-up (#321 review, minor 8):* `recent_timeout` does not say whose `timeout_s` it uses.
+  *Follow-up (#321 review, minor 9):* `reference/mandate/mutants.py` runs only in
+  `cargo xtask ci nightly`, not in `cargo xtask check`.
+  *Follow-up (#321 round 2, minor 1), owned by the M7 tests correction:* nothing tests that
+  `ApprovalResponded` records the approver count and independence check 7 applied; dropping the
+  member survives the whole fuzz. Assert the recorded quorum against the fuzz's own `own_quorum`,
+  and add a mutant.
+  *Follow-up (#321 round 2, minor 2):* say which stream the policy overlay is folded from.
+  `PolicyChanged` is on the workspace control stream, and §2's copy list for the agent runtime does
+  not include it. State either that the runtime copies it into the agent stream, or that replay
+  reads the recorded quorum rather than re-deriving the overlay. Every interleaving only
+  over-tightens today, because check 7 takes the maximum with the bound values.
+  *Follow-up (#321 round 2, minor 3):* the reference model reads absolute
+  `independent_approval_required` and `two_approver_above_usd` from `PolicyChanged`, where journal §9
+  gives `level`, `diff` and `affected agents`. State how a partial diff resolves, at which level,
+  and whether the agent must be listed in `affected agents`.
+  *Follow-up (#321 round 2, nits):*
+  - reword the admission sentence as "the grants that count … now number check 7's approver count";
+  - say once that "at the effective time" and "folded before the step" coincide because the clock
+    fold advances on every event;
+  - the approval surface shows the current requirement, not only the bound `approvers` (a PX item);
+  - add the per-order approval to §4.3's list of what `independent_approval_required` scopes.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded

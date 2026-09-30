@@ -1,5 +1,8 @@
-"""Property-based fuzz of the reference implementation against the invariants of mandate spec §1.1 (MI-1 to MI-20)."""
-import copy, json, random, sys
+"""Property-based fuzz of the reference implementation against the invariants of mandate spec §1.1 (MI-1 to MI-25)."""
+import copy, itertools, json, random, sys
+from collections import Counter
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from ref import *  # noqa: F401,F403
 from ref import D
 import bases as base
@@ -631,6 +634,509 @@ def reduce_mul(xs):
         out *= x
     return out
 
+# ------------------------------------------------------------------ escalation (§6.1, §6.4; MI-21 to MI-25)
+# The oracles below keep their own integer clock, deadlines, pending set, grant sets, and assertion ledger, and
+# compute New York wall time with datetime.fromtimestamp; none of them calls the admission or re-validation code.
+NYC = ZoneInfo("America/New_York")
+ESC_T0 = 1_789_999_200
+OWN_BAND_BP = {"us_equity": 100, "crypto": 200}
+ESC_INSTRUMENTS = {base.ABC: "us_equity", base.BTC: "crypto"}
+ESC_LABELS = ["rule:r1", "rule:r2", "default", "admission_ceiling"]
+ACTOR_KINDS = ["system", "agent", "user", "broker", "platform_operator"]
+
+def ts(s):
+    return datetime.fromtimestamp(s, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + ".000000000Z"
+
+def scaled(p):
+    """A decimal string as an integer count of 10^-8, by string surgery rather than Decimal."""
+    neg = p.startswith("-")
+    whole, _, frac = p.lstrip("-").partition(".")
+    v = int(whole + frac.ljust(8, "0"))
+    return -v if neg else v
+
+def own_drift_ok(m_req, m_now, cls):
+    if m_req is None or m_now is None:
+        return False
+    a, b = scaled(m_req), scaled(m_now)
+    return abs(b - a) * 10000 <= OWN_BAND_BP[cls] * a
+
+def own_step_up_ok(ev, at, env, seen):
+    if not isinstance(ev, dict) or not isinstance(ev.get("assertion"), str) or not isinstance(ev.get("at_s"), int):
+        return False
+    return 0 <= at - ev["at_s"] <= 300 and ev["assertion"] not in seen and ev.get("method") == "cli_confirm" and env == "paper"
+
+def wire(ev):
+    """The fuzz's evidence as the journal carries it: `at_s` is the oracle's own integer copy."""
+    if not isinstance(ev, dict):
+        return ev
+    out = {k: v for k, v in ev.items() if k != "at_s"}
+    if isinstance(ev.get("at_s"), int):
+        out["authenticated_at"] = ts(ev["at_s"])
+    return out
+
+def rand_mark(m_req, cls):
+    if m_req is None or rng.random() < 0.08:
+        return None
+    band = D(OWN_BAND_BP[cls]) / 10000
+    r = D(m_req)
+    pick = rng.random()
+    if pick < 0.25:
+        return norm(r * (1 + band * rng.choice([1, -1])))
+    if pick < 0.5:
+        edge = r * (1 + band * rng.choice([1, -1]))
+        return norm(edge + rng.choice([D("0.0001"), D("-0.0001")]) * (1 if edge > r else -1))
+    return norm(r * (1 + D(rng.randint(-300, 300)) / 10000))
+
+def rand_evidence(eff, seen_list, fresh_ids):
+    k = rng.random()
+    if k < 0.08:
+        return None
+    if k < 0.12:
+        return rng.choice([{"assertion": "a-malformed"}, {"authenticated_at": "yesterday", "method": "cli_confirm"}, "cli_confirm"])
+    assertion = rng.choice(seen_list) if seen_list and rng.random() < 0.15 else f"a{next(fresh_ids)}"
+    return {"assertion": assertion, "at_s": eff - rng.choice([-1, 0, 1, 150, 299, 300, 301, 900]),
+            "method": "cli_confirm" if rng.random() < 0.95 else "passkey"}
+
+def rand_now(bound):
+    cls = bound["asset_class"]
+    return {"mandate_version": bound["mandate_version"] if rng.random() < 0.9 else "sha256:v2",
+            "mode": "normal" if rng.random() < 0.85 else rng.choice(["exits_only", "paused", "stopped"]),
+            "instrument_restricted": rng.random() < 0.07, "in_working_universe": rng.random() > 0.05,
+            "classification": rng.choice([{"decision": "auto", "by": "default"}, {"decision": "ask", "by": bound["decided_by"]},
+                                          {"decision": "ask", "by": bound["decided_by"]}, {"decision": "ask", "by": "rule:other"},
+                                          {"decision": "deny", "by": "rule:d"}]),
+            "dry_run": {"verdict": "allow", "reason": None} if rng.random() < 0.85 else {"verdict": "deny", "reason": "concentration_limit"},
+            "mark": rand_mark((bound["reference_mark"] or {}).get("price"), cls)}
+
+def own_acts(bound, now):
+    c = now["classification"]
+    return (now["mandate_version"] == bound["mandate_version"] and now["mode"] == "normal"
+            and not now["instrument_restricted"] and now["in_working_universe"]
+            and c["decision"] != "deny" and not (c["decision"] == "ask" and c["by"] != bound["decided_by"])
+            and now["dry_run"]["verdict"] == "allow"
+            and own_drift_ok((bound["reference_mark"] or {}).get("price"), now["mark"], bound["asset_class"]))
+
+POLICY_CEILINGS = [None, None, "24.875", "100", "101", "303", "1000", "43000", "129000"]
+
+def own_quorum(bound, policy):
+    """Check 7's requirement, computed apart from the model: the order value and the policy ceiling in 10^-16 units,
+    independence if the request or the oracle's own record of the policy requires it, and the larger count."""
+    order = scaled(bound["qty"]) * scaled(bound["limit_price"])
+    over = policy["ceiling"] is not None and order > scaled(policy["ceiling"]) * 10 ** 8
+    return max(bound["approvers_required"], 2 if over else 1), bound["independent_required"] or policy["independent"]
+
+TABLE = {("open", "ApprovalDelivered"): "open", ("open", "refused"): "open", ("open", "counted"): "open",
+         ("open", "skipped"): "done", ("open", "approved"): "granted", ("granted", "act"): "acted",
+         ("granted", "skip"): "done", ("acted", "IntentProposed"): "done", ("open", "ApprovalTimedOut"): "done",
+         ("open", "ApprovalCanceled"): "done", ("done", "refused_not_pending"): "done"}
+
+def transition_label(e):
+    t = e["type"]
+    if t == "ApprovalResponded":
+        if e["result"] == "refused":
+            return "refused_not_pending" if e["reason"] == "not_pending" else "refused"
+        if e["result"] == "counted":
+            return "counted"
+        return e["verdict"]
+    if t == "ApprovalRevalidated":
+        return e["result"]
+    return t
+
+def fuzz_escalation(n):
+    """MI-21 to MI-25 (EI-1 to EI-7, EI-10, EI-11, EI-13 to EI-16) over random asks, ticks, responses, re-tailed
+    responses, cancellations, a cancellation batched with responses, and workspace `PolicyChanged` events between a
+    request and its responses. Every response the oracle judges timely, human, listed, delivered, matching, freshly
+    and singly stepped-up, in the quorum of the stricter of the bound requirement and the oracle's own record of the
+    current policy, and passing every re-validation value must act, and no other may; every approval ends in exactly
+    one terminal event of the transition table."""
+    for _ in range(n):
+        env = "paper" if rng.random() < 0.85 else "live"
+        timeout_s = rng.choice([30, 60, 300, 600])
+        inbox = 1 if rng.random() < 0.85 else 0
+        push, qh = (["email"], rng.choice([None, {"start": "00:00", "end": "23:59"}])) if not inbox or rng.random() < 0.3 else ([], None)
+        ctx = {"approvers": {"u1", "u2"}, "author": "u1", "environment": env, "timeout_s": timeout_s,
+               "inbox": inbox, "push_channels": push, "quiet_hours": qh}
+        st = escalation_fold([], ts(ESC_T0))
+        journal, history, ids, fresh = [], [], itertools.count(1), itertools.count(1)
+        own = {"clock": ESC_T0, "pending": {}, "seen": [], "sources": set(), "policy": {"independent": False, "ceiling": None}}
+        bound_of, deadline_of, hash_of, drafts = {}, {}, {}, []
+        for _ in range(rng.randint(4, 28)):
+            just_counted = any(d["type"] == "ApprovalResponded" and d["result"] == "counted" for d in drafts)
+            if rng.random() < (0.6 if just_counted else 0.1):
+                independent, ceiling = rng.random() < (0.8 if just_counted else 0.4), rng.choice(POLICY_CEILINGS)
+                journal.append({"type": "PolicyChanged", "independent_approval_required": independent,
+                                "two_approver_above_usd": ceiling, "clock": ts(own["clock"])})
+                escalation_apply(st, journal[-1])
+                own["policy"] = {"independent": independent, "ceiling": ceiling}
+            k = rng.random()
+            if k < 0.2:
+                inst = rng.choice(list(ESC_INSTRUMENTS))
+                ref_price = rng.choice(["100", "250.5", "43210.25", "0.5", None])
+                bound = {"instrument": inst, "asset_class": ESC_INSTRUMENTS[inst], "side": "buy",
+                         "qty": rng.choice(["1", "3", "0.25", "12"]), "limit_price": rng.choice(["99.5", "101", "43000"]),
+                         "purpose": rng.choice(["open", "increase"]), "mandate_version": "sha256:v1",
+                         "decided_by": rng.choice(ESC_LABELS), "combined_score": "0.7",
+                         "reference_mark": None if ref_price is None else {"price": ref_price, "seq": rng.randint(1, 99)},
+                         "approvers_required": rng.choice([1, 1, 2]), "independent_required": rng.random() < 0.3,
+                         "timeout_s": timeout_s}
+                a = f"ap{next(ids)}"
+                inp = {"kind": "ask", "approval": a, "bound": bound}
+            elif k < 0.38:
+                ahead = [d - own["clock"] for d in deadline_of.values() if d > own["clock"]]
+                step = rng.choice(ahead) if ahead and rng.random() < 0.4 else rng.choice([0, 1, 30, 120, 299, 400])
+                inp = {"kind": "tick", "at": ts(own["clock"] + step)}
+            elif k < 0.84 or not history:
+                inp = None
+            elif k < 0.9:
+                inp = copy.deepcopy(rng.choice(history))
+            elif k < 0.95:
+                inp = {"kind": "cancel", "reason": rng.choice(CANCEL_REASONS)}
+            else:
+                inp = {"kind": "batch", "reason": rng.choice(CANCEL_REASONS), "responses": []}
+            if inp is None or inp["kind"] == "batch":
+                known = list(own["pending"]) if own["pending"] and rng.random() < 0.9 else list(bound_of) + ["ap-unknown"]
+                resps = []
+                for _ in range(1 if inp is None else rng.randint(1, 2)):
+                    a = rng.choice(known)
+                    dl = deadline_of.get(a, own["clock"] + 60)
+                    sub = rng.choice([own["clock"] - 100, own["clock"] - 1, own["clock"], own["clock"] + 1, dl - 1, dl, dl + 5])
+                    eff = max(sub, own["clock"])
+                    resps.append({"source": f"ctl{next(ids)}", "approval": a, "actor_kind": "user" if rng.random() < 0.8 else rng.choice(ACTOR_KINDS),
+                                  "responder": rng.choice(["u1", "u2", "u2", "u3"]), "verdict": "approved" if rng.random() < 0.8 else "skipped",
+                                  "content_hash": hash_of.get(a, "sha256:none") if rng.random() < 0.9 else "sha256:" + "f" * 64,
+                                  "submitted_at": sub, "step_up": rand_evidence(eff, own["seen"], fresh)})
+                nows = [rand_now(bound_of[r["approval"]]) if r["approval"] in bound_of else rand_now(
+                        {"mandate_version": "sha256:v1", "decided_by": "default", "asset_class": "crypto", "reference_mark": None}) for r in resps]
+                if inp is None:
+                    inp = {"kind": "response", "response": resps[0], "now": nows[0]}
+                else:
+                    inp["responses"], inp["now"] = resps, nows[0]
+                history.append(inp)
+            fed = copy.deepcopy(inp)
+            for r in ([fed["response"]] if fed["kind"] == "response" else fed.get("responses", [])):
+                r["submitted_at"], r["step_up"] = ts(r["submitted_at"]), wire(r["step_up"])
+            if fed["kind"] == "tick":
+                journal.append({"type": "ClockAdvanced", "clock": fed["at"]})
+                escalation_apply(st, journal[-1])
+            drafts = escalation_step(st, fed, ctx)
+            for d in drafts:
+                escalation_apply(st, d)
+            journal += drafts
+            expected, granted, quorate = {}, {}, {}
+            if inp["kind"] == "ask":
+                asked = [d for d in drafts if d["type"] == "ApprovalRequested"]
+                check(bool(asked) == (not own["pending"]), "MI-25 one pending risk-adding approval per agent", (own["pending"], asked))
+                if asked:
+                    a, b = inp["approval"], inp["bound"]
+                    bound_of[a], deadline_of[a], hash_of[a] = b, own["clock"] + timeout_s, asked[0]["content_hash"]
+                    ny = datetime.fromtimestamp(own["clock"], NYC)
+                    delivered = bool(inbox) or (qh is None or ny.hour * 60 + ny.minute == 23 * 60 + 59)
+                    own["pending"][a] = {"grants": set(), "delivered": delivered}
+            elif inp["kind"] == "tick":
+                own["clock"] = max(own["clock"], int(T(inp["at"]).timestamp()))
+                for a in [a for a in own["pending"] if deadline_of[a] <= own["clock"]]:
+                    del own["pending"][a]
+            if inp["kind"] in ("cancel", "batch"):
+                own["pending"].clear()
+            for r in ([inp["response"]] if inp["kind"] == "response" else inp.get("responses", [])):
+                if r["source"] in own["sources"]:
+                    expected[r["source"]] = None
+                    continue
+                own["sources"].add(r["source"])
+                a, eff = r["approval"], max(r["submitted_at"], own["clock"])
+                p = own["pending"].get(a)
+                ok = (p is not None and eff < deadline_of[a] and r["actor_kind"] == "user" and r["responder"] in ("u1", "u2")
+                      and p["delivered"] and r["content_hash"] == hash_of[a])
+                acts = granted[r["source"]] = quorate[r["source"]] = False
+                need, independent = own_quorum(bound_of[a], own["policy"]) if a in bound_of else (1, False)
+                if ok and r["verdict"] == "skipped":
+                    del own["pending"][a]
+                elif ok and own_step_up_ok(r["step_up"], eff, env, own["seen"]) and r["responder"] not in p["grants"] \
+                        and not (independent and r["responder"] == "u1"):
+                    granted[r["source"]] = True
+                    p["grants"].add(r["responder"])
+                    if len([g for g in p["grants"] if not (independent and g == "u1")]) >= need:
+                        quorate[r["source"]] = True
+                        del own["pending"][a]
+                        acts = own_acts(bound_of[a], inp["now"])
+                if isinstance(r["step_up"], dict) and isinstance(r["step_up"].get("assertion"), str):
+                    own["seen"].append(r["step_up"]["assertion"])
+                expected[r["source"]] = acts
+            last, last_approval, reval_act, produced = None, None, False, {}
+            for d in drafts:
+                if d["type"] == "ApprovalResponded":
+                    check((d["verdict"] == "approved" and d["result"] in ("admitted", "counted")) == granted.get(d["source"], False),
+                          "MI-24 a grant counts exactly when a listed human shown this content steps up freshly and once",
+                          (d, granted.get(d["source"])))
+                    check((d["verdict"] == "approved" and d["result"] == "admitted") == quorate.get(d["source"], False),
+                          "MI-24 a grant is admitted exactly at the stricter of the bound and the current policy quorum",
+                          (d, own["policy"], bound_of.get(d["approval"], {}).get("approvers_required"), quorate.get(d["source"])))
+                    last, last_approval, reval_act = d["source"], d["approval"], False
+                    produced.setdefault(last, False)
+                elif d["type"] == "ApprovalRevalidated":
+                    reval_act = d["result"] == "act" and d["approval"] == last_approval
+                elif d["type"] == "IntentProposed":
+                    check(reval_act and d["approval"] == last_approval, "MI-21 an intent follows only a grant re-validated to act",
+                          (inp["kind"], d))
+                    reval_act = False
+                    if last is not None:
+                        produced[last] = True
+                    b = bound_of.get(d["approval"], {})
+                    check({f: d[f] for f in BOUND_FIELDS} == {f: b.get(f) for f in BOUND_FIELDS},
+                          "MI-22 the intent equals the bound fields", (d, b))
+            for src, want in expected.items():
+                if want is None:
+                    check(src not in produced, "MI-21 a re-tailed control-stream event is copied once", (src, drafts))
+                else:
+                    check(produced.get(src, False) == want, "MI-21 a response acts exactly when every check passes",
+                          (inp["kind"], src, want, produced.get(src), [d for d in drafts if d["type"] != "ApprovalDelivered"]))
+            if inp["kind"] in ("cancel", "batch"):
+                check(not st["pending"], "MI-21 no approval outlives the tightening or version that cancelled it", st["pending"])
+            check(proposal_route(st["pending"], rng.choice(sorted(REDUCING))) == "handed",
+                  "MI-23 no exit waits on an approval", st["pending"])
+            check((proposal_route(st["pending"], "open") == "awaiting_approval") == bool(own["pending"]),
+                  "MI-25 a risk-adding proposal waits exactly while an approval is pending", (st["pending"], own["pending"]))
+        journal.append({"type": "ClockAdvanced", "clock": ts(own["clock"] + 10 ** 6)})
+        escalation_apply(st, journal[-1])
+        final = escalation_step(st, {"kind": "tick", "at": journal[-1]["clock"]}, ctx)
+        for d in final:
+            escalation_apply(st, d)
+        journal += final
+        for a in bound_of:
+            state = "start"
+            for e in (e for e in journal if e.get("approval") == a):
+                if e["type"] == "ApprovalRequested":
+                    nxt = "open" if state == "start" else None
+                else:
+                    nxt = TABLE.get((state, transition_label(e)))
+                check(nxt is not None, "MI-21 every move is in the approval transition table", (a, state, e))
+                state = nxt or state
+            check(state == "done", "MI-21 every approval ends in exactly one terminal event", (a, state))
+        replay = escalation_fold(journal, ts(ESC_T0))
+        check(replay["pending"] == st["pending"] and replay["used"] == st["used"] and replay["policy"] == st["policy"],
+              "MI-21 replay folds to the same approvals", None)
+
+def run_policy_quorum(bound, script):
+    """One approval through `script`, a list of ("policy", independent, ceiling) and ("grant", responder) moves, all
+    with fresh valid step-up and inside the deadline. Returns the model's results and the oracle's, move by move."""
+    ctx = {"approvers": {"u1", "u2"}, "author": "u1", "environment": "paper", "timeout_s": 600,
+           "inbox": 1, "push_channels": [], "quiet_hours": None}
+    st = escalation_fold([], ts(ESC_T0))
+    for d in escalation_step(st, {"kind": "ask", "approval": "ap1", "bound": bound}, ctx):
+        escalation_apply(st, d)
+    content_hash = next(iter(st["pending"].values()))["content_hash"]
+    policy, grants, open_, got, want = {"independent": False, "ceiling": None}, set(), True, [], []
+    for i, move in enumerate(script):
+        if move[0] == "policy":
+            escalation_apply(st, {"type": "PolicyChanged", "independent_approval_required": move[1],
+                                  "two_approver_above_usd": move[2], "clock": ts(ESC_T0)})
+            policy = {"independent": move[1], "ceiling": move[2]}
+            continue
+        who = move[1]
+        resp = {"source": f"ctl{i}", "approval": "ap1", "actor_kind": "user", "responder": who, "verdict": "approved",
+                "content_hash": content_hash, "submitted_at": ts(ESC_T0),
+                "step_up": {"assertion": f"q{i}", "authenticated_at": ts(ESC_T0), "method": "cli_confirm"}}
+        now = {"mandate_version": bound["mandate_version"], "mode": "normal", "instrument_restricted": False,
+               "in_working_universe": True, "classification": {"decision": "ask", "by": bound["decided_by"]},
+               "dry_run": {"verdict": "allow", "reason": None}, "mark": bound["reference_mark"]["price"]}
+        drafts = escalation_step(st, {"kind": "response", "response": resp, "now": now}, ctx)
+        for d in drafts:
+            escalation_apply(st, d)
+        got.append(next(d["result"] for d in drafts if d["type"] == "ApprovalResponded"))
+        need, independent = own_quorum(bound, policy)
+        if not open_:
+            want.append("refused")
+        elif who in grants or (independent and who == "u1"):
+            want.append("refused")
+        else:
+            grants.add(who)
+            quorate = len([g for g in grants if not (independent and g == "u1")]) >= need
+            want.append("admitted" if quorate else "counted")
+            open_ = not quorate
+    return got, want
+
+def fuzz_policy_quorum(n):
+    """MI-24 and DEC-173 item 13: check 7 takes the stricter of the bound requirement and the workspace policy overlay
+    current at the response, so no `PolicyChanged` between request and response loosens a pending approval. The oracle
+    keeps its own record of the policy and its own grant set; the pinned scripts are the review's three cases."""
+    base_bound = {"instrument": base.ABC, "asset_class": "us_equity", "side": "buy", "qty": "3", "limit_price": "101",
+                  "purpose": "open", "mandate_version": "sha256:v1", "decided_by": "default", "combined_score": "0.7",
+                  "reference_mark": {"price": "101", "seq": 1}, "timeout_s": 600}
+    pinned = [
+        ("maker-checker turned on while pending binds it, and the author's counted grant stops counting",
+         dict(base_bound, approvers_required=2, independent_required=False),
+         [("grant", "u1"), ("policy", True, None), ("grant", "u2")], ["counted", "counted"]),
+        ("a lowered ceiling while pending raises the count to two",
+         dict(base_bound, approvers_required=1, independent_required=False),
+         [("policy", False, "101"), ("grant", "u1")], ["counted"]),
+        ("a policy loosened while pending leaves the bound requirement in force",
+         dict(base_bound, approvers_required=2, independent_required=True),
+         [("policy", False, None), ("grant", "u1"), ("grant", "u2")], ["refused", "counted"]),
+    ]
+    for title, bound, script, want in pinned:
+        got, oracle = run_policy_quorum(bound, script)
+        check(got == want == oracle, f"DEC-173 item 13 {title}", (got, want, oracle))
+    for _ in range(n):
+        bound = dict(base_bound, qty=rng.choice(["1", "3", "0.25", "12"]), limit_price=rng.choice(["99.5", "101", "43000"]),
+                     approvers_required=rng.choice([1, 2]), independent_required=rng.random() < 0.4)
+        script = [("policy", rng.random() < 0.5, rng.choice(POLICY_CEILINGS)) if rng.random() < 0.4
+                  else ("grant", rng.choice(["u1", "u1", "u2"])) for _ in range(rng.randint(1, 6))]
+        got, want = run_policy_quorum(bound, script)
+        check(got == want, "MI-24 check 7 never loosens a pending approval under a policy change", (bound, script, got, want))
+
+def fuzz_drift(n):
+    """MI-22's drift band against a scaled-integer oracle, with the exact band edge and one unit either side."""
+    for _ in range(n):
+        cls = rng.choice(["us_equity", "crypto"])
+        m_req = rng.choice(["100", "250.5", "43210.25", "0.5", "7", "19.99"])
+        m_now = rand_mark(m_req, cls) if rng.random() < 0.95 else None
+        check(within_drift(m_req, m_now, cls) == own_drift_ok(m_req, m_now, cls), "MI-22 drift is inside the band exactly as the integers say",
+              (m_req, m_now, cls))
+    for cls, m_req, inside, outside in [("us_equity", "100", ["101", "99"], ["101.0001", "98.9999"]),
+                                        ("crypto", "100", ["102", "98"], ["102.0001", "97.9999"])]:
+        for m in inside:
+            check(within_drift(m_req, m, cls), "MI-22 a move exactly at the band is inside", (cls, m))
+        for m in outside:
+            check(not within_drift(m_req, m, cls), "MI-22 one unit beyond the band is outside", (cls, m))
+
+def fuzz_ask_budget(n):
+    """MI-25: the oracle counts asks per America/New_York day from integer instants, across both 2026 DST changes and the
+    hours where the UTC and New York dates differ, with its own skip and timeout windows."""
+    days = [datetime(2026, 3, 8, 12, tzinfo=NYC), datetime(2026, 11, 1, 12, tzinfo=NYC), datetime(2026, 9, 22, 12, tzinfo=NYC)]
+    for _ in range(n):
+        noon = int(rng.choice(days).timestamp())
+        evs = []
+        for _ in range(rng.randint(0, 24)):
+            t = noon + rng.randint(-14 * 3600, 11 * 3600 + 3599)
+            kind = rng.choices(["requested", "owner_skipped", "timed_out", "version_applied"], [8, 2, 2, 1])[0]
+            evs.append({"event": kind, "at_s": t, "instrument": rng.choice(["A", "B"]), "timeout_s": rng.choice([30, 300, 600])})
+        evs.sort(key=lambda e: e["at_s"])
+        last = evs[-1]["at_s"] if evs else noon
+        timeouts = [e for e in evs if e["event"] == "timed_out"]
+        q = rng.choice([last, last + 1, noon + 11 * 3600 + 3599] + [e["at_s"] + e["timeout_s"] + rng.choice([-1, 0]) for e in timeouts])
+        q = max(q, last)
+        inst = rng.choice(["A", "B"])
+        day = datetime.fromtimestamp(q, NYC).date()
+        same = lambda e: datetime.fromtimestamp(e["at_s"], NYC).date() == day
+        asked = len([e for e in evs if e["event"] == "requested" and same(e)])
+        skipped = False
+        for e in evs:
+            if e["event"] == "owner_skipped" and e["instrument"] == inst and same(e):
+                skipped = True
+            if e["event"] == "version_applied":
+                skipped = False
+        recent = any(e["event"] == "timed_out" and e["instrument"] == inst and e["at_s"] <= q < e["at_s"] + e["timeout_s"] for e in evs)
+        want = "budget" if asked >= 10 else "skipped_today" if skipped else "recent_timeout" if recent else None
+        ledger = [{"event": e["event"], "at": ts(e["at_s"]), "instrument": e["instrument"], "timeout_s": e["timeout_s"]} for e in evs]
+        got = ask_permit(ledger, inst, ts(q))
+        check(got == want, "MI-25 the ask budget and suppression windows", (want, got, ts(q), [(e["event"], ts(e["at_s"])) for e in evs]))
+
+def fuzz_quiet_hours(n):
+    """MI-25: quiet hours suppress a push inside [start, end) New York wall time and never the inbox. The oracle walks the
+    window minute by minute; the pinned instants are 23:00 and 07:00 in both DST states under 23:00 to 07:00."""
+    for winter, summer in [(datetime(2026, 1, 15, 23, 0, tzinfo=NYC), datetime(2026, 7, 15, 23, 0, tzinfo=NYC)),
+                           (datetime(2026, 1, 15, 7, 0, tzinfo=NYC), datetime(2026, 7, 15, 7, 0, tzinfo=NYC))]:
+        for at in (winter, summer):
+            want = "suppressed_quiet_hours" if at.hour == 23 else "delivered"
+            check(deliver_now("push", {"start": "23:00", "end": "07:00"}, ts(int(at.timestamp()))) == want,
+                  "MI-25 quiet hours are New York wall time in both DST states", (at, want))
+            check(deliver_now("cli_inbox", {"start": "23:00", "end": "07:00"}, ts(int(at.timestamp()))) == "delivered",
+                  "MI-25 quiet hours never suppress the inbox", at)
+    for _ in range(n):
+        s, e = rng.randrange(1440), rng.randrange(1440)
+        if s == e:
+            continue
+        window, mnt = set(), s
+        while mnt != e:
+            window.add(mnt)
+            mnt = (mnt + 1) % 1440
+        qh = {"start": f"{s // 60:02d}:{s % 60:02d}", "end": f"{e // 60:02d}:{e % 60:02d}"}
+        at = ESC_T0 + rng.randrange(365 * 86400)
+        local = datetime.fromtimestamp(at, NYC)
+        for channel in ("push", "cli_inbox"):
+            want = "suppressed_quiet_hours" if channel == "push" and local.hour * 60 + local.minute in window else "delivered"
+            check(deliver_now(channel, qh, ts(at)) == want, "MI-25 quiet hours suppress exactly the pushes inside the window",
+                  (channel, qh, local))
+
+def fuzz_owner_controls(n):
+    """MI-23: pause always applies; resume, stop, and acknowledge are judged when processed and an owner exit when
+    committed; a refused owner exit loses only its privilege and is still routed; a kill switch with any evidence, or
+    none, stops and flattens every position, selling equities outside the session only with valid evidence."""
+    fresh = itertools.count(1)
+    for _ in range(n):
+        env = "paper" if rng.random() < 0.85 else "live"
+        committed = ESC_T0 + rng.randrange(86400)
+        processed = committed + rng.choice([0, 10, 150, 299, 300, 301, 3600])
+        seen = [f"old{i}" for i in range(rng.randint(0, 2))]
+        ev = rand_evidence(committed, seen, fresh)
+        used = set(seen)
+        kind = rng.choice(["pause", "resume", "stop", "acknowledge", "owner_exit"])
+        got = owner_command(kind, wire(ev), ts(committed), ts(processed), env, used)
+        at = committed if kind == "owner_exit" else processed
+        want = kind == "pause" or own_step_up_ok(ev, at, env, seen)
+        check((got["result"] == "apply") == want, "MI-23 each owner control is judged at its own moment", (kind, ev, committed, processed, env, got))
+        cls = rng.choice(["us_equity", "crypto"])
+        session = rng.choice(["regular", "pre_market", "after_hours"]) if cls == "us_equity" else "crypto"
+        mode = rng.choice(["normal", "exits_only", "paused"])
+        confirmed = rng.random() < 0.6
+        auth = owner_command("owner_exit", wire(ev), ts(committed), ts(processed), env, used)
+        prop = {"purpose": "owner_exit", "instrument": base.ABC if cls == "us_equity" else base.BTC, "qty": "1", "limit_price": "100"}
+        out = owner_exit_order(base.swing, {}, prop, mode, session, cls, confirmed, auth)
+        privileged = confirmed and own_step_up_ok(ev, committed, env, seen)
+        want_verdict = ("hold" if mode == "paused" else
+                        "defer" if cls == "us_equity" and session != "regular" and not privileged else "allow")
+        check(out["verdict"] == want_verdict, "MI-23 a refused owner exit loses only its privilege and is still routed",
+              (mode, session, cls, confirmed, ev, out))
+        positions = [{"agent": "a1", "instrument": f"E{i}", "asset_class": "us_equity", "qty": "2"} for i in range(rng.randint(0, 2))]
+        positions += [{"agent": "a1", "instrument": "BTC", "asset_class": "crypto", "qty": "0.5"}] * (rng.random() < 0.5)
+        positions += [{"agent": "a2", "instrument": "OTHER", "asset_class": "us_equity", "qty": "4"}]
+        ks_session = rng.choice(["regular", "pre_market", "after_hours"])
+        inp = {"agent": "a1", "owner_confirmed_bid": confirmed, "confirmed_bid": "100", "max_exit_offset": "0.02",
+               "owner_floor_price": None, "session": ks_session, "open_orders": [], "agent_positions": positions}
+        ks = owner_kill_switch(inp, wire(ev), ts(committed), env, used)
+        mine = sorted(p["instrument"] for p in positions if p["agent"] == "a1")
+        sold = {s["instrument"] for s in ks["sells"]}
+        waiting = {s["instrument"] for s in ks["deferred_sells"]}
+        check(ks["mode_applied_first"] == "stopped", "MI-23 a kill switch with any evidence stops the agent", (ev, ks))
+        check(sorted(sold | waiting) == mine and not sold & waiting, "MI-23 a kill switch flattens every position of its agent",
+              (ev, positions, ks))
+        ks_privileged = confirmed and own_step_up_ok(ev, committed, env, seen)
+        for p in positions:
+            if p["agent"] == "a1" and p["asset_class"] == "us_equity" and ks_session != "regular":
+                check((p["instrument"] in sold) == ks_privileged,
+                      "MI-23 only valid evidence as committed sells equities outside the session", (ev, ks_session, confirmed, ks))
+
+def fuzz_content(n):
+    """§6.4 content and rule 6: exactly the nine keys; the trigger's rule is the owner's confirmed rule verbatim, or
+    null for the default and the admission ceiling; every bound field moves the hash; a notification carries no
+    sentinel of the request."""
+    m = copy.deepcopy(base.swing)
+    for _ in range(n):
+        m["autonomy"]["rules"] = [rand_rule(i) for i in range(rng.randint(0, 3))]
+        labels = [f"rule:{r['id']}" for r in m["autonomy"]["rules"]] + ["default", "admission_ceiling"]
+        req = {"approval": "01J" + "SENTINELAPPROVAL"[:10].upper() + "0" * 13, "instrument": "SENTINELINSTR", "asset_class": "us_equity",
+               "side": "buy", "qty": "777.77", "limit_price": "31415.9", "purpose": "open", "mandate_version": "sha256:sentinelversion",
+               "decided_by": rng.choice(labels), "combined_score": "0.4242", "reference_mark": {"price": "27182.8", "seq": 4242},
+               "deadline": "2026-09-22T14:10:00.000000000Z", "approvers_required": rng.choice([1, 2]), "independent_required": rng.random() < 0.5}
+        figures = {"agent_equity": "5000", "position_usd_after": "123456.7", "gross_usd_after": "234567.8", "bought_today_usd": "345678.9",
+                   "drawdown": "0.0123", "daily_pnl_fraction": "-0.0456"}
+        content = approval_content(m, req, figures)
+        check(tuple(content) == CONTENT_KEYS, "§6.4 the content object has exactly the nine keys", list(content))
+        rule = next((r for r in m["autonomy"]["rules"] if f"rule:{r['id']}" == req["decided_by"]), None)
+        check(content["trigger"]["rule"] == rule, "§6.4 the trigger shows the owner's confirmed rule verbatim", (req["decided_by"], content["trigger"]))
+        note = canon(approval_notification(req))
+        check(set(approval_notification(req)) == {"subject", "text"} and not any(
+              s in note for s in ("SENTINEL" + "INSTR", "777.77", "31415.9", "sentinelversion", "0.4242", "27182.8", "2026-09-22")),
+              "rule 6 a notification carries only the opaque id and generic text", note)
+        field = rng.choice(["instrument", "qty", "limit_price", "purpose", "mandate_version", "decided_by", "reference_mark", "approvers_required"])
+        ctx = {"timeout_s": 600, "inbox": 1, "push_channels": [], "quiet_hours": None}
+        st = escalation_fold([], ts(ESC_T0))
+        bound = {k: v for k, v in req.items() if k not in ("approval", "deadline")}
+        other = dict(bound, **{field: {"instrument": "X2", "qty": "1", "limit_price": "2", "purpose": "increase", "mandate_version": "sha256:v9",
+                                       "decided_by": "rule:zz", "reference_mark": None, "approvers_required": 3}[field]})
+        h = [escalation_step(st, {"kind": "ask", "approval": "ap1", "bound": b}, ctx)[0]["content_hash"] for b in (bound, other)]
+        check(h[0] != h[1], "§6.4 every bound field moves the content hash", field)
+
 if __name__ == "__main__":
     fuzz_ladder_precision(300)
     fuzz_risk(400)
@@ -642,7 +1148,14 @@ if __name__ == "__main__":
     fuzz_pinning(400)
     fuzz_gate_universe(200)
     fuzz_autonomy(3000)
-    from collections import Counter
+    fuzz_escalation(3000)
+    fuzz_policy_quorum(1000)
+    fuzz_drift(600)
+    fuzz_ask_budget(600)
+    fuzz_quiet_hours(600)
+    fuzz_owner_controls(600)
+    fuzz_content(200)
     print("failures:", len(FAIL), Counter(f[0] for f in FAIL))
     for name, ctx in FAIL[:3]:
         print("EXAMPLE", name, str(ctx)[:1500])
+    sys.exit(1 if FAIL else 0)
