@@ -158,7 +158,6 @@ proptest! {
     /// and report `price_outside_collar` before the cap at check 2 was ever reached, so the
     /// property would fail on a correct gate once E6-8 lands.
     #[test]
-    #[ignore = "pending E6-3"]
     fn position_cap_is_the_lower_of_both_bounds(
         equity in 1_000_u32..40_000,
         shares in 1_u32..30,
@@ -197,7 +196,6 @@ proptest! {
     /// Gross exposure is bounded by equity as well as by the configured limit. As above, the
     /// notional varies through the quantity so the collar cannot fire first.
     #[test]
-    #[ignore = "pending E6-3"]
     fn gross_exposure_is_bounded_by_equity(
         equity in 500_u32..5_000,
         held in 0_u32..4_000,
@@ -230,7 +228,6 @@ proptest! {
 
     /// Every limit comparison is strictly greater, so a value exactly at a limit passes (MC-G02).
     #[test]
-    #[ignore = "pending E6-3"]
     fn a_value_exactly_at_a_limit_passes(order in 1_u32..=1_000) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -245,7 +242,6 @@ proptest! {
 
     /// A stricter mode is never more permissive: raising the mode never turns a deny into an allow.
     #[test]
-    #[ignore = "pending E6-3"]
     fn a_stricter_mode_is_never_more_permissive(order in whole_dollars()) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -265,7 +261,6 @@ proptest! {
 
     /// The re-entry cooldown covers every instrument of the group, not the proposed one alone.
     #[test]
-    #[ignore = "pending E6-3"]
     fn cooldown_covers_the_whole_group(elapsed_s in 0_i64..7_200) {
         let mut s = Scenario::allowing();
         let exit_at = common::at("2026-09-21T14:00:00Z");
@@ -292,7 +287,6 @@ proptest! {
     /// Every decision lists all eight checks, in §9.1 order, with the ones after a failure marked
     /// `NotReached`.
     #[test]
-    #[ignore = "pending E6-3"]
     fn every_decision_lists_the_checks_it_reached(order in whole_dollars()) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -337,7 +331,6 @@ proptest! {
 
     /// The order-to-fill ratio is compared without dividing, and only after enough orders.
     #[test]
-    #[ignore = "pending E6-8"]
     fn the_ratio_is_compared_without_dividing(orders in 0_u32..80, fills in 0_u32..20) {
         let mut s = Scenario::allowing();
         s.conduct.orders_today_per_instrument.insert(asset(INSTRUMENT_3), orders);
@@ -430,7 +423,6 @@ proptest! {
 
     /// MI-8: identical inputs give identical decisions, check list included.
     #[test]
-    #[ignore = "pending E6-3"]
     fn mi8_identical_inputs_give_identical_decisions(order in whole_dollars()) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -444,7 +436,6 @@ proptest! {
     /// A shadow ledger the property accumulates itself: no sequence of allowed openings walks past
     /// a limit, however it is split.
     #[test]
-    #[ignore = "pending E6-3"]
     fn no_allowed_sequence_ever_exceeds_a_limit(
         share_counts in prop::collection::vec(1_u32..6, 1..8),
     ) {
@@ -508,7 +499,6 @@ proptest! {
 proptest! {
     /// §9.1: whichever checks would fail, the earliest one decides the reported code.
     #[test]
-    #[ignore = "pending E6-3"]
     fn the_first_failing_check_decides(
         outside_universe in any::<bool>(),
         oversized in any::<bool>(),
@@ -550,7 +540,6 @@ proptest! {
 
     /// Nothing opens outside the working universe, whatever the other inputs say.
     #[test]
-    #[ignore = "pending E6-3"]
     fn an_opening_needs_the_working_universe(inside in any::<bool>(), shares in 1_u32..5) {
         let mut s = Scenario::allowing();
         s.universe = if inside {
@@ -572,7 +561,6 @@ proptest! {
     /// seconds after" includes its last instant, so a fill exactly 60 s ago still blocks (DEC-163
     /// item 3).
     #[test]
-    #[ignore = "pending E6-8"]
     fn only_an_opposite_side_fill_starts_the_interval(
         opposite in any::<bool>(),
         elapsed in 0_i64..120,
@@ -597,7 +585,6 @@ proptest! {
 
     /// A cancel that precedes a risk-reducing order is never denied, whatever the resting time.
     #[test]
-    #[ignore = "pending E6-8"]
     fn a_cancel_that_precedes_a_reduction_is_never_denied(elapsed in 0_i64..10) {
         let config = common::test_default_config();
         let order = common::open_order(mandate_risk::AgentId(1), INSTRUMENT_3, "100");
@@ -622,7 +609,6 @@ proptest! {
 
     /// The surveillance report flags every threshold it crosses, and none it does not.
     #[test]
-    #[ignore = "pending E6-8"]
     fn the_report_flags_every_threshold_it_crosses(orders in 0_u32..60, fills in 0_u32..10) {
         let mut input = mandate_risk::SurveillanceInput::default();
         input.orders.insert(
