@@ -21,13 +21,10 @@ for (const section of TOP) {
 
     const gap = await current.evaluate((el) => {
       const range = document.createRange();
-      range.selectNodeContents(el);
+      range.selectNodeContents(el.firstChild!);
       const text = range.getBoundingClientRect();
-      const box = el.getBoundingClientRect();
-      const after = getComputedStyle(el, "::after");
-      const left = box.left + parseFloat(after.left);
-      const right = box.right - parseFloat(after.right);
-      return { start: Math.abs(left - text.left), end: Math.abs(right - text.right) };
+      const line = el.querySelector("[data-slot=tab-underline]")!.getBoundingClientRect();
+      return { start: Math.abs(line.left - text.left), end: Math.abs(line.right - text.right) };
     });
     expect(gap.start).toBeLessThanOrEqual(1);
     expect(gap.end).toBeLessThanOrEqual(1);

@@ -97,6 +97,7 @@ function EquityHero({
   rangeLabel,
   empty,
   footer,
+  pulse,
 }: {
   slot: string;
   titleId: string;
@@ -114,12 +115,14 @@ function EquityHero({
   rangeLabel: string;
   empty?: ReactNode;
   footer: ReactNode;
+  pulse: boolean;
 }) {
   const [scrub, setScrub] = useState<ScrubPoint>(null);
   const [levelsOpen, setLevelsOpen] = useState(false);
   const legendId = useId();
   const onScrub = useCallback((p: ScrubPoint) => setScrub(p), []);
-  const series = useMemo<ChartSeries>(() => ({ kind: "area", tone, points }), [points, tone]);
+  const trend = direction(((points.at(-1)?.value ?? 0) - (points[0]?.value ?? 0)).toFixed(2));
+  const series = useMemo<ChartSeries>(() => ({ kind: "area", tone, points, trend }), [points, tone, trend]);
   const now = points[points.length - 1];
   const shown = scrub ?? now ?? null;
   const base = points[0]?.value ?? 0;
@@ -142,7 +145,7 @@ function EquityHero({
         {points.length >= 2 && shown ? (
           // The symbol never takes a line of its own (DEC-210): it keeps the pill's line and baseline at every width, and a narrow pill wraps inside itself instead.
           <p className="flex items-baseline gap-2 pt-1 text-sm">
-            <span data-slot="hero-change" data-tone={changeTone} className={cn("inline-flex w-fit min-w-0 max-w-full flex-wrap items-baseline gap-x-2 rounded-full px-3 py-1 font-medium", PILL[changeTone])}>
+            <span data-slot="hero-change" data-tone={changeTone} className={cn("inline-flex w-fit min-w-0 max-w-full flex-wrap items-baseline gap-x-2 rounded-lg px-3 py-1 font-medium", PILL[changeTone])}>
               <SignedMoney value={changeText} instant={scrubbing} />
               {pct ? <span className="font-mono tabular">({pct})</span> : null}
               <span className="text-muted-foreground tabular" data-slot="hero-when">
@@ -163,7 +166,8 @@ function EquityHero({
           levels={levels}
           axis={(levels?.length ?? 0) > 0}
           onScrub={onScrub}
-          height={tone === "account" ? 260 : 280}
+          pulse={pulse}
+          height={tone === "account" ? 340 : 300}
           phoneHeight={tone === "account" ? ACCOUNT_PHONE_HEIGHT : undefined}
           className="-mx-1"
         />
@@ -193,7 +197,7 @@ function EquityHero({
 }
 
 /**
- * The account as a volt line, on paper: every agent's equity together, plus what no agent
+ * The account as one line, on paper: every agent's equity together, plus what no agent
  * manages. The fixture holds that part flat, so the chart ends at the broker's figure and moves with
  * the agents.
  */
@@ -223,6 +227,7 @@ export function AccountEquityChart() {
       range={range}
       onRange={setRange}
       rangeLabel="Account equity range"
+      pulse={!stale}
       footer={
         <>
           <span>Simulated funds on paper.</span>
@@ -263,6 +268,7 @@ export function AgentEquityChart({ agent }: { agent: Agent }) {
       range={range}
       onRange={setRange}
       rangeLabel="Equity range"
+      pulse={!stale}
       empty={points.length < 2 ? <p className="rounded-lg bg-background px-4 py-6 text-sm text-muted-foreground">No equity history yet. It starts when the agent deploys.</p> : undefined}
       legend={drawn.length + offChart.length > 0 ? <LevelLegend levels={drawn} offChart={offChart} /> : undefined}
       footer={

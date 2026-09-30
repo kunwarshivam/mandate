@@ -14,7 +14,7 @@ export function ProvenanceBadge({ provenance, className }: { provenance: FieldPr
       data-slot="provenance-badge"
       data-provenance={provenance.provenance}
       className={cn(
-        "inline-flex h-6 w-fit shrink-0 items-center rounded-full px-2.5 text-caption whitespace-nowrap",
+        "inline-flex h-6 w-fit shrink-0 items-center rounded-md px-2.5 text-caption whitespace-nowrap",
         platform ? "border border-dashed border-foreground font-medium text-foreground" : "border border-border text-muted-foreground",
         className,
       )}

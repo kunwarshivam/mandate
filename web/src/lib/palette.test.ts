@@ -6,7 +6,7 @@ import { apcaLc, passesApca } from "@/test/apca";
 import { MARKERS } from "../../scripts/no-apca.mjs";
 import { checkCvd, checkPalette, measure } from "./contrast";
 import { CVD_DISTINCT, CVD_VISIONS, HATCH_MAX, HATCH_MIN, KUMO_PAIRS, type KumoScope, PAIRS, STOP_CONTRAST } from "./contrast-pairs";
-import { LIGHTNESS, NEUTRAL_HUE, PALETTE, PALETTE_DARK, PALETTES, RAMPS, type RampId, STEPS, type Step, TOKEN_NAMES, type ThemeName, type TokenName, VOLT_HUE } from "./palette";
+import { LIGHTNESS, NEUTRAL_HUE, PALETTE, PALETTE_DARK, PALETTES, RAMPS, type RampId, STEPS, type Step, TOKEN_NAMES, type ThemeName, type TokenName, AZURE_HUE, SUN_HUE } from "./palette";
 
 const SRC = resolve(process.cwd(), "src");
 const css = readFileSync(join(SRC, "app/globals.css"), "utf8");
@@ -70,14 +70,20 @@ const SCOPES: Record<ThemeName, Record<KumoScope, Record<string, string>>> = { l
 const hueDistance = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
 const rampOf = (ref: string) => ref.slice(0, ref.lastIndexOf("-")) as RampId;
 const stepOf = (ref: string) => Number(ref.slice(ref.lastIndexOf("-") + 1)) as Step;
-const CHROMATIC: RampId[] = ["volt", "green", "red", "amber", "cvd-teal", "cvd-rose", "cvd-orange", "crimson"];
+const CHROMATIC: RampId[] = ["azure", "sun", "teal", "sky", "green", "red", "amber", "cvd-teal", "cvd-rose", "cvd-orange", "crimson"];
 
-/** The only tokens that may carry volt: the mandate's and the account's accent roles, the text selection and the highlight. */
-const VOLT_TOKENS: TokenName[] = ["mandate", "mandate-soft", "mandate-strong", "mandate-marker", "mandate-edge", "lapis-soft", "lapis-line", "selection", "highlight"];
-/** Neon volt as a fill: the highlight in both themes and the selection in light, always under ink type. */
-const VIVID_FILLS: TokenName[] = ["highlight", "selection"];
-/** Volt that is saturated enough to shout: lines, marks and labels, never a surface. */
-const SATURATED_VOLT: TokenName[] = ["mandate-strong", "mandate-marker", "mandate-edge", "lapis-line"];
+/** The tokens that may carry azure: actions and links, the mandate's and the account's accent roles, the selection, and the first asset series. */
+const AZURE_TOKENS: TokenName[] = ["primary", "mandate", "mandate-soft", "mandate-strong", "mandate-marker", "mandate-edge", "lapis-line", "selection", "series-1"];
+/** In dark, the account's approval card and its quiet field are calm azure too; in light they are sun and ink. */
+const DARK_AZURE: TokenName[] = ["lapis-strong"];
+/** In dark, the mandate's fields are charcoal like the rest of the surfaces; azure stays in their marks. */
+const DARK_CHARCOAL: TokenName[] = ["mandate", "mandate-soft"];
+/** Sun: the highlight, the second asset series and, in light, the approval card. Dark mode's approval card is a calm azure field. */
+const SUN_TOKENS: Record<ThemeName, TokenName[]> = { light: ["highlight", "lapis-soft", "series-2"], dark: ["highlight", "series-2"] };
+/** Sun as a fill, always under ink type. */
+const SUN_FILLS: Record<ThemeName, TokenName[]> = { light: ["highlight", "lapis-soft"], dark: ["highlight"] };
+/** Azure saturated enough to shout: lines, marks and labels, never a surface. */
+const SATURATED_AZURE: TokenName[] = ["mandate-strong", "mandate-marker", "mandate-edge", "lapis-line"];
 
 describe("ramps", () => {
   it.each(Object.values(RAMPS).map((r) => [r.id, r] as const))("%s has thirteen in-gamut steps at one hue on the shared lightness curve", (_, ramp) => {
@@ -104,7 +110,7 @@ describe("ramps", () => {
     expect(cs[cs.length - 1]).toBeLessThan(cs[peak]);
   });
 
-  it("tints paper and ink cool (hue 255), both between C 0.003 and 0.01: a cool white page", () => {
+  it("tints paper and ink cool (hue 255): a cool white page, and a midnight under dark mode", () => {
     expect(RAMPS.paper.hue).toBe(NEUTRAL_HUE);
     expect(RAMPS.ink.hue).toBe(NEUTRAL_HUE);
     expect(NEUTRAL_HUE).toBe(255);
@@ -112,24 +118,39 @@ describe("ramps", () => {
       for (const s of STEPS) {
         const { c } = parseOklch(RAMPS[id].steps[s]);
         expect(c, `${id}-${s}`).toBeGreaterThanOrEqual(0.003);
-        expect(c, `${id}-${s}`).toBeLessThanOrEqual(0.01);
+        expect(c, `${id}-${s}`).toBeLessThanOrEqual(id === "paper" || s < 850 ? 0.014 : 0.022);
       }
     }
   });
 
-  it("keeps volt a volt: the yellow-green of #ccff00, and at least 30 degrees from the gain's green", () => {
-    expect(RAMPS.volt.hue).toBe(VOLT_HUE);
-    expect(VOLT_HUE).toBeGreaterThanOrEqual(115);
-    expect(VOLT_HUE).toBeLessThanOrEqual(125);
-    expect(hueDistance(VOLT_HUE, RAMPS.green.hue)).toBeGreaterThanOrEqual(30);
-    expect(hueDistance(VOLT_HUE, RAMPS.amber.hue)).toBeGreaterThanOrEqual(30);
+  it("sets azure, gain and loss as a near-triad: each pair 100 to 140 degrees apart", () => {
+    expect(RAMPS.azure.hue).toBe(AZURE_HUE);
+    expect(AZURE_HUE).toBeGreaterThanOrEqual(250);
+    expect(AZURE_HUE).toBeLessThanOrEqual(262);
+    for (const [a, b] of [[AZURE_HUE, RAMPS.green.hue], [AZURE_HUE, RAMPS.red.hue], [RAMPS.green.hue, RAMPS.red.hue]]) {
+      expect(hueDistance(a, b)).toBeGreaterThanOrEqual(100);
+      expect(hueDistance(a, b)).toBeLessThanOrEqual(140);
+    }
   });
 
-  it("makes volt neon from 200 to 400, deep enough from 500 to 700 for a line or a label, and quiet at 100, 850 and 900, where it is a field", () => {
-    const c = (s: Step) => parseOklch(RAMPS.volt.steps[s]).c;
-    for (const s of [200, 300, 400] as const) expect(c(s), `volt-${s}`).toBeGreaterThanOrEqual(0.17);
-    for (const s of [500, 600, 700] as const) expect(c(s), `volt-${s}`).toBeGreaterThanOrEqual(0.1);
-    for (const s of [100, 850, 900] as const) expect(c(s), `volt-${s}`).toBeLessThanOrEqual(0.06);
+  it("sets sun near azure's complement, and clear of the gain's green", () => {
+    expect(RAMPS.sun.hue).toBe(SUN_HUE);
+    expect(hueDistance(SUN_HUE, AZURE_HUE + 180)).toBeLessThanOrEqual(20);
+    expect(hueDistance(SUN_HUE, RAMPS.green.hue)).toBeGreaterThanOrEqual(45);
+  });
+
+  it("draws the asset series from azure's cool side and sun, never from the gain or loss hue", () => {
+    for (const id of ["teal", "sky"] as const) {
+      expect(hueDistance(RAMPS[id].hue, AZURE_HUE)).toBeLessThanOrEqual(70);
+      expect(hueDistance(RAMPS[id].hue, RAMPS.green.hue)).toBeGreaterThanOrEqual(40);
+      expect(hueDistance(RAMPS[id].hue, RAMPS.red.hue)).toBeGreaterThanOrEqual(90);
+    }
+  });
+
+  it("makes azure vivid from 500 to 700, for a line, a link or a label, and quiet at 100, 850 and 900, where it is a field", () => {
+    const c = (s: Step) => parseOklch(RAMPS.azure.steps[s]).c;
+    for (const s of [500, 600, 700] as const) expect(c(s), `azure-${s}`).toBeGreaterThanOrEqual(0.15);
+    for (const s of [100, 850, 900] as const) expect(c(s), `azure-${s}`).toBeLessThanOrEqual(0.08);
   });
 
   it("matches gain and loss in lightness and chroma, differing only in hue", () => {
@@ -143,14 +164,14 @@ describe("ramps", () => {
   });
 
   /**
-   * The gain was Okabe-Ito blue (245) until the accent became volt (266): 21 degrees apart,
-   * a blue gain and volt text merge under red-green deficiency. Teal still reads as up (blues
-   * and greens do, for people with CVD) and stays clear of volt, orange and raspberry.
+   * The gain was Okabe-Ito blue (245) until the accent was volt: a blue gain and accent text merge
+   * under red-green deficiency. With an azure brand that holds again, so the gain stays teal: it
+   * still reads as up (blues and greens do, for people with CVD) and stays clear of orange and raspberry.
    */
   it("keeps the colour-blind alternates at teal (between Okabe-Ito sky blue and bluish green), reddish purple and orange", () => {
     expect(RAMPS["cvd-teal"].hue).toBeGreaterThanOrEqual(200);
     expect(RAMPS["cvd-teal"].hue).toBeLessThanOrEqual(215);
-    expect(hueDistance(RAMPS["cvd-teal"].hue, VOLT_HUE)).toBeGreaterThanOrEqual(50);
+    expect(hueDistance(RAMPS["cvd-teal"].hue, AZURE_HUE)).toBeGreaterThanOrEqual(50);
     expect(RAMPS["cvd-rose"].hue).toBeGreaterThanOrEqual(340);
     expect(RAMPS["cvd-rose"].hue).toBeLessThanOrEqual(355);
     expect(RAMPS["cvd-orange"].hue).toBeGreaterThanOrEqual(45);
@@ -158,7 +179,7 @@ describe("ramps", () => {
   });
 });
 
-describe.each(THEMES)("Ink and Volt, %s", (theme) => {
+describe.each(THEMES)("Azure and Sun, %s", (theme) => {
   const palette = PALETTES[theme];
   const t = palette.tokens;
   const refs = palette.refs;
@@ -171,34 +192,37 @@ describe.each(THEMES)("Ink and Volt, %s", (theme) => {
     }
   });
 
-  it("draws the surfaces, the type, the primary action, the account fill and the Stop control from paper and ink", () => {
-    for (const n of ["background", "card", "muted", "border", "foreground", "muted-foreground", "primary", "primary-foreground", "lapis", "lapis-foreground", "ink", "ink-foreground", "ink-line"] as const) {
+  it("draws the surfaces, the type, the account fill and the Stop control from paper and ink, and the primary action from azure", () => {
+    for (const n of ["background", "card", "muted", "border", "foreground", "muted-foreground", "primary-foreground", "lapis", "lapis-foreground", "ink", "ink-foreground", "ink-line"] as const) {
       expect(["paper", "ink"], n).toContain(rampOf(refs[n]));
     }
     const surface = theme === "light" ? "paper" : "ink";
     for (const n of ["background", "card", "muted", "border"] as const) expect(rampOf(refs[n]), n).toBe(surface);
-    expect(refs.primary).toBe(refs.lapis);
-    expect(refs.primary).toBe(refs.ink);
-    expect(refs.primary).toBe(refs.foreground);
+    expect(rampOf(refs.primary)).toBe("azure");
+    expect(refs.lapis).toBe(refs.ink);
+    expect(refs.lapis).toBe(refs.foreground);
+    if (theme === "dark") expect(rampOf(refs["lapis-soft"]), "the account's field is a raised charcoal in dark, not navy").toBe("ink");
   });
 
-  it("gives volt only to the volt tokens", () => {
-    const accent = TOKEN_NAMES.filter((n) => rampOf(refs[n]) === "volt");
-    expect(accent.filter((n) => !VOLT_TOKENS.includes(n))).toEqual([]);
-    for (const n of VOLT_TOKENS) expect(rampOf(refs[n]), n).toBe("volt");
+  it("gives azure only to the azure tokens, and sun only to the sun tokens", () => {
+    const azure = TOKEN_NAMES.filter((n) => rampOf(refs[n]) === "azure");
+    expect(azure.filter((n) => !AZURE_TOKENS.includes(n) && !(theme === "dark" && DARK_AZURE.includes(n)))).toEqual([]);
+    for (const n of AZURE_TOKENS) expect(rampOf(refs[n]), n).toBe(theme === "dark" && DARK_CHARCOAL.includes(n) ? "ink" : "azure");
+    const sun = TOKEN_NAMES.filter((n) => rampOf(refs[n]) === "sun");
+    expect(sun.sort()).toEqual([...SUN_TOKENS[theme]].sort());
   });
 
-  it("carries no second volt: outside the volt tokens, nothing within 30 degrees of its hue is saturated", () => {
-    for (const n of TOKEN_NAMES.filter((n) => !VOLT_TOKENS.includes(n))) {
+  it("carries no second blue: outside the azure tokens, nothing within 20 degrees of azure is saturated", () => {
+    for (const n of TOKEN_NAMES.filter((n) => !AZURE_TOKENS.includes(n) && !DARK_AZURE.includes(n))) {
       const { c, h } = parseOklch(t[n].value);
-      expect(hueDistance(h, VOLT_HUE) < 30 && c > 0.02, `${n} ${t[n].value}`).toBe(false);
+      expect(hueDistance(h, AZURE_HUE) < 20 && c > 0.03, `${n} ${t[n].value}`).toBe(false);
     }
   });
 
-  it("never paints saturated volt as a surface: every volt background is a quiet tint, but for the vivid fills", () => {
+  it("never paints saturated azure as a surface: the mandate's fields are quiet tints", () => {
     const backgrounds = new Set(PAIRS.map((p) => p.bg));
-    expect(SATURATED_VOLT.filter((n) => backgrounds.has(n))).toEqual([]);
-    for (const n of VOLT_TOKENS.filter((n) => !SATURATED_VOLT.includes(n) && !VIVID_FILLS.includes(n))) {
+    expect(SATURATED_AZURE.filter((n) => backgrounds.has(n))).toEqual([]);
+    for (const n of ["mandate", "mandate-soft"] as const) {
       const { l, c } = parseOklch(t[n].value);
       if (theme === "light") expect(l, n).toBeGreaterThanOrEqual(0.9);
       else expect(l, n).toBeLessThanOrEqual(0.4);
@@ -206,19 +230,19 @@ describe.each(THEMES)("Ink and Volt, %s", (theme) => {
     }
   });
 
-  it("paints no Kumo surface, fill or tint in saturated volt, in any scope", () => {
-    const saturated = new Set(SATURATED_VOLT.map((n) => t[n].value));
+  it("paints no Kumo surface, fill or tint in saturated azure, in any scope", () => {
+    const saturated = new Set(SATURATED_AZURE.map((n) => t[n].value));
     const surfaces = /^color-kumo-(canvas|elevated|recessed|base|tint|overlay|control|fill|fill-hover|contrast|brand|brand-hover|badge-[a-z]+|banner-[a-z]+|[a-z]+-tint)$/;
     for (const [scope, values] of Object.entries(SCOPES[theme])) {
       for (const [role, value] of Object.entries(values)) if (surfaces.test(role)) expect(saturated.has(value), `${scope}: --${role}`).toBe(false);
     }
   });
 
-  it("puts only ink type on neon volt: the highlight and the selection carry the ink foreground at 7:1 or more", () => {
-    for (const n of VIVID_FILLS) {
-      const onIt = PAIRS.filter((p) => p.bg === n);
+  it("puts only ink type on the sun: the highlight carries the ink foreground at 7:1 or more; an azure ring may edge it", () => {
+    for (const n of SUN_FILLS[theme]) {
+      const onIt = PAIRS.filter((p) => p.bg === n && p.kind !== "mark");
       expect(onIt.length, n).toBeGreaterThan(0);
-      for (const p of onIt) expect(rampOf(refs[p.fg]), `${p.fg} on ${n}`).toBe(theme === "light" || n === "highlight" ? "ink" : "paper");
+      for (const p of onIt) expect(rampOf(refs[p.fg]), `${p.fg} on ${n}`).toBe("ink");
     }
     expect(contrastRatio(t["highlight-foreground"].value, t.highlight.value)).toBeGreaterThanOrEqual(STOP_CONTRAST);
   });
@@ -259,34 +283,36 @@ describe.each(THEMES)("Ink and Volt, %s", (theme) => {
   });
 });
 
-describe("Ink and Volt, the light theme's accent", () => {
+describe("Azure and Sun, the light theme's accent", () => {
   const refs = PALETTE.refs;
 
-  it("sets the mandate as a volt-100 field under volt-500 rules and markers, with volt-700 labels", () => {
-    expect(refs.mandate).toBe("volt-100");
-    expect(refs["mandate-edge"]).toBe("volt-500");
-    expect(refs["mandate-marker"]).toBe("volt-500");
-    expect(refs["mandate-strong"]).toBe("volt-700");
-    expect(refs["lapis-line"]).toBe("volt-500");
+  it("sets the mandate as an azure-200 field under azure-600 rules and markers, with azure-800 labels, and links in azure-600", () => {
+    expect(refs.mandate).toBe("azure-200");
+    expect(refs["mandate-edge"]).toBe("azure-600");
+    expect(refs["mandate-marker"]).toBe("azure-600");
+    expect(refs["mandate-strong"]).toBe("azure-800");
+    expect(refs["lapis-line"]).toBe("azure-600");
+    expect(refs.primary).toBe("azure-600");
   });
 
-  it("never sets volt text lighter than volt-700", () => {
-    const accentText = PAIRS.filter((p) => p.kind !== "mark" && rampOf(refs[p.fg]) === "volt");
+  it("never sets azure text lighter than azure-600", () => {
+    const accentText = PAIRS.filter((p) => p.kind !== "mark" && rampOf(refs[p.fg]) === "azure");
     expect(accentText.length).toBeGreaterThan(0);
-    for (const p of accentText) expect(stepOf(refs[p.fg]), `${p.fg} on ${p.bg}`).toBeGreaterThanOrEqual(700);
-    for (const n of VOLT_TOKENS.filter((n) => n.endsWith("-strong"))) expect(stepOf(refs[n]), n).toBeGreaterThanOrEqual(700);
+    for (const p of accentText) expect(stepOf(refs[p.fg]), `${p.fg} on ${p.bg}`).toBeGreaterThanOrEqual(600);
   });
 });
 
-describe("Ink and Volt, the dark theme", () => {
+describe("Azure and Sun, the dark theme", () => {
   const refs = PALETTE_DARK.refs;
 
-  it("turns volt bright: volt-400 rules, markers and the account's line, volt-200 labels, a volt-850 field, neon volt-300 fills", () => {
-    expect(refs.mandate).toBe("volt-850");
-    expect(refs["mandate-edge"]).toBe("volt-400");
-    expect(refs["mandate-marker"]).toBe("volt-400");
-    expect(refs["lapis-line"]).toBe("volt-400");
-    expect(refs["mandate-strong"]).toBe("volt-200");
+  it("turns azure bright: azure-400 rules, markers and the account's line, azure-300 labels and links on charcoal fields, the same sun-300 highlight", () => {
+    expect(refs.mandate).toBe("ink-850");
+    expect(refs["lapis-soft"]).toBe("ink-850");
+    expect(refs["mandate-edge"]).toBe("azure-400");
+    expect(refs["mandate-marker"]).toBe("azure-400");
+    expect(refs["lapis-line"]).toBe("azure-400");
+    expect(refs["mandate-strong"]).toBe("azure-300");
+    expect(refs.primary).toBe("azure-300");
     expect(refs.highlight).toBe(PALETTE.refs.highlight);
   });
 
@@ -345,7 +371,7 @@ describe("apca-w3 stays in the tests", () => {
   });
 });
 
-describe("Kumo in Ink and Volt", () => {
+describe("Kumo in Azure and Sun", () => {
   const kumoRoles = [...new Set(Array.from(kumoTheme.matchAll(/--((?:text-)?color-kumo-[a-z0-9-]+):/g), (m) => m[1]))].filter((n) => !n.includes("neutral"));
 
   it("re-points every colour role Kumo defines, so none of Kumo's own colours shows", () => {
@@ -382,7 +408,7 @@ describe("Kumo in Ink and Volt", () => {
     expect(contrastRatio(root["text-color-kumo-inverse"], root["color-kumo-brand"])).toBeGreaterThanOrEqual(STOP_CONTRAST);
   });
 
-  it.each(THEMES)("paints the account surface in the account fill, the field in the volt tint under a volt line, and ink in ink, in %s", (theme) => {
+  it.each(THEMES)("paints the account surface in the account fill, the field in the azure tint under an azure line, and ink in ink, in %s", (theme) => {
     const t = PALETTES[theme].tokens;
     expect(SCOPES[theme].account["color-kumo-base"]).toBe(t.lapis.value);
     expect(SCOPES[theme].field["color-kumo-base"]).toBe(t.mandate.value);
@@ -410,7 +436,7 @@ describe.each(THEMES)("colour-vision deficiency, %s", (theme) => {
     for (const vision of c.requiredVisions) expect(c.byVision[vision], `${vision} ΔE ${c.byVision[vision].toFixed(3)}`).toBeGreaterThanOrEqual(CVD_DISTINCT);
   });
 
-  it("keeps the accent's marks, gain, loss and crimson apart under deuteranopia, protanopia and tritanopia", () => {
+  it("keeps the accent's marks, gain, loss and crimson apart under deuteranopia, protanopia and, but for teal against azure, tritanopia", () => {
     const core = [
       ["gain-cvd", "loss-cvd"],
       ["gain-cvd", "crimson"],
@@ -423,7 +449,9 @@ describe.each(THEMES)("colour-vision deficiency, %s", (theme) => {
     for (const [a, b] of core) {
       const c = results.find((r) => r.a === a && r.b === b)!;
       expect(c.requiredHere, `${a} / ${b}`).toBe(true);
-      expect(c.requiredVisions, `${a} / ${b}`).toEqual(CVD_VISIONS);
+      // Tritanopia merges blue and teal at any depth, so a teal gain against the azure marks is required under red-green deficiency only (DEC-217).
+      const tritanInfoOnly = a === "gain-cvd" && (b === "mandate-marker" || b === "lapis-line");
+      expect(c.requiredVisions, `${a} / ${b}`).toEqual(tritanInfoOnly ? ["deuteranopia", "protanopia"] : CVD_VISIONS);
     }
     expect(CVD_VISIONS).toEqual(["deuteranopia", "protanopia", "tritanopia"]);
   });
@@ -433,7 +461,7 @@ describe.each(THEMES)("colour-vision deficiency, %s", (theme) => {
     expect(def.byVision.deuteranopia).toBeLessThan(CVD_DISTINCT);
   });
 
-  it("keeps every colour-blind alternate apart from volt and crimson where it is required", () => {
+  it("keeps every colour-blind alternate apart from azure and crimson where it is required", () => {
     const required = results.filter((c) => c.requiredHere && (c.a.endsWith("-cvd") || c.b.endsWith("-cvd")));
     const against = new Set(required.flatMap((c) => [c.a, c.b]));
     for (const n of ["crimson", "mandate-marker", "lapis-line", "mandate-strong"] as const) expect(against.has(n), n).toBe(true);
@@ -478,7 +506,7 @@ describe("colour usage in components", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("paints saturated volt only as thin fills: the envelope's rails, posts and ticks, a legend swatch and the page header's rule", () => {
+  it("paints saturated azure only as thin fills: the envelope's rails, posts and ticks, a legend swatch and the page header's rule", () => {
     const fill = /\bbg-(mandate-strong|mandate-marker|mandate-edge|lapis-line)\b/;
     const allowed = ["components/domain/envelope.tsx", "components/charts/chart-parts.tsx", "components/kumo/page-header/page-header.tsx"];
     expect(files.filter((f) => fill.test(f.text) && !specimens.test(f.path) && !allowed.includes(f.path)).map((f) => f.path)).toEqual([]);

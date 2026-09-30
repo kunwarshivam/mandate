@@ -16,7 +16,7 @@ export type PasskeysAuth = Pick<BrowserClient["auth"], "registerPasskey" | "pass
 export const NAME_MAX = 120;
 
 const SMALL_PILL =
-  "press inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold outline-none focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
+  "press inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold outline-none focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
 const PRIMARY = `${SMALL_PILL} bg-lapis text-lapis-foreground hover:bg-lapis-strong`;
 const OUTLINE = `${SMALL_PILL} border border-foreground/25 bg-card hover:bg-background`;
 const QUIET = `${SMALL_PILL} px-3 text-muted-foreground hover:bg-muted hover:text-foreground`;

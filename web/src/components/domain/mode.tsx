@@ -32,7 +32,7 @@ export function ModeBadge({ mode, className }: { mode: AgentMode; className?: st
       data-slot="mode-badge"
       data-mode={mode}
       className={cn(
-        "inline-flex h-6 w-fit shrink-0 items-center gap-1 rounded-full pr-2.5 pl-2 text-label whitespace-nowrap transition-colors duration-(--duration-hover) [&>svg]:size-3.5",
+        "inline-flex h-6 w-fit shrink-0 items-center gap-1 rounded-md pr-2.5 pl-2 text-label whitespace-nowrap transition-colors duration-(--duration-hover) [&>svg]:size-3.5",
         MODE_FIELD[mode],
         className,
       )}
@@ -60,7 +60,7 @@ export const SOURCE_TAG: Record<RestrictionSource, string> = {
 
 export function SourceTag({ source, className }: { source: RestrictionSource; className?: string }) {
   return (
-    <span data-source={source} className={cn("inline-flex h-6 w-fit shrink-0 items-center rounded-full px-2.5 text-label", SOURCE_TAG[source], className)}>
+    <span data-source={source} className={cn("inline-flex h-6 w-fit shrink-0 items-center rounded-md px-2.5 text-label", SOURCE_TAG[source], className)}>
       {SOURCE_LABEL[source]}
     </span>
   );

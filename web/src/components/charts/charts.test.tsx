@@ -1,17 +1,17 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
-import { ColorType, LineStyle } from "lightweight-charts";
+import { ColorType, LineStyle, LineType } from "lightweight-charts";
 import { afterEach, describe, expect, it } from "vitest";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
 import { parseOklch, toHex } from "@/lib/color";
 import { toFixed } from "@/lib/decimal";
-import { usd } from "@/lib/format";
+import { direction, usd } from "@/lib/format";
 import { agentLimits } from "@/lib/limits";
 import { PALETTE, PALETTE_DARK } from "@/lib/palette";
 import { type MockChart, chartControl, chartIn, liveCharts, pointerTime } from "@/test/chart-mock";
 import { renderWithRuntime } from "@/test/harness";
-import { spoken } from "@/test/spoken";
+import { drawn, spoken } from "@/test/spoken";
 import { AccountEquityChart, AgentEquityChart, unmanagedEquity } from "./equity-chart";
-import { CHART_COLOR, CHART_TOKEN, type ChartLevel, LABEL_GAP, type Tone, areaOptions, baseOptions, candleOptions, crowdedLevels, lineOptions, priceLineFor, setChartMode, usdLabel } from "./options";
+import { CHART_COLOR, CHART_TOKEN, type ChartLevel, HERO_FILL, LABEL_GAP, type Tone, areaOptions, baseOptions, candleOptions, crowdedLevels, heroAreaOptions, lineOptions, priceLineFor, setChartMode, trendColor, usdLabel } from "./options";
 import { ApprovalChart, PositionChart } from "./price-chart";
 
 const WS = buildWorkspace("normal");
@@ -66,6 +66,19 @@ describe("chart builders draw flat, solid colour", () => {
     }
   });
 
+  it("draws a hero line in the colour of its change, smooth, with nothing under it", () => {
+    for (const [trend, plain, cvd] of [
+      ["gain", CHART_COLOR.gain, CHART_COLOR.gainCvd],
+      ["loss", CHART_COLOR.loss, CHART_COLOR.lossCvd],
+      ["flat", CHART_COLOR.foreground, CHART_COLOR.foreground],
+    ] as const) {
+      expect(heroAreaOptions(trend)).toMatchObject({ lineColor: plain, lineType: LineType.Curved, topColor: HERO_FILL, bottomColor: HERO_FILL, lastValueVisible: false });
+      expect(heroAreaOptions(trend, true).lineColor).toBe(cvd);
+      expect(trendColor(trend)).toBe(plain);
+    }
+    expect(baseOptions({ reducedMotion: false, hero: { axis: false } }).timeScale?.visible).toBe(false);
+  });
+
   it("colours are plain hex from the tokens, gains and losses signed", () => {
     for (const hex of Object.values(CHART_COLOR)) expect(hex).toMatch(/^#[0-9a-f]{6}$/i);
     expect(candleOptions()).toMatchObject({ upColor: CHART_COLOR.gain, downColor: CHART_COLOR.loss });
@@ -79,11 +92,11 @@ describe("chart builders draw flat, solid colour", () => {
     }
   });
 
-  it("draws the account as a volt line, the mandate's marks in volt, and the grid in a cool paper tint", () => {
+  it("draws the account's levels in azure, the mandate's marks in azure, and the grid in a cool paper tint", () => {
     expect(CHART_TOKEN.lapis).toBe("lapis-line");
-    expect(PALETTE.tokens["lapis-line"].ref).toBe("volt-500");
-    expect(PALETTE.tokens["mandate-marker"].ref).toBe("volt-500");
-    expect(PALETTE.tokens["mandate-strong"].ref).toBe("volt-700");
+    expect(PALETTE.tokens["lapis-line"].ref).toBe("azure-600");
+    expect(PALETTE.tokens["mandate-marker"].ref).toBe("azure-600");
+    expect(PALETTE.tokens["mandate-strong"].ref).toBe("azure-800");
     const grid = baseOptions({ reducedMotion: false }).grid;
     expect(grid?.horzLines?.color).toBe(CHART_COLOR.muted);
     expect(grid?.vertLines?.color).toBe(CHART_COLOR.muted);
@@ -92,7 +105,7 @@ describe("chart builders draw flat, solid colour", () => {
     expect(paper.c).toBeGreaterThan(0);
   });
 
-  it("a mandate level is a dashed grey line with a volt label, the account a solid volt line, a proposal dashed ink", () => {
+  it("a mandate level is a dashed grey line with an azure label, the account a solid azure line, a proposal dashed ink", () => {
     const level = (tone: ChartLevel["tone"]): ChartLevel => ({ key: tone, label: tone, price: 1, tone });
     expect(priceLineFor(level("mandate"))).toMatchObject({ color: CHART_COLOR.mutedForeground, axisLabelColor: CHART_COLOR.mandate, axisLabelTextColor: CHART_COLOR.mandateStrong, lineStyle: LineStyle.Dashed });
     expect(priceLineFor(level("account"))).toMatchObject({ color: CHART_COLOR.lapis, axisLabelColor: CHART_COLOR.ink, axisLabelTextColor: CHART_COLOR.inkForeground, lineStyle: LineStyle.Solid });
@@ -128,7 +141,9 @@ describe("AgentEquityChart", () => {
     expect(series.options.topColor).toBe(series.options.bottomColor);
 
     const levels = agentLimits(agent).levels;
-    for (const line of series.priceLines) {
+    const [open] = series.priceLines.filter((l) => l.id === "open");
+    expect(open).toMatchObject({ price: (series.data[0] as { value: number }).value, lineStyle: LineStyle.Dotted, axisLabelVisible: false, title: "" });
+    for (const line of series.priceLines.filter((l) => l.id !== "open")) {
       const level = levels.find((l) => l.key === line.id);
       expect(level, String(line.id)).toBeDefined();
       expect(line.price).toBe(Number(toFixed(level!.at, 2)));
@@ -142,7 +157,7 @@ describe("AgentEquityChart", () => {
     const listed = [...(legend?.querySelectorAll("[data-level]") ?? [])];
     expect(listed.map((li) => li.getAttribute("data-level")).sort()).toEqual(levels.map((l) => l.key).sort());
     const drawnKeys = listed.filter((li) => li.getAttribute("data-drawn") === "true").map((li) => li.getAttribute("data-level"));
-    expect(drawnKeys.sort()).toEqual(series.priceLines.map((l) => String(l.id)).sort());
+    expect(drawnKeys.sort()).toEqual(series.priceLines.filter((l) => l.id !== "open").map((l) => String(l.id)).sort());
   });
 
   it("hides the label of a level that would sit on the label above it, and keeps its line", () => {
@@ -186,11 +201,13 @@ describe("AgentEquityChart", () => {
 });
 
 describe("AccountEquityChart", () => {
-  it("ends at the broker's equity, as the account's volt line, with the TradingView credit", () => {
+  it("ends at the broker's equity, as the account's line, with the TradingView credit", () => {
     const { container } = renderWithRuntime(<AccountEquityChart />);
     const [series] = onlyChart(container).series;
-    expect(series.options.lineColor).toBe(CHART_COLOR.lapis);
-    expect(series.options.topColor).toBe(series.options.bottomColor);
+    const data = series.data as Array<{ value: number }>;
+    expect(series.options.lineColor).toBe(trendColor(direction((data.at(-1)!.value - data[0].value).toFixed(2))));
+    expect(series.options.topColor).toBe(HERO_FILL);
+    expect(series.options.bottomColor).toBe(HERO_FILL);
     const last = series.data.at(-1) as { value: number };
     expect(last.value).toBe(Number(WS.connection.account_equity));
     expect(container.querySelector("[data-slot=account-equity-value]")).toHaveTextContent(usd(WS.connection.account_equity));
@@ -228,7 +245,7 @@ describe("the hero chart scrubs", () => {
     hover(chart, point);
     const h = hero(container);
     expect(spoken(h.value)).toBe(usdLabel(point.value));
-    expect(h.value.querySelector("[data-slot=cents]")).toHaveTextContent(usdLabel(point.value).slice(-3));
+    expect(h.value.querySelector("[data-part=fraction]")).toHaveTextContent(usdLabel(point.value).slice(-3));
     expect(h.when).toHaveTextContent(/^Sep 28, \d{2}:\d{2} ET$/);
     expect(h.section).toHaveAttribute("data-scrubbing");
     const change = Math.round((point.value - data[0].value) * 100) / 100;
@@ -277,7 +294,8 @@ describe("the hero chart scrubs", () => {
       hover(chart, point);
       const signed = hero(container).change.querySelector("[data-direction]")!;
       expect(signed).toHaveAttribute("data-direction", word);
-      expect(signed.textContent).toMatch(new RegExp(`^\\${sign}\\$[\\d,]+\\.\\d{2}${word}$`));
+      expect(spoken(signed)).toMatch(new RegExp(`^\\${sign}\\$[\\d,]+\\.\\d{2}${word}$`));
+      expect(drawn(signed)).toMatch(new RegExp(`^\\${sign}\\$[\\d,]+\\.\\d{2}${word}$`));
       expect(hero(container).section.querySelector("[data-placeholder=performance]")).toHaveTextContent("[[DISCLOSURE-PERFORMANCE]]");
     }
   });
@@ -296,7 +314,7 @@ describe("the hero chart scrubs", () => {
       hover(chart, point);
       const pill = hero(container).change;
       expect(pill).toHaveAttribute("data-tone", tone);
-      expect(pill.className.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "w-fit", "px-3", "py-1", "font-medium", fill, ink]));
+      expect(pill.className.split(" ")).toEqual(expect.arrayContaining(["rounded-lg", "w-fit", "px-3", "py-1", "font-medium", fill, ink]));
       for (const other of ["bg-gain-soft", "bg-loss-soft", "bg-muted"].filter((c) => c !== fill)) expect(pill).not.toHaveClass(other);
       expect(pill.querySelector("[data-direction]")).toHaveAttribute("data-direction", tone);
       expect(pill).toHaveTextContent(word);
@@ -308,7 +326,8 @@ describe("the hero chart scrubs", () => {
       expect(pill.parentElement!.className).not.toMatch(/flex-col/);
     }
     expect(spoken(hero(container).value)).toBe(usdLabel(data[0].value));
-    expect(hero(container).change).toHaveTextContent(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);
+    expect(spoken(hero(container).change)).toMatch(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);
+    expect(drawn(hero(container).change)).toMatch(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);
   });
 
   it("follows a finger: the crosshair is pinned to the nearest point and let go on release", () => {
@@ -358,7 +377,7 @@ describe("the hero chart scrubs", () => {
 });
 
 describe("PositionChart", () => {
-  it("draws candles with the average cost as the account's volt line and the bracket as the mandate's dashed lines, at the position's prices", () => {
+  it("draws candles with the average cost as the account's azure line and the bracket as the mandate's dashed lines, at the position's prices", () => {
     const { container } = renderWithRuntime(<PositionChart agent={SWING} position={XYZ} />);
     const [series] = onlyChart(container).series;
     expect(series.type).toBe("Candlestick");

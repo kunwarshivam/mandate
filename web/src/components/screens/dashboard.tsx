@@ -2,24 +2,24 @@
 
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, CaretRight, Check, CheckCircle, Tray, WarningCircle } from "@phosphor-icons/react";
+import { ArrowRight, CaretRight, CheckCircle, Tray, WarningCircle } from "@phosphor-icons/react";
 import { Deadline } from "@/components/approvals/deadline";
 import { AccountEquityChart } from "@/components/charts/equity-chart";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
 import { ModeBadge } from "@/components/domain/mode";
-import { SignedMoney } from "@/components/domain/money";
-import { Placeholder } from "@/components/domain/placeholders";
-import { STRETCHED_LINK } from "@/components/domain/positions";
+import { AgentOwl, Owl } from "@/components/domain/owl";
 import type { Agent, Approval, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { alertLines } from "@/lib/attention";
-import { clock, price, quantity, usd, zoneLabel } from "@/lib/format";
+import { clock, price, quantity, zoneLabel } from "@/lib/format";
 import { headroomLine } from "@/lib/limits";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
-import { decisionHref, positionHref } from "@/lib/screens";
+import { decisionHref } from "@/lib/screens";
 import { cn } from "@/lib/utils";
 import { AgentCard } from "./agent-card";
+import { AssetsSection } from "./assets-section";
+import { NewsSection } from "./news-section";
 import { EmptyBoard, Section, SectionLink, WorkspaceGate } from "./common";
 
 /** The rail beside the account chart shows this many requests; the rest are one link away. */
@@ -64,7 +64,7 @@ function Waiting({ ws, open, now }: { ws: Workspace; open: Approval[]; now: stri
       <h2 id="waiting-title" className="flex items-center gap-2.5 text-h2">
         {open.length === 0 ? "Nothing waiting" : "Waiting for you"}
         {open.length > 0 ? (
-          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-lapis px-2 font-mono text-label text-lapis-foreground tabular">
+          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-sm bg-lapis px-2 font-mono text-label text-lapis-foreground tabular">
             {open.length}
             <span className="sr-only">{open.length === 1 ? " request" : " requests"}</span>
           </span>
@@ -85,7 +85,7 @@ function Waiting({ ws, open, now }: { ws: Workspace; open: Approval[]; now: stri
                 <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
                 <Link
                   href={`/approvals/${a.approval_id}`}
-                  className="press inline-flex h-11 w-fit items-center gap-2 rounded-full bg-lapis pr-4 pl-5 text-sm font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-lapis-soft"
+                  className="press inline-flex h-11 w-fit items-center gap-2 rounded-lg bg-lapis pr-4 pl-5 text-sm font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-lapis-soft"
                 >
                   Open request <ArrowRight aria-hidden className="size-4" />
                 </Link>
@@ -128,15 +128,15 @@ function NeedsYou({ ws, open, className }: { ws: Workspace; open: Approval[]; cl
       <h2 id="needs-you-title" className="flex items-center gap-2.5 text-h2">
         Needs you
         {count > 0 ? (
-          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-lapis px-2 font-mono text-label text-lapis-foreground tabular">
+          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-sm bg-lapis px-2 font-mono text-label text-lapis-foreground tabular">
             {count}
             <span className="sr-only">{count === 1 ? " item" : " items"}</span>
           </span>
         ) : null}
       </h2>
       {count === 0 ? (
-        <p data-slot="all-clear" className="flex min-h-11 items-center gap-2.5 text-sm text-muted-foreground">
-          <Check aria-hidden className="size-5 shrink-0" />
+        <p data-slot="all-clear" className="flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
+          <Owl seed="owlhead" mood="awake" className="size-8" />
           All clear. Nothing needs you.
         </p>
       ) : (
@@ -183,8 +183,9 @@ function PhoneAgentRow({ agent }: { agent: Agent }) {
     <li data-slot="phone-agent" className="border-b border-border/70 last:border-b-0">
       <Link
         href={`/agents/${agent.agent_id}`}
-        className="press -mx-2 grid min-h-11 grid-cols-[minmax(0,1fr)_1rem] items-center gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
+        className="press -mx-2 grid min-h-11 grid-cols-[2rem_minmax(0,1fr)_1rem] items-center gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
       >
+        <AgentOwl agent={agent} className="size-8" />
         <span className="grid min-w-0 gap-1">
           <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
             <span className="font-semibold">{agent.label}</span>
@@ -209,12 +210,11 @@ function Dashboard() {
     .filter((a) => a.status === "delivered")
     .sort((a, b) => Date.parse(a.deadline) - Date.parse(b.deadline));
   const marketStale = ws.health.market_data.state !== "ok";
-  const positions = ws.agents.flatMap((a) => a.positions.map((p) => ({ agent: a, p })));
 
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
       <h1 className="sr-only">Dashboard</h1>
-      <div className="grid grid-cols-1 gap-(--section-gap) max-lg:gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14">
+      <div className="grid grid-cols-1 gap-(--section-gap) max-lg:gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-x-16">
         <NeedsYou ws={ws} open={open} className="lg:hidden" />
         <div data-slot="account-board" data-layout="main" className="reveal grid min-w-0 gap-5">
           <AccountEquityChart />
@@ -240,7 +240,9 @@ function Dashboard() {
         </ul>
       </Section>
 
-      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-x-14">
+      <AssetsSection ws={ws} className="max-lg:hidden" />
+
+      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-x-16">
         <Section
           title="Recent activity"
           action={
@@ -274,47 +276,7 @@ function Dashboard() {
           ) : null}
         </Section>
 
-        <Section title="Positions" action={<SectionLink href="/positions">All positions</SectionLink>} className="max-lg:hidden">
-          {positions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No agent holds a position.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <caption className="sr-only">Positions across agents</caption>
-              <thead className="sr-only">
-                <tr>
-                  <th scope="col">Holding</th>
-                  <th scope="col">Value and unrealized P&amp;L</th>
-                </tr>
-              </thead>
-              <tbody>
-                {positions.map(({ agent, p }) => (
-                  <tr key={`${agent.agent_id}-${p.instrument.asset_id}`} className="group relative border-b border-border/70 last:border-b-0">
-                    <th scope="row" className="py-3 text-left font-normal">
-                      <Link href={positionHref(agent.agent_id, p.instrument.asset_id)} className={cn("font-medium underline-offset-4 group-hover:underline", STRETCHED_LINK)}>
-                        <span className="font-mono tabular">{quantity(p.qty)}</span> {p.instrument.symbol}
-                      </Link>
-                      <span className="block text-caption text-muted-foreground">{agent.label}</span>
-                    </th>
-                    <td className="py-3 text-right align-top">
-                      <span className="block font-mono tabular">{usd(p.market_value)}</span>
-                      <SignedMoney value={p.unrealized_pnl} showWord={false} className="text-caption" />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {positions.length > 0 ? (
-            <p className="flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
-              Unrealized paper P&amp;L, simulated. <Placeholder name="performance" />
-            </p>
-          ) : null}
-          {ws.external_positions.length > 0 ? (
-            <p className="text-caption text-muted-foreground">
-              Also on the account, not managed by any agent: {ws.external_positions.map((e) => `${quantity(e.qty)} ${e.instrument.symbol}`).join(", ")}.
-            </p>
-          ) : null}
-        </Section>
+        <NewsSection ws={ws} now={now} className="max-lg:hidden" />
       </div>
     </div>
   );

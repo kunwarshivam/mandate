@@ -53,7 +53,7 @@ function PerformanceDisclosure({ className }: { className?: string }) {
           aria-label="Performance disclosure"
           aria-describedby={id}
           data-slot="disclosure-trigger"
-          className="relative inline-block w-4 shrink-0 cursor-pointer text-muted-foreground outline-none transition-colors duration-(--duration-hover) ease-(--ease-out) before:absolute before:top-1/2 before:left-1/2 before:size-6 before:-translate-1/2 before:rounded-full before:content-[''] hover:text-foreground focus-visible:before:ring-2 focus-visible:before:ring-ring data-popup-open:text-foreground pointer-coarse:before:size-11 print:hidden"
+          className="relative inline-block w-4 shrink-0 cursor-pointer text-muted-foreground outline-none transition-colors duration-(--duration-hover) ease-(--ease-out) before:absolute before:top-1/2 before:left-1/2 before:size-6 before:-translate-1/2 before:rounded-lg before:content-[''] hover:text-foreground focus-visible:before:ring-2 focus-visible:before:ring-ring data-popup-open:text-foreground pointer-coarse:before:size-11 print:hidden"
         >
           <span aria-hidden>{"\u200b"}</span>
           <Info aria-hidden weight="regular" className="pointer-events-none absolute top-1/2 left-0 size-4 -translate-y-1/2" />
@@ -85,7 +85,7 @@ export function Placeholder({ name, className }: { name: PlaceholderName; classN
 /** Marks fixture values so no one reads them as a record. */
 export function FixtureTag({ className }: { className?: string }) {
   return (
-    <span data-slot="fixture-tag" className={cn("inline-flex h-5 shrink-0 items-center rounded-sm border border-dashed border-muted-foreground px-1.5 text-label text-muted-foreground", className)}>
+    <span data-slot="fixture-tag" className={cn("inline-flex h-5 shrink-0 items-center rounded-sm bg-muted px-1.5 text-label text-muted-foreground", className)}>
       Fixture data
     </span>
   );

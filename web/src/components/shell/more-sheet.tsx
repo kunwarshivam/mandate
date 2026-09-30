@@ -136,7 +136,7 @@ export function MoreSheet({ open, onOpenChange }: { open: boolean; onOpenChange:
             <Dialog.Title className="text-h2">More</Dialog.Title>
             <Dialog.Close
               aria-label="Close"
-              className="-mr-2 grid size-11 place-items-center rounded-full text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
+              className="-mr-2 grid size-11 place-items-center rounded-lg text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
             >
               <X className="size-5" aria-hidden />
             </Dialog.Close>
@@ -183,7 +183,7 @@ export function MoreSheet({ open, onOpenChange }: { open: boolean; onOpenChange:
 
             <div className="flex min-h-11 items-center justify-between gap-3 border-t border-border/70 pt-3">
               <span className="text-sm font-medium">Theme</span>
-              <ThemeMenu className="press inline-flex size-11 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring" />
+              <ThemeMenu className="press inline-flex size-11 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring" />
             </div>
 
             {session ? (

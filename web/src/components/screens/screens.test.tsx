@@ -314,7 +314,7 @@ describe("D5 inbox and D6 request", () => {
     expect(record.innerHTML).toBe(confirmed);
     const after = main().querySelector<HTMLElement>("[data-slot=after-confirm]")!;
     expect(record.contains(after)).toBe(false);
-    expect(within(after).getByRole("heading", { name: "After you responded" })).toBeInTheDocument();
+    expect(within(after).getByRole("heading", { name: "You chose Approve" })).toBeInTheDocument();
     expect(after).toHaveTextContent(/Approved so far: Priya \(approver\) at 14:02:31, You at \d{2}:\d{2}:\d{2}\./);
   });
 
@@ -365,6 +365,31 @@ describe("D5 inbox and D6 request", () => {
     const outcome = within(article).getByRole("region", { name: "Outcome" });
     expect(outcome).toHaveAttribute("data-status", "acted");
     expect(outcome).toHaveTextContent("submitted to the paper broker");
+  });
+
+  it("turns the pinned choices into the response and its progress in place, and moves focus there without scrolling", () => {
+    request(APPROVAL_IDS.btc);
+    const bar = within(main()).getByRole("region", { name: "Your response" });
+    const scroll = vi.spyOn(HTMLElement.prototype, "focus");
+    fireEvent.click(within(bar).getByRole("button", { name: "Approve" }));
+    const heading = within(bar).getByRole("heading", { name: "You chose Approve" });
+    expect(document.activeElement).toBe(heading);
+    expect(scroll).toHaveBeenCalledWith({ preventScroll: true });
+    scroll.mockRestore();
+    const steps = () => [...bar.querySelectorAll("[data-slot=response-progress] li")].map((li) => [li.textContent, li.getAttribute("data-state")]);
+    expect(steps()).toEqual([
+      ["Sent, done", "done"],
+      ["Recorded in the journal, in progress", "current"],
+      ["Result, not yet", "waiting"],
+    ]);
+    expect(bar).not.toHaveTextContent("If you do nothing");
+
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(steps()[1]).toEqual(["Recorded in the journal, done", "done"]);
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 0.75));
+    expect(within(main()).getByRole("region", { name: "Your response" })).toBe(bar);
+    expect(steps()[2]).toEqual(["Approved and submitted, done", "done"]);
+    expect(within(bar).getByRole("region", { name: "Outcome" })).toHaveAttribute("data-status", "acted");
   });
 
   it("records a skip as skipped with nothing sent", () => {

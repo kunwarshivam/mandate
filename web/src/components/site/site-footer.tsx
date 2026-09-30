@@ -21,7 +21,6 @@ export function SiteFooter() {
             Back to top
           </a>
         </p>
-        <p className="text-sm">Best viewed in any browser, at any size.</p>
       </div>
     </footer>
   );

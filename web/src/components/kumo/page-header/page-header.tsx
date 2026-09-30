@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { motion } from "motion/react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
@@ -9,7 +10,8 @@ import type { Environment } from "@/fixtures/types";
 
 /**
  * Kumo's PageHeader block (`kumo add PageHeader`), calm. Route tabs are links in a `nav`, not a
- * tablist: each is a page with its own address, so nothing required hides behind a tab. The
+ * tablist: each is a page with its own address, so nothing required hides behind a tab. The current
+ * tab's underline slides from the tab you left (a shared layout, so it jumps with reduced motion). The
  * environment slot is filled on every record screen, so the paper badge sits beside the title.
  */
 export interface PageTab {
@@ -26,6 +28,8 @@ export interface PageHeaderProps {
   tabsLabel?: string;
   /** Beside the title, after the environment badge, such as an agent's mode on a phone. */
   status?: ReactNode;
+  /** Before the title, such as an agent's owl. */
+  icon?: ReactNode;
   /** Actions on the right of the title row, such as Stop scoped to this agent. */
   actions?: ReactNode;
   /** Extra content under the title, such as a mode field. */
@@ -42,18 +46,22 @@ export function isCurrentTab(pathname: string, href: string, tabs: readonly Page
   return longest?.href === href;
 }
 
-export function PageHeader({ title, description, environment, tabs, tabsLabel = "Sections", status, actions, children, className, tabsClassName }: PageHeaderProps) {
+export function PageHeader({ title, description, environment, tabs, tabsLabel = "Sections", status, icon, actions, children, className, tabsClassName }: PageHeaderProps) {
   const pathname = usePathname();
+  const underline = `page-tabs-${tabsLabel}`;
   return (
     <header data-slot="page-header" className={cn("mb-(--block-gap) grid grid-cols-1 gap-(--block-gap)", className)}>
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="grid min-w-0 gap-1">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <h1 className="text-h1">{title}</h1>
-            {environment ? <EnvironmentBadge environment={environment} /> : null}
-            {status}
+        <div className="flex min-w-0 items-center gap-4">
+          {icon}
+          <div className="grid min-w-0 gap-1">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <h1 className="text-h1">{title}</h1>
+              {environment ? <EnvironmentBadge environment={environment} /> : null}
+              {status}
+            </div>
+            {description ? <p className="max-w-measure text-muted-foreground">{description}</p> : null}
           </div>
-          {description ? <p className="max-w-measure text-muted-foreground">{description}</p> : null}
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>
@@ -70,10 +78,19 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
                     aria-current={current ? "page" : undefined}
                     className={cn(
                       "relative inline-flex h-11 items-center px-3 text-sm text-muted-foreground outline-none transition-colors duration-(--duration-hover) group-first/tab:pl-0 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
-                      current && "font-medium text-foreground after:absolute after:inset-x-3 group-first/tab:after:left-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-lapis-line",
+                      current && "font-medium text-foreground",
                     )}
                   >
                     {tab.label}
+                    {current ? (
+                      <motion.span
+                        layoutId={underline}
+                        aria-hidden
+                        data-slot="tab-underline"
+                        className="absolute inset-x-3 -bottom-px h-0.5 rounded-xs bg-lapis-line group-first/tab:left-0"
+                        transition={{ type: "spring", duration: 0.35, bounce: 0.2 }}
+                      />
+                    ) : null}
                   </Link>
                 </li>
               );

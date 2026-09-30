@@ -14,7 +14,7 @@ import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { Section, WorkspaceGate } from "./common";
 
 /**
- * Open requests sit on a pale volt tint you can act on; resolved ones recede to muted type, with their
+ * Open requests sit on the account's pale tint you can act on; resolved ones recede to muted type, with their
  * status as a label. On a phone every request is one hairline row, the open ones marked by the tray.
  */
 function Row({ approval, now, label, index }: { approval: Approval; now: string; label: string; index: number }) {
@@ -40,7 +40,7 @@ function Row({ approval, now, label, index }: { approval: Approval; now: string;
           {open ? (
             <ArrowRight className="mt-1 size-4 shrink-0 text-lapis transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" aria-hidden />
           ) : (
-            <span className="inline-flex h-6 items-center rounded-full bg-background px-2.5 text-label text-foreground">{APPROVAL_STATUS_LABEL[approval.status]}</span>
+            <span className="inline-flex h-6 items-center rounded-md bg-background px-2.5 text-label text-foreground">{APPROVAL_STATUS_LABEL[approval.status]}</span>
           )}
         </span>
         {open ? (
