@@ -1248,6 +1248,13 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   - reword that test's doc, which says the two cases fail only because their labels contradict their
     clock. DEC-250 item 3's label-against-clock comparison stays proved by
     `the_builder_and_the_gate_see_one_scene`'s doctored MC-B01.
+
+  *Done (E6-2, `cursor/family-b-fold-back-138b`; DEC-250's 2026-09-30 amendment):* MC-B22 and
+  MC-B23 are in `PASSING`, `CLOCKED` and `labels_agree_with_calendar` are gone, and the renamed
+  `the_two_session_cases_pass_as_stated_and_compare_every_sibling` runs its sibling swap on the
+  fixture as stated. The sweeps' counts, recomputed from the fixture, grow with the two cases (768
+  doctorings, 150 plants, 981 refused inputs). With the harness's label comparison skipped,
+  `the_builder_and_the_gate_see_one_scene` fails on MC-B01's doctored `session`.
 - Derive the family-B sibling counts (#331 round-2 review, nit). *Done (E6-2,
   [#346](https://github.com/kunwarshivam/mandate/pull/346); DEC-250 item 18):* the hand-written `siblings == 87` and
   `siblings == 11` are replaced by an assertion that every enum-valued expectation a swept case
