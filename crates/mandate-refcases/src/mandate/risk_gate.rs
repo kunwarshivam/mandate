@@ -970,3 +970,196 @@ fn object_at<'a>(value: &'a Json, key: &str) -> Result<&'a serde_json::Map<Strin
 fn gate_error(what: &str, e: &GateError) -> String {
     format!("`mandate_risk::{what}`: {e} ({})", e.code())
 }
+
+/// The hand-copied gate configuration against the fixture it copies, so a regenerated fixture cannot
+/// leave it stale.
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use mandate_canon::DecStr;
+    use mandate_num::{Fraction, Usd};
+    use mandate_risk::GateConfig;
+
+    use super::super::num;
+    use crate::{Json, at, expect_eq, read_fixture, str_at, u64_at};
+
+    /// The members of `configs.test_default.gate` that `GateConfig` does not carry, because another
+    /// crate reads them: the data profile, the exit ladder and its step, the stop-limit offset, the
+    /// stop watchdog, the protective-replace buffer, the bracket timeout, the unprotected-exposure
+    /// bound, and the 403 threshold.
+    const NOT_GATE_CONFIG: [&str; 8] = [
+        "data_profile",
+        "unexplained_403_threshold",
+        "crypto_stop_limit_offset",
+        "stop_watchdog_s",
+        "protective_replace_buffer_trading_days",
+        "bracket_partial_fill_timeout_s",
+        "max_unprotected_s",
+        "exit_ladder",
+    ];
+    /// The members `GateConfig` reads from the fixture, with the nested ones swept one level down.
+    const READ: [&str; 7] = [
+        "price_floor",
+        "liquidity_floor_usd",
+        "collar",
+        "opposite_fill_interval_s",
+        "order_to_fill",
+        "close_window_minutes",
+        "legacy_pdt_equity_threshold",
+    ];
+    const COLLAR: [&str; 5] = [
+        "liquid_threshold_usd",
+        "liquid_x",
+        "other_x",
+        "crypto_x",
+        "passive_band",
+    ];
+    const ORDER_TO_FILL: [&str; 2] = ["max", "min_orders"];
+
+    fn gate_fixture() -> Result<Json, String> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
+        let fixture = read_fixture(&dir, "trading-domain.json").map(Arc::unwrap_or_clone)?;
+        at(&fixture, "configs.test_default.gate").cloned()
+    }
+
+    fn members_are(object: &Json, what: &str, known: &[&str]) -> Result<(), String> {
+        let mut got: Vec<&str> = object
+            .as_object()
+            .ok_or_else(|| format!("`{what}` is not an object"))?
+            .keys()
+            .map(String::as_str)
+            .collect();
+        got.sort_unstable();
+        let mut wanted = known.to_vec();
+        wanted.sort_unstable();
+        expect_eq(&format!("the members of `{what}`"), got, wanted)
+    }
+
+    /// Every `GateConfig` field is compared: the twelve the fixture states by value with the
+    /// fixture's, and the five it does not state with `mandate-risk`'s `test_default_config` values.
+    /// `GateConfig` is taken apart whole, so a field the crate adds does not compile here until it is
+    /// compared, and the fixture's members must be exactly the ones read and the ones named in
+    /// [`NOT_GATE_CONFIG`], so a member the fixture grows, one of the five included, fails here until
+    /// it is placed.
+    #[test]
+    fn the_gate_configuration_is_the_fixtures_test_default() -> Result<(), String> {
+        let gate = gate_fixture()?;
+        let top: Vec<&str> = READ.iter().chain(NOT_GATE_CONFIG.iter()).copied().collect();
+        members_are(&gate, "configs.test_default.gate", &top)?;
+        members_are(at(&gate, "collar")?, "collar", &COLLAR)?;
+        members_are(at(&gate, "order_to_fill")?, "order_to_fill", &ORDER_TO_FILL)?;
+
+        let decimal =
+            |path: &str| DecStr::parse(str_at(&gate, path)?).map_err(|e| format!("`{path}`: {e}"));
+        let usd = |path: &str| num(Usd::parse(decimal(path)?.as_str()), path);
+        let fraction = |path: &str| num(Fraction::parse(decimal(path)?.as_str()), path);
+        let count = |path: &str| {
+            u32::try_from(u64_at(&gate, path)?).map_err(|_| format!("`{path}` does not fit a u32"))
+        };
+        let GateConfig {
+            price_floor,
+            liquidity_floor_usd,
+            crypto_liquidity_floor_usd,
+            collar_liquid_threshold_usd,
+            collar_liquid_x,
+            collar_other_x,
+            collar_crypto_x,
+            collar_passive_band,
+            opposite_fill_interval_s,
+            min_resting_time_s,
+            order_to_fill_max,
+            order_to_fill_min_orders,
+            order_size_participation,
+            daily_participation,
+            close_window_minutes,
+            legacy_pdt_equity_threshold,
+            etp_classification_max_age_s,
+        } = super::test_default_gate_config()?;
+
+        expect_eq("price_floor", price_floor, usd("price_floor")?)?;
+        expect_eq(
+            "liquidity_floor_usd",
+            liquidity_floor_usd,
+            usd("liquidity_floor_usd")?,
+        )?;
+        expect_eq(
+            "collar.liquid_threshold_usd",
+            collar_liquid_threshold_usd,
+            usd("collar.liquid_threshold_usd")?,
+        )?;
+        expect_eq(
+            "collar.liquid_x",
+            collar_liquid_x,
+            fraction("collar.liquid_x")?,
+        )?;
+        expect_eq(
+            "collar.other_x",
+            collar_other_x,
+            fraction("collar.other_x")?,
+        )?;
+        expect_eq(
+            "collar.crypto_x",
+            collar_crypto_x,
+            fraction("collar.crypto_x")?,
+        )?;
+        expect_eq(
+            "collar.passive_band",
+            collar_passive_band,
+            fraction("collar.passive_band")?,
+        )?;
+        expect_eq(
+            "opposite_fill_interval_s",
+            opposite_fill_interval_s,
+            count("opposite_fill_interval_s")?,
+        )?;
+        expect_eq(
+            "order_to_fill.max",
+            order_to_fill_max,
+            decimal("order_to_fill.max")?
+                .as_str()
+                .parse::<u32>()
+                .map_err(|e| format!("`order_to_fill.max`: {e}"))?,
+        )?;
+        expect_eq(
+            "order_to_fill.min_orders",
+            order_to_fill_min_orders,
+            count("order_to_fill.min_orders")?,
+        )?;
+        expect_eq(
+            "close_window_minutes",
+            close_window_minutes,
+            count("close_window_minutes")?,
+        )?;
+        expect_eq(
+            "legacy_pdt_equity_threshold",
+            legacy_pdt_equity_threshold,
+            usd("legacy_pdt_equity_threshold")?,
+        )?;
+
+        let own = |text: &str, what: &str| num(Usd::parse(text), what);
+        let own_fraction = |text: &str, what: &str| num(Fraction::parse(text), what);
+        expect_eq(
+            "crypto_liquidity_floor_usd",
+            crypto_liquidity_floor_usd,
+            own("1000000", "crypto_liquidity_floor_usd")?,
+        )?;
+        expect_eq("min_resting_time_s", min_resting_time_s, 2)?;
+        expect_eq(
+            "order_size_participation",
+            order_size_participation,
+            own_fraction("0.05", "order_size_participation")?,
+        )?;
+        expect_eq(
+            "daily_participation",
+            daily_participation,
+            own_fraction("0.05", "daily_participation")?,
+        )?;
+        expect_eq(
+            "etp_classification_max_age_s",
+            etp_classification_max_age_s,
+            604_800,
+        )
+    }
+}
