@@ -14,7 +14,7 @@ use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
 use crate::payload::{int, text};
-use crate::protection::protection_cancelled;
+use crate::protection::{overdue, protection_cancelled};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
     AccountState, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest, EventId,
@@ -263,7 +263,7 @@ pub(crate) fn absent(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Executo
 /// A cancel the broker confirmed (§5.7): the order it names becomes `Canceled`, which releases its
 /// reservation and clears the unconfirmed cancel that held its instrument (§5.4). An id this
 /// executor did not derive, or does not carry, asks for a reconciliation rather than being
-/// dropped.
+/// dropped. The exits the cancel held back are released after the step, as after any other.
 pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), ExecutorError> {
     let Some(id) = known(batch, Some(raw)) else {
         batch.request_reconciliation();
@@ -275,16 +275,13 @@ pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
         OrderState::Canceled,
         vec![("cancel_confirmed", Value::Bool(true))],
     )?;
-    let protective = batch
-        .view
-        .orders
-        .get(&id)
-        .filter(|order| order.purpose == Purpose::Protective)
-        .map(|order| order.instrument.clone());
-    if let Some(instrument) = protective {
-        protection_cancelled(batch, &instrument, &id)?;
+    match batch.view.orders.get(&id) {
+        Some(order) if order.purpose == Purpose::Protective => {
+            let instrument = order.instrument.clone();
+            protection_cancelled(batch, &instrument, &id)
+        }
+        _ => Ok(()),
     }
-    Ok(())
 }
 
 /// An `Unknown` order is queried again once `unknown_absent_window_s ÷ (N − 1)` seconds (rounded
@@ -666,7 +663,9 @@ fn restrict(
 }
 
 /// A reject the broker answered with. Journaled with its status, code and message; an order of
-/// ours it names is `Rejected`, which releases its reservation. The account is restricted to
+/// ours it names is `Rejected`, which releases its reservation — unless a cancel of the order is
+/// outstanding, in any live state: then the broker refused the cancel, not the order, and the
+/// order is queried as overdue ([`overdue`], DEC-160 (7), (13)). The account is restricted to
 /// closing only (§7.3) by DEC-143's reading: a message that says `closing` or `restricted`, since
 /// no connector reject table maps a `code` yet, or the configured run of consecutive 403s, every
 /// 403 counting, a named order's included. A reject naming an id we do not know counts toward
@@ -687,7 +686,16 @@ pub(crate) fn reject(
         pairs.push(("code", text(code.clone())));
     }
     batch.journal("RejectObserved", None, pairs)?;
-    if let Some(id) = known(batch, reject.client_order_id.as_deref()) {
+    let cancelling = known(batch, reject.client_order_id.as_deref()).filter(|id| {
+        batch
+            .view
+            .orders
+            .get(id)
+            .is_some_and(|order| order.cancel_unconfirmed)
+    });
+    if let Some(id) = cancelling {
+        overdue(batch, &id)?;
+    } else if let Some(id) = known(batch, reject.client_order_id.as_deref()) {
         let extra = reject
             .code
             .iter()
