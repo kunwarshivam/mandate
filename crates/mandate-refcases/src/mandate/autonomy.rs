@@ -18,10 +18,13 @@
 //! before any fact is read, so a fact it stated would be one nobody compared.
 //!
 //! **What the harness fills for a risk-reducing action.** `ActionContext` still needs a value in
-//! every field, so [`unread_facts`] supplies zeros, `crypto`, and an instrument no case names. The
-//! values cannot decide the case: a decision reached through the rules is labelled `rule:<id>`,
-//! `default`, or `admission_ceiling`, never `builtin_risk_reducing`, so a `classify` that read them
-//! fails the case on `by` whatever they are.
+//! every field, so [`unread_facts`] supplies zeros, `crypto`, and [`UNREAD_INSTRUMENT`], a
+//! placeholder no opening may name: one that does fails naming its case. With those values MC-A01 to
+//! MC-A04 must come back labelled `builtin_risk_reducing`, so a `classify` that sent a reducing
+//! purpose through the rules fails on `by` (`rule:<id>`, `default`, or `admission_ceiling`). A
+//! `classify` that consulted the filled values and still answered with the built-in would pass here;
+//! that no facts and no rules change the answer is `mandate-builder`'s
+//! `no_rule_set_ever_denies_or_asks_a_reducing_purpose`.
 //!
 //! **The approval is compared both ways.** An ASK must state `approvers_required` and `on_timeout`
 //! and match both; an AUTO or a DENY carries no approval (§6.4), so a case that states either member
@@ -57,7 +60,7 @@ const OPENING_KEYS: &[&str] = &[
 ];
 /// The members an ASK's expectation adds to `decision` and `by`.
 const APPROVAL_KEYS: [&str; 2] = ["approvers_required", "on_timeout"];
-/// The instrument [`unread_facts`] names, which no case in the fixture does.
+/// The instrument [`unread_facts`] names, which [`action`] refuses in every opening.
 const UNREAD_INSTRUMENT: &str = "00000000-0000-4000-8000-000000000000";
 
 /// `kind: autonomy` — one action classified against the case's patched mandate.
@@ -65,13 +68,14 @@ pub(super) fn autonomy_case(fixture: &Json, case: &Json) -> Result<(), String> {
     unknown_members(case, CASE_KEYS)
         .map_err(|unknown| format!("case keys not interpreted: {unknown}"))?;
     let mandate = must_parse(&patched(fixture, case)?)?;
-    let action = action(at_of(case, "action")?)?;
+    let action = action(str_at(case, "id")?, at_of(case, "action")?)?;
     let decided = classify(&mandate.autonomy, &action).map_err(builder)?;
     compare(at_of(case, "expect")?, &decided)
 }
 
-/// The case's `action` as the facts `classify` reads, every member of it read.
-fn action(stated: &Json) -> Result<ActionContext, String> {
+/// Case `id`'s `action` as the facts `classify` reads, every member of it read. An opening may not
+/// name [`UNREAD_INSTRUMENT`], so no case is ever decided against the placeholder by accident.
+fn action(id: &str, stated: &Json) -> Result<ActionContext, String> {
     let purpose = purpose(str_at(stated, "purpose")?)?;
     if purpose.reduces_risk() {
         unknown_members(stated, &["purpose"]).map_err(|unknown| {
@@ -92,12 +96,16 @@ fn action(stated: &Json) -> Result<ActionContext, String> {
             .as_bool()
             .ok_or_else(|| format!("`{key}` is not a boolean"))
     };
+    let instrument = AssetId::parse(str_at(stated, "instrument")?)
+        .map_err(|e| format!("`instrument`: {}", e.code()))?;
+    ensure(instrument != unread_instrument()?, || {
+        format!("{id}: `instrument` names the harness's placeholder {UNREAD_INSTRUMENT}")
+    })?;
     Ok(ActionContext {
         purpose,
         order_usd: usd("order_usd")?,
         combined_score: unit("combined_score")?,
-        instrument: AssetId::parse(str_at(stated, "instrument")?)
-            .map_err(|e| format!("`instrument`: {}", e.code()))?,
+        instrument,
         asset_class: AssetClass::parse(str_at(stated, "asset_class")?)
             .map_err(|e| format!("`asset_class`: {}", e.code()))?,
         session: MarketSession::parse_condition_form(str_at(stated, "session")?)
@@ -120,8 +128,7 @@ fn unread_facts() -> Result<ActionContext, String> {
         purpose: Purpose::Open,
         order_usd: Usd::ZERO,
         combined_score: Unit::ZERO,
-        instrument: AssetId::parse(UNREAD_INSTRUMENT)
-            .map_err(|e| format!("the unread instrument: {}", e.code()))?,
+        instrument: unread_instrument()?,
         asset_class: AssetClass::Crypto,
         session: MarketSession::Crypto,
         first_trade_in_instrument: false,
@@ -134,6 +141,10 @@ fn unread_facts() -> Result<ActionContext, String> {
         bought_today_usd: Usd::ZERO,
         position_pnl_fraction: Signed::ZERO,
     })
+}
+
+fn unread_instrument() -> Result<AssetId, String> {
+    AssetId::parse(UNREAD_INSTRUMENT).map_err(|e| format!("the unread instrument: {}", e.code()))
 }
 
 /// §6.1's six purposes, spelt as the fixture writes them.
@@ -219,7 +230,10 @@ mod tests {
 
     use crate::{Json, mandate, read_fixture};
 
-    const PLANTED: &str = "zz_planted";
+    /// A real case member at the wrong level: other families carry `input` at a case's top level,
+    /// so the suite's shared `unread_keys` accepts it there and only this module's own sweep refuses
+    /// it. No `action` or `expect` has an `input` member either.
+    const PLANTED: &str = "input";
 
     /// §6.3's fields, less the reserved `unusual_input`, which no action states (V-018).
     const FIELDS: [ConditionField; 15] = [
@@ -290,12 +304,16 @@ mod tests {
         Ok(copy)
     }
 
-    /// The doctored case must fail, and its failure must name `named`.
-    fn fails_naming(result: Result<(), String>, named: &str, what: &str) -> Result<(), String> {
+    /// The doctored case must fail with exactly `expected`, never a message that merely contains
+    /// it. A member name alone is too generic a needle: `on_timeout` is in its edited, dropped, and
+    /// stated failures alike, so a test of one would pass on either of the others.
+    fn fails_with(result: Result<(), String>, expected: &str, what: &str) -> Result<(), String> {
         match result {
             Ok(()) => Err(format!("{what}: the case still passed")),
-            Err(e) if e.contains(named) => Ok(()),
-            Err(e) => Err(format!("{what}: the failure does not name `{named}`: {e}")),
+            Err(e) if e == expected => Ok(()),
+            Err(e) => Err(format!(
+                "{what}: expected the failure `{expected}`, got `{e}`"
+            )),
         }
     }
 
@@ -333,14 +351,19 @@ mod tests {
                 .ok_or("an expectation object")?;
             for (member, value) in expect {
                 let pointer = format!("/expect/{member}");
-                let edited = doctored(&fixture, &id, &pointer, |v| *v = changed(value))?;
-                fails_naming(run(edited, &id), member, &format!("{id}: {member} edited"))?;
+                let edit = changed(value);
+                let edited = doctored(&fixture, &id, &pointer, |v| *v = edit.clone())?;
+                fails_with(
+                    run(edited, &id),
+                    &format!("{member}: expected {edit}, got {value}"),
+                    &format!("{id}: {member} edited"),
+                )?;
                 let dropped = doctored(&fixture, &id, "/expect", |e| {
                     e.as_object_mut().map(|m| m.remove(member));
                 })?;
-                fails_naming(
+                fails_with(
                     run(dropped, &id),
-                    member,
+                    &format!("fixture has no `{member}`"),
                     &format!("{id}: {member} dropped"),
                 )?;
                 doctorings = doctorings.saturating_add(2);
@@ -349,10 +372,15 @@ mod tests {
                 e.as_object_mut()
                     .map(|m| m.insert(PLANTED.to_owned(), Json::Null));
             })?;
-            fails_naming(run(planted, &id), PLANTED, &format!("{id}: a plant"))?;
+            fails_with(
+                run(planted, &id),
+                &format!("expectations not interpreted: {PLANTED}"),
+                &format!("{id}: a plant"),
+            )?;
             if expect.contains_key("approvers_required") {
                 continue;
             }
+            let decision = crate::str_at(&case, "expect.decision")?;
             for (member, value) in [
                 ("approvers_required", json!(1)),
                 ("on_timeout", json!("skip")),
@@ -361,7 +389,13 @@ mod tests {
                     e.as_object_mut()
                         .map(|m| m.insert(member.to_owned(), value.clone()));
                 })?;
-                fails_naming(run(stated, &id), member, &format!("{id}: {member} stated"))?;
+                fails_with(
+                    run(stated, &id),
+                    &format!(
+                        "`{member}`: the case states one, but a `{decision}` carries no approval"
+                    ),
+                    &format!("{id}: {member} stated"),
+                )?;
                 doctorings = doctorings.saturating_add(1);
             }
         }
@@ -374,10 +408,14 @@ mod tests {
 
     /// Every opening fact is required and every other member refused: dropping any member of an
     /// opening's `action` fails naming it, and a member planted in any action fails naming the
-    /// plant, a fact planted in a risk-reducing action included. So does a member planted at the
-    /// case's top level.
+    /// plant, a fact planted in a risk-reducing action included. So does [`PLANTED`] at the case's
+    /// top level, which the suite's shared sweep accepts, so the module's own sweep is under test.
     #[test]
     fn every_action_member_is_required_and_no_other_is_accepted() -> Result<(), String> {
+        crate::ensure(
+            mandate::CASE_KEYS.contains(&PLANTED) && !super::CASE_KEYS.contains(&PLANTED),
+            || format!("`{PLANTED}` must pass the shared top-level sweep and fail this module's"),
+        )?;
         let fixture = fixture()?;
         let mut openings = 0_usize;
         for case in family_a(&fixture)? {
@@ -397,24 +435,66 @@ mod tests {
                     let dropped = doctored(&fixture, &id, "/action", |a| {
                         a.as_object_mut().map(|m| m.remove(member));
                     })?;
-                    fails_naming(
+                    fails_with(
                         run(dropped, &id),
-                        member,
+                        &format!("fixture has no `{member}`"),
                         &format!("{id}: {member} dropped"),
                     )?;
                 }
             }
-            let plant = if reducing { "order_usd" } else { PLANTED };
+            let (plant, refusal) = if reducing {
+                (
+                    "order_usd",
+                    "`action` states facts a risk-reducing purpose never reads: order_usd",
+                )
+            } else {
+                (PLANTED, "`action` members not interpreted: input")
+            };
             let planted = doctored(&fixture, &id, "/action", |a| {
                 a.as_object_mut()
                     .map(|m| m.insert(plant.to_owned(), json!("1")));
             })?;
-            fails_naming(run(planted, &id), plant, &format!("{id}: {plant} planted"))?;
+            fails_with(
+                run(planted, &id),
+                refusal,
+                &format!("{id}: {plant} planted"),
+            )?;
             let top = doctored(&fixture, &id, "", |c| {
                 c.as_object_mut()
                     .map(|m| m.insert(PLANTED.to_owned(), Json::Null));
             })?;
-            fails_naming(run(top, &id), PLANTED, &format!("{id}: a top-level plant"))?;
+            fails_with(
+                run(top, &id),
+                &format!("case keys not interpreted: {PLANTED}"),
+                &format!("{id}: a top-level plant"),
+            )?;
+        }
+        crate::expect_eq("openings", openings, 12)
+    }
+
+    /// No case is decided against the placeholder [`super::unread_facts`] fills: every opening,
+    /// doctored to name it as its `instrument`, fails naming the case and the placeholder.
+    #[test]
+    fn no_opening_may_name_the_unread_instrument() -> Result<(), String> {
+        let fixture = fixture()?;
+        let mut openings = 0_usize;
+        for case in family_a(&fixture)? {
+            let id = id(&case)?;
+            if crate::at(&case, "action")?.get("instrument").is_none() {
+                continue;
+            }
+            let named = doctored(&fixture, &id, "/action/instrument", |i| {
+                *i = json!("00000000-0000-4000-8000-000000000000");
+            })?;
+            fails_with(
+                run(named, &id),
+                &format!(
+                    "{id}: `instrument` names the harness's placeholder \
+                     00000000-0000-4000-8000-000000000000"
+                ),
+                &format!("{id}: the placeholder named"),
+            )?;
+            openings = openings.saturating_add(1);
         }
         crate::expect_eq("openings", openings, 12)
     }
@@ -433,7 +513,7 @@ mod tests {
             if stated.as_object().is_some_and(|m| m.len() == 1) {
                 continue;
             }
-            let facts = super::action(stated).map_err(|e| format!("{id}: {e}"))?;
+            let facts = super::action(&id, stated).map_err(|e| format!("{id}: {e}"))?;
             for field in FIELDS {
                 let name = field.as_str();
                 let wanted = &stated[name];
