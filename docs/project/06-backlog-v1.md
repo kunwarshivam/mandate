@@ -1252,6 +1252,22 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   beside a resting protective sell in the same instrument is denied `conduct_limit_breached` though
   §5.3 rule 8 lets a bracket add a tranche. A stop is not in the book until triggered; deciding
   whether it counts would reopen that path.
+- **An exit's pacing can return a gate error** (#311 round 2, minor 1). `conduct::pacing` propagates
+  `NumError` from `Qty::portion` in `slice` and from `Price::collar_bound` in `price_by_collar`, so
+  an owner or discretionary exit with extreme prices or volumes gets `Err` rather than a decision.
+  Nothing exercises it, since the property's generators are small. Add a property over extreme
+  prices and volumes, or state what the executor does with a gate error on an exit (it must still
+  route the exit, rule 13).
+- **The opposite-fill property pins its boundary only by chance** (#311 round 2, minor 2).
+  `properties::only_an_opposite_side_fill_starts_the_interval` draws `elapsed in 0..120`, and
+  `ci test` fixes no proptest seed. `gate::tests::the_opposite_fill_interval_includes_its_last_instant`
+  pins the 60 s edge deterministically; add 60 to the property's draw explicitly so it is not the
+  boundary's cover by luck.
+- **Assert the whole exit for exempt purposes** (#311 round 2, minor 3).
+  `an_allowed_exit_is_never_below_its_minimum_or_zero` samples `RiskEngine` and `ProtectiveLeg` but
+  asserts only the quantity bound for them, not `sent == proposed`, which
+  `a_slice_binds_only_below_the_proposal_and_names_its_cap` covers separately. Assert it in the
+  property too.
 - **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
   every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
   held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;
@@ -1365,6 +1381,31 @@ From E6-4's slice R3 (stream H2; DEC-167 item 7):
   item 7 (a)). Keep it in `hard_first` and regenerate with `reference/mandate/generate.py`, which must
   leave `fixtures/refcases/mandate.json` unchanged (checked from the crate's side: putting `ref.py`'s
   reading into the fold leaves the same fifteen MC-R cases passing).
+
+Minor findings from the independent review of slice R2 ([#324](https://github.com/kunwarshivam/mandate/pull/324);
+held back by the freeze rule; R3's builder is asked to take 1, 2, 4, and 6 where they fit its code):
+
+- **Say that a caller fails closed on a refused step** (#324, minor 1). `RiskState::step`'s
+  `# Errors` block lists the refusals and that the state is unchanged, but not what the caller does:
+  treat any `Err` as a refusal to decide (stop stepping the agent, admit no new risk, keep exits
+  open, escalate), never skip the input as though it had not happened. `E6-3-risk-gate.md` states
+  the same rule for `GateError`.
+- **Clamp session seconds by wall seconds** (#324, minor 2). The fold credits the caller's
+  `SessionClock` seconds to the lift delay unclamped, so a clock that over-reports lifts a
+  `scale_sizes` rung early. `session_s.min(wall_s)` only tightens, and is an identity for crypto.
+- **The `strictest` oracle reads the daily-loss mode by hand** (#324, minor 3; a tests correction).
+  `tests/risk.rs`'s `strictest` maps `DailyLoss` to `exits_only`, while the fold reads
+  `daily_loss_action`. No walk triggers the daily loss today; R3's renewal walks could, so take the
+  action from the mandate before they do.
+- **Make a refused fold step inert by type** (#324, minor 4). `Fold` writes `self.at` and the mark
+  age before the staleness guard can refuse, and only `RiskState::step`'s clone keeps a refusal
+  inert. `Fold::step(&self) -> Result<(Self, Outcome)>` would hold it at rung 1.
+- **A `Qty::checked_sub` failure is always reported as a short sale** (#324, minor 5). True while a
+  negative result is its only failure; name the error by its kind if `Qty` gains another.
+- **`SpecError::Unimplemented`'s doc is stale** (#324, minor 6). It says the implementation PR
+  removes the variant; DEC-167 item 5 makes it the answer for what R3 and R4 still own.
+- **Wrap `M5-F-mandate-spec.md`'s long line** (#324, minor 7), the R2 row that runs past the file's
+  wrap width.
 
 From journal spec v0.5 §9.1, the agent-stream payload schemas ([DEC-177](04-decision-log.md#decisions);
 DEC-174 items 4 and 5). Until each lands, the drafts it names stay refused at `append`, which adds no
