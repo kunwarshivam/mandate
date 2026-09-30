@@ -619,10 +619,62 @@ html:root[data-cvd="on"] {
     scroll-behavior: auto !important;
   }
   [data-slot="stop-sheet"],
+/* The owls (DEC-217): a blink on each owl's own rhythm, breathing while asleep, a tilt toward the
+   owner's hover. Stopped owls and still owls do none of it. */
+[data-slot="owl"] :is(.owl-blink, .owl-body, .owl-z) {
+  transform-box: fill-box;
+}
+[data-slot="owl"] .owl-blink {
+  transform-origin: center;
+}
+[data-slot="owl"]:not([data-still]) .owl-blink {
+  animation: owl-blink var(--owl-blink) linear var(--owl-blink-offset) infinite;
+}
+[data-slot="owl"] .owl-body {
+  transform-origin: 50% 95%;
+  transition: rotate 480ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+[data-slot="owl"][data-mood="asleep"]:not([data-still]) .owl-body {
+  animation: owl-breathe 2.6s ease-in-out infinite alternate;
+}
+:hover > [data-slot="owl"]:not([data-still], [data-mood="stopped"]) .owl-body,
+[data-slot="owl"]:not([data-still], [data-mood="stopped"]):hover .owl-body {
+  rotate: -8deg;
+}
+[data-slot="owl"] .owl-z {
+  opacity: 0;
+  animation: owl-z 3.2s ease-out infinite;
+}
+[data-slot="owl"] .owl-z-late {
+  animation-delay: 1.6s;
+}
+
+@keyframes owl-blink {
+  0%, 93%, 100% { transform: scaleY(1); }
+  95.5% { transform: scaleY(0.08); }
+}
+@keyframes owl-breathe {
+  from { transform: scale(1); }
+  to { transform: scale(1.035, 1.025); }
+}
+@keyframes owl-z {
+  0% { opacity: 0; transform: translate(0, 0); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: translate(4px, -10px); }
+}
+
   [data-slot="more-sheet"],
   [data-slot="step-up-dialog"],
   [data-slot="sheet-backdrop"] {
     transition: none !important;
+  [data-slot="owl"] :is(.owl-blink, .owl-body, .owl-z) {
+    animation: none !important;
+    transition: none !important;
+    rotate: none !important;
+  }
+  [data-slot="owl"] .owl-z:not(.owl-z-late) {
+    opacity: 1;
+  }
   }
   [data-slot="skeleton"] {
     animation: none !important;

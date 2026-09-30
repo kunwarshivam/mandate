@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { useMarket } from "@/components/charts/chart-parts";
 import { Sparkline } from "@/components/charts/sparkline";
 import { AsOf } from "@/components/domain/as-of";
+import { AgentOwl } from "@/components/domain/owl";
 import { ModeBadge, SOURCE_FIELD, SourceTag } from "@/components/domain/mode";
 import { Money, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
@@ -48,10 +49,11 @@ export function AgentCard({
       aria-labelledby={`agent-${agent.agent_id}`}
       data-mode={agent.mode}
       data-slot="agent-band"
-      className="group reveal relative -mx-3 grid gap-2.5 rounded-2xl px-3 py-4 transition-[background-color,scale] duration-(--duration-hover) ease-(--ease-out) hover:bg-background has-[a:active]:scale-[0.99]"
+      className="group reveal relative -mx-3 grid grid-cols-[2.5rem_minmax(0,1fr)] gap-x-3 gap-y-2.5 rounded-2xl px-3 py-4 transition-[background-color,scale] duration-(--duration-hover) ease-(--ease-out) hover:bg-background has-[a:active]:scale-[0.99] sm:grid-cols-[3rem_minmax(0,1fr)] sm:gap-x-4"
       style={{ "--i": index } as CSSProperties}
     >
-      <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto] items-center gap-x-4 sm:grid-cols-[minmax(0,1fr)_9rem_10rem_1rem] sm:gap-x-6">
+      <AgentOwl agent={agent} className="row-span-3 size-10 sm:size-12" />
+      <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto] items-center gap-x-4 sm:grid-cols-[minmax(0,1fr)_12rem_10rem_1rem] sm:gap-x-6">
         <div className="grid min-w-0 gap-1">
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
             <Heading id={`agent-${agent.agent_id}`} className="text-h3">
@@ -75,11 +77,11 @@ export function AgentCard({
               points={today}
               limit={daily?.price ?? null}
               label={`${agent.label} equity today${daily ? `, against the daily loss limit at ${usd(daily.price.toFixed(2))}` : ""}`}
-              className="h-9 sm:h-10"
+              className="h-10 sm:h-12"
             />
           ) : null}
         </div>
-        <div className="grid justify-items-end gap-0.5 text-right">
+        <div className="grid justify-items-end gap-0.5 text-right tabular">
           <p className="text-base font-medium sm:text-lg">
             <Money value={agent.state.equity} />
           </p>
@@ -90,7 +92,7 @@ export function AgentCard({
         <CaretRight aria-hidden className="hidden size-4 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5 sm:block" />
       </div>
 
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
+      <p className="col-start-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
         <span>Paper P&amp;L, simulated</span>
         <SignedMoney value={agent.pnl_total} className="text-caption" />
         <span className="inline-flex items-center gap-x-2 whitespace-nowrap">
@@ -101,7 +103,7 @@ export function AgentCard({
       </p>
 
       {agent.restrictions.length > 0 ? (
-        <ul aria-label="Restrictions" className="grid gap-1.5">
+        <ul aria-label="Restrictions" className="col-start-2 grid gap-1.5">
           {agent.restrictions.map((r) => {
             const d = describeRestriction(r);
             return (

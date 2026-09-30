@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CaretRight, Octagon } from "@phosphor-icons/react";
 import { LinkButton } from "@cloudflare/kumo/components/button";
+import { AgentOwl } from "@/components/domain/owl";
 import { ModeBadge, ModeBanner } from "@/components/domain/mode";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { SECTION_ICON } from "@/components/shell/screen-icons";
@@ -106,6 +107,7 @@ export function AgentFrame({ agent, title, description, children }: { agent: Age
     <div className="grid grid-cols-1 gap-(--section-gap)">
       <PageHeader
         title={title ?? agent.label}
+        icon={<AgentOwl agent={agent} className="size-14 sm:size-16" />}
         environment={useRuntime().ws.environment}
         status={<ModeBadge mode={agent.mode} className="lg:hidden" />}
         description={description ?? agent.mandate.name}

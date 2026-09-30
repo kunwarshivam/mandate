@@ -2,12 +2,13 @@
 
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, CaretRight, Check, CheckCircle, Tray, WarningCircle } from "@phosphor-icons/react";
+import { ArrowRight, CaretRight, CheckCircle, Tray, WarningCircle } from "@phosphor-icons/react";
 import { Deadline } from "@/components/approvals/deadline";
 import { AccountEquityChart } from "@/components/charts/equity-chart";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
 import { ModeBadge } from "@/components/domain/mode";
 import { SignedMoney } from "@/components/domain/money";
+import { AgentOwl, Owl } from "@/components/domain/owl";
 import { Placeholder } from "@/components/domain/placeholders";
 import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { Agent, Approval, Workspace } from "@/fixtures/types";
@@ -135,8 +136,8 @@ function NeedsYou({ ws, open, className }: { ws: Workspace; open: Approval[]; cl
         ) : null}
       </h2>
       {count === 0 ? (
-        <p data-slot="all-clear" className="flex min-h-11 items-center gap-2.5 text-sm text-muted-foreground">
-          <Check aria-hidden className="size-5 shrink-0" />
+        <p data-slot="all-clear" className="flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
+          <Owl seed="owlhead" mood="awake" className="size-9" />
           All clear. Nothing needs you.
         </p>
       ) : (
@@ -183,8 +184,9 @@ function PhoneAgentRow({ agent }: { agent: Agent }) {
     <li data-slot="phone-agent" className="border-b border-border/70 last:border-b-0">
       <Link
         href={`/agents/${agent.agent_id}`}
-        className="press -mx-2 grid min-h-11 grid-cols-[minmax(0,1fr)_1rem] items-center gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
+        className="press -mx-2 grid min-h-11 grid-cols-[2.25rem_minmax(0,1fr)_1rem] items-center gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
       >
+        <AgentOwl agent={agent} className="size-9" />
         <span className="grid min-w-0 gap-1">
           <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
             <span className="font-semibold">{agent.label}</span>
