@@ -967,7 +967,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   a BTC/USDT pair the research agent admitted is, so the journaled denial would say something false
   about it. Registering a code adds no risk and closes a gap, so DEC-176 lets an agent do it in its
   own spec PR; the tests' `PAIR_CODE` constant flips with it ([DEC-254](04-decision-log.md#decisions)
-  item 3; DEC-129 items 25 and 27; #342 review, minors 1 and 2).
+  item 3; DEC-129 items 25 and 27; #342 review, minors 1 and 2). *Done (#352,
+  [DEC-255](04-decision-log.md#decisions)):* the code is registered and §3.2 item 7 names it; the
+  gate's emission and the `PAIR_CODE` flip stay with E6-10's implementation.
 - **The broker symbol's quote currency is read exactly** (E6-10; #342 review, minor 3). The gate's
   USD-pair rule rests on the §3.1 loader mapping a pair to `QuoteCurrency`, and E7-8's
   `TradingClient::asset` criterion does not name it. The loader matches `USD` exactly and
