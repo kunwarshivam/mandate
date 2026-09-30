@@ -8,6 +8,7 @@ import { OWLHEAD_ASCII } from "./ascii";
 import { BetaForm } from "./beta-form";
 import { Contents } from "./contents";
 import { BODY, BOLD, BUTTON, H2, LINK, MONO, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
+import { ModeChart, Perch, TitleOwl } from "./owls";
 import { RecordTrace } from "./record-trace";
 import { Blink, Browser, Desktop, UnderConstruction, Window } from "./retro";
 import { SiteFooter } from "./site-footer";
@@ -95,6 +96,7 @@ export const SECTIONS: Section[] = [
           <li>One Stop button halts every agent and cancels their open orders.</li>
           <li>If market data goes stale, or Owlhead&apos;s records and your broker&apos;s disagree, it stops adding risk and waits for you.</li>
         </ul>
+        <ModeChart />
         <p>
           Limits can&apos;t prevent every loss. When a market gaps or halts, prices can move past a limit before an order fills, so a loss can end up larger than the limit. Owlhead tells you this, in dollars, before you confirm your
           rules.
@@ -222,6 +224,7 @@ export function Landing() {
                 {OWLHEAD_ASCII}
               </span>
             </h1>
+            <Perch />
             <p className="max-w-[34rem] pt-2 text-[1.3125rem] leading-snug text-balance">{SUBHEAD}</p>
             <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
               <span className={cn(RAISED, "bg-highlight px-1.5 text-sm tracking-wide text-highlight-foreground uppercase", PIXEL)}>
@@ -267,7 +270,7 @@ export function Landing() {
 
               <Section id="beta" n={SECTIONS.length + 2} title="Ask for a place">
                 <p>Sign the guestbook to ask for a place. Leave your email and we&apos;ll write once, when your place opens.</p>
-                <Window title="guestbook.cgi" className="max-w-[30rem]">
+                <Window title="guestbook.cgi" icon={<TitleOwl />} className="max-w-[30rem]">
                   <BetaForm />
                 </Window>
               </Section>

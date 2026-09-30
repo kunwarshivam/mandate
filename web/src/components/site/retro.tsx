@@ -32,10 +32,10 @@ function TitleBar({ title, icon }: { title: string; icon?: ReactNode }) {
 }
 
 /** A dialog window: the title bar and a grey body. */
-export function Window({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
+export function Window({ title, icon, children, className }: { title: string; icon?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <div className={cn(RAISED, "bg-muted p-0.5 ring-1 ring-foreground/70", className)} data-slot="window">
-      <TitleBar title={title} />
+      <TitleBar title={title} icon={icon} />
       <div className="p-4 sm:p-5">{children}</div>
     </div>
   );
