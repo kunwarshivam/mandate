@@ -41,7 +41,7 @@ function useWallpaper(): string {
 }
 
 function Picture({ art, className, sizes }: { art: Artwork; className?: string; sizes: string }) {
-  return <Image src={art.src} alt="" fill sizes={sizes} className={cn("object-cover", className)} style={{ objectPosition: art.focus }} />;
+  return <Image src={art.src} alt="" fill sizes={sizes} loading="eager" className={cn("object-cover", className)} style={{ objectPosition: art.focus }} />;
 }
 
 /** The painting behind the desktop. Night dims it a little, the way a monitor turned down would. */

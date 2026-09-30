@@ -29,8 +29,10 @@ type Action =
 
 const CLOSED: Win = { open: false, min: false, max: false, x: 0, y: 0, z: 0 };
 
+const closed = (id: AppId): Win => ({ ...CLOSED, ...APPS[id].offset });
+
 function initial(): State {
-  return { top: 1, wins: { home: { ...CLOSED, open: true, z: 1 }, readme: CLOSED, owl: CLOSED, display: CLOSED } };
+  return { top: 1, wins: { home: { ...closed("home"), open: true, z: 1 }, readme: closed("readme"), owl: closed("owl"), display: closed("display") } };
 }
 
 function reduce(state: State, action: Action): State {
@@ -44,7 +46,7 @@ function reduce(state: State, action: Action): State {
     case "open":
       return set({ open: true, min: false }, true);
     case "close":
-      return set({ ...CLOSED });
+      return set(closed(action.id));
     case "minimize":
       return set({ min: true });
     case "maximize":
@@ -70,33 +72,41 @@ function frontmost(state: State): AppId | null {
   return front;
 }
 
-type App = { title: string; task: string; icon: ReactNode; frame: string };
+type App = { title: string; task: string; icon: ReactNode; frame: string; offset: { x: number; y: number } };
 
-/** Each window's place on a wide screen. On a phone every window fills the desktop. */
+/**
+ * Each window's size on a wide screen. Every window opens centred on the desktop, the home page
+ * clear of the icons on both sides, and the others a little off centre so a second one never hides
+ * the first exactly. On a phone every window fills the desktop.
+ */
 const APPS: Record<AppId, App> = {
   home: {
     title: "Owlhead Home Page",
     task: "Owlhead",
     icon: <OwlheadMark title="" className="size-4 shrink-0" />,
-    frame: "sm:inset-y-3 sm:left-[7.5rem] sm:right-3 2xl:right-auto 2xl:w-[72rem]",
+    frame: "sm:inset-y-3 sm:mx-auto sm:w-[min(66rem,calc(100%-15rem))]",
+    offset: { x: 0, y: 0 },
   },
   readme: {
     title: "readme.txt - Notepad",
     task: "readme.txt",
     icon: <PixelIcon sprite={NOTE} className="size-4" />,
-    frame: "sm:inset-auto sm:top-12 sm:right-8 sm:h-[27rem] sm:max-h-[calc(100%-4rem)] sm:w-[27rem]",
+    frame: "sm:m-auto sm:h-[min(27rem,calc(100%-4rem))] sm:w-[27rem]",
+    offset: { x: -48, y: -24 },
   },
   owl: {
     title: "owl.jpg - Picture Viewer",
     task: "owl.jpg",
     icon: <PixelIcon sprite={PICTURE} className="size-4" />,
-    frame: "sm:inset-auto sm:top-6 sm:right-28 sm:h-[38rem] sm:max-h-[calc(100%-2rem)] sm:w-[23rem]",
+    frame: "sm:m-auto sm:h-[min(38rem,calc(100%-2rem))] sm:w-[23rem]",
+    offset: { x: 48, y: 0 },
   },
   display: {
     title: "Display Properties",
     task: "Display",
     icon: <PixelIcon sprite={MONITOR} className="size-4" />,
-    frame: "sm:inset-auto sm:top-10 sm:left-[max(8rem,calc(50%-14rem))] sm:max-h-[calc(100%-3rem)] sm:w-[28rem]",
+    frame: "sm:m-auto sm:h-fit sm:max-h-[calc(100%-2rem)] sm:w-[28rem]",
+    offset: { x: 0, y: 24 },
   },
 };
 
@@ -166,7 +176,7 @@ function Glyph({ name }: { name: keyof typeof GLYPHS }) {
   );
 }
 
-function Window({ id, win, front, dispatch, children }: { id: AppId; win: Win; front: boolean; dispatch: (a: Action) => void; children: ReactNode }) {
+function Window({ id, win, layer, front, dispatch, children }: { id: AppId; win: Win; layer: number; front: boolean; dispatch: (a: Action) => void; children: ReactNode }) {
   const { title, icon, frame } = APPS[id];
   const ref = useRef<HTMLElement>(null);
   const drag = useRef<{ sx: number; sy: number; ox: number; oy: number; minX: number; maxX: number; minY: number; maxY: number } | null>(null);
@@ -216,7 +226,7 @@ function Window({ id, win, front, dispatch, children }: { id: AppId; win: Win; f
       onPointerDownCapture={() => dispatch({ type: "focus", id })}
       onFocusCapture={() => dispatch({ type: "focus", id })}
       className={cn(RAISED, "absolute inset-0 flex flex-col bg-muted p-0.5 ring-1 ring-foreground/70 outline-none max-sm:translate-none!", !win.max && frame)}
-      style={{ zIndex: win.z, translate: win.max ? undefined : `${win.x}px ${win.y}px` }}
+      style={{ zIndex: layer, translate: win.max ? undefined : `${win.x}px ${win.y}px` }}
     >
       <TitleBar
         title={title}
@@ -353,6 +363,7 @@ export function Desktop({ home }: { home: ReactNode }) {
   };
 
   const open = (Object.keys(APPS) as AppId[]).filter((id) => state.wins[id].open);
+  const layers = (Object.keys(APPS) as AppId[]).toSorted((a, b) => state.wins[a].z - state.wins[b].z);
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden" data-slot="desktop">
@@ -393,7 +404,7 @@ export function Desktop({ home }: { home: ReactNode }) {
         </ul>
 
         {(Object.keys(APPS) as AppId[]).map((id) => (
-          <Window key={id} id={id} win={state.wins[id]} front={front === id} dispatch={dispatch}>
+          <Window key={id} id={id} win={state.wins[id]} layer={layers.indexOf(id) + 1} front={front === id} dispatch={dispatch}>
             {bodies[id]}
           </Window>
         ))}
