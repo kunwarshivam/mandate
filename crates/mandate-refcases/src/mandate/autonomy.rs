@@ -18,10 +18,12 @@
 //! before any fact is read, so a fact it stated would be one nobody compared.
 //!
 //! **What the harness fills for a risk-reducing action.** `ActionContext` still needs a value in
-//! every field, so [`unread_facts`] supplies zeros, `crypto`, and an instrument no case names. The
-//! values cannot decide the case: a decision reached through the rules is labelled `rule:<id>`,
-//! `default`, or `admission_ceiling`, never `builtin_risk_reducing`, so a `classify` that read them
-//! fails the case on `by` whatever they are.
+//! every field, so [`unread_facts`] supplies zeros, `crypto`, and an instrument no case names. With
+//! those values MC-A01 to MC-A04 must come back labelled `builtin_risk_reducing`, so a `classify`
+//! that sent a reducing purpose through the rules fails on `by` (`rule:<id>`, `default`, or
+//! `admission_ceiling`). A `classify` that consulted the filled values and still answered with the
+//! built-in would pass here; that no facts and no rules change the answer is `mandate-builder`'s
+//! `no_rule_set_ever_denies_or_asks_a_reducing_purpose`.
 //!
 //! **The approval is compared both ways.** An ASK must state `approvers_required` and `on_timeout`
 //! and match both; an AUTO or a DENY carries no approval (§6.4), so a case that states either member
