@@ -26,11 +26,15 @@ use crate::document::{
 use crate::{SchemaDec, SpecError};
 
 /// What a version does to risk (§9.2).
+///
+/// [`Ord`] is the severity order `Neutral < RiskReducing < RiskIncreasing < Invalid`, so a verdict
+/// over several paths is a maximum and "which class wins" is one thing in one place, as it is for
+/// [`AutonomyDecision`] and [`AgentMode`](mandate_domain::AgentMode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ChangeClass {
-    RiskIncreasing,
-    RiskReducing,
     Neutral,
+    RiskReducing,
+    RiskIncreasing,
     /// `environment` or `connection_id` changed, which §9.2 calls invalid rather than classifying.
     /// V-031 reports the same thing at validation; neither surface depends on the other
     /// (DEC-128 item 12).
@@ -62,13 +66,21 @@ pub struct Classification {
 
 /// Classifies `new` against `old`.
 ///
+/// A changed [`REFUSED_PATHS`] member is [`ChangeClass::Invalid`] before anything else is looked at,
+/// the pinning switch included, so that verdict never rests on what [`PIN_SWITCH_PATHS`] lists.
+///
 /// A mandate whose public fields no longer match the document it was parsed from has no canonical
 /// form, and is refused with [`ParseError::Diverged`](crate::ParseError::Diverged) rather than
 /// classified from fields the version would not hash.
 pub fn classify(old: &Mandate, new: &Mandate) -> Result<Classification, SpecError> {
     let (before, after) = (old.canonical()?, new.canonical()?);
     let changed_paths = diff(&before, &after);
-    let class = if is_pinning_switch(old, new, &changed_paths) {
+    let class = if changed_paths
+        .iter()
+        .any(|p| REFUSED_PATHS.contains(&p.as_str()))
+    {
+        ChangeClass::Invalid
+    } else if is_pinning_switch(old, new, &changed_paths) {
         ChangeClass::RiskReducing
     } else {
         let mut classes = Vec::with_capacity(changed_paths.len());
@@ -92,6 +104,10 @@ pub fn classify(old: &Mandate, new: &Mandate) -> Result<Classification, SpecErro
 pub fn changed_paths(old: &Mandate, new: &Mandate) -> Result<Vec<Pointer>, SpecError> {
     Ok(diff(&old.canonical()?, &new.canonical()?))
 }
+
+/// The paths §9.2 refuses to classify: a version may not move a mandate to another environment or
+/// connection (V-031, DEC-128 item 12).
+pub const REFUSED_PATHS: [&str; 2] = ["/environment", "/connection_id"];
 
 /// The five paths DEC-121's pinning switch may touch and no others.
 pub const PIN_SWITCH_PATHS: [&str; 5] = [
@@ -168,22 +184,16 @@ fn walk(old: Option<&Value>, new: Option<&Value>, at: &str, out: &mut Vec<Pointe
     }
 }
 
-/// Increasing if any class is, else reducing if any is, else neutral; `Invalid` above all of them,
-/// because a changed environment or connection is refused whatever else changed (DEC-172 item 8).
+/// The most severe class, [`ChangeClass`]'s [`Ord`]: increasing if any class is, else reducing if
+/// any is, else neutral, and neutral for none.
 fn join(classes: impl IntoIterator<Item = ChangeClass>) -> ChangeClass {
-    let seen: BTreeSet<ChangeClass> = classes.into_iter().collect();
-    [
-        ChangeClass::Invalid,
-        ChangeClass::RiskIncreasing,
-        ChangeClass::RiskReducing,
-    ]
-    .into_iter()
-    .find(|class| seen.contains(class))
-    .unwrap_or(ChangeClass::Neutral)
+    classes.into_iter().fold(ChangeClass::Neutral, Ord::max)
 }
 
 /// §9.2's row for one changed path. `before` and `after` are the canonical values of `old` and
 /// `new`, read only where the row compares text rather than a typed field.
+///
+/// [`classify`] has refused [`REFUSED_PATHS`] before any row is read, so they have no arm here.
 fn row(
     old: &Mandate,
     new: &Mandate,
@@ -193,7 +203,6 @@ fn row(
 ) -> Result<ChangeClass, SpecError> {
     let (o, n) = (old, new);
     Ok(match path {
-        "/environment" | "/connection_id" => ChangeClass::Invalid,
         "/name" => ChangeClass::Neutral,
         "/notifications/channels" => {
             if o.notifications
@@ -447,6 +456,13 @@ fn has_admitting_model(mandate: &Mandate) -> bool {
 
 /// DEC-121's switch over the change's own paths, which [`classify`] computed and
 /// [`pinning_switch`] checks a caller's list against.
+///
+/// When the switch fails, [`row`]'s `/universe/pinned` arm is reducing on the same two conditions
+/// it starts from (pinned after, an admitting model before), which is looser than the switch. That
+/// arm never decides a verdict between two valid versions: V-037 leaves the pinned version no
+/// admitting model, so the model that admitted before has changed, and `/behavior/signal_models`,
+/// an unlisted row, is increasing; V-036 makes `/behavior/research` move with it. Only a version
+/// validation rejects reaches that arm's reducing verdict alone.
 fn is_pinning_switch(old: &Mandate, new: &Mandate, paths: &[Pointer]) -> bool {
     let cleared: Vec<SignalModel> = old
         .behavior
