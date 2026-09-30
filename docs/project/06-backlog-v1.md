@@ -389,10 +389,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Follow-up (#321 review, minor 8):* `recent_timeout` does not say whose `timeout_s` it uses.
   *Follow-up (#321 review, minor 9):* `reference/mandate/mutants.py` runs only in
   `cargo xtask ci nightly`, not in `cargo xtask check`.
-  *Follow-up (#321 round 2, minor 1), owned by the M7 tests correction:* nothing tests that
-  `ApprovalResponded` records the approver count and independence check 7 applied; dropping the
-  member survives the whole fuzz. Assert the recorded quorum against the fuzz's own `own_quorum`,
-  and add a mutant.
+  *Done (#321 round 2, minor 1; the M7 tests correction's reference half, DEC-173 item 13):*
+  nothing tested that `ApprovalResponded` records the approver count and independence check 7
+  applied, so dropping the member survived the whole fuzz. `fuzz_escalation` now asserts that every
+  grant reaching check 7, and no other response, records its own `own_quorum`, and `mutants.py`
+  gains two planted bugs, the member dropped and the bound quorum recorded in place of the applied
+  one, which `origin/main`'s fuzz let through and this one catches.
   *Follow-up (#321 round 2, minor 2):* say which stream the policy overlay is folded from.
   `PolicyChanged` is on the workspace control stream, and §2's copy list for the agent runtime does
   not include it. State either that the runtime copies it into the agent stream, or that replay

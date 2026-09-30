@@ -959,8 +959,9 @@ def fuzz_escalation(n):
     responses, cancellations, a cancellation batched with responses, and workspace `PolicyChanged` events between a
     request and its responses. Every response the oracle judges timely, human, listed, delivered, matching, freshly
     and singly stepped-up, in the quorum of the stricter of the bound requirement and the oracle's own record of the
-    current policy, and passing every re-validation value must act, and no other may; every approval ends in exactly
-    one terminal event of the transition table."""
+    current policy, and passing every re-validation value must act, and no other may; every grant that reaches check 7,
+    and no other response, records that quorum on its `ApprovalResponded`; every approval ends in exactly one terminal
+    event of the transition table."""
     for _ in range(n):
         env = "paper" if rng.random() < 0.85 else "live"
         timeout_s = rng.choice([30, 60, 300, 600])
@@ -1034,7 +1035,7 @@ def fuzz_escalation(n):
             for d in drafts:
                 escalation_apply(st, d)
             journal += drafts
-            expected, granted, quorate = {}, {}, {}
+            expected, granted, quorate, applied = {}, {}, {}, {}
             if inp["kind"] == "ask":
                 asked = [d for d in drafts if d["type"] == "ApprovalRequested"]
                 check(bool(asked) == (not own["pending"]), "MI-25 one pending risk-adding approval per agent", (own["pending"], asked))
@@ -1063,14 +1064,15 @@ def fuzz_escalation(n):
                 need, independent = own_quorum(bound_of[a], own["policy"]) if a in bound_of else (1, False)
                 if ok and r["verdict"] == "skipped":
                     del own["pending"][a]
-                elif ok and own_step_up_ok(r["step_up"], eff, env, own["seen"]) and r["responder"] not in p["grants"] \
-                        and not (independent and r["responder"] == "u1"):
-                    granted[r["source"]] = True
-                    p["grants"].add(r["responder"])
-                    if len([g for g in p["grants"] if not (independent and g == "u1")]) >= need:
-                        quorate[r["source"]] = True
-                        del own["pending"][a]
-                        acts = own_acts(bound_of[a], inp["now"])
+                elif ok and own_step_up_ok(r["step_up"], eff, env, own["seen"]):
+                    applied[r["source"]] = {"required": need, "independent": independent}
+                    if r["responder"] not in p["grants"] and not (independent and r["responder"] == "u1"):
+                        granted[r["source"]] = True
+                        p["grants"].add(r["responder"])
+                        if len([g for g in p["grants"] if not (independent and g == "u1")]) >= need:
+                            quorate[r["source"]] = True
+                            del own["pending"][a]
+                            acts = own_acts(bound_of[a], inp["now"])
                 if isinstance(r["step_up"], dict) and isinstance(r["step_up"].get("assertion"), str):
                     own["seen"].append(r["step_up"]["assertion"])
                 expected[r["source"]] = acts
@@ -1083,6 +1085,9 @@ def fuzz_escalation(n):
                     check((d["verdict"] == "approved" and d["result"] == "admitted") == quorate.get(d["source"], False),
                           "MI-24 a grant is admitted exactly at the stricter of the bound and the current policy quorum",
                           (d, own["policy"], bound_of.get(d["approval"], {}).get("approvers_required"), quorate.get(d["source"])))
+                    check(d.get("quorum") == applied.get(d["source"]),
+                          "MI-24 ApprovalResponded records the approver count and independence check 7 applied, for exactly the grants that reach it",
+                          (d, own["policy"], applied.get(d["source"])))
                     last, last_approval, reval_act = d["source"], d["approval"], False
                     produced.setdefault(last, False)
                 elif d["type"] == "ApprovalRevalidated":
