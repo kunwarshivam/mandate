@@ -230,7 +230,10 @@ mod tests {
 
     use crate::{Json, mandate, read_fixture};
 
-    const PLANTED: &str = "zz_planted";
+    /// A real case member at the wrong level: other families carry `input` at a case's top level,
+    /// so the suite's shared `unread_keys` accepts it there and only this module's own sweep refuses
+    /// it. No `action` or `expect` has an `input` member either.
+    const PLANTED: &str = "input";
 
     /// §6.3's fields, less the reserved `unusual_input`, which no action states (V-018).
     const FIELDS: [ConditionField; 15] = [
@@ -385,10 +388,14 @@ mod tests {
 
     /// Every opening fact is required and every other member refused: dropping any member of an
     /// opening's `action` fails naming it, and a member planted in any action fails naming the
-    /// plant, a fact planted in a risk-reducing action included. So does a member planted at the
-    /// case's top level.
+    /// plant, a fact planted in a risk-reducing action included. So does [`PLANTED`] at the case's
+    /// top level, which the suite's shared sweep accepts, so the module's own sweep is under test.
     #[test]
     fn every_action_member_is_required_and_no_other_is_accepted() -> Result<(), String> {
+        crate::ensure(
+            mandate::CASE_KEYS.contains(&PLANTED) && !super::CASE_KEYS.contains(&PLANTED),
+            || format!("`{PLANTED}` must pass the shared top-level sweep and fail this module's"),
+        )?;
         let fixture = fixture()?;
         let mut openings = 0_usize;
         for case in family_a(&fixture)? {
