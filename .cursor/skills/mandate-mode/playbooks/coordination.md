@@ -56,12 +56,17 @@ and resolve conflicts by keeping both sides.
 ## 5. One merge queue
 
 Cursor cloud agents cannot launch other agents (ship playbook step 3), so they stop at an open PR
-with green CI and say so in its body. The Claude Code coordinating session is the merge
+with green CI and report it to the session that launched them, which writes the PR's
+description. Only a coordinating session writes a `Coordinator-approved-head` line (DEC-175); an
+author never adds, edits, or copies one. The Claude Code coordinating session is the merge
 coordinator for both sides: it launches the independent review on a different model, relays
 findings back to the author through the PR, and on PASS squash-merges (the reviewer may merge on
 its behalf, as ship.md step 5 allows). Merges go in claim order, one at a time, so shared files
-never race. Nobody rebases, force-pushes, or closes a branch they did not create; to ask for a
-review, a decision, or a rebase, comment on the PR or the claim issue.
+never race. Under DEC-175 the `merge` workflow may land two approved PRs close together; one that
+a merge left conflicting is not mergeable, so the workflow skips it, and its author merges `main`
+in and asks for a new approval of the new head. Nobody rebases, force-pushes, or closes a branch
+they did not create; to ask for a review, a decision, or a rebase, comment on the PR or the claim
+issue.
 
 The exception is UI PRs (DEC-200): the Cursor coordinating session launches their independent
 review on a different model and merges them itself, and the Claude Code session neither reviews nor
