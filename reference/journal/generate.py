@@ -899,6 +899,15 @@ def hash_chain(bodies: list[dict], genesis: str) -> list[dict]:
     return entries
 
 
+def rechain(entries: list[dict]) -> None:
+    """Re-canonicalize and re-hash chain entries in place from the first body's `prev_hash`."""
+    prev = entries[0]["body"]["prev_hash"]
+    for entry in entries:
+        entry["body"]["prev_hash"] = prev
+        entry["canonical"] = canon(entry["body"])
+        prev = entry["hash"] = sha256_hex(entry["canonical"].encode())
+
+
 def draft_of(body: dict) -> dict:
     return {k: copy.deepcopy(v) for k, v in body.items() if k not in JOURNAL_FIELDS}
 
@@ -1564,9 +1573,15 @@ def payload_named(section: dict, name: str) -> dict:
 def vector_mutants(section: dict) -> list[tuple[str, dict]]:
     """Seeded bugs in the vectors; the chain check must reject each one."""
 
-    def mutated(fn) -> dict:
+    unhashed = {"prev_hash not chained", "artifact content changed"}
+
+    def mutated(name: str, fn) -> dict:
+        """The mutant, re-chained unless it seeds a hashing bug, so that only the check it names can
+        catch it rather than the canonical-bytes check."""
         copy_ = copy.deepcopy(section)
         fn(copy_)
+        if name not in unhashed:
+            rechain(copy_["chain"])
         return copy_
 
     def decision(s: dict) -> dict:
@@ -1630,7 +1645,7 @@ def vector_mutants(section: dict) -> list[tuple[str, dict]]:
             lambda s: draft_named(s, "reason_code_empty_string_on_allow")["expect"].update(reason="schema"),
         ),
     ]:
-        out.append((name, mutated(fn)))
+        out.append((name, mutated(name, fn)))
     return out
 
 
