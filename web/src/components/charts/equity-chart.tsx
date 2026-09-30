@@ -121,7 +121,8 @@ function EquityHero({
   const [levelsOpen, setLevelsOpen] = useState(false);
   const legendId = useId();
   const onScrub = useCallback((p: ScrubPoint) => setScrub(p), []);
-  const series = useMemo<ChartSeries>(() => ({ kind: "area", tone, points }), [points, tone]);
+  const trend = direction(((points.at(-1)?.value ?? 0) - (points[0]?.value ?? 0)).toFixed(2));
+  const series = useMemo<ChartSeries>(() => ({ kind: "area", tone, points, trend }), [points, tone, trend]);
   const now = points[points.length - 1];
   const shown = scrub ?? now ?? null;
   const base = points[0]?.value ?? 0;
@@ -166,7 +167,7 @@ function EquityHero({
           axis={(levels?.length ?? 0) > 0}
           onScrub={onScrub}
           pulse={pulse}
-          height={tone === "account" ? 260 : 280}
+          height={tone === "account" ? 340 : 300}
           phoneHeight={tone === "account" ? ACCOUNT_PHONE_HEIGHT : undefined}
           className="-mx-1"
         />

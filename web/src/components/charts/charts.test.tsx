@@ -1,17 +1,17 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
-import { ColorType, LineStyle } from "lightweight-charts";
+import { ColorType, LineStyle, LineType } from "lightweight-charts";
 import { afterEach, describe, expect, it } from "vitest";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
 import { parseOklch, toHex } from "@/lib/color";
 import { toFixed } from "@/lib/decimal";
-import { usd } from "@/lib/format";
+import { direction, usd } from "@/lib/format";
 import { agentLimits } from "@/lib/limits";
 import { PALETTE, PALETTE_DARK } from "@/lib/palette";
 import { type MockChart, chartControl, chartIn, liveCharts, pointerTime } from "@/test/chart-mock";
 import { renderWithRuntime } from "@/test/harness";
 import { drawn, spoken } from "@/test/spoken";
 import { AccountEquityChart, AgentEquityChart, unmanagedEquity } from "./equity-chart";
-import { CHART_COLOR, CHART_TOKEN, type ChartLevel, LABEL_GAP, type Tone, areaOptions, baseOptions, candleOptions, crowdedLevels, lineOptions, priceLineFor, setChartMode, usdLabel } from "./options";
+import { CHART_COLOR, CHART_TOKEN, type ChartLevel, HERO_FILL, LABEL_GAP, type Tone, areaOptions, baseOptions, candleOptions, crowdedLevels, heroAreaOptions, lineOptions, priceLineFor, setChartMode, trendColor, usdLabel } from "./options";
 import { ApprovalChart, PositionChart } from "./price-chart";
 
 const WS = buildWorkspace("normal");
@@ -64,6 +64,19 @@ describe("chart builders draw flat, solid colour", () => {
       for (const t of typesIn(options)) expect(t).toBe(ColorType.Solid);
       if ("topColor" in options) expect(options.topColor).toBe(options.bottomColor);
     }
+  });
+
+  it("draws a hero line in the colour of its change, smooth, with nothing under it", () => {
+    for (const [trend, plain, cvd] of [
+      ["gain", CHART_COLOR.gain, CHART_COLOR.gainCvd],
+      ["loss", CHART_COLOR.loss, CHART_COLOR.lossCvd],
+      ["flat", CHART_COLOR.foreground, CHART_COLOR.foreground],
+    ] as const) {
+      expect(heroAreaOptions(trend)).toMatchObject({ lineColor: plain, lineType: LineType.Curved, topColor: HERO_FILL, bottomColor: HERO_FILL, lastValueVisible: false });
+      expect(heroAreaOptions(trend, true).lineColor).toBe(cvd);
+      expect(trendColor(trend)).toBe(plain);
+    }
+    expect(baseOptions({ reducedMotion: false, hero: { axis: false } }).timeScale?.visible).toBe(false);
   });
 
   it("colours are plain hex from the tokens, gains and losses signed", () => {
@@ -128,7 +141,9 @@ describe("AgentEquityChart", () => {
     expect(series.options.topColor).toBe(series.options.bottomColor);
 
     const levels = agentLimits(agent).levels;
-    for (const line of series.priceLines) {
+    const [open] = series.priceLines.filter((l) => l.id === "open");
+    expect(open).toMatchObject({ price: (series.data[0] as { value: number }).value, lineStyle: LineStyle.Dotted, axisLabelVisible: false, title: "" });
+    for (const line of series.priceLines.filter((l) => l.id !== "open")) {
       const level = levels.find((l) => l.key === line.id);
       expect(level, String(line.id)).toBeDefined();
       expect(line.price).toBe(Number(toFixed(level!.at, 2)));
@@ -142,7 +157,7 @@ describe("AgentEquityChart", () => {
     const listed = [...(legend?.querySelectorAll("[data-level]") ?? [])];
     expect(listed.map((li) => li.getAttribute("data-level")).sort()).toEqual(levels.map((l) => l.key).sort());
     const drawnKeys = listed.filter((li) => li.getAttribute("data-drawn") === "true").map((li) => li.getAttribute("data-level"));
-    expect(drawnKeys.sort()).toEqual(series.priceLines.map((l) => String(l.id)).sort());
+    expect(drawnKeys.sort()).toEqual(series.priceLines.filter((l) => l.id !== "open").map((l) => String(l.id)).sort());
   });
 
   it("hides the label of a level that would sit on the label above it, and keeps its line", () => {
@@ -189,8 +204,10 @@ describe("AccountEquityChart", () => {
   it("ends at the broker's equity, as the account's line, with the TradingView credit", () => {
     const { container } = renderWithRuntime(<AccountEquityChart />);
     const [series] = onlyChart(container).series;
-    expect(series.options.lineColor).toBe(CHART_COLOR.lapis);
-    expect(series.options.topColor).toBe(series.options.bottomColor);
+    const data = series.data as Array<{ value: number }>;
+    expect(series.options.lineColor).toBe(trendColor(direction((data.at(-1)!.value - data[0].value).toFixed(2))));
+    expect(series.options.topColor).toBe(HERO_FILL);
+    expect(series.options.bottomColor).toBe(HERO_FILL);
     const last = series.data.at(-1) as { value: number };
     expect(last.value).toBe(Number(WS.connection.account_equity));
     expect(container.querySelector("[data-slot=account-equity-value]")).toHaveTextContent(usd(WS.connection.account_equity));

@@ -18,6 +18,7 @@ import {
 } from "lightweight-charts";
 import type { Bar, DailyBar, Point } from "@/fixtures/market";
 import { nearestPoint } from "@/lib/chart-data";
+import type { Direction } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useChartMode, useColourBlind } from "./chart-parts";
 import {
@@ -33,15 +34,18 @@ import {
   candleOptions,
   crowdedLevels,
   formatTime,
+  heroAreaOptions,
   lineOptions,
   markersFor,
+  openLineFor,
   priceLineFor,
   setChartMode,
   usdLabel,
 } from "./options";
 
 export type ChartSeries =
-  | { kind: "area"; tone: Tone; points: Point[] }
+  /** `trend` makes a hero area follow its change: green up, red down (DEC-217). */
+  | { kind: "area"; tone: Tone; points: Point[]; trend?: Direction }
   | { kind: "line"; tone: Tone; points: Point[] }
   | { kind: "candles"; bars: Array<Bar | DailyBar> };
 
@@ -161,11 +165,12 @@ export function TimeChart({
           api = candles;
         } else if (series.kind === "area") {
           const area = chart.addSeries(AreaSeries, {
-            ...areaOptions(series.tone),
+            ...(hero && series.trend ? heroAreaOptions(series.trend, colourBlind) : areaOptions(series.tone)),
             ...(hero ? { lastValueVisible: false, crosshairMarkerRadius: 5 } : {}),
             ...(hero && pulse && !reducedMotion ? { lastPriceAnimation: LastPriceAnimationMode.Continuous } : {}),
           });
           area.setData(areaData(series.points));
+          if (hero && series.trend && series.points.length > 1) area.createPriceLine(openLineFor(series.points[0].value));
           api = area;
         } else {
           const line = chart.addSeries(LineSeries, lineOptions(series.tone));

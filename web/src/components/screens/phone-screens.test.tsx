@@ -107,7 +107,7 @@ describe("Home on a phone", () => {
     const canvas = main().querySelector<HTMLElement>("[data-slot=account-equity] [data-slot=chart-canvas]")!;
     expect(canvas).toHaveClass("h-(--chart-phone)", "lg:h-(--chart-height)");
     expect(canvas.style.getPropertyValue("--chart-phone")).toBe("180px");
-    expect(canvas.style.getPropertyValue("--chart-height")).toBe("260px");
+    expect(canvas.style.getPropertyValue("--chart-height")).toBe("340px");
     const hero = main().querySelector<HTMLElement>("[data-slot=account-equity]")!;
     expect(shownOnPhone(hero.querySelector("[data-placeholder=performance]")!)).toBe(true);
     expect(shownOnPhone(hero.querySelector("[data-slot=range-picker]")!)).toBe(true);

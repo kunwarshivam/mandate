@@ -11,6 +11,7 @@ import {
   LastPriceAnimationMode,
   type LineSeriesPartialOptions,
   LineStyle,
+  LineType,
   type SeriesMarker,
   type Time,
   TickMarkType,
@@ -18,6 +19,7 @@ import {
 } from "lightweight-charts";
 import type { Bar, DailyBar, Point } from "@/fixtures/market";
 import { toHex } from "@/lib/color";
+import type { Direction } from "@/lib/format";
 import { PALETTE, PALETTES, type Palette, type TokenName } from "@/lib/palette";
 import type { ThemeMode } from "@/lib/theme";
 
@@ -178,8 +180,9 @@ function heroOptions(valueFormat: (value: number) => string, axis: boolean): Dee
     },
     rightPriceScale: { visible: axis, borderVisible: false, scaleMargins: { top: 0.16, bottom: 0.12 } },
     leftPriceScale: { visible: false },
+    /* No time labels: the hero's "when" reads the time under the pointer. */
     timeScale: {
-      visible: true,
+      visible: false,
       borderVisible: false,
       timeVisible: true,
       secondsVisible: false,
@@ -218,6 +221,57 @@ export function areaOptions(tone: Tone): AreaSeriesPartialOptions {
     lastPriceAnimation: LastPriceAnimationMode.Disabled,
     crosshairMarkerBorderColor: CHART_COLOR.card,
     crosshairMarkerBackgroundColor: line,
+  };
+}
+
+/** A hero line has no fill: any tint under it reads as a box on the page. */
+export const HERO_FILL = "transparent";
+
+/** The hero line in the colour of the change over its range: green up, red down, ink when flat. */
+export function trendColor(trend: Direction, colourBlind = false): string {
+  switch (trend) {
+    case "gain":
+      return colourBlind ? CHART_COLOR.gainCvd : CHART_COLOR.gain;
+    case "loss":
+      return colourBlind ? CHART_COLOR.lossCvd : CHART_COLOR.loss;
+    case "flat":
+      return CHART_COLOR.foreground;
+    default: {
+      const unhandled: never = trend;
+      throw new Error(`unhandled trend ${String(unhandled)}`);
+    }
+  }
+}
+
+/** A hero line: smooth, 2 px, in the trend's colour, with nothing under it. */
+export function heroAreaOptions(trend: Direction, colourBlind = false): AreaSeriesPartialOptions {
+  const line = trendColor(trend, colourBlind);
+  return {
+    lineColor: line,
+    lineWidth: 2,
+    lineType: LineType.Curved,
+    topColor: HERO_FILL,
+    bottomColor: HERO_FILL,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    lastPriceAnimation: LastPriceAnimationMode.Disabled,
+    crosshairMarkerRadius: 5,
+    crosshairMarkerBorderColor: CHART_COLOR.card,
+    crosshairMarkerBackgroundColor: line,
+  };
+}
+
+/** The range's opening value: a faint dotted rule the line is read against, with no label. */
+export function openLineFor(price: number): CreatePriceLineOptions {
+  return {
+    id: "open",
+    price,
+    color: CHART_COLOR.mutedForeground,
+    lineWidth: 1,
+    lineStyle: LineStyle.Dotted,
+    lineVisible: true,
+    axisLabelVisible: false,
+    title: "",
   };
 }
 
