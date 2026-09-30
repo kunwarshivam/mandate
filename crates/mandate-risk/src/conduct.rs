@@ -83,15 +83,16 @@ fn collar(input: &GateInput<'_>, quote: SaneQuote) -> Result<(Price, Price), Gat
 }
 
 /// §9.6's tier: `collar_crypto_x` for crypto; for an equity `collar_liquid_x` when the 20-day
-/// median dollar volume is at least the threshold (`≥`, the spec's own sign) and `collar_other_x`
-/// otherwise, an unknown volume included, as the spec's "otherwise" reads.
+/// median dollar volume is at least the threshold (`≥`, the spec's own sign), `collar_other_x` when
+/// it is known and below it, and the narrower `collar_liquid_x` when it is unknown, so the
+/// ambiguous case admits fewer prices, not more (DEC-163 item 2).
 fn collar_x(input: &GateInput<'_>) -> Fraction {
     let config = input.config;
     match input.instrument.asset_class {
         AssetClass::Crypto => config.collar_crypto_x,
         AssetClass::UsEquity => match input.instrument.median_dollar_volume_20d {
-            Some(volume) if volume >= config.collar_liquid_threshold_usd => config.collar_liquid_x,
-            _ => config.collar_other_x,
+            Some(volume) if volume < config.collar_liquid_threshold_usd => config.collar_other_x,
+            Some(_) | None => config.collar_liquid_x,
         },
     }
 }

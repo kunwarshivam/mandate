@@ -304,8 +304,8 @@ pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty
 /// eligibility floor and where it sits in check 2; and for E6-8, each conduct boundary a mutant or
 /// a planted bug crossed: a locked and a crossed quote, both collar ends, each participation cap
 /// alone, the order-to-fill maximum, the opposite-fill interval's last instant, the collar pricing
-/// only a discretionary exit, a slice only below the proposal and never of a risk exit, and the
-/// resting time's end.
+/// only a discretionary exit, a slice only below the proposal and never of a risk exit, an unknown
+/// median's narrower collar, and the resting time's end.
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -2530,6 +2530,31 @@ mod tests {
                 sliced("9", crate::PacingControl::DailyParticipation)?,
             ],
             "a cap equal to the proposal slices nothing; one below it slices to its increment"
+        );
+        Ok(())
+    }
+
+    /// §9.6 for a collar: an equity whose 20-day median dollar volume is unknown takes the narrower
+    /// `collar_liquid_x` (DEC-163 item 2). An opening in it never reaches the collar, since the
+    /// eligibility floor denies it first, so a discretionary sell at 98 shows it: with bid 99.95 it
+    /// is raised to the liquid floor 98.9505, on the cent grid 98.96, where the other tier's floor
+    /// of 97.951 at a known median of 40M sends it as proposed.
+    #[test]
+    fn an_unknown_median_volume_takes_the_narrower_collar() -> Result<(), GateError> {
+        let selling = |median: Option<&str>| -> Result<_, GateError> {
+            let mut o = allowing()?.selling(Origin::OrderBuilder)?;
+            o.proposed.limit_price = Price::parse("98")?;
+            o.instrument.median_dollar_volume_20d = median.map(Usd::parse).transpose()?;
+            let d = o.decide()?;
+            Ok((d.verdict, d.pacing.map(|p| p.limit_price)))
+        };
+        assert_eq!(
+            [selling(None)?, selling(Some("40000000"))?],
+            [
+                (Verdict::Allow, Some(Price::parse("98.96")?)),
+                (Verdict::Allow, None)
+            ],
+            "an unknown median prices by the liquid collar, a known low one by the other"
         );
         Ok(())
     }
