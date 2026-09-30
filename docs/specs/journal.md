@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.5 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.6 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -12,18 +12,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
-- **v0.5, amended ([DEC-181](../project/04-decision-log.md#decisions)):** `DecisionMade` names the
-  source of its autonomy decision and, when a delegation lifted it, the `delegation_id` that
-  delegation usage is counted from ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003));
-  `ApprovalRequested`'s content object lists the delegation shapes offered in `choices`, and
-  `ApprovalResponded` records the shape chosen.
-  `DecisionMade` also records `requested_by`, and the client's id for a client-requested order, and the
-  content object's `trigger` carries both
-  ([DEC-185](../project/04-decision-log.md#decisions)).
-  No new event type; test vectors are unchanged. §9.1's closed `DecisionMade` schema does not list
-  these members yet: they join it, with generated vectors, in their own change before E8-8 or E6-12
-  writes them, and until then no writer emits them.
-- **v0.5 ([DEC-177](../project/04-decision-log.md#decisions)):** §9.1 closes the payload schemas of
+- **v0.6 ([DEC-177](../project/04-decision-log.md#decisions)):** §9.1 closes the payload schemas of
   the agent stream's `StreamOpened`, `ObservationRecorded`, `ModelOutputRecorded`, `DecisionMade`,
   `IntentProposed`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`, and rules on
   every contradiction [DEC-174](../project/04-decision-log.md#decisions) item 3 found in them: `null`,
@@ -34,8 +23,23 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   per-range checks `intent_action_mismatch` and `mode_event_mismatch`. The test vectors gain a
   generated `agent_stream` section (a hash-chained stream from `StreamOpened` with its artifacts, an
   invalid draft for every rule, valid drafts, batches, and range-verification cases) and stay
-  version 3 until the harness reads it. The approval events close with the escalation spec change
-  (M7).
+  version 3 until the harness reads it. The approval events that v0.5 added are not closed here.
+  Reconciled with v0.5 (DEC-177 items 21 to 24): `IntentProposed` may be caused by an
+  `ApprovalRevalidated` and then repeats its approval's bound action, and rule 16 makes each copy of
+  an owner command name its `OwnerCommandIssued`.
+- **v0.5, amended ([DEC-181](../project/04-decision-log.md#decisions)):** `DecisionMade` names the
+  source of its autonomy decision and, when a delegation lifted it, the `delegation_id` that
+  delegation usage is counted from ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003));
+  `ApprovalRequested`'s content object lists the delegation shapes offered in `choices`, and
+  `ApprovalResponded` records the shape chosen.
+  `DecisionMade` also records `requested_by`, and the client's id for a client-requested order, and the
+  content object's `trigger` carries both
+  ([DEC-185](../project/04-decision-log.md#decisions)).
+  No new event type. §9.1's closed `DecisionMade` schema lists them as `decided_by`,
+  `delegation_id`, `requested_by`, and `client_id`, with rule 5 and rule 7 clauses that tie them
+  to `autonomy` and refuse a client-requested opening recorded as `auto`
+  ([DEC-252](../project/04-decision-log.md#decisions)); the generated `agent_stream` vectors cover
+  every clause and the test vectors stay version 3.
 - **v0.5 ([DEC-173](../project/04-decision-log.md#decisions), with [DEC-155](../project/04-decision-log.md#decisions),
   [DEC-156](../project/04-decision-log.md#decisions), and [DEC-158](../project/04-decision-log.md#decisions)):**
   approval escalation v0 ([mandate spec §6.1, §6.4](mandate.md#64-approvals)). The workspace
@@ -387,7 +391,7 @@ column of §9, and the required `config_refs` stay as §9 lists them. Each schem
 a record with exactly the listed members, every one present (§4.2). The test vectors' `agent_stream`
 section holds at least one chain event per schema, an invalid draft for every rule below, and valid
 drafts for the cases a rule might be misread to refuse. The other agent-stream events are not
-closed yet: the approval events close with the escalation spec change (M7),
+closed yet: the approval events that v0.5 added (§9, mandate spec §6.4) close in their own change,
 `ModelInvocationRecorded`, `ThesisProposed`, and `ThesisRevised` with their own stories.
 
 **Types.**
@@ -410,9 +414,10 @@ never read as `null` (§4.2), even where `null` would be valid. The first violat
 reported, in this order: unlisted members (in key order), then the listed members in the order given,
 then the numbered consistency rules in number order, each rule's clauses in the order given (only on
 a payload whose members are all well typed), then `artifact_refs` and `pii_refs` (§3), then the
-subject rules 14 and 15 (`stream_mismatch`). Rule 10's second clause spans a batch, so it is checked
-only once every draft in the batch passes these checks, and is reported at the first `IntentProposed`
-in the batch that breaks it. Paths are dotted from the envelope (`payload.step_up.authenticated_at`).
+subject rules 14 and 15 (`stream_mismatch`), then the copy rule 16 (also only on a well-typed
+payload). Rule 10's second clause spans a batch, so it is checked only once every draft in the batch
+passes these checks, and is reported at the first `IntentProposed` in the batch that breaks it.
+Paths are dotted from the envelope (`payload.step_up.authenticated_at`).
 
 **`StreamOpened`** on the agent stream. The schema of `StreamOpened` and of `KillSwitchActivated` is
 chosen by the stream type of `stream_id`; the account stream's are unchanged.
@@ -461,7 +466,7 @@ model gave it; one the agent does not use carries the reason in `ignored`.
 | `qty` | `decimal` | |
 | `limit_price` | `decimal?` | Rule 2 |
 | `purpose` | `open` \| `increase` \| `discretionary_exit` \| `risk_exit` | The proposer's label: the order builder's, a goal completion's or a removed instrument's (`exit_origin`), or the risk engine's `trim_to_target`. The gate assigns the purpose it enforces ([trading spec §9.1](trading-domain.md#91-evaluation-order-and-reason-codes)) |
-| `exit_origin` | `signal` \| `goal_completion` \| `removed_instrument`, or `null` | Which of the three origins mandate spec §6.1 gives a `discretionary_exit`: the order builder's signal exit (§8.3 step 2), a goal's completion (§3.1), or a removed instrument (§2.2, §2.3). `null` for every other purpose: rule 8 |
+| `exit_origin` | `signal` \| `goal_completion` \| `removed_instrument`, or `null` | Which of the three origins [mandate spec §6.1](mandate.md#61-purposes)'s purpose table gives a `discretionary_exit`: the order builder's signal exit (§8.3 step 2), a goal's completion (§3.1), or a removed instrument (§2.3, including an expired or invalidated thesis, §8.6). `null` for every other purpose: rule 8 |
 | `exit_conviction`, `buy_conviction`, `combined_score` | `decimal?` | c, b, and s of §8.3 step 1, for a decision a §8.3 evaluation produced (an opening, an increase, or a signal exit); `null` for every other: rule 8 |
 | `outputs_used` | `[ulid]` | The `ModelOutputRecorded` event IDs of the fresh outputs combined; empty for a decision no §8.3 evaluation produced: rules 8 and 9 |
 | `model_weights` | `[{key: text, value: decimal}]` | The weight of **every** configured model, fresh or not (§4.1); empty for a decision no §8.3 evaluation produced: rules 8 and 9 |
@@ -469,12 +474,20 @@ model gave it; one the agent does not use carries the reason in `ignored`.
 | `dry_run` | `allow` \| `deny` \| `defer` | The gate dry run: rules 4 to 6 |
 | `reason_code` | `id?` | The gate's reason code (trading spec §9.1): rule 4 |
 | `autonomy` | `auto` \| `ask` \| `deny`, or `null` | The §6.2 classification, reached only after an `allow`: rules 5 and 7 |
-| `ask_suppressed` | `budget` \| `skipped_today` \| `recent_timeout`, or `null` | Why an `ask` was classified but not asked ([DEC-156](../project/04-decision-log.md#decisions) item 5; mandate spec §6.4 once M7's change lands), in this precedence: the agent's 10 requests in the risk day are spent; the owner skipped this instrument earlier in the risk day and no version has applied since; an approval for it timed out less than `timeout_s` ago. `null` for every other decision, including an `ask` that was asked. Non-null only when `autonomy` is `ask` and no approval was requested: rule 7 |
+| `ask_suppressed` | `budget` \| `skipped_today` \| `recent_timeout`, or `null` | Why an `ask` was classified but not asked, with the reasons and precedence of [mandate spec §6.4](mandate.md#64-approvals) ("Asking is bounded"; [DEC-156](../project/04-decision-log.md#decisions) item 5). `null` for every other decision, including an `ask` that was asked. Non-null only when `autonomy` is `ask` and no approval was requested: rule 7 |
+| `decided_by` | `text?` | What decided `autonomy` (mandate spec §6.2), one label of: `builtin_risk_reducing` (step 3), `rule:<id>` or `default` (step 4), `delegation:<id>` (step 4a), `admission_ceiling` (step 5), `client_ceiling` (step 5a), with `<id>` an `id`; the same labels as the approval content's `decided_by` ([mandate spec §6.4](mandate.md#64-approvals)). `null` exactly when `autonomy` is: rule 5 |
+| `delegation_id` | `id?` | The delegation that lifted an `ask` to `auto` (mandate spec §6.5, [DEC-181](../project/04-decision-log.md#decisions)); delegation usage is counted from these events. Non-null exactly when `decided_by` is `delegation:` and this id: rule 7 |
+| `requested_by` | `agent` \| `owner` \| `client` | Who asked for the order (mandate spec §6.2 step 5a, [DEC-185](../project/04-decision-log.md#decisions)): the order builder, the owner through the web app or CLI, or an owner-connected client, set from the authenticated channel and never from the request's content |
+| `client_id` | `id?` | The connected client that asked, by the id it was connected under ([DEC-141](../project/04-decision-log.md#decisions)); non-null exactly when `requested_by` is `client`: rule 7 |
 
 **`IntentProposed`**: exactly the `IntentReceived` vector's intent fields less `intent_id`, which is
 this event's `event_id` (§2), and `agent_id`, which is the stream's. The executor's `IntentReceived`
-copies the members and adds those two. Its `causation_id` is the `DecisionMade` whose action members
-it repeats exactly, or for an owner's exit of one instrument the `OwnerExitRequested` (rule 10).
+copies the members and adds those two. Its `causation_id` is one of three events (rule 10): the
+`DecisionMade` whose action members it repeats exactly; for an owner's exit of one instrument, the
+`OwnerExitRequested`; or after an approval's grant, the `ApprovalRevalidated` with result `act` that
+precedes it in the same batch (§9, [mandate spec §6.4](mandate.md#64-approvals)). Re-validation
+never re-prices, re-sizes, or changes the order, so an approved intent repeats exactly the action
+members bound in its approval's `ApprovalRequested` content object.
 
 | Member | Type | Meaning |
 |---|---|---|
@@ -510,7 +523,8 @@ step-up still stops the agent and flattens as an automated flatten does, and onl
 privileges beyond that need `valid`. A correct writer can meet every rule here for every owner
 exit, whatever its step-up: no member is required that only valid step-up or a confirmed bid would
 supply, and a confirmed bid with `absent` or `stale` step-up is valid, recorded as given, and
-unlocks nothing (mandate spec §6.1) while the exit proceeds. So no step-up state can hold a
+unlocks nothing while the exit proceeds ([mandate spec §6.1](mandate.md#61-purposes), "Owner
+controls and step-up": owner exit and kill switch). So no step-up state can hold a
 reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cases.
 
 | Member | Type | Meaning |
@@ -533,13 +547,23 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
    `payload.type`.
 4. `DecisionMade`: `reason_code` is `null` exactly when `dry_run` is `allow` — `payload.reason_code`.
 5. `DecisionMade`: `autonomy` is non-null exactly when `dry_run` is `allow`; no classification runs
-   after a `deny` or `defer` (mandate spec §6.2) — `payload.autonomy`.
+   after a `deny` or `defer` (mandate spec §6.2) — `payload.autonomy`; `decided_by` is non-null
+   exactly when `autonomy` is, and is then `builtin_risk_reducing` exactly when `purpose` is neither
+   `open` nor `increase` — `payload.decided_by`; and a non-null `decided_by` is one of the member's
+   labels — `non_canonical` at `payload.decided_by`.
 6. `DecisionMade`: `defer` only for `discretionary_exit` — `payload.dry_run`.
 7. `DecisionMade`: a non-null `autonomy` is `auto` unless `purpose` is `open` or `increase` (built-in
    AUTO, §6.2 step 3) — `payload.autonomy`; and `ask_suppressed` is non-null only when `autonomy` is
    `ask` — `payload.ask_suppressed`. So a suppression only ever skips an opening or an increase,
-   never an exit. That no `ApprovalRequested` names a suppressed decision is checked with the
-   approval events (M7).
+   never an exit. That no `ApprovalRequested` names a suppressed decision is checked when the
+   approval events' schemas close here. Then: `delegation_id` is non-null exactly when `decided_by` is
+   `delegation:` followed by it, and then `autonomy` is `auto` (mandate spec §6.2 step 4a, MI-26) —
+   `payload.delegation_id`; `client_id` is non-null exactly when `requested_by` is `client` —
+   `payload.client_id`; a decision `requested_by` `client` with purpose `open` or `increase` is
+   never `auto`, whatever decided it (the client ceiling, mandate spec §6.2 step 5a, MI-30) —
+   `payload.autonomy`; and `decided_by` is `client_ceiling` only when `requested_by` is `client` and
+   `autonomy` is `ask` — `payload.decided_by`. So the record itself refuses a connected client's
+   opening that ran unasked.
 8. `DecisionMade`: `exit_origin` is non-null exactly when `purpose` is `discretionary_exit` —
    `payload.exit_origin`. A decision was produced by a §8.3 evaluation exactly when `purpose` is
    `open` or `increase` or `exit_origin` is `signal`; `exit_conviction`, `buy_conviction`, and
@@ -568,6 +592,21 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
 14. `StreamOpened`: `stream_id` equals `agent:{workspace_id}:{agent_id}` — `stream_id`.
 15. `KillSwitchActivated`, `OwnerExitRequested`: scope `agent` names the stream's agent and scope
     `workspace` its workspace — `payload.subject`.
+
+**Copy rule** (reason `schema`):
+
+16. The agent runtime's copies of an owner command (§2) have a non-null `causation_id` —
+    `causation_id`. The copies are every `OwnerExitRequested`, a `KillSwitchActivated` whose
+    `initiator` is `owner`, and an `AgentModeChanged` whose `reason` is `owner_pause`,
+    `owner_resume`, or `owner_stop`. `causation_id` is the `event_id` of the control stream's
+    `OwnerCommandIssued` the copy was made from. That ID is from another stream, which §2 allows and
+    which neither `append` nor §11's per-range checks resolve, since both read only this stream. On
+    one agent stream a command is copied at most once into each of these event types: an owner's
+    kill switch is copied as its `OwnerExitRequested` and its `KillSwitchActivated`, both naming the
+    one command, and every other command has one copy. The copy always has its command in hand, so the rule
+    never holds a pause, a Stop, an owner exit, or a kill switch (`AGENTS.md` rule 13). A mode
+    change that originates on the account stream, and the `AgentModeChanged` a kill switch writes,
+    are not owner copies and are not covered here.
 
 Two facts span events. `IntentProposed` repeats its `DecisionMade`'s action, which `append`
 checks when both are in one batch (rule 10), and `mode_event` names this stream's
@@ -609,7 +648,10 @@ anchored hash), `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_m
 `segment_gap`, and on an agent stream ([§9.1](#91-agent-stream-payload-schemas-dec-177)):
 
 - `intent_action_mismatch` — an `IntentProposed` whose `causation_id` names a `DecisionMade` has
-  that decision's action members (rule 10), reported at the `IntentProposed`;
+  that decision's action members (rule 10), and one whose `causation_id` names an
+  `ApprovalRevalidated` has the action members bound in that approval's `ApprovalRequested`,
+  reported at the `IntentProposed`. The second clause is checked, with vectors, once §9.1 closes
+  the approval events' schemas; until then no range fails on it;
 - `mode_event_mismatch` — a `KillSwitchActivated` whose `mode_event` is non-null names an earlier
   `AgentModeChanged` on this stream with reason `kill_switch`, reported at the
   `KillSwitchActivated`.

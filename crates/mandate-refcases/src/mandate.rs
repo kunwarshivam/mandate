@@ -1,6 +1,6 @@
 //! The `mandate` suite: `fixtures/refcases/mandate.json`, the JSON form of
 //! [the mandate reference cases](../../../docs/specs/reference-cases/mandate.yaml) (spec §11). One
-//! named test per case id (`mandate::MC-S01`), 298 of them.
+//! named test per case id (`mandate::MC-S01`), plus `version` and `version_vector`.
 //!
 //! Stream F owns 202: the families `schema` (S), `semantic` (V), `policy` (P), `change` (C),
 //! `risk_state` (R), `risk_day` (T), and `goal` (L). Stream J's family N — `admission`, `lineage`,

@@ -6,11 +6,12 @@ implementation. It:
 1. canonicalizes per spec §4 and proves it by reproducing every version-3 vector (chain bodies and
    hashes, the export line, string escaping, and decimal normalization) before trusting itself;
 2. builds the artifacts and the agent-stream chain, hashing each body onto the previous one;
-3. validates every draft against the closed schemas and the §9.1 consistency and subject rules:
-   each chain event must pass every rule, and each invalid draft must break exactly the one rule
-   it names, with the reason and path it expects;
+3. validates every draft against the closed schemas and the §9.1 consistency, subject, and copy
+   rules: each chain event must pass every rule, and each invalid draft must break exactly the one
+   rule it names, with the reason and path it expects;
 4. recomputes the `DecisionMade` numbers from the model output and weights (mandate spec §8.3) by
-   an independent path, and checks `IntentProposed` against the account chain's `IntentReceived`;
+   an independent path, checks `IntentProposed` against the account chain's `IntentReceived`, and
+   checks each owner copy against the control-stream command it names;
 5. seeds bugs, into the validator and into the vectors, and requires every one to be caught.
 
 Usage: `generate.py` (or `generate.py --write`) rewrites the agent-stream section of journal.yaml;
@@ -242,6 +243,10 @@ IGNORED = one_of(
 )
 EXIT_ORIGIN = one_of("signal", "goal_completion", "removed_instrument")
 ASK_SUPPRESSED = one_of("budget", "skipped_today", "recent_timeout")
+REQUESTED_BY = one_of("agent", "owner", "client")
+BUILTIN_LABEL = "builtin_risk_reducing"
+DELEGATION_PREFIX = "delegation:"
+DECIDED_BY = re.compile(r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|(rule|delegation):[A-Za-z0-9_-]+)$")
 STEP_UP = rec(("assertion_id", STR), ("authenticated_at", TS), ("method", STR))
 
 SCHEMAS: dict[tuple[str, str], T] = {
@@ -286,6 +291,10 @@ SCHEMAS: dict[tuple[str, str], T] = {
         ("reason_code", opt(ID)),
         ("autonomy", opt(one_of("auto", "ask", "deny"))),
         ("ask_suppressed", opt(ASK_SUPPRESSED)),
+        ("decided_by", opt(STR)),
+        ("delegation_id", opt(ID)),
+        ("requested_by", REQUESTED_BY),
+        ("client_id", opt(ID)),
     ),
     ("agent", "IntentProposed"): rec(
         ("instrument_id", STR),
@@ -481,10 +490,22 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         allow = p["dry_run"] == "allow"
         rule(4, (p["reason_code"] is None) == allow, "schema", "payload.reason_code")
         rule(5, (p["autonomy"] is not None) == allow, "schema", "payload.autonomy")
+        by, classified = p["decided_by"], p["autonomy"] is not None
+        labelled = (by is not None) == classified and (not classified or (by == BUILTIN_LABEL) != adds_risk)
+        rule("5.decided_by", labelled, "schema", "payload.decided_by")
+        rule("5.decided_by_label", by is None or bool(DECIDED_BY.match(by)), "non_canonical", "payload.decided_by")
         rule(6, p["dry_run"] != "defer" or p["purpose"] == "discretionary_exit", "schema", "payload.dry_run")
         rule(7, p["autonomy"] in (None, "auto") or p["purpose"] in RISK_ADDING, "schema", "payload.autonomy")
         asked = p["autonomy"] == "ask"
         rule("7.ask_suppressed", p["ask_suppressed"] is None or asked, "schema", "payload.ask_suppressed")
+        lifted = by[len(DELEGATION_PREFIX) :] if by is not None and by.startswith(DELEGATION_PREFIX) else None
+        delegated = p["delegation_id"] == lifted and (lifted is None or p["autonomy"] == "auto")
+        rule("7.delegation", delegated, "schema", "payload.delegation_id")
+        client = p["requested_by"] == "client"
+        rule("7.client_id", (p["client_id"] is not None) == client, "schema", "payload.client_id")
+        rule("7.client_ceiling", not (client and adds_risk and p["autonomy"] == "auto"), "schema", "payload.autonomy")
+        ceiling_label = by != "client_ceiling" or (client and asked)
+        rule("7.client_ceiling_label", ceiling_label, "schema", "payload.decided_by")
         discretionary = p["purpose"] == "discretionary_exit"
         rule("8.exit_origin", (p["exit_origin"] is not None) == discretionary, "schema", "payload.exit_origin")
         evaluated = adds_risk or p["exit_origin"] == "signal"
@@ -536,6 +557,29 @@ def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     return out
 
 
+OWNER_MODE_REASONS = ("owner_pause", "owner_resume", "owner_stop")
+
+
+def copy_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """Rule 16: the agent runtime's copy of an owner command (§2) names it as its cause."""
+    p = draft["payload"]
+    if event_type == "OwnerExitRequested":
+        kind = "owner_exit"
+    elif event_type == "KillSwitchActivated" and (
+        p["initiator"] == "owner" or "overreach.rule_16_automated_kill_switch" in skip
+    ):
+        kind = "kill_switch"
+    elif event_type == "AgentModeChanged" and (
+        p["reason"] in OWNER_MODE_REASONS or "overreach.rule_16_kill_switch_mode" in skip
+    ):
+        kind = f"mode.{p['reason']}"
+    else:
+        return []
+    if draft["causation_id"] is not None or f"rule.16.{kind}" in skip:
+        return []
+    return [Violation(f"rule.16.{kind}", "schema", "causation_id")]
+
+
 def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violation]:
     """Every rule an agent-stream draft breaks, in the journal's check order (spec §9.1)."""
     out = type_violations(ENVELOPE, draft, "", skip)
@@ -578,6 +622,7 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         out.append(Violation("pii_refs", "pii_refs", "pii_refs"))
     if not payload_types:
         out += subject_violations(event_type, as_read, skip)
+        out += copy_violations(event_type, as_read, skip)
     return out
 
 
@@ -666,6 +711,17 @@ SEQ = {name: seq for seq, (name, _) in enumerate(CHAIN, start=1)}
 ID = dict(CHAIN)
 ABSENT_EVENT_ID = "01J8ZNB0A000000000000000Z9"
 assert is_ulid(ABSENT_EVENT_ID) and ABSENT_EVENT_ID not in ID.values(), "names no event of the chain"
+CONTROL_STREAM = f"ctl:{WORKSPACE}"
+COMMAND = {
+    "close_held": "01J8Z6A00000000000000000C1",
+    "close_opened": "01J8ZMR00000000000000000C2",
+    "kill_switch": "01J8ZNB00000000000000000C3",
+    "pause": "01J8ZNB00000000000000000C4",
+    "resume": "01J8ZNB00000000000000000C5",
+    "stop": "01J8ZNB00000000000000000C6",
+}
+assert all(is_ulid(c) for c in COMMAND.values()), "each command is an event ID (§3)"
+assert not set(COMMAND.values()) & {*ID.values(), ABSENT_EVENT_ID}, "commands are control-stream events"
 
 QUOTE_SNAPSHOT = {
     "kind": "quote_snapshot",
@@ -692,7 +748,8 @@ DERIVATION = {
         "Illustrative mandate and account values the DecisionMade vector is recomputed from "
         "(mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no "
         "fresh output, so it counts as missing. The ask is the observed quote's (artifact quote_snapshot). "
-        "The gate dry run and the autonomy result are inputs. Gross exposure is the held position's "
+        "The gate dry run, the autonomy result and its decided_by label, and who requested the order "
+        "are inputs. Gross exposure is the held position's "
         "quantity x mark. After the session closes the profit_stop goal is reached, whose completion "
         "is a discretionary exit of every position (mandate spec §3.1), deferred until the session "
         "(trading spec §9.6) with nothing proposed (mandate spec §6.2). Outside the session an exit is a "
@@ -703,8 +760,28 @@ DERIVATION = {
         "confirmed bid, whose floor is the default, bid x (1 - max_exit_offset), for the instrument's "
         ">= 50 M USD tier (trading spec §5.5, §5.6); that close's own limit is the floor. Step-up is "
         "valid for 300 s after authentication (DEC-156 item 8). The regular session is 09:30 to 16:00 "
-        "America/New_York (EDT, UTC-4, on this date)."
+        "America/New_York (EDT, UTC-4, on this date). The owner commands are the control stream's "
+        "OwnerCommandIssued events that the owner copies name as their cause (spec §2, §9.1 rule 16); "
+        "they are on another stream, so only the members the copies are checked against are listed."
     ),
+    "owner_commands": [
+        {
+            "event_id": COMMAND[name],
+            "stream_id": CONTROL_STREAM,
+            "command": command,
+            "scope": scope,
+            "subject": subject,
+            "submitted_at": f"2026-09-21T{at}.500000000Z",
+        }
+        for name, command, scope, subject, at in (
+            ("close_held", "owner_exit", "instrument", HELD_INSTRUMENT, "14:59:59"),
+            ("close_opened", "owner_exit", "instrument", INSTRUMENT, "20:09:59"),
+            ("kill_switch", "kill_switch", "agent", AGENT, "20:29:59"),
+            ("pause", "pause", "agent", AGENT, "20:29:59"),
+            ("resume", "resume", "agent", AGENT, "20:29:59"),
+            ("stop", "stop", "agent", AGENT, "20:29:59"),
+        )
+    ],
     "owner_bid": "151",
     "goal_exit_reference_bid": "151",
     "exit_offset": "0.005",
@@ -735,6 +812,8 @@ DERIVATION = {
     "tif": "day",
     "dry_run": "allow",
     "autonomy": "auto",
+    "decided_by": "default",
+    "requested_by": "agent",
 }
 
 
@@ -864,6 +943,10 @@ def chain_bodies() -> list[dict]:
                 "reason_code": None,
                 "autonomy": "auto",
                 "ask_suppressed": None,
+                "decided_by": "default",
+                "delegation_id": None,
+                "requested_by": "agent",
+                "client_id": None,
             },
         ),
         event(
@@ -894,6 +977,7 @@ def chain_bodies() -> list[dict]:
                     "method": "webauthn",
                 },
             },
+            causation_id=COMMAND["close_held"],
         ),
         event(
             "owner_close_in_session_intent",
@@ -930,6 +1014,10 @@ def chain_bodies() -> list[dict]:
                 "reason_code": "discretionary_exit_regular_session_only",
                 "autonomy": None,
                 "ask_suppressed": None,
+                "decided_by": None,
+                "delegation_id": None,
+                "requested_by": "agent",
+                "client_id": None,
             },
         ),
         event(
@@ -952,6 +1040,7 @@ def chain_bodies() -> list[dict]:
                     "method": "webauthn",
                 },
             },
+            causation_id=COMMAND["close_opened"],
         ),
         event(
             "owner_close_confirmed_intent",
@@ -992,6 +1081,7 @@ def chain_bodies() -> list[dict]:
                 "step_up_status": "absent",
                 "step_up": None,
             },
+            causation_id=COMMAND["kill_switch"],
         ),
         event(
             "kill_switch",
@@ -999,6 +1089,7 @@ def chain_bodies() -> list[dict]:
             f"{day}20:30:00.000000000Z",
             f"{day}20:30:00.000300000Z",
             {"scope": "agent", "subject": AGENT, "initiator": "owner", "mode_event": ID["kill_switch_mode"]},
+            causation_id=COMMAND["kill_switch"],
         ),
     ]
     assert [b["seq"] for b in bodies] == list(range(1, len(CHAIN) + 1)), "bodies follow CHAIN's order"
@@ -1234,6 +1325,7 @@ def invalid_drafts() -> list[dict]:
                 change("payload.type", "market"),
                 change("payload.purpose", "discretionary_exit"),
                 change("payload.exit_origin", "signal"),
+                change("payload.decided_by", "builtin_risk_reducing"),
             ],
             "schema",
             "payload.limit_price",
@@ -1270,6 +1362,7 @@ def invalid_drafts() -> list[dict]:
                 change("payload.dry_run", "defer"),
                 change("payload.reason_code", "session_not_allowed"),
                 change("payload.autonomy", None),
+                change("payload.decided_by", None),
             ],
             "schema",
             "payload.dry_run",
@@ -1283,6 +1376,7 @@ def invalid_drafts() -> list[dict]:
                 change("payload.purpose", "discretionary_exit"),
                 change("payload.exit_origin", "signal"),
                 change("payload.autonomy", "ask"),
+                change("payload.decided_by", "builtin_risk_reducing"),
             ],
             "schema",
             "payload.autonomy",
@@ -1302,6 +1396,150 @@ def invalid_drafts() -> list[dict]:
             [change("payload.autonomy", "ask"), change("payload.ask_suppressed", "quiet_hours")],
             "non_canonical",
             "payload.ask_suppressed",
+        ),
+        invalid(
+            "decision_denied_keeps_decided_by",
+            "§9.1 rule 5",
+            "decision",
+            [
+                change("payload.dry_run", "deny"),
+                change("payload.reason_code", "insufficient_buying_power"),
+                change("payload.autonomy", None),
+            ],
+            "schema",
+            "payload.decided_by",
+        ),
+        invalid(
+            "decision_classified_without_decided_by",
+            "§9.1 rule 5",
+            "decision",
+            [change("payload.decided_by", None)],
+            "schema",
+            "payload.decided_by",
+        ),
+        invalid(
+            "decision_open_labelled_builtin",
+            "§9.1 rule 5",
+            "decision",
+            [change("payload.decided_by", "builtin_risk_reducing")],
+            "schema",
+            "payload.decided_by",
+        ),
+        invalid(
+            "decision_exit_labelled_by_default",
+            "§9.1 rule 5",
+            "decision",
+            [
+                change("payload.side", "sell"),
+                change("payload.purpose", "discretionary_exit"),
+                change("payload.exit_origin", "signal"),
+            ],
+            "schema",
+            "payload.decided_by",
+        ),
+        invalid(
+            "decision_decided_by_unknown_label",
+            "§9.1 rule 5",
+            "decision",
+            [change("payload.decided_by", "platform_suggestion")],
+            "non_canonical",
+            "payload.decided_by",
+        ),
+        invalid(
+            "decision_delegation_id_under_default",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.delegation_id", "d1")],
+            "schema",
+            "payload.delegation_id",
+        ),
+        invalid(
+            "decision_delegation_label_without_id",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.decided_by", "delegation:d1")],
+            "schema",
+            "payload.delegation_id",
+        ),
+        invalid(
+            "decision_delegation_names_another_id",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.decided_by", "delegation:d1"), change("payload.delegation_id", "d2")],
+            "schema",
+            "payload.delegation_id",
+        ),
+        invalid(
+            "decision_delegation_on_an_ask",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.autonomy", "ask"),
+                change("payload.decided_by", "delegation:d1"),
+                change("payload.delegation_id", "d1"),
+            ],
+            "schema",
+            "payload.delegation_id",
+        ),
+        invalid(
+            "decision_requested_by_unknown",
+            "§9.1 DecisionMade",
+            "decision",
+            [change("payload.requested_by", "platform")],
+            "non_canonical",
+            "payload.requested_by",
+        ),
+        invalid(
+            "decision_client_request_without_client_id",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.autonomy", "ask"),
+                change("payload.decided_by", "client_ceiling"),
+            ],
+            "schema",
+            "payload.client_id",
+        ),
+        invalid(
+            "decision_client_id_on_agent_request",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.client_id", "client_dots")],
+            "schema",
+            "payload.client_id",
+        ),
+        invalid(
+            "decision_client_opening_auto",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+            ],
+            "schema",
+            "payload.autonomy",
+        ),
+        invalid(
+            "decision_client_opening_auto_by_delegation",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+                change("payload.decided_by", "delegation:d1"),
+                change("payload.delegation_id", "d1"),
+            ],
+            "schema",
+            "payload.autonomy",
+        ),
+        invalid(
+            "decision_client_ceiling_on_agent_request",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.autonomy", "ask"), change("payload.decided_by", "client_ceiling")],
+            "schema",
+            "payload.decided_by",
         ),
         invalid(
             "decision_discretionary_exit_without_origin",
@@ -1355,7 +1593,11 @@ def invalid_drafts() -> list[dict]:
             "decision_risk_exit_with_convictions",
             "§9.1 rule 8",
             "decision",
-            [change("payload.side", "sell"), change("payload.purpose", "risk_exit")],
+            [
+                change("payload.side", "sell"),
+                change("payload.purpose", "risk_exit"),
+                change("payload.decided_by", "builtin_risk_reducing"),
+            ],
             "schema",
             "payload.exit_conviction",
         ),
@@ -1471,6 +1713,59 @@ def invalid_drafts() -> list[dict]:
             "stream_mismatch",
             "payload.subject",
         ),
+        invalid(
+            "owner_exit_without_its_command",
+            "§9.1 rule 16",
+            "owner_close_in_session",
+            [change("causation_id", None)],
+            "schema",
+            "causation_id",
+        ),
+        invalid(
+            "owner_kill_switch_without_its_command",
+            "§9.1 rule 16",
+            "kill_switch",
+            [change("causation_id", None)],
+            "schema",
+            "causation_id",
+        ),
+        invalid(
+            "owner_pause_without_its_command",
+            "§9.1 rule 16",
+            "kill_switch_mode",
+            [
+                change("payload.to", "paused"),
+                change("payload.reason", "owner_pause"),
+                change("payload.lifecycle", "paused"),
+            ],
+            "schema",
+            "causation_id",
+        ),
+        invalid(
+            "owner_resume_without_its_command",
+            "§9.1 rule 16",
+            "kill_switch_mode",
+            [
+                change("payload.from", "paused"),
+                change("payload.to", "normal"),
+                change("payload.reason", "owner_resume"),
+                change("payload.lifecycle", "normal"),
+            ],
+            "schema",
+            "causation_id",
+        ),
+        invalid(
+            "owner_stop_without_its_command",
+            "§9.1 rule 16",
+            "kill_switch_mode",
+            [
+                change("payload.to", "stopped"),
+                change("payload.reason", "owner_stop"),
+                change("payload.lifecycle", "stopped"),
+            ],
+            "schema",
+            "causation_id",
+        ),
     ]
 
 
@@ -1488,7 +1783,8 @@ def valid_drafts() -> list[dict]:
     """Drafts a rule might be misread to refuse. Each must be accepted: refusing an owner exit, or the
     owner's pause or Stop, would hold a reduction (`AGENTS.md` rule 13), and refusing a suppressed
     ask would leave the skip unrecorded (DEC-156 item 5). The owner's mode changes put `to` equal to
-    `lifecycle`, rule 11's boundary."""
+    `lifecycle`, rule 11's boundary, and name their command (rule 16); an automated kill switch is
+    no owner copy, so rule 16 must not hold it."""
     return [
         valid(
             "mode_owner_pause",
@@ -1498,6 +1794,7 @@ def valid_drafts() -> list[dict]:
                 change("payload.to", "paused"),
                 change("payload.reason", "owner_pause"),
                 change("payload.lifecycle", "paused"),
+                change("causation_id", COMMAND["pause"]),
             ],
         ),
         valid(
@@ -1509,6 +1806,7 @@ def valid_drafts() -> list[dict]:
                 change("payload.to", "normal"),
                 change("payload.reason", "owner_resume"),
                 change("payload.lifecycle", "normal"),
+                change("causation_id", COMMAND["resume"]),
             ],
         ),
         valid(
@@ -1519,13 +1817,89 @@ def valid_drafts() -> list[dict]:
                 change("payload.to", "stopped"),
                 change("payload.reason", "owner_stop"),
                 change("payload.lifecycle", "stopped"),
+                change("causation_id", COMMAND["stop"]),
             ],
+        ),
+        valid(
+            "kill_switch_automated_without_a_command",
+            "§9.1 rule 16",
+            "kill_switch",
+            [change("payload.initiator", "risk_limit"), change("causation_id", None)],
         ),
         valid(
             "decision_ask_suppressed_by_budget",
             "§9.1 rule 7",
             "decision",
             [change("payload.autonomy", "ask"), change("payload.ask_suppressed", "budget")],
+        ),
+        valid(
+            "decision_lifted_by_delegation",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.decided_by", "delegation:d1"), change("payload.delegation_id", "d1")],
+        ),
+        valid(
+            "decision_asked_by_admission_ceiling",
+            "§9.1 rule 5",
+            "decision",
+            [change("payload.autonomy", "ask"), change("payload.decided_by", "admission_ceiling")],
+        ),
+        valid(
+            "decision_owner_request_auto",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.requested_by", "owner")],
+        ),
+        valid(
+            "decision_client_request_asked",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+                change("payload.autonomy", "ask"),
+                change("payload.decided_by", "client_ceiling"),
+            ],
+        ),
+        valid(
+            "decision_client_request_asked_by_rule",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+                change("payload.autonomy", "ask"),
+                change("payload.decided_by", "rule:large_orders"),
+            ],
+        ),
+        valid(
+            "decision_client_request_denied",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+                change("payload.autonomy", "deny"),
+                change("payload.decided_by", "rule:large_orders"),
+            ],
+        ),
+        valid(
+            "decision_client_risk_exit_auto",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+                change("payload.side", "sell"),
+                change("payload.purpose", "risk_exit"),
+                change("payload.exit_conviction", None),
+                change("payload.buy_conviction", None),
+                change("payload.combined_score", None),
+                change("payload.outputs_used", []),
+                change("payload.model_weights", []),
+                change("payload.clips_applied", []),
+                change("payload.decided_by", "builtin_risk_reducing"),
+            ],
         ),
         valid(
             "decision_removed_instrument_exit_without_numbers",
@@ -1636,6 +2010,7 @@ def range_verification() -> list[dict]:
                 ("kill_switch_mode", "payload.to", "paused"),
                 ("kill_switch_mode", "payload.reason", "owner_pause"),
                 ("kill_switch_mode", "payload.lifecycle", "paused"),
+                ("kill_switch_mode", "causation_id", COMMAND["pause"]),
             ],
             "mode_event_mismatch",
             "kill_switch",
@@ -1761,6 +2136,10 @@ def recompute_decision(chain: list[dict], artifacts: list[dict], d: dict) -> dic
         "reason_code": None,
         "autonomy": d["autonomy"],
         "ask_suppressed": None,
+        "decided_by": d["decided_by"],
+        "delegation_id": None,
+        "requested_by": d["requested_by"],
+        "client_id": None,
     }
 
 
@@ -1786,6 +2165,54 @@ def outside_session_exit_defer_code() -> str:
     return codes.pop()
 
 
+ORACLE_CHECKS = (
+    *(f"chain.{c}" for c in ("seq", "prev_hash", "canonical", "hash", "stream", "opened", "valid")),
+    "artifacts.rehash",
+    "artifacts.missing",
+    "decision.recompute",
+    "intent.cause",
+    "intent.action",
+    "received.intent",
+    "kill_switch.mode_event",
+    "kill_switch.stopped",
+    *(f"goal_exit.{c}" for c in ("whole", "origin", "defer", "rung", "proposes", "evaluated")),
+    *(
+        f"owner_exits.{c}"
+        for c in (
+            "user",
+            "step_up",
+            "fresh",
+            "flatten",
+            "one_intent",
+            "sell",
+            "whole",
+            "floor",
+            "priced",
+            "confirmed_outside",
+            "session",
+        )
+    ),
+    *(f"owner_copies.{c}" for c in ("cause", "stream", "kind", "subject", "submitted", "at_most_once")),
+    "invalid_drafts",
+    "valid_drafts",
+    "batches",
+    "range.chain",
+    "range.case",
+    "range.valid",
+)
+
+
+def found(check: str, message: str) -> str:
+    """A failure named by the check that found it, so a seeded bug is shown caught by its own check."""
+    if check not in ORACLE_CHECKS:
+        raise ValueError(f"unregistered check {check}")
+    return f"{check}: {message}"
+
+
+def check_of(problem: str) -> str:
+    return problem.partition(": ")[0]
+
+
 def check_goal_exit(chain: list[dict], d: dict, decision: dict, goal: dict) -> list[str]:
     """Mandate spec §3.1, §6.2 and trading spec §9.4, §9.6 for the goal-completion exit, from the
     derivation: what it sells, at what price, that it is deferred after the session with the
@@ -1794,24 +2221,24 @@ def check_goal_exit(chain: list[dict], d: dict, decision: dict, goal: dict) -> l
     p = goal["payload"]
     whole = (decision["payload"]["instrument_id"], "sell", decision["payload"]["qty"])
     if d["goal"] != "profit_stop" or (p["instrument_id"], p["side"], p["qty"]) != whole:
-        problems.append("the profit_stop completion does not exit the whole position")
+        problems.append(found("goal_exit.whole", "the profit_stop completion does not exit the whole position"))
     if (p["purpose"], p["exit_origin"]) != ("discretionary_exit", "goal_completion"):
-        problems.append("a goal completion's exit is a discretionary exit of origin goal_completion")
+        problems.append(found("goal_exit.origin", "a goal completion's exit is a discretionary exit of origin goal_completion"))
     close = nanos(d["regular_session_utc"]["close"])
     if nanos(goal["event_time"]) >= close:
         code = outside_session_exit_defer_code()
         if (p["dry_run"], p["reason_code"]) != ("defer", code):
-            problems.append(f"after the session a discretionary equity exit is deferred ({code})")
+            problems.append(found("goal_exit.defer", f"after the session a discretionary equity exit is deferred ({code})"))
         tick = Fraction(d["equity_tick"])
         rung = Fraction(d["goal_exit_reference_bid"]) * (1 - Fraction(d["exit_offset"]))
         limit = math.ceil(rung / tick) * tick
         if p["type"] != "limit" or p["limit_price"] is None or Fraction(p["limit_price"]) != limit:
-            problems.append("outside the session the exit is a limit at the ladder's first rung (§9.4, §5.6)")
+            problems.append(found("goal_exit.rung", "outside the session the exit is a limit at the ladder's first rung (§9.4, §5.6)"))
     if any(e["body"]["causation_id"] == goal["event_id"] for e in chain):
-        problems.append("a deferred decision proposes nothing (mandate spec §6.2)")
+        problems.append(found("goal_exit.proposes", "a deferred decision proposes nothing (mandate spec §6.2)"))
     evaluated = ("exit_conviction", "buy_conviction", "combined_score", "outputs_used", "model_weights", "clips_applied")
     if any(p[m] not in (None, []) for m in evaluated):
-        problems.append("no order-builder evaluation produced the goal exit, so it carries none of its results")
+        problems.append(found("goal_exit.evaluated", "no order-builder evaluation produced the goal exit, so it carries none of its results"))
     return problems
 
 
@@ -1826,36 +2253,88 @@ def check_owner_exits(chain: list[dict], d: dict, decision: dict) -> list[str]:
         p, at = owner["payload"], nanos(owner["event_time"])
         label = f"OwnerExitRequested seq {owner['seq']}"
         if p["user"] is None:
-            problems.append(f"{label}: the owner who asked is not recorded")
+            problems.append(found("owner_exits.user", f"{label}: the owner who asked is not recorded"))
         evidence = p["step_up"]
         if (evidence is not None) != (p["step_up_status"] == "valid"):
-            problems.append(f"{label}: step_up does not match step_up_status")
+            problems.append(found("owner_exits.step_up", f"{label}: step_up does not match step_up_status"))
         if evidence is not None and not 0 <= at - nanos(evidence["authenticated_at"]) <= d["step_up_max_age_s"] * 10**9:
-            problems.append(f"{label}: step-up recorded as valid is not fresh at the command (DEC-156 item 8)")
+            problems.append(found("owner_exits.fresh", f"{label}: step-up recorded as valid is not fresh at the command (DEC-156 item 8)"))
         caused = [b for b in bodies if b["event_type"] == "IntentProposed" and b["causation_id"] == owner["event_id"]]
         in_session = session[0] <= at < session[1]
         if p["scope"] != "instrument":
             if caused:
-                problems.append(f"{label}: a kill switch's flatten is never a proposed intent (§9.1)")
+                problems.append(found("owner_exits.flatten", f"{label}: a kill switch's flatten is never a proposed intent (§9.1)"))
             continue
         if len(caused) != 1:
-            problems.append(f"{label}: an owner close of one instrument proposes exactly one intent")
+            problems.append(found("owner_exits.one_intent", f"{label}: an owner close of one instrument proposes exactly one intent"))
             continue
         close = caused[0]["payload"]
         if (close["instrument_id"], close["side"], close["purpose"]) != (p["subject"], "sell", "owner_exit"):
-            problems.append(f"{label}: its intent is not an owner_exit sell of the named instrument")
+            problems.append(found("owner_exits.sell", f"{label}: its intent is not an owner_exit sell of the named instrument"))
         if close["qty"] != positions.get(p["subject"]):
-            problems.append(f"{label}: its intent does not close the whole position")
+            problems.append(found("owner_exits.whole", f"{label}: its intent does not close the whole position"))
         if p["confirmed"]:
             floor = dec(d["owner_bid"]) * (1 - dec(d["max_exit_offset"]))
             if p["bid"] != d["owner_bid"] or dec(p["floor"]) != floor:
-                problems.append(f"{label}: the floor is not the default floor of its confirmed bid")
+                problems.append(found("owner_exits.floor", f"{label}: the floor is not the default floor of its confirmed bid"))
             if close["type"] != "limit" or close["limit_price"] is None or dec(close["limit_price"]) < floor:
-                problems.append(f"{label}: its intent may price below the confirmed floor")
+                problems.append(found("owner_exits.priced", f"{label}: its intent may price below the confirmed floor"))
             if in_session:
-                problems.append(f"{label}: the vector's confirmed close is meant to be outside the session")
+                problems.append(found("owner_exits.confirmed_outside", f"{label}: the vector's confirmed close is meant to be outside the session"))
         elif not in_session:
-            problems.append(f"{label}: without a confirmed bid an equity owner close sells only in the session")
+            problems.append(found("owner_exits.session", f"{label}: without a confirmed bid an equity owner close sells only in the session"))
+    return problems
+
+
+def copied_command(body: dict) -> str | None:
+    """The `OwnerCommandIssued` command an event copies (§2, §9 control stream), read from what the
+    event means rather than from rule 16's list."""
+    p = body["payload"]
+    match body["event_type"]:
+        case "OwnerExitRequested":
+            return "owner_exit" if p["scope"] == "instrument" else "kill_switch"
+        case "KillSwitchActivated" if p["initiator"] == "owner":
+            return "kill_switch"
+        case "AgentModeChanged":
+            return {"owner_pause": "pause", "owner_resume": "resume", "owner_stop": "stop"}.get(p["reason"])
+    return None
+
+
+def check_owner_copies(chain: list[dict], valid_drafts: list[dict], d: dict) -> list[str]:
+    """Spec §2 and rule 16 from the derivation's control-stream commands: each owner copy, on the
+    chain or among the valid drafts, names the command it was made from, of its kind and subject, on
+    its workspace's control stream and submitted before the copy; and on the chain a command is
+    copied at most once into each event type."""
+    problems = []
+    commands = {c["event_id"]: c for c in d["owner_commands"]}
+    copies = [(f"seq {e['seq']}", e["body"], True) for e in chain]
+    copies += [(f"valid draft {c['name']}", apply_changes(chain, c), False) for c in valid_drafts]
+    copied = set()
+    for where, body, on_chain in copies:
+        kind = copied_command(body)
+        if kind is None:
+            continue
+        label = f"{body['event_type']} {where}"
+        command = commands.get(body["causation_id"])
+        if command is None:
+            problems.append(found("owner_copies.cause", f"{label}: its cause is no control-stream OwnerCommandIssued"))
+            continue
+        _, workspace, agent = body["stream_id"].split(":")
+        p = body["payload"]
+        subject = ("agent", agent) if body["event_type"] == "AgentModeChanged" else (p["scope"], p["subject"])
+        if command["stream_id"] != f"ctl:{workspace}":
+            problems.append(found("owner_copies.stream", f"{label}: its command is not on its workspace's control stream"))
+        if command["command"] != kind:
+            problems.append(found("owner_copies.kind", f"{label}: copies the command {command['command']}, not {kind}"))
+        if (command["scope"], command["subject"]) != subject:
+            problems.append(found("owner_copies.subject", f"{label}: its command addresses another subject"))
+        if nanos(command["submitted_at"]) > nanos(body["event_time"]):
+            problems.append(found("owner_copies.submitted", f"{label}: copied before its command was submitted"))
+        if on_chain:
+            key = (body["event_type"], command["event_id"])
+            if key in copied:
+                problems.append(found("owner_copies.at_most_once", f"{label}: its command is already copied into a {body['event_type']}"))
+            copied.add(key)
     return problems
 
 
@@ -1868,89 +2347,90 @@ def check_chain(section: dict, v3: dict) -> list[str]:
     for i, entry in enumerate(chain, start=1):
         body = entry["body"]
         if body["seq"] != i or entry["seq"] != i:
-            problems.append(f"seq {i}: gap")
+            problems.append(found("chain.seq", f"seq {i}: gap"))
         if body["prev_hash"] != prev:
-            problems.append(f"seq {i}: prev_hash does not chain")
+            problems.append(found("chain.prev_hash", f"seq {i}: prev_hash does not chain"))
         if canon(body) != entry["canonical"]:
-            problems.append(f"seq {i}: canonical differs")
+            problems.append(found("chain.canonical", f"seq {i}: canonical differs"))
         if sha256_hex(entry["canonical"].encode()) != entry["hash"]:
-            problems.append(f"seq {i}: hash differs")
+            problems.append(found("chain.hash", f"seq {i}: hash differs"))
         prev = entry["hash"]
         if body["stream_id"] != STREAM or body["event_type"] != entry["event_type"]:
-            problems.append(f"seq {i}: stream or type differs")
+            problems.append(found("chain.stream", f"seq {i}: stream or type differs"))
     stored = {a["ref"]: a for a in section["artifacts"]}
     for a in section["artifacts"]:
         if (
             canon(a["object"]) != a["canonical"]
             or "sha256:" + sha256_hex(a["canonical"].encode()) != a["ref"]
         ):
-            problems.append(f"artifact {a['name']}: does not re-hash")
+            problems.append(found("artifacts.rehash", f"artifact {a['name']}: does not re-hash"))
     for entry in chain:
         for ref in entry["body"]["artifact_refs"]:
             if ref not in stored:
-                problems.append(f"seq {entry['seq']}: artifact {ref} missing")
+                problems.append(found("artifacts.missing", f"seq {entry['seq']}: artifact {ref} missing"))
     if chain[0]["event_type"] != "StreamOpened":
-        problems.append("seq 1 is not StreamOpened")
+        problems.append(found("chain.opened", "seq 1 is not StreamOpened"))
     named = {name: chain[seq - 1]["body"] for name, seq in SEQ.items() if seq <= len(chain)}
     decision = named["decision"]
     expected = recompute_decision(chain, section["artifacts"], section["derivation"])
     for member, value in expected.items():
         if decision["payload"][member] != value:
-            problems.append(f"DecisionMade.{member}: {decision['payload'][member]!r} != recomputed {value!r}")
+            problems.append(found("decision.recompute", f"DecisionMade.{member}: {decision['payload'][member]!r} != recomputed {value!r}"))
     intent = named["intent"]
     if intent["causation_id"] != decision["event_id"]:
-        problems.append("IntentProposed.causation_id is not the DecisionMade")
+        problems.append(found("intent.cause", "IntentProposed.causation_id is not the DecisionMade"))
     action = {k: decision["payload"][k] for k in intent["payload"]}
     if intent["payload"] != action:
-        problems.append("IntentProposed does not repeat the DecisionMade's action")
+        problems.append(found("intent.action", "IntentProposed does not repeat the DecisionMade's action"))
     received = next(e["body"] for e in v3["chain"] if e["event_type"] == "IntentReceived")
     copied = {k: v for k, v in received["payload"].items() if k not in ("intent_id", "agent_id")}
     if intent["payload"] != copied:
-        problems.append("IntentProposed differs from the IntentReceived vector less intent_id and agent_id")
+        problems.append(found("received.intent", "IntentProposed differs from the IntentReceived vector less intent_id and agent_id"))
     if (
         received["payload"]["intent_id"] != intent["event_id"]
         or received["causation_id"] != intent["event_id"]
     ):
-        problems.append("IntentReceived does not name the IntentProposed as its intent")
+        problems.append(found("received.intent", "IntentReceived does not name the IntentProposed as its intent"))
     if received["payload"]["agent_id"] != intent["stream_id"].split(":")[2]:
-        problems.append("IntentReceived.agent_id is not the agent stream's agent")
+        problems.append(found("received.intent", "IntentReceived.agent_id is not the agent stream's agent"))
     if not intent["recorded_at"] < received["recorded_at"]:
-        problems.append("IntentProposed must be recorded before the account stream copies it")
+        problems.append(found("received.intent", "IntentProposed must be recorded before the account stream copies it"))
     mode, switch = named["kill_switch_mode"], named["kill_switch"]
     if switch["payload"]["mode_event"] != mode["event_id"] or mode["payload"]["reason"] != "kill_switch":
-        problems.append("KillSwitchActivated.mode_event does not name its AgentModeChanged")
+        problems.append(found("kill_switch.mode_event", "KillSwitchActivated.mode_event does not name its AgentModeChanged"))
     if mode["payload"]["to"] != "stopped":
-        problems.append("an owner kill switch's final mode is stopped (trading spec §5.5)")
+        problems.append(found("kill_switch.stopped", "an owner kill switch's final mode is stopped (trading spec §5.5)"))
     problems += check_goal_exit(chain, section["derivation"], decision, named["goal_exit"])
     problems += check_owner_exits(chain, section["derivation"], decision)
+    problems += check_owner_copies(chain, section["valid_drafts"], section["derivation"])
     for case in section["invalid_drafts"]:
         got = violations(apply_changes(chain, case))
         want = case["expect"]
         if len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"]):
-            problems.append(f"{case['name']}: expected exactly {want['reason']} at {want['path']}, got {got}")
+            problems.append(found("invalid_drafts", f"{case['name']}: expected exactly {want['reason']} at {want['path']}, got {got}"))
     for case in section["valid_drafts"]:
         got = violations(apply_changes(chain, case))
         if got:
-            problems.append(f"{case['name']}: expected Valid, got {got}")
+            problems.append(found("valid_drafts", f"{case['name']}: expected Valid, got {got}"))
     for case in section["valid_batches"] + section["invalid_batches"]:
         got = batch_violations(batch_drafts(chain, case))
         if not batch_matches(got, case["expect"]):
-            problems.append(f"batch {case['name']}: expected {case['expect']}, got {got}")
+            problems.append(found("batches", f"batch {case['name']}: expected {case['expect']}, got {got}"))
     if verify_range(chain, 1):
-        problems.append(f"the chain fails §11's range checks: {verify_range(chain, 1)}")
+        problems.append(found("range.chain", f"the chain fails §11's range checks: {verify_range(chain, 1)}"))
     for case in section["range_verification"]:
         want = [(case["expect"]["seq"], case["expect"]["code"])]
         tampered = tampered_chain(chain, case)
         got = verify_range(tampered, case["from_seq"])
         if got != want:
-            problems.append(f"range case {case['name']}: expected {want}, got {got}")
+            problems.append(found("range.case", f"range case {case['name']}: expected {want}, got {got}"))
         for entry in tampered:
             if violations(draft_of(entry["body"])):
-                problems.append(f"range case {case['name']}: seq {entry['seq']} is not a valid draft")
+                problems.append(found("range.valid", f"range case {case['name']}: seq {entry['seq']} is not a valid draft"))
     for entry in chain:
         got = violations(draft_of(entry["body"]))
         if got:
-            problems.append(f"seq {entry['seq']}: valid event breaks {got}")
+            problems.append(found("chain.valid", f"seq {entry['seq']}: valid event breaks {got}"))
     return problems
 
 
@@ -1962,11 +2442,24 @@ VALIDATOR_MUTANTS = (
     "artifact_refs",
     "config_refs.required",
     *(f"rule.{n}" for n in range(1, 15)),
+    "rule.5.decided_by",
+    "rule.5.decided_by_label",
     "rule.7.ask_suppressed",
+    "rule.7.delegation",
+    "rule.7.client_id",
+    "rule.7.client_ceiling",
+    "rule.7.client_ceiling_label",
     "rule.8.exit_origin",
     "rule.12.step_up",
     "rule.15.agent",
     "rule.15.workspace",
+    "rule.16.owner_exit",
+    "rule.16.kill_switch",
+    "rule.16.mode.owner_pause",
+    "rule.16.mode.owner_resume",
+    "rule.16.mode.owner_stop",
+    "overreach.rule_16_automated_kill_switch",
+    "overreach.rule_16_kill_switch_mode",
     *REGRESSIONS,
     "regress.rule_12_ties_evidence_to_the_bid",
     "regress.rule_8_numbers_on_every_exit_but_risk",
@@ -1983,6 +2476,10 @@ def draft_named(section: dict, name: str) -> dict:
     return next(d for d in section["invalid_drafts"] if d["name"] == name)
 
 
+def valid_named(section: dict, name: str) -> dict:
+    return next(d for d in section["valid_drafts"] if d["name"] == name)
+
+
 def body_named(section: dict, name: str) -> dict:
     return section["chain"][SEQ[name] - 1]["body"]
 
@@ -1991,8 +2488,13 @@ def payload_named(section: dict, name: str) -> dict:
     return body_named(section, name)["payload"]
 
 
-def vector_mutants(section: dict) -> list[tuple[str, dict]]:
-    """Seeded bugs in the vectors; the chain check must reject each one."""
+def command_named(section: dict, name: str) -> dict:
+    return next(c for c in section["derivation"]["owner_commands"] if c["event_id"] == COMMAND[name])
+
+
+def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
+    """Seeded bugs in the vectors, each registered against the one check (`ORACLE_CHECKS`) that
+    must reject it."""
 
     unhashed = {"prev_hash not chained", "artifact content changed"}
 
@@ -2008,69 +2510,127 @@ def vector_mutants(section: dict) -> list[tuple[str, dict]]:
     def decision(s: dict) -> dict:
         return payload_named(s, "decision")
 
+    def copy_kill_switch_again(s: dict) -> None:
+        """A second, otherwise valid, `KillSwitchActivated` from the one command, appended at the head."""
+        again = copy.deepcopy(body_named(s, "kill_switch"))
+        again.update(
+            seq=len(s["chain"]) + 1,
+            event_id="01J8ZNB0R000000000000000K3",
+            recorded_at="2026-09-21T20:30:00.000400000Z",
+        )
+        s["chain"].append({"seq": again["seq"], "event_type": again["event_type"], "body": again})
+
+    def unchain(s: dict) -> None:
+        """One body's `prev_hash` breaks the chain; its own bytes and hash still agree, so only the
+        link is wrong."""
+        entry = s["chain"][SEQ["owner_close_in_session"] - 1]
+        entry["body"]["prev_hash"] = "0" * 64
+        entry["canonical"] = canon(entry["body"])
+        entry["hash"] = sha256_hex(entry["canonical"].encode())
+
+    def propose_flatten(s: dict) -> None:
+        """An `IntentProposed` caused by the owner's kill switch, appended so every owner close keeps
+        its own intent."""
+        again = copy.deepcopy(body_named(s, "owner_close_confirmed_intent"))
+        again.update(
+            seq=len(s["chain"]) + 1,
+            event_id="01J8ZNB0R000000000000000P3",
+            event_time="2026-09-21T20:30:00.000000000Z",
+            recorded_at="2026-09-21T20:30:00.000400000Z",
+            causation_id=ID["owner_kill_switch"],
+        )
+        s["chain"].append({"seq": again["seq"], "event_type": again["event_type"], "body": again})
+
+    def copy_owner_exit_again(s: dict) -> None:
+        """A second `OwnerExitRequested` from the owner's kill switch command, matching it in kind,
+        subject, stream, and time and proposing nothing, so only the at-most-once clause refuses it."""
+        again = copy.deepcopy(body_named(s, "owner_kill_switch"))
+        again.update(
+            seq=len(s["chain"]) + 1,
+            event_id="01J8ZNB0R000000000000000K4",
+            recorded_at="2026-09-21T20:30:00.000400000Z",
+        )
+        s["chain"].append({"seq": again["seq"], "event_type": again["event_type"], "body": again})
+
     out = []
-    for name, fn in [
+    for name, check, fn in [
         (
             "missing model counted as 0 in buy conviction",
+            "decision.recompute",
             lambda s: decision(s).update(buy_conviction=decision(s)["exit_conviction"]),
         ),
-        ("combined score from conviction", lambda s: decision(s).update(combined_score="0.8536")),
+        ("combined score from conviction", "decision.recompute", lambda s: decision(s).update(combined_score="0.8536")),
+        ("decision labelled by a rule it was not decided by", "decision.recompute", lambda s: decision(s).update(decided_by="rule:large_orders")),
+        ("decision recorded as the owner's request", "decision.recompute", lambda s: decision(s).update(requested_by="owner")),
         (
             "every bound listed as a clip",
+            "decision.recompute",
             lambda s: decision(s).update(clips_applied=["max_order_usd", "position_cap", "gross_exposure_cap"]),
         ),
-        ("quantity not truncated", lambda s: decision(s).update(qty="10.07")),
+        ("quantity not truncated", "decision.recompute", lambda s: decision(s).update(qty="10.07")),
         (
             "weights of fresh models only",
+            "decision.recompute",
             lambda s: decision(s).update(model_weights=[{"key": "quant.mean_reversion", "value": "0.9"}]),
         ),
-        ("intent differs from its decision", lambda s: payload_named(s, "intent").update(qty="11")),
+        ("intent differs from its decision", "intent.action", lambda s: payload_named(s, "intent").update(qty="11")),
         (
             "intent caused by the model output",
+            "intent.cause",
             lambda s: body_named(s, "intent").update(causation_id=ID["model_output"]),
         ),
-        ("prev_hash not chained", lambda s: body_named(s, "owner_close_in_session").update(prev_hash="0" * 64)),
-        ("artifact content changed", lambda s: s["artifacts"][0]["object"].update(ask="150.02")),
-        ("floor not the default", lambda s: payload_named(s, "owner_close_confirmed").update(floor="146.46")),
+        ("prev_hash not chained", "chain.prev_hash", unchain),
+        ("artifact content changed", "artifacts.rehash", lambda s: s["artifacts"][0]["object"].update(ask="150.02")),
+        ("floor not the default", "owner_exits.floor", lambda s: payload_named(s, "owner_close_confirmed").update(floor="146.46")),
         (
             "mode_event names another event",
+            "kill_switch.mode_event",
             lambda s: payload_named(s, "kill_switch").update(mode_event=ID["owner_kill_switch"]),
         ),
-        ("goal exit of part of the position", lambda s: payload_named(s, "goal_exit").update(qty="4")),
+        ("goal exit of part of the position", "goal_exit.whole", lambda s: payload_named(s, "goal_exit").update(qty="4")),
         (
             "goal exit allowed after the session",
+            "goal_exit.defer",
             lambda s: payload_named(s, "goal_exit").update(dry_run="allow", reason_code=None, autonomy="auto"),
         ),
         (
             "goal exit deferred with the opening's deny code",
+            "goal_exit.defer",
             lambda s: payload_named(s, "goal_exit").update(reason_code="session_not_allowed"),
         ),
         (
             "goal exit sent as a market order after the session",
+            "goal_exit.rung",
             lambda s: payload_named(s, "goal_exit").update(type="market", limit_price=None),
         ),
         (
             "goal exit limit rounded down, not up",
+            "goal_exit.rung",
             lambda s: payload_named(s, "goal_exit").update(limit_price="150.24"),
         ),
         (
             "goal exit carries the order builder's weights",
+            "goal_exit.evaluated",
             lambda s: payload_named(s, "goal_exit").update(model_weights=decision(s)["model_weights"]),
         ),
         (
             "deferred goal exit proposes an intent",
+            "goal_exit.proposes",
             lambda s: body_named(s, "owner_close_confirmed_intent").update(causation_id=ID["goal_exit"]),
         ),
         (
             "confirmed close priced below its floor",
+            "owner_exits.priced",
             lambda s: payload_named(s, "owner_close_confirmed_intent").update(limit_price="146.46"),
         ),
         (
             "owner close of part of the position",
+            "owner_exits.whole",
             lambda s: payload_named(s, "owner_close_in_session_intent").update(qty="4"),
         ),
         (
             "unconfirmed close after the session closes",
+            "owner_exits.session",
             lambda s: body_named(s, "owner_close_in_session").update(event_time="2026-09-21T20:05:00.000000000Z")
             or payload_named(s, "owner_close_in_session")["step_up"].update(
                 authenticated_at="2026-09-21T20:04:52.000000000Z"
@@ -2078,24 +2638,58 @@ def vector_mutants(section: dict) -> list[tuple[str, dict]]:
         ),
         (
             "stale step-up recorded as valid",
+            "owner_exits.fresh",
             lambda s: payload_named(s, "owner_close_confirmed")["step_up"].update(
                 authenticated_at="2026-09-21T20:04:59.000000000Z"
             ),
         ),
+        ("kill switch flatten proposed as an intent", "owner_exits.flatten", propose_flatten),
         (
-            "kill switch flatten proposed as an intent",
-            lambda s: body_named(s, "owner_close_confirmed_intent").update(causation_id=ID["owner_kill_switch"]),
+            "owner copy caused by an agent-stream event",
+            "owner_copies.cause",
+            lambda s: body_named(s, "kill_switch").update(causation_id=ID["kill_switch_mode"]),
+        ),
+        ("kill switch command copied twice", "owner_copies.at_most_once", copy_kill_switch_again),
+        ("owner kill switch copied twice as its owner exit", "owner_copies.at_most_once", copy_owner_exit_again),
+        (
+            "owner close copies a kill switch command",
+            "owner_copies.kind",
+            lambda s: command_named(s, "close_held").update(command="kill_switch"),
+        ),
+        (
+            "owner close names the command for the other instrument",
+            "owner_copies.subject",
+            lambda s: command_named(s, "close_held").update(subject=INSTRUMENT),
+        ),
+        (
+            "owner pause copies the Stop command",
+            "owner_copies.kind",
+            lambda s: valid_named(s, "mode_owner_pause")["changes"][-1].update(value=COMMAND["stop"]),
+        ),
+        (
+            "owner command journaled on the agent stream",
+            "owner_copies.stream",
+            lambda s: command_named(s, "kill_switch").update(stream_id=STREAM),
+        ),
+        (
+            "owner exit copied before its command",
+            "owner_copies.submitted",
+            lambda s: command_named(s, "close_opened").update(submitted_at="2026-09-21T20:10:00.500000000Z"),
         ),
         (
             "invalid draft expects the wrong reason",
+            "invalid_drafts",
             lambda s: draft_named(s, "reason_code_empty_string_on_allow")["expect"].update(reason="schema"),
         ),
     ]:
-        out.append((name, mutated(name, fn)))
+        out.append((name, check, mutated(name, fn)))
     return out
 
 
 def run_mutants(section: dict, v3: dict) -> list[str]:
+    """Every seeded bug caught. A vector mutant counts as caught only by the check it is registered
+    against, and no other check of that check's family may also catch it, so no clause can be
+    masked by a neighbour; every clause of `check_owner_copies` has a mutant of its own."""
     escaped = []
     chain = section["chain"]
     cases = [(draft_of(e["body"]), None) for e in chain]
@@ -2120,9 +2714,20 @@ def run_mutants(section: dict, v3: dict) -> list[str]:
         caught |= bool(verify_range(chain, 1, skip))
         if not caught:
             escaped.append(f"validator mutant {mutant}")
-    for name, mutated in vector_mutants(section):
-        if not check_chain(mutated, v3):
-            escaped.append(f"vector mutant: {name}")
+    registered = vector_mutants(section)
+    for check in ORACLE_CHECKS:
+        if check.startswith("owner_copies.") and not any(c == check for _, c, _ in registered):
+            escaped.append(f"check {check} has no vector mutant registered against it")
+    for name, check, mutated in registered:
+        if check not in ORACLE_CHECKS:
+            raise ValueError(f"vector mutant {name} is registered against no check")
+        caught_by = {check_of(problem) for problem in check_chain(mutated, v3)}
+        family = check.partition(".")[0]
+        masked = sorted(c for c in caught_by if c != check and c.partition(".")[0] == family)
+        if check not in caught_by:
+            escaped.append(f"vector mutant: {name} (not caught by {check}; caught by {sorted(caught_by)})")
+        elif masked:
+            escaped.append(f"vector mutant: {name} (caught by {check} and also by {masked}, which mask it)")
     return escaped
 
 
@@ -2136,7 +2741,7 @@ def build_section(v3: dict) -> dict:
         for name, obj in ARTIFACTS.items()
     ]
     return {
-        "spec": "docs/specs/journal.md v0.5 §9.1 (DEC-177)",
+        "spec": "docs/specs/journal.md v0.6 §9.1 (DEC-177)",
         "stream_id": STREAM,
         "artifacts": artifacts,
         "chain": chain,

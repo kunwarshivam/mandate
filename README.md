@@ -186,7 +186,7 @@ Phase 1 adds `mandate-risk` (the gate), `mandate-builder` (autonomy and the orde
 
 | Spec | Version | Reference cases | How the code is held to it |
 |---|---|---|---|
-| [Trading domain](docs/specs/trading-domain.md) | v0.12, approved | 26 worked cases (RC-01 onward) and 40 registered reason codes over accounting, settlement, corporate actions, fills, US account rules | `mandate-refcases` runs each case as a test; `status.toml` marks the ones that pass and a passing case may never regress |
+| [Trading domain](docs/specs/trading-domain.md) | v0.13, approved | 26 worked cases (RC-01 onward) and 41 registered reason codes over accounting, settlement, corporate actions, fills, US account rules | `mandate-refcases` runs each case as a test; `status.toml` marks the ones that pass and a passing case may never regress |
 | [Journal](docs/specs/journal.md) | v0.4 | Byte-exact vectors: decimal normalization, string escaping, a 5-event chain, the export line, the Merkle anchor, 9 append-protocol cases (idempotent retry, stale head, fenced writer, rejected float), 9 tamper cases with their expected first failure | Conformance tests reproduce every vector byte for byte; `mandate journal verify` reports the tamper cases' codes |
 | [Mandate](docs/specs/mandate.md) | v0.6 | 298 generated cases across schema, validation, policy, change classification, risk state, autonomy, the order builder, the gate, admission, lineage, and expiry | A Python reference implementation (`reference/mandate`) generates the cases; CI regenerates them and diffs, runs the checker, a fuzzer over the invariants MI-1 to MI-20, and a seeded-mutant check. The Rust harness runs every case, with each family pending until its implementation lands |
 

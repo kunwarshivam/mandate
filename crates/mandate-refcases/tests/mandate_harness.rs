@@ -29,29 +29,81 @@ fn run(fixture: Json, id: &str) -> Result<(), String> {
     (case.run)()
 }
 
+/// The families this harness owns, by case-ID prefix, each with its kind and the number of cases spec
+/// §11 lists for it (`MC-S01` to `MC-S31`, and so on).
+///
+/// Every count in this file is over these families alone. A family another harness owns, or one the
+/// fixture gains before any arm interprets it, changes none of them; a case added to or dropped from
+/// one of these families fails `the_fixture_holds_the_families_this_stream_expects`, naming the family.
+const OWNED: [(&str, &str, usize); 7] = [
+    ("MC-S", "schema", 31),
+    ("MC-V", "semantic", 67),
+    ("MC-P", "policy", 22),
+    ("MC-C", "change", 48),
+    ("MC-R", "risk_state", 24),
+    ("MC-T", "risk_day", 5),
+    ("MC-L", "goal", 5),
+];
+
+/// Every kind an arm of `mandate::cases` interprets, this harness's and the other streams'.
+const INTERPRETED: [&str; 15] = [
+    "schema",
+    "semantic",
+    "policy",
+    "change",
+    "risk_state",
+    "risk_day",
+    "goal",
+    "gate",
+    "agent_flatten",
+    "admission",
+    "lineage",
+    "thesis_expiry",
+    "stagger",
+    "autonomy",
+    "builder",
+];
+
+/// A case ID's family: `MC-V` for `MC-V07`.
+fn family(id: &str) -> &str {
+    id.trim_end_matches(|c: char| c.is_ascii_digit())
+}
+
+/// The ids of the cases whose family `owned` accepts, in fixture order.
+fn ids_where(fixture: &Json, owned: impl Fn(&str) -> bool) -> Vec<String> {
+    fixture["cases"]
+        .as_array()
+        .expect("a case list")
+        .iter()
+        .map(|c| c["id"].as_str().expect("an id"))
+        .filter(|id| owned(family(id)))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The ids of every case of the seven owned families.
+fn owned_ids(fixture: &Json) -> Vec<String> {
+    ids_where(fixture, |f| OWNED.iter().any(|(prefix, _, _)| *prefix == f))
+}
+
+/// The ids of the owned family whose kind is `kind`.
+fn ids_of(fixture: &Json, kind: &str) -> Vec<String> {
+    let (prefix, _, _) = OWNED
+        .iter()
+        .find(|(_, owned, _)| *owned == kind)
+        .unwrap_or_else(|| panic!("`{kind}` is not an owned family's kind"));
+    ids_where(fixture, |f| f == *prefix)
+}
+
 /// Every key of every owned case is one the harness knows. A key the fixture gains and the harness
 /// does not read fails its case, naming the key, rather than being skipped.
 #[test]
 fn every_owned_case_key_is_read() {
-    let owned = [
-        "schema",
-        "semantic",
-        "policy",
-        "change",
-        "risk_state",
-        "risk_day",
-        "goal",
-    ];
     let fixture = fixture();
-    let cases = fixture["cases"].as_array().expect("a case list");
     let mut checked = 0;
-    for case in cases {
-        let kind = case["kind"].as_str().expect("a kind");
-        if !owned.contains(&kind) {
-            continue;
-        }
+    for id in &owned_ids(&fixture) {
         checked += 1;
-        let id = case["id"].as_str().expect("an id");
+        let id = id.as_str();
         let mut doctored = fixture.clone();
         let slot = doctored["cases"]
             .as_array_mut()
@@ -68,10 +120,7 @@ fn every_owned_case_key_is_read() {
             "{id}: the failure must name the key it did not read, got: {failure}"
         );
     }
-    assert_eq!(
-        checked, 202,
-        "the seven owned families are 202 of the fixture's 298 cases"
-    );
+    assert_eq!(checked, 202, "the seven owned families are 202 cases");
 }
 
 /// A case of a kind no arm interprets fails naming the kind, so nobody can mistake it for covered; and
@@ -82,6 +131,10 @@ fn every_owned_case_key_is_read() {
 /// DEC-162), families G and F with stream G's (DEC-178), and family B, the last, with stream H's
 /// (E6-2, DEC-250), so no story is left to name: the rule that remains is that an uninterpreted kind
 /// fails rather than passes (DEC-85).
+///
+/// Each of the fifteen interpreted kinds is in the fixture and reaches its arm. A kind outside them,
+/// such as a family the fixture gains before its arm lands, is allowed, and its cases fail until an arm
+/// interprets it and joins `INTERPRETED`.
 #[test]
 fn a_kind_no_arm_interprets_fails_naming_it() {
     let fixture = fixture();
@@ -93,9 +146,21 @@ fn a_kind_no_arm_interprets_fails_naming_it() {
             kinds.push((kind, case["id"].as_str().expect("an id")));
         }
     }
-    assert_eq!(kinds.len(), 15, "the fixture's fifteen kinds");
+    for kind in INTERPRETED {
+        assert!(
+            kinds.iter().any(|(k, _)| *k == kind),
+            "the fixture holds no `{kind}` case"
+        );
+    }
     for (kind, id) in &kinds {
-        if let Err(failure) = run(fixture.clone(), id) {
+        let outcome = run(fixture.clone(), id);
+        if !INTERPRETED.contains(kind) {
+            assert!(
+                outcome.is_err(),
+                "{id}: no arm is listed for `{kind}`, so its case must fail rather than pass; an arm \
+                 that interprets it belongs in `INTERPRETED`"
+            );
+        } else if let Err(failure) = outcome {
             assert!(
                 !failure.contains(&format!("kind `{kind}`")),
                 "{id}: `{kind}` must reach an arm, got: {failure}"
@@ -182,29 +247,48 @@ fn a_wrong_expected_value_fails_the_case() {
     );
 }
 
-/// The fixture's own shape, so a regenerated file that renames a family or drops a case is caught here
-/// rather than by 298 individually confusing failures.
+/// The owned families' shape, so a regenerated file that renames, renumbers, or drops one of their
+/// cases is caught here, naming the family, rather than by a run of individually confusing failures;
+/// and one test per fixture case, so no case of any family is dropped between the fixture and the run.
+///
+/// Families this harness does not own are counted by their own harnesses, and a family the fixture
+/// gains changes nothing here.
 #[test]
 fn the_fixture_holds_the_families_this_stream_expects() {
     let fixture = fixture();
     let cases = fixture["cases"].as_array().expect("a case list");
-    assert_eq!(cases.len(), 298, "spec §11 states 298 cases");
-    let count = |kind: &str| cases.iter().filter(|c| c["kind"] == kind).count();
-    for (kind, expected) in [
-        ("schema", 31),
-        ("semantic", 67),
-        ("policy", 22),
-        ("change", 48),
-        ("risk_state", 24),
-        ("risk_day", 5),
-        ("goal", 5),
-    ] {
-        assert_eq!(count(kind), expected, "`{kind}` count");
+    for (prefix, kind, count) in OWNED {
+        let mut ids = ids_where(&fixture, |f| f == prefix);
+        ids.sort();
+        let listed: Vec<String> = (1..=count).map(|n| format!("{prefix}{n:02}")).collect();
+        assert_eq!(
+            ids, listed,
+            "family {prefix} is {prefix}01 to {prefix}{count:02}, as spec §11 lists it"
+        );
+        for id in &ids {
+            let case = cases
+                .iter()
+                .find(|c| c["id"] == id.as_str())
+                .expect("the case");
+            assert_eq!(case["kind"], kind, "{id}: family {prefix} is `{kind}`");
+        }
     }
+    let mut expected = vec![
+        "mandate::version".to_owned(),
+        "mandate::version_vector".to_owned(),
+    ];
+    expected.extend(
+        cases
+            .iter()
+            .map(|c| format!("mandate::{}", c["id"].as_str().expect("an id"))),
+    );
+    let run: Vec<String> = mandate::cases(&Arc::new(fixture.clone()))
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
     assert_eq!(
-        mandate::cases(&Arc::new(fixture)).len(),
-        300,
-        "298 cases plus `version` and `version_vector`"
+        run, expected,
+        "one test per fixture case, plus `version` and `version_vector`"
     );
 }
 
@@ -217,25 +301,11 @@ fn the_fixture_holds_the_families_this_stream_expects() {
 /// beside the real expectations rather than replacing one.
 #[test]
 fn every_owned_expectation_member_is_read() {
-    let owned = [
-        "schema",
-        "semantic",
-        "policy",
-        "change",
-        "risk_state",
-        "risk_day",
-        "goal",
-    ];
     let fixture = fixture();
-    let cases = fixture["cases"].as_array().expect("a case list");
     let mut top_level = 0;
     let mut in_steps = 0;
-    for case in cases {
-        let kind = case["kind"].as_str().expect("a kind");
-        if !owned.contains(&kind) {
-            continue;
-        }
-        let id = case["id"].as_str().expect("an id");
+    for id in &owned_ids(&fixture) {
+        let id = id.as_str();
         let mut doctored = fixture.clone();
         let slot = doctored["cases"]
             .as_array_mut()
@@ -277,17 +347,6 @@ fn every_owned_expectation_member_is_read() {
         (178, 111),
         "both sweeps must have been exercised over every expectation the owned cases carry"
     );
-}
-
-/// The owned cases of one kind, by id.
-fn ids_of(fixture: &Json, kind: &str) -> Vec<String> {
-    fixture["cases"]
-        .as_array()
-        .expect("a case list")
-        .iter()
-        .filter(|c| c["kind"] == kind)
-        .map(|c| c["id"].as_str().expect("an id").to_owned())
-        .collect()
 }
 
 /// A value no expectation of these families can hold, in the shape of the one it replaces: a string
@@ -618,13 +677,7 @@ fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
 #[test]
 fn every_risk_day_case_passes_and_fails_on_each_edited_expectation() {
     let fixture = fixture();
-    let ids: Vec<String> = fixture["cases"]
-        .as_array()
-        .expect("a case list")
-        .iter()
-        .filter(|c| c["kind"] == "risk_day")
-        .map(|c| c["id"].as_str().expect("an id").to_owned())
-        .collect();
+    let ids = ids_of(&fixture, "risk_day");
     assert_eq!(ids.len(), 5, "family T is five cases");
     let mut edited = 0;
     for id in &ids {
@@ -671,13 +724,7 @@ fn every_risk_day_case_passes_and_fails_on_each_edited_expectation() {
 #[test]
 fn every_risk_state_step_field_and_initial_field_is_read() {
     let fixture = fixture();
-    let ids: Vec<String> = fixture["cases"]
-        .as_array()
-        .expect("a case list")
-        .iter()
-        .filter(|c| c["kind"] == "risk_state")
-        .map(|c| c["id"].as_str().expect("an id").to_owned())
-        .collect();
+    let ids = ids_of(&fixture, "risk_state");
     assert_eq!(ids.len(), 24, "family R is 24 cases");
     let planted = "a_field_the_harness_does_not_read".to_owned();
     let mut steps_planted = 0;
@@ -724,14 +771,10 @@ fn every_risk_state_step_field_and_initial_field_is_read() {
 #[test]
 fn a_step_whose_event_the_harness_does_not_apply_fails_the_case() {
     let fixture = fixture();
-    let id = fixture["cases"]
-        .as_array()
-        .expect("a case list")
-        .iter()
-        .find(|c| c["kind"] == "risk_state")
-        .and_then(|c| c["id"].as_str())
-        .expect("a risk_state case")
-        .to_owned();
+    let id = ids_of(&fixture, "risk_state")
+        .into_iter()
+        .next()
+        .expect("a risk_state case");
     let mut doctored = fixture.clone();
     let slot = doctored["cases"]
         .as_array_mut()

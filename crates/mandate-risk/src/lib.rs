@@ -511,6 +511,19 @@ pub enum EtpClass {
     Unclassified,
 }
 
+/// What a pair is quoted in, for §3.2 item 7's "USD pairs only" (DEC-254).
+///
+/// `Usd` is the only value that can admit a crypto opening, and nothing produces it by default:
+/// the type has no `Default`, [`InstrumentSnapshot::quote_currency`] is `None` when the instrument
+/// master stated no quote currency, and every stated code but exactly `USD` is `Other` — a
+/// stablecoin (USDT, USDC), a fiat other than USD, a crypto asset, or a code the loader does not
+/// recognise. A USD-pegged stablecoin is not USD: the floor's dollar figures were written for USD.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuoteCurrency {
+    Usd,
+    Other,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SaneQuote {
     pub bid: Price,
@@ -611,6 +624,10 @@ pub struct InstrumentSnapshot {
     pub ptp_no_exception: bool,
     pub etp: EtpClass,
     pub etp_classified_at: Option<UtcNanos>,
+    /// The quote half of the pair (the `USD` of `BTC/USD`), which §3.2 item 7 reads for crypto
+    /// only; `None` when the instrument master did not state it, which admits no crypto opening. A
+    /// US equity is quoted in USD and the gate never reads the field for one.
+    pub quote_currency: Option<QuoteCurrency>,
     pub prior_close: Option<Price>,
     pub median_dollar_volume_20d: Option<Usd>,
     pub median_dollar_volume_30d: Option<Usd>,

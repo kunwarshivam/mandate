@@ -36,11 +36,11 @@ pub(crate) type Stop = (Verdict, ReasonCode);
 /// The story that completes a check, while any part of it is owed: check 2 still owes §3.2 item
 /// 7's "USD pairs only" for crypto (E6-10). Every other check is whole for a US equity.
 ///
-/// Check 2 takes the input because "USD pairs only" has no field to read: `InstrumentSnapshot`
-/// carries no quote currency and `AssetId` is a UUID, so nothing distinguishes BTC/USD from
-/// BTC/USDT. Calling check 2 whole for crypto would let a non-USD pair be opened, so a crypto
-/// opening stays owed and is refused by the fail-closed rule until E6-10 supplies the field
-/// (DEC-129 item 34). A crypto *exit* is unaffected: `first_owed` accrues only for an opening.
+/// Check 2 takes the input because "USD pairs only" is judged from
+/// [`crate::InstrumentSnapshot::quote_currency`] (DEC-254), which the floor does not read yet:
+/// calling check 2 whole for crypto before it does would let a non-USD pair be opened, so a crypto
+/// opening stays owed and is refused by the fail-closed rule until E6-10's implementation (DEC-129
+/// item 34). A crypto *exit* is unaffected: `first_owed` accrues only for an opening.
 fn owed(check: Check, input: &GateInput<'_>) -> Option<&'static str> {
     match check {
         Check::UniverseAndLimits if input.instrument.asset_class != AssetClass::UsEquity => {
@@ -470,6 +470,7 @@ mod tests {
             ptp_no_exception: false,
             etp: EtpClass::Plain,
             etp_classified_at: Some(UtcNanos::parse_rfc3339("2026-09-21T00:00:00Z")?),
+            quote_currency: Some(crate::QuoteCurrency::Usd),
             prior_close: Some(Price::parse("100")?),
             median_dollar_volume_20d: Some(usd("90000000")?),
             median_dollar_volume_30d: None,
@@ -1330,12 +1331,13 @@ mod tests {
         Ok(())
     }
 
-    /// A crypto opening stays owed at check 2 until E6-10 supplies the quote currency, while a
-    /// crypto exit is untouched (DEC-129 item 34).
+    /// A crypto opening stays owed at check 2 until E6-10's implementation reads the quote
+    /// currency, while a crypto exit is untouched (DEC-129 item 34).
     ///
-    /// §3.2 item 7 admits USD pairs only and nothing in `InstrumentSnapshot` says what a pair is
-    /// quoted in, so calling check 2 whole for crypto would let a stablecoin pair open. The same
-    /// opening in a US equity, for which every check is whole, is allowed.
+    /// §3.2 item 7 admits USD pairs only and the floor does not read
+    /// `InstrumentSnapshot::quote_currency` yet, so calling check 2 whole for crypto would let a
+    /// stablecoin pair open, even the USD pair this fixture states. The same opening in a US
+    /// equity, for which every check is whole, is allowed.
     #[test]
     fn a_crypto_opening_is_owed_to_e6_10_while_a_crypto_exit_is_not() -> Result<(), GateError> {
         let mut o = allowing()?;
@@ -1605,7 +1607,7 @@ mod tests {
     /// position can come from, each typed by the brief's purpose table rather than by
     /// `assign_purpose`: no breach of the universe or the floor denies an exit, and check 2 is
     /// listed `Passed` for it, or `NotReached` for crypto, whose check 2 stays owed to E6-10 for
-    /// every purpose until the quote currency is an input (DEC-129 items 29 and 34). Each breach
+    /// every purpose until the floor reads the quote currency (DEC-129 items 29 and 34). Each breach
     /// first denies an opening with its own code at check 2, so an exit's allow is never an
     /// instrument that happens to pass the floor.
     #[test]
