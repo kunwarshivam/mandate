@@ -360,11 +360,12 @@ implementation PR turns the pending tests green without editing them (DEC-77).
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
 implementation PRs fill the crate in story by story: E6-3 has landed `evaluate` and `agent_flatten`,
 E6-9 check 3's halt and no market orders under a presumed halt (a market exit is re-priced),
-E6-7 check 2's eligibility floor, and E6-6 `session_at`, check 3's sessions, the rest of check 4,
-check 7's buying power and check 8's `legacy_pdt` budget.
-Until every check exists the gate fails closed for adding risk (DEC-129 item 29): an opening the
-implemented checks would allow is `GateError::Unimplemented`, while a reducing purpose passes a
-check still owed.
+E6-7 check 2's eligibility floor, E6-6 `session_at`, check 3's sessions, the rest of check 4,
+check 7's buying power and check 8's `legacy_pdt` budget, and E6-8 check 5's mark and collar,
+check 6's conduct controls, the pacing of an allowed exit, `evaluate_cancel` and `surveillance`
+(DEC-163). Until every check exists the gate fails closed for adding risk (DEC-129 item 29): a
+crypto opening is `GateError::Unimplemented` until E6-10 completes check 2, while a reducing purpose
+passes a check still owed.
 
 - **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
   §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
@@ -389,7 +390,11 @@ check still owed.
   `crates/mandate-risk/src/session.rs` (`session_at` from the committed calendar and check 3's
   session and auction-window rules), `crates/mandate-risk/src/account_rules.rs` (§5.3 rules 2 and
   4 to 8, buying power with the fee reservation, and the `legacy_pdt` day-trade budget),
-  `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
+  `crates/mandate-risk/src/conduct.rs` (check 5's fresh quote and collar, check 6's conduct
+  controls, the collar, participation and close-window pacing of an allowed exit, and
+  `evaluate_cancel`'s minimum resting time, trading spec §8.2 and §9.6),
+  `crates/mandate-risk/src/surveillance.rs` (§9.6's daily surveillance report: figures and flagged
+  thresholds, concentration a figure only, no judgement), `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
   `AccountType`, `AssetClass` and `Side` and changes neither them nor `mandate-time`.
@@ -399,7 +404,9 @@ check still owed.
   `crates/mandate-risk/tests/properties.rs` (one property per invariant and per "never" or "always"
   in §9, including MI-1 scoped to its own words, the mode rule, MI-8, and a shadow-ledger sequence
   property), `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
-  oracle, which never calls the crate's arithmetic). Planted bugs per test: the task brief.
+  oracle, which never calls the crate's arithmetic), and the in-module tests in `gate.rs` and
+  `surveillance.rs` for the boundaries the files above cannot pin. Planted bugs per test: the task
+  brief.
 - **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
   `fixtures/refcases/mandate.json`; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
   and `RC-25` with their variants, and the `propose_order` steps of `RC-03`, `RC-08` and `RC-18`,
@@ -506,7 +513,10 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `crates/mandate-spec/src/document.rs` (the hashed envelope document and the strict parse),
   `crates/mandate-spec/src/validate.rs` (the V-rules, the warnings, the closed platform-default list,
   `ValidatedMandate`), `crates/mandate-spec/src/policy.rs` (the hierarchy and its runtime overlay),
-  `crates/mandate-spec/src/risk.rs` (the risk-state fold, breach confirmation, risk days),
+  `crates/mandate-spec/src/risk.rs` (the risk-state types, breach confirmation, risk days),
+  `crates/mandate-spec/src/risk/limits.rs` (the §5.2 and §5.6 comparisons),
+  `crates/mandate-spec/src/risk/fold.rs` (the fold's spine over marks, fills, and clock ticks, slice
+  R2; the rest of §5 is `unimplemented` until R3 and R4, DEC-167 items 5 and 6),
   `crates/mandate-spec/src/goal.rs`, `crates/mandate-spec/src/change.rs` (the version and §9.2
   classification), `crates/mandate-spec/src/condition.rs` (the §6.3 language, owned here and nowhere
   else), `crates/mandate-spec/src/context.rs` (`ValidationContext::from_journal`, the fold over
@@ -536,7 +546,12 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   paths against hand-written per-edit classes, an allocation-only change classified by its direction,
   and MI-11 against a first-match evaluator of the test's own; DEC-172),
   `crates/mandate-spec/src/change/tests.rs` (the `not_in` shapes no other test reaches, DEC-172
-  item 13);
+  item 13); `crates/mandate-spec/src/risk/limits.rs`'s tests (the comparisons against an integer
+  oracle, and the exact set of limits they read); `crates/mandate-spec/src/risk/fold/tests.rs` (the
+  spine's edges: the lift delay's boundary and restart, severe rungs that a receding drawdown does not
+  lift, the whole-second monotone risk clock, staleness left to R3, the crypto and equity clocks, the
+  floor's carry, fills, the daily action, every input left to R3 and R4, and a lift property whose
+  oracle is a run rule);
   `crates/mandate-domain/tests/domain.rs` (live). Planted bugs per test: the task brief and the E10-3
   tests and implementation PRs.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
