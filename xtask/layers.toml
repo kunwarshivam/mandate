@@ -140,8 +140,9 @@ allowed_external = ["thiserror"]
 
 [crates.mandate-cli]
 layer = 7
-safety_critical = false
+safety_critical = true
 pure = false
+allowed_external = ["anyhow", "clap", "serde", "tokio", "toml"]
 
 [crates.mandate-executor]
 layer = 6

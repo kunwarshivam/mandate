@@ -698,7 +698,6 @@ fn a_lost_answer_is_retried_under_the_same_id_and_commits_once() {
 /// answered. The append loop pauses exactly `backoff`'s answer before each retry, and never before
 /// the first attempt.
 #[test]
-#[ignore = "pending E8-3"]
 fn retries_back_off_between_attempts() {
     let through = approve_through(|j| j.fence_next = 4);
     one_id_for_every_attempt(&through);
@@ -730,7 +729,6 @@ fn retries_back_off_between_attempts() {
 /// meeting: the grant and the skip of one request, each fenced once in its own journal, are given
 /// different first pauses, and each journal saw its own.
 #[test]
-#[ignore = "pending E8-3"]
 fn two_racing_commands_back_off_differently() {
     let first_pause = |grant: bool| {
         let mut fx = Fixture::new();
@@ -771,7 +769,6 @@ fn two_racing_commands_back_off_differently() {
 /// re-run, with a new process's ids and a later clock, finds that event, commits nothing twice, and
 /// spends no new step-up.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_exhausted_answer_names_its_event_and_a_re_run_finds_it() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
@@ -827,7 +824,6 @@ fn an_exhausted_answer_names_its_event_and_a_re_run_finds_it() {
 /// been committed since; nothing has, so the re-run finds it, though the other event moved the head
 /// the command was decided at, and commits nothing twice.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_re_run_finds_its_event_after_another_writer_moved_the_head() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
@@ -887,7 +883,6 @@ fn a_re_run_finds_its_event_after_another_writer_moved_the_head() {
 /// request is still pending and the owner may answer again before the deadline; that answer is a
 /// new event with fresh evidence, never taken for the refused one.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_re_answer_after_the_runtime_refused_is_committed_anew() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
@@ -934,7 +929,6 @@ fn a_re_answer_after_the_runtime_refused_is_committed_anew() {
 /// action is skipped, and never offered another answer. Both name the reason and that nothing was
 /// sent.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_refusal_says_whether_the_deadline_has_passed() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
