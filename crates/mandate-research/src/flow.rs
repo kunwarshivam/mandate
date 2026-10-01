@@ -39,16 +39,26 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_num::{Ratio, Usd};
+use mandate_num::{Fraction, Ratio, Rounding, Usd};
 
 use crate::{
-    AssetId, ContentHash, InstrumentRestriction, ResearchError, ResearchEvent, UniverseEntry,
-    WorkingUniverse, WorkspaceId,
+    AssetId, ContentHash, InstrumentRestriction, ResearchError, ResearchEvent, UniverseChange,
+    UniverseChangeReason, UniverseEntry, WorkingUniverse, WorkspaceId,
 };
 
 /// The scale the report's share of ADV rounds at (DEC-293, the E4-2 report discipline of one
 /// rounding of one quotient) — the same scale the `score` module's figures round at.
 pub const REPORT_SCALE: u32 = 12;
+
+/// DEC-123's dollar arm, 1,000,000 USD of research exposure per instrument per deployment: the
+/// lower arm for every instrument whose one percent of 20-day average daily dollar volume sits
+/// above it. Canonical text, because `Usd` has no const constructor; the value is DEC-123's own,
+/// not a field, and moving it is DEC-295's founder question.
+const DOLLAR_ARM: &str = "1000000";
+
+/// DEC-123's other arm, one percent of the instrument's 20-day average daily dollar volume — an
+/// exact factor, so the arm is one exact product and never a rounded quotient.
+const ONE_PERCENT: &str = "0.01";
 
 /// One agent's research flow in its deployment (DEC-100): the workspace it runs in, whether its
 /// mandate pins the universe (bring-your-own-strategy, which contributes nothing and is never
@@ -141,20 +151,32 @@ pub struct HaltOutcome {
 /// by none of them. The admitting hash arrives as an argument — a fact the caller reads from the
 /// mandate — because the crate's narrow envelope view carries no model triple.
 ///
-/// The matching itself is total; the `Result` exists for the DEC-77 stub protocol and always
-/// returns `Ok` once implemented.
+/// The matching itself is total: the `Result` keeps the entry point's shape as DEC-293 item 11
+/// fixed it for the callers that compose this with the fold's fallible reads, and no input can
+/// make it `Err`.
 ///
 /// # Errors
-/// Returns [`ResearchError::Unimplemented`] until E17-6's implementation lands.
+/// None, ever: the matching has no failure mode (DEC-293 item 11), and the `Result` stays because
+/// the shape is public.
 pub fn halted_instruments(
     halts: &[OperatorHalt],
     admitting_model: Option<&ContentHash>,
 ) -> Result<BTreeSet<AssetId>, ResearchError> {
-    let _ = (halts, admitting_model);
-    Err(ResearchError::Unimplemented(
-        "flow::halted_instruments",
-        "E17-6",
-    ))
+    let mut halted = BTreeSet::new();
+    for OperatorHalt {
+        instrument,
+        research_agent,
+    } in halts
+    {
+        let matches_this_workspace = match research_agent.as_ref() {
+            None => true,
+            Some(hash) => admitting_model == Some(hash),
+        };
+        if matches_this_workspace {
+            halted.insert(instrument.clone());
+        }
+    }
+    Ok(halted)
 }
 
 /// DEC-100's halt applied to one workspace's fold. An unread universe is an error, never a
@@ -168,20 +190,67 @@ pub fn halted_instruments(
 /// the application produces removals only — it never permits anything a workspace's own limits
 /// deny.
 ///
+/// The entries are read once each exactly as `expire_theses` reads them, duplicates refused
+/// before the pinned branch, so a malformed list is a caller bug whatever the mandate's kind; and
+/// the universe the outcome returns is the input universe minus the journaled removals and
+/// nothing else — an instrument the universe holds that no entry names is never dropped without a
+/// journal entry to replay, and an entry naming an instrument the universe does not hold adds
+/// nothing, because a halt that added would be a halt that permitted (DEC-294).
+///
 /// # Errors
-/// Returns [`ResearchError::UniverseUnavailable`] for an unread working universe,
-/// [`ResearchError::DuplicateInstrument`] for an entry list naming one instrument twice, and
-/// [`ResearchError::Unimplemented`] until E17-6's implementation lands.
+/// Returns [`ResearchError::UniverseUnavailable`] for an unread working universe and
+/// [`ResearchError::DuplicateInstrument`] for an entry list naming one instrument twice.
 pub fn apply_operator_halts(
     halted: &BTreeSet<AssetId>,
     entries: &[UniverseEntry],
     universe: &WorkingUniverse,
 ) -> Result<HaltOutcome, ResearchError> {
-    let _ = (halted, entries, universe);
-    Err(ResearchError::Unimplemented(
-        "flow::apply_operator_halts",
-        "E17-6",
-    ))
+    let (instruments, pinned) = crate::known_instruments(universe)?;
+    let mut by_instrument: BTreeMap<&AssetId, &UniverseEntry> = BTreeMap::new();
+    for entry in entries {
+        if by_instrument.insert(&entry.instrument, entry).is_some() {
+            return Err(ResearchError::DuplicateInstrument);
+        }
+    }
+    if pinned {
+        return Ok(HaltOutcome {
+            universe: universe.clone(),
+            removed: Vec::new(),
+            instrument_restrictions: BTreeMap::new(),
+            journal: Vec::new(),
+        });
+    }
+    let mut kept = instruments.clone();
+    let mut removed = Vec::new();
+    let mut instrument_restrictions = BTreeMap::new();
+    let mut journal = Vec::new();
+    let mut remaining = instruments.len();
+    for (instrument, entry) in by_instrument {
+        if !halted.contains(instrument) || !instruments.contains(instrument) {
+            continue;
+        }
+        kept.remove(instrument);
+        remaining = remaining.saturating_sub(1);
+        removed.push(instrument.clone());
+        instrument_restrictions
+            .insert(instrument.clone(), InstrumentRestriction::RemovedInstrument);
+        journal.push(crate::universe_changed(
+            instrument,
+            UniverseChange::Removed,
+            UniverseChangeReason::OperatorHalt,
+            (&entry.thesis_id, &entry.lineage_id),
+            remaining,
+        ));
+    }
+    Ok(HaltOutcome {
+        universe: WorkingUniverse::Known {
+            instruments: kept,
+            pinned: false,
+        },
+        removed,
+        instrument_restrictions,
+        journal,
+    })
 }
 
 /// DEC-100's aggregate-flow monitor over one deployment: the research agents' exposure summed per
@@ -192,16 +261,64 @@ pub fn apply_operator_halts(
 /// ordered by instrument id. The report is a value: the monitor writes to no workspace, sends
 /// nothing anywhere, and halts nothing (DEC-123: the operator issues the halt).
 ///
+/// A negative exposure row is refused whichever agent holds it, pinned ones included: v1 is
+/// long-only, and a caller bug the monitor silently swallows is the fail-open direction
+/// (DEC-294). A negative ADV is caller garbage the monitor neither refuses nor reads as quiet:
+/// its one percent is negative, so every exposure alerts above it, and the row shows its own
+/// share rather than hiding behind a second error code DEC-293 scoped away.
+///
 /// # Errors
-/// Returns [`ResearchError::NegativeExposure`] for a negative exposure row (v1 is long-only, and
-/// a negative row would under-state the aggregate) and [`ResearchError::Unimplemented`] until
-/// E17-6's implementation lands.
+/// Returns [`ResearchError::NegativeExposure`] for a negative exposure row, and
+/// [`ResearchError::Num`] when a sum or a share leaves `Usd`'s exact range.
 pub fn aggregate_flow(input: &FlowInput<'_>) -> Result<FlowReport, ResearchError> {
-    let _ = input;
-    Err(ResearchError::Unimplemented(
-        "flow::aggregate_flow",
-        "E17-6",
-    ))
+    let dollar_arm = Usd::parse(DOLLAR_ARM)?;
+    let one_percent = Fraction::parse(ONE_PERCENT)?;
+    let mut totals: BTreeMap<AssetId, (Usd, BTreeSet<WorkspaceId>)> = BTreeMap::new();
+    for agent in input.agents {
+        for exposure in agent.exposure.values() {
+            if exposure.is_negative() {
+                return Err(ResearchError::NegativeExposure);
+            }
+        }
+        if agent.pinned {
+            continue;
+        }
+        for (instrument, exposure) in agent.exposure {
+            if exposure.is_zero() {
+                continue;
+            }
+            let total = totals
+                .entry(instrument.clone())
+                .or_insert_with(|| (Usd::ZERO, BTreeSet::new()));
+            total.0 = total.0.checked_add(*exposure)?;
+            total.1.insert(agent.workspace.clone());
+        }
+    }
+    let mut rows = Vec::with_capacity(totals.len());
+    for (instrument, (exposure_usd, workspaces)) in totals {
+        let volume = input.average_daily_dollar_volume.get(&instrument);
+        let share_of_adv = match volume {
+            Some(volume) if !volume.is_zero() => {
+                Some(exposure_usd.ratio_to(*volume, REPORT_SCALE, Rounding::HalfEven)?)
+            }
+            _ => None,
+        };
+        let alerts = match volume {
+            None => true,
+            Some(volume) => {
+                let one_percent_of_volume = volume.times_fraction(one_percent)?;
+                exposure_usd > one_percent_of_volume.min(dollar_arm)
+            }
+        };
+        rows.push(FlowRow {
+            instrument,
+            exposure_usd,
+            share_of_adv,
+            alerts,
+            contributing_workspaces: workspaces.into_iter().collect(),
+        });
+    }
+    Ok(FlowReport { rows })
 }
 
 #[cfg(test)]

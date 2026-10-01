@@ -48,9 +48,9 @@
 //! risk (MI-19), and it is the only path by which anything here shrinks the universe: a lowered
 //! `max_instruments` refuses further admissions and never removes (DEC-132 item 14).
 //!
-//! The `flow` module's three entry points are stubs that return
-//! [`ResearchError::Unimplemented`] until E17-6's implementation lands; every other entry point
-//! has its implementation and returns its own typed errors (DEC-77).
+//! Every entry point has its implementation and returns its own typed errors (DEC-77): the
+//! `flow` module's three were the last to land, with E17-6, so
+//! [`ResearchError::Unimplemented`] is returned by nothing and stays only as a pinned ES-09 code.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1208,9 +1208,9 @@ pub enum ResearchError {
     /// under-state the aggregate flow the monitor exists to see (AGENTS.md rule 12)
     #[error("a research exposure is never negative")]
     NegativeExposure,
-    /// Returned by the stubs of a story not yet implemented — E17-6's three `flow` entry points
-    /// until its implementation PR lands, each call naming itself and its story; every implemented
-    /// entry point returns its own typed errors instead (DEC-77).
+    /// Returned by no entry point of this crate since E17-6's implementation landed the last
+    /// stubs; kept because ES-09's registry is add-only and the `unimplemented` code is pinned
+    /// live, so a future staged story can name itself and its story again (DEC-77, DEC-294).
     #[error("{0} is not implemented yet (pending {1})")]
     Unimplemented(&'static str, &'static str),
     #[error(transparent)]

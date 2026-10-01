@@ -1599,7 +1599,6 @@ fn built_agents(workspaces: Vec<(usize, &FlowWorkspace)>) -> Vec<BuiltAgent> {
 /// the assertions stay on the sum and the workspace set. A plain function over a `TestRunner`,
 /// because a pending test must not be one a macro generates.
 #[test]
-#[ignore = "pending E17-6"]
 fn the_deployment_total_and_workspace_set_match_an_independent_accumulator() {
     let slot_of: BTreeMap<AssetId, usize> = INSTRUMENTS
         .iter()
