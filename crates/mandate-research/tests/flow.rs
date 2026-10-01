@@ -108,7 +108,6 @@ fn removal_entry(instrument: &str, thesis: &str, size_after: usize) -> ResearchE
 /// instrument 1 and `120000` of instrument 2, and the row names each contributing workspace
 /// once.
 #[test]
-#[ignore = "pending E17-6"]
 fn the_deployment_sums_research_exposure_per_instrument() {
     let ws_one = workspace("ws-one");
     let ws_two = workspace("ws-two");
@@ -174,7 +173,6 @@ fn the_deployment_sums_research_exposure_per_instrument() {
 /// The acceptance clause's bring-your-own-strategy sentence: a pinned agent's exposure never
 /// enters the aggregate, and an instrument only pinned agents hold has no row at all.
 #[test]
-#[ignore = "pending E17-6"]
 fn a_pinned_agent_contributes_nothing_to_the_aggregate() {
     let ws_pin = workspace("ws-pin");
     let ws_dyn = workspace("ws-dyn");
@@ -219,7 +217,6 @@ fn a_pinned_agent_contributes_nothing_to_the_aggregate() {
 /// DEC-123's 1% arm: an ADV of `10000000` makes the threshold `100000`, so exposure at the bar
 /// is quiet and one cent above it alerts — the comparison is strict at the bar.
 #[test]
-#[ignore = "pending E17-6"]
 fn a_thin_name_alerts_above_one_percent_of_its_adv() {
     let ws = workspace("ws-thin");
     let map = exposure(&[(INSTRUMENT_1, "100000"), (INSTRUMENT_2, "100000.01")]);
@@ -243,7 +240,6 @@ fn a_thin_name_alerts_above_one_percent_of_its_adv() {
 /// DEC-123's dollar arm: an ADV of `1000000000` makes 1% of it `10000000`, so the threshold is
 /// the `1000000` arm — at the bar quiet, one cent above it alerts.
 #[test]
-#[ignore = "pending E17-6"]
 fn a_megacap_alerts_above_the_dollar_threshold() {
     let ws = workspace("ws-mega");
     let map = exposure(&[(INSTRUMENT_1, "1000000"), (INSTRUMENT_2, "1000000.01")]);
@@ -269,7 +265,6 @@ fn a_megacap_alerts_above_the_dollar_threshold() {
 /// the min and read quiet under a max — and at the crossover ADV of `100000000` both arms are
 /// `1000000`, quiet at the bar and alerting one cent above it.
 #[test]
-#[ignore = "pending E17-6"]
 fn the_threshold_is_whichever_arm_is_lower() {
     let ws = workspace("ws-min");
     let map = exposure(&[
@@ -312,7 +307,6 @@ fn the_threshold_is_whichever_arm_is_lower() {
 /// `150000 ÷ 10000000 = 0.015` exactly, `600.75 ÷ 1000000000 = 0.00000060075` exactly, and
 /// `1 ÷ 3` rounds once at 12 places to `0.333333333333`.
 #[test]
-#[ignore = "pending E17-6"]
 fn the_report_states_each_instrument_s_share_of_adv() {
     let ws = workspace("ws-share");
     let map = exposure(&[
@@ -352,7 +346,6 @@ fn the_report_states_each_instrument_s_share_of_adv() {
 /// below the dollar arm, because the 1% arm may bind lower — and the rest of the report lives,
 /// so one missing figure does not blind the monitor to every other instrument.
 #[test]
-#[ignore = "pending E17-6"]
 fn a_missing_adv_alerts_even_below_the_dollar_threshold() {
     let ws = workspace("ws-gap");
     let map = exposure(&[(INSTRUMENT_1, "500000"), (INSTRUMENT_2, "150000")]);
@@ -384,7 +377,6 @@ fn a_missing_adv_alerts_even_below_the_dollar_threshold() {
 /// A zero ADV decides: the 1% arm is zero, so any exposure alerts; the share stays absent,
 /// because nothing divides by zero.
 #[test]
-#[ignore = "pending E17-6"]
 fn a_zero_adv_alerts_on_any_exposure() {
     let ws = workspace("ws-zero");
     let map = exposure(&[(INSTRUMENT_1, "1"), (INSTRUMENT_2, "100000")]);
@@ -415,7 +407,6 @@ fn a_zero_adv_alerts_on_any_exposure() {
 /// An instrument with no research exposure — a zero row, or no row at all — is absent from the
 /// report, and the instruments that do hold exposure are present beside it.
 #[test]
-#[ignore = "pending E17-6"]
 fn an_instrument_with_no_research_exposure_is_absent_from_the_report() {
     let ws_one = workspace("ws-one");
     let ws_two = workspace("ws-two");
@@ -455,7 +446,6 @@ fn an_instrument_with_no_research_exposure_is_absent_from_the_report() {
 /// under-state the aggregate — the fail-open direction. The positive input reports its row
 /// beside the refusal.
 #[test]
-#[ignore = "pending E17-6"]
 fn a_negative_exposure_is_refused() {
     let ws = workspace("ws-sign");
     let map_ok = exposure(&[(INSTRUMENT_1, "1")]);
@@ -493,7 +483,6 @@ fn a_negative_exposure_is_refused() {
 /// rows carry their own exposures in that order, so a report of correctly ordered but zeroed
 /// rows cannot pass either.
 #[test]
-#[ignore = "pending E17-6"]
 fn the_report_is_ordered_by_instrument_id() {
     let ws = workspace("ws-order");
     let map = exposure(&[
@@ -540,7 +529,6 @@ fn the_report_is_ordered_by_instrument_id() {
 /// because check 5 and the pinned universe are what hold a pinned mandate back, not the halt's
 /// matching.
 #[test]
-#[ignore = "pending E17-6"]
 fn an_unscoped_halt_matches_every_workspace() {
     let unscoped = halt(INSTRUMENT_1, None);
     assert_eq!(
@@ -560,7 +548,6 @@ fn an_unscoped_halt_matches_every_workspace() {
 /// named content hash — a different version is not matched, and a pinned mandate (no admitting
 /// model) is matched by none of them.
 #[test]
-#[ignore = "pending E17-6"]
 fn a_hash_scoped_halt_matches_only_its_own_research_agent() {
     let halts = [
         halt(INSTRUMENT_1, Some(agent_hash(HASH_A))),
@@ -588,7 +575,6 @@ fn a_hash_scoped_halt_matches_only_its_own_research_agent() {
 /// restriction is the exits-only `RemovedInstrument`, and the instrument the halt did not name
 /// stays.
 #[test]
-#[ignore = "pending E17-6"]
 fn a_halt_removes_the_instrument_from_the_working_universe() {
     let universe = universe_of(&[INSTRUMENT_1, INSTRUMENT_2]);
     let entries = [
@@ -637,7 +623,6 @@ fn a_halt_removes_the_instrument_from_the_working_universe() {
 /// Two removals journal in instrument order — not the entry list's order, which the fixture
 /// scrambles — with `universe_size_after` sinking by one per removal.
 #[test]
-#[ignore = "pending E17-6"]
 fn removals_are_journalled_in_instrument_order_with_sinking_sizes() {
     let universe = universe_of(&[INSTRUMENT_1, INSTRUMENT_2, INSTRUMENT_3]);
     let entries = [
@@ -689,7 +674,6 @@ fn removals_are_journalled_in_instrument_order_with_sinking_sizes() {
 /// that removes from a dynamic universe leaves a pinned universe alone — the pinned list is the
 /// owner's, and a pinned mandate has no research flow to stop.
 #[test]
-#[ignore = "pending E17-6"]
 fn the_same_halt_leaves_a_pinned_universe_alone_and_removes_from_a_dynamic_one() {
     let dynamic = universe_of(&[INSTRUMENT_1]);
     let entries = [entry(
@@ -733,7 +717,6 @@ fn the_same_halt_leaves_a_pinned_universe_alone_and_removes_from_a_dynamic_one()
 /// admission takes. The same halt set on a read dynamic universe removes beside the refusal,
 /// so the test fails on any constant answer, not only the permissive one.
 #[test]
-#[ignore = "pending E17-6"]
 fn an_unread_universe_is_never_halted_silently() {
     let refused =
         apply_operator_halts(&halted(&[INSTRUMENT_1]), &[], &WorkingUniverse::Unavailable);
@@ -767,7 +750,6 @@ fn an_unread_universe_is_never_halted_silently() {
 /// that removes on the halted entries alone, never checking what the universe holds, would
 /// remove and journal instrument 2 too.
 #[test]
-#[ignore = "pending E17-6"]
 fn a_halt_removes_the_held_instrument_and_leaves_one_the_universe_does_not_hold() {
     let universe = universe_of(&[INSTRUMENT_1]);
     let entries = [
@@ -810,7 +792,6 @@ fn a_halt_removes_the_held_instrument_and_leaves_one_the_universe_does_not_hold(
 /// `operator_halt`, every restriction is the exits-only one, and the universe it returns is a
 /// subset of the one it was handed.
 #[test]
-#[ignore = "pending E17-6"]
 fn the_halt_only_ever_removes() {
     let universe = universe_of(&[INSTRUMENT_1, INSTRUMENT_2, INSTRUMENT_3]);
     let entries = [
@@ -870,7 +851,6 @@ fn the_halt_only_ever_removes() {
 /// them; a list naming one instrument twice is refused. The well-formed list beside it removes,
 /// so the test fails on any constant answer, not only the permissive one.
 #[test]
-#[ignore = "pending E17-6"]
 fn duplicate_entries_are_refused() {
     let universe = universe_of(&[INSTRUMENT_1]);
     let well_formed = [entry(
@@ -916,7 +896,6 @@ fn duplicate_entries_are_refused() {
 /// workspace's state (DEC-09). The report is a value: nothing consumes it, and it changes no
 /// decision.
 #[test]
-#[ignore = "pending E17-6"]
 fn one_workspace_s_state_never_enters_another_s_decisions() {
     let b = Scenario::admitting();
     let admission_before =
@@ -966,7 +945,6 @@ fn one_workspace_s_state_never_enters_another_s_decisions() {
 /// to agent A's hash removes A's instrument and leaves B's, because B derives its own set from
 /// its own admitting model.
 #[test]
-#[ignore = "pending E17-6"]
 fn a_halt_reaches_a_workspace_only_through_its_own_halt_set() {
     let scoped = halt(INSTRUMENT_5, Some(agent_hash(HASH_A)));
     let ws_a_set = halted_instruments(std::slice::from_ref(&scoped), Some(&agent_hash(HASH_A)))
