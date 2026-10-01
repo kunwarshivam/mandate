@@ -519,26 +519,16 @@ fn the_filled_minimum_order_is_one_share_to_the_last_place() {
     );
 }
 
-/// Each proposal is decided alone, with no trace of an earlier one (DEC-199 item 3), so a case
-/// with a second `propose_order` step waits for the stories that give a submission its effects.
-/// RC-08 passes with its one proposal and fails, naming them, with that proposal listed twice.
+/// A later proposal waits for the stories that give a submission its effects (E7-4, E7-5) while an
+/// earlier allowed proposal has not been filled in full on its side (DEC-199 item 3, as narrowed by
+/// the coordinator's ruling on #370, item 2). Here an allowed buy with no fill is followed by a
+/// second proposal. A denied earlier proposal leaves no trace, so this test no longer pins RC-08
+/// with its denied proposal listed twice.
 #[test]
 fn a_second_proposal_in_one_case_waits_for_e7_4_and_e7_5() {
     let waits =
         err("a second `propose_order` step in one case not interpreted until E7-4 and E7-5");
     assert_eq!(run(fixture(), "RC-08"), Ok(()));
-    assert_eq!(
-        run(
-            edited("RC-08", |c| {
-                let steps = c["steps"].as_array_mut().unwrap();
-                let proposal = steps[2].clone();
-                assert_eq!(proposal["event"], "propose_order");
-                steps.insert(3, proposal);
-            }),
-            "RC-08",
-        ),
-        waits
-    );
     assert_eq!(
         scene(
             json!([
@@ -759,6 +749,10 @@ fn a_fractional_proposal_needs_a_day_tif_and_a_fractionable_instrument() {
     );
 }
 
+/// RC-09 and RC-09B are not pinned here: E6-6's harness changes their pending reasons step by step
+/// (the coordinator's ruling on #370, item 1). Each case's trial in `tests/refcases.rs` runs only
+/// with `--include-ignored` until `status.toml` marks it passing; from then on the spec guard holds
+/// it.
 #[test]
 fn every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for() {
     let pending = [
@@ -785,10 +779,6 @@ fn every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for() {
         (
             "RC-17",
             "`deploy_agent` steps not interpreted until E7-5; a second `propose_order` step in one case not interpreted until E7-4 and E7-5; expectation `buying_power` after `propose_order` not interpreted until E7-5; initial `agents` not interpreted until E7-5; proposal field `agent` not interpreted until E7-5",
-        ),
-        (
-            "RC-09B",
-            "`propose_order` on a `generic` margin account's day-trade regime not interpreted until E6-6; a second `propose_order` step in one case not interpreted until E7-4 and E7-5; expectation `day_trade_count` not interpreted until E6-6; initial account `last_equity` not interpreted until E6-6; initial account `prior_day_trades` not interpreted until E6-6; initial account `regime` not interpreted until E6-6",
         ),
         (
             "RC-22",

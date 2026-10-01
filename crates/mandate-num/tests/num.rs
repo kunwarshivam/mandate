@@ -1234,6 +1234,30 @@ fn hand_calculated_statistics_of_a_falling_series() {
     );
 }
 
+/// The exact product the forward-paper bound needs (DEC-281 item 6): `z × σ` on operands that
+/// fit, the sign rule through a negative factor, zero as the single-thesis margin, and the
+/// refusal when a product needs more than `Ratio`'s 24 fractional digits.
+#[test]
+fn ratio_products_are_exact_or_refused() {
+    let z = Ratio::parse("1.645").unwrap();
+    let sigma = Ratio::parse("0.030103512022").unwrap();
+    assert_eq!(
+        z.checked_mul(sigma).unwrap().to_string(),
+        "0.04952027727619"
+    );
+    assert_eq!(
+        z.negated().checked_mul(sigma).unwrap().to_string(),
+        "-0.04952027727619"
+    );
+    assert_eq!(z.checked_mul(Ratio::ZERO).unwrap().to_string(), "0");
+    let thirteens = Ratio::parse("0.0000000000001").unwrap();
+    assert_eq!(
+        thirteens.checked_mul(thirteens).map(|_| ()),
+        Err(NumError::TooPrecise),
+        "a product needing 26 fractional digits has no exact Ratio"
+    );
+}
+
 /// A zero denominator is an error, not an infinity, and a root of a negative value is rejected.
 #[test]
 fn statistics_that_have_no_value_are_errors() {

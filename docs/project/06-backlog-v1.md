@@ -380,6 +380,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Follow-up (DEC-280 item 7):* `mandate-journal`'s catalogue gains `OwnerCommandRefused` (agent and
   account streams), and the runtime journals it for a refused resume or Stop, tests first, with a
   test that a refused Stop leaves exactly that event (the #395 review, major 1; DEC-278 item 12).
+  *Tests done (the M7 `OwnerCommandRefused` tests PR, DEC-291); the runtime's implementation
+  follows:* the catalogue admits it on the account and agent streams; three tests in
+  `crates/mandate-runtime/tests/approvals.rs` are pending E8-3: a refused Stop leaves exactly its
+  `OwnerCommandRefused` for each of missing, stale and reused evidence, a stale resume does the
+  same, and a refused command re-tailed after a restart writes nothing. The executor's half (a
+  refused acknowledgment) rides with E7-4 slice 5's copy of `OwnerAcknowledged` (DEC-291 item 4).
   *Follow-up (the #397 review, minors 1 to 5; one M7 tests PR before the `clap` wiring makes the
   commands reachable):* pin the closed key set of every control payload the CLI commits
   (`OwnerCommandIssued`, `ApprovalResponseSubmitted`, `OwnerAcknowledged`) in `tests/agent.rs` and
@@ -475,9 +481,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `--release` choice and the warning shown to `Command::Stop` and the payload (journal spec §9).
   *Prerequisite (DEC-257 item 17):* `mandate-journal` registers no payload schema for any agent- or
   control-stream event (`ApprovalRequested`, `ApprovalResponseSubmitted`, `OwnerCommandIssued`,
-  `OwnerAcknowledged`, and the rest), so a real journal refuses each one as `UnknownSchema` and
-  neither the runtime's nor the CLI's implementation can append through one. Register the schemas
-  as journal spec §9 closes them, with the catalogue entries above, before either implementation.
+  `OwnerAcknowledged`, `OwnerCommandRefused`, and the rest), so a real journal refuses each one as
+  `UnknownSchema` and neither the runtime's nor the CLI's implementation can append through one.
+  Register the schemas as journal spec §9 closes them, with the catalogue entries above, before
+  either implementation.
   *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
   control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
   would make MI-24 true as written.
@@ -754,6 +761,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   no user's results are aggregated; every thesis is scored after its horizon against buy-and-hold of
   the eligible basket and a broad index ETF, net of the cost model; the report states pass or fail
   against the threshold and is reproducible from the journal.
+  *Follow-up (#410 review, minor 3; DEC-282 item 9):* an evaluation whose scoreable set is empty
+  against a registered `minimum_scoreable` of zero refuses with `Num(DivisionByZero)` — fail-loud,
+  but a code that tells a caller nothing. A tests PR names the refusal (a `ResearchError` arm of
+  its own; the registry's codes are add-only) so the empty report carries its reason, with the
+  frozen surface otherwise unchanged.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -1184,7 +1196,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **Blocks E7-4 slice 5 (the trading day):** `mandate-executor` must copy the cross-stream facts
   journal spec §2 gives it (`AgentModeApplied` from the agent stream's `AgentModeChanged`,
   `TradingDayStarted`, `ClockAdvanced` crossing midnight America/New_York, `OwnerAcknowledged` from the
-  control stream), each with its `causation_id`. Before E7-4 slice 1, `step`'s `Input::Journal(_) => Ok(())` copied
+  control stream), each with its `causation_id`. An acknowledgment whose step-up does not count is
+  copied as `OwnerCommandRefused` instead (command `acknowledge`, the reason, `effective_at`), lifts
+  nothing, and is tested first to leave exactly that event (DEC-291 item 4, journal spec §2). Before E7-4 slice 1, `step`'s `Input::Journal(_) => Ok(())` copied
   nothing, silently, so `properties::every_copied_draft_cites_its_origin` sees no copied draft under any
   script and passes vacuously. The slice that adds the producer also adds a generator step (a clock
   advance crossing midnight New York, an owner acknowledgment) and asserts `seen > 0` on scripts
@@ -1671,16 +1685,20 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
 - **E6-6 slice 2:** the account-wide fold is `mandate_risk::fold_day_trades` (DEC-259). Still
   owed: interpret RC-09's and RC-09B's `regime`, `prior_day_trades`, `last_equity`, `multiplier`
   and `day_trade_count` in `mandate-refcases`, driving the ledger through `fold_day_trades` from the
-  case's fills. That changes RC-09B's pending reason, which
-  `trading_domain_gate_harness.rs`'s `every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for`
-  pins, so a tests correction comes first (DEC-77); both cases also carry a second `propose_order`
-  step, which DEC-199 item 3 refuses until E7-4 and E7-5 unless a narrower reading lets a later
-  proposal be decided once every earlier allowed one has filled in full; and RC-09's third step is
-  a crypto proposal, which waits for E6-10. The executor (E7-3) calls the fold account-wide and
-  journals `DayTradeFold::today`. **A fold error refuses openings only** (#370 review, major 1):
-  E7-3 must still route exits and protective orders when `fold_day_trades` fails (`AGENTS.md`
-  rule 13), and E7-3's tests PR carries the pending test
+  case's fills. The tests correction that unpins RC-09B's pending reason is #408 (DEC-77), and the
+  narrower reading of DEC-199 item 3 is DEC-259 item 7: a later proposal is decided once every
+  earlier allowed one was filled in full on its side. The harness PR owes three tests for that
+  reading: identical buys with no fill between them are still refused, a partial fill is still
+  refused, and a plant that takes the conduct figures from the proposal instead of the `fill` steps
+  is caught. RC-09's third step is a crypto proposal, which waits for E6-10's harness PR. The
+  executor (E7-3) calls the fold account-wide and journals `DayTradeFold::today`. **A fold error
+  refuses openings only** (#370 review, major 1): E7-3 must still route exits and protective orders
+  when `fold_day_trades` fails (`AGENTS.md` rule 13), and E7-3's tests PR carries the pending test
   `a_failed_day_trade_fold_refuses_openings_and_still_routes_exits` for it.
+- **Check the trading-domain pin of pending reasons for completeness** (#408 review, not a
+  finding). `every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for` is a fixed list,
+  so nothing makes a newly pending gate case join it. A rung-2 check that derives the list from the
+  pending gate cases, less those a ruling excepts (RC-09, RC-09B), would close the gap.
 - **Lift §2.2's trade date onto `ExchangeCalendar`** (#370 review, minor 1). `mandate-risk`'s
   `daytrades::trading_day` re-states `TradingCalendar::equity_trade_date`'s 20:00 ET cutoff over
   the committed exchange calendar, and `the_trade_date_agrees_with_the_accounting_calendar` pins
