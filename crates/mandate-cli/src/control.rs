@@ -409,6 +409,36 @@ fn backoff(retry: u32, event_id: &str) -> Result<Duration, ControlError> {
     Err(ControlError::Unimplemented { story: "E8-3" })
 }
 
+/// One attempt at appending `bytes`, the draft of `event_id`: its stored `seq` once the journal
+/// holds it, or `None` for an answer that is retried.
+fn attempt(
+    journal: &mut dyn ControlJournal,
+    stream: &StreamId,
+    event_id: &str,
+    bytes: &[u8],
+    now: Now,
+) -> Result<Option<u64>, ControlError> {
+    let epoch = journal.take_ownership(stream)?;
+    let head = journal.head(stream)?.seq;
+    match journal.append(stream, head, epoch, now.at, &[bytes])? {
+        AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows) => rows
+            .iter()
+            .find(|row| row.event_id == event_id)
+            .map(|row| Some(row.seq))
+            .ok_or_else(|| ControlError::Journal("the stored event is missing".into())),
+        AppendOutcome::Fenced { .. }
+        | AppendOutcome::HeadMismatch { .. }
+        | AppendOutcome::Ambiguous
+        | AppendOutcome::Unavailable => Ok(None),
+        AppendOutcome::IdempotencyConflict { stored_seq } => Err(ControlError::Journal(format!(
+            "another event is stored under this id at seq {stored_seq}"
+        ))),
+        AppendOutcome::Invalid { error, .. } => {
+            Err(ControlError::Journal(format!("refused: {error:?}")))
+        }
+    }
+}
+
 const FIRST_BACKOFF: Duration = Duration::from_millis(100);
 const LAST_BACKOFF: Duration = Duration::from_secs(2);
 
@@ -449,36 +479,18 @@ pub(crate) fn commit(
     key.push(("step_up", evidence));
     let payload = object(key)?;
     let bytes = draft(owner, &stream, &event_id, event_type, payload, now)?;
-    for attempt in 0..ATTEMPTS {
-        if attempt > 0 {
-            journal.wait(backoff(attempt, &event_id)?);
+    let mut retries = 1..ATTEMPTS;
+    loop {
+        if let Some(stored) = attempt(journal, &stream, &event_id, &bytes, now)? {
+            return Ok(Submitted {
+                event_id,
+                seq: stored,
+            });
         }
-        let epoch = journal.take_ownership(&stream)?;
-        let head = journal.head(&stream)?.seq;
-        match journal.append(&stream, head, epoch, now.at, &[&bytes])? {
-            AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows) => {
-                let stored = rows
-                    .iter()
-                    .find(|row| row.event_id == event_id)
-                    .ok_or_else(|| ControlError::Journal("the stored event is missing".into()))?;
-                return Ok(Submitted {
-                    event_id,
-                    seq: stored.seq,
-                });
-            }
-            AppendOutcome::Fenced { .. }
-            | AppendOutcome::HeadMismatch { .. }
-            | AppendOutcome::Ambiguous
-            | AppendOutcome::Unavailable => {}
-            AppendOutcome::IdempotencyConflict { stored_seq } => {
-                return Err(ControlError::Journal(format!(
-                    "another event is stored under this id at seq {stored_seq}"
-                )));
-            }
-            AppendOutcome::Invalid { error, .. } => {
-                return Err(ControlError::Journal(format!("refused: {error:?}")));
-            }
-        }
+        let Some(retry) = retries.next() else {
+            break;
+        };
+        journal.wait(backoff(retry, &event_id)?);
     }
     Err(ControlError::Journal(format!(
         "the control stream did not settle after {ATTEMPTS} attempts; the command may have been \
