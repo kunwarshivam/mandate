@@ -42,7 +42,6 @@ fn verdict(old: &Value, new: &Value) -> (ChangeClass, Vec<String>, bool) {
 /// none; and a date the schema's pattern admits but the calendar does not is refused, never read as
 /// "no review date", so a malformed date cannot switch the review off (DEC-271 item 2).
 #[test]
-#[ignore = "pending E6-14"]
 fn a_review_date_parses_as_the_date_it_names() {
     let parsed = Mandate::parse(&reviewed("2026-12-23")).expect("a reviewed document parses");
     assert_eq!(parsed.autonomy.review_by, Some(day("2026-12-23")));
@@ -65,7 +64,6 @@ fn a_review_date_parses_as_the_date_it_names() {
 /// Each change is exactly the one path, and a stricter rule beside an earlier date is still
 /// risk-reducing, so the autonomy row does not read the review date as a change of its own.
 #[test]
-#[ignore = "pending E6-14"]
 fn the_review_date_classifies_by_its_own_row() {
     let set = reviewed("2026-12-23");
     for (old, new, class) in [

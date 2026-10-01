@@ -306,15 +306,23 @@ fn client_ceiling(decision: AutonomyDecision, by: DecidedBy) -> (AutonomyDecisio
 /// and ASK, labelled [`DecidedBy::ReviewCeiling`] only when that changed the decision; on or before
 /// the review date, the decision and its source unchanged (DEC-271 items 1 and 3).
 ///
-/// A stub until E6-14's implementation PR (DEC-77): it is reached only by a policy that has a
-/// review date, which no parsed mandate can have yet, so every existing path is unchanged.
+/// The review date is the **last** risk day `auto` stands, so the comparison is strictly after:
+/// on the date itself nothing changes (§6.6, MI-32).
 fn review_ceiling(
-    _decision: AutonomyDecision,
-    _by: DecidedBy,
-    _review_by: Date,
-    _risk_day: Date,
+    decision: AutonomyDecision,
+    by: DecidedBy,
+    review_by: Date,
+    risk_day: Date,
 ) -> Result<(AutonomyDecision, DecidedBy), BuilderError> {
-    Err(BuilderError::Unimplemented)
+    if risk_day <= review_by {
+        return Ok((decision, by));
+    }
+    let ceiled = decision.stricter(AutonomyDecision::Ask);
+    if ceiled == decision {
+        Ok((decision, by))
+    } else {
+        Ok((ceiled, DecidedBy::ReviewCeiling))
+    }
 }
 
 /// §6.2 step 2 and then steps 3 to 6: the gate's verdict in, an outcome out.

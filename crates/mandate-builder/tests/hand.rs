@@ -4048,7 +4048,6 @@ fn a_proposed_buy_carries_the_risk_day_it_was_evaluated_on() {
 /// the agent's order is AUTO by the rule; on the next risk day the same order is ASK, labelled
 /// `review_ceiling` and carrying §6.4's approval, for an `open` and an `increase` alike.
 #[test]
-#[ignore = "pending E6-14"]
 fn an_auto_rule_stands_on_the_review_date_and_asks_the_day_after() {
     let policy = reviewed(base_policy());
     for day in ["2026-12-22", REVIEW_BY] {
@@ -4077,7 +4076,6 @@ fn an_auto_rule_stands_on_the_review_date_and_asks_the_day_after() {
 /// §6.2 step 5b: past the review date an `auto` default asks too, and a `deny` admission still
 /// denies, so the ceiling is not a constant.
 #[test]
-#[ignore = "pending E6-14"]
 fn past_the_review_date_an_auto_default_asks_and_a_deny_still_denies() {
     let autopilot = reviewed(policy(
         Vec::new(),
@@ -4106,7 +4104,6 @@ fn past_the_review_date_an_auto_default_asks_and_a_deny_still_denies() {
 /// leaves the rules' `auto` standing for an admitted instrument's first order, and past the review
 /// date that is what the review ceiling turns into ASK (MC-D22's shape).
 #[test]
-#[ignore = "pending E6-14"]
 fn past_the_review_date_an_admitted_first_order_asks_though_admission_is_auto() {
     let owner_allowed = reviewed(policy(
         base_rules(),
@@ -4132,7 +4129,6 @@ fn past_the_review_date_an_admitted_first_order_asks_though_admission_is_auto() 
 /// date a `deny` rule still denies by its rule, an ASK the rules reached keeps the rule, and only
 /// the order the rules left AUTO is labelled `review_ceiling`.
 #[test]
-#[ignore = "pending E6-14"]
 fn past_the_review_date_a_deny_denies_and_an_ask_keeps_its_rule() {
     let deny_first = Rule {
         id: rule_id("deny_big"),
@@ -4167,7 +4163,6 @@ fn past_the_review_date_a_deny_denies_and_an_ask_keeps_its_rule() {
 /// which comes first and leaves the review ceiling nothing to change; the agent's identical order is
 /// ASKed by the review ceiling.
 #[test]
-#[ignore = "pending E6-14"]
 fn past_the_review_date_a_client_ask_keeps_the_client_ceiling() {
     let policy = reviewed(base_policy());
     let clients = classified(
@@ -4190,7 +4185,6 @@ fn past_the_review_date_a_client_ask_keeps_the_client_ceiling() {
 /// §6.4: an ASK the review ceiling raised needs the approvers any ASK of that size needs, and on
 /// the review date the same orders run with no approval at all.
 #[test]
-#[ignore = "pending E6-14"]
 fn a_review_ceiling_ask_above_the_threshold_needs_two_approvers() {
     let autopilot = reviewed(policy(
         Vec::new(),
@@ -4243,7 +4237,6 @@ fn past_the_review_date_every_reducing_purpose_is_auto_by_the_builtin() {
 /// ASKed, one the gate denies is skipped with nobody asked, and a deferred one is deferred; on the
 /// review date the same buy runs.
 #[test]
-#[ignore = "pending E6-14"]
 fn decide_asks_a_buy_past_the_review_date_and_skips_one_the_gate_denies() {
     let policy = reviewed(base_policy());
     let dated = |day: &str| {
