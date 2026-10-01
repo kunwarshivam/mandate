@@ -141,9 +141,10 @@ cargo xtask ci pending
    registers the confidence level's `z` (DEC-122's 95% is 1.645) with the window and the minimum,
    and the evaluator applies what was registered.
 
-## Planted bugs (the seeds run against the implementation PR's real code, each caught by a named
-test; round 1's review additionally ran the original 18 against a throwaway implementation,
-18/18 caught)
+## Planted bugs
+
+The seeds run against the implementation PR's real code, each caught by a named test; round 1's
+review additionally ran the original 18 against a throwaway implementation, 18/18 caught.
 
 | # | Bug | Caught by |
 |---|---|---|

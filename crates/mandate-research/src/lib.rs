@@ -47,8 +47,9 @@
 //! risk (MI-19), and it is the only path by which anything here shrinks the universe: a lowered
 //! `max_instruments` refuses further admissions and never removes (DEC-132 item 14).
 //!
-//! No entry point returns [`ResearchError::Unimplemented`] any more; the variant stays only because
-//! the tests PR's `rules.rs` pins its code, so removing it is a tests correction (DEC-77).
+//! The `score` module's six entry points are stubs that return
+//! [`ResearchError::Unimplemented`] until E17-8's implementation lands; every other entry point has
+//! its implementation and returns its own typed errors (DEC-77).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1201,8 +1202,9 @@ pub enum ResearchError {
     /// A thesis's horizon closes outside the registered window
     #[error("a thesis's horizon closes outside the registered window")]
     ThesisOutsideWindow,
-    /// Returned by no entry point since the implementation landed; kept for the tests PR's pinned
-    /// code only (DEC-77).
+    /// Returned by the stubs of a story not yet implemented — E17-8's six `score` entry points
+    /// until its implementation PR lands, each call naming itself and its story; every implemented
+    /// entry point returns its own typed errors instead (DEC-77).
     #[error("{0} is not implemented yet (pending {1})")]
     Unimplemented(&'static str, &'static str),
     #[error(transparent)]
