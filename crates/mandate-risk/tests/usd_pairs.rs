@@ -121,7 +121,6 @@ fn all_passed() -> Vec<CheckOutcome> {
 /// is denied at check 2, and §3.2's list order puts item 7's "USD pairs only" after items 1 to 3
 /// and ahead of item 7's own 30-day volume floor.
 #[test]
-#[ignore = "pending E6-10"]
 fn a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2() {
     for quote in NOT_USD {
         for (increase, purpose) in [(false, Purpose::Open), (true, Purpose::Increase)] {
@@ -163,7 +162,6 @@ fn a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2() {
 /// A crypto opening or increase in a USD pair passes the floor and every later check, while the
 /// pair's own 30-day volume floor still binds it.
 #[test]
-#[ignore = "pending E6-10"]
 fn a_crypto_opening_in_a_usd_pair_passes_the_floor() {
     let usd_pair = Some(QuoteCurrency::Usd);
     for (increase, purpose) in [(false, Purpose::Open), (true, Purpose::Increase)] {
@@ -194,7 +192,6 @@ fn a_crypto_opening_in_a_usd_pair_passes_the_floor() {
 /// checks as passed, and a crypto exit in any pair lists check 2 as passed, exactly as a US
 /// equity's does, rather than as not reached.
 #[test]
-#[ignore = "pending E6-10"]
 fn check_2_is_whole_for_crypto() {
     let d = evaluate(&buying(crypto(Some(QuoteCurrency::Usd)), false).input())
         .expect("a crypto opening is decided, not refused as owed");
@@ -306,7 +303,6 @@ proptest! {
     /// The oracle is the rule's own words over the generator's choices, `opening ∧ crypto ∧
     /// quote ≠ USD`; it never reads the gate's purpose or its check list to decide what to expect.
     #[test]
-    #[ignore = "pending E6-10"]
     fn the_pair_rule_denies_exactly_a_crypto_opening_not_quoted_in_usd(
         is_crypto in any::<bool>(),
         quote in prop::sample::select(QUOTES.to_vec()),

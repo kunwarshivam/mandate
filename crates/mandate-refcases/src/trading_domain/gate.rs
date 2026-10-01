@@ -61,7 +61,8 @@ use super::{Instruments, acct, dec_at, fields, instrument, num, resolved_config}
 use crate::{Json, at, ensure, list_at, str_at, u64_at};
 
 /// §7.3's account fields, read from `initial.account` and from `broker_account_update` data.
-/// `crypto_status` is not among them: it gates only a crypto opening, which E6-10 still owes.
+/// `crypto_status` is not among them: it gates only a crypto opening, which this driver does not
+/// propose until E6-10's harness PR reads a pair's quote currency.
 pub(super) const STATUS_FIELDS: &[&str] = &[
     "status",
     "trading_blocked",

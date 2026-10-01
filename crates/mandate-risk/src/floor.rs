@@ -6,7 +6,7 @@ use mandate_num::{Price, Qty, Usd};
 use mandate_time::UtcNanos;
 
 use crate::gate::Stop;
-use crate::{AssetClass, EtpClass, GateError, GateInput, ReasonCode, Verdict};
+use crate::{AssetClass, EtpClass, GateError, GateInput, QuoteCurrency, ReasonCode, Verdict};
 
 /// The first §3.2 item the instrument fails, or `None` when it passes all seven.
 ///
@@ -15,8 +15,10 @@ use crate::{AssetClass, EtpClass, GateError, GateInput, ReasonCode, Verdict};
 /// (DEC-129 item 25 asks the founder to retire `not_in_universe`). Item 3's `ptp_no_exception` has
 /// no code of its own and reports `ipo_not_tradable`, the one item-3 code the registry has. Items 4
 /// to 6 are US-equity items and item 7 is crypto's: a price floor and a 20-day volume have no
-/// meaning for a crypto pair, which has its own 30-day volume floor instead. Item 7's "USD pairs
-/// only" is not read here yet, which is why check 2 stays owed for crypto (E6-10, DEC-254).
+/// meaning for a crypto pair, which has its own 30-day volume floor instead. Item 7 lists "USD pairs
+/// only" first, so a pair whose quote currency is not stated as USD reports `crypto_pair_not_usd`
+/// before its volume is looked at (DEC-254 items 1 and 2, DEC-255); an unstated quote currency is
+/// never read as USD.
 pub(crate) fn eligibility(input: &GateInput<'_>) -> Result<Option<Stop>, GateError> {
     let i = input.instrument;
     let config = input.config;
@@ -29,6 +31,8 @@ pub(crate) fn eligibility(input: &GateInput<'_>) -> Result<Option<Stop>, GateErr
         Some(ReasonCode::IpoNotTradable)
     } else if equity {
         equity_items(input)?
+    } else if i.quote_currency != Some(QuoteCurrency::Usd) {
+        Some(ReasonCode::CryptoPairNotUsd)
     } else {
         below(
             i.median_dollar_volume_30d,

@@ -48,12 +48,11 @@
 //! its second slice [`fold_day_trades`], the budget's ledger folded account-wide (DEC-259). E6-8
 //! adds check 5 (mark freshness and the collar), check 6's market-conduct controls, the pacing an
 //! allowed exit is sent with, [`evaluate_cancel`]'s minimum resting time and the [`surveillance`]
-//! report (§9.6, DEC-163), which leaves only check 2 for crypto owed, to E6-10.
-//! **Until every check exists the gate fails closed for adding risk** (DEC-129 item 29): an
-//! opening or increasing order the implemented checks would allow returns
-//! [`GateError::Unimplemented`] naming the story still owed, a denial or hold from an implemented
-//! check reports first, and a reducing purpose passes a check that does not exist yet. Every other
-//! entry point returns [`GateError::Unimplemented`] until the story named in its doc comment lands
+//! report (§9.6, DEC-163). E6-10 adds §3.2 item 7's "USD pairs only" at check 2 (DEC-254,
+//! DEC-255), which makes check 2 whole for crypto and so every check whole for both asset classes:
+//! DEC-129 item 29's fail-closed refusal of an opening a missing check might have denied has
+//! nothing left to refuse, and [`evaluate`] decides every proposal itself. Every other entry point
+//! returns [`GateError::Unimplemented`] until the story named in its doc comment lands
 //! (DEC-77, DEC-83).
 
 use core::fmt::Display;
@@ -87,8 +86,7 @@ pub use spec_types::{
 /// and increment have no registered code, which is why no variant names them: DEC-129 item 27
 /// proposes `below_min_order_size` and `quantity_off_increment` to the founder, and until they are
 /// registered the gate denies without minting one. `CryptoPairNotUsd` is §3.2 item 7's "USD pairs
-/// only" (DEC-255); the gate reports it from E6-10's implementation on, and until then refuses a
-/// crypto opening as owed rather than deciding it.
+/// only" (DEC-255).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ReasonCode {
     AccountTradingBlocked,
