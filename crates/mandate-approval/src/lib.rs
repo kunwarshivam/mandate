@@ -27,10 +27,9 @@
 //! automated flatten does (DEC-158 option (c), `AGENTS.md` rule 13).
 //!
 //! Every entry point is pure: no clock, no randomness, no I/O, ordered collections only (ES-21).
-//! Every entry point but [`quorum`] is implemented, and those whose answer is total keep the stub
-//! API's `Result`. [`quorum`], check 7's reading of the workspace policy overlay (DEC-173 item 13),
-//! is a stub returning [`ApprovalError::Unimplemented`], and [`admit`] returns its error for a
-//! grant that reaches check 7 under any overlay but [`PolicyOverlay::NONE`].
+//! Every entry point is implemented, and those whose answer is total keep the stub API's
+//! `Result`. Check 7 reads the bound requirement and the workspace policy overlay through
+//! [`quorum`], which takes the stricter of the two (DEC-173 item 13).
 
 mod admit;
 mod budget;
