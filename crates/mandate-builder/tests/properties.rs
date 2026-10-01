@@ -2987,9 +2987,13 @@ fn no_client_buy_reaches_auto_through_decide() {
     });
 }
 
+/// One swept rule list and the label and decision of the rule that matches, or `None` for the
+/// default.
+type SweptRules = (Vec<Rule>, Option<(&'static str, AutonomyDecision)>);
+
 /// The rule shapes the exhaustive sweep runs: none, one matching rule, or one that does not match
 /// followed by one that does, each with every `then`.
-fn swept_rules() -> Vec<(Vec<Rule>, Option<(&'static str, AutonomyDecision)>)> {
+fn swept_rules() -> Vec<SweptRules> {
     let decisions = [
         AutonomyDecision::Auto,
         AutonomyDecision::Ask,
