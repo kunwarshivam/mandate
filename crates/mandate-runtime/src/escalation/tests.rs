@@ -681,7 +681,6 @@ fn owner_input_for_another_agent_is_inert() -> Checked {
 /// `OwnerCommandRefused` (journal spec §9, rule 16; DEC-291); fresh evidence stops the agent and
 /// cancels the approval; and a resume after it, even with fresh evidence, never lifts a Stop.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_stop_needs_fresh_step_up_and_no_resume_lifts_it() -> Checked {
     let (view, flatten) = (
         view()?,

@@ -55,7 +55,8 @@ pub struct RuntimeState {
     /// a request records and the mark re-validation compares with it (DEC-156 item 3).
     marks: BTreeMap<InstrumentId, ReferenceMark>,
     /// The control-stream events this runtime has already copied: the `causation_id` of every
-    /// `ApprovalResponded`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`. The
+    /// `ApprovalResponded`, `AgentModeChanged`, `KillSwitchActivated`, `OwnerExitRequested`, and
+    /// `OwnerCommandRefused` (DEC-291). The
     /// control stream's `event_id` is the idempotency key (DEC-155 item 2), so one re-tailed, or
     /// re-tailed after a restart, is copied and acted on once (EI-3).
     copied: BTreeSet<EventId>,
@@ -568,6 +569,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
             copy_of(state, event);
             responded(state, &event.payload);
         }
+        "OwnerCommandRefused" => copy_of(state, event),
         "ApprovalRevalidated" | "ApprovalTimedOut" | "ApprovalCanceled" => {
             if let Some(approval) = approval_of(&event.payload) {
                 state.pending_approvals.remove(&approval);
@@ -758,7 +760,7 @@ fn mode_field(event: &FoldedEvent) -> Result<Mode, RuntimeError> {
 }
 
 /// Records that an agent-stream event copies the control-stream event its `causation_id` names, so
-/// the runtime never copies that event again (DEC-155 item 2, EI-3). Only the four copy types call
+/// the runtime never copies that event again (DEC-155 item 2, EI-3). Only the five copy types call
 /// it, and a `causation_id` that names anything else is never looked up as a control event.
 fn copy_of(state: &mut RuntimeState, event: &FoldedEvent) {
     if let Some(cause) = &event.causation_id {
