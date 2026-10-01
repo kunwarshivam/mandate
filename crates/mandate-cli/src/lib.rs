@@ -1,11 +1,17 @@
 //! The `mandate` command line. `download` fetches Alpaca historical bars and trades into Parquet
 //! datasets (backlog E2-1); `inspect` reports what a stored dataset covers and whether to trust
 //! it (E2-2); `journal verify` runs journal spec §11 over an exported journal and its artifact
-//! store, and `artifact put` and `get` supply and fetch those artifacts (E5-4).
+//! store, and `artifact put` and `get` supply and fetch those artifacts (E5-4). `approvals` and
+//! `agent` are M7's owner control: the inbox, the owner's answers, and the owner's commands, each
+//! committed to the workspace control stream (E8-1 to E8-3; their commands land with the
+//! implementation PR).
 
 use clap::{Parser, Subcommand};
 
+pub mod agent;
+pub mod approvals;
 pub mod artifact;
+pub mod control;
 pub mod download;
 pub mod inspect;
 pub mod journal;
