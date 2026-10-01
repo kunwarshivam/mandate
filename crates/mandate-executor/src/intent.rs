@@ -7,16 +7,19 @@ use mandate_canon::Value;
 use crate::batch::Batch;
 use crate::codec::{order_type_name, purpose_name, side_name, tif_name};
 use crate::error::ExecutorError;
-use crate::gate::{PartialGateDecision, Proposal, UNPRICED, account_stream_checks};
+use crate::gate::{
+    PartialGateDecision, Proposal, SESSION_CLOSED, SESSION_UNKNOWN, UNPRICED, account_stream_checks,
+};
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
 use crate::protection::{
-    ExitPrice, awaits_cancel, begin_exit, bracketed_add, crypto_add, exit_limit, fallback,
-    passive_exit, reprotect_unpriced,
+    ExitPrice, alone, awaits_cancel, begin_exit, bracketed_add, crypto_add, exit_limit, fallback,
+    passive_exit, reprotect_unpriced, rests,
 };
+use crate::session::{closed_hold, extended_hours};
 use crate::state::IntentOutcome;
 use crate::types::{
-    AgentId, BrokerRequest, GateVerdict, IntentBody, IntentHandoff, OrderType, Purpose,
+    AgentId, BrokerRequest, EventId, GateVerdict, IntentBody, IntentHandoff, OrderType, Purpose,
     SubmitOrder, TimeInForce,
 };
 
@@ -68,11 +71,24 @@ fn flatten_plan() -> Result<(), ExecutorError> {
 
 /// Whether an intent is past `max_intent_age`, measured from its `IntentReceived`. Checked at
 /// **every** `Intent → Submitting` transition, the first included (§5.7, interpretation 11).
+/// An exit is never too old: it is held, never dropped (rule 13, DEC-160 (12), the coordinator's
+/// ruling D2), and priced at its release from the quotes then (§5.6), so the stale price the age
+/// guards against is never acted on. Only an opening is abandoned for age.
 fn too_old(batch: &Batch<'_, '_>, intent: &IntentId) -> bool {
+    !exit(batch, intent) && aged(batch, intent)
+}
+
+fn aged(batch: &Batch<'_, '_>, intent: &IntentId) -> bool {
     batch.view.intents.get(intent).is_none_or(|record| {
         batch.at().secs().saturating_sub(record.received_at.secs())
             > batch.ports.config.max_intent_age_s
     })
+}
+
+fn exit(batch: &Batch<'_, '_>, intent: &IntentId) -> bool {
+    batch.view.bodies.get(intent).is_some_and(
+        |body| !matches!(body, IntentBody::Order { purpose, .. } if purpose.adds_risk()),
+    )
 }
 
 /// Gates an intent the fold carries as received and not yet submitted: it is submitted, held, or
@@ -102,7 +118,7 @@ fn begin_and_submit(
     }
     match gate(batch, intent, always)? {
         ALLOW => submit(batch, intent)?,
-        HOLD if decide(batch, intent)?.0.reason_code() == UNPRICED => {
+        HOLD if WAITS.contains(&decide(batch, intent)?.0.reason_code()) => {
             reprotect_unpriced(batch, intent)?;
         }
         _ => {}
@@ -112,6 +128,9 @@ fn begin_and_submit(
 
 const ALLOW: &str = "allow";
 const HOLD: &str = "hold";
+/// The holds that may outlast a running sequence's interval, so its protection is re-placed
+/// rather than left cancelled while the exit waits (DEC-160 (12), DEC-260 (13)).
+const WAITS: [&str; 3] = [UNPRICED, SESSION_CLOSED, SESSION_UNKNOWN];
 
 /// The gate's verdict on `intent` against the current state, journaling nothing: only an exit
 /// the gate allows starts §5.4's sequence, so a held or denied one leaves protection resting.
@@ -146,17 +165,18 @@ fn decide(
         },
         batch.ports,
     )?;
+    let allowed = decision.verdict == GateVerdict::Allow;
+    let closed = closed_hold(batch.ports, instrument, batch.at())
+        .filter(|_| allowed && !purpose.adds_risk());
     let unpriced = *purpose == Purpose::DiscretionaryExit
-        && decision.verdict == GateVerdict::Allow
+        && allowed
         && exit_limit(batch, intent, instrument, *purpose, *limit) == ExitPrice::Held;
-    Ok((
-        if unpriced {
-            decision.unpriced()
-        } else {
-            decision
-        },
-        *purpose,
-    ))
+    let decision = match closed {
+        Some(reason) => decision.closed(reason),
+        None if unpriced => decision.unpriced(),
+        None => decision,
+    };
+    Ok((decision, *purpose))
 }
 
 /// Runs the binding gate on an intent, journals the decision, and answers its verdict name:
@@ -170,23 +190,54 @@ fn gate(
     let (decision, purpose) = decide(batch, intent)?;
     let verdict = decision.verdict_name();
     if verdict == ALLOW || always {
-        let decided = batch.journal(
-            "GateDecided",
-            None,
-            vec![
-                ("intent_id", text(intent.0.0.clone())),
-                ("verdict", text(verdict)),
-                ("reason_code", text(decision.reason_code())),
-                ("purpose", text(purpose_name(purpose))),
-                ("checks", decision.checks_value()?),
-                ("evaluation", text("account_stream_only")),
-            ],
-        )?;
-        if decision.reason_code() == UNPRICED {
-            batch.notify(decided, UNPRICED);
+        let decided = journal_decision(batch, intent, &decision, purpose, Vec::new())?;
+        if let reason @ (UNPRICED | SESSION_UNKNOWN) = decision.reason_code() {
+            batch.notify(
+                decided,
+                if reason == UNPRICED {
+                    UNPRICED
+                } else {
+                    SESSION_UNKNOWN
+                },
+            );
         }
     }
     Ok(verdict)
+}
+
+fn journal_decision(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    decision: &PartialGateDecision,
+    purpose: Purpose,
+    mut extra: Vec<(&'static str, Value)>,
+) -> Result<EventId, ExecutorError> {
+    let mut pairs = vec![
+        ("intent_id", text(intent.0.0.clone())),
+        ("verdict", text(decision.verdict_name())),
+        ("reason_code", text(decision.reason_code())),
+        ("purpose", text(purpose_name(purpose))),
+        ("checks", decision.checks_value()?),
+        ("evaluation", text("account_stream_only")),
+    ];
+    pairs.append(&mut extra);
+    batch.journal("GateDecided", None, pairs)
+}
+
+/// The coordinator's ruling D2: an exit still held past `max_intent_age_s` is journaled once more,
+/// `held_long`, with its hold's reason, and the owner alerted once, so a long hold is seen.
+fn held_long(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorError> {
+    if !exit(batch, intent) || !aged(batch, intent) || batch.view.held_long.contains(intent) {
+        return Ok(());
+    }
+    let (decision, purpose) = decide(batch, intent)?;
+    if decision.verdict_name() != HOLD {
+        return Ok(());
+    }
+    let extra = vec![("held_long", Value::Bool(true))];
+    let decided = journal_decision(batch, intent, &decision, purpose, extra)?;
+    batch.notify(decided, "exit_held_long");
+    Ok(())
 }
 
 pub(crate) fn intent_of(
@@ -234,6 +285,9 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         return Ok(());
     }
     bracketed_add(&batch.view, &instrument, purpose, protection.is_some())?;
+    let lone = !batch.view.exiting.contains_key(&instrument)
+        && !rests(&batch.view, &instrument)
+        && alone(batch, &instrument, purpose, limit);
     let limit = match exit_limit(batch, intent, &instrument, purpose, limit) {
         ExitPrice::Own(limit) | ExitPrice::Laddered(limit) => limit,
         ExitPrice::Fallback(limit) => {
@@ -246,6 +300,7 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         }
     };
     let tif = order_tif(batch, &instrument);
+    let extended_hours = extended_hours(batch.ports, &instrument, batch.at(), purpose);
     let request = SubmitOrder {
         client_order_id: ClientOrderId::for_intent(intent)?,
         instrument,
@@ -257,10 +312,16 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         stop_price: None,
         bracket: None,
         oco: None,
-        extended_hours: false,
+        extended_hours,
         purpose,
     };
-    send(batch, request, Some(intent), &agent, 1)
+    if !lone {
+        return send(batch, request, Some(intent), &agent, 1);
+    }
+    let laddered = vec![("laddered", Value::Bool(true))];
+    journal_rung(batch, &request, Some(intent), &agent, 1, laddered)?;
+    batch.broker(BrokerRequest::Submit(request));
+    Ok(())
 }
 
 /// Journals `OrderSubmitted` with every field of the request, then describes the request. The
@@ -436,6 +497,7 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
     let held: Vec<IntentId> = batch.view.held.iter().cloned().collect();
     for intent in held {
         let id = ClientOrderId::for_intent(&intent)?;
+        held_long(batch, &intent)?;
         if too_old(batch, &intent) {
             abandon(batch, &intent, "intent_too_old")?;
         } else if !batch.view.orders.contains_key(&id) {

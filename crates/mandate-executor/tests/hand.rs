@@ -4147,7 +4147,6 @@ fn an_unconfirmed_owner_exit_waits_for_the_session() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_risk_exit_submits_inside_the_close_window() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

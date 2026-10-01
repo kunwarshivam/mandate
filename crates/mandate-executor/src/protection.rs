@@ -11,6 +11,7 @@ use mandate_canon::Value;
 use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::fold::single_holder;
+use crate::gate::SESSION_UNKNOWN;
 use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
@@ -18,7 +19,10 @@ use crate::intent::{
 use crate::orders::transition;
 use crate::payload::{int, text};
 use crate::ports::Ports;
-use crate::state::{EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome};
+use crate::session::{
+    Venue, closed_hold, extended_hours, same_session, stops_trigger_since, venue,
+};
+use crate::state::{EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, LoneLadder};
 use crate::types::{
     AgentId, BrokerRequest, EventId, ExitTier, IntentBody, IntentHandoff, MarketObservation, Mode,
     OcoLegs, OrderState, OrderType, ProtectionPrices, Purpose, RiskClock, SubmitOrder, TimeInForce,
@@ -109,7 +113,8 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .breaches
         .iter()
         .filter(|(instrument, since)| {
-            now.saturating_sub(since.secs()) >= wait
+            stops_trigger_since(batch.ports, instrument, batch.at())
+                .is_some_and(|open| now.saturating_sub(since.secs().max(open)) >= wait)
                 && batch
                     .view
                     .watchdogged
@@ -229,10 +234,44 @@ pub(crate) fn exit_price(
     }
 }
 
-/// An exit where §5.4's sequence runs, or will once the gate allows it (protection rests), is
-/// priced by §5.6's ladder from the last sane bid and the latest quote, oldest first; every other
-/// order keeps its intent's limit, and so does the exit of a passive sequence, which is placed as
-/// its new OCO's take-profit at that limit (§5.4) and needs nothing to price from.
+/// Whether §5.6 ladders an exit with no protection to cancel first (DEC-260 (14)): one that must be
+/// marketable where no market order may go — in extended hours, in the closing auction window, or
+/// in a presumed halt (§4.4: the latest quote stale or not sane) — and whose purpose may trade
+/// there: a risk exit, a protective order or a flatten in any of them, and an owner exit in the
+/// regular session. A discretionary exit is paced (§9.6), an instrument with no tier has no
+/// ladder, and an exit priced above a fresh sane bid is passive: each keeps its own limit.
+pub(crate) fn alone(
+    batch: &Batch<'_, '_>,
+    instrument: &InstrumentId,
+    purpose: Purpose,
+    limit: Price,
+) -> bool {
+    let fresh = batch
+        .at()
+        .secs()
+        .saturating_sub(batch.ports.config.exit_step_s);
+    let latest = batch.view.quotes.get(instrument);
+    let current = latest.filter(|quote| quote.sane && quote.observed_at.secs() >= fresh);
+    let may = purpose.exempt_from_pacing()
+        || purpose == Purpose::OwnerExit
+            && venue(batch.ports, instrument, batch.at()) != Venue::Extended;
+    let needed = match venue(batch.ports, instrument, batch.at()) {
+        Venue::Extended | Venue::Closing => true,
+        Venue::Regular => latest.is_some() && current.is_none(),
+        Venue::Closed => false,
+    };
+    may && needed
+        && batch.ports.instruments.exit_tier(instrument).is_some()
+        && !current
+            .and_then(|quote| quote.bid)
+            .is_some_and(|bid| limit > bid)
+}
+
+/// An exit where §5.4's sequence runs, or will once the gate allows it (protection rests), or one
+/// [`alone`] ladders, is priced by §5.6's ladder from the last sane bid and the latest quote,
+/// oldest first; every other order keeps its intent's limit, and so does the exit of a passive
+/// sequence, which is placed as its new OCO's take-profit at that limit (§5.4) and needs nothing
+/// to price from.
 pub(crate) fn exit_limit(
     batch: &Batch<'_, '_>,
     intent: &IntentId,
@@ -245,7 +284,9 @@ pub(crate) fn exit_limit(
         .exiting
         .get(instrument)
         .is_some_and(|sequence| sequence.passive && &sequence.intent == intent);
-    if passive || !batch.view.exiting.contains_key(instrument) && !rests(&batch.view, instrument) {
+    let unsequenced =
+        !batch.view.exiting.contains_key(instrument) && !rests(&batch.view, instrument);
+    if passive || unsequenced && !alone(batch, instrument, purpose, limit) {
         return ExitPrice::Own(limit);
     }
     let tier = batch.ports.instruments.exit_tier(instrument);
@@ -333,18 +374,29 @@ pub(crate) fn ladder_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
         .iter()
         .filter(|(instrument, sequence)| {
             !sequence.passive
-                && !sequence.ladder.floored
-                && !sequence.ladder.stepping
                 && batch.ports.instruments.exit_tier(instrument).is_some()
                 && climbs(&batch.view, sequence)
-                && sequence
-                    .ladder
+        })
+        .map(|(_, sequence)| (&sequence.intent, sequence.ladder))
+        .chain(
+            batch
+                .view
+                .ladders
+                .iter()
+                .filter(|(instrument, lone)| {
+                    batch.ports.instruments.exit_tier(instrument).is_some()
+                        && batch.view.effective_mode(&lone.agent) < Mode::Paused
+                })
+                .map(|(_, lone)| (&lone.intent, lone.ladder)),
+        )
+        .filter(|(_, ladder)| {
+            !ladder.floored
+                && !ladder.stepping
+                && ladder
                     .since
                     .is_some_and(|since| now.saturating_sub(since.secs()) >= step_s)
         })
-        .map(|(_, sequence)| {
-            ClientOrderId::for_intent(&sequence.intent)?.rung(sequence.ladder.rung)
-        })
+        .map(|(intent, ladder)| ClientOrderId::for_intent(intent)?.rung(ladder.rung))
         .collect::<Result<Vec<_>, _>>()?;
     for id in due {
         let live = batch.view.orders.get(&id).is_some_and(|order| {
@@ -374,10 +426,11 @@ pub(crate) fn ladder_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
 fn next_rung(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
-    sequence: &ExitSequence,
+    (intent, rung): (&IntentId, u32),
     qty: Qty,
+    lone: bool,
 ) -> Result<(), ExecutorError> {
-    let (agent, body) = intent_of(batch, &sequence.intent)?;
+    let (agent, body) = intent_of(batch, intent)?;
     let IntentBody::Order {
         side,
         limit,
@@ -387,7 +440,7 @@ fn next_rung(
     else {
         return Ok(());
     };
-    let step = sequence.ladder.rung.saturating_add(1);
+    let step = rung.saturating_add(1);
     let tier = batch.ports.instruments.exit_tier(instrument);
     let observations = observed(batch, instrument);
     let rung = tier.map(|tier| ladder_price(tier, &observations, step, batch.at(), None));
@@ -397,12 +450,12 @@ fn next_rung(
             rung.at_floor,
         ),
         _ => {
-            fallback(batch, &sequence.intent, instrument, limit)?;
+            fallback(batch, intent, instrument, limit)?;
             (limit, false)
         }
     };
     let request = SubmitOrder {
-        client_order_id: ClientOrderId::for_intent(&sequence.intent)?.rung(step)?,
+        client_order_id: ClientOrderId::for_intent(intent)?.rung(step)?,
         instrument: instrument.clone(),
         side,
         qty,
@@ -412,14 +465,17 @@ fn next_rung(
         stop_price: None,
         bracket: None,
         oco: None,
-        extended_hours: false,
+        extended_hours: extended_hours(batch.ports, instrument, batch.at(), purpose),
         purpose,
     };
-    let extra = vec![
+    let mut extra = vec![
         ("rung", int(u64::from(step))?),
         ("at_floor", Value::Bool(at_floor)),
     ];
-    journal_rung(batch, &request, Some(&sequence.intent), &agent, 1, extra)?;
+    if lone {
+        extra.push(("laddered", Value::Bool(true)));
+    }
+    journal_rung(batch, &request, Some(intent), &agent, 1, extra)?;
     if at_floor {
         let alerted = changed(batch, instrument, "ladder_floor", Vec::new())?;
         batch.notify(alerted, "exit_ladder_floor");
@@ -429,7 +485,8 @@ fn next_rung(
 }
 
 /// What §5.6 prices `instrument` from, oldest to newest by when each was observed: the last sane
-/// quote with a trade, the last sane bid, and the latest quote.
+/// quote with a trade, the last sane bid, and the latest quote. A trade printed in another session
+/// prices nothing (§8.2: a last trade counts only in-session).
 fn observed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Vec<MarketObservation> {
     let mut seen: Vec<MarketObservation> = [
         &batch.view.trades,
@@ -439,6 +496,12 @@ fn observed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Vec<MarketObser
     .into_iter()
     .filter_map(|kept| kept.get(instrument))
     .cloned()
+    .map(|mut quote| {
+        if !same_session(batch.ports, instrument, quote.observed_at, batch.at()) {
+            quote.last_trade = None;
+        }
+        quote
+    })
     .collect();
     seen.sort_by_key(|quote| quote.observed_at);
     seen.dedup();
@@ -620,6 +683,16 @@ pub(crate) fn begin_exit(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
 ) -> Result<(), ExecutorError> {
+    begin(batch, intent, true)
+}
+
+/// [`begin_exit`], where `may_rest` false starts the marketable sequence whatever the exit's
+/// limit: a parked ladder resuming at the open was marketable when it stepped (DEC-260 (18)).
+fn begin(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    may_rest: bool,
+) -> Result<(), ExecutorError> {
     let (agent, body) = intent_of(batch, intent)?;
     let IntentBody::Order {
         instrument,
@@ -649,7 +722,7 @@ pub(crate) fn begin_exit(
     let kept = resting
         .as_ref()
         .and_then(|protection| protection.prices)
-        .filter(|_| bid.is_some_and(|bid| limit > bid));
+        .filter(|_| may_rest && bid.is_some_and(|bid| limit > bid));
     if kept.is_some_and(|prices| prices.take_profit.is_none()) {
         return Err(ExecutorError::Unimplemented { story: "E7-4" });
     }
@@ -773,6 +846,71 @@ pub(crate) fn protection_cancelled(
     changed(batch, instrument, "cancelled", orders).map(|_| ())
 }
 
+/// §5.6 step 2 for an exit [`alone`] ladders: a rung's confirmed step cancel submits the next
+/// rung for what it left unsold. The step was asked while the ladder climbed, and no protection
+/// returns for the remainder, so a pause since then does not end it (DEC-260 (14)).
+fn lone_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let ladders: Vec<(InstrumentId, LoneLadder)> = batch
+        .view
+        .ladders
+        .iter()
+        .map(|(instrument, lone)| (instrument.clone(), lone.clone()))
+        .collect();
+    for (instrument, lone) in ladders.into_iter().filter(|(_, lone)| lone.ladder.stepping) {
+        let rung = ClientOrderId::for_intent(&lone.intent)?.rung(lone.ladder.rung)?;
+        let left = match batch.view.orders.get(&rung) {
+            Some(order) if order.state == OrderState::Canceled => {
+                order.qty.checked_sub(order.filled_qty)?
+            }
+            _ => Qty::ZERO,
+        };
+        if left == Qty::ZERO {
+            continue;
+        }
+        let paused = batch.view.effective_mode(&lone.agent) >= Mode::Paused;
+        if let Some(reason) = closed_hold(batch.ports, &instrument, batch.at()) {
+            park(batch, &lone.intent, reason, lone.ladder.parked)?;
+        } else if lone.ladder.parked && paused {
+            continue;
+        } else if rests(&batch.view, &instrument) {
+            begin(batch, &lone.intent, false)?;
+        } else {
+            let at = (&lone.intent, lone.ladder.rung);
+            next_rung(batch, &instrument, at, left, true)?;
+        }
+    }
+    Ok(())
+}
+
+/// The coordinator's ruling on #400 round 1, blocker 1 (DEC-260 (18)): a ladder step whose next
+/// rung would fall while no v1 session is open submits nothing. The exit is journaled held, once,
+/// `session_closed` (`session_unknown` where the calendar names no open, alerted), `parked` so the
+/// fold neither gates it again nor resends its first rung; a sequence's protection is re-placed
+/// meanwhile, and at the first tick of the next open the ladder resumes from the next rung, priced
+/// fresh, its clock starting there ([`lone_steps`]).
+fn park(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    reason: &'static str,
+    parked: bool,
+) -> Result<(), ExecutorError> {
+    if parked {
+        return Ok(());
+    }
+    let pairs = vec![
+        ("intent_id", text(intent.0.0.clone())),
+        ("verdict", text("hold")),
+        ("reason_code", text(reason)),
+        ("parked", Value::Bool(true)),
+        ("evaluation", text("account_stream_only")),
+    ];
+    let decided = batch.journal("GateDecided", None, pairs)?;
+    if reason == SESSION_UNKNOWN {
+        batch.notify(decided, SESSION_UNKNOWN);
+    }
+    Ok(())
+}
+
 /// After every step (§5.4): the waiting exits are re-evaluated ([`release_waiting`]); then, in an
 /// instrument where a sequence runs and no protective order rests any more, once the sequence's
 /// exit is terminal, denied or abandoned **and** no other exit there is working or waiting, the
@@ -789,6 +927,7 @@ pub(crate) fn protection_cancelled(
 /// other exits, and [`replace`] then covers what they left unsold (#286 round 2, M1′).
 pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     release_waiting(batch)?;
+    lone_steps(batch)?;
     let sequences: Vec<(InstrumentId, ExitSequence)> = batch
         .view
         .exiting
@@ -803,11 +942,16 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         let finished = match batch.view.orders.get(&exit) {
             Some(order) if order.state == OrderState::Canceled && steps(&batch.view, &sequence) => {
                 let left = order.qty.checked_sub(order.filled_qty)?;
-                if left > Qty::ZERO {
-                    next_rung(batch, &instrument, &sequence, left)?;
+                if left == Qty::ZERO {
+                    true
+                } else if let Some(reason) = closed_hold(batch.ports, &instrument, batch.at()) {
+                    park(batch, &sequence.intent, reason, sequence.ladder.parked)?;
+                    true
+                } else {
+                    let at = (&sequence.intent, sequence.ladder.rung);
+                    next_rung(batch, &instrument, at, left, false)?;
                     continue;
                 }
-                true
             }
             Some(order) => handed(&batch.view, &sequence) || order.state.is_terminal(),
             None => batch
@@ -2476,12 +2620,12 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// An exit that grew too old while its cancel was confirmed is abandoned, and the position it
-    /// never reduced is protected again in full. The interval's own bound is set past the exit's
-    /// age here, so that the age, not the bound, abandons it.
+    /// The coordinator's ruling D2 (rule 13, DEC-160 (12)): an exit that grew older than
+    /// `max_intent_age_s` while its cancel was confirmed is never abandoned; it goes once the
+    /// cancel is confirmed. The interval's own bound is set past the exit's age here, so that the
+    /// age alone is tested.
     #[test]
-    fn an_abandoned_exit_re_places_protection_for_the_whole_position() -> Result<(), ExecutorError>
-    {
+    fn an_old_exit_still_goes_once_its_cancel_is_confirmed() -> Result<(), ExecutorError> {
         let (config, fees) = (
             ExecutorConfig {
                 max_unprotected_s: 600,
@@ -2500,13 +2644,13 @@ mod sequence_tests {
         executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
         executor.run(Input::Tick(RiskClock::from_secs(500)), &ports)?;
         let settled = executor.run(cancel_accepted(OCO), &ports)?;
-        assert!(drafted(&settled).contains(&"OrderAbandoned"));
+        assert!(!drafted(&settled).contains(&"OrderAbandoned"));
         assert_eq!(
             submissions(&settled)
                 .iter()
-                .map(|order| order.qty)
+                .map(|order| (order.client_order_id.as_str().to_owned(), order.qty))
                 .collect::<Vec<_>>(),
-            vec![Qty::parse("10")?]
+            vec![(format!("md-{EXIT}"), Qty::parse("5")?)]
         );
         Ok(())
     }
@@ -4497,13 +4641,11 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// Rule 3: a passive exit that ends without its OCO once the old one's cancel is confirmed —
-    /// here abandoned, too old at the confirmation (§5.7) — never leaves the position
-    /// unprotected, with no interval to bound or alert it: the sequence ends by re-placing the
-    /// recorded OCO for the position held, as a marketable sequence's finished exit does (found by
-    /// #286 round 1's mutation run).
+    /// The coordinator's ruling D2 (rule 13): a passive exit older than `max_intent_age_s` when
+    /// the old OCO's cancel is confirmed is never abandoned; it is placed as its new OCO's
+    /// take-profit at its own limit, the stop kept, for the whole position (§5.4).
     #[test]
-    fn an_abandoned_passive_exit_re_places_the_protection() -> Result<(), ExecutorError> {
+    fn an_old_passive_exit_still_places_its_oco() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &Ids,
@@ -4518,7 +4660,7 @@ mod sequence_tests {
         executor.run(Input::Tick(RiskClock::from_secs(121)), &ports)?;
         let late = executor.run(cancel_accepted(OCO), &ports)?;
         assert!(
-            drafted(&late).contains(&"OrderAbandoned"),
+            !drafted(&late).contains(&"OrderAbandoned"),
             "{:?}",
             drafted(&late)
         );
@@ -4529,16 +4671,11 @@ mod sequence_tests {
                 .collect::<Vec<_>>(),
             vec![(
                 Qty::parse("10")?,
-                legs("170", "140", "10")?,
+                legs("160", "140", "10")?,
                 Purpose::Protective
             )],
-            "the recorded OCO, for the whole position"
+            "the exit's price as the take-profit, the stop kept"
         );
-        assert_eq!(
-            actions(&late),
-            vec!["cancelled", "placed", "unprotected_end"]
-        );
-        assert!(executor.state.exiting.is_empty(), "no stale sequence");
         assert_eq!(stop_covered(&executor)?, position(&executor)?);
         Ok(())
     }
@@ -6528,8 +6665,8 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// A quote observed at `at`: its bid (also its mark, kept above the stop at 140 so the
-    /// watchdog's stub is never reached), its last trade, and whether it is sane.
+    /// A quote observed at `at`: its bid (also its mark, so a bid at or below the stop at 140 is a
+    /// breach the watchdog counts), its last trade, and whether it is sane.
     fn observation(
         bid: Option<u32>,
         trade: Option<u32>,
@@ -6576,6 +6713,7 @@ mod sequence_tests {
         let price = || prop::option::of(135_u32..=160);
         prop_oneof![
             4 => (1_i64..=20).prop_map(Move::Tick),
+            1 => prop::sample::select(vec![1_800_i64, 3_600, 7_200]).prop_map(Move::Tick),
             3 => (price(), price(), any::<bool>()).prop_map(|(bid, trade, sane)| Move::Quote(bid, trade, sane)),
             2 => (0_usize..4, 1_u32..=4, 141_u32..=165).prop_map(|(purpose, qty, limit)| Move::Exit(purpose, qty, limit)),
             2 => Just(Move::Ack),
@@ -6620,14 +6758,115 @@ mod sequence_tests {
         fills: u32,
         paused: bool,
         quiet_since: i64,
+        /// Whether the script starts inside the calendar's range: before it (the 1970 base, the
+        /// eve of 2018) every instant reads as the regular session (DEC-260 (13)).
+        calendar: bool,
     }
 
+    /// §4.3 written out for the oracle, never read from the calendar file: the New York midnight
+    /// of each trading day its scripts can reach (2026-09-01 to 10-16 without Labor Day, and the
+    /// calendar's last week, 2028-12-26 to 29), from which each day's overnight (20:00 the day
+    /// before to 04:00), pre-market, regular (09:30 to 16:00) and after-hours (to 20:00) follow.
+    const TRADING_DAYS: [i64; 37] = [
+        1_788_235_200,
+        1_788_321_600,
+        1_788_408_000,
+        1_788_494_400,
+        1_788_840_000,
+        1_788_926_400,
+        1_789_012_800,
+        1_789_099_200,
+        1_789_358_400,
+        1_789_444_800,
+        1_789_531_200,
+        1_789_617_600,
+        1_789_704_000,
+        1_789_963_200,
+        1_790_049_600,
+        1_790_136_000,
+        1_790_222_400,
+        1_790_308_800,
+        1_790_568_000,
+        1_790_654_400,
+        1_790_740_800,
+        1_790_827_200,
+        1_790_913_600,
+        1_791_172_800,
+        1_791_259_200,
+        1_791_345_600,
+        1_791_432_000,
+        1_791_518_400,
+        1_791_777_600,
+        1_791_864_000,
+        1_791_950_400,
+        1_792_036_800,
+        1_792_123_200,
+        1_861_419_600,
+        1_861_506_000,
+        1_861_592_400,
+        1_861_678_800,
+    ];
+
     impl Desk {
+        /// The session `at` falls in by the oracle's own reading: its trading day and 0 overnight,
+        /// 1 pre-market, 2 regular, 3 after-hours; `None` while the market is closed.
+        fn segment(at: i64) -> Option<(i64, u8)> {
+            const HOUR: i64 = 3_600;
+            TRADING_DAYS.iter().find_map(|day| {
+                let at_hour = |hours: i64, halves: i64| {
+                    day.saturating_add(hours.saturating_mul(HOUR))
+                        .saturating_add(halves.saturating_mul(HOUR / 2))
+                };
+                [
+                    (at_hour(-4, 0), at_hour(4, 0), 0),
+                    (at_hour(4, 0), at_hour(9, 1), 1),
+                    (at_hour(9, 1), at_hour(16, 0), 2),
+                    (at_hour(16, 0), at_hour(20, 0), 3),
+                ]
+                .into_iter()
+                .find(|(from, to, _)| (*from..*to).contains(&at))
+                .map(|(_, _, segment)| (*day, segment))
+            })
+        }
+
+        /// Whether `then` and now are one session (§8.2's in-session trade).
+        fn same_session(&self, then: i64) -> bool {
+            !self.calendar || Self::segment(then) == Self::segment(self.now)
+        }
+
+        /// Whether no v1 session is open now (DEC-30: the overnight session is none).
+        fn closed(&self) -> bool {
+            self.calendar && !matches!(Self::segment(self.now), Some((_, 1..=3)))
+        }
+
+        /// Whether now is the regular session, where nothing goes extended-hours.
+        fn regular(&self) -> bool {
+            !self.calendar || matches!(Self::segment(self.now), Some((_, 2)))
+        }
+
+        /// Rule 13's session duties on every order the executor sends or journals: no exit goes
+        /// while no session is open, and `extended_hours` only in pre-market or after-hours.
+        fn sent(&self, id: &str, purpose: Purpose, extended: bool) -> Result<(), String> {
+            if self.closed() && purpose != Purpose::Protective {
+                return Err(format!(
+                    "{id} ({purpose:?}) sent at {} with no session open",
+                    self.now
+                ));
+            }
+            if extended && (self.closed() || self.regular()) {
+                return Err(format!("{id} sent extended-hours at {}", self.now));
+            }
+            Ok(())
+        }
+
         /// §5.6 by the oracle's own reading: there is something to price from when some sane
-        /// quote with a bid or a trade was seen within five minutes (DEC-260 (5)).
+        /// quote with a bid, or with a trade printed in the session it is now (§8.2), was seen
+        /// within five minutes (DEC-260 (5), (16)).
         fn priceable(&self) -> bool {
             self.quotes.iter().any(|(at, bid, trade, sane)| {
-                *sane && (bid.is_some() || trade.is_some()) && self.now.saturating_sub(*at) <= 300
+                *sane
+                    && (bid.is_some() || trade.is_some() && self.same_session(*at))
+                    && self.now.saturating_sub(*at) <= 300
             })
         }
 
@@ -6686,6 +6925,7 @@ mod sequence_tests {
                         .get(&intent)
                         .is_some_and(|exit| self.oversells(&intent, exit.qty));
                     let priceable = self.priceable();
+                    let closed = self.closed();
                     let now = self.now;
                     let Some(exit) = self.exits.get_mut(&intent) else {
                         return Ok(());
@@ -6697,7 +6937,12 @@ mod sequence_tests {
                         "deny" if reason != "sell_exceeds_available" || !oversells => {
                             return Err(format!("{intent} denied for {reason}"));
                         }
-                        "hold" if !RULE_13_HOLDS.contains(&reason) && !unpriced => {
+                        "hold"
+                            if !RULE_13_HOLDS.contains(&reason)
+                                && !unpriced
+                                && !(matches!(reason, "session_closed" | "session_unknown")
+                                    && closed) =>
+                        {
                             return Err(format!("{intent} held for {reason}"));
                         }
                         _ => {}
@@ -6711,6 +6956,13 @@ mod sequence_tests {
                     return Err(format!("{intent} fell back with something to price from"));
                 }
                 ("OrderSubmitted", _) => {
+                    let purpose = match field("purpose") {
+                        Some("protective") => Purpose::Protective,
+                        _ => Purpose::RiskExit,
+                    };
+                    let extended = draft.payload.get("extended_hours") == Some(&Value::Bool(true));
+                    let id = field("client_order_id").unwrap_or_default();
+                    self.sent(id, purpose, extended)?;
                     if let Some(exit) = self.exits.get_mut(&intent) {
                         exit.done = true;
                     }
@@ -6718,7 +6970,7 @@ mod sequence_tests {
                 ("OrderAbandoned", _) => {
                     let reason = field("reason_code").or(field("reason")).unwrap_or_default();
                     if let Some(exit) = self.exits.get_mut(&intent) {
-                        if !matches!(reason, "unprotected_interval_limit" | "intent_too_old") {
+                        if reason != "unprotected_interval_limit" {
                             return Err(format!("{intent} abandoned for {reason}"));
                         }
                         exit.done = true;
@@ -6752,6 +7004,7 @@ mod sequence_tests {
             });
             for (intent, exit) in &self.exits {
                 let held = self.paused
+                    || self.closed()
                     || exit.verdict == "hold"
                         && (exit.purpose == Purpose::DiscretionaryExit && !self.priceable()
                             || matches!(
@@ -6759,8 +7012,9 @@ mod sequence_tests {
                                 "unknown_order_in_flight" | "broker"
                             ));
                 let waits = held || broker || self.oversells(intent, exit.qty);
-                let aged = self.now.saturating_sub(exit.arrived)
-                    > config.max_intent_age_s.saturating_add(20);
+                let aged = !waits
+                    && self.now.saturating_sub(exit.arrived)
+                        > config.max_intent_age_s.saturating_add(20);
                 let since = exit.since.max(self.quiet_since);
                 if !exit.done
                     && !broker
@@ -6798,6 +7052,11 @@ mod sequence_tests {
                             self.asked.push(client_order_id.as_str().to_owned());
                         }
                         Effect::Broker(BrokerRequest::Submit(order)) => {
+                            self.sent(
+                                order.client_order_id.as_str(),
+                                order.purpose,
+                                order.extended_hours,
+                            )?;
                             let qty = order
                                 .qty
                                 .to_string()
@@ -6859,13 +7118,13 @@ mod sequence_tests {
         })
     }
 
-    fn rule_13_script(script: &[Move]) -> Result<(), String> {
+    fn rule_13_script(start: i64, script: &[Move]) -> Result<(), String> {
         let failed = |error: ExecutorError| format!("{error:?}");
         let (config, fees) = (executor_config(), fees().map_err(failed)?);
         let ports = tiered_ports(&config, &fees);
         let mut executor = protected(&ports).map_err(failed)?;
         let mut desk = Desk {
-            now: 0,
+            now: start,
             quotes: Vec::new(),
             position: 10,
             venue: BTreeMap::from([(
@@ -6883,8 +7142,14 @@ mod sequence_tests {
             fills: 0,
             paused: false,
             quiet_since: 0,
+            calendar: start >= 1_514_782_800,
         };
         let agent = AgentId("agent-a".to_owned());
+        desk.deliver(
+            &mut executor,
+            &ports,
+            Input::Tick(RiskClock::from_secs(start)),
+        )?;
         for (step, next) in script.iter().enumerate() {
             let input = match *next {
                 Move::Tick(by) => {
@@ -7023,7 +7288,9 @@ mod sequence_tests {
 
     /// Rule 13, by an oracle of its own over random scripts of ticks, quotes (a bid, a trade,
     /// either, neither; sane or not; marks at, above and below the stop, so the watchdog fires), exits of every purpose and size, acknowledgments, partial
-    /// fills, cancel confirmations and pauses, against ten protected AAPL with an exit tier: no
+    /// fills, cancel confirmations and pauses, against ten protected AAPL with an exit tier, from
+    /// an instant in each session (none the calendar covers, after-hours, just before the closing
+    /// auction window, the morning, overnight, and just before the open): no
     /// input is refused; no exit is denied but for a genuine over-sell; no exit is held but for
     /// rule 13's four, or a discretionary exit with nothing to price from (DEC-160 (12)); no
     /// exit falls back to its own limit while something prices it; and none stays neither
@@ -7039,11 +7306,648 @@ mod sequence_tests {
             failure_persistence: None,
             ..ProptestConfig::default()
         };
+        let starts = prop::sample::select(vec![
+            0,
+            AFTER_HOURS,
+            CLOSING.saturating_sub(30),
+            MORNING,
+            OVERNIGHT,
+            OPEN.saturating_sub(30),
+            1_790_121_590,
+            1_790_121_590,
+            1_790_121_590,
+            SATURDAY,
+            1_788_789_600,
+            1_514_739_600,
+            1_861_754_400,
+            1_862_150_400,
+        ]);
         TestRunner::new(config)
-            .run(&prop::collection::vec(moves(), 1..64), |script| {
-                rule_13_script(&script).map_err(TestCaseError::fail)
-            })
+            .run(
+                &(starts, prop::collection::vec(moves(), 1..64)),
+                |(start, script)| rule_13_script(start, &script).map_err(TestCaseError::fail),
+            )
             .map_err(|error| error.to_string())
+    }
+
+    /// 2026-09-22, a Tuesday, at 17:00 ET: after-hours.
+    const AFTER_HOURS: i64 = 1_790_110_800;
+    /// 11:00 ET, the regular session.
+    const MORNING: i64 = 1_790_089_200;
+    /// 15:50:00 ET, the first second of the closing auction window, and the second before it.
+    const CLOSING: i64 = 1_790_106_600;
+    /// 02:00 ET, the overnight session v1 disables (DEC-30).
+    const OVERNIGHT: i64 = 1_790_056_800;
+    /// 08:00 ET, pre-market, and 09:30 ET, the regular open.
+    const PRE_MARKET: i64 = 1_790_078_400;
+    const OPEN: i64 = 1_790_083_800;
+    /// Saturday 2026-09-26, 12:00 ET: the market is closed.
+    const SATURDAY: i64 = 1_790_438_400;
+
+    /// An unprotected position's exit at `at`, priced 150 with a quote observed `age` seconds
+    /// before: what it was submitted as.
+    fn alone_at(
+        purpose: Purpose,
+        limit: &str,
+        at: i64,
+        age: i64,
+    ) -> Result<(Executor, SubmitOrder, EventDraft), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+        executor.run(
+            observation(Some(150), None, true, at.saturating_sub(age))?,
+            &ports,
+        )?;
+        let ran = executor.run(sell(EXIT, "10", limit, purpose)?, &ports)?;
+        let order = submissions(&ran)
+            .first()
+            .copied()
+            .cloned()
+            .ok_or_else(|| missing("the exit's submission"))?;
+        let draft = ran
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "OrderSubmitted" => Some(draft),
+                _ => None,
+            })
+            .cloned()
+            .ok_or_else(|| missing("its OrderSubmitted"))?;
+        Ok((executor, order, draft))
+    }
+
+    /// §4.3, §5.6, DEC-260 (13), (14): in after-hours an unprotected position's risk exit goes as an
+    /// extended-hours limit at the ladder's first rung, 150 × (1 − 0.5%), journaled `laddered`;
+    /// a discretionary or owner exit keeps its own limit as a regular-session limit, which the
+    /// broker queues to the session (§5.5, §9.6), and so does an exit priced above the bid.
+    #[test]
+    fn an_after_hours_risk_exit_is_laddered_and_extended() -> Result<(), ExecutorError> {
+        let laddered = Some(Value::Bool(true));
+        let (_, order, draft) = alone_at(Purpose::RiskExit, "150", AFTER_HOURS, 0)?;
+        assert_eq!(order.limit_price, Some(Price::parse("149.25")?));
+        assert!(order.extended_hours);
+        assert_eq!(draft.payload.get("laddered").cloned(), laddered);
+        for purpose in [Purpose::DiscretionaryExit, Purpose::OwnerExit] {
+            let (_, order, draft) = alone_at(purpose, "150", AFTER_HOURS, 0)?;
+            assert_eq!(order.limit_price, Some(Price::parse("150")?), "{purpose:?}");
+            assert!(!order.extended_hours, "{purpose:?}");
+            assert_eq!(draft.payload.get("laddered"), None, "{purpose:?}");
+        }
+        let (_, passive, _) = alone_at(Purpose::RiskExit, "151", AFTER_HOURS, 0)?;
+        assert_eq!(
+            passive.limit_price,
+            Some(Price::parse("151")?),
+            "above the bid"
+        );
+        assert!(passive.extended_hours, "still an extended-hours exit");
+        Ok(())
+    }
+
+    /// §4.4, §5.6: in the regular session a fresh quote leaves the exit at its own limit, and a
+    /// quote 120 s old is a presumed halt that ladders a risk or owner exit, but not a discretionary
+    /// one; in the closing auction window the risk and owner exits are laddered from a fresh quote,
+    /// and in the second before it they are not.
+    #[test]
+    fn a_presumed_halt_or_the_close_window_ladders_the_exit() -> Result<(), ExecutorError> {
+        let rung = Some(Price::parse("149.25")?);
+        let own = Some(Price::parse("150")?);
+        for (purpose, at, age, expected) in [
+            (Purpose::RiskExit, MORNING, 0, own),
+            (Purpose::RiskExit, MORNING, 120, rung),
+            (Purpose::OwnerExit, MORNING, 120, rung),
+            (Purpose::DiscretionaryExit, MORNING, 120, own),
+            (Purpose::RiskExit, CLOSING, 0, rung),
+            (Purpose::OwnerExit, CLOSING, 0, rung),
+            (Purpose::DiscretionaryExit, CLOSING, 0, own),
+            (Purpose::RiskExit, CLOSING.saturating_sub(1), 0, own),
+        ] {
+            let (_, order, _) = alone_at(purpose, "150", at, age)?;
+            assert_eq!(
+                order.limit_price, expected,
+                "{purpose:?} at {at}, {age} s old"
+            );
+            assert!(!order.extended_hours, "{purpose:?} at {at}");
+        }
+        Ok(())
+    }
+
+    /// The gate's reason on the `GateDecided` drafts in `effects`, newest last.
+    fn gate_reasons(effects: &[Effect]) -> Vec<String> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "GateDecided" => draft
+                    .payload
+                    .get("reason_code")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// DEC-260 (13), the coordinator's ruling D1 (rule 13's broker hold): with no v1 session open,
+    /// an equity exit of any purpose is held `session_closed`, nothing sent, until the calendar's
+    /// next pre-market open: overnight to 04:00, a Friday evening to Monday 04:00, the Friday
+    /// before Labor Day (2026-09-07) to Tuesday 04:00. At the open it is priced fresh, 151 ×
+    /// (1 − 0.5%) on the tick, as an extended-hours rung, and its ladder's clock starts there.
+    #[test]
+    fn a_closed_market_holds_the_exit_for_the_next_pre_market_open() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let exit = format!("md-{EXIT}");
+        for (closed, open) in [
+            (OVERNIGHT, 1_790_064_000),
+            (1_790_382_600, 1_790_582_400),
+            (1_788_568_200, 1_788_854_400),
+        ] {
+            for purpose in [Purpose::RiskExit, Purpose::DiscretionaryExit] {
+                let mut executor = held(&ports)?;
+                executor.run(Input::Tick(RiskClock::from_secs(closed)), &ports)?;
+                executor.run(observation(Some(150), None, true, closed)?, &ports)?;
+                let ran = executor.run(sell(EXIT, "10", "150", purpose)?, &ports)?;
+                assert!(submissions(&ran).is_empty(), "{purpose:?} at {closed}");
+                assert_eq!(gate_reasons(&ran), vec!["session_closed"], "{purpose:?}");
+                let before = executor.run(Input::Tick(RiskClock::from_secs(open - 1)), &ports)?;
+                assert!(submissions(&before).is_empty(), "{purpose:?} before {open}");
+                executor.run(observation(Some(151), None, true, open)?, &ports)?;
+                let released = executor.run(Input::Tick(RiskClock::from_secs(open)), &ports)?;
+                let order = submissions(&released)
+                    .first()
+                    .copied()
+                    .cloned()
+                    .ok_or_else(|| missing("the released exit"))?;
+                if purpose == Purpose::RiskExit {
+                    assert_eq!(
+                        order.limit_price,
+                        Some(Price::parse("150.25")?),
+                        "at {open}"
+                    );
+                    assert!(order.extended_hours);
+                    let early =
+                        executor.run(Input::Tick(RiskClock::from_secs(open + 9)), &ports)?;
+                    assert!(
+                        cancels(&early).is_empty(),
+                        "the ladder's clock starts at release"
+                    );
+                    let step =
+                        executor.run(Input::Tick(RiskClock::from_secs(open + 10)), &ports)?;
+                    assert_eq!(cancels(&step), vec![exit.as_str()]);
+                } else {
+                    assert_eq!(order.limit_price, Some(Price::parse("150")?));
+                    assert!(!order.extended_hours, "paced to the regular session (§9.6)");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// D1 holds only an exit the gate allows: one that would sell more than the position is still
+    /// denied `sell_exceeds_available` in a closed market (§5.3 rule 4), never held for the open.
+    #[test]
+    fn a_closed_market_never_holds_an_exit_the_gate_denies() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(OVERNIGHT)), &ports)?;
+        executor.run(observation(Some(150), None, true, OVERNIGHT)?, &ports)?;
+        let ran = executor.run(sell(EXIT, "20", "150", Purpose::RiskExit)?, &ports)?;
+        assert!(submissions(&ran).is_empty());
+        assert_eq!(gate_reasons(&ran), vec!["sell_exceeds_available"]);
+        Ok(())
+    }
+
+    /// D1: the protection resting when a closed market holds the exit stays untouched through the
+    /// hold; the sequence starts, cancelling it, only at the release.
+    #[test]
+    fn a_closed_market_hold_leaves_the_protection_resting() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(OVERNIGHT)), &ports)?;
+        executor.run(observation(Some(150), None, true, OVERNIGHT)?, &ports)?;
+        let ran = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+        assert!(cancels(&ran).is_empty() && submissions(&ran).is_empty());
+        assert!(rests(&executor.state, &aapl()?));
+        executor.run(observation(Some(150), None, true, 1_790_064_000)?, &ports)?;
+        let open = executor.run(Input::Tick(RiskClock::from_secs(1_790_064_000)), &ports)?;
+        assert_eq!(
+            cancels(&open),
+            vec![OCO],
+            "the sequence starts at the release"
+        );
+        Ok(())
+    }
+
+    /// D1 in a running sequence: an exit allowed at 19:59:50 ET, after-hours, whose protective
+    /// cancel is confirmed after 20:00 finds no session open; it is held `session_closed`, and
+    /// the protection is re-placed at once for the position rather than left cancelled through
+    /// the night.
+    #[test]
+    fn a_sequence_that_runs_into_the_close_re_protects() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let late = 1_790_121_590;
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(late)), &ports)?;
+        executor.run(observation(Some(150), None, true, late)?, &ports)?;
+        let ran = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&ran), vec![OCO]);
+        executor.run(Input::Tick(RiskClock::from_secs(late + 15)), &ports)?;
+        let closed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert!(
+            submissions(&closed)
+                .iter()
+                .all(|order| order.purpose == Purpose::Protective)
+        );
+        assert!(!ocos(&closed).is_empty(), "{:?}", drafted(&closed));
+        assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        Ok(())
+    }
+
+    /// #400 round 1, blocker 1 (DEC-260 (18)), the reviewer's witness: a 19:59:55 ET risk exit
+    /// goes after-hours at 149.25; its step is asked at 20:00:05, and the cancel's confirmation, in
+    /// the overnight session, submits nothing: the exit is held `session_closed`, parked. At
+    /// Wednesday's 04:00 open the ladder resumes from `-l1`, priced fresh, 151 × (1 − 1%), as an
+    /// extended-hours rung, and its clock starts there.
+    #[test]
+    fn a_step_into_the_close_parks_the_ladder_until_the_open() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let (mut executor, first, _) = alone_at(Purpose::RiskExit, "150", 1_790_121_595, 0)?;
+        assert_eq!(first.limit_price, Some(Price::parse("149.25")?));
+        let exit = format!("md-{EXIT}");
+        let step = executor.run(Input::Tick(RiskClock::from_secs(1_790_121_605)), &ports)?;
+        assert_eq!(cancels(&step), vec![exit.as_str()]);
+        let night = executor.run(cancel_accepted(&exit), &ports)?;
+        assert!(submissions(&night).is_empty(), "{:?}", drafted(&night));
+        assert_eq!(gate_reasons(&night), vec!["session_closed"]);
+        assert!(
+            !alerts(&night).contains(&"session_unknown"),
+            "{:?}",
+            alerts(&night)
+        );
+        for at in [1_790_121_700, 1_790_140_000, 1_790_150_399] {
+            let quiet = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            assert!(submissions(&quiet).is_empty(), "at {at}");
+            assert!(gate_reasons(&quiet).is_empty(), "journaled once, at {at}");
+        }
+        executor.run(observation(Some(151), None, true, 1_790_150_400)?, &ports)?;
+        let open = executor.run(Input::Tick(RiskClock::from_secs(1_790_150_400)), &ports)?;
+        let rung = submissions(&open)
+            .first()
+            .copied()
+            .cloned()
+            .ok_or_else(|| missing("the resumed rung"))?;
+        assert_eq!(rung.client_order_id.as_str(), format!("{exit}-l1"));
+        assert_eq!(rung.limit_price, Some(Price::parse("149.49")?));
+        assert!(rung.extended_hours);
+        let early = executor.run(Input::Tick(RiskClock::from_secs(1_790_150_409)), &ports)?;
+        assert!(
+            cancels(&early).is_empty(),
+            "the ladder's clock restarts at the release"
+        );
+        let again = executor.run(Input::Tick(RiskClock::from_secs(1_790_150_410)), &ports)?;
+        assert_eq!(cancels(&again), vec![format!("{exit}-l1").as_str()]);
+        Ok(())
+    }
+
+    /// Blocker 1 for a sequence's ladder: the step confirmed in the overnight session submits no
+    /// rung; the protection is re-placed for the night, and at the 04:00 open the sequence starts
+    /// again, cancelling it, and resumes from `-l1` priced fresh.
+    #[test]
+    fn a_sequence_step_into_the_close_re_protects_and_resumes_at_the_open()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let late = 1_790_121_595;
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(late)), &ports)?;
+        executor.run(observation(Some(150), None, true, late)?, &ports)?;
+        executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+        let first = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(submissions(&first).len(), 1);
+        let exit = format!("md-{EXIT}");
+        let step = executor.run(Input::Tick(RiskClock::from_secs(late + 10)), &ports)?;
+        assert_eq!(cancels(&step), vec![exit.as_str()]);
+        let night = executor.run(cancel_accepted(&exit), &ports)?;
+        assert!(
+            submissions(&night)
+                .iter()
+                .all(|order| order.purpose == Purpose::Protective),
+            "{:?}",
+            drafted(&night)
+        );
+        assert!(
+            !ocos(&night).is_empty(),
+            "the protection is re-placed for the night"
+        );
+        assert_eq!(gate_reasons(&night), vec!["session_closed"]);
+        assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        executor.run(observation(Some(151), None, true, 1_790_150_400)?, &ports)?;
+        let open = executor.run(Input::Tick(RiskClock::from_secs(1_790_150_400)), &ports)?;
+        let replaced = cancels(&open)
+            .first()
+            .map(|id| (*id).to_owned())
+            .ok_or_else(|| missing("the night's protection cancelled at the open"))?;
+        let resumed = executor.run(cancel_accepted(&replaced), &ports)?;
+        let rung = submissions(&resumed)
+            .first()
+            .copied()
+            .cloned()
+            .ok_or_else(|| missing("the resumed rung"))?;
+        assert_eq!(rung.client_order_id.as_str(), format!("{exit}-l1"));
+        assert_eq!(rung.limit_price, Some(Price::parse("149.49")?));
+        assert!(rung.extended_hours);
+        assert!(
+            executor.state.ladders.is_empty() && executor.state.exiting.contains_key(&aapl()?),
+            "the parked ladder resumes inside the new sequence, not beside it"
+        );
+        Ok(())
+    }
+
+    /// DEC-260 (18): a sequence that starts in an instrument takes a parked ladder only if it is
+    /// that ladder's own exit; another exit's sequence starts its own ladder, and the parked one
+    /// stays for its exit.
+    #[test]
+    fn a_parked_ladder_resumes_only_in_its_own_exits_sequence() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let parked = crate::state::Ladder {
+            rung: 2,
+            since: None,
+            floored: false,
+            stepping: true,
+            parked: true,
+        };
+        for (intent, takes) in [(SECOND, false), (EXIT, true)] {
+            let mut executor = held(&ports)?;
+            executor.state.ladders.insert(
+                aapl()?,
+                crate::state::LoneLadder {
+                    intent: IntentId(EventId(EXIT.to_owned())),
+                    agent: AgentId("agent-a".to_owned()),
+                    ladder: parked,
+                },
+            );
+            committed(
+                &mut executor,
+                "ProtectionChanged",
+                vec![
+                    ("instrument", text("AAPL")),
+                    ("action", text("unprotected_start")),
+                    ("orders", text(OCO)),
+                    ("intent_id", text(intent)),
+                    ("entry", text("md-held-1")),
+                    ("agent", text("agent-a")),
+                    ("stop", text("140")),
+                ],
+            )?;
+            let started = executor
+                .state
+                .exiting
+                .get(&aapl()?)
+                .map(|sequence| sequence.ladder)
+                .ok_or_else(|| missing("the sequence"))?;
+            assert_eq!(started == parked, takes, "{intent}");
+            assert_eq!(executor.state.ladders.is_empty(), takes, "{intent}");
+        }
+        Ok(())
+    }
+
+    /// #400 round 1, minor 1: in the overnight session of the calendar's last trading day
+    /// (2028-12-29, 02:00 ET), that day's 04:00 open is named, so the hold reads `session_closed`.
+    #[test]
+    fn the_last_trading_days_overnight_reads_session_closed() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let at = 1_861_686_000;
+        let mut executor = held(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+        executor.run(observation(Some(150), None, true, at)?, &ports)?;
+        let ran = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(gate_reasons(&ran), vec!["session_closed"]);
+        Ok(())
+    }
+
+    /// D1's fail-safe: on the calendar's last Friday evening (2028-12-29, 21:00 ET) no next
+    /// pre-market open can be named, and past its last date (2029-01-03, 11:00 ET) no session at
+    /// all, so the exit is held `session_unknown` and alerted, and stays held; never sent as a
+    /// queued limit or an overnight extended-hours one.
+    #[test]
+    fn a_closed_market_with_no_next_open_holds_and_alerts() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        for at in [1_861_754_400, 1_862_150_400] {
+            let mut executor = held(&ports)?;
+            executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            executor.run(observation(Some(150), None, true, at)?, &ports)?;
+            let ran = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+            assert!(submissions(&ran).is_empty());
+            assert_eq!(gate_reasons(&ran), vec!["session_unknown"]);
+            assert!(
+                alerts(&ran).contains(&"session_unknown"),
+                "{:?}",
+                alerts(&ran)
+            );
+            let later = executor.run(Input::Tick(RiskClock::from_secs(at + 86_400)), &ports)?;
+            assert!(submissions(&later).is_empty());
+        }
+        Ok(())
+    }
+
+    /// #400 round 1, minor 2: a `session_unknown` hold past `max_intent_age_s` is never abandoned
+    /// and alerts `exit_held_long` once, as every hold does (D2).
+    #[test]
+    fn a_session_unknown_hold_is_never_abandoned() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let at = 1_862_150_400;
+        let mut executor = held(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+        executor.run(observation(Some(150), None, true, at)?, &ports)?;
+        executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+        let long = executor.run(Input::Tick(RiskClock::from_secs(at + 121)), &ports)?;
+        assert!(!drafted(&long).contains(&"OrderAbandoned"));
+        assert!(alerts(&long).contains(&"exit_held_long"));
+        assert_eq!(gate_reasons(&long), vec!["session_unknown"]);
+        let later = executor.run(Input::Tick(RiskClock::from_secs(at + 86_400)), &ports)?;
+        assert!(!drafted(&later).contains(&"OrderAbandoned"));
+        assert!(!alerts(&later).contains(&"exit_held_long"));
+        Ok(())
+    }
+
+    /// The coordinator's ruling D2 (rule 13, DEC-160 (12)): an exit held past `max_intent_age_s`
+    /// (120 s) for any reason — paused, nothing to price from where protection rests, the market
+    /// closed — is never
+    /// abandoned; the hold is journaled once more, `held_long`, and alerted once, and the exit goes
+    /// when the hold clears.
+    #[test]
+    fn a_long_hold_alerts_once_and_the_exit_still_goes() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let agent = AgentId("agent-a".to_owned());
+        for (reason, start) in [
+            ("agent_paused", 0),
+            ("exit_unpriced", 0),
+            ("session_closed", OVERNIGHT),
+        ] {
+            let protects = reason == "exit_unpriced";
+            let mut executor = if protects {
+                protected(&ports)?
+            } else {
+                held(&ports)?
+            };
+            executor.run(Input::Tick(RiskClock::from_secs(start)), &ports)?;
+            let purpose = match reason {
+                "agent_paused" => {
+                    executor.state.modes.insert(agent.clone(), Mode::Paused);
+                    executor.run(observation(Some(150), None, true, start)?, &ports)?;
+                    Purpose::RiskExit
+                }
+                "exit_unpriced" => {
+                    executor.run(unpriceable()?, &ports)?;
+                    Purpose::DiscretionaryExit
+                }
+                _ => {
+                    executor.run(observation(Some(150), None, true, start)?, &ports)?;
+                    Purpose::RiskExit
+                }
+            };
+            let ran = executor.run(sell(EXIT, "10", "150", purpose)?, &ports)?;
+            assert_eq!(gate_reasons(&ran), vec![reason]);
+            let long = executor.run(Input::Tick(RiskClock::from_secs(start + 121)), &ports)?;
+            assert!(!drafted(&long).contains(&"OrderAbandoned"), "{reason}");
+            assert!(alerts(&long).contains(&"exit_held_long"), "{reason}");
+            assert_eq!(
+                gate_reasons(&long),
+                vec![reason],
+                "journaled with its reason"
+            );
+            let again = executor.run(Input::Tick(RiskClock::from_secs(start + 200)), &ports)?;
+            assert!(
+                !alerts(&again).contains(&"exit_held_long"),
+                "once: {reason}"
+            );
+            let clear = if reason == "session_closed" {
+                1_790_064_000
+            } else {
+                start + 201
+            };
+            executor.state.modes.clear();
+            executor.run(observation(Some(150), None, true, clear)?, &ports)?;
+            let mut released = executor.run(Input::Tick(RiskClock::from_secs(clear)), &ports)?;
+            if protects {
+                assert_eq!(
+                    cancels(&released),
+                    vec![OCO],
+                    "the sequence starts at the release"
+                );
+                released = executor.run(cancel_accepted(OCO), &ports)?;
+            }
+            assert_eq!(submissions(&released).len(), 1, "{reason}");
+        }
+        Ok(())
+    }
+
+    /// §5.6 step 2 for a lone ladder: unfilled after `exit_step_s` (10 s here) the rung is cancelled
+    /// to step, and the confirmation submits `-l1` one offset step lower, 148.50, extended-hours.
+    /// A pause after the step was asked does not end it (DEC-260 (14)), but while paused no new
+    /// step is asked.
+    #[test]
+    fn a_lone_ladder_steps_and_a_pause_stops_only_new_steps() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let (mut executor, _, _) = alone_at(Purpose::RiskExit, "150", AFTER_HOURS, 0)?;
+        let early = executor.run(Input::Tick(RiskClock::from_secs(AFTER_HOURS + 9)), &ports)?;
+        assert!(cancels(&early).is_empty(), "not before exit_step_s");
+        let step = executor.run(Input::Tick(RiskClock::from_secs(AFTER_HOURS + 10)), &ports)?;
+        let exit = format!("md-{EXIT}");
+        assert_eq!(cancels(&step), vec![exit.as_str()]);
+        executor
+            .state
+            .modes
+            .insert(AgentId("agent-a".to_owned()), Mode::Paused);
+        let next = executor.run(cancel_accepted(&exit), &ports)?;
+        let rung = submissions(&next)
+            .first()
+            .copied()
+            .cloned()
+            .ok_or_else(|| missing("the next rung"))?;
+        assert_eq!(rung.client_order_id.as_str(), format!("{exit}-l1"));
+        assert_eq!(rung.limit_price, Some(Price::parse("148.5")?));
+        assert!(rung.extended_hours);
+        let paused = executor.run(Input::Tick(RiskClock::from_secs(AFTER_HOURS + 30)), &ports)?;
+        assert!(
+            cancels(&paused).is_empty(),
+            "paused: {:?}",
+            drafted(&paused)
+        );
+        executor.state.modes.clear();
+        let resumed = executor.run(Input::Tick(RiskClock::from_secs(AFTER_HOURS + 31)), &ports)?;
+        assert_eq!(cancels(&resumed), vec![format!("{exit}-l1").as_str()]);
+        Ok(())
+    }
+
+    /// §8.2, #373 round 2 minor A: a last trade counts only in its own session. At 16:01 ET with
+    /// no bid at all, a print at 15:59, two minutes before but in the regular session, prices the
+    /// after-hours exit nothing, so it falls back to its own limit; a print at 16:00:30 prices it,
+    /// 149 × (1 − 0.5%) rounded up to the tick.
+    #[test]
+    fn a_trade_from_another_session_prices_no_rung() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let now = 1_790_107_260;
+        for (printed, expected) in [(now - 30, "148.26"), (now - 120, "150")] {
+            let mut executor = held(&ports)?;
+            executor.run(Input::Tick(RiskClock::from_secs(now)), &ports)?;
+            executor.run(observation(None, Some(149), true, printed)?, &ports)?;
+            let ran = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+            let order = submissions(&ran)
+                .first()
+                .copied()
+                .cloned()
+                .ok_or_else(|| missing("the exit"))?;
+            assert_eq!(
+                order.limit_price,
+                Some(Price::parse(expected)?),
+                "printed {printed}"
+            );
+        }
+        Ok(())
+    }
+
+    /// §5.4, DEC-260 (12): stops do not trigger outside the regular session, so a breach that began
+    /// in pre-market is watchdogged only `stop_watchdog_s` (30 s) after the open, one in
+    /// after-hours or on a weekend never.
+    #[test]
+    fn the_watchdog_waits_for_the_regular_session() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(139), None, true, PRE_MARKET)?, &ports)?;
+        for at in [PRE_MARKET + 60, OPEN, OPEN + 29] {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            assert!(
+                watchdog_record(&tick).is_none(),
+                "at {at}: {:?}",
+                drafted(&tick)
+            );
+        }
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(OPEN + 30)), &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        for at in [AFTER_HOURS, SATURDAY] {
+            let mut executor = protected(&ports)?;
+            executor.run(observation(Some(139), None, true, at)?, &ports)?;
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at + 600)), &ports)?;
+            assert!(
+                watchdog_record(&tick).is_none(),
+                "at {at}: {:?}",
+                drafted(&tick)
+            );
+        }
+        Ok(())
     }
 }
 

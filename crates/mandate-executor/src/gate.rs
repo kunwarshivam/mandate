@@ -55,15 +55,27 @@ impl PartialGateDecision {
     /// DEC-160 (12): an allowed discretionary exit with nothing to price from is **held**
     /// `exit_unpriced`, protection resting, and re-evaluated at every tick. A discretionary exit
     /// may be paced, never denied (rule 13); no other exit is held for a price.
-    pub(crate) fn unpriced(mut self) -> Self {
+    pub(crate) fn unpriced(self) -> Self {
+        self.held_for("exit_priceable", UNPRICED)
+    }
+
+    /// The coordinator's ruling D1 on [#174] (5926142854): an equity exit while no v1 session is
+    /// open is **held** `session_closed` for the calendar's next pre-market open, rule 13's broker
+    /// hold, protection resting; one the calendar can give no next open for is held
+    /// `session_unknown` and alerted, never sent.
+    pub(crate) fn closed(self, reason: &'static str) -> Self {
+        self.held_for("session_open", reason)
+    }
+
+    fn held_for(mut self, check: &'static str, reason: &str) -> Self {
         self.checks.push(GateCheck {
-            id: "exit_priceable",
+            id: check,
             passed: false,
             inputs: Value::Null,
             computed: Value::Null,
         });
         self.verdict = GateVerdict::Deny {
-            reason_code: UNPRICED.to_owned(),
+            reason_code: reason.to_owned(),
         };
         self.held = true;
         self
@@ -87,6 +99,9 @@ impl PartialGateDecision {
 
 /// The hold reason of an exit with nothing to price from (DEC-160 (12)).
 pub(crate) const UNPRICED: &str = "exit_unpriced";
+/// The hold reasons of an equity exit while no v1 session is open (DEC-260 (13)).
+pub(crate) const SESSION_CLOSED: &str = "session_closed";
+pub(crate) const SESSION_UNKNOWN: &str = "session_unknown";
 
 /// One order a gate run is asked about.
 pub(crate) struct Proposal<'s> {
