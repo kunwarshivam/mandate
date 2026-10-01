@@ -3274,8 +3274,9 @@ fn the_watchdog_exit_is_a_risk_exit_through_the_ladder() {
     );
     assert_eq!(
         submission.limit_price,
-        Some(price("138.305")),
-        "the liquid-equity tier's 0.5% off a 139 reference bid, rounded per §2.1"
+        Some(price("138.31")),
+        "the liquid-equity tier's 0.5% off a 139 reference bid, 138.305, rounded up to the cent \
+         (§2.1: a sell limit rounds up to the tick; DEC-260 (6))"
     );
 }
 
