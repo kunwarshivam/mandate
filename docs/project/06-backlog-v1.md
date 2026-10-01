@@ -1399,16 +1399,6 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the session part already prices them (both pass with the fold, shown in its PR). Restore
   `TradingDayStarted` to `properties::every_catalogue_event_is_interpreted_or_named`'s
   `INTERPRETED` in the same change (#400 round 1, major 3).
-- **E7-4 slice 6 (stream K), from [#400](https://github.com/kunwarshivam/mandate/pull/400) round 2
-  (the coordinator's ruling 5930410998):** a ladder that parks at the close
-  ([DEC-260](04-decision-log.md#decisions) (18)) alerts the owner once, when it parks, for
-  `session_closed` as for `session_unknown`. The alert carries generic text and an opaque id only
-  (`AGENTS.md` rule 6), and the park also counts in what `exit_held_long` reports. Today a
-  `session_closed` park journals its hold and raises nothing, so an exit can wait 8 hours
-  overnight unannounced. Add a test asserting exactly one notification across a parked night.
-  Slice 6's tests PR adds the three pending tests ([DEC-260](04-decision-log.md#decisions) (19));
-  its implementation PR deletes this row. The oracle's nit from the same round is done there
-  (DEC-260 (20)).
 - **E7-4 slice 7 (stream K), moved from slice 5 by the coordinator's ruling D3 on
   [#174](https://github.com/kunwarshivam/mandate/pull/174) (5926142854):** the four kill-switch
   session tests (`hand::an_automated_flatten_defers_equity_sells_to_the_session`,

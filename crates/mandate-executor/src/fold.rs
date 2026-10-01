@@ -331,6 +331,9 @@ fn gate_decided(
             }
         }
         "hold" if flag(payload, "parked") => {
+            if flag(payload, "held_long") {
+                state.held_long.insert(id.clone());
+            }
             let ladders = state
                 .exiting
                 .values_mut()
