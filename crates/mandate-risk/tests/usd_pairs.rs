@@ -3,11 +3,8 @@
 //! crypto. A crypto exit in any pair and a US equity whatever its quote currency are never judged
 //! by the rule.
 //!
-//! Until E6-10's implementation lands, check 2 is still owed for crypto and the gate refuses every
-//! crypto opening its other checks would allow with `GateError::Unimplemented("evaluate",
-//! "E6-10")` (DEC-129 items 29 and 34), which is where each pending test here stops. The exit, the
-//! equity and the check-1 tests are not pending: they hold today and must go on holding once the
-//! rule exists.
+//! E6-10's implementation (#394) made check 2 whole for crypto, so none of these tests is pending:
+//! each holds against the gate as it stands and must go on holding.
 
 mod common;
 

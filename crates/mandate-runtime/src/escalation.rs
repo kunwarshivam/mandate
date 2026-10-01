@@ -693,20 +693,20 @@ fn commanded(
         CommandAuthority::Apply => None,
         CommandAuthority::Refused(why) => Some(why),
     };
-    match kind {
-        OwnerCommandKind::Pause => {
+    match (kind, refusal) {
+        (OwnerCommandKind::Pause, _) => {
             let lifecycle = state.lifecycle().max(Mode::Paused);
             lifecycle_change(state, payload::REASON_OWNER_PAUSE, lifecycle, cause, batch)?;
             cancel_approvals(state, batch, payload::REASON_OWNER_PAUSE)
         }
-        OwnerCommandKind::Resume if refusal.is_none() => {
+        (OwnerCommandKind::Resume, None) => {
             let lifecycle = match state.lifecycle() {
                 Mode::Stopped => Mode::Stopped,
                 _ => Mode::Normal,
             };
             lifecycle_change(state, payload::REASON_OWNER_RESUME, lifecycle, cause, batch)
         }
-        OwnerCommandKind::Stop if refusal.is_none() => {
+        (OwnerCommandKind::Stop, None) => {
             lifecycle_change(
                 state,
                 payload::REASON_OWNER_STOP,
@@ -716,14 +716,17 @@ fn commanded(
             )?;
             cancel_approvals(state, batch, payload::REASON_OWNER_STOP)
         }
-        OwnerCommandKind::OwnerExit => {
+        (OwnerCommandKind::OwnerExit, _) => {
             let judged = judged(refusal, evidence.as_ref(), confirmed_bid(event)?, user)?;
             owner_exit(state, event, &judged, ports, batch)
         }
-        OwnerCommandKind::Resume | OwnerCommandKind::Stop => {
-            refused(kind, refusal, processed_at(state, submitted), cause, batch)
+        (OwnerCommandKind::Resume, Some(why)) => {
+            refused("resume", why, processed_at(state, submitted), cause, batch)
         }
-        OwnerCommandKind::Acknowledge => Ok(()),
+        (OwnerCommandKind::Stop, Some(why)) => {
+            refused("stop", why, processed_at(state, submitted), cause, batch)
+        }
+        (OwnerCommandKind::Acknowledge, _) => Ok(()),
     }
 }
 
@@ -735,13 +738,13 @@ fn commanded(
 /// # Errors
 /// [`RuntimeError::Unimplemented`] in the tests PR (DEC-77).
 fn refused(
-    kind: OwnerCommandKind,
-    refusal: Option<StepUpRefusal>,
+    command: &'static str,
+    refusal: StepUpRefusal,
     judged_at: RiskClock,
     cause: Option<EventId>,
     batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
-    let _ = (kind, refusal, judged_at, cause, batch);
+    let _ = (command, refusal, judged_at, cause, batch);
     Err(RuntimeError::Unimplemented { story: "E8-3" })
 }
 

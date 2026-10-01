@@ -25,6 +25,7 @@ use common::{
 use mandate_accounting::Side;
 use mandate_approval::{GenericText, Notification};
 use mandate_canon::Value;
+use mandate_journal::Environment;
 use mandate_runtime::{
     ActorKind, Autonomy, Effect, EventDraft, EventId, Initiator, Input, IntentBody, KillScope,
     Purpose, TimerId, TimerRequest,
@@ -996,6 +997,30 @@ fn a_refused_stop_leaves_exactly_its_owner_command_refused() {
     assert_eq!(changed.causation_id.as_ref(), Some(&fresh.event_id));
     assert!(drafts_of(&ran, "OwnerCommandRefused").is_empty());
     assert_eq!(shell.state.effective_mode(), mandate_runtime::Mode::Stopped);
+}
+
+/// Mandate spec §6.1, DEC-155 item 4: `cli_confirm` counts on `paper` alone. On a backtest view a
+/// Stop whose evidence is fresh and unused is refused for its method, and leaves exactly its
+/// `OwnerCommandRefused` with `step_up_method` (the #411 review, minor 1).
+#[test]
+#[ignore = "pending E8-3"]
+fn a_stop_with_cli_confirm_off_paper_is_refused_for_its_method() {
+    let (ids, gate, plan) = (TestIds, AllowGate, FixedPlan::silent());
+    let mut view = universe(&["AAPL"]);
+    view.approval.environment = Environment::Backtest;
+    let ports = ports(&ids, &gate, &plan, &view);
+    let (mut shell, _) = started(&ports);
+    let reconciled = shell.state.effective_mode();
+    let stop = Command::to_agent(next_control_seq(&shell), "stop", ASKED_AT + 10).event();
+    let ran = tail(&mut shell, &stop, &ports);
+    refused_only(
+        &ran,
+        &stop.event_id,
+        "stop",
+        "step_up_method",
+        ASKED_AT + 10,
+    );
+    assert_eq!(shell.state.effective_mode(), reconciled);
 }
 
 /// Journal spec §2, EI-3: a refused command is copied at most once. After a restart that folds
