@@ -64,6 +64,7 @@ const CASE_KEYS: &[&str] = &[
     "proposed",
     "input",
     "at",
+    "now",
     "action",
     "expect",
 ];
@@ -137,6 +138,7 @@ fn run_listed(fixture: &Json, index: usize) -> Result<(), String> {
         "thesis_expiry" => research::thesis_expiry_case(case),
         "stagger" => research::stagger_case(case),
         "autonomy" => autonomy::autonomy_case(fixture, case),
+        "review" => autonomy::review_case(fixture, case),
         "builder" => order_builder::builder_case(fixture, case),
         other => Err(format!("unknown case kind `{other}`")),
     }
@@ -201,6 +203,16 @@ const EXPECT_KEYS: &[(&str, &[&str])] = &[
     (
         "autonomy",
         &["decision", "by", "approvers_required", "on_timeout"],
+    ),
+    (
+        "review",
+        &[
+            "decision",
+            "by",
+            "approvers_required",
+            "on_timeout",
+            "trigger",
+        ],
     ),
     ("builder", order_builder::EXPECT_KEYS),
 ];

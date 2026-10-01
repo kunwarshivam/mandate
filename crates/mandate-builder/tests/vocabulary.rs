@@ -25,6 +25,7 @@ use mandate_domain::{AssetClass, AutonomyDecision, MarketSession, Purpose};
 use mandate_num::{NumError, Ratio, Signed, Unit, Usd};
 use mandate_spec::condition::{ConditionField, Facts};
 use mandate_spec::document::RuleId;
+use mandate_time::Date;
 
 fn usd(text: &str) -> Usd {
     Usd::parse(text).unwrap_or_else(|e| panic!("`{text}` is a USD amount: {e}"))
@@ -114,6 +115,12 @@ fn decided_by_is_labelled_the_way_the_reference_cases_write_it() {
         DecidedBy::ClientCeiling.label(),
         "client_ceiling",
         "§6.4's `decided_by` and DEC-252's `DecisionMade` spell the client ceiling this way"
+    );
+    assert_eq!(
+        DecidedBy::ReviewCeiling.label(),
+        "review_ceiling",
+        "§6.4's `decided_by`, the journal spec's `DecisionMade`, and MC-D spell the review ceiling \
+         this way"
     );
     let id = RuleId::parse("low_score").unwrap_or_else(|e| panic!("a rule id: {e}"));
     assert_eq!(
@@ -238,6 +245,7 @@ fn an_action() -> ActionContext {
         bought_today_usd: usd("1100"),
         position_pnl_fraction: signed("0.05"),
         requested_by: RequestedBy::Agent,
+        risk_day: Date::parse("2026-09-22").unwrap_or_else(|e| panic!("a date: {e}")),
     }
 }
 

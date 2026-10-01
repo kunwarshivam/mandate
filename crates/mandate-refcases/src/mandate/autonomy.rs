@@ -39,8 +39,12 @@ use mandate_builder::{ActionContext, BuilderError, Classification, RequestedBy, 
 use mandate_domain::{AssetClass, AssetId, AutonomyDecision, MarketSession, Purpose};
 use mandate_num::{Signed, Unit, Usd};
 use mandate_spec::document::OnTimeout;
+use mandate_spec::risk;
+use mandate_time::Date;
 
-use super::{at_of, must_parse, not_implemented, num, patched, unknown_members};
+use super::{
+    at_of, instant, must_parse, not_implemented, num, patched, patched_json, unknown_members,
+};
 use crate::{Json, at, ensure, expect_eq, str_at, u64_at};
 
 /// Every member a family-A case carries at its top level.
@@ -68,19 +72,118 @@ const APPROVAL_KEYS: [&str; 2] = ["approvers_required", "on_timeout"];
 /// The instrument [`unread_facts`] names, which [`action`] refuses in every opening.
 const UNREAD_INSTRUMENT: &str = "00000000-0000-4000-8000-000000000000";
 
+/// Every member a `kind: review` case carries at its top level: family A's and the risk clock.
+const REVIEW_CASE_KEYS: &[&str] = &[
+    "id", "kind", "title", "base", "patch", "now", "action", "expect",
+];
+/// The members of a review-ceiling ASK's `trigger` (§6.4), for a request the agent made.
+const TRIGGER_KEYS: &[&str] = &[
+    "mandate_version",
+    "decided_by",
+    "requested_by",
+    "client",
+    "rule",
+];
+/// The day family A's actions are decided on. Family A states no time, so [`autonomy_case`]
+/// refuses a mandate with a review date, the only thing that reads the day (§6.2 step 5b).
+const UNSTATED_DAY: (u16, u8, u8) = (2026, 9, 22);
+
 /// `kind: autonomy` — one action classified against the case's patched mandate.
 pub(super) fn autonomy_case(fixture: &Json, case: &Json) -> Result<(), String> {
     unknown_members(case, CASE_KEYS)
         .map_err(|unknown| format!("case keys not interpreted: {unknown}"))?;
     let mandate = must_parse(&patched(fixture, case)?)?;
-    let action = action(str_at(case, "id")?, at_of(case, "action")?)?;
+    ensure(mandate.autonomy.review_by.is_none(), || {
+        "a family-A case states no risk clock, so its mandate may have no review date".to_owned()
+    })?;
+    let (year, month, day) = UNSTATED_DAY;
+    let unstated = Date::new(year, month, day).map_err(|e| format!("the unstated day: {e}"))?;
+    let action = action(str_at(case, "id")?, at_of(case, "action")?, unstated)?;
     let decided = classify(&mandate.autonomy, &action).map_err(builder)?;
     compare(at_of(case, "expect")?, &decided)
 }
 
+/// `kind: review` — family A's case at a stated risk clock, `now`, whose risk day §6.2 step 5b
+/// compares with the review date (MI-32, DEC-271). The day is `mandate-spec`'s reading of the risk
+/// day of `now` (§5.4, MC-T), never the UTC date. An ASK's expectation also states the approval
+/// content's `trigger` (§6.4), which is read here from the classification and the case's own
+/// patched document: the rule that asked verbatim, or `null` for the default and the ceilings.
+pub(super) fn review_case(fixture: &Json, case: &Json) -> Result<(), String> {
+    unknown_members(case, REVIEW_CASE_KEYS)
+        .map_err(|unknown| format!("case keys not interpreted: {unknown}"))?;
+    let document = patched(fixture, case)?;
+    let mandate = must_parse(&document)?;
+    let now = instant(at(case, "now")?, "now")?;
+    let day = risk::risk_day(now)
+        .map_err(|e| format!("`now` has no risk day: {}", e.code()))?
+        .day;
+    let action = action(str_at(case, "id")?, at_of(case, "action")?, day)?;
+    let decided = classify(&mandate.autonomy, &action).map_err(builder)?;
+    let expect = at_of(case, "expect")?;
+    let mut rest = expect.clone();
+    let trigger = rest
+        .as_object_mut()
+        .and_then(|members| members.remove("trigger"));
+    compare(&rest, &decided)?;
+    match (decided.decision, trigger) {
+        (AutonomyDecision::Ask, Some(trigger)) => {
+            let rules = at(at(&patched_json(fixture, case)?, "autonomy")?, "rules")?.clone();
+            let version = mandate
+                .version()
+                .map_err(|e| format!("the mandate version: {}", e.code()))?;
+            let version = format!("sha256:{}", version.digest());
+            compare_trigger(&trigger, &decided, &version, &rules)
+        }
+        (AutonomyDecision::Ask, None) => {
+            Err("an ASK states the approval content's `trigger`".to_owned())
+        }
+        (_, Some(_)) => Err("`trigger`: only an ASK has an approval content".to_owned()),
+        (_, None) => Ok(()),
+    }
+}
+
+fn compare_trigger(
+    trigger: &Json,
+    decided: &Classification,
+    version: &str,
+    rules: &Json,
+) -> Result<(), String> {
+    unknown_members(trigger, TRIGGER_KEYS)
+        .map_err(|unknown| format!("`trigger` members not interpreted: {unknown}"))?;
+    let label = decided.by.label();
+    expect_eq(
+        "trigger.mandate_version",
+        version,
+        str_at(trigger, "mandate_version")?,
+    )?;
+    expect_eq(
+        "trigger.decided_by",
+        label.as_str(),
+        str_at(trigger, "decided_by")?,
+    )?;
+    expect_eq(
+        "trigger.requested_by",
+        "agent",
+        str_at(trigger, "requested_by")?,
+    )?;
+    expect_eq("trigger.client", &Json::Null, at(trigger, "client")?)?;
+    let shown = match label.strip_prefix("rule:") {
+        Some(id) => rules
+            .as_array()
+            .and_then(|all| {
+                all.iter()
+                    .find(|r| r.get("id").and_then(Json::as_str) == Some(id))
+            })
+            .cloned()
+            .ok_or_else(|| format!("no rule `{id}` in the case's document"))?,
+        None => Json::Null,
+    };
+    expect_eq("trigger.rule", &shown, at(trigger, "rule")?)
+}
+
 /// Case `id`'s `action` as the facts `classify` reads, every member of it read. An opening may not
 /// name [`UNREAD_INSTRUMENT`], so no case is ever decided against the placeholder by accident.
-fn action(id: &str, stated: &Json) -> Result<ActionContext, String> {
+fn action(id: &str, stated: &Json, risk_day: Date) -> Result<ActionContext, String> {
     let purpose = purpose(str_at(stated, "purpose")?)?;
     if purpose.reduces_risk() {
         unknown_members(stated, &["purpose"]).map_err(|unknown| {
@@ -88,7 +191,7 @@ fn action(id: &str, stated: &Json) -> Result<ActionContext, String> {
         })?;
         return Ok(ActionContext {
             purpose,
-            ..unread_facts()?
+            ..unread_facts(risk_day)?
         });
     }
     unknown_members(stated, OPENING_KEYS)
@@ -125,11 +228,12 @@ fn action(id: &str, stated: &Json) -> Result<ActionContext, String> {
         bought_today_usd: usd("bought_today_usd")?,
         position_pnl_fraction: signed("position_pnl_fraction")?,
         requested_by: RequestedBy::Agent,
+        risk_day,
     })
 }
 
 /// The facts a risk-reducing action does not state; the module doc says why they cannot matter.
-fn unread_facts() -> Result<ActionContext, String> {
+fn unread_facts(risk_day: Date) -> Result<ActionContext, String> {
     Ok(ActionContext {
         purpose: Purpose::Open,
         order_usd: Usd::ZERO,
@@ -147,6 +251,7 @@ fn unread_facts() -> Result<ActionContext, String> {
         bought_today_usd: Usd::ZERO,
         position_pnl_fraction: Signed::ZERO,
         requested_by: RequestedBy::Agent,
+        risk_day,
     })
 }
 
@@ -231,6 +336,8 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
+    use mandate_builder::{Classification, DecidedBy};
+    use mandate_domain::AutonomyDecision;
     use mandate_num::Ratio;
     use mandate_spec::condition::{ConditionField, Facts, FieldKind};
     use serde_json::json;
@@ -520,7 +627,9 @@ mod tests {
             if stated.as_object().is_some_and(|m| m.len() == 1) {
                 continue;
             }
-            let facts = super::action(&id, stated).map_err(|e| format!("{id}: {e}"))?;
+            let (year, month, day) = super::UNSTATED_DAY;
+            let unstated = mandate_time::Date::new(year, month, day).map_err(|e| e.to_string())?;
+            let facts = super::action(&id, stated, unstated).map_err(|e| format!("{id}: {e}"))?;
             for field in FIELDS {
                 let name = field.as_str();
                 let wanted = &stated[name];
@@ -540,5 +649,83 @@ mod tests {
             }
         }
         crate::expect_eq("facts compared", compared, 12 * 15)
+    }
+
+    /// The `review` arm passes no case it was not shown to pass: MC-D18 with its decision, its
+    /// source, or its `trigger` edited fails, and so does one with a member planted beside the
+    /// case's own.
+    #[test]
+    fn a_review_case_with_an_edited_expectation_fails() -> Result<(), String> {
+        let fixture = fixture()?;
+        for (pointer, value) in [
+            ("/expect/decision", json!("auto")),
+            ("/expect/by", json!("rule:routine")),
+            ("/expect/trigger/decided_by", json!("default")),
+            ("/a_key_the_harness_does_not_know", json!(null)),
+        ] {
+            let edited = doctored(&fixture, "MC-D18", "", |case| {
+                if let Some(slot) = case.pointer_mut(pointer) {
+                    *slot = value.clone();
+                } else if let Some(members) = case.as_object_mut() {
+                    members.insert(pointer.trim_start_matches('/').to_owned(), value.clone());
+                }
+            })?;
+            crate::ensure(run(edited, "MC-D18").is_err(), || {
+                format!("MC-D18 with {pointer} edited still passed")
+            })?;
+        }
+        Ok(())
+    }
+
+    /// §6.4's `trigger`, compared member by member: an ASK the review ceiling raised shows no rule,
+    /// an ASK a rule reached shows that rule verbatim, and each member edited alone fails naming it.
+    #[test]
+    fn the_trigger_is_compared_member_by_member() -> Result<(), String> {
+        let large_orders = json!({"id": "large_orders", "when": {"field": "order_usd", "op": "gt", "value": "900"},
+                            "then": "ask"});
+        let rules = json!([large_orders.clone()]);
+        let asked = |by: DecidedBy| Classification {
+            decision: AutonomyDecision::Ask,
+            by,
+            approval: None,
+        };
+        let ceiling = json!({"mandate_version": "sha256:v", "decided_by": "review_ceiling",
+                             "requested_by": "agent", "client": null, "rule": null});
+        super::compare_trigger(
+            &ceiling,
+            &asked(DecidedBy::ReviewCeiling),
+            "sha256:v",
+            &rules,
+        )?;
+        let large =
+            mandate_spec::document::RuleId::parse("large_orders").map_err(|e| e.to_string())?;
+        let ruled = json!({"mandate_version": "sha256:v", "decided_by": "rule:large_orders",
+                           "requested_by": "agent", "client": null, "rule": large_orders.clone()});
+        super::compare_trigger(&ruled, &asked(DecidedBy::Rule(large)), "sha256:v", &rules)?;
+        for (member, value) in [
+            ("mandate_version", json!("sha256:w")),
+            ("decided_by", json!("default")),
+            ("requested_by", json!("client")),
+            ("client", json!("dots")),
+            ("rule", large_orders.clone()),
+            ("planted", json!(null)),
+        ] {
+            let mut edited = ceiling.clone();
+            if let Some(members) = edited.as_object_mut() {
+                members.insert(member.to_owned(), value);
+            }
+            let failure = super::compare_trigger(
+                &edited,
+                &asked(DecidedBy::ReviewCeiling),
+                "sha256:v",
+                &rules,
+            )
+            .err()
+            .ok_or_else(|| format!("`trigger.{member}` edited still compared equal"))?;
+            crate::ensure(failure.contains(member), || {
+                format!("`trigger.{member}` edited failed without naming it: {failure}")
+            })?;
+        }
+        Ok(())
     }
 }
