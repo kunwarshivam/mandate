@@ -11,10 +11,12 @@
 //! adds the backtest cases — `bars`, `orders`, `isolation`, and the `fills` and `canceled_legs`
 //! expectations, run through `mandate-sim` (DEC-106 item 11); E6-9 adds `propose_order` steps and
 //! the `decision` expectation, decided by `mandate_risk::evaluate`, and the account's §7.3 status
-//! fields from `initial.account` and `broker_account_update` steps ([`gate`], DEC-199). A case
-//! that uses anything owned by a later story fails with "not interpreted until <story>" for each
-//! such item; anything the vocabulary does not know fails as unknown. Every key of every
-//! interpreted expectation is checked.
+//! fields from `initial.account` and `broker_account_update` steps ([`gate`], DEC-199); E6-6 adds
+//! the day-trade regime and its figures from `initial.account` and the `day_trade_count`
+//! expectation (DEC-284), and decides a later proposal once every earlier allowed one was filled
+//! in full (DEC-259 item 7). A case that uses anything owned by a later story fails with "not
+//! interpreted until <story>" for each such item; anything the vocabulary does not know fails as
+//! unknown. Every key of every interpreted expectation is checked.
 
 use core::fmt::Display;
 use std::collections::BTreeSet;
@@ -30,7 +32,7 @@ use mandate_num::{
     Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Fraction, Price, Qty, Rounding, ShareIncrement,
     SignedQty, SplitRatio, Usd,
 };
-use mandate_risk::Decision;
+use mandate_risk::{AccountFill, AssetId, Decision};
 use mandate_sim::{
     Eligibility, FirstBarVolumes, Instrument, Nanos, OcoLeg, OrderKind, OrderRef, Session, SimBar,
     SimConfig, SimError, SimFill, SimOrder, SimOutcome, Slippage, TimeInForce, simulate,
@@ -68,7 +70,6 @@ const PENDING_EVENTS: &[(&str, &str)] = &[
 const PENDING_EXPECT: &[(&str, &str)] = &[
     ("orders", "E7-2"),
     ("actions", "E7-4"),
-    ("day_trade_count", "E6-6"),
     ("reconciliation", "E7-3"),
     ("protective_sell_qty", "E7-4"),
 ];
@@ -92,11 +93,15 @@ const MODE_OWNERS: &[(&str, &str)] = &[
 /// a proposal's `agent`), so an `agent_mode` expectation there is its to compare.
 const MODE_HOLDER: &str = "E7-5";
 
-/// What a proposal's submission needs before a second proposal in the same case can be decided
-/// against its effects (DEC-199 item 3): the working order, its reservation, and its conduct
-/// figures, which `actions` (E7-4) and the account ledger (E7-5) own. Until then each proposal is
-/// decided alone, so a case with two is refused rather than run as if the first left no trace.
-const SUBMISSION_STORIES: &str = "E7-4 and E7-5";
+/// What a proposal's submission needs before a later proposal in the same case can be decided
+/// against a working order: the order, its reservation, and its conduct figures, which `actions`
+/// (E7-4) and the account ledger (E7-5) own. Until then a later proposal is decided only once every
+/// earlier allowed proposal was filled in full on its side by the case's `fill` steps (DEC-199 item
+/// 3 as narrowed by DEC-259 item 7), and is refused with this text otherwise, rather than run as if
+/// the earlier order left no trace. It reads as a pending item whether a run or the case's shape
+/// finds it.
+pub(crate) const LATER_PROPOSAL_WAITS: &str =
+    "a second `propose_order` step in one case not interpreted until E7-4 and E7-5";
 
 /// `propose_order` members that later stories' arms read: another agent (the account ledger),
 /// brackets and the exit ladder's pricing and status inputs (the exit sequences), and an owner's
@@ -114,7 +119,13 @@ const PENDING_PROPOSAL: &[(&str, &str)] = &[
 
 const PENDING_INITIAL: &[(&str, &str)] = &[("open_orders", "E7-4"), ("agents", "E7-5")];
 
-const PENDING_ACCOUNT: &[(&str, &str)] = &[
+/// `initial.account` members a later story reads. The day-trade regime and its figures are read
+/// from the initial account ([`gate`], DEC-284).
+const PENDING_INITIAL_ACCOUNT: &[(&str, &str)] = &[("crypto_status", "E6-10")];
+
+/// `broker_account_update` members a later story reads: a change to the regime or its figures in
+/// the middle of a case is not read (DEC-284), and neither is the crypto status.
+const PENDING_ACCOUNT_UPDATE: &[(&str, &str)] = &[
     ("regime", "E6-6"),
     ("prior_day_trades", "E6-6"),
     ("last_equity", "E6-6"),
@@ -320,22 +331,12 @@ fn pending(case: &Json) -> BTreeSet<String> {
         .and_then(Json::as_object)
         .unwrap_or(&empty);
     for key in account.keys() {
-        if let Some(story) = owner(PENDING_ACCOUNT, key) {
+        if let Some(story) = owner(PENDING_INITIAL_ACCOUNT, key) {
             note(format!("initial account `{key}`"), story);
         }
     }
     let steps = case.get("steps").and_then(Json::as_array);
-    let proposals = steps
-        .into_iter()
-        .flatten()
-        .filter(|step| step.get("event").and_then(Json::as_str) == Some("propose_order"))
-        .count();
-    if proposals > 1 {
-        note(
-            "a second `propose_order` step in one case".to_owned(),
-            SUBMISSION_STORIES,
-        );
-    }
+    let unfilled = steps.is_some_and(|steps| a_proposal_follows_one_not_filled_in_full(steps));
     for step in steps.into_iter().flatten() {
         let event = step.get("event").and_then(Json::as_str).unwrap_or("");
         if let Some(story) = owner(PENDING_EVENTS, event) {
@@ -375,18 +376,60 @@ fn pending(case: &Json) -> BTreeSet<String> {
         if event == "broker_account_update" {
             let members = data.and_then(Json::as_object).unwrap_or(&empty);
             for key in members.keys() {
-                if let Some(story) = owner(PENDING_ACCOUNT, key) {
+                if let Some(story) = owner(PENDING_ACCOUNT_UPDATE, key) {
                     note(format!("account update field `{key}`"), story);
                 }
             }
         }
     }
+    if unfilled && !out.is_empty() {
+        out.insert(LATER_PROPOSAL_WAITS.to_owned());
+    }
     out
 }
 
+/// Whether some proposal follows an earlier one that the `fill` steps between them, on its
+/// instrument and side, do not fill in full. Whether that later proposal can be decided turns on
+/// the earlier one's verdict (DEC-259 item 7: a refused proposal leaves no trace), which only a run
+/// gives, so [`pending`] lists it only while another item keeps the case from running, and the run
+/// refuses it otherwise ([`gate::Gate::decide`]).
+fn a_proposal_follows_one_not_filled_in_full(steps: &[Json]) -> bool {
+    let mut open: Option<(&Json, Option<Qty>)> = None;
+    for step in steps {
+        let data = step.get("data");
+        let field = |key: &str| data.and_then(|d| d.get(key));
+        let qty = |key: &str| {
+            field(key)
+                .and_then(Json::as_str)
+                .and_then(|text| Qty::parse(text).ok())
+        };
+        match step.get("event").and_then(Json::as_str) {
+            Some("propose_order") => {
+                if open.is_some_and(|(_, left)| left != Some(Qty::ZERO)) {
+                    return true;
+                }
+                open = Some((step, qty("qty")));
+            }
+            Some("fill") => {
+                if let Some((proposal, left)) = open.as_mut() {
+                    let on_its_side = ["instrument", "side"]
+                        .iter()
+                        .all(|key| proposal.get("data").and_then(|d| d.get(*key)) == field(key));
+                    if on_its_side {
+                        *left = left
+                            .zip(qty("qty_gross"))
+                            .and_then(|(left, filled)| left.checked_sub(filled).ok());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 /// What a `propose_order` step needs beyond [`gate`]: a later story's member, a crypto instrument
-/// (its quote currency for check 2's USD pairs, read by E6-10's harness PR), a margin account at a broker other than alpaca, whose day-trade
-/// regime the case must state (E6-6; check 8 reads no regime for a cash account), and the
+/// (its quote currency for check 2's USD pairs, read by E6-10's harness PR), and the
 /// `buying_power` after the proposal, which counts the submitted order's reservation (the account
 /// ledger, E7-5).
 fn pending_proposal(
@@ -409,17 +452,6 @@ fn pending_proposal(
         .and_then(Json::as_str);
     if class == Some("crypto") {
         note("`propose_order` on a crypto instrument".to_owned(), "E6-10");
-    }
-    let profile = case.get("broker_profile").and_then(Json::as_str);
-    let account_type = case
-        .get("initial")
-        .and_then(|i| i.get("account")?.get("type"))
-        .and_then(Json::as_str);
-    if let Some(profile) = profile.filter(|p| *p != "alpaca" && account_type != Some("cash")) {
-        note(
-            format!("`propose_order` on a `{profile}` margin account's day-trade regime"),
-            "E6-6",
-        );
     }
     if expect.contains_key("buying_power") {
         note(
@@ -462,12 +494,20 @@ fn run_case(fixture: &Json, case: &Json) -> Result<(), String> {
     for (n, step) in list_at(case, "steps")?.iter().enumerate() {
         let label = format!("step {}", n.saturating_add(1));
         let (record, decision) = run_step(&mut account, &mut gate, step, n, &instruments, &config)
-            .map_err(|e| format!("{label}: {e}"))?;
+            .map_err(|e| {
+                if e == LATER_PROPOSAL_WAITS {
+                    e
+                } else {
+                    format!("{label}: {e}")
+                }
+            })?;
         if let Some(expect) = step.get("expect") {
+            let when = UtcNanos::parse_rfc3339(str_at(step, "at")?)
+                .map_err(|e| format!("{label}: `at`: {e}"))?;
             check(
                 &account,
                 (record.as_ref(), decision.as_ref()),
-                &gate,
+                (&gate, &config, when),
                 baseline.as_ref(),
                 &instruments,
                 expect,
@@ -776,6 +816,7 @@ fn initial(
     let account = at(initial, "account")?;
     let mut account_keys = vec!["cash", "type"];
     account_keys.extend_from_slice(gate::STATUS_FIELDS);
+    account_keys.extend_from_slice(gate::DAY_TRADE_FIELDS);
     fields(account, "initial account", &account_keys)?;
     let account_type = account_type(account, profile)?;
     let cash = at(account, "cash")?;
@@ -862,13 +903,21 @@ fn run_step(
                         .to_owned(),
                 ),
             };
+            let qty_gross = num(Qty::parse(dec_at(data, "qty_gross")?.as_str()), "qty_gross")?;
+            gate.fill(AccountFill {
+                at: when,
+                instrument: AssetId::new(id.as_str()).map_err(|e| format!("`{id}`: {e}"))?,
+                asset_class: *class,
+                side,
+                qty: qty_gross,
+            })?;
             vec![Input::Fill(Execution {
                 fill_id: format!("step_{n}"),
                 client_order_id,
                 instrument: id.clone(),
                 asset_class: *class,
                 side,
-                qty_gross: num(Qty::parse(dec_at(data, "qty_gross")?.as_str()), "qty_gross")?,
+                qty_gross,
                 price: num(Price::parse(dec_at(data, "price")?.as_str()), "price")?,
                 liquidity,
                 executed_at: when,
@@ -1047,7 +1096,7 @@ fn delta(what: &str, now: Result<Usd, AccountingError>, then: Usd) -> Result<Usd
 fn check(
     account: &Account,
     (record, decision): (Option<&Record>, Option<&Decision>),
-    gate: &gate::Gate,
+    (gate, config, when): (&gate::Gate, &Config, UtcNanos),
     baseline: Option<&Baseline>,
     instruments: &Instruments,
     expect: &Json,
@@ -1072,11 +1121,15 @@ fn check(
             "income",
             "buying_power",
             "agent_mode",
+            "day_trade_count",
         ],
     )?;
     for (key, expected) in expect {
         match key.as_str() {
             "decision" => gate.check_decision(decision, expected)?,
+            "day_trade_count" => {
+                gate.check_day_trade_count(account, config, instruments, when, expected)?
+            }
             "agent_mode" => {
                 return Err(format!(
                     "expectation `agent_mode` not interpreted until {MODE_HOLDER}"
