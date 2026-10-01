@@ -13,11 +13,13 @@
 //! releases the agent's positions to the owner records the choice and the warning shown (DEC-136).
 
 use mandate_approval::KillScope;
-use mandate_canon::Value;
+use std::collections::{BTreeMap, BTreeSet};
+
+use mandate_canon::{Digest, Value};
 
 use crate::approvals;
 use crate::control::{
-    Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Submitted,
+    Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Repeat, Submitted,
     account_stream, agent_stream, code_of, commit, control_stream, decide, envelopes, object, text,
 };
 
@@ -91,9 +93,7 @@ fn code_at(agent: &str, command: &Command, head: u64) -> Result<Option<String>, 
         Command::Pause => return Ok(None),
         Command::Resume => ("resume", None, &None, None),
         Command::Stop { release: false } => ("stop", None, &None, None),
-        Command::Stop { release: true } => {
-            return Err(ControlError::Unimplemented { story: "E8-3" });
-        }
+        Command::Stop { release: true } => ("stop_release", None, &None, None),
         Command::Exit { instrument, bid } => ("owner_exit", Some(instrument), bid, None),
         Command::Acknowledge { event } => ("acknowledge", None, &None, Some(event)),
     };
@@ -213,6 +213,7 @@ pub fn command(
         event_type,
         key,
         Confirmation::AtHead(&confirmed),
+        Repeat::FindsEarlier,
     )? {
         Decision::Committed(submitted) => Ok(submitted),
         Decision::Fresh(decided) if needs_code && !decided.stepped_up => {
@@ -251,6 +252,7 @@ pub fn kill(
         "OwnerCommandIssued",
         key,
         Confirmation::AtHead(&confirmed),
+        Repeat::AlwaysCommits,
     )? {
         Decision::Committed(submitted) => Ok(submitted),
         Decision::Fresh(decided) => commit(journal, ids, owner, decided, &["submitted_at"], now),
@@ -315,19 +317,62 @@ pub fn status(
 /// The restrictions `account`'s stream holds for `agent`.
 ///
 /// # Errors
-/// [`ControlError::Journal`] when the journal cannot be read; [`ControlError::Unimplemented`] for
-/// an account stream with events, in the tests PR (DEC-77).
+/// [`ControlError::Journal`] when the journal cannot be read.
 fn restrictions(
     journal: &dyn ControlJournal,
     owner: &Owner,
     agent: &str,
     account: &str,
 ) -> Result<Vec<Restriction>, ControlError> {
-    if envelopes(journal, &account_stream(owner, account)?)?.is_empty() {
-        return Ok(Vec::new());
+    let mut agent_held: BTreeMap<String, String> = BTreeMap::new();
+    let mut instrument_held: BTreeSet<(String, String)> = BTreeSet::new();
+    for event in envelopes(journal, &account_stream(owner, account)?)? {
+        let payload = event.get("payload");
+        let field = |k: &str| payload.and_then(|p| p.get(k)).and_then(Value::as_str);
+        if field("agent") != Some(agent) {
+            continue;
+        }
+        let Some(restriction) = field("restriction") else {
+            continue;
+        };
+        match event.get("event_type").and_then(Value::as_str) {
+            Some("AgentModeApplied") => match field("to") {
+                Some("normal") => {
+                    agent_held.remove(restriction);
+                }
+                Some(mode) => {
+                    agent_held.insert(restriction.to_owned(), mode.to_owned());
+                }
+                None => {}
+            },
+            Some("InstrumentRestrictionChanged") => {
+                let Some(instrument) = field("instrument") else {
+                    continue;
+                };
+                let held = (instrument.to_owned(), restriction.to_owned());
+                match payload.and_then(|p| p.get("active")) {
+                    Some(Value::Bool(true)) => {
+                        instrument_held.insert(held);
+                    }
+                    Some(Value::Bool(false)) => {
+                        instrument_held.remove(&held);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
     }
-    let _ = agent;
-    Err(ControlError::Unimplemented { story: "E8-3" })
+    let agents = agent_held
+        .into_iter()
+        .map(|(restriction, mode)| Restriction::Agent { restriction, mode });
+    let instruments = instrument_held
+        .into_iter()
+        .map(|(instrument, restriction)| Restriction::Instrument {
+            instrument,
+            restriction,
+        });
+    Ok(agents.chain(instruments).collect())
 }
 
 /// What the owner chose in one `OwnerCommandIssued` (DEC-257 item 5, DEC-290): the agent, or `null`
@@ -345,7 +390,10 @@ fn issued(
 ) -> Result<Vec<(&'static str, Value)>, ControlError> {
     let given = |field: fn(&Confirmed) -> &String| bid.map_or(Value::Null, |b| text(field(b)));
     let warning_shown = match release {
-        Some(true) => return Err(ControlError::Unimplemented { story: "E8-3" }),
+        Some(true) => text(&format!(
+            "sha256:{}",
+            Digest::of(RELEASE_WARNING.as_bytes()).to_hex()
+        )),
         Some(false) | None => Value::Null,
     };
     Ok(vec![

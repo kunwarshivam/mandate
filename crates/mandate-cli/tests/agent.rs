@@ -689,7 +689,6 @@ fn every_owner_command_payload_has_exactly_its_members() {
 /// the CLI shows, computed here from [`RELEASE_WARNING`]'s bytes. The warning says the positions
 /// become unprotected.
 #[test]
-#[ignore = "pending E8-3"]
 fn stop_with_release_records_the_choice_and_the_warning_shown() {
     let mut fx = Fixture::new();
     let mut ids = FixedIds::default();
@@ -745,7 +744,6 @@ fn stop_with_release_records_the_choice_and_the_warning_shown() {
 /// never confirms a release, nor the release's code a plain Stop; each is refused and commits
 /// nothing.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_stop_code_is_bound_to_the_release_choice() {
     let mut fx = Fixture::new();
     let mut ids = FixedIds::default();
@@ -780,7 +778,6 @@ fn the_stop_code_is_bound_to_the_release_choice() {
 /// restriction shows while its latest change is active. Agent restrictions come first, each group
 /// in name order.
 #[test]
-#[ignore = "pending E8-3"]
 fn status_shows_the_restrictions_in_force() {
     let mut fx = Fixture::new();
     fx.applied(AGENT, "reconciliation", "exits_only");
@@ -970,7 +967,6 @@ fn run(
 /// re-run types the code printed before the first run, at the head before its own event. The kill
 /// switch is the exception, always committed (DEC-290 item 5).
 #[test]
-#[ignore = "pending E8-3"]
 fn a_re_run_of_a_command_that_did_commit_commits_nothing_twice() {
     let resume = code_for(&Fixture::new(), AGENT, &Command::Resume);
     for (label, which) in [
@@ -1012,7 +1008,6 @@ fn a_re_run_of_a_command_that_did_commit_commits_nothing_twice() {
 /// `causation_id` is it), the same command again is a new one and is committed; until then it is
 /// the same one, and a second pause reports the first.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_command_its_runtime_recorded_is_committed_anew() {
     let pause = |fx: &mut Fixture, second: i64| {
         answer(
@@ -1051,7 +1046,6 @@ fn a_command_its_runtime_recorded_is_committed_anew() {
 /// again by its re-run, never taken for the first. A pause repeated the same way is reported as the
 /// first, so the difference is the kill switch's own.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_kill_switch_is_always_committed_never_reported_as_an_earlier_one() {
     let mut fx = Fixture::new();
     let pause = |fx: &mut Fixture, second: i64| {
@@ -1112,7 +1106,6 @@ fn a_kill_switch_is_always_committed_never_reported_as_an_earlier_one() {
 /// acknowledgment again right after it, with the code printed before the first, reports the first
 /// and commits nothing, spending no new step-up.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_repeated_acknowledgment_reports_the_first() {
     let mut fx = Fixture::new();
     let ack = Command::Acknowledge {

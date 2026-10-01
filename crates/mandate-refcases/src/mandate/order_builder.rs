@@ -1374,15 +1374,46 @@ mod tests {
         "MC-B20", "MC-B21", "MC-B22", "MC-B23", "MC-B24", "MC-B25", "MC-B29",
     ];
 
-    /// The cases that cannot pass yet, each with what its failure must say.
-    const OWED: [(&str, &[&str]); 7] = [
-        ("MC-B17", &["mandate_risk::trim_proposals", "pending E6-4"]),
-        ("MC-B30", &["mandate_risk::trim_proposals", "pending E6-4"]),
-        ("MC-B31", &["mandate_risk::trim_proposals", "pending E6-4"]),
-        ("MC-B32", &["mandate_risk::trim_proposals", "pending E6-4"]),
-        ("MC-B26", &["`gate_dry_run`", "Some(CryptoPairNotUsd)"]),
-        ("MC-B27", &["`gate_dry_run`", "Some(CryptoPairNotUsd)"]),
-        ("MC-B28", &["`gate_dry_run`", "Some(CryptoPairNotUsd)"]),
+    /// The cases that cannot pass yet, each with what owes them and what its failure must say.
+    /// MC-B26 to MC-B28's failure names no story: the gate denies their crypto proposals
+    /// `crypto_pair_not_usd` because this harness does not yet read a pair's quote currency from
+    /// its pinned `symbol`, which E6-10's harness PR adds (DEC-254 item 7).
+    const OWED: [(&str, &str, &[&str]); 7] = [
+        (
+            "MC-B17",
+            "E6-4",
+            &["mandate_risk::trim_proposals", "pending E6-4"],
+        ),
+        (
+            "MC-B30",
+            "E6-4",
+            &["mandate_risk::trim_proposals", "pending E6-4"],
+        ),
+        (
+            "MC-B31",
+            "E6-4",
+            &["mandate_risk::trim_proposals", "pending E6-4"],
+        ),
+        (
+            "MC-B32",
+            "E6-4",
+            &["mandate_risk::trim_proposals", "pending E6-4"],
+        ),
+        (
+            "MC-B26",
+            "E6-10's harness PR",
+            &["`gate_dry_run`", "Some(CryptoPairNotUsd)"],
+        ),
+        (
+            "MC-B27",
+            "E6-10's harness PR",
+            &["`gate_dry_run`", "Some(CryptoPairNotUsd)"],
+        ),
+        (
+            "MC-B28",
+            "E6-10's harness PR",
+            &["`gate_dry_run`", "Some(CryptoPairNotUsd)"],
+        ),
     ];
 
     fn fixture() -> Result<Json, String> {
@@ -1674,12 +1705,12 @@ mod tests {
             if PASSING.contains(&id.as_str()) {
                 result.map_err(|e| format!("{id}: {e}"))?;
             } else {
-                let (_, needles) = OWED
+                let (_, owner, needles) = OWED
                     .iter()
-                    .find(|(owed, _)| *owed == id)
+                    .find(|(owed, _, _)| *owed == id)
                     .ok_or_else(|| format!("{id} is neither passing nor owed"))?;
                 for needle in *needles {
-                    fails_naming(result.clone(), needle, &id)?;
+                    fails_naming(result.clone(), needle, &format!("{id}, owed to {owner}"))?;
                 }
             }
             seen = seen.saturating_add(1);

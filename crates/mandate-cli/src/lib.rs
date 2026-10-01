@@ -1,3 +1,13 @@
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::float_arithmetic,
+    clippy::float_cmp,
+    clippy::as_conversions
+)]
 //! The `mandate` command line. `download` fetches Alpaca historical bars and trades into Parquet
 //! datasets (backlog E2-1); `inspect` reports what a stored dataset covers and whether to trust
 //! it (E2-2); `journal verify` runs journal spec §11 over an exported journal and its artifact

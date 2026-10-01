@@ -419,6 +419,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   approval flow, step-up and the owner commands (`AGENTS.md`'s safety-critical list), so set
   `safety_critical = true` for it in `xtask/layers.toml`, add its CODEOWNERS line and the lint
   header `cargo xtask layers` checks, and let the mutation gate judge its diff.
+  *Done (the M7 CLI follow-up implementation, DEC-290):* the 13 tests pass. A Stop with release
+  records `release: true` and the warning's content reference, and its code binds the choice;
+  `status` folds the account stream's restrictions; a re-run of the control stream's last,
+  unrecorded command reports it, whatever head it was decided at, while a kill switch skips that
+  search and is always committed; retries back off from 100 ms, doubling to 2 s, with a jitter
+  drawn from the event id; and a refusal's message says whether the deadline has passed.
+  `mandate-cli` is safety-critical (`xtask/layers.toml`, CODEOWNERS, the lint header). Still open:
+  the `clap` wiring and a `mandate-journal-pg` `ControlJournal` (DEC-279 item 10).
   *Follow-up (#343 review, minor 1; a tests correction):* a new family that reuses an owned family's
   kind (for example an `MC-E01` of kind `semantic`) now moves no count in `mandate_harness.rs` and
   runs through that family's arm, where on `main` before #343 it failed two counts. `unread_keys`
@@ -1706,19 +1714,30 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   asserts only the quantity bound for them, not `sent == proposed`, which
   `a_slice_binds_only_below_the_proposal_and_names_its_cap` covers separately. Assert it in the
   property too.
-- **E6-6 slice 2:** the account-wide fold is `mandate_risk::fold_day_trades` (DEC-259). Still
-  owed: interpret RC-09's and RC-09B's `regime`, `prior_day_trades`, `last_equity`, `multiplier`
-  and `day_trade_count` in `mandate-refcases`, driving the ledger through `fold_day_trades` from the
-  case's fills. The tests correction that unpins RC-09B's pending reason is #408 (DEC-77), and the
-  narrower reading of DEC-199 item 3 is DEC-259 item 7: a later proposal is decided once every
-  earlier allowed one was filled in full on its side. The harness PR owes three tests for that
-  reading: identical buys with no fill between them are still refused, a partial fill is still
-  refused, and a plant that takes the conduct figures from the proposal instead of the `fill` steps
-  is caught. RC-09's third step is a crypto proposal, which waits for E6-10's harness PR. The
-  executor (E7-3) calls the fold account-wide and journals `DayTradeFold::today`. **A fold error
-  refuses openings only** (#370 review, major 1): E7-3 must still route exits and protective orders
-  when `fold_day_trades` fails (`AGENTS.md` rule 13), and E7-3's tests PR carries the pending test
+- **E6-6 slice 2:** the account-wide fold is `mandate_risk::fold_day_trades` (DEC-259). The
+  trading-domain harness reads RC-09's and RC-09B's `regime`, `prior_day_trades`, `last_equity`,
+  `multiplier` and `day_trade_count` and drives the ledger through `fold_day_trades` from the
+  case's fills (DEC-284), after the tests correction #408. A later `propose_order` step is decided
+  once every earlier allowed one was filled in full on its side (DEC-259 item 7); the three tests
+  that reading owed are in `trading_domain::gate::tests`:
+  `a_later_proposal_waits_for_a_full_fill_on_its_side` (identical buys with no fill, a partial
+  fill, and more), and `the_conduct_figures_are_the_fill_steps` with
+  `the_opposite_fill_interval_runs_from_the_fill_step`, which catch the plant that takes the
+  conduct figures from the proposal. RC-09's third step is a crypto proposal, which waits for
+  E6-10's harness PR. The executor (E7-3) calls the fold account-wide and journals
+  `DayTradeFold::today`. **A fold error refuses openings only** (#370 review, major 1): E7-3 must
+  still route exits and protective orders when `fold_day_trades` fails (`AGENTS.md` rule 13), and
+  E7-3's tests PR carries the pending test
   `a_failed_day_trade_fold_refuses_openings_and_still_routes_exits` for it.
+- **Drive the trading-domain gate cases through the real order path once E7-4 and E7-5 do**
+  (the coordinator's ruling on #370, item 2). DEC-259 item 7 is a reading of the reference harness
+  only: it decides a later proposal once the earlier allowed ones were filled in full by `fill`
+  steps, and carries their conduct figures from those fills. When E7-4's `actions` and E7-5's
+  account ledger give a submission its working order, reservation and partial fills, switch
+  `mandate-refcases`' trading-domain gate driver to that path, delete the reading and its
+  `Order` bookkeeping in `trading_domain/gate.rs`, and let partial fills and overlapping orders be
+  decided as the order path decides them. Also read a `broker_account_update` that changes the
+  regime or its figures (DEC-284 item 4).
 - **Check the trading-domain pin of pending reasons for completeness** (#408 review, not a
   finding). `every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for` is a fixed list,
   so nothing makes a newly pending gate case join it. A rung-2 check that derives the list from the

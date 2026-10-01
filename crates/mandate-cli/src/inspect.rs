@@ -71,7 +71,7 @@ fn occurrences(name: &str, found: &Occurrences, lines: &mut Vec<String>) {
     lines.extend(found.first.iter().map(|at| format!("  {at}")));
     let shown = u64::try_from(found.first.len()).unwrap_or(u64::MAX);
     if found.count > shown {
-        lines.push(format!("  and {} more", found.count - shown));
+        lines.push(format!("  and {} more", found.count.saturating_sub(shown)));
     }
 }
 
