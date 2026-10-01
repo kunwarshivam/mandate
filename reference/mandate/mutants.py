@@ -181,6 +181,8 @@ MUTANTS = {
     "quiet hours suppress the inbox": ('    if channel == "cli_inbox" or quiet_hours is None:', '    if quiet_hours is None:'),
     "quiet hours include their end": ('% 1440 < (end - start) % 1440', '% 1440 <= (end - start) % 1440'),
     "the trigger drops the owner's rule": ('"rule": None if rule is None else {"id": rule["id"], "when": rule["when"], "then": rule["then"]}', '"rule": None'),
+    "the review ceiling's trigger names a rule": ('    rule = rules.get(by[len("rule:"):]) if by.startswith("rule:") else None\n    return {"mandate_version"',
+                                                  '    rule = rules.get(by[len("rule:"):]) if by.startswith("rule:") else (next(iter(rules.values()), None) if by == "review_ceiling" else None)\n    return {"mandate_version"'),
     "the review ceiling is skipped": ('    if review_passed(m, st) and STRICT[res["decision"]] < STRICT["ask"]:',
                                       '    if False:'),
     "the review date passes on the date itself": ('    return risk_day(st["now"])["risk_day"] > rb', '    return risk_day(st["now"])["risk_day"] >= rb'),

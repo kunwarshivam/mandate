@@ -28,7 +28,9 @@ for c in d["cases"]:
         passes = any(w in t for w in ("passes", "exactly equal", "with the accepted", "is fine", "platform defaults on listed",
                                       "user-entered and confirmed", "with two approvers", "equal to the validation",
                                       "below the floor budget", "is a warning", "shadowed", "(warning w-003)",
-                                      "is valid", "stays valid", "carries the delegation over"))
+                                      "review date at the platform default is valid", "review date on the validation date is valid",
+                                      "180 days after validation is valid", "lapsed review date carried unchanged stays valid",
+                                      "moves the review date and carries the delegation over"))
         req(cid, (e["violations"] == []) == passes, f"violations {e['violations']} vs title")
     if k == "policy":
         t = c["title"].lower()
@@ -314,6 +316,11 @@ for cid, (dec, by) in {"MC-D17": ("auto", "rule:routine"), "MC-D18": ("ask", "re
     req(cid, (C[cid]["expect"]["decision"], C[cid]["expect"]["by"]) == (dec, by), f"{dec} by {by}")
 req("MC-D21", C["MC-D21"]["patch"][1]["value"] == "auto", "an auto default")
 req("MC-D22", C["MC-D22"]["action"]["new_instrument"] and C["MC-D22"]["patch"][0]["value"] == "auto", "an auto admission")
+for cid in ("MC-D18", "MC-D19", "MC-D21", "MC-D22", "MC-D24"):
+    tr = C[cid]["expect"]["trigger"]
+    req(cid, tr["decided_by"] == C[cid]["expect"]["by"] and tr["requested_by"] == "agent" and tr["client"] is None, "the trigger names what asked")
+    req(cid, (tr["rule"] is None) == (C[cid]["expect"]["by"] == "review_ceiling"), "a review-ceiling ask shows no rule; a rule's ask shows it")
+req("MC-D19", C["MC-D19"]["expect"]["trigger"]["rule"]["id"] == "large_orders", "the owner's rule verbatim")
 req("MC-D23", C["MC-D23"]["now"] == C["MC-D17"]["now"] and C["MC-D24"]["now"] == C["MC-D18"]["now"]
     and C["MC-D23"]["patch"] == C["MC-D24"]["patch"] and C["MC-D23"]["action"] == C["MC-D24"]["action"], "the same delegation either side")
 req("MC-D27", "review_by" not in d["bases"]["btc_accumulator"]["mandate"]["autonomy"] and C["MC-D27"]["now"] > C["MC-D18"]["now"],

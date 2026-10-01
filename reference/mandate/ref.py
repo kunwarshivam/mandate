@@ -1606,11 +1606,18 @@ CONTENT_KEYS = ("action", "trigger", "evidence", "risk_impact", "reference_mark"
 DEFAULT_SENTENCE = "If you do nothing, this action is skipped"
 SCORE_LABEL = "combined model score, not a probability of profit"
 
-def approval_content(m, req, figures):
-    """The §6.4 content object whose SHA-256 is the content hash; `figures` are the §6.3 values at the request."""
-    r, rules = m["risk"], {x["id"]: x for x in m["autonomy"]["rules"]}
+def approval_trigger(m, req):
+    """The §6.4 content object's `trigger`: the owner's confirmed rule verbatim when a rule asked, else null."""
+    rules = {x["id"]: x for x in m["autonomy"]["rules"]}
     by = req["decided_by"]
     rule = rules.get(by[len("rule:"):]) if by.startswith("rule:") else None
+    return {"mandate_version": req["mandate_version"], "decided_by": by, "requested_by": req.get("requested_by", "agent"),
+            "client": req.get("client") if req.get("requested_by") == "client" else None,
+            "rule": None if rule is None else {"id": rule["id"], "when": rule["when"], "then": rule["then"]}}
+
+def approval_content(m, req, figures):
+    """The §6.4 content object whose SHA-256 is the content hash; `figures` are the §6.3 values at the request."""
+    r = m["risk"]
     E = D(figures["agent_equity"])
     ladder = [D(x["at"]) for x in r["drawdown_ladder"]]
     caps = {"order_usd": r["max_order_usd"], "position_usd_after": norm(min(D(r["max_position_usd"]), D(r["max_position_fraction"]) * E)),
@@ -1619,9 +1626,7 @@ def approval_content(m, req, figures):
     return {
         "action": {k: req[k] for k in ("instrument", "asset_class", "side", "qty")} | {"limit": req["limit_price"]}
                   | {"order_usd": norm(D(req["qty"]) * D(req["limit_price"])), "purpose": req["purpose"]},
-        "trigger": {"mandate_version": req["mandate_version"], "decided_by": by, "requested_by": req.get("requested_by", "agent"),
-                    "client": req.get("client") if req.get("requested_by") == "client" else None,
-                    "rule": None if rule is None else {"id": rule["id"], "when": rule["when"], "then": rule["then"]}},
+        "trigger": approval_trigger(m, req),
         "evidence": {"combined_score": {"value": req["combined_score"], "label": SCORE_LABEL}, "outputs": req.get("outputs", [])},
         "risk_impact": [{"field": f, "value": norm(D(req["qty"]) * D(req["limit_price"])) if f == "order_usd" else figures[f], "cap": caps[f]}
                         for f in ("order_usd", "position_usd_after", "gross_usd_after", "bought_today_usd", "drawdown", "daily_pnl_fraction")],

@@ -1491,13 +1491,13 @@ def fuzz_owner_controls(n):
 
 def fuzz_content(n):
     """§6.4 content and rule 6: exactly the nine keys; the trigger's rule is the owner's confirmed rule verbatim, or
-    null for the default and both ceilings; the trigger names who asked and the client (DEC-185); the choices end
+    null for the default and the three ceilings; the trigger names who asked and the client (DEC-185); the choices end
     with exactly the delegation shapes offered (DEC-181); every bound field moves the hash; a notification carries no
     sentinel of the request."""
     m = copy.deepcopy(base.swing)
     for _ in range(n):
         m["autonomy"]["rules"] = [rand_rule(i) for i in range(rng.randint(0, 3))]
-        labels = [f"rule:{r['id']}" for r in m["autonomy"]["rules"]] + ["default", "admission_ceiling", "client_ceiling"]
+        labels = [f"rule:{r['id']}" for r in m["autonomy"]["rules"]] + ["default", "admission_ceiling", "client_ceiling", "review_ceiling"]
         requested_by = rng.choice(["agent", "owner", "client"])
         shapes = rng.choice([[], ["like_this_until_close"], ["like_this_until_close", "this_instrument", "this_kind"]])
         req = {"approval": "01J" + "SENTINELAPPROVAL"[:10].upper() + "0" * 13, "instrument": "SENTINELINSTR", "asset_class": "us_equity",

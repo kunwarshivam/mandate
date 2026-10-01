@@ -930,7 +930,7 @@ REVIEW_A = [
      {"order_usd": "950", "combined_score": "0.9"}),
     ("MC-D21", "Past the review date an auto default asks", "btc_accumulator_reviewed", [rep("/autonomy/rules", []), rep("/autonomy/default", "auto")],
      PASSED, {}),
-    ("MC-D22", "Past the review date an auto admission setting asks", "btc_accumulator_reviewed", [rep("/autonomy/admission", "auto")],
+    ("MC-D22", "Past the review date a new instrument's first order asks, though the admission setting is auto", "btc_accumulator_reviewed", [rep("/autonomy/admission", "auto")],
      PASSED, {"new_instrument": True, "thesis_confidence": "0.9"}),
     ("MC-D23", "Before the review date a live delegation lifts an ask", "btc_accumulator_reviewed",
      [{"op": "add", "path": "/autonomy/delegations", "value": [REVIEW_DELEGATION]}], LAST_INSTANT, {"order_usd": "950", "combined_score": "0.9"}),
@@ -946,8 +946,10 @@ for cid, title, base, patch, now, a in REVIEW_A:
     full = dict(OPEN, **a)
     if full["purpose"] in REDUCING:
         full = {"purpose": full["purpose"]}
-    cases.append({"id": cid, "kind": "review", "title": title, "base": base, "patch": patch, "now": now, "action": full,
-                  "expect": autonomy(m, full, {"now": now})})
+    e = autonomy(m, full, {"now": now})
+    if e["decision"] == "ask":
+        e["trigger"] = approval_trigger(m, {"mandate_version": version(m), "decided_by": e["by"], "requested_by": "agent"})
+    cases.append({"id": cid, "kind": "review", "title": title, "base": base, "patch": patch, "now": now, "action": full, "expect": e})
 
 # =========================================================== output
 HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
@@ -985,6 +987,7 @@ HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
 # - autonomy: evaluate spec 6.2 for the given action, including the admission ceiling of 6.2 step 5.
 # - review: an autonomy case at the risk clock `now`, which judges the review date (spec 6.2 step 5b)
 #   and the delegations' windows (spec 6.5); no delegation has been used and nothing suspends one.
+#   An `ask` also expects the approval content's `trigger` (spec 6.4) for a request the agent made.
 # - admission: the ordered spec 8.5 checks for one thesis; the first failure is the reason, and the
 #   three shape reasons also set `ignored` (spec 8.2). `first_order_autonomy` is the decision for the
 #   first order in an admitted instrument, null when the thesis is refused.

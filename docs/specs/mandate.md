@@ -138,7 +138,7 @@ changes, acknowledgments, version changes, approval requests and responses, and 
 | MI-28 | While the agent's effective mode is not `normal`, a drawdown rung is active, a limit is accumulating breach time or latched, or a kill switch in the agent's scope is engaged, every decision is what it would be with no delegations |
 | MI-29 | A version classified risk-reducing or neutral never lets a delegation lift a decision the previous version's delegations would not have lifted, given the same usage (the delegation half of MI-11) |
 | MI-30 | An `open` or `increase` order an owner-connected client requested (`requested_by: client`, DEC-141) is never `auto`: it is `ask`, or `deny` when the rules deny, whatever the rules, the default, a delegation, or the admission setting say. Orders the owner or the agent requested are decided exactly as without this rule ([DEC-185](../project/04-decision-log.md#decisions)) |
-| MI-32 | **Silence ends autonomy** ([DEC-188](../project/04-decision-log.md#decisions)). From 00:00 America/New_York after `autonomy.review_by` in the version in effect, judged on the risk clock, no `open` or `increase` is `auto`: it is `ask`, or `deny` when the decision without the review date denies, whatever the rules, the default, a delegation, or the admission setting say, and an `ask` keeps its own source. Exits stay built-in AUTO (MI-1). Before that instant, and with no review date, every decision, label, and delegation id is what it would be without this rule. With no risk clock to judge by, nothing is `auto` (checked against an independent oracle that builds the instant from the calendar date) |
+| MI-32 | **Silence ends autonomy** ([DEC-188](../project/04-decision-log.md#decisions)). From 00:00 America/New_York after `autonomy.review_by` in the version in effect, judged on the risk clock, no `open` or `increase` is `auto`: it is `ask`, or `deny` when the decision without the review date denies, whatever the rules, the default, or a delegation say, and an `ask` keeps its own source. The admission ceiling only tightens (MI-17), so it never yields an `auto` of its own: an `auto` admission setting leaves the rules' `auto` standing, and that is what the review ceiling turns into `ask`. Exits stay built-in AUTO (MI-1). Before that instant, and with no review date, every decision, label, and delegation id is what it would be without this rule. With no risk clock to judge by, nothing is `auto` (checked against an independent oracle that builds the instant from the calendar date) |
 
 ## 2. Lifecycle
 
@@ -698,9 +698,10 @@ stream with `causation_id` and judges it there; nothing the owner's client check
      content, and the order builder carries it from the request to the order it proposes.
    - **5b. Review ceiling** ([DEC-188](../project/04-decision-log.md#decisions), §6.6). If
      `autonomy.review_by` is set and the risk day (§5.4) of the risk clock is after it, the decision
-     becomes the stricter of the result so far and `ask` (MI-32): no `auto` rule, `auto` default,
-     delegation, or `auto` admission setting acts alone on a mandate nobody has confirmed since its
-     review date. With no risk clock to judge by, the date has passed (`AGENTS.md` rule 3). Like the
+     becomes the stricter of the result so far and `ask` (MI-32): no `auto` rule, `auto` default, or
+     delegation acts alone on a mandate nobody has confirmed since its review date. The admission
+     ceiling only tightens (MI-17), so an `auto` admission setting yields no `auto` of its own; an
+     `auto` it leaves standing is the rules', which this step catches. With no risk clock to judge by, the date has passed (`AGENTS.md` rule 3). Like the
      two ceilings before it, it names itself (`review_ceiling`) only when it changed the decision,
      so an `ask` keeps its own source and a `deny` its own.
 6. `auto` → submit (the gate runs again at submission). `deny` → skip. `ask` → approval (§6.4).
@@ -750,7 +751,7 @@ has exactly these keys, and everything an approver is shown comes from it:
 | Key | Content |
 |---|---|
 | `action` | `instrument`, `asset_class`, `side` (`buy`), `qty`, `limit` (the limit price), `order_usd` (limit price × quantity), and `purpose` |
-| `trigger` | `mandate_version`; `decided_by`, the label of what asked (`rule:<id>`, `default`, `admission_ceiling`, `client_ceiling`, or `review_ceiling`); `requested_by` (`agent`, `owner`, or `client`) and `client`, the name the owner gave the connected client when connecting it, or `null` unless `requested_by` is `client` (§6.2 step 5a; the approver is shown "Requested by your connected agent" with that name); and `rule`, the owner's confirmed rule `{id, when, then}` exactly as the mandate holds it, or `null` for `default`, `admission_ceiling`, and `client_ceiling` |
+| `trigger` | `mandate_version`; `decided_by`, the label of what asked (`rule:<id>`, `default`, `admission_ceiling`, `client_ceiling`, or `review_ceiling`); `requested_by` (`agent`, `owner`, or `client`) and `client`, the name the owner gave the connected client when connecting it, or `null` unless `requested_by` is `client` (§6.2 step 5a; the approver is shown "Requested by your connected agent" with that name); and `rule`, the owner's confirmed rule `{id, when, then}` exactly as the mandate holds it, or `null` for `default`, `admission_ceiling`, `client_ceiling`, and `review_ceiling` |
 | `evidence` | `combined_score` as `{value, label}`, labeled "combined model score, not a probability of profit"; and `outputs`, one `{event_id, artifact, label}` per model output used (the artifact hash or `null`, and the author label below) |
 | `risk_impact` | One `{field, value, cap}` for each of `order_usd`, `position_usd_after`, `gross_usd_after`, `bought_today_usd`, `drawdown`, and `daily_pnl_fraction`: its §6.3 value at the request and the mandate cap it is measured against, respectively `max_order_usd`; min(`max_position_usd`, `max_position_fraction` × E); min(`max_gross_exposure_usd`, E); `null`; the lowest ladder rung's `at`; and `max_daily_loss` (§5.5, §8.3) |
 | `reference_mark` | The last `MarkUpdated` for the instrument as `{price, seq}`, or `null` |
@@ -981,8 +982,9 @@ nobody has confirmed since its review date keeps running, but nothing in it acts
   `goal.end_date` (§3.1): it passes at 00:00 America/New_York after it, so the same date is the
   same instant in both daylight-saving states.
 - **What it changes.** From that instant, §6.2 step 5b turns every `auto` an `open` or `increase`
-  would get into `ask`: the rules', the default's, a delegation's, and the admission setting's
-  (MI-32). A `deny` still denies, an `ask` keeps its source, and the `ask` times out to `skip`
+  would get into `ask`: the rules', the default's, and a delegation's, including on the first order
+  in a newly admitted instrument, where an `auto` admission setting leaves the rules' `auto`
+  standing (the admission ceiling only tightens, MI-17) (MI-32). A `deny` still denies, an `ask` keeps its source, and the `ask` times out to `skip`
   (§6.4). Nothing is flattened, cancelled, or held: exits, protective orders, risk exits, owner
   exits, and kill switches are built-in AUTO at step 3, before the ceiling (MI-1, `AGENTS.md`
   rules 2 and 13), and positions keep their protection.

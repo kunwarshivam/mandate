@@ -33,6 +33,7 @@
 # - autonomy: evaluate spec 6.2 for the given action, including the admission ceiling of 6.2 step 5.
 # - review: an autonomy case at the risk clock `now`, which judges the review date (spec 6.2 step 5b)
 #   and the delegations' windows (spec 6.5); no delegation has been used and nothing suspends one.
+#   An `ask` also expects the approval content's `trigger` (spec 6.4) for a request the agent made.
 # - admission: the ordered spec 8.5 checks for one thesis; the first failure is the reason, and the
 #   three shape reasons also set `ignored` (spec 8.2). `first_order_autonomy` is the decision for the
 #   first order in an admitted instrument, null when the thesis is refused.
@@ -10231,7 +10232,13 @@ cases:
     asset_class: crypto, session: crypto, first_trade_in_instrument: false, drawdown: '0', daily_pnl_fraction: '0',
     position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: false,
     thesis_confidence: '0'}
-  expect: {decision: ask, by: review_ceiling, approvers_required: 1, on_timeout: skip}
+  expect:
+    decision: ask
+    by: review_ceiling
+    approvers_required: 1
+    on_timeout: skip
+    trigger: {mandate_version: 'sha256:1512f996d3d2983f44bf8f6cae7f47b6fe372fc454a238e1dc592c672d2fbe1f', decided_by: review_ceiling,
+      requested_by: agent, client: null, rule: null}
 - id: MC-D19
   kind: review
   title: Past the review date an ask keeps the rule that asked
@@ -10242,7 +10249,20 @@ cases:
     asset_class: crypto, session: crypto, first_trade_in_instrument: false, drawdown: '0', daily_pnl_fraction: '0',
     position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: false,
     thesis_confidence: '0'}
-  expect: {decision: ask, by: 'rule:large_orders', approvers_required: 1, on_timeout: skip}
+  expect:
+    decision: ask
+    by: rule:large_orders
+    approvers_required: 1
+    on_timeout: skip
+    trigger:
+      mandate_version: sha256:1512f996d3d2983f44bf8f6cae7f47b6fe372fc454a238e1dc592c672d2fbe1f
+      decided_by: rule:large_orders
+      requested_by: agent
+      client: null
+      rule:
+        id: large_orders
+        when: {field: order_usd, op: gt, value: '900'}
+        then: ask
 - id: MC-D20
   kind: review
   title: Past the review date a deny rule still denies
@@ -10274,10 +10294,16 @@ cases:
     asset_class: crypto, session: crypto, first_trade_in_instrument: false, drawdown: '0', daily_pnl_fraction: '0',
     position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: false,
     thesis_confidence: '0'}
-  expect: {decision: ask, by: review_ceiling, approvers_required: 1, on_timeout: skip}
+  expect:
+    decision: ask
+    by: review_ceiling
+    approvers_required: 1
+    on_timeout: skip
+    trigger: {mandate_version: 'sha256:f82ba5ec367385442832a6b4d37319f00a77b9fc1cf1720d9d1496bcc432daa7', decided_by: review_ceiling,
+      requested_by: agent, client: null, rule: null}
 - id: MC-D22
   kind: review
-  title: Past the review date an auto admission setting asks
+  title: Past the review date a new instrument's first order asks, though the admission setting is auto
   base: btc_accumulator_reviewed
   patch:
   - {op: replace, path: /autonomy/admission, value: auto}
@@ -10286,7 +10312,13 @@ cases:
     asset_class: crypto, session: crypto, first_trade_in_instrument: false, drawdown: '0', daily_pnl_fraction: '0',
     position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: true,
     thesis_confidence: '0.9'}
-  expect: {decision: ask, by: review_ceiling, approvers_required: 1, on_timeout: skip}
+  expect:
+    decision: ask
+    by: review_ceiling
+    approvers_required: 1
+    on_timeout: skip
+    trigger: {mandate_version: 'sha256:0bb9edddd54ef3789d19a67bfdd13ee1bc54e22a743733f28d99c4bceb809c3b', decided_by: review_ceiling,
+      requested_by: agent, client: null, rule: null}
 - id: MC-D23
   kind: review
   title: Before the review date a live delegation lifts an ask
@@ -10338,7 +10370,13 @@ cases:
     asset_class: crypto, session: crypto, first_trade_in_instrument: false, drawdown: '0', daily_pnl_fraction: '0',
     position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: false,
     thesis_confidence: '0'}
-  expect: {decision: ask, by: review_ceiling, approvers_required: 1, on_timeout: skip}
+  expect:
+    decision: ask
+    by: review_ceiling
+    approvers_required: 1
+    on_timeout: skip
+    trigger: {mandate_version: 'sha256:a737985867cb79b2444a6d8e9c8d332d8ba4fcdad6132ed1520ada43c25567f4', decided_by: review_ceiling,
+      requested_by: agent, client: null, rule: null}
 - id: MC-D25
   kind: review
   title: Past the review date a discretionary exit is still AUTO

@@ -19888,7 +19888,14 @@
     "decision": "ask",
     "by": "review_ceiling",
     "approvers_required": 1,
-    "on_timeout": "skip"
+    "on_timeout": "skip",
+    "trigger": {
+     "mandate_version": "sha256:1512f996d3d2983f44bf8f6cae7f47b6fe372fc454a238e1dc592c672d2fbe1f",
+     "decided_by": "review_ceiling",
+     "requested_by": "agent",
+     "client": null,
+     "rule": null
+    }
    }
   },
   {
@@ -19919,7 +19926,22 @@
     "decision": "ask",
     "by": "rule:large_orders",
     "approvers_required": 1,
-    "on_timeout": "skip"
+    "on_timeout": "skip",
+    "trigger": {
+     "mandate_version": "sha256:1512f996d3d2983f44bf8f6cae7f47b6fe372fc454a238e1dc592c672d2fbe1f",
+     "decided_by": "rule:large_orders",
+     "requested_by": "agent",
+     "client": null,
+     "rule": {
+      "id": "large_orders",
+      "when": {
+       "field": "order_usd",
+       "op": "gt",
+       "value": "900"
+      },
+      "then": "ask"
+     }
+    }
    }
   },
   {
@@ -20004,13 +20026,20 @@
     "decision": "ask",
     "by": "review_ceiling",
     "approvers_required": 1,
-    "on_timeout": "skip"
+    "on_timeout": "skip",
+    "trigger": {
+     "mandate_version": "sha256:f82ba5ec367385442832a6b4d37319f00a77b9fc1cf1720d9d1496bcc432daa7",
+     "decided_by": "review_ceiling",
+     "requested_by": "agent",
+     "client": null,
+     "rule": null
+    }
    }
   },
   {
    "id": "MC-D22",
    "kind": "review",
-   "title": "Past the review date an auto admission setting asks",
+   "title": "Past the review date a new instrument's first order asks, though the admission setting is auto",
    "base": "btc_accumulator_reviewed",
    "patch": [
     {
@@ -20041,7 +20070,14 @@
     "decision": "ask",
     "by": "review_ceiling",
     "approvers_required": 1,
-    "on_timeout": "skip"
+    "on_timeout": "skip",
+    "trigger": {
+     "mandate_version": "sha256:0bb9edddd54ef3789d19a67bfdd13ee1bc54e22a743733f28d99c4bceb809c3b",
+     "decided_by": "review_ceiling",
+     "requested_by": "agent",
+     "client": null,
+     "rule": null
+    }
    }
   },
   {
@@ -20153,7 +20189,14 @@
     "decision": "ask",
     "by": "review_ceiling",
     "approvers_required": 1,
-    "on_timeout": "skip"
+    "on_timeout": "skip",
+    "trigger": {
+     "mandate_version": "sha256:a737985867cb79b2444a6d8e9c8d332d8ba4fcdad6132ed1520ada43c25567f4",
+     "decided_by": "review_ceiling",
+     "requested_by": "agent",
+     "client": null,
+     "rule": null
+    }
    }
   },
   {
