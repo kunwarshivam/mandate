@@ -52,13 +52,14 @@ mod step;
 mod types;
 
 pub use error::{JsonError, RuntimeError};
+pub use mandate_approval::ActorKind;
 pub use ports::{
     FlattenPlanner, GateDryRun, IdGen, IntentSink, OrderPlan, Ports, SinkError, TimerSource,
 };
 pub use state::{FOLD_VERSION, PendingApproval, RuntimeState, UnresolvedAppend, fold};
 pub use step::handle;
 pub use types::{
-    AgentId, ApprovalOutcome, ApprovalVerdict, Autonomy, Command, ConnectionId, Deployment,
+    AgentId, ApprovalSettings, Autonomy, Classified, Command, ConnectionId, Deployment,
     DryRunVerdict, Effect, EventDraft, EventId, FlattenLeg, FlattenPlan, FlattenRequest,
     FoldedEvent, Handoff, Initiator, Input, IntentBody, IntentHandoff, KillScope, LocalHold,
     MandateView, Mode, ModelOutput, NotificationRef, Observation, Outstanding, OwnerConfirmation,

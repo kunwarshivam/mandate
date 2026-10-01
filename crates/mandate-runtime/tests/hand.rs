@@ -161,6 +161,7 @@ fn the_golden_journal_folds_to_the_committed_state() {
                 .expect("an event type")
                 .to_owned(),
             causation_id: None,
+            actor: mandate_runtime::ActorKind::System,
             payload: row.get("payload").cloned().expect("a payload"),
         };
         fold(&mut state, &folded)
@@ -914,52 +915,6 @@ fn an_approval_binds_the_quantity_and_the_version() {
 }
 
 #[test]
-fn an_approval_under_a_changed_version_is_skipped() {
-    let ids = TestIds;
-    let gate = AllowGate;
-    let plan = FixedPlan::opening(Autonomy::Ask);
-    let view = universe(&["AAPL"]);
-    let ports = ports(&ids, &gate, &plan, &view);
-    let mut shell = Shell::new(1);
-    shell.fold_one(&reconciliation(1, 100)).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
-    let approval = asked(&mut shell, &ports, 100);
-
-    let applied = event(
-        ACCOUNT_STREAM,
-        2,
-        "MandateVersionApplied",
-        with_clock(
-            &[
-                ("classification", text("risk_reducing")),
-                ("new_version", text("v2")),
-                ("result", text("applied")),
-            ],
-            110,
-        ),
-    );
-    shell.fold_one(&applied).expect("folds");
-    shell.run(Input::Journal(applied), &ports);
-
-    let ran = shell.run(
-        Input::ApprovalResponse(mandate_runtime::ApprovalOutcome {
-            approval,
-            verdict: mandate_runtime::ApprovalVerdict::Approved {
-                responder: "user-1".to_owned(),
-                step_up: "assertion-1".to_owned(),
-            },
-            at: clock(120),
-        }),
-        &ports,
-    );
-    assert!(
-        ran.handed.is_empty(),
-        "an approval bound to a superseded version is skipped, never re-priced: {:?}",
-        ran.handed
-    );
-}
-
-#[test]
 fn an_approval_deadline_skips_the_action() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1609,38 +1564,6 @@ fn a_kill_switch_cancels_every_pending_approval() {
     assert!(
         shell.armed.is_empty(),
         "leaving no timer that could wake the runtime for an approval it has cancelled"
-    );
-}
-
-#[test]
-fn an_approval_that_arrives_after_a_kill_switch_proposes_nothing() {
-    let ids = TestIds;
-    let gate = AllowGate;
-    let plan = FixedPlan::opening(Autonomy::Ask);
-    let view = universe(&["AAPL"]);
-    let ports = ports(&ids, &gate, &plan, &view);
-    let mut shell = Shell::new(1);
-    shell.fold_one(&reconciliation(1, 100)).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
-    let approval = asked(&mut shell, &ports, 100);
-    shell.run(kill(this_agent(), Initiator::Owner, None), &ports);
-
-    let late = shell.run(
-        Input::ApprovalResponse(mandate_runtime::ApprovalOutcome {
-            approval,
-            verdict: mandate_runtime::ApprovalVerdict::Approved {
-                responder: "user-1".to_owned(),
-                step_up: "assertion-1".to_owned(),
-            },
-            at: clock(200),
-        }),
-        &ports,
-    );
-    assert!(
-        late.handed.is_empty() && !late.draft_types().contains(&"IntentProposed"),
-        "a response after the stop proposes nothing: {:?} {:?}",
-        late.draft_types(),
-        late.handed
     );
 }
 

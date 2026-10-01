@@ -376,6 +376,21 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `reference/mandate/ref.py`'s `approval_quorum`. The implementation PR implemented `quorum`,
   calls it for every overlay, leaves the author out of the grants that count while independence
   is required, and deleted the eight `#[ignore]` lines.
+  *Tests done (M7 tests PR 3 of 4, DEC-257 items 5 to 12); the runtime's implementation follows:*
+  `crates/mandate-runtime/tests/approvals.rs` and `approval_properties.rs` hold 20 tests pending
+  E8-3 for the grant path, owner commands on the control stream, and the #281 owner-exit
+  obligation. The implementation PR needs, first, the `mandate-journal` catalogue entries above
+  (a real journal refuses `ApprovalRevalidated` until then), and it fills `PendingApproval` with the
+  bound request, folds `MarkUpdated`, the control stream's assertions and its copies, and hands a
+  one-instrument owner exit as an agent-scoped flatten (DEC-257 item 7).
+  *Follow-up (DEC-257 item 12):* `PolicyChanged`'s payload is only "level, diff" in journal spec §9,
+  so the runtime neither folds the overlay check 7 reads nor has a two-approver runtime case
+  (PB-22). Close the payload, then fold it and add the cases in a tests correction.
+  *Follow-up (DEC-257 item 12):* no agent-stream event records a refused resume or Stop; specify
+  one (or say a refusal leaves only the control-stream command) so the runtime can journal it.
+  *Follow-up (DEC-257 item 12; stream I):* `Input::Command` still carries the owner's pause,
+  resume, Stop, exit and kill switch with no step-up judged; retire those for the control stream's
+  `OwnerCommandIssued` once the shell tails it, leaving only the risk-limit and operator switches.
   *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
   control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
   would make MI-24 true as written.
