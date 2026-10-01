@@ -724,7 +724,8 @@ fn the_same_halt_leaves_a_pinned_universe_alone_and_removes_from_a_dynamic_one()
 
 /// An unread working universe is never halted silently: the fold cannot know what it holds, and
 /// a dropped halt would be the fail-open direction, so it is an error — the same reading
-/// admission takes.
+/// admission takes. The same halt set on a read dynamic universe removes beside the refusal,
+/// so the test fails on any constant answer, not only the permissive one.
 #[test]
 #[ignore = "pending E17-6"]
 fn an_unread_universe_is_never_halted_silently() {
@@ -733,6 +734,23 @@ fn an_unread_universe_is_never_halted_silently() {
     assert!(
         matches!(&refused, Err(ResearchError::UniverseUnavailable)),
         "an unread universe is an error, never an empty halt (AGENTS.md rule 3): got {refused:?}"
+    );
+    let read = apply_operator_halts(
+        &halted(&[INSTRUMENT_1]),
+        &[entry(
+            INSTRUMENT_1,
+            "th-1",
+            "th-1",
+            "2026-09-23T14:00:00.000000000Z",
+            false,
+        )],
+        &universe_of(&[INSTRUMENT_1]),
+    )
+    .expect("the same halt set on a read dynamic universe removes");
+    assert_eq!(
+        read.removed,
+        vec![asset(INSTRUMENT_1)],
+        "the refusal is about the unread universe, not the halt set: read, the same set removes"
     );
 }
 
@@ -831,11 +849,26 @@ fn the_halt_only_ever_removes() {
 }
 
 /// The entries name the dynamic universe's instruments once each, as `expire_theses` reads
-/// them; a list naming one instrument twice is refused.
+/// them; a list naming one instrument twice is refused. The well-formed list beside it removes,
+/// so the test fails on any constant answer, not only the permissive one.
 #[test]
 #[ignore = "pending E17-6"]
 fn duplicate_entries_are_refused() {
     let universe = universe_of(&[INSTRUMENT_1]);
+    let well_formed = [entry(
+        INSTRUMENT_1,
+        "th-1",
+        "th-1",
+        "2026-09-23T14:00:00.000000000Z",
+        false,
+    )];
+    let removed = apply_operator_halts(&halted(&[INSTRUMENT_1]), &well_formed, &universe)
+        .expect("a list naming each instrument once removes");
+    assert_eq!(
+        removed.removed,
+        vec![asset(INSTRUMENT_1)],
+        "the well-formed list removes what it holds, proving the refusal below is about the duplicate"
+    );
     let entries = [
         entry(
             INSTRUMENT_1,
