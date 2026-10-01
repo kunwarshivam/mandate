@@ -55,9 +55,9 @@ DEC-262.
 | A client's `open` or `increase` is never AUTO, under any rule, default, or admission setting | `hand::a_client_opening_under_an_auto_rule_is_asked_by_the_client_ceiling`, `hand::a_client_opening_under_an_auto_default_is_asked`, `hand::a_client_admission_under_an_auto_admission_setting_is_asked`, `properties::a_client_opening_is_never_auto_and_every_other_request_decides_as_before`, `properties::every_rule_default_admission_and_requester_obeys_the_client_ceiling` |
 | A `deny` still denies, from a rule or the admission ceiling | `hand::a_deny_still_denies_a_client_request`, both properties |
 | The ceiling names itself only when it changed the decision | `hand::an_ask_reached_before_the_client_ceiling_keeps_its_source`, the sweep |
-| Owner and agent requests decide as before | `hand::owner_and_agent_requests_decide_as_before`, both properties |
+| Owner and agent requests decide as before | `hand::owner_and_agent_requests_decide_as_before` (live), `hand::a_client_request_beside_the_owners_is_asked`, both properties |
 | A ceiling ASK carries §6.4's approval and approver count | `hand::a_client_ask_above_the_threshold_needs_two_approvers` |
-| Exits are never narrowed (rules 2 and 13) | `hand::a_client_exit_is_still_auto_by_the_builtin`, both properties |
+| Exits are never narrowed (rules 2 and 13) | `hand::every_reducing_purpose_a_client_asks_for_is_auto_by_the_builtin` (live), `hand::a_client_opening_is_judged_by_the_rules_its_exits_skip`, both properties |
 | Through `decide`: a deny skips, a defer defers, an allow asks | `hand::decide_asks_a_client_buy_the_gate_allows_and_skips_one_it_denies`, `properties::no_client_buy_reaches_auto_through_decide` |
 | `propose` is the agent's own request | `hand::a_proposed_buy_is_the_order_builders_own_request` (live) |
 
@@ -65,21 +65,28 @@ The property's oracle is `properties.rs`'s naive rule walk, extended by step 5a,
 third formulation that asks which steps can deny and which can ask rather than ranking decisions.
 Neither calls the crate's `stricter`.
 
+**Per-test do-nothing bar** (#369 round 1). Each pending test fails on both plausible do-nothing
+ceilings: the identity, and a constant ASK labelled `client_ceiling`. Each hand test that expects
+the ceiling's ASK therefore also asserts an answer only a real ceiling gives: a `deny` kept, or an
+ASK the rules reached keeping the rule's label. The two halves that hold before the ceiling exists,
+exits staying AUTO and owner and agent requests deciding as before, are live tests, so rules 2 and
+13 stay pinned while the stub is in place.
+
 ## Planted bugs
 
 | Plant | Caught by |
 |---|---|
 | P1 the ceiling is skipped | all twelve pending tests |
-| P2 the ceiling turns a deny into an ask | `a_deny_still_denies_a_client_request`, `an_ask_reached_before_...`, all three properties |
-| P3 the ceiling reaches owner requests | `owner_and_agent_requests_decide_as_before`, all three properties |
-| P4 the client ceiling runs before the admission ceiling | `an_ask_reached_before_...`, all three properties |
-| P5 the ceiling reads the rules' result and drops the admission ceiling's | `a_deny_still_denies_a_client_request`, `an_ask_reached_before_...`, all three properties |
-| P6 the ceiling narrows a client's exit | `a_client_exit_is_still_auto_by_the_builtin`, the property and the sweep |
-| P7 a ceiling ask carries no approval | `a_client_ask_above_the_threshold_...`, `a_client_opening_under_an_auto_rule_...`, `decide_asks_...`, the property and the sweep |
-| P8 the ceiling keeps the rule's label | seven hand tests and all three properties |
-| P9 the ceiling relabels an ask it did not raise | `a_deny_still_denies_a_client_request`, `an_ask_reached_before_...`, all three properties |
-| P10 `decide` drops the requester | `decide_asks_...`, `no_client_buy_reaches_auto_through_decide` |
-| P11 `propose` stamps another requester | `a_proposed_buy_is_the_order_builders_own_request` |
+| P2 the ceiling turns a deny into an ask | all twelve pending tests |
+| P3 the ceiling reaches owner requests | `owner_and_agent_requests_decide_as_before` (live), all three properties |
+| P4 the client ceiling runs before the admission ceiling | `an_ask_reached_before_the_client_ceiling_keeps_its_source`, all three properties |
+| P5 the ceiling reads the rules' result and drops the admission ceiling's | all twelve pending tests |
+| P6 the ceiling narrows a client's exit | `every_reducing_purpose_a_client_asks_for_is_auto_by_the_builtin` (live), the generated property, the sweep |
+| P7 a ceiling ask carries no approval | `a_client_ask_above_the_threshold_needs_two_approvers`, `a_client_opening_under_an_auto_rule_is_asked_by_the_client_ceiling`, `decide_asks_a_client_buy_the_gate_allows_and_skips_one_it_denies`, the generated property, the sweep |
+| P8 the ceiling keeps the rule's label | all twelve pending tests |
+| P9 the ceiling relabels an ask it did not raise | all twelve pending tests |
+| P10 `decide` drops the requester | `decide_asks_a_client_buy_the_gate_allows_and_skips_one_it_denies`, `no_client_buy_reaches_auto_through_decide` |
+| P11 `propose` stamps another requester | `a_proposed_buy_is_the_order_builders_own_request` (live) |
 
 ## Commands
 
