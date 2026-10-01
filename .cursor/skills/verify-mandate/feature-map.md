@@ -658,12 +658,11 @@ proves each pending test fails on them (DEC-110).
   `fuzz_ask_budget`, `fuzz_quiet_hours`, `fuzz_owner_controls`, `fuzz_content`) and
   mutation-checked by `reference/mandate/mutants.py`. Check 7's quorum is the stricter of the bound
   requirement and the policy overlay (DEC-173 item 13).
-- **Code:** `mandate-approval` (layer 1; E8-1, E8-2 and E8-3 implemented but check 7's policy
-  overlay, DEC-173 item 14):
+- **Code:** `mandate-approval` (layer 1; E8-1, E8-2 and E8-3 implemented, check 7's policy overlay
+  included, DEC-173 item 13):
   `crates/mandate-approval/src/content.rs` (`BoundAction`, `content_object`, `content_hash`,
   `confirmation_code`), `crates/mandate-approval/src/admit.rs` (`admit`: checks 1 to 7;
-  `PolicyOverlay`, and `quorum`, a stub that `admit` fails closed on under any overlay but
-  `PolicyOverlay::NONE`),
+  `PolicyOverlay`, and `quorum`, the stricter of the bound requirement and the overlay),
   `crates/mandate-approval/src/revalidate.rs` (`revalidate`: checks 8 to 12, `GrantedOrder`),
   `crates/mandate-approval/src/drift.rs`, `crates/mandate-approval/src/budget.rs`,
   `crates/mandate-approval/src/notify.rs` (the closed `Notification`),
@@ -679,8 +678,9 @@ proves each pending test fails on them (DEC-110).
   and `crates/mandate-approval/tests/grant_properties.rs` (the check-table, clock-accumulator,
   principal, assertion-ledger, scaled-integer drift, field-comparer and kill-switch oracles), all
   live; and `crates/mandate-approval/tests/quorum.rs` (check 7 against the policy overlay, with
-  its own scaled-integer oracle), pending E8-3 but for three live tests. In-module tests in `src/stepup.rs` probe step-up evidence at the clock's extremes against an
-  `i128` oracle, and `src/drift.rs` a drift too large to compute.
+  its own scaled-integer oracle), all live. In-module tests in `src/stepup.rs` probe step-up
+  evidence at the clock's extremes against an `i128` oracle, and `src/drift.rs` a drift too large
+  to compute.
 - **Run:** `cargo nextest run -p mandate-approval`; `cargo xtask ci pending`.
 
 ## Reference-case harness

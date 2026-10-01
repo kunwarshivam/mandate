@@ -98,7 +98,9 @@ impl PolicyOverlay {
 /// grant, and whether the mandate's author is excluded from them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Quorum {
+    /// The number of distinct approvers whose grants admit: never below the bound count.
     pub approvers_required: NonZeroU8,
+    /// Whether the bound version's author is excluded from the grants that count.
     pub independent_required: bool,
 }
 
@@ -108,11 +110,31 @@ pub struct Quorum {
 /// it, else 1 (mandate spec §6.4 check 7, DEC-173 item 13).
 ///
 /// # Errors
-/// [`ApprovalError::Unimplemented`] until the overlay's part of check 7 lands (E8-3's follow-up);
-/// [`ApprovalError::Unrepresentable`] once it has, for an order value that overflows.
-pub fn quorum(_bound: &BoundAction, _policy: &PolicyOverlay) -> Result<Quorum, ApprovalError> {
-    Err(ApprovalError::Unimplemented { story: "E8-3" })
+/// [`ApprovalError::Unrepresentable`] for an order value that overflows while a ceiling is set.
+/// A request whose order value overflows has no content hash ([`crate::content_object`] refuses
+/// it), so the runtime never holds one pending; the error keeps the answer total.
+pub fn quorum(bound: &BoundAction, policy: &PolicyOverlay) -> Result<Quorum, ApprovalError> {
+    let over_ceiling = match policy.two_approver_above_usd {
+        None => false,
+        Some(ceiling) => {
+            bound
+                .qty
+                .notional(bound.limit)
+                .map_err(|_| ApprovalError::Unrepresentable {
+                    what: "order value",
+                })?
+                > ceiling
+        }
+    };
+    let by_policy = if over_ceiling { TWO } else { NonZeroU8::MIN };
+    Ok(Quorum {
+        approvers_required: bound.approvers_required.max(by_policy),
+        independent_required: bound.independent_required || policy.independent_approval_required,
+    })
 }
+
+/// The overlay's approver count above `two_approver_above_usd`.
+const TWO: NonZeroU8 = NonZeroU8::MIN.saturating_add(1);
 
 /// Why a response was refused. Not terminal: the approval stays pending until its deadline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -149,7 +171,7 @@ pub enum Admission {
 /// and needs no step-up or quorum (PX-7).
 ///
 /// # Errors
-/// [`quorum`]'s, for a grant that reaches check 7 under a policy overlay.
+/// [`quorum`]'s, for a grant that reaches check 7.
 pub fn admit(
     pending: Option<&Request>,
     response: &Response,
@@ -190,39 +212,87 @@ pub fn admit(
 }
 
 /// Check 7: the responder joins the grant set, once, and not as the author of a version that
-/// needs independent approval.
-///
-/// While [`quorum`] is a stub, the overlay's part of the check is owed and fails closed, as a
-/// partial gate does for adding risk (DEC-129 item 29): with no policy key set the bound
-/// requirement is the whole answer, and any other overlay returns [`quorum`]'s `Unimplemented`,
-/// so no grant is admitted on the bound requirement alone when the policy may be stricter.
+/// needs independent approval. The requirement is [`quorum`]'s, so a `PolicyChanged` folded while
+/// the approval was pending only tightens it, and while independence is required an author's
+/// earlier `counted` grant stops counting (DEC-173 items 13 and 15).
 fn check_7(
     request: &Request,
     response: &Response,
     ctx: &AdmissionContext,
 ) -> Result<Admission, ApprovalError> {
-    let bound = &request.content.bound;
-    let required = if ctx.policy == PolicyOverlay::NONE {
-        Quorum {
-            approvers_required: bound.approvers_required,
-            independent_required: bound.independent_required,
-        }
-    } else {
-        quorum(bound, &ctx.policy)?
-    };
+    let required = quorum(&request.content.bound, &ctx.policy)?;
     if request.grants.contains(&response.responder) {
         return Ok(Admission::Refused(Refusal::DuplicateApprover));
     }
     if required.independent_required && response.responder == ctx.author {
         return Ok(Admission::Refused(Refusal::NotIndependent));
     }
-    let mut grants = request.grants.clone();
-    grants.insert(response.responder.clone());
+    let counting = request
+        .grants
+        .iter()
+        .chain([&response.responder])
+        .filter(|approver| !(required.independent_required && **approver == ctx.author))
+        .count();
     Ok(
-        if grants.len() >= usize::from(required.approvers_required.get()) {
+        if counting >= usize::from(required.approvers_required.get()) {
             Admission::Admitted
         } else {
             Admission::Counted
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_num::{NumError, Price, Qty, Signed};
+
+    use super::*;
+    use crate::content::{AskablePurpose, AssetClass};
+
+    /// An order whose value the exact arithmetic cannot hold.
+    fn unrepresentable_order() -> Result<BoundAction, NumError> {
+        Ok(BoundAction {
+            instrument: "AAPL".to_owned(),
+            asset_class: AssetClass::UsEquity,
+            qty: Qty::parse("79228162514264337593543950")?,
+            limit: Price::parse("79228162514264337593543950")?,
+            purpose: AskablePurpose::Open,
+            mandate_version: "v1".to_owned(),
+            decided_by: "default".to_owned(),
+            combined_score: Signed::parse("0.5")?,
+            reference_mark: None,
+            approvers_required: NonZeroU8::MIN,
+            independent_required: true,
+        })
+    }
+
+    /// DEC-257 item 1: the order value is computed only while a ceiling is set, so without one the
+    /// answer is total and is the bound requirement with the overlay's independence; with one, an
+    /// order value that overflows is `Unrepresentable`, never a quorum.
+    #[test]
+    fn the_order_value_is_read_only_against_a_ceiling() -> Result<(), NumError> {
+        let bound = unrepresentable_order()?;
+        let no_ceiling = PolicyOverlay {
+            independent_approval_required: false,
+            two_approver_above_usd: None,
+        };
+        assert_eq!(
+            quorum(&bound, &no_ceiling),
+            Ok(Quorum {
+                approvers_required: NonZeroU8::MIN,
+                independent_required: true,
+            })
+        );
+        let ceiling = PolicyOverlay {
+            two_approver_above_usd: Some(Usd::parse("1000")?),
+            ..no_ceiling
+        };
+        assert_eq!(
+            quorum(&bound, &ceiling),
+            Err(ApprovalError::Unrepresentable {
+                what: "order value"
+            })
+        );
+        Ok(())
+    }
 }
