@@ -3909,7 +3909,8 @@
      "accrued_fees": "0",
      "model_cash": "10000.5",
      "cash_band": "1.25",
-     "cash_in_band": true
+     "cash_in_band": true,
+     "risk_clock": "2026-09-21T14:05:00.000000000Z"
     },
     "artifact_refs": [],
     "pii_refs": []
@@ -3946,7 +3947,8 @@
      "accrued_fees": "0",
      "model_cash": null,
      "cash_band": null,
-     "cash_in_band": null
+     "cash_in_band": null,
+     "risk_clock": "2026-09-21T21:00:00.000000000Z"
     },
     "artifact_refs": [],
     "pii_refs": []
@@ -4870,6 +4872,54 @@
      "outcome": "Invalid",
      "reason": "schema",
      "path": "payload.model_cash"
+    }
+   },
+   {
+    "name": "snapshot_risk_clock_absent",
+    "clause": "§9.2 AccountSnapshotRecorded.risk_clock: the executor folds every event at its clock",
+    "base_draft": "snapshot_fees",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "snapshot_risk_clock_as_seconds",
+    "clause": "§9.2 risk_clock: a whole-second timestamp, never integer seconds (§2)",
+    "base_draft": "snapshot_fees",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": 1790024400
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "snapshot_risk_clock_off_the_second",
+    "clause": "§9.2 risk_clock: a whole second (§2)",
+    "base_draft": "snapshot_reconciled",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-09-21T14:05:00.000000001Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.risk_clock"
     }
    },
    {

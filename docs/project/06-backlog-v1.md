@@ -1074,7 +1074,9 @@ From E10-1's slice-V implementation (DEC-161):
 - **Journal spec v0.7 §9.2's follow-ups ([DEC-261](04-decision-log.md#decisions)).** Until each
   lands, the drafts it names stay refused at `append`, which adds no risk (rule 3).
   - **Stream K:** the executor's fee-step `AccountSnapshotRecorded` writes `model_cash`, `cash_band`,
-    and `cash_in_band` as `null`, not absent (§4.2). **E7-10's implementation must not register
+    and `cash_in_band` as `null`, not absent (§4.2), and every snapshot writes `risk_clock` as a
+    whole-second timestamp, not integer seconds (DEC-302; `payload::clock` writes integers on every
+    account-stream event). **E7-10's implementation must not register
     `AccountSnapshotRecorded` until this lands.** The fee step pauses every agent and alerts the owner,
     and refusing its snapshot at `append` must never stop it (rules 3 and 13, DEC-261 item 7). E7-10's
     tests PR pins that ordering with a pending test.

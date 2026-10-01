@@ -12,6 +12,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.7, amended ([DEC-302](../project/04-decision-log.md#decisions)):** §9.2's
+  `AccountSnapshotRecorded` gains `risk_clock`, which the executor writes on every account-stream
+  event and folds each event at; v0.7 had missed it, so a conforming snapshot could not have been
+  replayed. The new `risk_clock` type is a whole-second timestamp. The vectors gain three invalid
+  drafts: the member absent, as integer seconds (the executor's form today), and off the second.
 - **v0.7 ([DEC-261](../project/04-decision-log.md#decisions)):** §9.2 closes the payload schemas of
   the control-stream and account-stream records among those `ValidationContext::from_journal` reads
   ([DEC-169](../project/04-decision-log.md#decisions)).
@@ -699,6 +704,7 @@ control-stream events close with their own stories.
 |---|---|---|
 | `pointer` | A JSON Pointer (RFC 6901) into the mandate document: one or more `/`-prefixed reference tokens, with `~` only in `~0` or `~1`. It is never the empty pointer: a record names each path it means | Not a string: `schema`; otherwise `non_canonical` |
 | `date` | `YYYY-MM-DD` (§4.7), a calendar date in years 1970 to 9999 | As `pointer` |
+| `risk_clock` | A §4.7 timestamp on a whole second: the risk clock (§2, mandate spec §5.2). Never integer seconds | As `pointer` |
 
 **`StreamOpened`** on the control stream.
 
@@ -794,6 +800,7 @@ otherwise `null`.
 | `model_cash` | `decimal?` | The cash the executor's model expected |
 | `cash_band` | `decimal?` | The tolerance |
 | `cash_in_band` | `boolean?` | Whether the broker's cash fell inside it: rule 24 |
+| `risk_clock` | `risk_clock` | The latest tick the executor had seen. The executor writes it on every account-stream event and folds each at it, so a snapshot without one could not be replayed ([DEC-302](../project/04-decision-log.md#decisions)). `append`'s check that it never decreases (§2) applies |
 
 **`OwnerCommandRefused`** on the agent and account streams ([mandate spec §6.1](mandate.md#61-purposes),
 DEC-291). The owner input it refused is its `causation_id`: rule 27.
