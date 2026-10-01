@@ -63,6 +63,14 @@ pub struct ExecutorState {
     /// exit ladder's "the last trade", which it takes only within 5 minutes (§5.6, DEC-260 (5)).
     /// Process-local, like `quotes`.
     pub(crate) trades: BTreeMap<InstrumentId, MarketObservation>,
+    /// When each instrument's current breach began: the first sane mark at or below its resting
+    /// stop since a sane mark above it, the triggered-stop watchdog's clock (§5.4). Process-local,
+    /// like `quotes`, so a restart starts the clock again from the next breaching mark.
+    pub(crate) breaches: BTreeMap<InstrumentId, RiskClock>,
+    /// When the triggered-stop watchdog last fired in each instrument, from its journaled record:
+    /// a breach fires only if it began after, so one breach is watchdogged once (§5.4, DEC-260
+    /// (11)).
+    pub(crate) watchdogged: BTreeMap<InstrumentId, RiskClock>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
     pub(crate) modes: BTreeMap<AgentId, Mode>,
@@ -188,6 +196,8 @@ impl ExecutorState {
             quotes: BTreeMap::new(),
             sane_bids: BTreeMap::new(),
             trades: BTreeMap::new(),
+            breaches: BTreeMap::new(),
+            watchdogged: BTreeMap::new(),
             positions: BTreeMap::new(),
             fills: BTreeSet::new(),
             modes: BTreeMap::new(),

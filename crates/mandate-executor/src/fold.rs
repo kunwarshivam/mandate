@@ -846,6 +846,9 @@ fn protection_changed(
                 });
             }
         }
+        "watchdog" => {
+            state.watchdogged.insert(instrument.clone(), at);
+        }
         "exit_unpriced" | "ladder_floor" => {}
         "interval_limit" | "unprotected_end" => {
             let ends = action == "unprotected_end";
@@ -955,6 +958,12 @@ fn leg_agent(
     if entry.is_some() {
         return entry;
     }
+    single_holder(state, instrument)
+}
+
+/// The position's single holder (§5.4's leg-agent rule, DEC-160 (3)(b)): the one agent whose
+/// attributed lots make up the whole open quantity, else none.
+pub(crate) fn single_holder(state: &ExecutorState, instrument: &InstrumentId) -> Option<AgentId> {
     let mut lots: BTreeMap<&AgentId, SignedQty> = BTreeMap::new();
     for order in state
         .orders
