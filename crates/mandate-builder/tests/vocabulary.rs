@@ -19,7 +19,7 @@
 use std::num::NonZeroU8;
 
 use mandate_builder::{
-    ActionContext, BuilderError, Clip, DecidedBy, HoldReason, ModelVersion, OrderShape,
+    ActionContext, BuilderError, Clip, DecidedBy, HoldReason, ModelVersion, OrderShape, RequestedBy,
 };
 use mandate_domain::{AssetClass, AutonomyDecision, MarketSession, Purpose};
 use mandate_num::{NumError, Ratio, Signed, Unit, Usd};
@@ -110,6 +110,11 @@ fn decided_by_is_labelled_the_way_the_reference_cases_write_it() {
     );
     assert_eq!(DecidedBy::Default.label(), "default");
     assert_eq!(DecidedBy::AdmissionCeiling.label(), "admission_ceiling");
+    assert_eq!(
+        DecidedBy::ClientCeiling.label(),
+        "client_ceiling",
+        "§6.4's `decided_by` and DEC-252's `DecisionMade` spell the client ceiling this way"
+    );
     let id = RuleId::parse("low_score").unwrap_or_else(|e| panic!("a rule id: {e}"));
     assert_eq!(
         DecidedBy::Rule(id.clone()).label(),
@@ -232,6 +237,7 @@ fn an_action() -> ActionContext {
         gross_usd_after: usd("900"),
         bought_today_usd: usd("1100"),
         position_pnl_fraction: signed("0.05"),
+        requested_by: RequestedBy::Agent,
     }
 }
 
