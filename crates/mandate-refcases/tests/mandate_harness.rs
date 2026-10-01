@@ -2,12 +2,13 @@
 //! interpret, and never lets a case pass for the wrong reason (DEC-85, DEC-128).
 //!
 //! Added in review round 1 of the tests PR, which found the three tests the brief names absent. They
-//! matter because the harness is the thing that decides whether 202 reference cases are being checked
+//! matter because the harness is the thing that decides whether the reference cases are being checked
 //! or merely being run: the first run of this suite had 31 cases "passing", thirty of them because a
 //! parse that rejects everything satisfies a `schema_valid: false`.
 
+use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use mandate_num::Usd;
 use mandate_refcases::{CaseStatus, Json, mandate, parse_status, read_fixture};
@@ -54,15 +55,8 @@ const OWNED: [(&str, &str); 7] = [
 /// pinning it lets a reference PR add a case without turning `main` red, and still fails any case the
 /// fixture gains or drops that §11 does not list.
 fn listed_size(prefix: &str) -> usize {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/specs/mandate.md");
-    let spec = std::fs::read_to_string(&path).expect("the mandate spec");
-    let table = spec
-        .split("\n## 11.")
-        .nth(1)
-        .and_then(|rest| rest.split("\n## ").next())
-        .expect("spec §11");
     let range = format!("{prefix}01 to {prefix}");
-    let sizes: Vec<usize> = table
+    let sizes: Vec<usize> = section_11()
         .lines()
         .filter(|line| line.starts_with('|'))
         .filter_map(|line| line.split(&range).nth(1))
@@ -82,13 +76,34 @@ fn listed_size(prefix: &str) -> usize {
     sizes.into_iter().next().expect("the family's size")
 }
 
+/// Spec §11, read once.
+fn section_11() -> &'static str {
+    static SECTION: OnceLock<String> = OnceLock::new();
+    SECTION.get_or_init(|| {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/specs/mandate.md");
+        let spec = std::fs::read_to_string(&path).expect("the mandate spec");
+        spec.split("\n## 11.")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .expect("spec §11")
+            .to_owned()
+    })
+}
+
+/// `status.toml`, parsed once.
+fn status() -> &'static BTreeMap<String, CaseStatus> {
+    static STATUS: OnceLock<BTreeMap<String, CaseStatus>> = OnceLock::new();
+    STATUS.get_or_init(|| {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("status.toml");
+        parse_status(&std::fs::read_to_string(&path).expect("status.toml"))
+            .expect("a well-formed status.toml")
+    })
+}
+
 /// Whether `status.toml` marks the case `passing`. A case it lists as `pending`, or does not list, is
 /// pending (DEC-77 item 1), and need not pass yet.
 fn passing(id: &str) -> bool {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("status.toml");
-    let status = parse_status(&std::fs::read_to_string(&path).expect("status.toml"))
-        .expect("a well-formed status.toml");
-    status.get(&format!("mandate::{id}")) == Some(&CaseStatus::Passing)
+    status().get(&format!("mandate::{id}")) == Some(&CaseStatus::Passing)
 }
 
 /// Every kind an arm of `mandate::cases` interprets, this harness's and the other streams'.
@@ -403,7 +418,12 @@ fn every_owned_expectation_member_is_read() {
         .sum();
     assert_eq!(
         (top_level, in_steps),
-        (owned_ids(&fixture).len() - listed_size("MC-R"), risk_steps),
+        (
+            owned_ids(&fixture)
+                .len()
+                .saturating_sub(listed_size("MC-R")),
+            risk_steps
+        ),
         "both sweeps must have been exercised over every expectation the owned cases carry: one \
          top-level expectation per case outside family R, and one per step of family R"
     );
@@ -632,12 +652,7 @@ fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
     );
     let ids: Vec<String> = family.into_iter().filter(|id| passing(id)).collect();
     assert!(!ids.is_empty(), "at least one MC-R case is passing");
-    let status = parse_status(
-        &std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("status.toml"))
-            .expect("status.toml"),
-    )
-    .expect("a well-formed status.toml");
-    let listed_passing: Vec<String> = status
+    let listed_passing: Vec<String> = status()
         .iter()
         .filter(|(key, state)| key.starts_with("mandate::MC-R") && **state == CaseStatus::Passing)
         .map(|(key, _)| key.trim_start_matches("mandate::").to_owned())
