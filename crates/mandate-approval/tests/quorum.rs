@@ -102,7 +102,6 @@ fn quorum_of(approvers: u8, independent: bool) -> Quorum {
 /// Check 7, `approval_quorum`: independence is required if the request bound it or the overlay
 /// requires it, and the count is unchanged by independence alone.
 #[test]
-#[ignore = "pending E8-3"]
 fn independence_is_required_if_the_request_or_the_overlay_requires_it() {
     for (bound, by_policy, want) in [
         (false, false, false),
@@ -126,7 +125,6 @@ fn independence_is_required_if_the_request_or_the_overlay_requires_it() {
 /// Check 7, `approval_quorum`: a ceiling below the order value asks for two; one at it, or above
 /// it by the smallest unit, does not, since only an order value that exceeds it counts.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_ceiling_below_the_order_value_asks_for_two_and_one_at_it_does_not() {
     let one = pending_with(1, false, &[]);
     for (ceiling, want) in [
@@ -148,7 +146,6 @@ fn a_ceiling_below_the_order_value_asks_for_two_and_one_at_it_does_not() {
 /// DEC-173 item 13: an overlay that turns maker-checker off or raises the ceiling leaves the
 /// bound requirement in force; the larger count and either independence win.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_loosened_overlay_leaves_the_bound_requirement_in_force() {
     let strict = pending_with(2, true, &[]);
     for policy in [
@@ -163,7 +160,6 @@ fn a_loosened_overlay_leaves_the_bound_requirement_in_force() {
 /// Check 7, DEC-173 item 13: an admin who turns maker-checker on while an approval is pending
 /// binds it, so the author can no longer grant it; another approver still can.
 #[test]
-#[ignore = "pending E8-3"]
 fn maker_checker_turned_on_while_pending_refuses_the_author() {
     let open = pending_with(1, false, &[]);
     assert_eq!(
@@ -183,7 +179,6 @@ fn maker_checker_turned_on_while_pending_refuses_the_author() {
 /// then maker-checker turned on. The author's grant stops counting, so the next approver's grant
 /// is counted, not admitted; a third, independent approver admits.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_authors_earlier_counted_grant_stops_counting_once_independence_is_required() {
     assert_eq!(
         judged(&pending_with(2, false, &[]), AUTHOR, PolicyOverlay::NONE),
@@ -209,7 +204,6 @@ fn the_authors_earlier_counted_grant_stops_counting_once_independence_is_require
 /// approval is pending raises its count to two, so one grant is counted and a second admits; a
 /// ceiling at the order value leaves one grant enough.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_lowered_ceiling_while_pending_makes_one_grant_counted() {
     let lowered = overlay(false, Some("1872.49"));
     assert_eq!(
@@ -234,7 +228,6 @@ fn a_lowered_ceiling_while_pending_makes_one_grant_counted() {
 /// with maker-checker off and a ceiling far above the order. The author is still refused and one
 /// grant is still only counted.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_loosened_policy_while_pending_leaves_the_bound_quorum() {
     let strict = pending_with(2, true, &[]);
     for policy in [PolicyOverlay::NONE, overlay(false, Some("100000"))] {
@@ -376,7 +369,6 @@ impl QuorumCase {
 /// MI-24, DEC-173 item 13: check 7 judges every grant against the stricter of the bound
 /// requirement and the overlay, and `quorum` names that requirement.
 #[test]
-#[ignore = "pending E8-3"]
 fn admission_judges_check_7_against_the_stricter_of_the_bound_and_the_overlay() {
     check(quorum_case(), |case| {
         let (r, c) = case.build();
