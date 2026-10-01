@@ -10,17 +10,18 @@ use mandate_canon::Value;
 
 use crate::batch::Batch;
 use crate::error::ExecutorError;
-use crate::ids::{ClientOrderId, IntentId};
+use crate::fold::single_holder;
+use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
-    abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif,
+    abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
 use crate::orders::transition;
 use crate::payload::{int, text};
 use crate::ports::Ports;
-use crate::state::{ExecutorState, ExitSequence, IntentOutcome};
+use crate::state::{EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome};
 use crate::types::{
-    AgentId, BrokerRequest, EventId, ExitTier, IntentBody, MarketObservation, Mode, OcoLegs,
-    OrderState, OrderType, ProtectionPrices, Purpose, RiskClock, SubmitOrder, TimeInForce,
+    AgentId, BrokerRequest, EventId, ExitTier, IntentBody, IntentHandoff, MarketObservation, Mode,
+    OcoLegs, OrderState, OrderType, ProtectionPrices, Purpose, RiskClock, SubmitOrder, TimeInForce,
 };
 
 /// Slice 2's entry: a **bracketed** add where protection rests is a new bracket (§5.4's tranche
@@ -39,24 +40,157 @@ pub(crate) fn bracketed_add(
     Ok(())
 }
 
-/// Only the triggered-stop watchdog's input (§5.4, slice 4), a sane mark at or below a resting
-/// stop, answers its stub, and refuses this step alone: nothing else waits on it.
-pub(crate) fn watched(
-    state: &ExecutorState,
-    observation: &MarketObservation,
-) -> Result<(), ExecutorError> {
+/// The triggered-stop watchdog's clock (§5.4): a sane mark at or below the instrument's resting
+/// stop starts a breach, unless one is running; any other sane mark ends it, above the stop or
+/// with no stop resting, as in the interval a watchdog's own sequence opens, so a breach never
+/// outlives the protection it was measured against (#385 round 2, blocker 2). An insane quote, or
+/// one with no mark, changes nothing. A breach starts when the executor learns of it, never
+/// earlier than its clock: a stale quote cannot claim the mark has been there for
+/// `stop_watchdog_s` already (DEC-260 (9)). A breach the watchdog has already fired on is spent:
+/// the next sane breaching mark starts a new one.
+pub(crate) fn breach(state: &mut ExecutorState, observation: &MarketObservation) {
     let stop = state
         .protection
         .get(&observation.instrument)
         .filter(|protection| !protection.resting.is_empty())
         .and_then(|protection| protection.prices)
         .map(|prices| prices.stop);
-    if let (true, Some(mark), Some(stop)) = (observation.sane, observation.mark, stop)
-        && mark <= stop
-    {
-        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    let (true, Some(mark)) = (observation.sane, observation.mark) else {
+        return;
+    };
+    let Some(stop) = stop else {
+        state.breaches.remove(&observation.instrument);
+        return;
+    };
+    if mark <= stop {
+        let learned = state.now.map_or(observation.observed_at, |now| {
+            now.max(observation.observed_at)
+        });
+        let fired = state.watchdogged.get(&observation.instrument).copied();
+        let start = state
+            .breaches
+            .entry(observation.instrument.clone())
+            .or_insert(learned);
+        if let Some(fired) = fired.filter(|fired| spent(*start, *fired)) {
+            *start = learned.max(RiskClock::from_secs(fired.secs().saturating_add(1)));
+        }
+    } else {
+        state.breaches.remove(&observation.instrument);
+    }
+}
+
+/// Whether a breach that began at `since` is the one the instrument's last watchdog, at `fired`,
+/// already fired on (or an older one): a spent breach fires no second watchdog, and the next sane
+/// breaching mark starts a new one, never earlier than the second after the fire (DEC-260 (11)).
+fn spent(since: RiskClock, fired: RiskClock) -> bool {
+    since <= fired
+}
+
+/// §5.4's triggered-stop watchdog (DEC-160 (11)). Where a breach has lasted `stop_watchdog_s` and
+/// the resting stop has no fill, the executor journals the watchdog record (`ProtectionChanged
+/// watchdog`), alerts the owner, and hands itself an intent: `w-<record>`, a `risk_exit` of the
+/// quantity the protection covers, its agent the position's single holder or none (`*`). That
+/// intent takes the marketable sequence like any exit (cancel, confirm, re-gate, the ladder), so
+/// it is never refused (rule 13). Its limit, the fallback for when nothing prices it, is the
+/// lowest of the latest quote's mark and bid, if that quote is sane, and the last sane bid's mark
+/// and bid: an insane quote never sets it, and it is never above a fresh bid, so never placed as
+/// a passive take-profit (#385 round 1, blocker 1). With no sane observation to take it from, the
+/// watchdog does not fire: the breach persists, the stop keeps resting and nothing is cancelled,
+/// so no exit goes and none waits, and §5.6 step 4's alert, which is for an exit at its fallback
+/// or held, has nothing to report; the next sane quote prices it. One watchdog runs per
+/// instrument at a time: none fires while a sequence runs there or a watchdog intent waits, and a
+/// breach it has fired on fires no second time. It exits what the protection still covers, never more than the long
+/// position (§5.4's "the held quantity").
+pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let now = batch.at().secs();
+    let wait = batch.ports.config.stop_watchdog_s;
+    let due: Vec<InstrumentId> = batch
+        .view
+        .breaches
+        .iter()
+        .filter(|(instrument, since)| {
+            now.saturating_sub(since.secs()) >= wait
+                && batch
+                    .view
+                    .watchdogged
+                    .get(*instrument)
+                    .is_none_or(|fired| !spent(**since, *fired))
+                && untouched(&batch.view, instrument)
+                && !batch.view.exiting.contains_key(*instrument)
+                && !watching(&batch.view, instrument)
+        })
+        .map(|(instrument, _)| instrument.clone())
+        .collect();
+    for instrument in due {
+        let held = covered(&batch.view, &instrument)?.min(long(&batch.view, &instrument));
+        let fresh = batch
+            .view
+            .quotes
+            .get(&instrument)
+            .filter(|quote| quote.sane);
+        let kept = batch.view.sane_bids.get(&instrument);
+        let limit = [
+            fresh.and_then(|quote| quote.mark),
+            fresh.and_then(|quote| quote.bid),
+            kept.and_then(|quote| quote.mark),
+            kept.and_then(|quote| quote.bid),
+        ]
+        .into_iter()
+        .flatten()
+        .min();
+        let (true, Some(limit)) = (held > Qty::ZERO, limit) else {
+            continue;
+        };
+        let agent = single_holder(&batch.view, &instrument)
+            .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+        let pairs = vec![
+            ("agent", text(agent.0.clone())),
+            ("qty", text(held.to_string())),
+        ];
+        let record = changed(batch, &instrument, "watchdog", pairs)?;
+        batch.notify(record.clone(), "stop_watchdog");
+        let intent_id = IntentId(EventId(format!("{WATCHDOG}{}", record.0)));
+        received(
+            batch,
+            IntentHandoff {
+                intent_id,
+                agent,
+                body: IntentBody::Order {
+                    instrument,
+                    side: Side::Sell,
+                    qty: held,
+                    limit,
+                    purpose: Purpose::RiskExit,
+                    protection: None,
+                },
+            },
+        )?;
     }
     Ok(())
+}
+
+/// Whether every protective order resting in `instrument` is unfilled: §5.4's "with no fill".
+fn untouched(view: &ExecutorState, instrument: &InstrumentId) -> bool {
+    view.protection.get(instrument).is_some_and(|protection| {
+        !protection.resting.is_empty()
+            && protection.resting.iter().all(|id| {
+                view.orders
+                    .get(id)
+                    .is_some_and(|order| order.filled_qty == Qty::ZERO)
+            })
+    })
+}
+
+/// Whether a watchdog intent in `instrument` is still waiting: received, and not yet submitted,
+/// denied or abandoned.
+fn watching(view: &ExecutorState, instrument: &InstrumentId) -> bool {
+    view.intents.iter().any(|(intent, record)| {
+        intent.0.0.starts_with(WATCHDOG)
+            && record.outcome == IntentOutcome::Received
+            && view.bodies.get(intent).is_some_and(
+                |body| matches!(body, IntentBody::Order { instrument: of, .. } if of == instrument),
+            )
+    })
 }
 
 /// How an order is priced (§5.6, DEC-160 (12)). Never a refusal: an exit is never denied for
@@ -1261,7 +1395,7 @@ mod stub_tests {
     use mandate_accounting::{InstrumentId, Side};
     use mandate_num::{Price, Qty};
 
-    use super::{awaits_cancel, bracketed_add, watched};
+    use super::{awaits_cancel, bracketed_add, breach};
     use crate::error::ExecutorError;
     use crate::ids::{ClientOrderId, IntentId};
     use crate::state::{ExecutorState, ExitSequence};
@@ -1675,13 +1809,14 @@ mod stub_tests {
         Ok(())
     }
 
-    /// The watchdog's input (slice 4) is a sane mark at or below the stop of protection that
-    /// rests; every other quote passes and is kept only as the latest observation.
+    /// The watchdog's clock (§5.4): only a sane mark at or below the stop of protection that rests
+    /// starts a breach, which keeps its start while it runs; a sane mark above the stop ends it,
+    /// and an insane quote, a quote with no mark, a quote elsewhere or a stop with no price
+    /// changes nothing.
     #[test]
-    fn only_a_sane_mark_at_or_below_a_resting_stop_answers_the_watchdog_stub()
-    -> Result<(), ExecutorError> {
+    fn only_a_sane_mark_at_or_below_a_resting_stop_starts_a_breach() -> Result<(), ExecutorError> {
         let (mut state, aapl) = protected()?;
-        let quote = |instrument: &InstrumentId, mark: Option<&str>, sane: bool| {
+        let quote = |instrument: &InstrumentId, mark: Option<&str>, sane: bool, at: i64| {
             Ok::<_, ExecutorError>(MarketObservation {
                 instrument: instrument.clone(),
                 bid: None,
@@ -1690,31 +1825,38 @@ mod stub_tests {
                 last_trade: None,
                 mark: mark.map(price).transpose()?,
                 sane,
-                observed_at: RiskClock::from_secs(10),
+                observed_at: RiskClock::from_secs(at),
             })
         };
-        let stub = Err(ExecutorError::Unimplemented { story: "E7-4" });
         let msft = InstrumentId::new("MSFT")?;
-        for (instrument, mark, sane, expected) in [
-            (&aapl, Some("139.99"), true, stub.clone()),
-            (&aapl, Some("140"), true, stub.clone()),
-            (&aapl, Some("140.01"), true, Ok(())),
-            (&aapl, Some("120"), false, Ok(())),
-            (&aapl, None, true, Ok(())),
-            (&msft, Some("120"), true, Ok(())),
+        let started = Some(RiskClock::from_secs(10));
+        for (instrument, mark, sane, at, expected) in [
+            (&aapl, Some("140.01"), true, 5, None),
+            (&aapl, Some("140"), true, 10, started),
+            (&aapl, Some("139.99"), true, 11, started),
+            (&aapl, Some("150"), false, 12, started),
+            (&aapl, None, true, 13, started),
+            (&msft, Some("120"), true, 14, started),
+            (&aapl, Some("140.01"), true, 15, None),
+            (&aapl, Some("120"), false, 16, None),
         ] {
+            breach(&mut state, &quote(instrument, mark, sane, at)?);
             assert_eq!(
-                watched(&state, &quote(instrument, mark, sane)?),
+                state.breaches.get(&aapl).copied(),
                 expected,
-                "{instrument:?} at {mark:?}, sane {sane}"
+                "{instrument:?} at {mark:?}, sane {sane}, at {at}"
             );
         }
+        assert!(
+            !state.breaches.contains_key(&msft),
+            "no protection rests there"
+        );
         if let Some(protection) = state.protection.get_mut(&aapl) {
             protection.prices = None;
         }
-        assert_eq!(
-            watched(&state, &quote(&aapl, Some("120"), true)?),
-            Ok(()),
+        breach(&mut state, &quote(&aapl, Some("120"), true, 17)?);
+        assert!(
+            state.breaches.is_empty(),
             "no stop price, nothing for the watchdog to compare with"
         );
         Ok(())
@@ -1906,7 +2048,8 @@ mod sequence_tests {
     use crate::payload::{clock, object, text};
     use crate::ports::{InstrumentSnapshot, MandateView, Ports};
     use crate::reconcile::tests::{
-        Everything, Executor, Ids, aapl, account, drafted, executor_config, fees, submitted,
+        Everything, Executor, Ids, aapl, account, drafted, executor_config, fees, missing,
+        submitted,
     };
     use crate::state::ExecutorState;
     use crate::types::{
@@ -2132,31 +2275,37 @@ mod sequence_tests {
         };
     }
 
-    /// #174 ruling 5862180909: a quote the watchdog stub refuses (a sane mark at or below the
-    /// resting stop) is refused alone. It leaves the state as it found it but for the latest
-    /// quote and the last sane bid, and the exit, the cancel's confirmation and the reconciliation
-    /// after it each run in full, with another such quote arriving between them.
+    /// #174 ruling 5862180909, carried into slice 4b: a breaching quote (a sane mark at or below
+    /// the resting stop) only starts the watchdog's clock. It leaves the state as it found it but
+    /// for the latest quote, the last sane bid and trade, and the breach, and the exit, the
+    /// cancel's confirmation and the reconciliation after it each run in full, with another such
+    /// quote arriving between them.
     #[test]
-    fn a_watchdog_stub_never_blocks_an_exit_a_cancel_or_a_reconciliation()
-    -> Result<(), ExecutorError> {
+    fn a_breach_never_blocks_an_exit_a_cancel_or_a_reconciliation() -> Result<(), ExecutorError> {
         with_ports!(ports);
         let mut executor = protected(&ports)?;
         let before = executor.state.clone();
-        assert!(stub(&executor.run(quote("139")?, &ports)));
+        assert_eq!(executor.run(quote("139")?, &ports)?, Vec::new());
         let mut kept = executor.state.clone();
         assert_eq!(
             kept.quotes.get(&aapl()?).and_then(|quote| quote.bid),
             Some(Price::parse("139")?),
-            "the refused quote is still the latest observation"
+            "the breaching quote is the latest observation"
         );
         assert_eq!(
             kept.sane_bids.get(&aapl()?).and_then(|quote| quote.bid),
             Some(Price::parse("139")?),
             "and the last sane bid"
         );
+        assert_eq!(
+            kept.breaches.get(&aapl()?),
+            Some(&RiskClock::from_secs(0)),
+            "and starts the watchdog's clock"
+        );
         kept.quotes = before.quotes.clone();
         kept.sane_bids = before.sane_bids.clone();
         kept.trades = before.trades.clone();
+        kept.breaches = before.breaches.clone();
         assert_eq!(kept, before, "and nothing else changed");
 
         let started = executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
@@ -2168,7 +2317,7 @@ mod sequence_tests {
         assert_eq!(actions(&started), vec!["unprotected_start"]);
         assert_eq!(submitted(&started), 0, "and waits for the confirmation");
 
-        assert!(stub(&executor.run(quote("138")?, &ports)));
+        executor.run(quote("138")?, &ports)?;
         let released = executor.run(cancel_accepted(OCO), &ports)?;
         assert_eq!(actions(&released), vec!["cancelled"]);
         assert_eq!(
@@ -3056,6 +3205,557 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// The watchdog's own intent, as journaled: its id, agent, purpose and quantity.
+    fn watchdog_intents(effects: &[Effect]) -> Vec<(String, String, String, String)> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "IntentReceived" => {
+                    let field = |name: &str| {
+                        draft
+                            .payload
+                            .get(name)
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned()
+                    };
+                    Some((
+                        field("intent_id"),
+                        field("agent"),
+                        field("purpose"),
+                        field("qty"),
+                    ))
+                }
+                _ => None,
+            })
+            .filter(|(intent, ..)| intent.starts_with("w-"))
+            .collect()
+    }
+
+    /// The id of the journaled watchdog record, `ProtectionChanged watchdog`.
+    fn watchdog_record(effects: &[Effect]) -> Option<String> {
+        effects.iter().find_map(|effect| match effect {
+            Effect::Journal(draft)
+                if draft.event_type == "ProtectionChanged"
+                    && draft.payload.get("action").and_then(Value::as_str) == Some("watchdog") =>
+            {
+                Some(draft.event_id.0.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// §5.4, DEC-160 (11): a sane mark at or below the resting stop for `stop_watchdog_s` (30 s
+    /// here) with no fill is watchdogged, and not a second sooner. The record is journaled and the
+    /// owner alerted; the executor's own intent `w-<record>` is a `risk_exit` of the ten the stop
+    /// covers, its agent the position's single holder; the protection is cancelled, and the
+    /// confirmation sends `md-w-<record>` through the ladder, 139 × 0.995 on the cent. A restart
+    /// between the cancel and its confirmation derives the same id.
+    #[test]
+    fn a_breached_stop_is_watchdogged_into_the_holders_risk_exit() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        for restart in [false, true] {
+            let mut executor = protected(&ports)?;
+            executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+            let early = executor.run(Input::Tick(RiskClock::from_secs(29)), &ports)?;
+            assert!(watchdog_record(&early).is_none(), "{:?}", drafted(&early));
+            let fired = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
+            let record = watchdog_record(&fired).ok_or_else(|| missing("the watchdog record"))?;
+            assert!(alerts(&fired).contains(&"stop_watchdog"));
+            assert_eq!(
+                watchdog_intents(&fired),
+                vec![(
+                    format!("w-{record}"),
+                    "agent-a".to_owned(),
+                    "risk_exit".to_owned(),
+                    "10".to_owned()
+                )]
+            );
+            assert_eq!(cancels(&fired), vec![OCO]);
+            if restart {
+                executor = executor.restarted(&ports)?;
+                executor.run(observation(Some(139), None, true, 30)?, &ports)?;
+            }
+            let sent = executor.run(cancel_accepted(OCO), &ports)?;
+            assert_eq!(
+                submissions(&sent)
+                    .iter()
+                    .map(|order| (
+                        order.client_order_id.as_str().to_owned(),
+                        order.purpose,
+                        order.qty,
+                        order.limit_price
+                    ))
+                    .collect::<Vec<_>>(),
+                vec![(
+                    format!("md-w-{record}"),
+                    Purpose::RiskExit,
+                    Qty::parse("10")?,
+                    Some(Price::parse("138.31")?)
+                )],
+                "restart {restart}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-260 (11): the watchdog's exit takes the lower of the latest mark and sane bid as its
+    /// limit, so a mark above a fresh bid (139.9 against 139) never makes it a passive
+    /// take-profit; it runs the marketable sequence.
+    #[test]
+    fn a_watchdog_exit_is_never_passive() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(
+            Input::Market(MarketObservation {
+                instrument: aapl()?,
+                bid: Some(Price::parse("139")?),
+                bid_size: Some(Qty::parse("100")?),
+                ask: Some(Price::parse("140")?),
+                last_trade: None,
+                mark: Some(Price::parse("139.9")?),
+                sane: true,
+                observed_at: RiskClock::from_secs(28),
+            }),
+            &ports,
+        )?;
+        executor.run(
+            Input::Market(MarketObservation {
+                instrument: aapl()?,
+                bid: Some(Price::parse("139")?),
+                bid_size: Some(Qty::parse("100")?),
+                ask: Some(Price::parse("140")?),
+                last_trade: None,
+                mark: Some(Price::parse("139.9")?),
+                sane: true,
+                observed_at: RiskClock::from_secs(57),
+            }),
+            &ports,
+        )?;
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(58)), &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        assert_eq!(
+            actions(&fired),
+            vec!["watchdog", "unprotected_start"],
+            "{:?}",
+            drafted(&fired)
+        );
+        Ok(())
+    }
+
+    /// The watchdog exits what is held: with the position already sold and the stop still
+    /// resting, there is nothing to exit, and no watchdog fires.
+    #[test]
+    fn a_flat_position_is_never_watchdogged() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        committed(
+            &mut executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-out")),
+                ("client_order_id", text("md-held-1")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text("10")),
+                ("price", text("150")),
+            ],
+        )?;
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        let ticked = executor.run(Input::Tick(RiskClock::from_secs(60)), &ports)?;
+        assert!(watchdog_record(&ticked).is_none(), "{:?}", drafted(&ticked));
+        Ok(())
+    }
+
+    /// One watchdog per breach (#385 round 1): once the first watchdog's exit has ended (four
+    /// filled, the rest cancelled at the bound) and protection is back for the six held, the
+    /// breach it fired on is spent; a new sane breaching mark, at 62, starts a new one, which
+    /// fires a second watchdog for those six `stop_watchdog_s` later.
+    #[test]
+    fn a_breach_that_outlasts_the_first_exit_fires_again() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        let first = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
+        let record = watchdog_record(&first).ok_or_else(|| missing("the first watchdog"))?;
+        let exit = format!("md-w-{record}");
+        executor.run(cancel_accepted(OCO), &ports)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
+                fill_id: FillId("f-w".to_owned()),
+                client_order_id: Some(exit.clone()),
+                instrument: aapl()?,
+                side: Side::Sell,
+                qty: Qty::parse("4")?,
+                price: Price::parse("138.31")?,
+                fees: Usd::ZERO,
+                trade_date: Date::parse("2026-09-22")?,
+            })),
+            &ports,
+        )?;
+        executor.run(Input::Tick(RiskClock::from_secs(40)), &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(60)), &ports)?;
+        let ended = executor.run(cancel_accepted(&exit), &ports)?;
+        assert_eq!(
+            submissions(&ended)
+                .iter()
+                .map(|order| (order.purpose, order.qty))
+                .collect::<Vec<_>>(),
+            vec![(Purpose::Protective, Qty::parse("6")?)],
+            "{:?}",
+            drafted(&ended)
+        );
+        let spent = executor.run(Input::Tick(RiskClock::from_secs(61)), &ports)?;
+        assert!(
+            watchdog_record(&spent).is_none(),
+            "the breach it fired on is spent: {:?}",
+            drafted(&spent)
+        );
+        executor.run(observation(Some(139), None, true, 62)?, &ports)?;
+        let early = executor.run(Input::Tick(RiskClock::from_secs(91)), &ports)?;
+        assert!(watchdog_record(&early).is_none(), "{:?}", drafted(&early));
+        let again = executor.run(Input::Tick(RiskClock::from_secs(92)), &ports)?;
+        let second = watchdog_record(&again).ok_or_else(|| missing("the second watchdog"))?;
+        assert_eq!(
+            watchdog_intents(&again),
+            vec![(
+                format!("w-{second}"),
+                "agent-a".to_owned(),
+                "risk_exit".to_owned(),
+                "6".to_owned()
+            )]
+        );
+        Ok(())
+    }
+
+    /// #385 round 1, blocker 1 (rule 3): an insane quote never prices the watchdog exit. Sane 139
+    /// at 0, then an insane quote at 200 at 400: the watchdog fires at 430 and its exit goes at
+    /// 139, its fallback from the last sane bid (alerted, the bid being past five minutes), never
+    /// at 200; and the protection does not cycle: once the bound has ended the exit and
+    /// re-protected, the spent breach fires no second watchdog.
+    #[test]
+    fn an_insane_quote_never_prices_the_watchdog_exit() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        executor.run(observation(Some(200), Some(200), false, 400)?, &ports)?;
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(430)), &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        let sent = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&sent)
+                .iter()
+                .map(|order| order.limit_price)
+                .collect::<Vec<_>>(),
+            vec![Some(Price::parse("139")?)]
+        );
+        assert_eq!(alerts(&sent), vec!["exit_unpriced"]);
+        let mut records = 0usize;
+        for at in (431..=600).step_by(7) {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            records = records.saturating_add(usize::from(watchdog_record(&tick).is_some()));
+            for id in cancels(&tick) {
+                if id.starts_with("md-w-") {
+                    executor.run(cancel_accepted(id), &ports)?;
+                }
+            }
+        }
+        assert_eq!(records, 0, "no second watchdog on the spent breach");
+        assert!(
+            rests(&executor.state, &aapl()?),
+            "the protection is back and stays"
+        );
+        Ok(())
+    }
+
+    /// #385 round 1, minor 1: with no sane observation to price the exit from (the breach came
+    /// from a sane mark with no bid, and the latest quote is insane), the watchdog does not fire:
+    /// the breach persists, the stop keeps resting and nothing is cancelled. The next sane quote
+    /// prices it, and the watchdog fires on the breach it has been running since 0.
+    #[test]
+    fn a_watchdog_with_nothing_sane_to_price_from_waits() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(
+            Input::Market(MarketObservation {
+                instrument: aapl()?,
+                bid: None,
+                bid_size: None,
+                ask: None,
+                last_trade: None,
+                mark: Some(Price::parse("139")?),
+                sane: true,
+                observed_at: RiskClock::from_secs(0),
+            }),
+            &ports,
+        )?;
+        executor.run(observation(Some(200), None, false, 10)?, &ports)?;
+        for at in [30, 60, 90] {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            assert!(
+                watchdog_record(&tick).is_none() && cancels(&tick).is_empty(),
+                "at {at}: {:?}",
+                drafted(&tick)
+            );
+        }
+        assert!(executor.state.breaches.contains_key(&aapl()?));
+        assert!(rests(&executor.state, &aapl()?));
+        let priced = executor.run(observation(Some(139), None, true, 91)?, &ports)?;
+        assert!(watchdog_record(&priced).is_some(), "{:?}", drafted(&priced));
+        assert_eq!(cancels(&priced), vec![OCO]);
+        Ok(())
+    }
+
+    /// DEC-260 (11), the boundary: with `stop_watchdog_s` at 0 the watchdog fires in the second the
+    /// breach begins, and that breach is spent at once: a tick and a breaching quote in the same
+    /// second fire nothing, and the new breach starts the second after the fire.
+    #[test]
+    fn a_breach_is_spent_in_the_second_it_fires() -> Result<(), ExecutorError> {
+        let fees = fees()?;
+        let config = ExecutorConfig {
+            stop_watchdog_s: 0,
+            max_unprotected_s: 600,
+            ..executor_config()
+        };
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor
+            .state
+            .modes
+            .insert(AgentId("agent-a".to_owned()), Mode::Paused);
+        let fired = executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        for input in [
+            Input::Tick(RiskClock::from_secs(0)),
+            observation(Some(139), None, true, 0)?,
+        ] {
+            let again = executor.run(input, &ports)?;
+            assert!(watchdog_record(&again).is_none(), "{:?}", drafted(&again));
+        }
+        assert_eq!(
+            executor.state.breaches.get(&aapl()?),
+            Some(&RiskClock::from_secs(1)),
+            "the new breach starts the second after the fire"
+        );
+        Ok(())
+    }
+
+    /// #385 round 2, blocker 2 (rule 3): a breach never outlives the recovery that ends it. Sane
+    /// 139 at 0 fires the watchdog at 30; sane 139 at 30 re-arms a breach while the cancel waits;
+    /// once the cancel is confirmed no stop rests, and sane 155 at 35, 40 and 50 end the breach.
+    /// The bound at 61 re-places the protection for the unfilled exit, and at 62 no second
+    /// watchdog fires: the restored protection rests and nothing sells at 154.23.
+    #[test]
+    fn a_recovery_during_the_interval_ends_the_breach() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        executor.run(observation(Some(139), None, true, 30)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        for at in [35, 40, 50] {
+            executor.run(observation(Some(155), None, true, at)?, &ports)?;
+        }
+        assert!(executor.state.breaches.is_empty(), "the recovery ended it");
+        let bound = executor.run(Input::Tick(RiskClock::from_secs(61)), &ports)?;
+        for id in cancels(&bound) {
+            if id.starts_with("md-w-") {
+                executor.run(cancel_accepted(id), &ports)?;
+            }
+        }
+        assert!(rests(&executor.state, &aapl()?), "the protection is back");
+        let after = executor.run(Input::Tick(RiskClock::from_secs(62)), &ports)?;
+        assert!(watchdog_record(&after).is_none(), "{:?}", drafted(&after));
+        assert!(cancels(&after).is_empty(), "{:?}", drafted(&after));
+        assert!(
+            submissions(&after)
+                .iter()
+                .all(|order| order.purpose == Purpose::Protective),
+            "nothing sells: {:?}",
+            drafted(&after)
+        );
+        assert!(rests(&executor.state, &aapl()?));
+        Ok(())
+    }
+
+    /// §5.4: the breach must last. A sane mark back above the stop before `stop_watchdog_s` ends
+    /// it, and the next breach starts its own clock; an insane quote neither starts nor ends one.
+    #[test]
+    fn a_breach_must_last_stop_watchdog_s() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        executor.run(observation(Some(141), None, true, 20)?, &ports)?;
+        executor.run(observation(Some(139), None, true, 25)?, &ports)?;
+        executor.run(observation(Some(150), None, false, 40)?, &ports)?;
+        let early = executor.run(Input::Tick(RiskClock::from_secs(54)), &ports)?;
+        assert!(watchdog_record(&early).is_none(), "{:?}", drafted(&early));
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(55)), &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        let sent = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&sent)
+                .iter()
+                .map(|order| order.limit_price)
+                .collect::<Vec<_>>(),
+            vec![Some(Price::parse("138.31")?)],
+            "priced from the last sane bid, 139, never from the insane 150"
+        );
+        Ok(())
+    }
+
+    /// DEC-260 (9): a stale breaching quote starts the clock when the executor learns of it, not
+    /// at its own timestamp, so it never fires the watchdog at once.
+    #[test]
+    fn a_stale_breach_starts_the_clock_when_it_arrives() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(100)), &ports)?;
+        let arrived = executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        assert!(
+            watchdog_record(&arrived).is_none(),
+            "{:?}",
+            drafted(&arrived)
+        );
+        let early = executor.run(Input::Tick(RiskClock::from_secs(129)), &ports)?;
+        assert!(watchdog_record(&early).is_none(), "{:?}", drafted(&early));
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(130)), &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        Ok(())
+    }
+
+    /// §5.4's "with no fill": a stop that has filled at all is working, and is not watchdogged.
+    #[test]
+    fn a_stop_that_has_filled_is_not_watchdogged() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        committed(
+            &mut executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-stop")),
+                ("client_order_id", text(OCO)),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text("2")),
+                ("price", text("140")),
+            ],
+        )?;
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        let ticked = executor.run(Input::Tick(RiskClock::from_secs(60)), &ports)?;
+        assert!(watchdog_record(&ticked).is_none(), "{:?}", drafted(&ticked));
+        Ok(())
+    }
+
+    /// Rule 13: a watchdog exit the gate holds (its agent paused) leaves the stop resting and is
+    /// journaled once: no second watchdog fires while it waits, not even on new breaching quotes
+    /// past `stop_watchdog_s`, which would sell the same shares twice once released; the tick after
+    /// the pause lifts releases it into the sequence.
+    #[test]
+    fn a_held_watchdog_exit_fires_once_and_goes_when_released() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let agent = AgentId("agent-a".to_owned());
+        let mut executor = protected(&ports)?;
+        executor.state.modes.insert(agent.clone(), Mode::Paused);
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
+        assert!(watchdog_record(&fired).is_some());
+        assert_eq!(verdicts(&fired), vec!["hold"]);
+        assert!(cancels(&fired).is_empty(), "the stop keeps resting");
+        for at in [31, 45, 60, 90] {
+            let quoted = executor.run(observation(Some(139), None, true, at)?, &ports)?;
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            assert!(
+                watchdog_record(&quoted).is_none() && watchdog_record(&tick).is_none(),
+                "at {at}: a new breach while the watchdog's exit waits fires nothing: {:?}",
+                drafted(&tick)
+            );
+        }
+        executor.state.modes.insert(agent, Mode::Normal);
+        let released = executor.run(Input::Tick(RiskClock::from_secs(91)), &ports)?;
+        assert_eq!(cancels(&released), vec![OCO], "{:?}", drafted(&released));
+        assert!(watchdog_record(&released).is_none());
+        Ok(())
+    }
+
+    /// DEC-160 (11), §2.3, §5.5: with no single holder (agent-b bought five beside agent-a's ten)
+    /// the watchdog exit belongs to no agent, `*`. It is never any agent's own, and the
+    /// instrument-wide bound cancels it by its own id like any exit working there.
+    #[test]
+    fn a_watchdog_exit_with_no_single_holder_is_nobodys_and_the_bound_ends_it()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text("md-held-2")),
+                ("agent", text("agent-b")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("5")),
+                ("limit", text("150")),
+                ("purpose", text("open")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-b")),
+                ("client_order_id", text("md-held-2")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty_gross", text("5")),
+                ("price", text("150")),
+            ],
+        )?;
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
+        let record = watchdog_record(&fired).ok_or_else(|| missing("the watchdog record"))?;
+        assert_eq!(
+            watchdog_intents(&fired),
+            vec![(
+                format!("w-{record}"),
+                "*".to_owned(),
+                "risk_exit".to_owned(),
+                "10".to_owned()
+            )],
+            "the ten the stop covers, owned by no agent"
+        );
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = ClientOrderId::parse(&format!("md-w-{record}"))?;
+        let order = executor
+            .state
+            .orders
+            .get(&exit)
+            .ok_or_else(|| missing("the watchdog exit"))?;
+        assert_eq!(order.agent, Some(AgentId("*".to_owned())));
+        assert_ne!(order.agent, Some(AgentId("agent-a".to_owned())));
+        assert_ne!(order.agent, Some(AgentId("agent-b".to_owned())));
+        let bound = executor.run(Input::Tick(RiskClock::from_secs(60)), &ports)?;
+        assert!(
+            cancels(&bound).contains(&exit.as_str()),
+            "{:?}",
+            cancels(&bound)
+        );
+        Ok(())
+    }
+
     /// §5.6 ladders an exit only where its instrument has an exit tier: without one the exit goes
     /// at its intent's own limit and is never cancelled to step.
     #[test]
@@ -3541,11 +4241,7 @@ mod sequence_tests {
         for (sane, observed, now) in [(false, 0, 0), (true, 0, 100)] {
             let mut executor = protected(&ports)?;
             executor.run(Input::Tick(RiskClock::from_secs(now)), &ports)?;
-            let watched = executor.run(fresh_quote("0.01", sane, observed)?, &ports);
-            assert!(
-                watched.is_ok() || stub(&watched),
-                "the quote is kept either way"
-            );
+            executor.run(fresh_quote("0.01", sane, observed)?, &ports)?;
             let started = executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
             assert_eq!(
                 actions(&started),
@@ -5877,7 +6573,7 @@ mod sequence_tests {
     ];
 
     fn moves() -> impl Strategy<Value = Move> {
-        let price = || prop::option::of(141_u32..=160);
+        let price = || prop::option::of(135_u32..=160);
         prop_oneof![
             4 => (1_i64..=20).prop_map(Move::Tick),
             3 => (price(), price(), any::<bool>()).prop_map(|(bid, trade, sane)| Move::Quote(bid, trade, sane)),
@@ -5909,6 +6605,7 @@ mod sequence_tests {
         verdict: String,
         reason: String,
         done: bool,
+        watchdog: bool,
     }
 
     /// The rule-13 oracle's own record: what the script fed in, what the broker holds, and each
@@ -5922,6 +6619,7 @@ mod sequence_tests {
         exits: BTreeMap<String, Followed>,
         fills: u32,
         paused: bool,
+        quiet_since: i64,
     }
 
     impl Desk {
@@ -5955,6 +6653,31 @@ mod sequence_tests {
             let field = |name: &str| draft.payload.get(name).and_then(Value::as_str);
             let intent = field("intent_id").unwrap_or_default().to_owned();
             match (draft.event_type.as_str(), field("action")) {
+                ("IntentReceived", _) if intent.starts_with("w-") => {
+                    let qty = field("qty")
+                        .unwrap_or_default()
+                        .parse::<u32>()
+                        .map_err(|error| format!("the watchdog's qty: {error}"))?;
+                    if field("purpose") != Some("risk_exit") {
+                        return Err(format!("{intent}: the watchdog's exit is not a risk_exit"));
+                    }
+                    if self.exits.values().any(|exit| exit.watchdog && !exit.done) {
+                        return Err(format!("{intent}: a second watchdog while one waits"));
+                    }
+                    self.exits.insert(
+                        intent.clone(),
+                        Followed {
+                            purpose: Purpose::RiskExit,
+                            qty,
+                            arrived: self.now,
+                            since: self.now,
+                            verdict: String::new(),
+                            reason: String::new(),
+                            done: false,
+                            watchdog: true,
+                        },
+                    );
+                }
                 ("GateDecided", _) => {
                     let verdict = field("verdict").unwrap_or_default();
                     let reason = field("reason_code").unwrap_or_default();
@@ -6015,7 +6738,8 @@ mod sequence_tests {
         /// zero beside the others still selling waits for room, never denied while it waits; and
         /// every exit the broker is not holding is done by `max_intent_age_s`, which abandons it.
         /// A broker silent on a protective cancel holds the exit with the protection still
-        /// resting; nothing bounds that hold yet (backlog).
+        /// resting; nothing bounds that hold yet (backlog), and the bound runs from when the
+        /// broker last confirmed.
         fn bounded(&self, config: &ExecutorConfig) -> Result<(), String> {
             let limit = config
                 .max_unprotected_s
@@ -6037,9 +6761,10 @@ mod sequence_tests {
                 let waits = held || broker || self.oversells(intent, exit.qty);
                 let aged = self.now.saturating_sub(exit.arrived)
                     > config.max_intent_age_s.saturating_add(20);
+                let since = exit.since.max(self.quiet_since);
                 if !exit.done
                     && !broker
-                    && (aged || !waits && self.now.saturating_sub(exit.since) > limit)
+                    && (aged || !waits && self.now.saturating_sub(since) > limit)
                 {
                     return Err(format!(
                         "{intent} ({} {}) waited from {} to {}",
@@ -6157,6 +6882,7 @@ mod sequence_tests {
             exits: BTreeMap::new(),
             fills: 0,
             paused: false,
+            quiet_since: 0,
         };
         let agent = AgentId("agent-a".to_owned());
         for (step, next) in script.iter().enumerate() {
@@ -6185,6 +6911,7 @@ mod sequence_tests {
                             verdict: String::new(),
                             reason: String::new(),
                             done: false,
+                            watchdog: false,
                         },
                     );
                     Some(
@@ -6238,6 +6965,16 @@ mod sequence_tests {
                         None
                     } else {
                         let id = desk.asked.remove(0);
+                        let protective = |desk: &Desk, id: &String| {
+                            desk.venue
+                                .get(id)
+                                .is_some_and(|held| held.purpose == Purpose::Protective)
+                        };
+                        let cleared = protective(&desk, &id)
+                            && !desk.asked.iter().any(|other| protective(&desk, other));
+                        if cleared {
+                            desk.quiet_since = desk.now;
+                        }
                         match desk.venue.get_mut(&id) {
                             Some(held) if held.live => {
                                 held.live = false;
@@ -6269,6 +7006,7 @@ mod sequence_tests {
         restarted.quotes.clone_from(&executor.state.quotes);
         restarted.sane_bids.clone_from(&executor.state.sane_bids);
         restarted.trades.clone_from(&executor.state.trades);
+        restarted.breaches.clone_from(&executor.state.breaches);
         restarted.modes.clone_from(&executor.state.modes);
         restarted.now = executor.state.now;
         restarted.epoch = executor.state.epoch;
@@ -6284,7 +7022,7 @@ mod sequence_tests {
     }
 
     /// Rule 13, by an oracle of its own over random scripts of ticks, quotes (a bid, a trade,
-    /// either, neither; sane or not), exits of every purpose and size, acknowledgments, partial
+    /// either, neither; sane or not; marks at, above and below the stop, so the watchdog fires), exits of every purpose and size, acknowledgments, partial
     /// fills, cancel confirmations and pauses, against ten protected AAPL with an exit tier: no
     /// input is refused; no exit is denied but for a genuine over-sell; no exit is held but for
     /// rule 13's four, or a discretionary exit with nothing to price from (DEC-160 (12)); no
@@ -6292,7 +7030,8 @@ mod sequence_tests {
     /// submitted, denied nor abandoned past the bounds but under those holds or the broker's
     /// silence on a protective cancel. The oracle reads the drafts and its own record, never
     /// the fold; and at the end the journal, folded afresh, equals the live state but for what is
-    /// process-local (quotes, the clock, the writer's epoch, and the pause set directly here).
+    /// process-local (quotes, the watchdog's clock, the clock, the writer's epoch, and the pause set
+    /// directly here).
     #[test]
     fn rule_13_holds_over_random_scripts() -> Result<(), String> {
         let config = ProptestConfig {

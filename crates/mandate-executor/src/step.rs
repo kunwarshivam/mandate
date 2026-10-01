@@ -8,7 +8,9 @@ use crate::orders::{
 };
 use crate::payload::optional_text;
 use crate::ports::Ports;
-use crate::protection::{bound, cancel_openings, ladder_steps, overdue_openings, settle, watched};
+use crate::protection::{
+    bound, breach, cancel_openings, ladder_steps, overdue_openings, settle, watchdog,
+};
 use crate::reconcile::run;
 use crate::state::{EVERY_AGENT, ExecutorState, UnresolvedAppend};
 use crate::types::{
@@ -58,6 +60,7 @@ pub fn handle(
         state.now = state.now.max(Some(*at));
     }
     if let Input::Market(observation) = &input {
+        breach(state, observation);
         for (kept, carries) in [
             (&mut state.sane_bids, observation.bid.is_some()),
             (&mut state.trades, observation.last_trade.is_some()),
@@ -148,13 +151,14 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
     match input {
         Input::Started(_) => Err(ExecutorError::AlreadyStarted),
         Input::Journal(event) => copied(batch, &event),
-        Input::Market(observation) => watched(&batch.view, &observation),
+        Input::Market(_) => watchdog(batch),
         Input::Tick(_) => {
             lookups_due(batch);
             release_held(batch)?;
             overdue_openings(batch)?;
             bound(batch)?;
-            ladder_steps(batch)
+            ladder_steps(batch)?;
+            watchdog(batch)
         }
         Input::Intent(handoff) => received(batch, handoff),
         Input::Broker(Err(_)) => silence(batch),
@@ -247,11 +251,11 @@ mod watch_call_tests {
         }))
     }
 
-    /// #258 round 1, major 1: `handle` passes every quote to `watched`, so the watchdog's input — a
-    /// sane mark at or below the resting stop — answers its stub (slice 4), and any other quote,
-    /// there or elsewhere, passes.
+    /// #258 round 1, major 1, carried into slice 4b: `handle` passes every quote to the
+    /// watchdog's clock, so a sane mark at or below the resting stop starts a breach, a sane mark
+    /// above it ends it, and a quote elsewhere touches nothing; none is refused.
     #[test]
-    fn a_quote_where_protection_rests_reaches_the_watchdog_stub() -> Result<(), ExecutorError> {
+    fn a_quote_where_protection_rests_reaches_the_watchdog() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &Ids,
@@ -261,12 +265,13 @@ mod watch_call_tests {
             fees: &fees,
         };
         let mut executor = protected_by_an_oco(&ports)?;
-        assert_eq!(
-            executor.run(quote("AAPL", "140")?, &ports),
-            Err(ExecutorError::Unimplemented { story: "E7-4" })
-        );
+        let aapl = InstrumentId::new("AAPL")?;
+        assert_eq!(executor.run(quote("AAPL", "140")?, &ports), Ok(Vec::new()));
+        assert!(executor.state.breaches.contains_key(&aapl));
         assert_eq!(executor.run(quote("AAPL", "150")?, &ports), Ok(Vec::new()));
+        assert!(executor.state.breaches.is_empty());
         assert_eq!(executor.run(quote("MSFT", "100")?, &ports), Ok(Vec::new()));
+        assert!(executor.state.breaches.is_empty());
         Ok(())
     }
 }

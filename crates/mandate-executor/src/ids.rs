@@ -12,6 +12,9 @@ pub struct IntentId(pub EventId);
 /// order of ours from external activity (trading-domain spec §7.1).
 pub const PREFIX: &str = "md-";
 
+/// The prefix of the triggered-stop watchdog's own intent id, `w-<event>` (§2.3, DEC-160 (11)).
+pub(crate) const WATCHDOG: &str = "w-";
+
 /// The longest `client_order_id` Alpaca accepts.
 const MAX_LEN: usize = 128;
 
@@ -32,12 +35,32 @@ impl ClientOrderId {
     /// number: trading-domain spec §5.7 requires a resubmission after a confirmed absence to carry
     /// the same id, and an id that depended on the attempt could not. An intent id is a ULID, so
     /// its body is alphanumeric; anything else is refused rather than escaped.
+    ///
+    /// The triggered-stop watchdog's exit is the executor's own intent, `w-<event>` from its
+    /// journaled record (trading-domain spec §2.3, DEC-160 (11)), so `md-w-<event>`. An event id
+    /// is a ULID in production, and the `md-w-` prefix keeps it apart from every intent's id
+    /// whatever its event id's hyphens (DEC-260 (10)); one that would read back as a protective
+    /// order's is refused, as [`Self::for_replacement`] refuses.
     pub fn for_intent(intent: &IntentId) -> Result<Self, ExecutorError> {
         let raw = intent.0.0.as_str();
-        if !raw.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        let derived = match raw.strip_prefix(WATCHDOG) {
+            Some(record) => {
+                !record.starts_with('-')
+                    && !record.ends_with('-')
+                    && record
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            }
+            None => raw.bytes().all(|b| b.is_ascii_alphanumeric()),
+        };
+        if raw.is_empty() || raw == WATCHDOG || !derived {
             return Err(malformed(raw));
         }
-        Self::parse(&format!("{PREFIX}{raw}"))
+        let id = Self::parse(&format!("{PREFIX}{raw}"))?;
+        if id.protected_entry().is_some() {
+            return Err(malformed(id.as_str()));
+        }
+        Ok(id)
     }
 
     /// `md-r-<origin>` for the order that replaces one the broker replaced, derived from the
@@ -211,6 +234,23 @@ mod tests {
     }
 
     /// #258 round 1, minor 2: no replacement id reads back as a protective order's.
+    /// §2.3, DEC-160 (11), DEC-260 (10): the watchdog's own intent `w-<record>` takes letters,
+    /// digits and inner hyphens after `w-`; an agent's intent stays alphanumeric; nothing empty,
+    /// nothing with an outer hyphen, and nothing that reads back as a protective order's.
+    #[test]
+    fn only_a_watchdog_intent_may_carry_hyphens() -> Result<(), ExecutorError> {
+        let id = |raw: &str| ClientOrderId::for_intent(&IntentId(EventId(raw.to_owned())));
+        assert_eq!(id("w-e2-h8-o0")?.as_str(), "md-w-e2-h8-o0");
+        assert_eq!(id("w-01JABC")?.as_str(), "md-w-01JABC");
+        assert_eq!(id("01JABC")?.as_str(), "md-01JABC");
+        for refused in [
+            "", "w-", "w--e1", "w-e1-", "w-e_1", "01J-ABC", "-w-e1", "w-e1-p2",
+        ] {
+            assert!(id(refused).is_err(), "{refused:?} is refused");
+        }
+        Ok(())
+    }
+
     #[test]
     fn a_replacement_id_never_names_an_entry() -> Result<(), ExecutorError> {
         for raw in ["p1", "e1-p2", "x-pq"] {

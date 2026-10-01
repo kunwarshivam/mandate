@@ -3218,7 +3218,6 @@ fn protection_is_not_re_placed_early() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_stop_at_its_trigger_price_without_a_fill_is_watchdogged() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3244,7 +3243,6 @@ fn a_stop_at_its_trigger_price_without_a_fill_is_watchdogged() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_watchdog_exit_is_a_risk_exit_through_the_ladder() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
