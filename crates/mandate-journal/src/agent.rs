@@ -1,8 +1,9 @@
 //! The agent stream's closed payload schemas (journal spec §9.1, DEC-177, DEC-252) and §11's two
 //! agent-stream per-range checks (E7-9, DEC-168). Every rule only refuses a draft or fails a
 //! range; none changes what a writer may do. The checks are stubs until E7-9's implementation:
-//! each §9.1 draft is refused as `unimplemented`, as it was refused as `unknown_schema` before, and
-//! every agent-stream range fails.
+//! each §9.1 draft is refused as `unimplemented`. Seven of the eight types were refused as
+//! `unknown_schema` before; an agent stream's `StreamOpened`, which took the account schema, was
+//! refused as `stream_mismatch` or `schema`. Every agent-stream range fails.
 
 use mandate_canon::Value;
 

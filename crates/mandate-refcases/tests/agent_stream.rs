@@ -7,6 +7,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use Shape::{Boolean, Integer, List, Record, Text};
 use mandate_refcases::{Json, journal, read_fixture};
 use serde_json::json;
 
@@ -275,4 +276,354 @@ fn a_reference_before_the_range_is_left_to_the_full_chain() {
         run(from_the_switch, &id),
         Err("expected (13, \"mode_event_mismatch\"), but the range verified".to_owned())
     );
+}
+
+/// How a §9.1 member is written, and so which value is off its type: every string-shaped type
+/// (`text`, `id`, `ulid`, `decimal`, `timestamp`, `ref`, a value list) refuses a number as
+/// `schema`, `integer` and `boolean` refuse a string, and a list or a record refuses a scalar.
+#[derive(Clone, Copy)]
+enum Shape {
+    Text,
+    Integer,
+    Boolean,
+    List,
+    Record,
+}
+
+/// An event type, the chain seq its sweep starts from, and its members in §9.1's order.
+type Schema = (&'static str, u64, &'static [(&'static str, Shape)]);
+
+/// Journal spec v0.6 §9.1's eight tables, member by member in the order given, and the chain event
+/// each sweep starts from (one whose optional lists and records are filled in).
+const SCHEMAS: [Schema; 8] = [
+    (
+        "StreamOpened",
+        1,
+        &[
+            ("stream_type", Text),
+            ("workspace_id", Text),
+            ("agent_id", Text),
+        ],
+    ),
+    (
+        "ObservationRecorded",
+        2,
+        &[
+            ("source", Text),
+            ("instrument_id", Text),
+            ("as_of", Text),
+            ("data_ref", Text),
+        ],
+    ),
+    (
+        "ModelOutputRecorded",
+        3,
+        &[
+            ("model_id", Text),
+            ("model_version", Text),
+            ("content_hash", Text),
+            ("instrument_id", Text),
+            ("as_of", Text),
+            ("expires_at", Text),
+            ("direction", Text),
+            ("conviction", Text),
+            ("confidence", Text),
+            ("horizon_s", Integer),
+            ("thesis_ref", Text),
+            ("evidence", List),
+            ("invalidation", Text),
+            ("thesis_id", Text),
+            ("lineage_id", Text),
+            ("ignored", Text),
+        ],
+    ),
+    (
+        "DecisionMade",
+        4,
+        &[
+            ("instrument_id", Text),
+            ("side", Text),
+            ("type", Text),
+            ("tif", Text),
+            ("qty", Text),
+            ("limit_price", Text),
+            ("purpose", Text),
+            ("exit_origin", Text),
+            ("exit_conviction", Text),
+            ("buy_conviction", Text),
+            ("combined_score", Text),
+            ("outputs_used", List),
+            ("model_weights", List),
+            ("clips_applied", List),
+            ("dry_run", Text),
+            ("reason_code", Text),
+            ("autonomy", Text),
+            ("ask_suppressed", Text),
+            ("decided_by", Text),
+            ("delegation_id", Text),
+            ("requested_by", Text),
+            ("client_id", Text),
+        ],
+    ),
+    (
+        "IntentProposed",
+        5,
+        &[
+            ("instrument_id", Text),
+            ("side", Text),
+            ("type", Text),
+            ("tif", Text),
+            ("qty", Text),
+            ("limit_price", Text),
+            ("purpose", Text),
+        ],
+    ),
+    (
+        "AgentModeChanged",
+        11,
+        &[
+            ("from", Text),
+            ("to", Text),
+            ("reason", Text),
+            ("lifecycle", Text),
+        ],
+    ),
+    (
+        "KillSwitchActivated",
+        13,
+        &[
+            ("scope", Text),
+            ("subject", Text),
+            ("initiator", Text),
+            ("mode_event", Text),
+        ],
+    ),
+    (
+        "OwnerExitRequested",
+        9,
+        &[
+            ("scope", Text),
+            ("subject", Text),
+            ("confirmed", Boolean),
+            ("bid", Text),
+            ("bid_size", Text),
+            ("floor", Text),
+            ("user", Text),
+            ("step_up_status", Text),
+            ("step_up", Record),
+        ],
+    ),
+];
+
+/// A value off `shape`'s type.
+fn off_type(shape: Shape) -> Json {
+    match shape {
+        Text | List | Record => json!(7),
+        Integer | Boolean => json!("7"),
+    }
+}
+
+/// One generated invalid draft: its event type, base seq, changes, and the member it must be
+/// refused at as `schema`.
+struct Sweep {
+    event_type: &'static str,
+    name: String,
+    base: u64,
+    changes: Json,
+    path: String,
+}
+
+/// The seqs of the chain events of `event_type`.
+fn chain_seqs(event_type: &str) -> Vec<u64> {
+    fixture()["agent_stream"]["chain"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["event_type"] == event_type)
+        .map(|e| e["seq"].as_u64().unwrap())
+        .collect()
+}
+
+/// Every member of every §9.1 schema set off its type on its base event, and deleted on every chain
+/// event of its type, so a member is also deleted where `null` would be valid and no rule can
+/// refuse the draft in its place; plus the members of the lists'
+/// items and of `step_up`, each change alone on its base chain event.
+fn sweep() -> Vec<Sweep> {
+    let mut out = Vec::new();
+    let mut add = |event_type: &'static str, base: u64, name: String, change: Json, path: &str| {
+        out.push(Sweep {
+            event_type,
+            name: format!("sweep_{}_{name}", event_type.to_lowercase()),
+            base,
+            changes: json!([change]),
+            path: format!("payload.{path}"),
+        });
+    };
+    for (event_type, base, members) in SCHEMAS {
+        for (member, shape) in members.iter().copied() {
+            let path = format!("payload.{member}");
+            add(
+                event_type,
+                base,
+                format!("{member}_off_type"),
+                json!({"path": path, "value": off_type(shape)}),
+                member,
+            );
+            for seq in chain_seqs(event_type) {
+                add(
+                    event_type,
+                    seq,
+                    format!("{member}_absent_at_{seq}"),
+                    json!({"path": path, "delete": true}),
+                    member,
+                );
+            }
+        }
+    }
+    let items = [
+        (
+            "ModelOutputRecorded",
+            3,
+            "evidence",
+            json!([7]),
+            "evidence[0]",
+        ),
+        (
+            "DecisionMade",
+            4,
+            "outputs_used",
+            json!([7]),
+            "outputs_used[0]",
+        ),
+        (
+            "DecisionMade",
+            4,
+            "clips_applied",
+            json!([7]),
+            "clips_applied[0]",
+        ),
+        (
+            "DecisionMade",
+            4,
+            "model_weights",
+            json!([7]),
+            "model_weights[0]",
+        ),
+        (
+            "DecisionMade",
+            4,
+            "model_weights",
+            json!([{"key": 7, "value": "0.9"}]),
+            "model_weights[0].key",
+        ),
+        (
+            "DecisionMade",
+            4,
+            "model_weights",
+            json!([{"key": "quant.mean_reversion", "value": 7}]),
+            "model_weights[0].value",
+        ),
+        (
+            "DecisionMade",
+            4,
+            "model_weights",
+            json!([{"value": "0.9"}]),
+            "model_weights[0].key",
+        ),
+        (
+            "DecisionMade",
+            4,
+            "model_weights",
+            json!([{"key": "quant.mean_reversion"}]),
+            "model_weights[0].value",
+        ),
+    ];
+    for (i, (event_type, base, member, value, path)) in items.into_iter().enumerate() {
+        add(
+            event_type,
+            base,
+            format!("{member}_item_{i}"),
+            json!({"path": format!("payload.{member}"), "value": value}),
+            path,
+        );
+    }
+    for member in ["assertion_id", "authenticated_at", "method"] {
+        let path = format!("payload.step_up.{member}");
+        let at = format!("step_up.{member}");
+        add(
+            "OwnerExitRequested",
+            9,
+            format!("step_up_{member}_absent"),
+            json!({"path": path, "delete": true}),
+            &at,
+        );
+        add(
+            "OwnerExitRequested",
+            9,
+            format!("step_up_{member}_off_type"),
+            json!({"path": path, "value": 7}),
+            &at,
+        );
+    }
+    out
+}
+
+/// §9.1's type and presence layer: each member of each schema, deleted or set off its type, is
+/// refused as `schema` at that member, and never read as `null` (§4.2). The member table is §9.1's,
+/// written out here, and must name exactly the members of the chain event each sweep starts from.
+#[test]
+#[ignore = "pending E7-9"]
+fn every_member_is_required_and_typed() {
+    let mut fixture = fixture();
+    for (event_type, base, members) in SCHEMAS {
+        let mut listed: Vec<&str> = members.iter().map(|(m, _)| *m).collect();
+        let chain = fixture["agent_stream"]["chain"].as_array().unwrap();
+        let entry = chain.iter().find(|e| e["seq"] == base).unwrap();
+        assert_eq!(entry["event_type"], event_type);
+        let mut written: Vec<&str> = entry["body"]["payload"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        listed.sort_unstable();
+        written.sort_unstable();
+        assert_eq!(listed, written, "{event_type}'s members");
+    }
+    let sweeps = sweep();
+    let members: usize = SCHEMAS.iter().map(|(_, _, m)| m.len()).sum();
+    assert_eq!(members, 69);
+    let deletions: usize = SCHEMAS
+        .iter()
+        .map(|(event_type, _, m)| m.len() * chain_seqs(event_type).len())
+        .sum();
+    assert_eq!(sweeps.len(), 69 + deletions + 8 + 6);
+    let drafts = fixture["agent_stream"]["invalid_drafts"]
+        .as_array_mut()
+        .unwrap();
+    for s in &sweeps {
+        drafts.push(json!({
+            "name": s.name, "clause": "§9.1 types", "base_seq": s.base, "changes": s.changes,
+            "expect": {"outcome": "Invalid", "reason": "schema", "path": s.path},
+        }));
+    }
+    let wanted: Vec<String> = sweeps
+        .iter()
+        .map(|s| {
+            format!(
+                "journal::agent_stream::{}::invalid::{}",
+                s.event_type, s.name
+            )
+        })
+        .collect();
+    let cases: Vec<_> = journal::cases(&Arc::new(fixture))
+        .into_iter()
+        .filter(|c| wanted.contains(&c.id))
+        .collect();
+    assert_eq!(cases.len(), sweeps.len());
+    let failed: Vec<String> = cases
+        .into_iter()
+        .filter_map(|case| (case.run)().err().map(|e| format!("{}: {e}", case.id)))
+        .collect();
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }

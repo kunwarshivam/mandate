@@ -168,8 +168,9 @@ pub enum InvalidReason {
     PiiRefs,
     #[error("risk_clock is earlier than the stream's last risk_clock")]
     RiskClockRegressed,
-    /// The stub's answer for a journal spec §9.1 draft until E7-9's implementation lands. It
-    /// refuses exactly the drafts `unknown_schema` refused before.
+    /// The stub's answer for a journal spec §9.1 draft until E7-9's implementation lands. Seven of
+    /// the eight types were refused as `unknown_schema` before, and an agent stream's
+    /// `StreamOpened` as `stream_mismatch` or `schema`, so it refuses nothing that was accepted.
     #[error("the agent stream's payload checks (§9.1) are not implemented yet")]
     Unimplemented,
 }
