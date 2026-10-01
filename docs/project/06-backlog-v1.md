@@ -389,6 +389,13 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   content and the head (or record why it cannot), add backoff between attempts, and word the
   exhausted report to match; and make `message(Outcome::Refused)` say whether the deadline has
   passed.
+  *Tests done (the M7 CLI follow-up tests PR, DEC-290); the implementation follows:* the closed
+  member sets and the derived event id are live tests; 13 tests pending E8-3 in `tests/agent.rs`
+  and `tests/approvals.rs` cover Stop's release and its warning, `status`'s restrictions, the
+  re-run that finds its committed event, the runtime-recorded command committed anew, the backoff,
+  and the refusal's deadline wording. `Command::Stop` gains `release`, `status` takes the account,
+  `message` takes the owner's clock, `Ids` no longer mints the event id, and `ControlJournal` gains
+  `wait`; the `clap` wiring still waits for the implementation.
   *Follow-up (#343 review, minor 1; a tests correction):* a new family that reuses an owned family's
   kind (for example an `MC-E01` of kind `semantic`) now moves no count in `mandate_harness.rs` and
   runs through that family's arm, where on `main` before #343 it failed two counts. `unread_keys`
