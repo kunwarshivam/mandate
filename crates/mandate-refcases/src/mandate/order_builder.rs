@@ -716,6 +716,9 @@ impl Inputs {
                 has_prior_fill: flag_or(input, "has_prior_fill", !position.is_zero())?,
                 new_instrument: false,
                 thesis_confidence: Unit::ZERO,
+                risk_day: mandate_spec::risk::risk_day(now)
+                    .map_err(|e| format!("`now` has no risk day: {}", e.code()))?
+                    .day,
             },
             gate_size_factor: num(Ratio::parse(size_factor), "size_factor")?,
             outputs,
