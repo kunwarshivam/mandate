@@ -30,7 +30,9 @@ story. Fill every section; write "none" rather than deleting one.
   behaviour with no reference-case family; family N's cases end at the crate's existing checks.
 - **Invariants touched:** MI-16 (nothing here changes an envelope field — the detector reads
   inputs, never the mandate), ES-21 (no clocks, no randomness, no floats: the fold is over
-  nanosecond timestamps and integer counts), ES-09 (no new reason code is minted in this slice).
+  nanosecond timestamps and integer counts), ES-09 (the one code this slice mints,
+  `observation_out_of_order`, joins `ResearchError`'s stable code registry and is pinned live;
+  no journal §8.5 reason code is minted).
 - **Crates in scope:** `mandate-research` (a new `drift` module; `lib.rs` gains `pub mod drift;`
   alone).
 - **Crates out of scope:** `mandate-spec` (V-018's lift is stream F's, with the fixture's V-018
@@ -75,8 +77,11 @@ pins:
    5. `LengthShift` — the recent window's mean byte length is more than 4× the baseline's mean,
       or under a quarter of it (an injected payload, or a stripped feed).
 5. **The fact.** `unusual_input` (§6.3) is true for a proposal exactly when a source it cites is
-   unusual. The crate computes it; making it rule-usable is V-018's lift, which is stream F's
-   spec change with the founder, not this slice's.
+   unusual — and a cited source never observed is unusual, because zero observations is fewer
+   than 32 (the fail-safe reading of an unproven citation; the report's per-source verdicts cover
+   observed sources, and the fact itself consults the fold for the unseen one). The crate
+   computes it; making it rule-usable is V-018's lift, which is stream F's spec change with the
+   founder, not this slice's.
 6. **The escalation seam is Proposed, not taken.** §8.4 says the detector "escalates unusual
    inputs before the agent acts on them", and every way to wire that into the admission path
    changes a founder-owned contract: a new §8.5 reason code (ES-09's registry), an escalation
@@ -85,12 +90,16 @@ pins:
    an escalation, not a refusal) — the founder picks, in the next spec window, and the
    implementation PR wires whichever is chosen. Until then the detector computes and reports, and
    `admit()` is untouched.
-7. **Thresholds are code constants in the implementation PR**, pinned by a live test there, and
-   recorded here: baseline 32, recent 8, duplicate 4-of-8, arrival factor 12, gap factor 4
-   (with the 31 gaps), length factor 4. Moving them into envelope fields (AGENTS.md rule 11
-   names signal-model thresholds envelope fields) is a founder question recorded in DEC-266; a
-   code constant is the conservative start because an owner cannot be talked out of a threshold
-   they never confirmed.
+7. **Thresholds are code constants in the implementation PR**, pinned from both sides by the
+   pending boundary cases — each measure's bar with its just-under neighbour, so a threshold
+   moved by one in either direction, or a strict comparison relaxed to equality, fails a test —
+   and by a live test there. Recorded here: baseline 32, recent 8, duplicate 4-of-8, arrival
+   factor 12 (which compares spans, so crossing needs roughly a 2.7x rate, not a 12x flood: 8
+   arrivals at the baseline's pace already span 7/31 of it), gap factor 4 (with the 31 gaps),
+   length factor 4. Moving them into envelope fields (AGENTS.md rule 11 names signal-model
+   thresholds envelope fields) is a founder question recorded in DEC-266; a code constant is the
+   conservative start because an owner cannot be talked out of a threshold they never
+   confirmed.
 
 ## Commands
 
@@ -106,7 +115,8 @@ cargo xtask ci pending
    not inside the model loop: the crate receives typed observations the shell records as inputs
    arrive (E17-2's invocation is the shell's), and the verdict is available to whatever admission
    becomes.
-2. A source with no baseline escalates (item 4.1 above). The alternative — treating a new source
+2. A source with no baseline escalates (item 4.1 above), and so does a citation of a source
+   never observed: zero observations is fewer than 32. The alternative — treating a new source
    as quiet until proven unusual — reads a missing answer as "normal", which is the fail-open
    direction AGENTS.md rule 3 bars.
 3. Per-source isolation is a property, not a convenience: the report's unusual set is computed
@@ -120,8 +130,17 @@ cargo xtask ci pending
    strictly earlier instant refused with `ResearchError::ObservationOutOfOrder` (DEC-85's
    fail-loud reading of a shell that hands observations over out of order) — and the check is per
    source: one source's timeline never constrains another's.
-6. Determinism is total: the same observations, in the same order, into two states, give equal
-   reports (ES-21's replay equality at the detector's scale).
+6. Determinism is total: the report depends on each source's own observation order and nothing
+   else — which source arrived first, or how two sources' observations interleave with each
+   source's order kept, changes nothing (ES-21's replay equality at the detector's scale), and a
+   test asserts it against reordered and interleaved folds, so a report that remembers fold
+   order fails it.
+7. A refused observation quarantines its source (round 1's tightening reading): a backwards
+   timestamp breaks the timing integrity both windows read, so both read only the observations
+   after the last refusal and the source is unusual (`NoBaseline`) until a full new baseline has
+   formed. The alternative — a refusal count on `SourceDrift` with any recent refusal unusual —
+   was not taken, because the quarantine also stops the untrusted timing from feeding any
+   measure.
 
 ## Planted bugs (each tried against a throwaway implementation; a named test must catch each)
 
@@ -137,6 +156,16 @@ cargo xtask ci pending
 | 8 | The report forgets the baseline and compares the recent window to itself, so nothing ever crosses | `a_volume_spike_crosses_the_arrival_measure` (a spike read against itself is quiet) and `a_length_shift_crosses_the_length_measure` |
 | 9 | The observation type gains a text field (R-05 surface) | every test that constructs an observation — the change breaks their construction sites |
 | 10 | A backwards timestamp is folded silently, or the order check is global rather than per source | `an_observation_before_its_source_s_last_is_refused` |
+| 11 | `unusual_input` reads a citation of a never-observed source as quiet (fail-open) | `a_cited_source_never_observed_is_unusual` |
+| 12 | `BASELINE_WINDOW` moved to 31 or 33, or its `<` relaxed to `<=` | `the_baseline_bar_is_pinned_at_32` (32 quiet at the bar, 31 unusual just under) |
+| 13 | `RECENT_WINDOW` moved to 7 (or 9) | `the_duplicate_bar_is_pinned_at_4_of_the_recent_8` — the replays sit in the window's older half, so 7 reads three — and, for 9, `the_length_bar_is_pinned_at_4x_the_baseline_mean` and the arrival crossing |
+| 14 | `DUPLICATE_MINIMUM` moved to 3 or 5, or its `>=` tightened to `>` | `the_duplicate_bar_is_pinned_at_4_of_the_recent_8` (4-of-8 at the bar, 3-of-8 just under) |
+| 15 | `ARRIVAL_FACTOR` moved to 11 or 13, or its `<` relaxed to `<=` | `the_arrival_bar_is_pinned_at_a_twelfth_of_the_baseline_span` (a 155 s span at the bar, 154 s just under) |
+| 16 | `GAP_FACTOR` moved to 3 or 5, or its `<` relaxed to `<=` | `the_gap_bar_is_pinned_at_a_quarter_of_the_baseline_mean_gap` (a 15 s smallest gap at the bar, 14 s just under) |
+| 17 | `LENGTH_FACTOR` moved to 3 or 5, or either strict comparison moved onto equality | `the_length_bar_is_pinned_at_4x_the_baseline_mean` (4 000 and 250 at the bar, 4 001 and 249 just outside) |
+| 18 | A refusal leaves no residue: the pre-refusal history still feeds the measures | `a_refused_observation_quarantines_the_baseline_until_a_new_one_forms` |
+| 19 | The report remembers fold order, so which source arrived first changes it | `the_report_is_independent_of_the_sources_arrival_order` |
+| 20 | The duplicate measure is evaluated after the timing measures | `replayed_content_crosses_the_duplicate_measure` (the window crosses both, and duplicate must be the one reported) |
 
 ## Not done
 

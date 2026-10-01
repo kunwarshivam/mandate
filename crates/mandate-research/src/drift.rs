@@ -23,9 +23,18 @@
 //! 5. [`DriftMeasure::LengthShift`] — the recent window's mean byte length beyond
 //!    [`LENGTH_FACTOR`] times the baseline's, or under its inverse.
 //!
-//! The thresholds are DEC-266's, pinned by a live test in the implementation PR; moving them
-//! into envelope fields is Proposed there, because an owner cannot be talked out of a threshold
-//! they never confirmed. The escalation seam — how an unusual verdict reaches the owner before
+//! A refused observation quarantines its source: a timestamp before the source's last breaks
+//! the history's timing integrity, so both windows read only the observations after the last
+//! refusal and the source reads unproven — `NoBaseline`, unusual — until a full
+//! [`BASELINE_WINDOW`]-observation baseline has formed after it (DEC-266's tightening reading:
+//! the pre-refusal timing is not trusted, and the source escalates while its baseline is
+//! incomplete).
+//!
+//! The thresholds are DEC-266's, pinned by the boundary cases among the pending tests — each
+//! measure's bar with its just-under neighbour, so a threshold moved by one in either direction
+//! fails a test — and by a live test in the implementation PR; moving them into envelope fields
+//! is Proposed there, because an owner cannot be talked out of a threshold they never
+//! confirmed. The escalation seam — how an unusual verdict reaches the owner before
 //! the agent acts — is Proposed to the founder in DEC-266 item 4 and is **not wired here**:
 //! [`crate::admit`] is untouched, and the §6.3 fact becomes rule-usable only when stream F lifts
 //! V-018.
@@ -137,7 +146,10 @@ impl DriftState {
         }
     }
 
-    /// Folds one observation into the source's history, in arrival order.
+    /// Folds one observation into the source's history, in arrival order. A timestamp before
+    /// the source's last is refused, and the refusal quarantines the source: both windows read
+    /// only the observations after the last refusal, so the source reads unproven until a new
+    /// baseline forms (DEC-266's tightening reading).
     ///
     /// # Errors
     /// Returns [`ResearchError::Unimplemented`] until E17-5's implementation lands: the pending
@@ -174,7 +186,10 @@ impl DriftReport {
     }
 
     /// Mandate spec §6.3's `unusual_input` fact (V-018): true exactly when a source the proposal
-    /// cites is unusual. Rule-usability waits on stream F's lift of V-018.
+    /// cites is unusual — and a cited source never observed is unusual, because zero
+    /// observations is fewer than [`BASELINE_WINDOW`] (the fail-safe reading of an unproven
+    /// citation; the report's verdicts cover observed sources, and the fact consults the fold
+    /// for the unseen one). Rule-usability waits on stream F's lift of V-018.
     ///
     /// # Errors
     /// Returns [`ResearchError::Unimplemented`] until E17-5's implementation lands.
