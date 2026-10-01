@@ -646,14 +646,14 @@ fn a_held_exit_is_released_at_the_first_tick_its_hold_has_cleared() {
 }
 
 #[test]
-fn a_held_intent_past_its_age_is_abandoned_at_a_tick() {
+fn a_held_exit_past_its_age_is_never_abandoned() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = holding(&ports);
-    submitted(&mut shell, &ports, OTHER_INTENT, common::AGENT, AAPL);
+    let unknown = submitted(&mut shell, &ports, OTHER_INTENT, common::AGENT, AAPL);
     shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
     shell.run(
         handoff(INTENT, common::AGENT, risk_exit(AAPL, "10", "150")),
@@ -661,9 +661,58 @@ fn a_held_intent_past_its_age_is_abandoned_at_a_tick() {
     );
     let ran = shell.run(Input::Tick(clock(121)), &ports);
     assert!(
-        ran.draft_types().contains(&"OrderAbandoned"),
-        "121 seconds is past max_intent_age: {:?}",
+        !ran.draft_types().contains(&"OrderAbandoned"),
+        "121 seconds is past max_intent_age, but an exit is held, never dropped (AGENTS.md rule \
+         13; DEC-160 (12); DEC-260 (17)): {:?}",
         ran.draft_types()
+    );
+    assert!(
+        ran.notifications.contains(&"exit_held_long"),
+        "a hold past max_intent_age is journaled and alerted: {:?}",
+        ran.notifications
+    );
+    let again = shell.run(Input::Tick(clock(240)), &ports);
+    assert!(
+        !again.notifications.contains(&"exit_held_long"),
+        "once: {:?}",
+        again.notifications
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::Order(broker_order(
+            "b-1",
+            Some(&unknown),
+            AAPL,
+            Side::Buy,
+            "10",
+            "0",
+            "canceled",
+        )))),
+        &ports,
+    );
+    let released = shell.run(Input::Tick(clock(241)), &ports);
+    assert_eq!(
+        released.submissions().len(),
+        1,
+        "the Unknown resolved, so the exit goes however long it was held"
+    );
+
+    let mut cold = Shell::new(1);
+    cold.fold_one(&stream_opened()).expect("folds");
+    let (mut cold, _) = cold.restart(&ports);
+    let held = cold.run(
+        handoff(OTHER_INTENT, common::AGENT, opening(AAPL, "10", "150")),
+        &ports,
+    );
+    assert_eq!(
+        gate_field(&held, "verdict").as_deref(),
+        Some("hold"),
+        "the opening is held until the startup reconciliation has run"
+    );
+    let aged = cold.run(Input::Tick(clock(121)), &ports);
+    assert!(
+        aged.draft_types().contains(&"OrderAbandoned"),
+        "an opening held as long is still abandoned at max_intent_age (§5.7): {:?}",
+        aged.draft_types()
     );
 }
 

@@ -627,10 +627,9 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
     which neither `append` nor §11's per-range checks resolve, since both read only this stream. On
     one agent stream a command is copied at most once into each of these event types: an owner's
     kill switch is copied as its `OwnerExitRequested` and its `KillSwitchActivated`, both naming the
-    one command, and every other command has one copy, which for a resume or a Stop is the
-    `AgentModeChanged` when its step-up counted and the `OwnerCommandRefused` naming it when it did
-    not ([mandate spec §6.1](mandate.md#61-purposes)); the two are exclusive, so neither a refused
-    command without a record nor one recorded both ways passes. The copy always has its command in hand, so the rule
+    one command, and every other command has one copy: for a resume or a Stop, its
+    `AgentModeChanged` or its `OwnerCommandRefused`, never both ([mandate spec §6.1](mandate.md#61-purposes)).
+    The copy always has its command in hand, so the rule
     never holds a pause, a Stop, an owner exit, or a kill switch (`AGENTS.md` rule 13). A mode
     change that originates on the account stream, and the `AgentModeChanged` a kill switch writes,
     are not owner copies and are not covered here.
