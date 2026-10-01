@@ -35,7 +35,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_builder::{ActionContext, BuilderError, Classification, classify};
+use mandate_builder::{ActionContext, BuilderError, Classification, RequestedBy, classify};
 use mandate_canon::{DecStr, Digest};
 use mandate_domain::{MarketSession, Purpose};
 use mandate_num::{Signed, Unit, Usd};
@@ -172,6 +172,7 @@ fn first_order_action(
         gross_usd_after: usd("gross_usd_after")?,
         bought_today_usd: usd("bought_today_usd")?,
         position_pnl_fraction: signed("position_pnl_fraction")?,
+        requested_by: RequestedBy::Agent,
     })
 }
 
