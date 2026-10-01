@@ -1112,6 +1112,19 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the coordinator moved from 3a to slice 2 (#267, comment 5862923162): under rule 13 no exit waits
   for the startup reconciliation, so the plant gets weight only with the first opening through
   `fault::protected` (slice 2's add). Slice 2's PR shows each of the three red.
+- **E7-4 slice 6's tests PR (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373)
+  round 1 (major 1):** §5.5 exempts kill-switch and mandate-limit flatten exits from the agent's
+  mode, but slice 4a's ladder stops stepping while the agent is `paused` or `stopped`
+  ([DEC-260](04-decision-log.md#decisions) (3)), and the gate's `mode_failure` holds every
+  risk-reducing order at `paused` or stricter. Add a pending test: while the agent is paused, a
+  flatten's ladder steps, its step cancel does not end the sequence, and `mode_failure` lets that
+  flatten through. Slice 6 narrows `climbs` and the gate together to make it pass.
+- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1
+  (minor 1):** wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
+  `exit_limit` and `next_rung`, which pass none today, so §5.6's "never below an owner exit's
+  floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
+  `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
+  resubmitted at the same price every `exit_step_s`.
 - **E7-4 (stream K), found by slice 4a's rule-13 oracle (`protection::sequence_tests::rule_13_holds_over_random_scripts`):**
   (1) a passive exit waits on its OCO's cancel confirmation with no bound and no alert: a broker
   that never confirms holds the exit for good, with the protection still resting (rule 13's broker
