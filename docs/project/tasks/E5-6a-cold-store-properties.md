@@ -37,7 +37,7 @@ story. Fill every section; write "none" rather than deleting one.
   dev-dependency (already registered in [dependencies](../../dependencies.md), DEC-72).
 - **Safety-critical:** yes. This is a **tests-only PR**: DEC-77's flow with nothing to stub,
   because the implementation it exercises is merged.
-- **Size budget:** one test file, 6 properties at 256 cases (ES-11).
+- **Size budget:** one test file, 7 properties at 256 cases (ES-11).
 
 ## The design (DEC-287)
 
@@ -46,21 +46,25 @@ story. Fill every section; write "none" rather than deleting one.
    built, never from the crate's walk: the verified state by advancing the trusted start over
    the walked rows; the failing check and its seq by DEC-264's order over the tamper it knows.
 2. **A scenario is a random run** (1 to 12 rows of one stream, real journal hashes from
-   `MemoryJournal`), **cut at random boundaries**, entered at the genesis or inside the first
-   segment — the only entries a range can verify — with `prev_hash` the hash of the event
-   before `from_seq`.
+   `MemoryJournal`), **cut at random boundaries**, entered at the genesis, inside the first
+   segment, or exactly at any later segment's first seq with the earlier segments omitted — a
+   range may be entered at any supplied segment's first seq — with `prev_hash` the hash of the
+   event before `from_seq`.
 3. **Every tamper names its owner** (DEC-264, and DEC-263 item 5 for the canonical form): a
    flipped file byte or a lying manifest field fails `segment_manifest_mismatch` at the
    manifest's own claimed `first_seq`; bytes that are not a manifest — or the six fields in a
    non-canonical member order, which only `parse`'s canonical-bytes guard can refuse — fail it
    at the seq the range expected; a dropped segment or a stale overlapping copy fails
-   `segment_gap` at the expected seq; and a row whose hash is a lie, with the parts rebuilt
+   `segment_gap` at the expected seq — the copy may be prepended in front of the trusted start,
+   where one ending before the entry is refused at the start itself by the first segment's
+   upper carries bound alone; and a row whose hash is a lie, with the parts rebuilt
    from the lied row so every segment check passes, fails the per-event check 4 and surfaces
    as the `Event` arm unchanged. The tamper's indices are drawn against the very scenario
    they corrupt.
-4. **Reachability**: swapping the first two rows' hashes leaves a range entered at 3 or later
-   verifying, because the walk starts at `from_seq` — the parts are rebuilt from the swapped
-   rows so the export stays self-consistent and only the rule can save it.
+4. **Reachability**: swapping the first two rows' hashes leaves a range entered at 3 or later,
+   with the whole run supplied, verifying, because the walk starts at `from_seq` — the parts
+   are rebuilt from the swapped rows so the export stays self-consistent and only the rule can
+   save it.
 5. **The token's two answers** are pinned as a property: `verify_tsa` is never `Ok`; it is
    `TsaVerificationIncomplete` exactly when the token contains the imprint, by the suite's own
    containment search, and `TsaTokenInvalid` otherwise.
@@ -73,8 +77,10 @@ story. Fill every section; write "none" rather than deleting one.
    directions", and the first "carries the trusted start" — read as the start's `from_seq` not
    sitting outside the first segment's span.
 8. **The do-nothing check still applies**: with every entry point's body replaced by a
-   refusal or a constant — the codes and the accessor included — no test of the 39 passes, for
-   every one of the 37 flavours.
+   refusal or a constant — the codes and the accessor included — 0 of the 7 properties pass,
+   for every one of the 37 flavours; the one test an identity `verify_range` answers is
+   `cold::an_empty_range_returns_the_trusted_start` (#391's test of the degenerate case, whose
+   subject is exactly that answer), so no test this PR adds passes under any flavour.
 
 ## Commands
 

@@ -3,8 +3,11 @@
 //!
 //! The oracle (AGENTS.md, "Independent oracles") builds every scenario itself — a random run of
 //! one stream's events, split into segments at random boundaries, entered at the genesis or
-//! mid-segment — and computes the expected outcome from the scenario it built, never from the
-//! crate's walk:
+//! mid-segment inside the first supplied segment, or exactly at any supplied segment's first
+//! seq with the earlier segments omitted (DEC-287 item 2: a range may be entered at any
+//! supplied segment's first seq, the natural case of reading a range that starts partway
+//! through the cold store) — and computes the expected outcome from the scenario it built,
+//! never from the crate's walk:
 //!
 //! 1. **The verified state.** An untampered range's `Verified` is the trusted start advanced by
 //!    exactly the events the range walks: `next_seq` one past the last walked event's `seq`,
@@ -14,9 +17,11 @@
 //!    or that is not in canonical form (DEC-263 item 5: `parse` accepts only canonical bytes),
 //!    fails `segment_manifest_mismatch` at the expected seq; a file or edge that disagrees with
 //!    its manifest fails it at the manifest's own claimed `first_seq`; a segment that begins
-//!    before or after the expected seq fails `segment_gap` at the expected seq; and an event
-//!    that does not re-hash inside an otherwise valid segment fails the per-event check 4,
-//!    surfacing as the `Event` arm unchanged.
+//!    before or after the expected seq, or that ends before it — a stale copy prepended in
+//!    front of a boundary entry, which only the first segment's upper carries bound can refuse
+//!    at the start itself — fails `segment_gap` at the expected seq; and an event that does
+//!    not re-hash inside an otherwise valid segment fails the per-event check 4, surfacing as
+//!    the `Event` arm unchanged.
 //! 3. **The reachability rule.** Events before the trusted start are never checked: a scenario
 //!    may swap the first two rows' hashes and the range still verifies, because the walk starts
 //!    at `from_seq`.
@@ -48,26 +53,34 @@ use mandate_journal_cold::{
 use proptest::collection::vec;
 use proptest::prelude::*;
 
-/// One generated scenario: the run's rows, the segment boundaries, and the trusted start the
-/// range enters at.
+/// One generated scenario: the run's rows, the segment boundaries, the run's segment the range
+/// is handed from, and the trusted start the range enters at.
 #[derive(Clone, Debug)]
 struct Scenario {
     rows: Vec<StoredEvent>,
     /// Segment `i` holds `rows[firsts[i]..firsts[i + 1]]`; the last holds the rest.
     firsts: Vec<usize>,
+    /// The run's segments the range is handed: `supplied_from..` — the segment carrying the
+    /// entry and every later one; the earlier ones are omitted (DEC-287 item 2).
+    supplied_from: usize,
     start: TrustedStart,
 }
 
 impl Scenario {
-    /// The `i`th segment's rows.
+    /// The `i`th supplied segment's rows.
     fn slice(&self, i: usize) -> &[StoredEvent] {
+        self.run_slice(self.supplied_from + i)
+    }
+
+    /// The run's `i`th segment's rows.
+    fn run_slice(&self, i: usize) -> &[StoredEvent] {
         let begin = self.firsts[i];
         let end = self.firsts.get(i + 1).copied().unwrap_or(self.rows.len());
         &self.rows[begin..end]
     }
 
     fn segment_count(&self) -> usize {
-        self.firsts.len()
+        self.firsts.len() - self.supplied_from
     }
 
     /// The segment as the exporter builds it: the manifest's canonical bytes (the oracle's own
@@ -92,26 +105,39 @@ fn oracle_manifest_bytes(rows: &[StoredEvent]) -> Vec<u8> {
     ))
 }
 
+/// The row each run segment begins at: `cuts[i - 1]` true cuts the run after row `i`.
+fn segment_firsts(cuts: &[bool]) -> Vec<usize> {
+    let mut firsts = vec![0usize];
+    for (at, cut) in cuts.iter().enumerate() {
+        if *cut {
+            firsts.push(at + 1);
+        }
+    }
+    firsts
+}
+
 /// A random scenario: 1 to 12 rows, cut after row `i` wherever `cuts[i - 1]` is true, entered
-/// at the genesis or inside the first segment (the only entries a range can verify).
+/// at the genesis or inside the first segment (the whole run supplied), or exactly at any later
+/// segment's first seq with the earlier segments omitted — a range may be entered at any
+/// supplied segment's first seq (DEC-287 item 2) — with `prev_hash` the hash of the event
+/// before `from_seq`.
 fn scenario() -> BoxedStrategy<Scenario> {
     (1usize..=12)
         .prop_flat_map(|n| vec(any::<bool>(), n - 1))
         .prop_flat_map(|cuts| {
-            let first_len = cuts
-                .iter()
-                .position(|cut| *cut)
-                .map_or(cuts.len() + 1, |at| at + 1);
-            (Just(cuts), 1usize..=first_len)
+            let firsts = segment_firsts(&cuts);
+            let first_len = firsts.get(1).copied().unwrap_or(cuts.len() + 1);
+            let mut entries: Vec<usize> = (1..=first_len).collect();
+            entries.extend(firsts[1..].iter().map(|first| first + 1));
+            (Just(cuts), proptest::sample::select(entries))
         })
         .prop_map(|(cuts, entry)| {
             let rows = journal_with(cuts.len() as u64).rows(&stream()).to_vec();
-            let mut firsts = vec![0usize];
-            for (at, cut) in cuts.iter().enumerate() {
-                if *cut {
-                    firsts.push(at + 1);
-                }
-            }
+            let firsts = segment_firsts(&cuts);
+            let supplied_from = firsts
+                .iter()
+                .rposition(|first| *first < entry)
+                .expect("segment 0 begins at row 0, before every entry");
             let start = if entry == 1 {
                 TrustedStart::GENESIS
             } else {
@@ -123,6 +149,7 @@ fn scenario() -> BoxedStrategy<Scenario> {
             Scenario {
                 rows,
                 firsts,
+                supplied_from,
                 start,
             }
         })
@@ -157,7 +184,11 @@ enum Tamper {
     CorruptEvent(usize),
     /// Segment `i` (never the last, never the only one) is missing.
     Drop(usize),
-    /// A stale copy of the first `width` rows stands after segment `at` (never first).
+    /// A stale copy of the first `width` rows stands at `at` — in front of the trusted start
+    /// when `at` is 0, where a copy ending before the entry is refused only by the first
+    /// segment's upper carries bound, the one check a boundary entry leaves unmasked: the copy
+    /// is walked as empty and the run's own first supplied segment then begins exactly at the
+    /// entry, so nothing else reports the gap.
     StaleCopy { at: usize, width: usize },
 }
 
@@ -251,13 +282,17 @@ fn tampered_parts(s: &Scenario, tamper: Tamper) -> Vec<(Vec<u8>, Vec<u8>)> {
     parts
 }
 
-/// The scenario's parts rebuilt from `rows` — every manifest and file derived from the same
-/// rows, so the export is self-consistent and only the walk's own rules can refuse it.
+/// The scenario's supplied segments rebuilt from `rows` — every manifest and file derived from
+/// the same rows, so the export is self-consistent and only the walk's own rules can refuse it.
 fn parts_from_rows(s: &Scenario, rows: &[StoredEvent]) -> Vec<(Vec<u8>, Vec<u8>)> {
     (0..s.segment_count())
         .map(|i| {
-            let begin = s.firsts[i];
-            let end = s.firsts.get(i + 1).copied().unwrap_or(rows.len());
+            let begin = s.firsts[s.supplied_from + i];
+            let end = s
+                .firsts
+                .get(s.supplied_from + i + 1)
+                .copied()
+                .unwrap_or(rows.len());
             let slice = &rows[begin..end];
             (oracle_manifest_bytes(slice), export_segment(slice))
         })
@@ -278,7 +313,8 @@ fn no_artifacts() -> BTreeMap<Digest, Vec<u8>> {
 }
 
 /// A scenario paired with one of its own failing tamples: the tamper's indices are drawn
-/// against the very scenario the property will apply them to.
+/// against the very scenario the property will apply them to, and the stale copy either
+/// follows a supplied segment or is prepended in front of the trusted start.
 fn tampered_scenario() -> BoxedStrategy<(Scenario, Tamper)> {
     scenario()
         .prop_flat_map(|s| {
@@ -296,17 +332,18 @@ fn tampered_scenario() -> BoxedStrategy<(Scenario, Tamper)> {
                         4 => Field::LastHash,
                         _ => Field::FileSha256,
                     };
-                    let tamper = match pick % 7 {
+                    let tamper = match pick % 8 {
                         0 => Tamper::FlipFileByte(at),
                         1 => Tamper::LieField(at, field),
                         2 => Tamper::Unparsable(at),
                         3 if segments >= 2 => Tamper::Drop(at.min(segments - 2)),
                         4 => Tamper::NonCanonical(at),
                         5 => Tamper::CorruptEvent(first_walked + (width - 1) % walked),
-                        _ => Tamper::StaleCopy {
+                        6 => Tamper::StaleCopy {
                             at: (at % segments) + 1,
                             width,
                         },
+                        _ => Tamper::StaleCopy { at: 0, width },
                     };
                     (s, tamper)
                 },
@@ -315,17 +352,19 @@ fn tampered_scenario() -> BoxedStrategy<(Scenario, Tamper)> {
         .boxed()
 }
 
-/// One segment of the oracle's model: the rows it holds, or a stale copy's width.
+/// One segment of the oracle's model: a supplied segment's own index and the run segment
+/// holding its rows, or a stale copy's width.
 enum Modeled {
-    Real { rows_at: usize },
+    Real { at: usize, rows_at: usize },
     Stale { width: usize },
 }
 
 /// DEC-264 item 3, from its own words: "each begins where the previous ended, exactly, in both
 /// directions" — so a later segment chains only by beginning at the previous end — "and the
 /// first carries the trusted start", which §11's reachability clause reads as the start's
-/// `from_seq` not sitting outside the first segment's span: a range may enter mid-segment, and
-/// a segment that ends before the start or begins after it carries nothing.
+/// `from_seq` not sitting outside the first segment's span: a range may enter mid-segment or
+/// exactly at a segment's first seq, and a segment that ends before the start or begins after
+/// it carries nothing.
 fn chains_from_the_words(first_segment: bool, first: u64, last: u64, start: u64) -> bool {
     if first_segment {
         !(start < first || last < start)
@@ -337,8 +376,9 @@ fn chains_from_the_words(first_segment: bool, first: u64, last: u64, start: u64)
 /// The oracle's own walk: the failure the range must report, for a tamper the generator proves
 /// fails — computed from the scenario, never from the crate.
 fn oracle_failure(s: &Scenario, tamper: Tamper) -> Option<ColdFailure> {
-    let mut modeled: Vec<Modeled> = (0..s.segment_count())
-        .map(|rows_at| Modeled::Real { rows_at })
+    let mut modeled: Vec<Modeled> = (s.supplied_from..s.firsts.len())
+        .enumerate()
+        .map(|(at, rows_at)| Modeled::Real { at, rows_at })
         .collect();
     match tamper {
         Tamper::Drop(at) => {
@@ -353,34 +393,34 @@ fn oracle_failure(s: &Scenario, tamper: Tamper) -> Option<ColdFailure> {
     let mut expected = s.start.from_seq;
     let mut first_segment = true;
     for segment in &modeled {
-        let (claimed_first, claimed_last, walked_last_seq, rows_at) = match segment {
+        let (claimed_first, claimed_last, walked_last_seq, at) = match segment {
             Modeled::Stale { width } => (1u64, *width as u64, *width as u64, usize::MAX),
-            Modeled::Real { rows_at } => {
-                let rows = s.slice(*rows_at);
+            Modeled::Real { at, rows_at } => {
+                let rows = s.run_slice(*rows_at);
                 let first = rows.first().expect("a segment holds a row");
                 let last = rows.last().expect("a segment holds a row");
                 let claimed_first = match tamper {
-                    Tamper::LieField(at, Field::FirstSeq) if at == *rows_at => first.seq + 1,
+                    Tamper::LieField(i, Field::FirstSeq) if i == *at => first.seq + 1,
                     _ => first.seq,
                 };
                 let claimed_last = match tamper {
-                    Tamper::LieField(at, Field::LastSeq) if at == *rows_at => last.seq + 1,
+                    Tamper::LieField(i, Field::LastSeq) if i == *at => last.seq + 1,
                     _ => last.seq,
                 };
-                (claimed_first, claimed_last, last.seq, *rows_at)
+                (claimed_first, claimed_last, last.seq, *at)
             }
         };
-        if rows_at != usize::MAX {
-            if matches!(tamper, Tamper::Unparsable(at) if at == rows_at)
-                || matches!(tamper, Tamper::NonCanonical(at) if at == rows_at)
+        if at != usize::MAX {
+            if matches!(tamper, Tamper::Unparsable(i) if i == at)
+                || matches!(tamper, Tamper::NonCanonical(i) if i == at)
             {
                 return Some(ColdFailure::Segment {
                     at_seq: expected,
                     check: ColdCheck::SegmentManifestMismatch,
                 });
             }
-            if matches!(tamper, Tamper::LieField(at, _) if at == rows_at)
-                || matches!(tamper, Tamper::FlipFileByte(at) if at == rows_at)
+            if matches!(tamper, Tamper::LieField(i, _) if i == at)
+                || matches!(tamper, Tamper::FlipFileByte(i) if i == at)
             {
                 return Some(ColdFailure::Segment {
                     at_seq: claimed_first,
@@ -394,8 +434,8 @@ fn oracle_failure(s: &Scenario, tamper: Tamper) -> Option<ColdFailure> {
                 check: ColdCheck::SegmentGap,
             });
         }
-        if let Tamper::CorruptEvent(row) = tamper {
-            let begin = s.firsts[rows_at];
+        if let (Tamper::CorruptEvent(row), Modeled::Real { rows_at, .. }) = (tamper, segment) {
+            let begin = s.firsts[*rows_at];
             let end = s.firsts.get(rows_at + 1).copied().unwrap_or(s.rows.len());
             if begin <= row && row < end {
                 return Some(ColdFailure::Event(mandate_journal::EventFailure {
@@ -513,11 +553,13 @@ proptest! {
 
     /// Oracle 3: events before the trusted start are not checked — the first two rows' hashes
     /// may be swapped, and the range still verifies, because the walk starts at `from_seq`.
+    /// The whole run is supplied: the two swapped rows sit inside the handed segments, before
+    /// the entry.
     #[test]
     fn events_before_the_trusted_start_are_not_checked(
         s in scenario().prop_filter(
-            "the entry leaves two rows before it",
-            |s| s.start.from_seq >= 3,
+            "the whole run is supplied and the entry leaves two rows before it",
+            |s| s.supplied_from == 0 && s.start.from_seq >= 3,
         ),
     ) {
         let mut swapped = s.rows.clone();
