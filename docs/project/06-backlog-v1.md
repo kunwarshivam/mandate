@@ -1764,6 +1764,13 @@ risk (rule 3):
   2).** No vector or test breaks both an envelope check and a subject or copy rule, so swapping their
   order passes. A tests-correction PR from stream L adds a draft that breaks both and expects the
   envelope check's reason and path.
+- **A reference past a bounded range's end is exempted like one before its start (#384 review round
+  2, minor 3).** `verify_agent_stream` leaves unchecked a `causation_id` or `mode_event` that names no
+  event of the range, whichever side of the range the event lies on. §11 exempts only a reference
+  before the trusted start; a range with a `to_seq` needs the rule stated and a check or a test.
+- **Duplicate `event_id`s in `verify_agent_stream`'s index are unpinned (#384 review round 2, minor
+  3).** The index keeps the last row with an ID. `append` refuses a repeated `event_id`, so a stored
+  range never holds one, but no test says what a tampered range with a duplicate reports.
 - **The model registry stores each pinned model's content object as an artifact.**
   `ModelOutputRecorded.content_hash` is a `sha256:` reference, so it is in `artifact_refs` (§3), and
   §11 check 6 fails `artifact_missing` unless the object is in the artifact store.

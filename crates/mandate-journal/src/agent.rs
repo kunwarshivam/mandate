@@ -230,9 +230,11 @@ pub fn verify_agent_stream(
                 }
             }
             "KillSwitchActivated" => {
-                let applied = match own.get("mode_event").and_then(Value::as_str) {
+                let mode_event = own.get("mode_event").filter(|m| **m != Value::Null);
+                let applied = match mode_event.map(Value::as_str) {
                     None => true,
-                    Some(id) => match index.get(id) {
+                    Some(None) => false,
+                    Some(Some(id)) => match index.get(id) {
                         None => start.from_seq != 1,
                         Some((named_type, named_payload)) => {
                             earlier.contains(id)
@@ -975,6 +977,78 @@ mod tests {
                 "from {from_seq}"
             );
         }
+        Ok(())
+    }
+
+    /// A `{seq, path, value}` change whose value is the JSON text `value`.
+    fn setting(seq: u64, path: &str, value: &str) -> Result<Value, String> {
+        parse(format!(r#"{{"seq":{seq},"path":"{path}","value":{value}}}"#).as_bytes())
+            .map_err(|e| format!("{e:?}"))
+    }
+
+    fn mode_event_mismatch_at(seq: u64) -> Result<(), AgentStreamFailure> {
+        Err(AgentStreamFailure {
+            seq,
+            check: AgentStreamCheck::ModeEventMismatch,
+        })
+    }
+
+    /// #384 review round 2, major 2: a present `mode_event` that is not an event ID string names
+    /// nothing, so it is refused, never read as `null`.
+    #[test]
+    fn a_mode_event_that_is_not_a_string_is_refused() -> Result<(), String> {
+        let section = section()?;
+        for value in ["42", "true", "false", "{}", "[]"] {
+            let tampered = rows(&section, &[setting(13, "payload.mode_event", value)?])?;
+            assert_eq!(
+                verify_from(&tampered, 1),
+                mode_event_mismatch_at(13),
+                "{value}"
+            );
+        }
+        Ok(())
+    }
+
+    /// #384 review round 2, major 3: a switch naming an `AgentModeChanged` with reason
+    /// `kill_switch` that comes after it is refused, at every start that holds the switch.
+    #[test]
+    fn a_kill_switch_naming_a_later_mode_change_is_refused() -> Result<(), String> {
+        let section = section()?;
+        let later_mode =
+            r#"{"from":"normal","to":"stopped","reason":"kill_switch","lifecycle":"normal"}"#;
+        let changes = [
+            setting(12, "event_type", r#""KillSwitchActivated""#)?,
+            setting(
+                12,
+                "payload",
+                r#"{"scope":"agent","subject":"agent_a","initiator":"risk_limit","mode_event":null}"#,
+            )?,
+            naming(&section, 12, "payload.mode_event", 13)?,
+            setting(13, "event_type", r#""AgentModeChanged""#)?,
+            setting(13, "payload", later_mode)?,
+        ];
+        let tampered = rows(&section, &changes)?;
+        for from_seq in [1, 2, 5, 12] {
+            assert_eq!(
+                verify_from(&tampered, from_seq),
+                mode_event_mismatch_at(12),
+                "from {from_seq}"
+            );
+        }
+        Ok(())
+    }
+
+    /// #384 review round 2, minor 2: the named earlier event carries reason `kill_switch` but is
+    /// not an `AgentModeChanged`, so only the type clause refuses it.
+    #[test]
+    fn a_kill_switch_naming_another_event_type_is_refused() -> Result<(), String> {
+        let section = section()?;
+        let tampered = rows(
+            &section,
+            &[setting(11, "event_type", r#""ObservationRecorded""#)?],
+        )?;
+        assert_eq!(verify_from(&tampered, 1), mode_event_mismatch_at(13));
+        assert_eq!(verify_from(&rows(&section, &[])?, 1), Ok(()));
         Ok(())
     }
 }
