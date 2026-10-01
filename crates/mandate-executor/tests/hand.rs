@@ -5045,7 +5045,7 @@ fn every_error_code_is_stable_and_unique() {
 }
 
 /// 2026-09-22, a Tuesday, at 19:59:57 ET: three seconds before the after-hours session ends.
-const INTO_THE_CLOSE: i64 = 1_790_121_597;
+const THREE_SECONDS_BEFORE_THE_NIGHT: i64 = 1_790_121_597;
 /// The Wednesday's 04:00 ET pre-market open, which ends that night's park.
 const NEXT_OPEN: i64 = 1_790_150_400;
 
@@ -5061,9 +5061,9 @@ fn parked_in_the_night(ports: &mandate_executor::Ports<'_>) -> (Shell, String, c
         shell.fold_one(&event).expect("the position folds");
     }
     let mut shell = shell.restart_ready(ports);
-    shell.run(Input::Tick(clock(INTO_THE_CLOSE)), ports);
+    shell.run(Input::Tick(clock(THREE_SECONDS_BEFORE_THE_NIGHT)), ports);
     shell.run(
-        Input::Market(quote(AAPL, "150", "150.2", INTO_THE_CLOSE)),
+        Input::Market(quote(AAPL, "150", "150.2", THREE_SECONDS_BEFORE_THE_NIGHT)),
         ports,
     );
     let sent = shell.run(
@@ -5082,7 +5082,7 @@ fn parked_in_the_night(ports: &mandate_executor::Ports<'_>) -> (Shell, String, c
         "after-hours, so marked extended (§5.5)"
     );
     let rung = first.client_order_id.as_str().to_owned();
-    let (stepped, parked) = step_rung(&mut shell, ports, INTO_THE_CLOSE + 6, &rung);
+    let (stepped, parked) = step_rung(&mut shell, ports, THREE_SECONDS_BEFORE_THE_NIGHT + 6, &rung);
     assert!(
         stepped.requests.iter().any(|request| matches!(
             request,
@@ -5202,7 +5202,7 @@ fn a_parked_night_alerts_the_owner_exactly_once() {
         "the park counts as a long hold from the start: nothing opens before 04:00"
     );
     let mut notes = notes_of(&parked);
-    let (night, wrong) = sweep_the_night(&mut shell, &ports, INTO_THE_CLOSE + 60);
+    let (night, wrong) = sweep_the_night(&mut shell, &ports, THREE_SECONDS_BEFORE_THE_NIGHT + 60);
     notes.extend(night);
     assert!(wrong.is_empty(), "{wrong:?}");
     assert_eq!(
@@ -5245,7 +5245,11 @@ fn a_restart_in_a_parked_night_alerts_nothing_more() {
         "a restart re-alerts nothing: {:?}",
         started.notifications
     );
-    let (notes, wrong) = sweep_the_night(&mut restarted, &ports, INTO_THE_CLOSE + 3_600);
+    let (notes, wrong) = sweep_the_night(
+        &mut restarted,
+        &ports,
+        THREE_SECONDS_BEFORE_THE_NIGHT + 3_600,
+    );
     assert!(wrong.is_empty(), "{wrong:?}");
     assert!(
         notes.is_empty(),

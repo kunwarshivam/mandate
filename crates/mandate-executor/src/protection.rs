@@ -7313,12 +7313,9 @@ mod sequence_tests {
             MORNING,
             OVERNIGHT,
             OPEN.saturating_sub(30),
-            INTO_THE_CLOSE,
-            INTO_THE_CLOSE,
-            INTO_THE_CLOSE,
-            INTO_THE_CLOSE,
-            INTO_THE_CLOSE,
-            INTO_THE_CLOSE,
+            TEN_SECONDS_BEFORE_THE_NIGHT,
+            TEN_SECONDS_BEFORE_THE_NIGHT,
+            TEN_SECONDS_BEFORE_THE_NIGHT,
             SATURDAY,
             1_788_789_600,
             1_514_739_600,
@@ -7352,11 +7349,11 @@ mod sequence_tests {
             Move::Quote(Some(150), None, true),
             Move::Tick(3_600),
         ];
-        rule_13_script(INTO_THE_CLOSE, &script)
+        rule_13_script(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
     }
 
     /// 2026-09-22, a Tuesday, at 19:59:50 ET: ten seconds before the after-hours session ends.
-    const INTO_THE_CLOSE: i64 = 1_790_121_590;
+    const TEN_SECONDS_BEFORE_THE_NIGHT: i64 = 1_790_121_590;
     /// 2026-09-22, a Tuesday, at 17:00 ET: after-hours.
     const AFTER_HOURS: i64 = 1_790_110_800;
     /// 11:00 ET, the regular session.
@@ -7756,6 +7753,20 @@ mod sequence_tests {
         }
         assert_eq!(notes, vec![(park, "session_closed")]);
         assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        let mut folded = ExecutorState::new(executor.state.scope.clone());
+        for event in &executor.journal {
+            fold(&mut folded, event)?;
+        }
+        let intent = IntentId(EventId(EXIT.to_owned()));
+        assert!(
+            folded.held_long.contains(&intent),
+            "the park is what `exit_held_long` reports: the journal folds it into the held-long set"
+        );
+        assert!(
+            !folded.held.contains(&intent),
+            "and it is never in the held set `exit_held_long`'s re-journal walks, which is what keeps \
+             the night to one alert"
+        );
         Ok(())
     }
 
