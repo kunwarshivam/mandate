@@ -1,5 +1,7 @@
-# Reference-case status (ADR-0001 ES-11, DEC-77). Founder-owned: a case marked passing must pass
-# and never returns to pending. Cases not listed are pending and run only with --include-ignored.
+# Reference-case status (ADR-0001 ES-11, DEC-77, DEC-277). Founder-owned: a case marked passing must
+# pass; it returns to pending only in a change that edits its expected output in fixtures/refcases/,
+# and the implementation that follows brings it back; it never drops out of this file. The spec guard
+# checks both against the merge base. Cases not listed are pending and run only with --include-ignored.
 
 [journal]
 'version' = { status = "passing", story = "E5-1" }

@@ -1673,6 +1673,10 @@ From E6-4's slice R4 (stream H2; DEC-167 item 8):
   `goal_complete`) with the loss carry, as `retire` does, and a test shows that releasing and
   redeploying on the same connection opens the new agent at the carried L (through
   `ValidationContext::from_journal` and V-032).
+- **MC-R17 back to passing (DEC-277; E6-4, stream H2).** The DEC-270 reference PR changes MC-R17's
+  expected journal and marks it `pending`, the one flip DEC-277 allows. The `mandate-spec` side above
+  must bring it back: the status PR that follows it marks MC-R17 `passing` again, with MC-R25,
+  MC-R26, and MC-V68.
 - **R4's status PR: the last nine MC-R cases pass.** MC-R09 to MC-R12, MC-R14, MC-R16, MC-R17,
   MC-R21, and MC-R23 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` on R4 (DEC-167 item 8 (i)); marking them in `status.toml` follows under DEC-77
