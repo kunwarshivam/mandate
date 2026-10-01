@@ -935,7 +935,6 @@ fn the_strictest_restriction_holds_the_mode_and_only_a_change_is_journalled() ->
 /// out of a flatten, which is the one direction §5.9 never allows. The order matters, so this is the
 /// walk the reference cases do not carry: MC-R16 completes its goal *before* the floor.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_weaker_restriction_applied_later_never_relaxes_the_mode() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let clock = RegularSessionClock::new();
@@ -1253,7 +1252,6 @@ fn a_confirmed_new_day_breach_renews_the_latch() -> Result<(), String> {
 /// A daily `flatten_and_pause` is acknowledged only once the agent is flat, and the acknowledgment leaves
 /// `exits_only` until the next risk day (§5.4).
 #[test]
-#[ignore = "pending E6-4"]
 fn a_daily_flatten_acknowledged_after_flat_leaves_exits_only_until_the_next_day()
 -> Result<(), String> {
     let mandate = swing(&[
@@ -1332,7 +1330,6 @@ fn a_daily_flatten_acknowledged_after_flat_leaves_exits_only_until_the_next_day(
 /// the reset the higher rung (0.04) lifts first, 600 s of regular-session time later; the lower one
 /// (0.02) starts its own 600 s only then, so a tick 300 s after the first lift changes nothing.
 #[test]
-#[ignore = "pending E6-4"]
 fn acknowledgment_waits_for_flat_then_resets_the_high_water_mark_and_lifts_rungs_in_turn()
 -> Result<(), String> {
     let mandate = swing(&[
@@ -1445,7 +1442,6 @@ fn acknowledgment_waits_for_flat_then_resets_the_high_water_mark_and_lifts_rungs
 /// 93 reaches exactly and a bid of 97 does not. The second walk is the same marks with no inherited loss,
 /// where nothing latches — so the test pins that L is read rather than that 9300 happens to be a floor.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_floor_is_raised_by_the_inherited_loss_and_cannot_be_acknowledged() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let clock = RegularSessionClock::new();
@@ -1516,7 +1512,6 @@ fn the_floor_is_raised_by_the_inherited_loss_and_cannot_be_acknowledged() -> Res
 /// `not_loosening`. Raising it to 0.2 moves the floor to 8000, below E, so the floor lifts —
 /// while the drawdown flatten it arrived with does not, which is why the mode does not move.
 #[test]
-#[ignore = "pending E6-4"]
 fn loosening_a_latched_floor_waits_a_full_risk_day_and_must_actually_loosen() -> Result<(), String>
 {
     let mandate = ladder_only(&[])?;
@@ -1586,7 +1581,6 @@ fn loosening_a_latched_floor_waits_a_full_risk_day_and_must_actually_loosen() ->
 /// A bid of 80 puts E at 8000, under the 9000 floor. Raising f to 0.15 moves the floor to 8500, which E is
 /// still below, so the version is `still_below_new_floor`; 0.25 moves it to 7500 and the floor lifts.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_version_that_leaves_equity_below_the_new_floor_is_refused() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let clock = RegularSessionClock::new();
@@ -1635,7 +1629,6 @@ fn a_version_that_leaves_equity_below_the_new_floor_is_refused() -> Result<(), S
 /// so the version is `still_below_new_floor`. An implementation that dropped L would have lifted the floor
 /// there, which is the one direction §5.7 never allows. 0.25 moves the floor to 8000 and does lift it.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_loosening_version_must_clear_the_floor_the_inherited_loss_raises() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let clock = RegularSessionClock::new();
@@ -1701,7 +1694,6 @@ fn a_loosening_version_must_clear_the_floor_the_inherited_loss_raises() -> Resul
 /// contributed falls from 10000 to 1000 and equity from 9150 to 150, so the difference is 850 either way —
 /// which `C − E` would not be, since the capital base is scaled by the withdrawal and E is not.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_withdrawal_cannot_shrink_the_loss_carried_to_the_connection() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let clock = RegularSessionClock::new();
@@ -1772,7 +1764,6 @@ fn a_withdrawal_cannot_shrink_the_loss_carried_to_the_connection() -> Result<(),
 /// checked only the soft levels would apply the change. `reference/mandate/ref.py` returns
 /// `would_trigger_limit` here, and the same port with the hard levels dropped applies it.
 #[test]
-#[ignore = "pending E6-4"]
 fn would_trigger_limit_tests_the_hard_levels_and_not_only_the_soft_ones() -> Result<(), String> {
     let mandate = swing(&[("/risk/max_daily_loss", Some(s("0.5")))])?;
     let clock = RegularSessionClock::new();
@@ -1817,7 +1808,6 @@ fn would_trigger_limit_tests_the_hard_levels_and_not_only_the_soft_ones() -> Res
 /// An allocation increase is refused while any limit is latched, and a decrease below the agent's gross
 /// exposure is refused too (§5.1, MI-7).
 #[test]
-#[ignore = "pending E6-4"]
 fn an_increase_is_refused_while_latched_and_a_decrease_below_exposure_is_refused()
 -> Result<(), String> {
     let mandate = ladder_only(&[])?;
@@ -1873,7 +1863,6 @@ fn an_increase_is_refused_while_latched_and_a_decrease_below_exposure_is_refused
 /// **above** the 10000 it started at, which is the direction MI-2 needs and which rounding half to even
 /// would have returned to exactly 10000.
 #[test]
-#[ignore = "pending E6-4"]
 fn an_applied_allocation_change_scales_the_marks_upward_and_arms_nothing() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let clock = RegularSessionClock::new();
@@ -2176,7 +2165,6 @@ fn a_profit_stop_confirms_by_time_in_breach_and_is_not_a_limit() -> Result<(), S
 /// would latch here with `breach_confirm_s` of 0, and neither of which may, because the goal disarmed them.
 /// A bid of 89.5 then reaches the floor, which `disarm_ladder` does not touch.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_disarmed_ladder_stops_the_rungs_and_the_daily_loss_while_the_floor_stays_armed()
 -> Result<(), String> {
     let mandate = swing(&[
@@ -2999,7 +2987,6 @@ proptest! {
     /// An applied allocation change preserves every ratio it reports and arms nothing; a refused one
     /// changes nothing at all (§5.1, MI-2, MI-7, planted bugs 4 and 5).
     #[test]
-    #[ignore = "pending E6-4"]
     fn an_applied_allocation_change_preserves_every_ratio_and_arms_nothing(
         bid in 60_i64..140,
         delta in -9_000_i64..9_000,
@@ -3083,7 +3070,6 @@ proptest! {
     /// The loss carried to the connection is the same however the allocation moved first (MI-14, planted
     /// bug 6): it is max(0, net contributed − E), and a withdrawal lowers both by the same dollars.
     #[test]
-    #[ignore = "pending E6-4"]
     fn the_loss_carry_is_invariant_under_a_withdraw_then_deposit_pair(
         bid in 98_i64..=100,
         withdrawal in 1_i64..5_000,
@@ -3139,7 +3125,6 @@ proptest! {
     /// `disarm_ladder` disarms the ladder and the daily loss, and `release` retires the agent — and none of
     /// the three is a path by which a latched limit goes away.
     #[test]
-    #[ignore = "pending E6-4"]
     fn a_completed_goal_never_adds_risk(
         on_complete in prop::sample::select(vec!["hold_protected", "disarm_ladder", "release"]),
         bid in 60_i64..140,
