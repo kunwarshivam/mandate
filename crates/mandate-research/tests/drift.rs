@@ -112,7 +112,6 @@ fn fold(history: &[InputObservation]) -> DriftState {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn a_quiet_source_never_escalates() {
     let state = fold(&quiet(&feed("feed-a")));
     let report = state.report().expect("the report is total");
@@ -138,7 +137,6 @@ fn a_quiet_source_never_escalates() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn a_burst_crosses_the_gap_measure() {
     let source = feed("feed-a");
     let mut history = quiet(&source);
@@ -170,7 +168,6 @@ fn a_burst_crosses_the_gap_measure() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn a_volume_spike_crosses_the_arrival_measure() {
     let source = feed("feed-a");
     let mut history = quiet(&source);
@@ -201,7 +198,6 @@ fn a_volume_spike_crosses_the_arrival_measure() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn replayed_content_crosses_the_duplicate_measure() {
     let source = feed("feed-a");
     let mut history = quiet(&source);
@@ -233,7 +229,6 @@ fn replayed_content_crosses_the_duplicate_measure() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn a_length_shift_crosses_the_length_measure() {
     let source = feed("feed-a");
     let grown: Vec<InputObservation> = quiet(&source)
@@ -286,7 +281,6 @@ fn a_length_shift_crosses_the_length_measure() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn a_source_without_a_baseline_escalates_fail_safe() {
     let source = feed("feed-a");
     let history: Vec<InputObservation> = (0..5)
@@ -318,7 +312,6 @@ fn a_source_without_a_baseline_escalates_fail_safe() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn a_compromised_source_does_not_escalate_others() {
     let quiet_source = feed("feed-quiet");
     let loud_source = feed("feed-loud");
@@ -361,7 +354,6 @@ fn a_compromised_source_does_not_escalate_others() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn the_report_is_independent_of_the_sources_arrival_order() {
     let loud = feed("feed-loud");
     let quiet_source = feed("feed-quiet");
@@ -412,7 +404,6 @@ fn the_report_is_independent_of_the_sources_arrival_order() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn the_fold_keeps_same_instant_arrivals() {
     let source = feed("feed-a");
     let mut history = quiet(&source);
@@ -444,7 +435,6 @@ fn the_fold_keeps_same_instant_arrivals() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn an_observation_before_its_source_s_last_is_refused() {
     let source = feed("feed-a");
     let other = feed("feed-b");
@@ -469,7 +459,6 @@ fn an_observation_before_its_source_s_last_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn the_fact_is_true_only_for_a_cited_unusual_source() {
     let quiet_source = feed("feed-quiet");
     let loud_source = feed("feed-loud");
@@ -502,7 +491,6 @@ fn the_fact_is_true_only_for_a_cited_unusual_source() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn a_cited_source_never_observed_is_unusual() {
     let quiet_source = feed("feed-quiet");
     let unseen = feed("feed-unseen");
@@ -524,7 +512,6 @@ fn a_cited_source_never_observed_is_unusual() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn the_baseline_bar_is_pinned_at_32() {
     let source = feed("feed-a");
     let full: Vec<InputObservation> = (0..32)
@@ -579,7 +566,6 @@ fn the_baseline_bar_is_pinned_at_32() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn the_duplicate_bar_is_pinned_at_4_of_the_recent_8() {
     let source = feed("feed-a");
     let mut at_bar = quiet(&source);
@@ -627,7 +613,6 @@ fn the_duplicate_bar_is_pinned_at_4_of_the_recent_8() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn the_arrival_bar_is_pinned_at_a_twelfth_of_the_baseline_span() {
     let source = feed("feed-a");
     let mut at_bar = quiet(&source);
@@ -683,7 +668,6 @@ fn the_arrival_bar_is_pinned_at_a_twelfth_of_the_baseline_span() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn the_gap_bar_is_pinned_at_a_quarter_of_the_baseline_mean_gap() {
     let source = feed("feed-a");
     let mut at_bar = quiet(&source);
@@ -739,7 +723,6 @@ fn the_gap_bar_is_pinned_at_a_quarter_of_the_baseline_mean_gap() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn the_length_bar_is_pinned_at_4x_the_baseline_mean() {
     let source = feed("feed-a");
     let with_recent = |length: u64, last: u64| -> Vec<InputObservation> {
@@ -801,7 +784,6 @@ fn the_length_bar_is_pinned_at_4x_the_baseline_mean() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn a_refused_observation_quarantines_the_baseline_until_a_new_one_forms() {
     let source = feed("feed-a");
     let mut state = DriftState::new();
@@ -866,7 +848,6 @@ fn a_refused_observation_quarantines_the_baseline_until_a_new_one_forms() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn the_gap_divisor_is_the_baseline_s_31_gaps() {
     let source = feed("feed-a");
     let mut collapsing = quiet(&source);
@@ -936,7 +917,6 @@ fn the_gap_divisor_is_the_baseline_s_31_gaps() {
 }
 
 #[test]
-#[ignore = "pending E17-5"]
 fn replays_confined_to_the_baseline_do_not_cross() {
     let source = feed("feed-a");
     let history: Vec<InputObservation> = (0..40)
