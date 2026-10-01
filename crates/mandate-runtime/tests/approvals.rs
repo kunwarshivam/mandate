@@ -25,6 +25,7 @@ use common::{
 use mandate_accounting::Side;
 use mandate_approval::{GenericText, Notification};
 use mandate_canon::Value;
+use mandate_journal::Environment;
 use mandate_runtime::{
     ActorKind, Autonomy, Effect, EventDraft, EventId, Initiator, Input, IntentBody, KillScope,
     Purpose, TimerId, TimerRequest,
@@ -856,7 +857,8 @@ fn an_owner_pause_needs_no_step_up_and_cancels_the_approval() {
 }
 
 /// Mandate spec §6.1: a resume needs step-up valid when the runtime processes it. Stale evidence is
-/// refused and leaves the pause in force; fresh evidence resumes, and the copy names its command.
+/// refused and leaves the pause in force, and its one copy is the `OwnerCommandRefused` (journal
+/// spec §9, rule 16; DEC-280 item 7); fresh evidence resumes, and the copy names its command.
 #[test]
 fn a_resume_needs_step_up_fresh_when_processed() {
     let (ids, gate, plan, view) = (TestIds, AllowGate, FixedPlan::silent(), universe(&["AAPL"]));
@@ -872,10 +874,12 @@ fn a_resume_needs_step_up_fresh_when_processed() {
 
     let stale = Command::to_agent(next_control_seq(&shell), "resume", ASKED_AT + 20).event();
     let ran = tail(&mut shell, &stale, &ports);
-    assert!(
-        drafts_of(&ran, "AgentModeChanged").is_empty(),
-        "evidence 380 s old when processed is refused: {:?}",
-        ran.draft_types()
+    refused_only(
+        &ran,
+        &stale.event_id,
+        "resume",
+        "step_up_stale",
+        ASKED_AT + 400,
     );
     assert_eq!(shell.state.effective_mode(), mandate_runtime::Mode::Paused);
 
@@ -884,7 +888,168 @@ fn a_resume_needs_step_up_fresh_when_processed() {
     let changed = only(&ran, "AgentModeChanged");
     assert_eq!(member(changed, "reason"), Some("owner_resume"));
     assert_eq!(changed.causation_id.as_ref(), Some(&fresh.event_id));
+    assert!(drafts_of(&ran, "OwnerCommandRefused").is_empty());
     assert_eq!(shell.state.effective_mode(), mandate_runtime::Mode::Normal);
+}
+
+/// `OwnerCommandRefused`'s members until journal spec §9.1 closes its schema (DEC-291): the
+/// command, the reason, and the effective time it was judged at.
+const REFUSED_MEMBERS: [&str; 3] = ["command", "effective_at", "reason"];
+
+/// Journal spec §9 and rule 16, mandate spec §6.1, DEC-280 item 7: a refused resume or Stop leaves
+/// exactly one event, its `OwnerCommandRefused`, and never an `AgentModeChanged`. It names the
+/// command, the reason, and the effective time it was judged at (the later of `submitted_at` and
+/// the folded clock), copies the `OwnerCommandIssued` as `causation_id`, and has no other member.
+fn refused_only(ran: &Ran, source: &EventId, command: &str, reason: &str, judged_at: i64) {
+    assert_eq!(
+        ran.draft_types(),
+        vec!["OwnerCommandRefused"],
+        "a refused {command} leaves exactly its refusal"
+    );
+    let draft = &ran.drafts[0];
+    assert_eq!(draft.causation_id.as_ref(), Some(source));
+    assert_eq!(member(draft, "command"), Some(command));
+    assert_eq!(member(draft, "reason"), Some(reason));
+    assert_eq!(
+        draft.payload.get("effective_at").and_then(Value::as_int),
+        u64::try_from(judged_at).ok(),
+        "judged at {judged_at}"
+    );
+    let members: Vec<&str> = draft
+        .payload
+        .as_object()
+        .map(|o| o.keys().map(|k| k.as_str()).collect())
+        .unwrap_or_default();
+    assert_eq!(members, REFUSED_MEMBERS.to_vec());
+}
+
+/// The #395 review, major 1, and its backlog row: a Stop whose step-up does not count leaves
+/// exactly its `OwnerCommandRefused` and never an `AgentModeChanged`, for each reason a Stop can be
+/// refused that this fixture can write: no evidence (`step_up_missing`), evidence older than its
+/// window when processed (`step_up_stale`), and an assertion an earlier command already used
+/// (`step_up_reused`). The agent keeps running after each. A Stop with fresh, unused evidence then
+/// stops it, with an `AgentModeChanged` and no refusal.
+#[test]
+fn a_refused_stop_leaves_exactly_its_owner_command_refused() {
+    let (ids, gate, plan, view) = (TestIds, AllowGate, FixedPlan::silent(), universe(&["AAPL"]));
+    let ports = ports(&ids, &gate, &plan, &view);
+    let (mut shell, _) = started(&ports);
+    let reconciled = shell.state.effective_mode();
+
+    let missing = Command {
+        step_up: None,
+        ..Command::to_agent(next_control_seq(&shell), "stop", ASKED_AT + 10)
+    }
+    .event();
+    let ran = tail(&mut shell, &missing, &ports);
+    refused_only(
+        &ran,
+        &missing.event_id,
+        "stop",
+        "step_up_missing",
+        ASKED_AT + 10,
+    );
+    assert_eq!(shell.state.effective_mode(), reconciled);
+
+    let stale = Command {
+        step_up: evidence("assertion-stale", ASKED_AT - 600),
+        ..Command::to_agent(next_control_seq(&shell), "stop", ASKED_AT + 20)
+    }
+    .event();
+    let ran = tail(&mut shell, &stale, &ports);
+    refused_only(
+        &ran,
+        &stale.event_id,
+        "stop",
+        "step_up_stale",
+        ASKED_AT + 20,
+    );
+    assert_eq!(shell.state.effective_mode(), reconciled);
+
+    let pause = Command {
+        step_up: evidence("assertion-shared", ASKED_AT + 30),
+        ..Command::to_agent(next_control_seq(&shell), "pause", ASKED_AT + 30)
+    }
+    .event();
+    tail(&mut shell, &pause, &ports);
+    let paused = shell.state.effective_mode();
+    let reused = Command {
+        step_up: evidence("assertion-shared", ASKED_AT + 30),
+        ..Command::to_agent(next_control_seq(&shell), "stop", ASKED_AT + 31)
+    }
+    .event();
+    let ran = tail(&mut shell, &reused, &ports);
+    refused_only(
+        &ran,
+        &reused.event_id,
+        "stop",
+        "step_up_reused",
+        ASKED_AT + 31,
+    );
+    assert_eq!(shell.state.effective_mode(), paused);
+
+    let fresh = Command::to_agent(next_control_seq(&shell), "stop", ASKED_AT + 40).event();
+    let ran = tail(&mut shell, &fresh, &ports);
+    let changed = only(&ran, "AgentModeChanged");
+    assert_eq!(member(changed, "reason"), Some("owner_stop"));
+    assert_eq!(changed.causation_id.as_ref(), Some(&fresh.event_id));
+    assert!(drafts_of(&ran, "OwnerCommandRefused").is_empty());
+    assert_eq!(shell.state.effective_mode(), mandate_runtime::Mode::Stopped);
+}
+
+/// Mandate spec §6.1, DEC-155 item 4: `cli_confirm` counts on `paper` alone. On a backtest view a
+/// Stop whose evidence is fresh and unused is refused for its method, and leaves exactly its
+/// `OwnerCommandRefused` with `step_up_method` (the #411 review, minor 1).
+#[test]
+fn a_stop_with_cli_confirm_off_paper_is_refused_for_its_method() {
+    let (ids, gate, plan) = (TestIds, AllowGate, FixedPlan::silent());
+    let mut view = universe(&["AAPL"]);
+    view.approval.environment = Environment::Backtest;
+    let ports = ports(&ids, &gate, &plan, &view);
+    let (mut shell, _) = started(&ports);
+    let reconciled = shell.state.effective_mode();
+    let stop = Command::to_agent(next_control_seq(&shell), "stop", ASKED_AT + 10).event();
+    let ran = tail(&mut shell, &stop, &ports);
+    refused_only(
+        &ran,
+        &stop.event_id,
+        "stop",
+        "step_up_method",
+        ASKED_AT + 10,
+    );
+    assert_eq!(shell.state.effective_mode(), reconciled);
+}
+
+/// Journal spec §2, EI-3: a refused command is copied at most once. After a restart that folds
+/// the journal, the same `OwnerCommandIssued` re-tailed writes nothing, neither a second refusal nor
+/// a mode change.
+#[test]
+fn a_refused_command_is_recorded_once_across_a_restart() {
+    let (ids, gate, plan, view) = (TestIds, AllowGate, FixedPlan::silent(), universe(&["AAPL"]));
+    let ports = ports(&ids, &gate, &plan, &view);
+    let (mut shell, _) = started(&ports);
+    let stop = Command {
+        step_up: None,
+        ..Command::to_agent(next_control_seq(&shell), "stop", ASKED_AT + 10)
+    }
+    .event();
+    let ran = tail(&mut shell, &stop, &ports);
+    refused_only(
+        &ran,
+        &stop.event_id,
+        "stop",
+        "step_up_missing",
+        ASKED_AT + 10,
+    );
+
+    let (mut restarted, _) = shell.restart(&ports);
+    let again = restarted.run(Input::Journal(stop.clone()), &ports);
+    assert!(
+        drafts_of(&again, "OwnerCommandRefused").is_empty()
+            && drafts_of(&again, "AgentModeChanged").is_empty(),
+        "a re-tailed refused command is not copied again: {:?}",
+        again.draft_types()
+    );
 }
 
 /// PB-14, PB-14b, DEC-158 option (c): an owner's kill switch is never refused. With missing or

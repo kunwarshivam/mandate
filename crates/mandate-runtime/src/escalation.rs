@@ -681,11 +681,12 @@ fn commanded(
         "owner_exit" => OwnerCommandKind::OwnerExit,
         _ => return Err(payload::non_canonical("command")),
     };
+    let judged_at = processed_at(state, submitted);
     let authority = mandate_approval::owner_command(
         kind,
         evidence.as_ref(),
         clock(submitted),
-        clock(processed_at(state, submitted)),
+        clock(judged_at),
         environment,
         &used,
     )?;
@@ -693,20 +694,20 @@ fn commanded(
         CommandAuthority::Apply => None,
         CommandAuthority::Refused(why) => Some(why),
     };
-    match kind {
-        OwnerCommandKind::Pause => {
+    match (kind, refusal) {
+        (OwnerCommandKind::Pause, _) => {
             let lifecycle = state.lifecycle().max(Mode::Paused);
             lifecycle_change(state, payload::REASON_OWNER_PAUSE, lifecycle, cause, batch)?;
             cancel_approvals(state, batch, payload::REASON_OWNER_PAUSE)
         }
-        OwnerCommandKind::Resume if refusal.is_none() => {
+        (OwnerCommandKind::Resume, None) => {
             let lifecycle = match state.lifecycle() {
                 Mode::Stopped => Mode::Stopped,
                 _ => Mode::Normal,
             };
             lifecycle_change(state, payload::REASON_OWNER_RESUME, lifecycle, cause, batch)
         }
-        OwnerCommandKind::Stop if refusal.is_none() => {
+        (OwnerCommandKind::Stop, None) => {
             lifecycle_change(
                 state,
                 payload::REASON_OWNER_STOP,
@@ -716,12 +717,43 @@ fn commanded(
             )?;
             cancel_approvals(state, batch, payload::REASON_OWNER_STOP)
         }
-        OwnerCommandKind::OwnerExit => {
+        (OwnerCommandKind::OwnerExit, _) => {
             let judged = judged(refusal, evidence.as_ref(), confirmed_bid(event)?, user)?;
             owner_exit(state, event, &judged, ports, batch)
         }
-        OwnerCommandKind::Resume | OwnerCommandKind::Stop | OwnerCommandKind::Acknowledge => Ok(()),
+        (OwnerCommandKind::Resume, Some(why)) => refused("resume", why, judged_at, cause, batch),
+        (OwnerCommandKind::Stop, Some(why)) => refused("stop", why, judged_at, cause, batch),
+        (OwnerCommandKind::Acknowledge, _) => Ok(()),
     }
+}
+
+/// A resume or Stop whose step-up does not count, recorded as its one copy, `OwnerCommandRefused`,
+/// in place of the `AgentModeChanged` it would have written (journal spec §9 and rule 16, mandate
+/// spec §6.1; DEC-280 item 7, the #395 review's major 1): the command, the reason, and the
+/// effective time it was judged at, with the `OwnerCommandIssued` as `causation_id`.
+///
+/// # Errors
+/// [`RuntimeError`] when the draft cannot be written.
+fn refused(
+    command: &'static str,
+    refusal: StepUpRefusal,
+    judged_at: RiskClock,
+    cause: Option<EventId>,
+    batch: &mut Batch<'_>,
+) -> Result<(), RuntimeError> {
+    let reason = match refusal {
+        StepUpRefusal::Missing => "step_up_missing",
+        StepUpRefusal::Stale => "step_up_stale",
+        StepUpRefusal::Reused => "step_up_reused",
+        StepUpRefusal::Method => "step_up_method",
+    };
+    let body = payload::object(vec![
+        ("command", payload::text(command)),
+        ("effective_at", payload::seconds(judged_at, "effective_at")?),
+        ("reason", payload::text(reason)),
+    ])?;
+    batch.journal("OwnerCommandRefused", cause, body)?;
+    Ok(())
 }
 
 /// The scope a control-stream kill switch names. Whether it reaches this deployment is

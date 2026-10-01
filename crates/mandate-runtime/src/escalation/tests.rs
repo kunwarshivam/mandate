@@ -677,8 +677,9 @@ fn owner_input_for_another_agent_is_inert() -> Checked {
 }
 
 /// Mandate spec §6.1, PX-4: the owner's Stop needs step-up fresh when the runtime processes it.
-/// Stale evidence changes nothing and leaves the approval pending; fresh evidence stops the agent
-/// and cancels the approval; and a resume after it, even with fresh evidence, never lifts a Stop.
+/// Stale evidence changes no mode and leaves the approval pending, and its one copy is its
+/// `OwnerCommandRefused` (journal spec §9, rule 16; DEC-291); fresh evidence stops the agent and
+/// cancels the approval; and a resume after it, even with fresh evidence, never lifts a Stop.
 #[test]
 fn a_stop_needs_fresh_step_up_and_no_resume_lifts_it() -> Checked {
     let (view, flatten) = (
@@ -703,12 +704,15 @@ fn a_stop_needs_fresh_step_up_and_no_resume_lifts_it() -> Checked {
     let approval = the(&ran, "ApprovalRequested")?.event_id.clone();
 
     let stale = evidence("stale", AT.saturating_sub(301))?;
-    let (_, ran) = rig.control(
+    let (refused, ran) = rig.control(
         COMMAND_ISSUED,
         command("a", "stop", ("agent", "a"), stale, false)?,
         &ports,
     )?;
-    assert!(ran.is_empty(), "{:?}", types(&ran));
+    assert_eq!(types(&ran), vec!["OwnerCommandRefused"]);
+    let record = the(&ran, "OwnerCommandRefused")?;
+    assert_eq!(member(record, "reason"), Some("step_up_stale"));
+    assert_eq!(record.causation_id.as_ref(), Some(&refused.event_id));
     assert!(rig.state.pending_approvals().contains_key(&approval));
 
     let (stop, ran) = rig.control(
@@ -732,6 +736,45 @@ fn a_stop_needs_fresh_step_up_and_no_resume_lifts_it() -> Checked {
     )?;
     assert!(ran.is_empty(), "{:?}", types(&ran));
     assert_eq!(mode_of(&rig), Mode::Stopped);
+    Ok(())
+}
+
+/// Mandate spec §6.1, journal spec §9, DEC-291 (the #413 review, minor 2): a Stop is judged when
+/// the runtime processes it. One submitted at 1 000 s with evidence authenticated then, read once
+/// the folded clock reached 1 400 s, is stale, and its `OwnerCommandRefused` records the folded
+/// second as `effective_at`, never its `submitted_at`.
+#[test]
+fn a_stop_processed_late_is_refused_at_the_folded_second() -> Checked {
+    let (view, flatten) = (
+        view()?,
+        Recording {
+            asked: RefCell::new(Vec::new()),
+        },
+    );
+    let plan = Plan::of(Vec::new(), Autonomy::Auto);
+    let ports = Ports {
+        ids: &Ids,
+        gate: &Allow,
+        plan: &plan,
+        flatten: &flatten,
+        view: &view,
+    };
+    let (mut rig, _) = Rig::started(&ports)?;
+    let processed = AT.saturating_add(400);
+    rig.step(Input::Tick(RiskClock::from_secs(processed)), &ports)?;
+    let (stop, ran) = rig.control(
+        COMMAND_ISSUED,
+        command("a", "stop", ("agent", "a"), evidence("late", AT)?, false)?,
+        &ports,
+    )?;
+    assert_eq!(types(&ran), vec!["OwnerCommandRefused"]);
+    let record = the(&ran, "OwnerCommandRefused")?;
+    assert_eq!(member(record, "reason"), Some("step_up_stale"));
+    assert_eq!(record.causation_id.as_ref(), Some(&stop.event_id));
+    assert_eq!(
+        record.payload.get("effective_at").and_then(Value::as_int),
+        u64::try_from(processed).ok()
+    );
     Ok(())
 }
 
