@@ -45,6 +45,21 @@
 use mandate_canon::Digest;
 use mandate_journal::{EventFailure, StoredEvent, StreamId, TrustedStart, Verified};
 
+/// A manifest's canonical JSON bytes: the form §6.2 pins, constructed by
+/// [`SegmentManifest::to_canonical_bytes`], read by [`SegmentManifest::parse`], and hashed by
+/// [`SegmentManifest::manifest_hash`]. The wrapper carries the canonical-form invariant a bare
+/// `Vec<u8>` would lose, the way `mandate-research`'s `ContentHash` carries a content digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalBytes(Vec<u8>);
+
+impl CanonicalBytes {
+    /// The bytes as stored, hashed, and parsed.
+    #[must_use]
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 /// The manifest of one contiguous run of one stream's events (§6.2): canonical JSON — stream,
 /// first and last `seq`, first `prev_hash`, last `hash`, the file's SHA-256 — whose own hash a
 /// `SegmentExported` event references (DEC-263).
@@ -79,8 +94,8 @@ impl SegmentManifest {
     /// The manifest's canonical JSON bytes: the object §6.2 names, canonicalized, so the manifest
     /// hash is a digest of exactly these bytes.
     #[must_use]
-    pub fn to_canonical_bytes(&self) -> Vec<u8> {
-        Vec::new()
+    pub fn to_canonical_bytes(&self) -> CanonicalBytes {
+        CanonicalBytes(Vec::new())
     }
 
     /// Reads a manifest back from its canonical bytes.
@@ -135,9 +150,9 @@ impl ColdCheck {
     }
 }
 
-/// Why a cold range failed: a per-event check inside a segment, unchanged from
-/// [`mandate_journal::verify_events`], or a cold check reported at the `seq` where the range
-/// expected the segment to be.
+/// Why a cold verification failed: a per-event check inside a segment, unchanged from
+/// [`mandate_journal::verify_events`], a cold check reported at the `seq` where the range
+/// expected the segment to be, or the timestamp token's structural check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColdFailure {
     /// A per-event check failed inside a segment at this `seq`.
@@ -149,6 +164,8 @@ pub enum ColdFailure {
         /// The check that failed.
         check: ColdCheck,
     },
+    /// The timestamp token failed §11's `tsa_token_invalid` check (DEC-265's structural scope).
+    TsaTokenInvalid,
     /// The pending E5-6 stub's own report; the arm goes when the story lands.
     Unimplemented(&'static str, &'static str),
 }
@@ -189,10 +206,10 @@ pub fn verify_range(
 /// chain, and revocation are the Proposed crypto half.
 ///
 /// # Errors
-/// Returns [`ColdCheck::TsaTokenInvalid`] when the token does not contain the imprint.
-pub fn verify_tsa(anchor: &mandate_journal::Anchor, token: &[u8]) -> Result<(), ColdCheck> {
+/// Returns [`ColdFailure::TsaTokenInvalid`] when the token does not contain the imprint.
+pub fn verify_tsa(anchor: &mandate_journal::Anchor, token: &[u8]) -> Result<(), ColdFailure> {
     let _ = (anchor, token);
-    Err(ColdCheck::TsaTokenInvalid)
+    Err(ColdFailure::Unimplemented("verify_tsa", "E5-6"))
 }
 
 /// The anchor's inclusion proof for one stream (§12): the RFC 6962 audit path — the sibling

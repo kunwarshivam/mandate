@@ -34,7 +34,10 @@ fn rows() -> Vec<StoredEvent> {
 /// One segment of a contiguous run: its manifest's bytes and its file's bytes.
 fn segment(rows: &[StoredEvent]) -> (Vec<u8>, Vec<u8>) {
     let manifest = SegmentManifest::of(rows).expect("a contiguous run manifests");
-    (manifest.to_canonical_bytes(), export_segment(rows))
+    (
+        manifest.to_canonical_bytes().as_slice().to_vec(),
+        export_segment(rows),
+    )
 }
 
 /// The manifest object §6.2 names, from the rows' own edges, as the test's oracle.
@@ -142,7 +145,7 @@ fn the_manifest_s_bytes_are_the_six_fields_in_canonical_form() {
     let all = rows();
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
     assert_eq!(
-        manifest.to_canonical_bytes(),
+        manifest.to_canonical_bytes().as_slice(),
         oracle_manifest_bytes(&all[0..3]),
         "the manifest's bytes are exactly the object §6.2 names, canonicalized"
     );
@@ -154,7 +157,7 @@ fn a_manifest_round_trips_through_its_canonical_bytes() {
     let all = rows();
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
     let bytes = manifest.to_canonical_bytes();
-    let read = SegmentManifest::parse(&bytes).expect("the manifest's own bytes parse");
+    let read = SegmentManifest::parse(bytes.as_slice()).expect("the manifest's own bytes parse");
     assert_eq!(read, manifest);
     assert_eq!(
         read.to_canonical_bytes(),
@@ -170,7 +173,7 @@ fn a_manifest_s_hash_is_the_digest_of_its_canonical_bytes() {
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
     assert_eq!(
         manifest.manifest_hash(),
-        Digest::of(&manifest.to_canonical_bytes()),
+        Digest::of(manifest.to_canonical_bytes().as_slice()),
         "the hash a SegmentExported references is the test's own digest of the canonical bytes"
     );
 }
@@ -181,7 +184,7 @@ fn a_manifest_in_the_wrong_member_order_is_refused() {
     let all = rows();
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
     assert!(
-        SegmentManifest::parse(&manifest.to_canonical_bytes()).is_ok(),
+        SegmentManifest::parse(manifest.to_canonical_bytes().as_slice()).is_ok(),
         "the manifest's own bytes parse, so the refusal below is about the order"
     );
     let swapped = format!(
@@ -195,7 +198,7 @@ fn a_manifest_in_the_wrong_member_order_is_refused() {
         Err(ColdError::MalformedManifest),
         "canonical order is the six keys sorted; a swapped manifest is refused, not re-ordered"
     );
-    let mut extra = parsed(&manifest.to_canonical_bytes());
+    let mut extra = parsed(manifest.to_canonical_bytes().as_slice());
     let Value::Object(members) = &mut extra else {
         panic!("a manifest's bytes are an object")
     };
@@ -216,7 +219,7 @@ fn an_edited_manifest_parses_to_a_different_hash() {
     let all = rows();
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
     let edited_value = {
-        let mut value = parsed(&manifest.to_canonical_bytes());
+        let mut value = parsed(manifest.to_canonical_bytes().as_slice());
         let Value::Object(members) = &mut value else {
             panic!("a manifest's bytes are an object")
         };
@@ -451,7 +454,7 @@ fn an_event_before_the_trusted_start_is_not_checked() {
     tampered.extend(all[2..].iter().cloned());
     let manifest = SegmentManifest::of(&tampered).expect("the run is still contiguous");
     let file = export_segment(&tampered);
-    let parts = [(manifest.to_canonical_bytes(), file)];
+    let parts = [(manifest.to_canonical_bytes().as_slice().to_vec(), file)];
     assert_eq!(
         verify_range(start, &files(&parts), &no_artifacts()),
         Ok(Verified {
@@ -489,7 +492,7 @@ fn a_per_event_failure_inside_a_segment_surfaces_as_the_event_check() {
     tampered.extend(all[5..].iter().cloned());
     let manifest = SegmentManifest::of(&tampered).expect("the run is still contiguous");
     let file = export_segment(&tampered);
-    let parts = [(manifest.to_canonical_bytes(), file)];
+    let parts = [(manifest.to_canonical_bytes().as_slice().to_vec(), file)];
     assert_eq!(
         verify_range(TrustedStart::GENESIS, &files(&parts), &no_artifacts()),
         Err(ColdFailure::Event(mandate_journal::EventFailure {
@@ -537,14 +540,14 @@ fn a_token_verifies_only_with_the_anchor_s_imprint() {
     );
     assert_eq!(
         verify_tsa(&anchor, b"no imprint here"),
-        Err(ColdCheck::TsaTokenInvalid),
+        Err(ColdFailure::TsaTokenInvalid),
         "a token without the imprint does not claim this root"
     );
     let mut root_only = anchor.root.as_bytes().to_vec();
     root_only.extend_from_slice(b"the raw root is not the imprint");
     assert_eq!(
         verify_tsa(&anchor, &root_only),
-        Err(ColdCheck::TsaTokenInvalid),
+        Err(ColdFailure::TsaTokenInvalid),
         "the root itself is not the imprint: SHA-256 of the root's bytes"
     );
 }
