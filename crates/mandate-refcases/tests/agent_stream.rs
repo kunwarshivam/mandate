@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use Shape::{Boolean, Integer, List, Record, Text};
+use Shape::{Boolean, Decimal, Id, Integer, List, Record, Ref, Str, Timestamp, Ulid, Value};
 use mandate_refcases::{Json, journal, read_fixture};
 use serde_json::json;
 
@@ -278,12 +278,25 @@ fn a_reference_before_the_range_is_left_to_the_full_chain() {
     );
 }
 
-/// How a §9.1 member is written, and so which value is off its type: every string-shaped type
-/// (`text`, `id`, `ulid`, `decimal`, `timestamp`, `ref`, a value list) refuses a number as
-/// `schema`, `integer` and `boolean` refuse a string, and a list or a record refuses a scalar.
+/// A §9.1 member's type (its Types table), and so which values are off it: every string-shaped
+/// type refuses a number as `schema` and its own malformed string as `non_canonical`, `integer`
+/// and `boolean` refuse a string, and a list or a record refuses a scalar.
 #[derive(Clone, Copy)]
 enum Shape {
-    Text,
+    /// `text`: a non-empty string.
+    Str,
+    /// `id`: `[A-Za-z0-9_-]+`.
+    Id,
+    /// `ulid`: an event ID.
+    Ulid,
+    /// `decimal` (§4.6).
+    Decimal,
+    /// `timestamp` (§4.7), never risk-clock seconds.
+    Timestamp,
+    /// `ref`: `sha256:` and 64 lowercase hex.
+    Ref,
+    /// One of the listed strings.
+    Value,
     Integer,
     Boolean,
     List,
@@ -300,116 +313,116 @@ const SCHEMAS: [Schema; 8] = [
         "StreamOpened",
         1,
         &[
-            ("stream_type", Text),
-            ("workspace_id", Text),
-            ("agent_id", Text),
+            ("stream_type", Value),
+            ("workspace_id", Id),
+            ("agent_id", Id),
         ],
     ),
     (
         "ObservationRecorded",
         2,
         &[
-            ("source", Text),
-            ("instrument_id", Text),
-            ("as_of", Text),
-            ("data_ref", Text),
+            ("source", Str),
+            ("instrument_id", Str),
+            ("as_of", Timestamp),
+            ("data_ref", Ref),
         ],
     ),
     (
         "ModelOutputRecorded",
         3,
         &[
-            ("model_id", Text),
-            ("model_version", Text),
-            ("content_hash", Text),
-            ("instrument_id", Text),
-            ("as_of", Text),
-            ("expires_at", Text),
-            ("direction", Text),
-            ("conviction", Text),
-            ("confidence", Text),
+            ("model_id", Str),
+            ("model_version", Str),
+            ("content_hash", Ref),
+            ("instrument_id", Str),
+            ("as_of", Timestamp),
+            ("expires_at", Timestamp),
+            ("direction", Str),
+            ("conviction", Decimal),
+            ("confidence", Decimal),
             ("horizon_s", Integer),
-            ("thesis_ref", Text),
+            ("thesis_ref", Ref),
             ("evidence", List),
-            ("invalidation", Text),
-            ("thesis_id", Text),
-            ("lineage_id", Text),
-            ("ignored", Text),
+            ("invalidation", Str),
+            ("thesis_id", Id),
+            ("lineage_id", Id),
+            ("ignored", Value),
         ],
     ),
     (
         "DecisionMade",
         4,
         &[
-            ("instrument_id", Text),
-            ("side", Text),
-            ("type", Text),
-            ("tif", Text),
-            ("qty", Text),
-            ("limit_price", Text),
-            ("purpose", Text),
-            ("exit_origin", Text),
-            ("exit_conviction", Text),
-            ("buy_conviction", Text),
-            ("combined_score", Text),
+            ("instrument_id", Str),
+            ("side", Value),
+            ("type", Value),
+            ("tif", Value),
+            ("qty", Decimal),
+            ("limit_price", Decimal),
+            ("purpose", Value),
+            ("exit_origin", Value),
+            ("exit_conviction", Decimal),
+            ("buy_conviction", Decimal),
+            ("combined_score", Decimal),
             ("outputs_used", List),
             ("model_weights", List),
             ("clips_applied", List),
-            ("dry_run", Text),
-            ("reason_code", Text),
-            ("autonomy", Text),
-            ("ask_suppressed", Text),
-            ("decided_by", Text),
-            ("delegation_id", Text),
-            ("requested_by", Text),
-            ("client_id", Text),
+            ("dry_run", Value),
+            ("reason_code", Id),
+            ("autonomy", Value),
+            ("ask_suppressed", Value),
+            ("decided_by", Str),
+            ("delegation_id", Id),
+            ("requested_by", Value),
+            ("client_id", Id),
         ],
     ),
     (
         "IntentProposed",
         5,
         &[
-            ("instrument_id", Text),
-            ("side", Text),
-            ("type", Text),
-            ("tif", Text),
-            ("qty", Text),
-            ("limit_price", Text),
-            ("purpose", Text),
+            ("instrument_id", Str),
+            ("side", Value),
+            ("type", Value),
+            ("tif", Value),
+            ("qty", Decimal),
+            ("limit_price", Decimal),
+            ("purpose", Value),
         ],
     ),
     (
         "AgentModeChanged",
         11,
         &[
-            ("from", Text),
-            ("to", Text),
-            ("reason", Text),
-            ("lifecycle", Text),
+            ("from", Value),
+            ("to", Value),
+            ("reason", Value),
+            ("lifecycle", Value),
         ],
     ),
     (
         "KillSwitchActivated",
         13,
         &[
-            ("scope", Text),
-            ("subject", Text),
-            ("initiator", Text),
-            ("mode_event", Text),
+            ("scope", Value),
+            ("subject", Id),
+            ("initiator", Value),
+            ("mode_event", Ulid),
         ],
     ),
     (
         "OwnerExitRequested",
         9,
         &[
-            ("scope", Text),
-            ("subject", Text),
+            ("scope", Value),
+            ("subject", Id),
             ("confirmed", Boolean),
-            ("bid", Text),
-            ("bid_size", Text),
-            ("floor", Text),
-            ("user", Text),
-            ("step_up_status", Text),
+            ("bid", Decimal),
+            ("bid_size", Decimal),
+            ("floor", Decimal),
+            ("user", Str),
+            ("step_up_status", Value),
             ("step_up", Record),
         ],
     ),
@@ -418,8 +431,24 @@ const SCHEMAS: [Schema; 8] = [
 /// A value off `shape`'s type.
 fn off_type(shape: Shape) -> Json {
     match shape {
-        Text | List | Record => json!(7),
         Integer | Boolean => json!("7"),
+        Str | Id | Ulid | Decimal | Timestamp | Ref | Value | List | Record => json!(7),
+    }
+}
+
+/// A string `shape` refuses as `non_canonical` (§9.1's Types table, §4.6, §4.7): empty text, an id
+/// with a dot, a lowercase ULID, a decimal with two points, risk-clock seconds, a short reference,
+/// and a value outside the list. `None` for a type that is not a string.
+fn malformed(shape: Shape) -> Option<Json> {
+    match shape {
+        Str => Some(json!("")),
+        Id => Some(json!("ws.01J8Z2")),
+        Ulid => Some(json!("01j8z3m0a000000000000000g2")),
+        Decimal => Some(json!("1.2.3")),
+        Timestamp => Some(json!("1726927200")),
+        Ref => Some(json!("sha256:8b7c2f")),
+        Value => Some(json!("not_listed")),
+        Integer | Boolean | List | Record => None,
     }
 }
 
@@ -430,6 +459,7 @@ struct Sweep {
     name: String,
     base: u64,
     changes: Json,
+    reason: &'static str,
     path: String,
 }
 
@@ -449,43 +479,76 @@ fn chain_seqs(event_type: &str) -> Vec<u64> {
 /// refuse the draft in its place; plus the members of the lists'
 /// items and of `step_up`, each change alone on its base chain event.
 fn sweep() -> Vec<Sweep> {
+    const SCHEMA: &str = "schema";
+    const NON_CANONICAL: &str = "non_canonical";
     let mut out = Vec::new();
-    let mut add = |event_type: &'static str, base: u64, name: String, change: Json, path: &str| {
+    let mut add = |event_type: &'static str,
+                   base: u64,
+                   name: String,
+                   change: Json,
+                   reason: &'static str,
+                   path: &str| {
         out.push(Sweep {
             event_type,
             name: format!("sweep_{}_{name}", event_type.to_lowercase()),
             base,
             changes: json!([change]),
+            reason,
             path: format!("payload.{path}"),
         });
     };
     for (event_type, base, members) in SCHEMAS {
         for (member, shape) in members.iter().copied() {
             let path = format!("payload.{member}");
+            let set = |value: Json| json!({"path": path, "value": value});
             add(
                 event_type,
                 base,
                 format!("{member}_off_type"),
-                json!({"path": path, "value": off_type(shape)}),
+                set(off_type(shape)),
+                SCHEMA,
                 member,
             );
+            if let Some(bad) = malformed(shape) {
+                add(
+                    event_type,
+                    base,
+                    format!("{member}_malformed"),
+                    set(bad),
+                    NON_CANONICAL,
+                    member,
+                );
+            }
             for seq in chain_seqs(event_type) {
+                let gone = json!({"path": path, "delete": true});
                 add(
                     event_type,
                     seq,
                     format!("{member}_absent_at_{seq}"),
-                    json!({"path": path, "delete": true}),
+                    gone,
+                    SCHEMA,
                     member,
                 );
             }
         }
     }
+    let weight = |key: Json, value: Json| json!([{"key": key, "value": value}]);
+    let key = || json!("quant.mean_reversion");
     let items = [
         (
             "ModelOutputRecorded",
             3,
             "evidence",
             json!([7]),
+            SCHEMA,
+            "evidence[0]",
+        ),
+        (
+            "ModelOutputRecorded",
+            3,
+            "evidence",
+            json!([malformed(Ulid)]),
+            NON_CANONICAL,
             "evidence[0]",
         ),
         (
@@ -493,6 +556,15 @@ fn sweep() -> Vec<Sweep> {
             4,
             "outputs_used",
             json!([7]),
+            SCHEMA,
+            "outputs_used[0]",
+        ),
+        (
+            "DecisionMade",
+            4,
+            "outputs_used",
+            json!([malformed(Ulid)]),
+            NON_CANONICAL,
             "outputs_used[0]",
         ),
         (
@@ -500,6 +572,15 @@ fn sweep() -> Vec<Sweep> {
             4,
             "clips_applied",
             json!([7]),
+            SCHEMA,
+            "clips_applied[0]",
+        ),
+        (
+            "DecisionMade",
+            4,
+            "clips_applied",
+            json!([malformed(Value)]),
+            NON_CANONICAL,
             "clips_applied[0]",
         ),
         (
@@ -507,20 +588,39 @@ fn sweep() -> Vec<Sweep> {
             4,
             "model_weights",
             json!([7]),
+            SCHEMA,
             "model_weights[0]",
         ),
         (
             "DecisionMade",
             4,
             "model_weights",
-            json!([{"key": 7, "value": "0.9"}]),
+            weight(json!(7), json!("0.9")),
+            SCHEMA,
             "model_weights[0].key",
         ),
         (
             "DecisionMade",
             4,
             "model_weights",
-            json!([{"key": "quant.mean_reversion", "value": 7}]),
+            weight(json!(""), json!("0.9")),
+            NON_CANONICAL,
+            "model_weights[0].key",
+        ),
+        (
+            "DecisionMade",
+            4,
+            "model_weights",
+            weight(key(), json!(7)),
+            SCHEMA,
+            "model_weights[0].value",
+        ),
+        (
+            "DecisionMade",
+            4,
+            "model_weights",
+            weight(key(), json!("1.2.3")),
+            NON_CANONICAL,
             "model_weights[0].value",
         ),
         (
@@ -528,49 +628,73 @@ fn sweep() -> Vec<Sweep> {
             4,
             "model_weights",
             json!([{"value": "0.9"}]),
+            SCHEMA,
             "model_weights[0].key",
         ),
         (
             "DecisionMade",
             4,
             "model_weights",
-            json!([{"key": "quant.mean_reversion"}]),
+            json!([{"key": key()}]),
+            SCHEMA,
             "model_weights[0].value",
         ),
     ];
-    for (i, (event_type, base, member, value, path)) in items.into_iter().enumerate() {
+    for (i, (event_type, base, member, value, reason, path)) in items.into_iter().enumerate() {
+        let change = json!({"path": format!("payload.{member}"), "value": value});
         add(
             event_type,
             base,
             format!("{member}_item_{i}"),
-            json!({"path": format!("payload.{member}"), "value": value}),
+            change,
+            reason,
             path,
         );
     }
-    for member in ["assertion_id", "authenticated_at", "method"] {
+    for (member, shape) in [
+        ("assertion_id", Str),
+        ("authenticated_at", Timestamp),
+        ("method", Str),
+    ] {
         let path = format!("payload.step_up.{member}");
         let at = format!("step_up.{member}");
+        let owner_exit = "OwnerExitRequested";
+        let gone = json!({"path": path, "delete": true});
         add(
-            "OwnerExitRequested",
+            owner_exit,
             9,
             format!("step_up_{member}_absent"),
-            json!({"path": path, "delete": true}),
+            gone,
+            SCHEMA,
             &at,
         );
+        let off = json!({"path": path, "value": off_type(shape)});
         add(
-            "OwnerExitRequested",
+            owner_exit,
             9,
             format!("step_up_{member}_off_type"),
-            json!({"path": path, "value": 7}),
+            off,
+            SCHEMA,
+            &at,
+        );
+        let bad = json!({"path": path, "value": malformed(shape)});
+        add(
+            owner_exit,
+            9,
+            format!("step_up_{member}_malformed"),
+            bad,
+            NON_CANONICAL,
             &at,
         );
     }
     out
 }
 
-/// §9.1's type and presence layer: each member of each schema, deleted or set off its type, is
-/// refused as `schema` at that member, and never read as `null` (§4.2). The member table is §9.1's,
-/// written out here, and must name exactly the members of the chain event each sweep starts from.
+/// §9.1's type and presence layer: each member of each schema, deleted or set to a value of another
+/// JSON type, is refused as `schema` at that member, and never read as `null` (§4.2); each member of
+/// a string type, set to a string outside that type, is refused as `non_canonical` there. The
+/// member table is §9.1's, written out here, and must name exactly the members of the chain event
+/// each sweep starts from.
 #[test]
 #[ignore = "pending E7-9"]
 fn every_member_is_required_and_typed() {
@@ -597,14 +721,19 @@ fn every_member_is_required_and_typed() {
         .iter()
         .map(|(event_type, _, m)| m.len() * chain_seqs(event_type).len())
         .sum();
-    assert_eq!(sweeps.len(), 69 + deletions + 8 + 6);
+    let strings = SCHEMAS
+        .iter()
+        .flat_map(|(_, _, m)| m.iter())
+        .filter(|(_, shape)| malformed(*shape).is_some())
+        .count();
+    assert_eq!(sweeps.len(), 69 + strings + deletions + 13 + 9);
     let drafts = fixture["agent_stream"]["invalid_drafts"]
         .as_array_mut()
         .unwrap();
     for s in &sweeps {
         drafts.push(json!({
             "name": s.name, "clause": "§9.1 types", "base_seq": s.base, "changes": s.changes,
-            "expect": {"outcome": "Invalid", "reason": "schema", "path": s.path},
+            "expect": {"outcome": "Invalid", "reason": s.reason, "path": s.path},
         }));
     }
     let wanted: Vec<String> = sweeps
