@@ -404,7 +404,9 @@ fn only_risk_adding_purposes_are_askable() {
 }
 
 /// DEC-278 item 1: a classifier's `ask` for an exit cannot hold it. The exit is proposed and handed
-/// as an `auto` one is, and nothing is requested; the same `ask` for an opening asks.
+/// as an `auto` one is, and nothing is requested; the same `ask` for an opening asks, and its batch
+/// carries exactly one notice, the opaque `NotifyApproval`, never an `Effect::Notify` whose key could
+/// carry content (the #395 review, minor 2).
 #[test]
 fn an_ask_for_an_exit_is_proposed_and_an_ask_for_an_opening_asks() -> Checked {
     let (view, flatten) = (
@@ -448,6 +450,14 @@ fn an_ask_for_an_exit_is_proposed_and_an_ask_for_an_opening_asks() -> Checked {
         vec!["DecisionMade", "ApprovalRequested", "ApprovalDelivered"]
     );
     assert!(handed(&ran).is_empty());
+    let notices: Vec<&Effect> = ran
+        .iter()
+        .filter(|e| matches!(e, Effect::Notify(_) | Effect::NotifyApproval(_)))
+        .collect();
+    assert!(
+        matches!(notices.as_slice(), [Effect::NotifyApproval(_)]),
+        "an ask notifies once, through the opaque approval notice and no other (rule 6, EI-9): {notices:?}"
+    );
     Ok(())
 }
 

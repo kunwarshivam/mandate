@@ -398,12 +398,22 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   batch, and copies each `OwnerCommandIssued`, never refusing a kill switch or an owner exit. The
   `mandate-journal` prerequisite below is still open, so the shell cannot yet append these events
   through a real journal.
-  *Follow-up (DEC-278 item 12; DEC-156 item 5):* the runtime does not yet bound asking: at most 10
+  *Follow-up (DEC-278 item 13; DEC-156 item 5):* the runtime does not yet bound asking: at most 10
   requests per agent per America/New_York risk day, no re-ask of an instrument the owner skipped
   until the next risk day or applied version, none for one `timeout_s` after a timeout, and each
   suppressed ask recorded as `DecisionMade.ask_suppressed`. `mandate_approval::ask_permit` and
   `AskLedger` exist; fold the ledger and call them before `escalation::ask`, tests first (MC-E25 to
-  MC-E28).
+  MC-E28). The same field must also name a request that cannot bind (DEC-278 item 2: no
+  `DecidedBy` label, a combined score that is not a decimal, or a content object that cannot be
+  represented), which today leaves `ask` on `DecisionMade` with no reason anywhere in the journal
+  (the #395 review, minor 3).
+  *Follow-up (DEC-278 item 12; the #395 review, major 1):* a refused owner resume, Stop, or
+  acknowledgment journals nothing. The M7 spec PR adds an agent-stream `OwnerCommandRefused`
+  (the command's control-stream id as `causation_id`, its kind, and the reason `step_up_missing`,
+  `step_up_stale`, `step_up_reused`, or `step_up_method`); the next M7 implementation PR journals
+  it, with a test that a refused Stop leaves exactly that event.
+  *Follow-up (the #395 review, nit):* `IntentProposed` carries no `mandate_version`, so EI-4's
+  version equality is enforced by check 8 but readable only from `ApprovalRevalidated`; add it.
   *Follow-up (DEC-278 item 11; a tests correction):* bump `FOLD_VERSION` and regenerate
   `tests/golden-journal.json` with an approval's request, delivery, response, and re-validation and
   a folded mark, since the fold now derives approvals, marks, and the control stream's assertions
