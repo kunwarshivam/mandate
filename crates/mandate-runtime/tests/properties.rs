@@ -753,7 +753,7 @@ proptest! {
         );
         for effect in &effects {
             match effect {
-                Effect::Journal(_) | Effect::Timer(_) | Effect::Notify(_) => {}
+                Effect::Journal(_) | Effect::Timer(_) | Effect::Notify(_) | Effect::NotifyApproval(_) => {}
                 Effect::Intent(handoff) => match &handoff.body {
                     IntentBody::Order { .. } | IntentBody::Flatten(_) => {}
                 },
@@ -762,7 +762,11 @@ proptest! {
         prop_assert!(
             effects.iter().all(|e| matches!(
                 e,
-                Effect::Journal(_) | Effect::Timer(_) | Effect::Notify(_) | Effect::Intent(_)
+                Effect::Journal(_)
+                    | Effect::Timer(_)
+                    | Effect::Notify(_)
+                    | Effect::NotifyApproval(_)
+                    | Effect::Intent(_)
             )),
  "the exhaustive matches above are the assertion: `Effect` and `IntentBody` have no variant that names a broker, an endpoint, or a credential, so the runtime cannot reach one (AGENTS.md rule 12). A new variant breaks this test to compile"
         );

@@ -720,8 +720,14 @@ proves each pending test fails on them (DEC-110).
   live; and `crates/mandate-approval/tests/quorum.rs` (check 7 against the policy overlay, with
   its own scaled-integer oracle), all live. In-module tests in `src/stepup.rs` probe step-up
   evidence at the clock's extremes against an `i128` oracle, and `src/drift.rs` a drift too large
-  to compute.
-- **Run:** `cargo nextest run -p mandate-approval`; `cargo xtask ci pending`.
+  to compute. The runtime's approval path (M7 tests PR 3 of 4, DEC-257 items 5 to 12):
+  `crates/mandate-runtime/tests/approvals.rs` (the grant, skip, timeout, lateness, re-tail,
+  principal, step-up, same-step cancellation, re-validation and drift cases, the owner exit whose
+  step-up is refused yet still routed, pause, resume and the owner's kill switch) and
+  `crates/mandate-runtime/tests/approval_properties.rs` (the transition-table and causation-walker
+  oracles over random scripts), pending E8-3 but for one live case, with fixtures in
+  `crates/mandate-runtime/tests/common/escalation.rs`.
+- **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime`; `cargo xtask ci pending`.
 
 ## Reference-case harness
 

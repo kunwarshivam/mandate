@@ -26,7 +26,7 @@ pub trait GateDryRun {
 /// `mandate-builder`'s sizing and classification over `mandate-spec`'s mandate view.
 pub trait OrderPlan {
     fn plan(&self, view: &MandateView, inputs: &SignalInputs) -> Option<Proposal>;
-    fn classify(&self, view: &MandateView, proposal: &Proposal) -> crate::types::Autonomy;
+    fn classify(&self, view: &MandateView, proposal: &Proposal) -> crate::types::Classified;
 }
 
 /// `mandate-risk`'s agent flatten (family F): the orders to cancel by `client_order_id`, the sells of

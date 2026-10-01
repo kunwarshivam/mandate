@@ -6,17 +6,21 @@
 
 #![allow(dead_code, reason = "each test binary uses a different subset")]
 
+pub mod escalation;
+
 use std::collections::BTreeMap;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
+use mandate_approval::Notification;
 use mandate_canon::{Int, Key, Value};
+use mandate_journal::Environment;
 use mandate_num::{Price, Qty};
 use mandate_runtime::{
-    AgentId, Autonomy, ConnectionId, Deployment, DryRunVerdict, Effect, EventDraft, EventId,
-    FlattenLeg, FlattenPlan, FlattenPlanner, FlattenRequest, FoldedEvent, GateDryRun, IdGen,
-    Initiator, IntentHandoff, MandateView, ModelOutput, OrderPlan, Ports, Proposal, Purpose,
-    RiskClock, RuntimeError, RuntimeState, Seq, SignalInputs, TimerId, TimerRequest, WorkspaceId,
-    WriterEpoch, fold, handle,
+    ActorKind, AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment,
+    DryRunVerdict, Effect, EventDraft, EventId, FlattenLeg, FlattenPlan, FlattenPlanner,
+    FlattenRequest, FoldedEvent, GateDryRun, IdGen, Initiator, IntentHandoff, MandateView,
+    ModelOutput, OrderPlan, Ports, Proposal, Purpose, RiskClock, RuntimeError, RuntimeState, Seq,
+    SignalInputs, TimerId, TimerRequest, WorkspaceId, WriterEpoch, fold, handle,
 };
 
 pub const AGENT_STREAM: &str = "agent:ws1:agent-a";
@@ -28,6 +32,11 @@ pub const VERSION: &str = "v1";
 pub const AGENT: &str = "agent-a";
 pub const CONNECTION: &str = "conn-1";
 pub const WORKSPACE: &str = "ws1";
+/// The fixture mandate's one approver, and its author, who is not an approver.
+pub const OWNER: &str = "user-owner";
+pub const AUTHOR: &str = "user-author";
+/// The `DecidedBy` label `FixedPlan` reports for its classification.
+pub const ASK_RULE: &str = "rule:big-order";
 
 /// The deployment every fixture is for: the ids in `AGENT_STREAM`, `ACCOUNT_STREAM`, and the rest.
 pub fn deployment() -> Deployment {
@@ -83,6 +92,7 @@ pub fn event(stream: &str, seq: u64, event_type: &str, payload: Value) -> Folded
         event_id: EventId(format!("{stream}-{seq}")),
         event_type: event_type.to_owned(),
         causation_id: None,
+        actor: ActorKind::System,
         payload,
     }
 }
@@ -110,9 +120,29 @@ pub fn with_clock(pairs: &[(&str, Value)], at: i64) -> Value {
 }
 
 /// The oracle's own derivation of an event id, written separately from the crate's so that the two
-/// agreeing means something (DEC-131 item 6).
+/// agreeing means something (DEC-131 item 6). It is ULID-shaped, as every journal event id is
+/// (journal spec §3), because an approval's reference is built only from one
+/// (`mandate_approval::ApprovalRef`, DEC-165 item 13): `0`, then the epoch in 5 places, the head in
+/// 10, and the ordinal in 10, each in base 20 over Crockford's letters, so no id holds a digit a
+/// sentinel scan could mistake for a quantity or a price.
 pub fn derived_id(epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
-    EventId(format!("e{}-h{}-o{}", epoch.0, head.0, ordinal))
+    EventId(format!(
+        "0{}{}{}",
+        letters(epoch.0, 5),
+        letters(head.0, 10),
+        letters(u64::from(ordinal), 10)
+    ))
+}
+
+fn letters(mut n: u64, width: usize) -> String {
+    const ALPHABET: &[u8; 20] = b"ABCDEFGHJKMNPQRSTVWX";
+    let mut out = vec![b'A'; width];
+    for slot in out.iter_mut().rev() {
+        *slot = ALPHABET[usize::try_from(n % 20).unwrap_or(0)];
+        n /= 20;
+    }
+    assert_eq!(n, 0, "an id part too large for its width");
+    String::from_utf8(out).unwrap_or_default()
 }
 
 pub struct TestIds;
@@ -148,6 +178,8 @@ pub struct FixedPlan {
     pub proposal: Option<Proposal>,
     pub autonomy: Autonomy,
     pub requires_fresh: bool,
+    /// The `DecidedBy` label `classify` reports, which an approval request binds (check 10).
+    pub decided_by: &'static str,
 }
 
 impl FixedPlan {
@@ -155,6 +187,7 @@ impl FixedPlan {
         Self {
             proposal: Some(Proposal {
                 instrument: instrument("AAPL"),
+                asset_class: AssetClass::UsEquity,
                 side: Side::Buy,
                 qty: qty("10"),
                 limit: price("155"),
@@ -163,6 +196,7 @@ impl FixedPlan {
             }),
             autonomy,
             requires_fresh: true,
+            decided_by: ASK_RULE,
         }
     }
 
@@ -170,6 +204,7 @@ impl FixedPlan {
         Self {
             proposal: Some(Proposal {
                 instrument: instrument("AAPL"),
+                asset_class: AssetClass::UsEquity,
                 side: Side::Sell,
                 qty: qty("10"),
                 limit: price("149"),
@@ -178,6 +213,7 @@ impl FixedPlan {
             }),
             autonomy,
             requires_fresh: true,
+            decided_by: ASK_RULE,
         }
     }
 
@@ -186,6 +222,7 @@ impl FixedPlan {
             proposal: None,
             autonomy: Autonomy::Deny,
             requires_fresh: false,
+            decided_by: ASK_RULE,
         }
     }
 }
@@ -209,8 +246,11 @@ impl OrderPlan for FixedPlan {
         Some(proposal)
     }
 
-    fn classify(&self, _view: &MandateView, _proposal: &Proposal) -> Autonomy {
-        self.autonomy
+    fn classify(&self, _view: &MandateView, _proposal: &Proposal) -> Classified {
+        Classified {
+            autonomy: self.autonomy,
+            decided_by: Some(self.decided_by.to_owned()),
+        }
     }
 }
 
@@ -258,6 +298,12 @@ pub fn universe(instruments: &[&str]) -> MandateView {
         version: VERSION.to_owned(),
         working_universe: instruments.iter().map(|n| instrument(n)).collect(),
         restricted_instruments: Default::default(),
+        approval: ApprovalSettings {
+            approvers: [OWNER.to_owned()].into(),
+            author: AUTHOR.to_owned(),
+            timeout_s: 300,
+            environment: Environment::Paper,
+        },
     }
 }
 
@@ -294,6 +340,7 @@ pub struct Ran {
     pub handed: Vec<IntentHandoff>,
     pub timers: Vec<TimerRequest>,
     pub notifications: Vec<&'static str>,
+    pub approval_notifications: Vec<Notification>,
     pub effects: Vec<Effect>,
 }
 
@@ -372,6 +419,7 @@ impl Shell {
                             event_id: draft.event_id.clone(),
                             event_type: draft.event_type.clone(),
                             causation_id: draft.causation_id.clone(),
+                            actor: ActorKind::Agent,
                             payload: draft.payload.clone(),
                         };
                         self.agent_journal.push(stored.clone());
@@ -393,6 +441,9 @@ impl Shell {
                     }
                 },
                 Effect::Intent(handoff) => ran.handed.push(handoff.clone()),
+                Effect::NotifyApproval(notification) => {
+                    ran.approval_notifications.push(notification.clone());
+                }
                 Effect::Timer(request) => {
                     match request {
                         TimerRequest::Arm { id, at } => {
