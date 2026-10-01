@@ -41,7 +41,9 @@ pub(crate) fn bracketed_add(
 }
 
 /// The triggered-stop watchdog's clock (§5.4): a sane mark at or below the instrument's resting
-/// stop starts a breach, unless one is running; a sane mark above it ends it. An insane quote, or
+/// stop starts a breach, unless one is running; any other sane mark ends it, above the stop or
+/// with no stop resting, as in the interval a watchdog's own sequence opens, so a breach never
+/// outlives the protection it was measured against (#385 round 2, blocker 2). An insane quote, or
 /// one with no mark, changes nothing. A breach starts when the executor learns of it, never
 /// earlier than its clock: a stale quote cannot claim the mark has been there for
 /// `stop_watchdog_s` already (DEC-260 (9)). A breach the watchdog has already fired on is spent:
@@ -53,7 +55,11 @@ pub(crate) fn breach(state: &mut ExecutorState, observation: &MarketObservation)
         .filter(|protection| !protection.resting.is_empty())
         .and_then(|protection| protection.prices)
         .map(|prices| prices.stop);
-    let (true, Some(mark), Some(stop)) = (observation.sane, observation.mark, stop) else {
+    let (true, Some(mark)) = (observation.sane, observation.mark) else {
+        return;
+    };
+    let Some(stop) = stop else {
+        state.breaches.remove(&observation.instrument);
         return;
     };
     if mark <= stop {
@@ -3540,6 +3546,46 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// #385 round 2, blocker 2 (rule 3): a breach never outlives the recovery that ends it. Sane
+    /// 139 at 0 fires the watchdog at 30; sane 139 at 30 re-arms a breach while the cancel waits;
+    /// once the cancel is confirmed no stop rests, and sane 155 at 35, 40 and 50 end the breach.
+    /// The bound at 61 re-places the protection for the unfilled exit, and at 62 no second
+    /// watchdog fires: the restored protection rests and nothing sells at 154.23.
+    #[test]
+    fn a_recovery_during_the_interval_ends_the_breach() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        executor.run(observation(Some(139), None, true, 30)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        for at in [35, 40, 50] {
+            executor.run(observation(Some(155), None, true, at)?, &ports)?;
+        }
+        assert!(executor.state.breaches.is_empty(), "the recovery ended it");
+        let bound = executor.run(Input::Tick(RiskClock::from_secs(61)), &ports)?;
+        for id in cancels(&bound) {
+            if id.starts_with("md-w-") {
+                executor.run(cancel_accepted(id), &ports)?;
+            }
+        }
+        assert!(rests(&executor.state, &aapl()?), "the protection is back");
+        let after = executor.run(Input::Tick(RiskClock::from_secs(62)), &ports)?;
+        assert!(watchdog_record(&after).is_none(), "{:?}", drafted(&after));
+        assert!(cancels(&after).is_empty(), "{:?}", drafted(&after));
+        assert!(
+            submissions(&after)
+                .iter()
+                .all(|order| order.purpose == Purpose::Protective),
+            "nothing sells: {:?}",
+            drafted(&after)
+        );
+        assert!(rests(&executor.state, &aapl()?));
+        Ok(())
+    }
+
     /// §5.4: the breach must last. A sane mark back above the stop before `stop_watchdog_s` ends
     /// it, and the next breach starts its own clock; an insane quote neither starts nor ends one.
     #[test]
@@ -6919,14 +6965,14 @@ mod sequence_tests {
                         None
                     } else {
                         let id = desk.asked.remove(0);
-                        let silent = |desk: &Desk| {
-                            desk.asked.iter().any(|id| {
-                                desk.venue
-                                    .get(id)
-                                    .is_some_and(|held| held.purpose == Purpose::Protective)
-                            })
+                        let protective = |desk: &Desk, id: &String| {
+                            desk.venue
+                                .get(id)
+                                .is_some_and(|held| held.purpose == Purpose::Protective)
                         };
-                        if !silent(&desk) {
+                        let cleared = protective(&desk, &id)
+                            && !desk.asked.iter().any(|other| protective(&desk, other));
+                        if cleared {
                             desk.quiet_since = desk.now;
                         }
                         match desk.venue.get_mut(&id) {
