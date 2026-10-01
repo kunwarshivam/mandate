@@ -1262,3 +1262,55 @@ fn the_event_id_matches_its_definition() {
         oracle_id("ApprovalResponseSubmitted", choice, true, 2)
     );
 }
+
+/// The #414 review, minor 1; DEC-290 item 5: a kill switch whose every answer was lost reports
+/// that running it again commits another, which is what a re-run does, and never that a re-run
+/// finds it. A pause in the same fault is told a re-run finds it, so the two reports differ by the
+/// command alone.
+#[test]
+fn an_exhausted_kill_switch_says_a_re_run_commits_another() {
+    let report = |kill_switch: bool| {
+        let mut fx = Fixture::new();
+        fx.journal.lost_for_good = true;
+        let outcome = if kill_switch {
+            kill(
+                &mut fx.journal,
+                &mut FixedIds::default(),
+                &owner(),
+                &Scope::Workspace,
+                None,
+                at(ASKED_AT),
+            )
+        } else {
+            command(
+                &mut fx.journal,
+                &mut FixedIds::default(),
+                &owner(),
+                AGENT,
+                &Command::Pause,
+                None,
+                at(ASKED_AT),
+            )
+        };
+        let stored = control(&fx)
+            .first()
+            .and_then(|e| member_text(e, "event_id").map(str::to_owned))
+            .unwrap_or_else(|| panic!("the first attempt committed"));
+        match outcome {
+            Err(ControlError::Journal(why)) => {
+                assert!(why.contains(&stored), "{why}");
+                why
+            }
+            other => panic!("the command gives up, not: {other:?}"),
+        }
+    };
+    let killed = report(true);
+    assert!(
+        killed.contains("running it again commits another"),
+        "{killed}"
+    );
+    assert!(!killed.contains("finds it"), "{killed}");
+    let paused = report(false);
+    assert!(paused.contains("finds it"), "{paused}");
+    assert!(!paused.contains("commits another"), "{paused}");
+}
