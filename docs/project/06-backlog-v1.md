@@ -376,6 +376,21 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `reference/mandate/ref.py`'s `approval_quorum`. The implementation PR implemented `quorum`,
   calls it for every overlay, leaves the author out of the grants that count while independence
   is required, and deleted the eight `#[ignore]` lines.
+  *Tests done (M7 tests PR 3 of 4, DEC-257 items 5 to 12); the runtime's implementation follows:*
+  `crates/mandate-runtime/tests/approvals.rs` and `approval_properties.rs` hold 20 tests pending
+  E8-3 for the grant path, owner commands on the control stream, and the #281 owner-exit
+  obligation. The implementation PR needs, first, the `mandate-journal` catalogue entries above
+  (a real journal refuses `ApprovalRevalidated` until then), and it fills `PendingApproval` with the
+  bound request, folds `MarkUpdated`, the control stream's assertions and its copies, and hands a
+  one-instrument owner exit as an agent-scoped flatten (DEC-257 item 7).
+  *Follow-up (DEC-257 item 12):* `PolicyChanged`'s payload is only "level, diff" in journal spec §9,
+  so the runtime neither folds the overlay check 7 reads nor has a two-approver runtime case
+  (PB-22). Close the payload, then fold it and add the cases in a tests correction.
+  *Follow-up (DEC-257 item 12):* no agent-stream event records a refused resume or Stop; specify
+  one (or say a refusal leaves only the control-stream command) so the runtime can journal it.
+  *Follow-up (DEC-257 item 12; stream I):* `Input::Command` still carries the owner's pause,
+  resume, Stop, exit and kill switch with no step-up judged; retire those for the control stream's
+  `OwnerCommandIssued` once the shell tails it, leaving only the risk-limit and operator switches.
   *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
   control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
   would make MI-24 true as written.
@@ -1111,12 +1126,37 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the coordinator moved from 3a to slice 2 (#267, comment 5862923162): under rule 13 no exit waits
   for the startup reconciliation, so the plant gets weight only with the first opening through
   `fault::protected` (slice 2's add). Slice 2's PR shows each of the three red.
-- **E7-4 slice 4 (stream K), from #264's review (comment 5862761692):** (a) name the do-nothing
-  finding in slice 4's PR: a permissive `ladder_price` turns `fault::crash_at_confirmation_before_exit_submit`
-  green, and only `protection::sequence_tests::an_unprotected_exit_never_reaches_the_ladder_stub`
-  catches it; (b) pin the fault fixture's exact recovered cash rather than §11's ±15.40 band;
-  (c) make the fault fixture's `equity` and `buying_power` consistent with its cash before any
-  slice reads buying power from it.
+- **E7-4 slice 6's tests PR (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373)
+  round 1 (major 1):** §5.5 exempts kill-switch and mandate-limit flatten exits from the agent's
+  mode, but slice 4a's ladder stops stepping while the agent is `paused` or `stopped`
+  ([DEC-260](04-decision-log.md#decisions) (3)), and the gate's `mode_failure` holds every
+  risk-reducing order at `paused` or stricter. Add a pending test: while the agent is paused, a
+  flatten's ladder steps, its step cancel does not end the sequence, and `mode_failure` lets that
+  flatten through. Slice 6 narrows `climbs` and the gate together to make it pass.
+- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1
+  (minor 1):** wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
+  `exit_limit` and `next_rung`, which pass none today, so §5.6's "never below an owner exit's
+  floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
+  `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
+  resubmitted at the same price every `exit_step_s`.
+- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 2
+  (minor A):** apply §8.2's in-session test to the exit ladder's last-trade arm once slice 5 folds
+  the session. Slice 4a takes a trade only from a sane quote within five minutes
+  ([DEC-260](04-decision-log.md#decisions) (5)); a print from outside the session the exit is in
+  must not price a rung either.
+- **E7-4 (stream K), found by slice 4a's rule-13 oracle (`protection::sequence_tests::rule_13_holds_over_random_scripts`):**
+  (1) a passive exit waits on its OCO's cancel confirmation with no bound and no alert: a broker
+  that never confirms holds the exit for good, with the protection still resting (rule 13's broker
+  hold, so no risk is added, but rule 3 wants the wait bounded). Bound it as rule 5's wait is
+  (`unknown_absent_window_s`, then query the order and alert), with a test. (2) `release_held`
+  journals only an allow, so when a held exit's cause changes (paused, then nothing to price; or
+  an allow that would now over-sell beside other exits) the journal's last verdict names a cause
+  that has gone; journal a changed hold reason once. (3) A later rung is sized from the fold's
+  filled quantity when the step's cancel is confirmed; a fill the broker reports after that
+  confirmation (`LateFillApplied`) is not netted, so the rung could sell more than the position
+  by that fill (rule 12). The same lag sizes §5.4's re-placement. Size from the broker's own
+  report of the cancelled order, or hold the rung for it, before slice 2 lets protected
+  positions exist outside the tests (DEC-160 (4)).
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
@@ -1484,13 +1524,25 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   asserts only the quantity bound for them, not `sent == proposed`, which
   `a_slice_binds_only_below_the_proposal_and_names_its_cap` covers separately. Assert it in the
   property too.
-- **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
-  every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
-  held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;
-  DEC-129 item 6), and interpret RC-09's and RC-09B's `regime`, `prior_day_trades`,
-  `last_equity`, `multiplier` and `day_trade_count` in `mandate-refcases`. Slice 1 (#221) reads the
-  ledger as an input the caller folds, so until slice 2 lands an agent-scoped ledger would
-  undercount the account's day trades (#221 review, round 1, minor).
+- **E6-6 slice 2:** the account-wide fold is `mandate_risk::fold_day_trades` (DEC-259). Still
+  owed: interpret RC-09's and RC-09B's `regime`, `prior_day_trades`, `last_equity`, `multiplier`
+  and `day_trade_count` in `mandate-refcases`, driving the ledger through `fold_day_trades` from the
+  case's fills. That changes RC-09B's pending reason, which
+  `trading_domain_gate_harness.rs`'s `every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for`
+  pins, so a tests correction comes first (DEC-77); both cases also carry a second `propose_order`
+  step, which DEC-199 item 3 refuses until E7-4 and E7-5 unless a narrower reading lets a later
+  proposal be decided once every earlier allowed one has filled in full; and RC-09's third step is
+  a crypto proposal, which waits for E6-10. The executor (E7-3) calls the fold account-wide and
+  journals `DayTradeFold::today`. **A fold error refuses openings only** (#370 review, major 1):
+  E7-3 must still route exits and protective orders when `fold_day_trades` fails (`AGENTS.md`
+  rule 13), and E7-3's tests PR carries the pending test
+  `a_failed_day_trade_fold_refuses_openings_and_still_routes_exits` for it.
+- **Lift §2.2's trade date onto `ExchangeCalendar`** (#370 review, minor 1). `mandate-risk`'s
+  `daytrades::trading_day` re-states `TradingCalendar::equity_trade_date`'s 20:00 ET cutoff over
+  the committed exchange calendar, and `the_trade_date_agrees_with_the_accounting_calendar` pins
+  the two together across 2026's holidays, both daylight-saving changes and the cutoff. Give
+  `mandate-time`'s `ExchangeCalendar` an `equity_trade_date` of its own and call it from both, so
+  the rule lives once.
 
 From the independent review of E6-2's autonomy slice ([#216](https://github.com/kunwarshivam/mandate/pull/216)
 round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
@@ -1677,6 +1729,16 @@ From E6-4's slice R4 (stream H2; DEC-167 item 8):
   expected journal and marks it `pending`, the one flip DEC-277 allows. The `mandate-spec` side above
   must bring it back: the status PR that follows it marks MC-R17 `passing` again, with MC-R25,
   MC-R26, and MC-V68.
+- **DEC-277's exception for the `journal` and `trading_domain` suites (the #381 review, round 2,
+  minor 1).** `fixture_entry_changed` in `xtask/src/main.rs` finds a case by an object whose `id` is
+  its `status.toml` key, which matches the `mandate` suite but no `journal` key and not
+  `trading_domain`'s compound `RC-NN::sub_case` or version rows, so a flip there always reads
+  "unchanged" and is refused. Extend the lookup to those key shapes, with fixture-repository tests in
+  each suite.
+- **Narrow DEC-277's exception to the case's expectation (the #381 review, round 2, minor 2).** The
+  guard allows a `passing` → `pending` flip when any part of the case's fixture entry changes; allow
+  it only when the entry's expectation members change (`expect`, or a risk-state step's `expect`), a
+  tightening, so a title or note edit cannot take a case back to pending.
 - **R4's status PR: the last nine MC-R cases pass.** MC-R09 to MC-R12, MC-R14, MC-R16, MC-R17,
   MC-R21, and MC-R23 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` on R4 (DEC-167 item 8 (i)); marking them in `status.toml` follows under DEC-77

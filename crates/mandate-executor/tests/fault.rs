@@ -711,7 +711,6 @@ fn crash_at_cancel_before_confirmation() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn crash_at_confirmation_before_exit_submit() {
     crash_one_protective_sequence(CrashPoint::ConfirmationBeforeExitSubmit);
 }

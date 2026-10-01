@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 mandate-accounting.workspace = true
+mandate-approval.workspace = true
 mandate-canon.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
