@@ -812,9 +812,8 @@ pub struct DayTradeFold {
 
 /// §9.2's `legacy_pdt` ledger, folded account-wide: the window is today plus the four prior trading
 /// days of the committed calendar, a sell takes shares held overnight first, each same-day
-/// open-then-close counts once, a purchase after a same-day sale of overnight shares counts too
-/// until the founder rules on DEC-269, fractional day trades count, and crypto never does (DEC-129
-/// item 6, DEC-259).
+/// open-then-close counts once, a repurchase after a same-day sale of overnight shares is not a day
+/// trade (DEC-269), fractional day trades count, and crypto never does (DEC-129 item 6, DEC-259).
 ///
 /// # Errors
 /// [`GateError::DayTradeLedgerOutOfOrder`] for fills out of execution order, after `now`, or

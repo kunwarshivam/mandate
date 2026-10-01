@@ -30,7 +30,6 @@ struct Book {
     overnight: Qty,
     same_day: Qty,
     bought_since_last_day_trade: bool,
-    sold_overnight_since_last_repurchase: bool,
     sold_today: bool,
 }
 
@@ -39,7 +38,6 @@ impl Book {
         overnight: Qty::ZERO,
         same_day: Qty::ZERO,
         bought_since_last_day_trade: false,
-        sold_overnight_since_last_repurchase: false,
         sold_today: false,
     };
 }
@@ -118,28 +116,22 @@ pub(crate) fn fold(input: &DayTradeInput<'_>) -> Result<DayTradeFold, GateError>
 /// One equity fill against its instrument's book; `true` when it completes a day trade. A sell
 /// takes shares held overnight first, and a sell that closes shares bought today, after a purchase
 /// not yet matched by a counted day trade, counts: so buy, buy, sell is one day trade and buy,
-/// sell, buy, sell is two. §9.2's "selling and purchasing" is read literally until the founder
-/// rules on DEC-269: a purchase after a sale of shares held overnight, not yet matched by a
-/// counted repurchase, counts too, and still opens a run a later sell can close, so the count is
-/// never lower than either reading's. A sell of more than the account holds would be a short
-/// sale, which v1 never makes (`AGENTS.md` rule 12), so the fills are inconsistent and nothing is
+/// sell, buy, sell is two. A sale of shares held overnight followed by a purchase is not a day
+/// trade (DEC-269, the founder's ruling): FINRA Rule 4210(f)(8)(B)'s "selling and purchasing" is
+/// a short sale and its cover, which v1 never takes. A sell of more than the account holds would
+/// be a short sale too (`AGENTS.md` rule 12), so the fills are inconsistent and nothing is
 /// guessed.
 fn apply(book: &mut Book, fill: &AccountFill) -> Result<bool, GateError> {
     match fill.side {
         Side::Buy => {
             book.same_day = book.same_day.checked_add(fill.qty)?;
             book.bought_since_last_day_trade = true;
-            let counts = book.sold_overnight_since_last_repurchase;
-            book.sold_overnight_since_last_repurchase = false;
-            Ok(counts)
+            Ok(false)
         }
         Side::Sell => {
             book.sold_today = true;
             let from_overnight = fill.qty.min(book.overnight);
             book.overnight = book.overnight.checked_sub(from_overnight)?;
-            if !from_overnight.is_zero() {
-                book.sold_overnight_since_last_repurchase = true;
-            }
             let from_today = fill.qty.checked_sub(from_overnight)?;
             if from_today.is_zero() {
                 return Ok(false);
@@ -391,12 +383,12 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-269's interim reading, §9.2 taken literally until the founder rules: a sale of shares
-    /// held overnight followed by a same-day purchase of the same security is one day trade, and
-    /// that purchase still opens a run a later sell closes. DEC-269 may flip the first figure to 0
-    /// and the second to 1.
+    /// DEC-269, the founder's ruling: a sale of shares held overnight followed by a same-day
+    /// purchase is not a day trade, so sell, buy counts 0; a later sell of the repurchased shares
+    /// closes a same-day open and counts 1. The gate's `required` still adds one for an opening
+    /// after a same-day sale (`gate::tests::the_day_trade_budget_counts_the_account_and_binds_only_openings`).
     #[test]
-    fn a_purchase_after_an_overnight_sale_counts_until_dec_269_rules() -> Result<(), GateError> {
+    fn a_repurchase_after_an_overnight_sale_is_not_a_day_trade() -> Result<(), GateError> {
         let mut s = Scene::at("2026-09-21T15:00:00-04:00")?;
         s.held_overnight.insert(id("AAPL")?, qty("10")?);
         s.fills_today = vec![
@@ -405,22 +397,15 @@ mod tests {
             fill("2026-09-21T10:02:00-04:00", "AAPL", Side::Buy, "6")?,
         ];
         let repurchase = s.fold()?;
-        assert_eq!(repurchase.ledger.window_count, 1, "sell, buy, buy is one");
-        assert_eq!(repurchase.today, earlier(&[("2026-09-21", "AAPL")])?);
+        assert_eq!(repurchase.ledger.window_count, 0, "sell, buy, buy is none");
+        assert_eq!(repurchase.today, Vec::new());
         assert_eq!(repurchase.ledger.open_same_day_positions, set(&["AAPL"])?);
+        assert_eq!(repurchase.ledger.sold_earlier_today, set(&["AAPL"])?);
         s.fills_today
             .push(fill("2026-09-21T10:03:00-04:00", "AAPL", Side::Sell, "10")?);
-        assert_eq!(s.fold()?.ledger.window_count, 2, "sell, buy, sell is two");
-        s.fills_today = vec![
-            fill(TEN_AM, "AAPL", Side::Buy, "1")?,
-            fill("2026-09-21T10:01:00-04:00", "AAPL", Side::Sell, "1")?,
-            fill("2026-09-21T10:02:00-04:00", "AAPL", Side::Buy, "1")?,
-        ];
-        assert_eq!(
-            s.fold()?.ledger.window_count,
-            1,
-            "a sale of overnight shares is the trigger: here the sale took one overnight share, so the repurchase counts, and buy, sell took no share bought today"
-        );
+        let closed = s.fold()?;
+        assert_eq!(closed.ledger.window_count, 1, "sell, buy, sell is one");
+        assert_eq!(closed.today, earlier(&[("2026-09-21", "AAPL")])?);
         Ok(())
     }
 
@@ -637,9 +622,8 @@ mod tests {
         /// Against an oracle in whole half-share units that never touches the crate's ledger: a
         /// sell's same-day part is what the running total sold exceeds the overnight holding by,
         /// less what earlier sells already took, and it counts when a buy came after the last
-        /// counted one. Under DEC-269's interim literal reading a buy also counts when the running
-        /// total sold first reached into the overnight holding after the last such buy. Sells the
-        /// account cannot cover are dropped from the generated day.
+        /// counted one; a buy never counts (DEC-269). Sells the account cannot cover are dropped
+        /// from the generated day.
         #[test]
         fn the_count_matches_a_running_total_oracle((overnight, ops) in day_of_fills()) {
             let half = |units: u64| {
@@ -649,27 +633,18 @@ mod tests {
             let mut s = Scene::at("2026-09-21T15:00:00-04:00")?;
             s.held_overnight.insert(id("AAPL")?, half(overnight)?);
             let (mut bought, mut sold, mut want, mut buy_since) = (0_u64, 0_u64, 0_u32, false);
-            let mut overnight_sale_since = false;
             let mut sold_any = false;
             for (minute, (is_buy, units)) in (1_u32..).zip(ops) {
                 let side = if is_buy {
                     bought = bought.saturating_add(units);
                     buy_since = true;
-                    if overnight_sale_since {
-                        want = want.saturating_add(1);
-                        overnight_sale_since = false;
-                    }
                     Side::Buy
                 } else {
                     if sold.saturating_add(units) > overnight.saturating_add(bought) {
                         continue;
                     }
                     let beyond_before = sold.saturating_sub(overnight);
-                    let overnight_before = sold.min(overnight);
                     sold = sold.saturating_add(units);
-                    if sold.min(overnight) > overnight_before {
-                        overnight_sale_since = true;
-                    }
                     sold_any = true;
                     if sold.saturating_sub(overnight) > beyond_before && buy_since {
                         want = want.saturating_add(1);
