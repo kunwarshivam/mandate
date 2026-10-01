@@ -1873,6 +1873,10 @@ risk (rule 3):
 - **Duplicate `event_id`s in `verify_agent_stream`'s index are unpinned (#384 review round 2, minor
   3).** The index keeps the last row with an ID. `append` refuses a repeated `event_id`, so a stored
   range never holds one, but no test says what a tampered range with a duplicate reports.
+- **An `invalid_drafts` vector for rule 12's `bid_size` (#384 review round 3, minor 1).** The journal
+  vectors refuse a confirmed exit without `bid` or `floor`, but none without `bid_size`; only
+  `mandate-journal`'s in-module `rule_12_needs_each_member_of_a_confirmed_bid` holds it. The next
+  journal-spec PR adds the draft (ES-22 keeps generated vectors out of a code PR).
 - **The model registry stores each pinned model's content object as an artifact.**
   `ModelOutputRecorded.content_hash` is a `sha256:` reference, so it is in `artifact_refs` (§3), and
   §11 check 6 fails `artifact_missing` unless the object is in the artifact store.
