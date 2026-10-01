@@ -1427,6 +1427,7 @@ dependencies = [
  "mandate-canon",
  "mandate-journal",
  "mandate-time",
+ "proptest",
  "thiserror",
 ]
 
