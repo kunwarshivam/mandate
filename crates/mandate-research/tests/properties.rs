@@ -1,6 +1,7 @@
-//! Property tests over generated theses, each with an oracle that computes the answer its own way.
+//! Property tests over generated theses and deployments, each with an oracle that computes the
+//! answer its own way.
 //!
-//! Four oracles, none of which shares code with the crate (AGENTS.md, "Independent oracles"):
+//! Five oracles, none of which shares code with the crate (AGENTS.md, "Independent oracles"):
 //!
 //! 1. **The universe from the events.** [`oracle::universe_from_events`] rebuilds the working
 //!    universe using only the `UniverseChanged` entries a step emitted, and the size after each one.
@@ -15,9 +16,17 @@
 //!    otherwise-passing thesis exceeded the cap, and derives retirement and the removal set without
 //!    reading the fold's state.
 //! 4. **The modular reduction** lives in `stagger.rs`, beside the case it pins.
+//! 5. **The cross-workspace accumulator.** [`oracle::flow_totals`] folds a generated deployment in
+//!    its own loop — each instrument's total research exposure in whole cents, and the indices of
+//!    the workspaces that contributed it, pinned agents skipped — so a monitor that drops an
+//!    agent's row, double-counts one, or names a workspace that never contributed fails. E17-6's
+//!    property drives it over several workspaces of several agents each and drops one workspace,
+//!    pinning that only the rows that workspace contributed to move.
 //!
 //! Every property first asserts that the generated case reached a verdict at all, so none can pass
-//! on an empty check list or an empty journal.
+//! on an empty check list or an empty journal; the flow generator builds the same non-vacuity in,
+//! every workspace hosting a dynamic agent that holds exposure, so its workspace-set assertions
+//! are never over an empty report.
 
 mod common;
 
@@ -26,17 +35,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use common::{
     DISCLOSURE_B, DISCLOSURE_C, INSTRUMENT_1, INSTRUMENT_2, INSTRUMENT_3, INSTRUMENT_4,
     INSTRUMENT_5, INSTRUMENT_9, Scenario, asset, at, dec, digest, lineage_id, source, thesis,
-    thesis_id, usd,
+    thesis_id, usd, workspace,
 };
+use mandate_num::Usd;
+use mandate_research::flow::{AgentFlow, FlowInput, aggregate_flow};
 use mandate_research::{
     AdmissionChange, AdmissionDecision, AssetClass, AssetId, AutonomyDecision, Corroboration,
     Direction, InstrumentRestriction, Invalidation, LineageId, LineageState, PolicyOverlay,
     RefusalReason, ResearchEvent, StaggerWindow, UniverseChange, UniverseChangeReason,
-    UniverseEntry, WorkingUniverse, admit, checks, expire_theses, fold_theses, stagger_offset,
-    stagger_release_at,
+    UniverseEntry, WorkingUniverse, WorkspaceId, admit, checks, expire_theses, fold_theses,
+    stagger_offset, stagger_release_at,
 };
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
+use proptest::test_runner::{TestCaseError, TestRunner};
 
 /// The instant every generated expiry scenario is measured at, so an entry's own `expires_at`
 /// straddles it.
@@ -363,8 +375,68 @@ fn fold_of(revisions: &[u32], cap: u32) -> common::FoldScenario {
     common::FoldScenario::new(cap, theses)
 }
 
+/// One generated agent for E17-6's flow oracle: whether its mandate pins its universe, and its
+/// research exposure per instrument slot in whole cents. Every entry is at least one cent, so a
+/// named instrument is always held and the oracle's integer totals never face a zero row.
+#[derive(Debug, Clone)]
+struct FlowAgent {
+    pinned: bool,
+    exposure_cents: BTreeMap<usize, u64>,
+}
+
+/// One generated workspace: two or three agents, the first always dynamic and holding at least one
+/// instrument, so every workspace contributes to the aggregate and dropping any one of them moves
+/// at least one row.
+#[derive(Debug, Clone)]
+struct FlowWorkspace {
+    agents: Vec<FlowAgent>,
+}
+
+/// A generated deployment: two to four workspaces of agents, and which one's agents the property
+/// drops to pin the cross-workspace claim.
+#[derive(Debug, Clone)]
+struct FlowPlan {
+    workspaces: Vec<FlowWorkspace>,
+    dropped: usize,
+}
+
+fn flow_agent() -> impl Strategy<Value = FlowAgent> {
+    (
+        any::<bool>(),
+        prop::collection::btree_map(0_usize..INSTRUMENTS.len(), 1_u64..2_000_000, 0..4),
+    )
+        .prop_map(|(pinned, exposure_cents)| FlowAgent {
+            pinned,
+            exposure_cents,
+        })
+}
+
+fn flow_workspace() -> impl Strategy<Value = FlowWorkspace> {
+    (
+        prop::collection::vec(flow_agent(), 2..4),
+        0_usize..INSTRUMENTS.len(),
+        1_u64..2_000_000,
+    )
+        .prop_map(|(mut agents, slot, cents)| {
+            agents[0].pinned = false;
+            agents[0].exposure_cents.insert(slot, cents);
+            FlowWorkspace { agents }
+        })
+}
+
+fn flow_plan() -> impl Strategy<Value = FlowPlan> {
+    prop::collection::vec(flow_workspace(), 2..5).prop_flat_map(|workspaces| {
+        (0_usize..workspaces.len(), Just(workspaces)).prop_map(|(dropped, workspaces)| FlowPlan {
+            workspaces,
+            dropped,
+        })
+    })
+}
+
 mod oracle {
-    use super::{AssetId, Dials, INSTRUMENT_2, INSTRUMENT_5, ResearchEvent, UniverseChange};
+    use super::{
+        AssetId, Dials, FlowWorkspace, INSTRUMENT_2, INSTRUMENT_5, ResearchEvent, UniverseChange,
+    };
     use std::collections::{BTreeMap, BTreeSet};
 
     /// The seventeen §8.5 predicates as an unordered set of ordinals, read from the spec table and
@@ -490,6 +562,30 @@ mod oracle {
             }
         }
         Ok(set)
+    }
+
+    /// E17-6's cross-workspace accumulator: each instrument's total research exposure in whole
+    /// cents and the indices of the workspaces that contributed it, folded here in a plain
+    /// integer loop over the generated plans — pinned agents skipped, every named entry at least
+    /// one cent — so a monitor that drops an agent's row, double-counts one, or names a workspace
+    /// that never contributed fails. Nothing in it touches the crate's decimal arithmetic.
+    pub fn flow_totals<'a>(
+        workspaces: impl IntoIterator<Item = (usize, &'a FlowWorkspace)>,
+    ) -> BTreeMap<usize, (u64, BTreeSet<usize>)> {
+        let mut totals: BTreeMap<usize, (u64, BTreeSet<usize>)> = BTreeMap::new();
+        for (index, workspace) in workspaces {
+            for agent in &workspace.agents {
+                if agent.pinned {
+                    continue;
+                }
+                for (slot, cents) in &agent.exposure_cents {
+                    let total = totals.entry(*slot).or_insert((0, BTreeSet::new()));
+                    total.0 += cents;
+                    total.1.insert(index);
+                }
+            }
+        }
+        totals
     }
 
     /// The lineage counter: the highest admitted revision, the admission count, retirement, **and
@@ -1447,6 +1543,167 @@ proptest! {
                 "the entry type follows the revision number, not the verdict"
             );
         }
+    }
+}
+
+/// Whole cents as the crate's own money type: canonical decimal text — no trailing fraction
+/// zero, which `Usd::parse` refuses — parsed once, no arithmetic shared with the oracle's integer
+/// loop.
+fn usd_of_cents(cents: u64) -> Usd {
+    let dollars = cents / 100;
+    let remainder = cents % 100;
+    let text = if remainder == 0 {
+        format!("{dollars}")
+    } else if remainder.is_multiple_of(10) {
+        format!("{}.{}", dollars, remainder / 10)
+    } else {
+        format!("{dollars}.{remainder:02}")
+    };
+    usd(&text)
+}
+
+/// One materialized agent: everything `AgentFlow` borrows, owned here, with the workspace named
+/// `ws-<index>` so the dropped workspace keeps its name in the reduced run too.
+struct BuiltAgent {
+    workspace: WorkspaceId,
+    pinned: bool,
+    exposure: BTreeMap<AssetId, Usd>,
+}
+
+/// Materializes a generated deployment's agents, pinned ones included: they travel to the monitor,
+/// which must skip them itself rather than be filtered by the caller.
+fn built_agents(workspaces: Vec<(usize, &FlowWorkspace)>) -> Vec<BuiltAgent> {
+    workspaces
+        .into_iter()
+        .flat_map(|(index, ws)| {
+            ws.agents.iter().map(move |agent| BuiltAgent {
+                workspace: workspace(&format!("ws-{index}")),
+                pinned: agent.pinned,
+                exposure: agent
+                    .exposure_cents
+                    .iter()
+                    .map(|(slot, cents)| (asset(INSTRUMENTS[*slot]), usd_of_cents(*cents)))
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+/// E17-6's monitor over generated deployments (DEC-100): several workspaces of several agents
+/// each, every instrument's total exposure and contributing-workspace set recomputed by
+/// [`oracle::flow_totals`] — whole cents in its own loop, pinned agents skipped — and both
+/// asserted against `aggregate_flow`, which must skip the pinned agents itself. Dropping one
+/// workspace's agents then moves only the rows that workspace contributed to: every other row is
+/// byte for byte what it was, which is the cross-workspace claim itself (DEC-09) — no workspace's
+/// flow enters another's row. The volume map names every instrument, so no row is undecidable and
+/// the assertions stay on the sum and the workspace set. A plain function over a `TestRunner`,
+/// because a pending test must not be one a macro generates.
+#[test]
+#[ignore = "pending E17-6"]
+fn the_deployment_total_and_workspace_set_match_an_independent_accumulator() {
+    let slot_of: BTreeMap<AssetId, usize> = INSTRUMENTS
+        .iter()
+        .enumerate()
+        .map(|(slot, id)| (asset(id), slot))
+        .collect();
+    let mut runner = TestRunner::new(ProptestConfig::with_cases(256));
+    let outcome = runner.run(&flow_plan(), |plan| {
+        let adv: BTreeMap<AssetId, Usd> = INSTRUMENTS
+            .iter()
+            .map(|id| (asset(id), usd("10000000")))
+            .collect();
+        let report_of = |workspaces: Vec<(usize, &FlowWorkspace)>| {
+            let built = built_agents(workspaces);
+            let agents: Vec<AgentFlow> = built
+                .iter()
+                .map(|agent| AgentFlow {
+                    workspace: &agent.workspace,
+                    pinned: agent.pinned,
+                    exposure: &agent.exposure,
+                })
+                .collect();
+            aggregate_flow(&FlowInput {
+                agents: &agents,
+                average_daily_dollar_volume: &adv,
+            })
+            .map_err(|refused| TestCaseError::fail(format!("the deployment's report: {refused:?}")))
+        };
+        let expected_full = oracle::flow_totals(plan.workspaces.iter().enumerate());
+        let kept: Vec<(usize, &FlowWorkspace)> = plan
+            .workspaces
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != plan.dropped)
+            .collect();
+        let expected_reduced = oracle::flow_totals(kept.iter().copied());
+        let full = report_of(plan.workspaces.iter().enumerate().collect())?;
+        let reduced = report_of(kept)?;
+        for (report, expected) in [(&full, &expected_full), (&reduced, &expected_reduced)] {
+            let reported: BTreeSet<AssetId> =
+                report.rows.iter().map(|row| row.instrument.clone()).collect();
+            let expected_instruments: BTreeSet<AssetId> = expected
+                .keys()
+                .map(|slot| asset(INSTRUMENTS[*slot]))
+                .collect();
+            prop_assert_eq!(
+                reported, expected_instruments,
+                "the report holds exactly the instruments the dynamic agents hold"
+            );
+            for row in &report.rows {
+                let (cents, contributors) = &expected[&slot_of[&row.instrument]];
+                prop_assert_eq!(
+                    row.exposure_usd,
+                    usd_of_cents(*cents),
+                    "{}'s total is the accumulator's own sum of every dynamic agent's row",
+                    row.instrument.as_str()
+                );
+                prop_assert_eq!(
+                    row.contributing_workspaces.iter().collect::<BTreeSet<_>>().len(),
+                    row.contributing_workspaces.len(),
+                    "{} names each contributing workspace once",
+                    row.instrument.as_str()
+                );
+                let expected_workspaces: BTreeSet<WorkspaceId> = contributors
+                    .iter()
+                    .map(|index| workspace(&format!("ws-{index}")))
+                    .collect();
+                prop_assert_eq!(
+                    row.contributing_workspaces.iter().cloned().collect::<BTreeSet<_>>(),
+                    expected_workspaces,
+                    "{}'s contributing workspaces are the accumulator's own set",
+                    row.instrument.as_str()
+                );
+            }
+        }
+        let dropped_contributions: BTreeSet<usize> = plan.workspaces[plan.dropped]
+            .agents
+            .iter()
+            .filter(|agent| !agent.pinned)
+            .flat_map(|agent| agent.exposure_cents.keys().copied())
+            .collect();
+        prop_assert!(
+            !dropped_contributions.is_empty(),
+            "the generator gives every workspace a dynamic agent that holds exposure, so the drop is never vacuous"
+        );
+        for (slot, id) in INSTRUMENTS.iter().enumerate() {
+            if dropped_contributions.contains(&slot) {
+                continue;
+            }
+            let instrument = asset(id);
+            let before = full.rows.iter().find(|row| row.instrument == instrument);
+            let after = reduced.rows.iter().find(|row| row.instrument == instrument);
+            prop_assert_eq!(
+                before,
+                after,
+                "dropping ws-{}'s agents moved {}, whose exposure they never held",
+                plan.dropped,
+                id
+            );
+        }
+        Ok(())
+    });
+    if let Err(failure) = outcome {
+        panic!("{failure}");
     }
 }
 
