@@ -720,8 +720,29 @@ fn commanded(
             let judged = judged(refusal, evidence.as_ref(), confirmed_bid(event)?, user)?;
             owner_exit(state, event, &judged, ports, batch)
         }
-        OwnerCommandKind::Resume | OwnerCommandKind::Stop | OwnerCommandKind::Acknowledge => Ok(()),
+        OwnerCommandKind::Resume | OwnerCommandKind::Stop => {
+            refused(kind, refusal, processed_at(state, submitted), cause, batch)
+        }
+        OwnerCommandKind::Acknowledge => Ok(()),
     }
+}
+
+/// A resume or Stop whose step-up does not count, recorded as its one copy, `OwnerCommandRefused`,
+/// in place of the `AgentModeChanged` it would have written (journal spec §9 and rule 16, mandate
+/// spec §6.1; DEC-280 item 7, the #395 review's major 1): the command, the reason, and the
+/// effective time it was judged at, with the `OwnerCommandIssued` as `causation_id`.
+///
+/// # Errors
+/// [`RuntimeError::Unimplemented`] in the tests PR (DEC-77).
+fn refused(
+    kind: OwnerCommandKind,
+    refusal: Option<StepUpRefusal>,
+    judged_at: RiskClock,
+    cause: Option<EventId>,
+    batch: &mut Batch<'_>,
+) -> Result<(), RuntimeError> {
+    let _ = (kind, refusal, judged_at, cause, batch);
+    Err(RuntimeError::Unimplemented { story: "E8-3" })
 }
 
 /// The scope a control-stream kill switch names. Whether it reaches this deployment is
