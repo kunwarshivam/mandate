@@ -625,10 +625,12 @@ fn a_new_cycle_is_a_new_intent_with_a_new_id() -> Result<(), String> {
     Ok(())
 }
 
-/// TI-9, PB-6: ASK sends nothing. The request is journaled and the tracer, which has no
-/// escalation, stops; the `skip` timeout is the runtime's.
+/// TI-9, PB-6: ASK sends nothing. The decision is journaled and the tracer, which has no
+/// escalation, stops. The stage classifier names no `DecidedBy` label until E7-7 wires the
+/// builder's, and a request that cannot show the rule that triggered it is not asked (mandate spec
+/// §6.4, DEC-278 item 2), so the runtime records the `ask` on `DecisionMade` and requests nothing.
 #[test]
-fn ask_journals_the_request_and_sends_nothing() -> Result<(), String> {
+fn ask_journals_the_decision_and_sends_nothing() -> Result<(), String> {
     let world = World::default();
     let mut stages = world.stages();
     stages.classifier = Box::new(FixedClassifier {
@@ -639,7 +641,8 @@ fn ask_journals_the_request_and_sends_nothing() -> Result<(), String> {
     assert_eq!(error.code(), "autonomy_not_auto");
     assert!(error.to_string().contains("classified ask"), "{error}");
     let ledger = world.ledger.borrow();
-    assert_eq!(ledger.count("ApprovalRequested"), 1);
+    assert_eq!(ledger.count("DecisionMade"), 1);
+    assert_eq!(ledger.count("ApprovalRequested"), 0);
     assert_eq!(ledger.count("IntentProposed"), 0);
     assert_eq!(world.tally.borrow().submissions, 0);
     Ok(())

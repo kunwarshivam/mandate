@@ -1,5 +1,6 @@
 //! The crate's one error enum, with a stable reason `code()` per variant (ADR-0001 ES-09).
 
+use mandate_approval::ApprovalError;
 use mandate_canon::ParseErrorKind;
 use mandate_journal::InvalidReason;
 use mandate_num::NumError;
@@ -51,6 +52,10 @@ pub enum RuntimeError {
     /// An approval response for a request the fold does not know.
     #[error("no approval request is pending for {approval}")]
     UnknownApproval { approval: String },
+    /// A value an approval or an owner command holds that `mandate-approval` cannot represent, which
+    /// the runtime reads as "do not act" (`AGENTS.md` rule 3).
+    #[error(transparent)]
+    Approval(#[from] ApprovalError),
     #[error(transparent)]
     Json(#[from] JsonError),
     #[error(transparent)]
@@ -86,6 +91,7 @@ impl RuntimeError {
             Self::NotStarted => "not_started",
             Self::NonCanonicalPayload { .. } => "non_canonical_payload",
             Self::UnknownApproval { .. } => "unknown_approval",
+            Self::Approval(_) => "approval",
             Self::Json(_) => "payload_rejected",
             Self::Num(_) => "arithmetic",
             Self::Time(_) => "time",

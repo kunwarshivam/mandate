@@ -169,7 +169,6 @@ fn skipped_on_revalidation(ran: &Ran, asked: &Asked, source: &EventId, reason: &
 /// from a listed approver acts with exactly the bound order; the same grant from the author, who is
 /// not listed, is refused first and acts on nothing.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_timely_grant_acts_with_the_bound_order() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -248,7 +247,6 @@ fn a_timely_grant_acts_with_the_bound_order() {
 /// PX-7: an admitted skip from a listed approver ends the approval, with no step-up, and nothing
 /// is sent; its deadline is disarmed. A grant after it is not pending.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_skip_ends_the_approval_and_sends_nothing() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -284,7 +282,6 @@ fn a_skip_ends_the_approval_and_sends_nothing() {
 /// deadline but that the runtime reads after the timeout is not pending; read before it, the same
 /// grant acts.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_timeout_never_acts_and_a_grant_read_after_it_is_not_pending() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -310,7 +307,6 @@ fn the_timeout_never_acts_and_a_grant_read_after_it_is_not_pending() {
 /// response submitted in time and read once the clock has reached the deadline is late, and so is
 /// one submitted exactly at it. A refusal is not terminal: the deadline still times it out.
 #[test]
-#[ignore = "pending E8-3"]
 fn lateness_is_judged_at_the_later_of_submission_and_the_folded_clock() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -351,7 +347,6 @@ fn lateness_is_judged_at_the_later_of_submission_and_the_folded_clock() {
 /// and proposes no second. A second, distinct grant for the same approval is copied and refused as
 /// `not_pending`, since the first one ended it.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_re_tailed_response_is_copied_once_and_acts_once() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -411,7 +406,6 @@ fn a_re_tailed_response_is_copied_once_and_acts_once() {
 /// EI-14, PB-15: a response that does not repeat the request's content hash is refused and leaves
 /// the approval pending, so the right one still acts.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_wrong_content_hash_is_refused_and_the_right_one_acts() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -436,7 +430,6 @@ fn a_wrong_content_hash_is_refused_and_the_right_one_acts() {
 /// broker, or a platform operator naming the owner as responder is refused, and so is the author,
 /// who is not listed.
 #[test]
-#[ignore = "pending E8-3"]
 fn only_a_listed_user_is_admitted() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -476,7 +469,6 @@ fn only_a_listed_user_is_admitted() {
 /// evidence older than 300 s, and an assertion an earlier control-stream event already carried
 /// are each refused; evidence exactly 300 s old acts.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_grant_needs_fresh_unused_step_up() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -524,7 +516,6 @@ fn a_grant_needs_fresh_unused_step_up() {
 /// restriction is judged against the pending set after that step's own cancellations, so it is not
 /// pending and never acts. Without the restriction the same grant acts.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_grant_in_the_step_that_cancels_its_approval_is_not_pending() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -554,7 +545,6 @@ fn a_grant_in_the_step_that_cancels_its_approval_is_not_pending() {
 /// PB-5, EI-7: any `MandateVersionApplied` cancels the approval, so a grant bound to the old
 /// version is not pending and never re-binds to the new one.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_approval_under_a_changed_version_is_not_pending() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -581,7 +571,6 @@ fn an_approval_under_a_changed_version_is_not_pending() {
 /// PB-13, EI-8: a kill switch is applied whatever the approval state and cancels the approval, so
 /// a grant read after it is not pending and the switch's flatten is the only handoff.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_grant_read_after_a_kill_switch_is_not_pending() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -615,7 +604,6 @@ fn a_grant_read_after_a_kill_switch_is_not_pending() {
 /// trigger, or that the dry run denies, is admitted and then skipped with that reason; nothing is
 /// sent and the approval is terminal.
 #[test]
-#[ignore = "pending E8-3"]
 fn re_validation_skips_a_reclassified_or_gate_denied_order() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -653,7 +641,6 @@ fn re_validation_skips_a_reclassified_or_gate_denied_order() {
 /// way. A mark exactly at the band acts; one unit beyond it, up or down, skips as `drift`; and a
 /// request with no mark skips as `drift`.
 #[test]
-#[ignore = "pending E8-3"]
 fn drift_beyond_the_band_either_way_or_no_mark_skips() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -744,7 +731,6 @@ struct FlattenRequestSeen {
 /// given, the plan carries no confirmation, so equities wait for the regular session, and the exit
 /// itself still reaches the executor. With valid step-up the same exit carries the confirmation.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_refused_owner_exit_step_up_still_routes_the_exit() {
     let (ids, gate, plan, view) = (TestIds, AllowGate, FixedPlan::silent(), universe(&["AAPL"]));
     let flatten = RecordingFlatten::new();
@@ -799,7 +785,6 @@ fn a_refused_owner_exit_step_up_still_routes_the_exit() {
 /// and is still routed, and so is one the runtime reads long after the owner committed it with
 /// evidence that was fresh then (judged at commit, DEC-156 item 8).
 #[test]
-#[ignore = "pending E8-3"]
 fn an_owner_exit_is_judged_at_commit_and_never_dropped() {
     let (ids, gate, plan, view) = (TestIds, AllowGate, FixedPlan::silent(), universe(&["AAPL"]));
     let flatten = RecordingFlatten::new();
@@ -844,7 +829,6 @@ fn an_owner_exit_is_judged_at_commit_and_never_dropped() {
 /// PX-4, EI-8: an owner's pause through the control stream needs no step-up, applies at once, and
 /// cancels the pending approval; its copy names the command.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_owner_pause_needs_no_step_up_and_cancels_the_approval() {
     let (ids, gate, plan, view) = (
         TestIds,
@@ -874,7 +858,6 @@ fn an_owner_pause_needs_no_step_up_and_cancels_the_approval() {
 /// Mandate spec §6.1: a resume needs step-up valid when the runtime processes it. Stale evidence is
 /// refused and leaves the pause in force; fresh evidence resumes, and the copy names its command.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_resume_needs_step_up_fresh_when_processed() {
     let (ids, gate, plan, view) = (TestIds, AllowGate, FixedPlan::silent(), universe(&["AAPL"]));
     let ports = ports(&ids, &gate, &plan, &view);
@@ -909,7 +892,6 @@ fn a_resume_needs_step_up_fresh_when_processed() {
 /// evidence fresh when the owner committed it, a runtime that reads it an hour later applies it with
 /// the confirmed bid.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_owner_kill_switch_is_never_refused() {
     let (ids, gate, plan, view) = (TestIds, AllowGate, FixedPlan::silent(), universe(&["AAPL"]));
     let flatten = RecordingFlatten::new();
