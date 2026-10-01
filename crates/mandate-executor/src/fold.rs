@@ -846,7 +846,10 @@ fn protection_changed(
                 });
             }
         }
-        "exit_unpriced" | "ladder_floor" | "watchdog" => {}
+        "watchdog" => {
+            state.watchdogged.insert(instrument.clone(), at);
+        }
+        "exit_unpriced" | "ladder_floor" => {}
         "interval_limit" | "unprotected_end" => {
             let ends = action == "unprotected_end";
             if ends {

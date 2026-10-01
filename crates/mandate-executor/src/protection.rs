@@ -44,7 +44,8 @@ pub(crate) fn bracketed_add(
 /// stop starts a breach, unless one is running; a sane mark above it ends it. An insane quote, or
 /// one with no mark, changes nothing. A breach starts when the executor learns of it, never
 /// earlier than its clock: a stale quote cannot claim the mark has been there for
-/// `stop_watchdog_s` already (DEC-260 (9)).
+/// `stop_watchdog_s` already (DEC-260 (9)). A breach the watchdog has already fired on is spent:
+/// the next sane breaching mark starts a new one.
 pub(crate) fn breach(state: &mut ExecutorState, observation: &MarketObservation) {
     let stop = state
         .protection
@@ -59,13 +60,24 @@ pub(crate) fn breach(state: &mut ExecutorState, observation: &MarketObservation)
         let learned = state.now.map_or(observation.observed_at, |now| {
             now.max(observation.observed_at)
         });
-        state
+        let fired = state.watchdogged.get(&observation.instrument).copied();
+        let start = state
             .breaches
             .entry(observation.instrument.clone())
             .or_insert(learned);
+        if let Some(fired) = fired.filter(|fired| spent(*start, *fired)) {
+            *start = learned.max(RiskClock::from_secs(fired.secs().saturating_add(1)));
+        }
     } else {
         state.breaches.remove(&observation.instrument);
     }
+}
+
+/// Whether a breach that began at `since` is the one the instrument's last watchdog, at `fired`,
+/// already fired on (or an older one): a spent breach fires no second watchdog, and the next sane
+/// breaching mark starts a new one, never earlier than the second after the fire (DEC-260 (11)).
+fn spent(since: RiskClock, fired: RiskClock) -> bool {
+    since <= fired
 }
 
 /// §5.4's triggered-stop watchdog (DEC-160 (11)). Where a breach has lasted `stop_watchdog_s` and
@@ -74,9 +86,14 @@ pub(crate) fn breach(state: &mut ExecutorState, observation: &MarketObservation)
 /// quantity the protection covers, its agent the position's single holder or none (`*`). That
 /// intent takes the marketable sequence like any exit (cancel, confirm, re-gate, the ladder), so
 /// it is never refused (rule 13). Its limit, the fallback for when nothing prices it, is the
-/// latest mark or sane bid, whichever is lower, so it is never placed as a passive take-profit.
-/// One watchdog runs per instrument at a time: none fires while a sequence runs there or a
-/// watchdog intent waits. It exits what the protection still covers, never more than the long
+/// lowest of the latest quote's mark and bid, if that quote is sane, and the last sane bid's mark
+/// and bid: an insane quote never sets it, and it is never above a fresh bid, so never placed as
+/// a passive take-profit (#385 round 1, blocker 1). With no sane observation to take it from, the
+/// watchdog does not fire: the breach persists, the stop keeps resting and nothing is cancelled,
+/// so no exit goes and none waits, and §5.6 step 4's alert, which is for an exit at its fallback
+/// or held, has nothing to report; the next sane quote prices it. One watchdog runs per
+/// instrument at a time: none fires while a sequence runs there or a watchdog intent waits, and a
+/// breach it has fired on fires no second time. It exits what the protection still covers, never more than the long
 /// position (§5.4's "the held quantity").
 pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
@@ -87,6 +104,11 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .iter()
         .filter(|(instrument, since)| {
             now.saturating_sub(since.secs()) >= wait
+                && batch
+                    .view
+                    .watchdogged
+                    .get(*instrument)
+                    .is_none_or(|fired| !spent(**since, *fired))
                 && untouched(&batch.view, instrument)
                 && !batch.view.exiting.contains_key(*instrument)
                 && !watching(&batch.view, instrument)
@@ -95,10 +117,17 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .collect();
     for instrument in due {
         let held = covered(&batch.view, &instrument)?.min(long(&batch.view, &instrument));
-        let quote = batch.view.quotes.get(&instrument);
+        let fresh = batch
+            .view
+            .quotes
+            .get(&instrument)
+            .filter(|quote| quote.sane);
+        let kept = batch.view.sane_bids.get(&instrument);
         let limit = [
-            quote.and_then(|quote| quote.mark),
-            quote.filter(|quote| quote.sane).and_then(|quote| quote.bid),
+            fresh.and_then(|quote| quote.mark),
+            fresh.and_then(|quote| quote.bid),
+            kept.and_then(|quote| quote.mark),
+            kept.and_then(|quote| quote.bid),
         ]
         .into_iter()
         .flatten()
@@ -3335,9 +3364,10 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// One watchdog per instrument at a time, and only while its intent waits: once the first
-    /// watchdog's exit has ended (four filled, the rest cancelled at the bound) and protection is
-    /// back for the six held, a breach that still holds fires a second watchdog for those six.
+    /// One watchdog per breach (#385 round 1): once the first watchdog's exit has ended (four
+    /// filled, the rest cancelled at the bound) and protection is back for the six held, the
+    /// breach it fired on is spent; a new sane breaching mark, at 62, starts a new one, which
+    /// fires a second watchdog for those six `stop_watchdog_s` later.
     #[test]
     fn a_breach_that_outlasts_the_first_exit_fires_again() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -3373,7 +3403,16 @@ mod sequence_tests {
             "{:?}",
             drafted(&ended)
         );
-        let again = executor.run(Input::Tick(RiskClock::from_secs(61)), &ports)?;
+        let spent = executor.run(Input::Tick(RiskClock::from_secs(61)), &ports)?;
+        assert!(
+            watchdog_record(&spent).is_none(),
+            "the breach it fired on is spent: {:?}",
+            drafted(&spent)
+        );
+        executor.run(observation(Some(139), None, true, 62)?, &ports)?;
+        let early = executor.run(Input::Tick(RiskClock::from_secs(91)), &ports)?;
+        assert!(watchdog_record(&early).is_none(), "{:?}", drafted(&early));
+        let again = executor.run(Input::Tick(RiskClock::from_secs(92)), &ports)?;
         let second = watchdog_record(&again).ok_or_else(|| missing("the second watchdog"))?;
         assert_eq!(
             watchdog_intents(&again),
@@ -3383,6 +3422,120 @@ mod sequence_tests {
                 "risk_exit".to_owned(),
                 "6".to_owned()
             )]
+        );
+        Ok(())
+    }
+
+    /// #385 round 1, blocker 1 (rule 3): an insane quote never prices the watchdog exit. Sane 139
+    /// at 0, then an insane quote at 200 at 400: the watchdog fires at 430 and its exit goes at
+    /// 139, its fallback from the last sane bid (alerted, the bid being past five minutes), never
+    /// at 200; and the protection does not cycle: once the bound has ended the exit and
+    /// re-protected, the spent breach fires no second watchdog.
+    #[test]
+    fn an_insane_quote_never_prices_the_watchdog_exit() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        executor.run(observation(Some(200), Some(200), false, 400)?, &ports)?;
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(430)), &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        let sent = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&sent)
+                .iter()
+                .map(|order| order.limit_price)
+                .collect::<Vec<_>>(),
+            vec![Some(Price::parse("139")?)]
+        );
+        assert_eq!(alerts(&sent), vec!["exit_unpriced"]);
+        let mut records = 0usize;
+        for at in (431..=600).step_by(7) {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            records = records.saturating_add(usize::from(watchdog_record(&tick).is_some()));
+            for id in cancels(&tick) {
+                if id.starts_with("md-w-") {
+                    executor.run(cancel_accepted(id), &ports)?;
+                }
+            }
+        }
+        assert_eq!(records, 0, "no second watchdog on the spent breach");
+        assert!(
+            rests(&executor.state, &aapl()?),
+            "the protection is back and stays"
+        );
+        Ok(())
+    }
+
+    /// #385 round 1, minor 1: with no sane observation to price the exit from (the breach came
+    /// from a sane mark with no bid, and the latest quote is insane), the watchdog does not fire:
+    /// the breach persists, the stop keeps resting and nothing is cancelled. The next sane quote
+    /// prices it, and the watchdog fires on the breach it has been running since 0.
+    #[test]
+    fn a_watchdog_with_nothing_sane_to_price_from_waits() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(
+            Input::Market(MarketObservation {
+                instrument: aapl()?,
+                bid: None,
+                bid_size: None,
+                ask: None,
+                last_trade: None,
+                mark: Some(Price::parse("139")?),
+                sane: true,
+                observed_at: RiskClock::from_secs(0),
+            }),
+            &ports,
+        )?;
+        executor.run(observation(Some(200), None, false, 10)?, &ports)?;
+        for at in [30, 60, 90] {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            assert!(
+                watchdog_record(&tick).is_none() && cancels(&tick).is_empty(),
+                "at {at}: {:?}",
+                drafted(&tick)
+            );
+        }
+        assert!(executor.state.breaches.contains_key(&aapl()?));
+        assert!(rests(&executor.state, &aapl()?));
+        let priced = executor.run(observation(Some(139), None, true, 91)?, &ports)?;
+        assert!(watchdog_record(&priced).is_some(), "{:?}", drafted(&priced));
+        assert_eq!(cancels(&priced), vec![OCO]);
+        Ok(())
+    }
+
+    /// DEC-260 (11), the boundary: with `stop_watchdog_s` at 0 the watchdog fires in the second the
+    /// breach begins, and that breach is spent at once: a tick and a breaching quote in the same
+    /// second fire nothing, and the new breach starts the second after the fire.
+    #[test]
+    fn a_breach_is_spent_in_the_second_it_fires() -> Result<(), ExecutorError> {
+        let fees = fees()?;
+        let config = ExecutorConfig {
+            stop_watchdog_s: 0,
+            max_unprotected_s: 600,
+            ..executor_config()
+        };
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor
+            .state
+            .modes
+            .insert(AgentId("agent-a".to_owned()), Mode::Paused);
+        let fired = executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        for input in [
+            Input::Tick(RiskClock::from_secs(0)),
+            observation(Some(139), None, true, 0)?,
+        ] {
+            let again = executor.run(input, &ports)?;
+            assert!(watchdog_record(&again).is_none(), "{:?}", drafted(&again));
+        }
+        assert_eq!(
+            executor.state.breaches.get(&aapl()?),
+            Some(&RiskClock::from_secs(1)),
+            "the new breach starts the second after the fire"
         );
         Ok(())
     }
@@ -3402,6 +3555,15 @@ mod sequence_tests {
         assert!(watchdog_record(&early).is_none(), "{:?}", drafted(&early));
         let fired = executor.run(Input::Tick(RiskClock::from_secs(55)), &ports)?;
         assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        let sent = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&sent)
+                .iter()
+                .map(|order| order.limit_price)
+                .collect::<Vec<_>>(),
+            vec![Some(Price::parse("138.31")?)],
+            "priced from the last sane bid, 139, never from the insane 150"
+        );
         Ok(())
     }
 
@@ -3451,8 +3613,9 @@ mod sequence_tests {
     }
 
     /// Rule 13: a watchdog exit the gate holds (its agent paused) leaves the stop resting and is
-    /// journaled once, never a second watchdog for the same breach; the tick after the pause lifts
-    /// releases it into the sequence.
+    /// journaled once: no second watchdog fires while it waits, not even on new breaching quotes
+    /// past `stop_watchdog_s`, which would sell the same shares twice once released; the tick after
+    /// the pause lifts releases it into the sequence.
     #[test]
     fn a_held_watchdog_exit_fires_once_and_goes_when_released() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -3466,10 +3629,11 @@ mod sequence_tests {
         assert_eq!(verdicts(&fired), vec!["hold"]);
         assert!(cancels(&fired).is_empty(), "the stop keeps resting");
         for at in [31, 45, 60, 90] {
+            let quoted = executor.run(observation(Some(139), None, true, at)?, &ports)?;
             let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
             assert!(
-                watchdog_record(&tick).is_none(),
-                "at {at}: {:?}",
+                watchdog_record(&quoted).is_none() && watchdog_record(&tick).is_none(),
+                "at {at}: a new breach while the watchdog's exit waits fires nothing: {:?}",
                 drafted(&tick)
             );
         }
@@ -6409,6 +6573,7 @@ mod sequence_tests {
         exits: BTreeMap<String, Followed>,
         fills: u32,
         paused: bool,
+        quiet_since: i64,
     }
 
     impl Desk {
@@ -6527,7 +6692,8 @@ mod sequence_tests {
         /// zero beside the others still selling waits for room, never denied while it waits; and
         /// every exit the broker is not holding is done by `max_intent_age_s`, which abandons it.
         /// A broker silent on a protective cancel holds the exit with the protection still
-        /// resting; nothing bounds that hold yet (backlog).
+        /// resting; nothing bounds that hold yet (backlog), and the bound runs from when the
+        /// broker last confirmed.
         fn bounded(&self, config: &ExecutorConfig) -> Result<(), String> {
             let limit = config
                 .max_unprotected_s
@@ -6549,9 +6715,10 @@ mod sequence_tests {
                 let waits = held || broker || self.oversells(intent, exit.qty);
                 let aged = self.now.saturating_sub(exit.arrived)
                     > config.max_intent_age_s.saturating_add(20);
+                let since = exit.since.max(self.quiet_since);
                 if !exit.done
                     && !broker
-                    && (aged || !waits && self.now.saturating_sub(exit.since) > limit)
+                    && (aged || !waits && self.now.saturating_sub(since) > limit)
                 {
                     return Err(format!(
                         "{intent} ({} {}) waited from {} to {}",
@@ -6669,6 +6836,7 @@ mod sequence_tests {
             exits: BTreeMap::new(),
             fills: 0,
             paused: false,
+            quiet_since: 0,
         };
         let agent = AgentId("agent-a".to_owned());
         for (step, next) in script.iter().enumerate() {
@@ -6751,6 +6919,16 @@ mod sequence_tests {
                         None
                     } else {
                         let id = desk.asked.remove(0);
+                        let silent = |desk: &Desk| {
+                            desk.asked.iter().any(|id| {
+                                desk.venue
+                                    .get(id)
+                                    .is_some_and(|held| held.purpose == Purpose::Protective)
+                            })
+                        };
+                        if !silent(&desk) {
+                            desk.quiet_since = desk.now;
+                        }
                         match desk.venue.get_mut(&id) {
                             Some(held) if held.live => {
                                 held.live = false;

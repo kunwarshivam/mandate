@@ -67,6 +67,10 @@ pub struct ExecutorState {
     /// stop since a sane mark above it, the triggered-stop watchdog's clock (§5.4). Process-local,
     /// like `quotes`, so a restart starts the clock again from the next breaching mark.
     pub(crate) breaches: BTreeMap<InstrumentId, RiskClock>,
+    /// When the triggered-stop watchdog last fired in each instrument, from its journaled record:
+    /// a breach fires only if it began after, so one breach is watchdogged once (§5.4, DEC-260
+    /// (11)).
+    pub(crate) watchdogged: BTreeMap<InstrumentId, RiskClock>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
     pub(crate) modes: BTreeMap<AgentId, Mode>,
@@ -193,6 +197,7 @@ impl ExecutorState {
             sane_bids: BTreeMap::new(),
             trades: BTreeMap::new(),
             breaches: BTreeMap::new(),
+            watchdogged: BTreeMap::new(),
             positions: BTreeMap::new(),
             fills: BTreeSet::new(),
             modes: BTreeMap::new(),
