@@ -1774,19 +1774,25 @@ const STUB_MARKERS: [&str; 5] = [
 /// DEC-110's rule still holds for them: each must run and must fail. Each row goes when its story
 /// lands, and the gate names every row it applies (DEC-137).
 ///
-/// The 7 `mandate-executor` rows are E7-4's (DEC-140's addendum, the coordinator's ruling (d)
-/// on #174): the E7-2/E7-3 slices submit, hold and fill but never place protection, so these
-/// tests see no bracket, OCO or stop-limit where E7-4's protective sequence belongs, instead of a
-/// stub's report.
-/// Each still runs and fails, and E7-4's implementation PR deletes each row with its `#[ignore]`
-/// line. The stub check runs first, so a row whose test stops at a stub is reported for deletion
-/// rather than applied (#194 review, round 1, finding 4).
+/// The 7 protective-sequence rows (6 `hand`, 1 `fault`) are E7-4's (DEC-140's addendum, the
+/// coordinator's ruling (d) on #174): the E7-2/E7-3 slices submit, hold and fill but never place
+/// protection, so these tests see no bracket, OCO or stop-limit where E7-4's protective sequence
+/// belongs, instead of a stub's report. Each still runs and fails, and E7-4's implementation PR
+/// deletes each row with its `#[ignore]` line. The stub check runs first, so a row whose test stops
+/// at a stub is reported for deletion rather than applied (#194 review, round 1, finding 4).
 ///
-/// The last 3 are E7-4's properties too. Their minimal failure has been their own E7-4 assertion
-/// since #196 (the protected lead has no bracket); they passed only on a stub's report from a case
-/// shrinking moved past, which [`failure_cause`] no longer reads (DEC-164; #196 review, round 1,
-/// finding 5; #199 review, round 1, finding 4).
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
+/// The 3 `properties` rows are E7-4's properties too. Their minimal failure has been their own E7-4
+/// assertion since #196 (the protected lead has no bracket); they passed only on a stub's report
+/// from a case shrinking moved past, which [`failure_cause`] no longer reads (DEC-164; #196 review,
+/// round 1, finding 5; #199 review, round 1, finding 4).
+///
+/// The 3 parked-exit rows (2 `hand`, 1 `protection::sequence_tests`) are E7-4 slice 6's alert
+/// (the coordinator's ruling on #400 round 2, DEC-260 (19), which amends DEC-160 (2)). Slice 5
+/// already parks a ladder at the close and journals the hold; slice 6 adds the alert and the
+/// `held_long` mark on that same path, and a stub there fails 4 live tests, so these fail on the
+/// missing alert and mark instead. Slice 6's implementation PR deletes the 3 rows with their
+/// `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1826,6 +1832,18 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "no_interval_exceeds_the_limit_without_an_alert",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_parked_night_alerts_the_owner_exactly_once",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_restart_in_a_parked_night_alerts_nothing_more",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_sequence_parked_overnight_alerts_the_owner_exactly_once",
     ),
 ];
 
