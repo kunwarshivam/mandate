@@ -1678,16 +1678,20 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
 - **E6-6 slice 2:** the account-wide fold is `mandate_risk::fold_day_trades` (DEC-259). Still
   owed: interpret RC-09's and RC-09B's `regime`, `prior_day_trades`, `last_equity`, `multiplier`
   and `day_trade_count` in `mandate-refcases`, driving the ledger through `fold_day_trades` from the
-  case's fills. That changes RC-09B's pending reason, which
-  `trading_domain_gate_harness.rs`'s `every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for`
-  pins, so a tests correction comes first (DEC-77); both cases also carry a second `propose_order`
-  step, which DEC-199 item 3 refuses until E7-4 and E7-5 unless a narrower reading lets a later
-  proposal be decided once every earlier allowed one has filled in full; and RC-09's third step is
-  a crypto proposal, which waits for E6-10. The executor (E7-3) calls the fold account-wide and
-  journals `DayTradeFold::today`. **A fold error refuses openings only** (#370 review, major 1):
-  E7-3 must still route exits and protective orders when `fold_day_trades` fails (`AGENTS.md`
-  rule 13), and E7-3's tests PR carries the pending test
+  case's fills. The tests correction that unpins RC-09B's pending reason is #408 (DEC-77), and the
+  narrower reading of DEC-199 item 3 is DEC-259 item 7: a later proposal is decided once every
+  earlier allowed one was filled in full on its side. The harness PR owes three tests for that
+  reading: identical buys with no fill between them are still refused, a partial fill is still
+  refused, and a plant that takes the conduct figures from the proposal instead of the `fill` steps
+  is caught. RC-09's third step is a crypto proposal, which waits for E6-10's harness PR. The
+  executor (E7-3) calls the fold account-wide and journals `DayTradeFold::today`. **A fold error
+  refuses openings only** (#370 review, major 1): E7-3 must still route exits and protective orders
+  when `fold_day_trades` fails (`AGENTS.md` rule 13), and E7-3's tests PR carries the pending test
   `a_failed_day_trade_fold_refuses_openings_and_still_routes_exits` for it.
+- **Check the trading-domain pin of pending reasons for completeness** (#408 review, not a
+  finding). `every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for` is a fixed list,
+  so nothing makes a newly pending gate case join it. A rung-2 check that derives the list from the
+  pending gate cases, less those a ruling excepts (RC-09, RC-09B), would close the gap.
 - **Lift §2.2's trade date onto `ExchangeCalendar`** (#370 review, minor 1). `mandate-risk`'s
   `daytrades::trading_day` re-states `TradingCalendar::equity_trade_date`'s 20:00 ET cutoff over
   the committed exchange calendar, and `the_trade_date_agrees_with_the_accounting_calendar` pins
