@@ -18,6 +18,8 @@ pub(crate) enum Ty {
     /// A journal decimal, normalized on the way in (spec §4.6).
     Decimal,
     Int,
+    /// `true` or `false` (spec §4.5).
+    Bool,
     Timestamp,
     /// A timestamp on a whole second: the risk clock (mandate spec §5.2).
     RiskClock,
@@ -51,6 +53,10 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
             .map(|d| Value::Str(d.as_str().to_owned()))
             .map_err(|_| non_canonical()),
         Ty::Int => value.as_int().map(|_| value.clone()).ok_or_else(schema),
+        Ty::Bool => match value {
+            Value::Bool(_) => Ok(value.clone()),
+            _ => Err(schema()),
+        },
         Ty::Timestamp => checked(UtcNanos::parse(text()?).is_ok()),
         Ty::RiskClock => checked(UtcNanos::parse(text()?).is_ok_and(|t| t.nanos() == 0)),
         Ty::Date => checked(Date::parse(text()?).is_ok()),

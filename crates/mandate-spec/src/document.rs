@@ -515,6 +515,11 @@ pub struct Autonomy {
     /// platform default is `ask`.
     pub admission: AutonomyDecision,
     pub approval: Approval,
+    /// The review date (§6.6, DEC-188): the last risk day on which any `auto` stands. From the
+    /// next risk day, §6.2 step 5b turns every `auto` an opening or an increase would get into
+    /// `ask` (MI-32). `None` is no review date. Until E6-14's implementation, the parse refuses a
+    /// document that sets one as unimplemented, so it fails closed rather than loading without it.
+    pub review_by: Option<Date>,
 }
 
 /// One autonomy rule. This is the crate's `Rule`, which is why a V-code is a

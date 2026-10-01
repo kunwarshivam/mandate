@@ -115,8 +115,9 @@ impl Draft {
             return Err(Invalid::new(InvalidReason::PiiRefs, "pii_refs"));
         }
 
-        if !closed
-            && event_type == "StreamOpened"
+        if closed {
+            agent::subject_and_copy(event_type, &stream_id, &payload, causation_id)?;
+        } else if event_type == "StreamOpened"
             && subject(&stream_id, &payload).as_deref() != Some(stream_id.as_str())
         {
             return Err(Invalid::new(InvalidReason::StreamMismatch, "stream_id"));

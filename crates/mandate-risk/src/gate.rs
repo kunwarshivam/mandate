@@ -3,12 +3,9 @@
 //! Each check is one function returning `Ok(None)` when it passes and `Ok(Some(stop))` when it
 //! decides, so the loop in [`evaluate`] is the only place the order lives.
 //!
-//! **A partial gate fails closed for adding risk** (DEC-129 item 29). While a check, or part of
-//! one, is still owed by a later PR or story, an opening or increasing order the implemented checks
-//! would allow is refused with [`GateError::Unimplemented`], naming the story that completes the
-//! first missing check; a denial or hold from an implemented check still reports first. A reducing
-//! purpose passes a check that does not exist yet (`AGENTS.md` rule 13: the broker is the
-//! backstop), exactly as it will pass most of them once they do.
+//! Every check is whole for both asset classes since E6-10 read §3.2 item 7's "USD pairs only", so
+//! DEC-129 item 29's fail-closed refusal of an opening a missing check might have denied has
+//! nothing left to refuse: the gate decides every proposal itself.
 
 use mandate_num::Qty;
 
@@ -33,34 +30,9 @@ const ORDER: [Check; 8] = [
 /// A check's decision when it does not pass.
 pub(crate) type Stop = (Verdict, ReasonCode);
 
-/// The story that completes a check, while any part of it is owed: check 2 still owes §3.2 item
-/// 7's "USD pairs only" for crypto (E6-10). Every other check is whole for a US equity.
-///
-/// Check 2 takes the input because "USD pairs only" is judged from
-/// [`crate::InstrumentSnapshot::quote_currency`] (DEC-254), which the floor does not read yet:
-/// calling check 2 whole for crypto before it does would let a non-USD pair be opened, so a crypto
-/// opening stays owed and is refused by the fail-closed rule until E6-10's implementation (DEC-129
-/// item 34). A crypto *exit* is unaffected: `first_owed` accrues only for an opening.
-fn owed(check: Check, input: &GateInput<'_>) -> Option<&'static str> {
-    match check {
-        Check::UniverseAndLimits if input.instrument.asset_class != AssetClass::UsEquity => {
-            Some("E6-10")
-        }
-        Check::AccountAndMode
-        | Check::UniverseAndLimits
-        | Check::SessionAndHalt
-        | Check::OrderConstraints
-        | Check::MarkAndCollar
-        | Check::ConductControls
-        | Check::BuyingPowerAndExposure
-        | Check::DayTradeBudget => None,
-    }
-}
-
 /// §9.1: the first failing check decides, and every check after it is listed as not reached. An
-/// owed check is listed as not reached too, for every purpose: the gate did not look, and the
-/// journal must not say it passed. Only an opening is refused for it (DEC-129 item 29). An allowed
-/// order then carries the [`conduct::pacing`] checks 3 to 6 put on it, or `None` when nothing did.
+/// allowed order then carries the [`conduct::pacing`] checks 3 to 6 put on it, or `None` when
+/// nothing did.
 pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     let held = input
         .agent
@@ -75,7 +47,6 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     let mut computed = Computed::default();
     let mut checks = Vec::with_capacity(ORDER.len());
     let mut stop: Option<Stop> = None;
-    let mut first_owed: Option<&'static str> = None;
     for check in ORDER {
         if stop.is_some() {
             checks.push(CheckOutcome::NotReached(check));
@@ -86,21 +57,12 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
                 checks.push(CheckOutcome::Failed(check, reason));
                 stop = Some((verdict, reason));
             }
-            None => match owed(check, input) {
-                Some(story) => {
-                    checks.push(CheckOutcome::NotReached(check));
-                    if opening {
-                        first_owed = first_owed.or(Some(story));
-                    }
-                }
-                None => checks.push(CheckOutcome::Passed(check)),
-            },
+            None => checks.push(CheckOutcome::Passed(check)),
         }
     }
-    let (verdict, reason) = match (stop, first_owed) {
-        (Some((verdict, reason)), _) => (verdict, Some(reason)),
-        (None, Some(story)) => return Err(GateError::Unimplemented("evaluate", story)),
-        (None, None) => (Verdict::Allow, None),
+    let (verdict, reason) = match stop {
+        Some((verdict, reason)) => (verdict, Some(reason)),
+        None => (Verdict::Allow, None),
     };
     let pacing = if verdict == Verdict::Allow {
         conduct::pacing(input, purpose, &at, market_orders_barred(input, &at))?
@@ -530,7 +492,7 @@ mod tests {
 
     /// The journal's check list carries §9.1's eight ids in §9.1's order, spelled out here rather
     /// than read from the crate's own `ORDER`, which is the thing under test. An equity risk exit
-    /// passes all eight; an owed check's `NotReached` is pinned by the crypto test below.
+    /// passes all eight.
     #[test]
     fn the_checks_are_listed_in_section_9_1_order() -> Result<(), GateError> {
         let d = allowing()?.selling(Origin::RiskEngine)?.decide()?;
@@ -654,16 +616,15 @@ mod tests {
         Ok(())
     }
 
-    /// With every check whole for a US equity, an opening all eight pass is allowed exactly as
-    /// proposed: an opening is never paced (DEC-129 item 11). The fail-closed refusal of item 29
-    /// is left to a crypto opening, which check 2 still owes to E6-10.
+    /// With every check whole, an opening all eight pass is allowed exactly as proposed: an
+    /// opening is never paced (DEC-129 item 11).
     #[test]
     fn an_equity_opening_every_check_passes_is_allowed_as_proposed() -> Result<(), GateError> {
         let d = allowing()?.decide()?;
         assert_eq!(
             (d.verdict, d.reason, d.pacing, d.checks.len()),
             (Verdict::Allow, None, None, 8),
-            "no check is owed for a US equity, so the gate decides the opening itself"
+            "no check is owed, so the gate decides the opening itself"
         );
         assert!(
             d.checks
@@ -820,8 +781,8 @@ mod tests {
     }
 
     /// One opening of 1 × 100 in `a` after `edit`: `Ok(code)` for a denial, `Err("allowed")` for an
-    /// allow, which is what "passes every limit" looks like, and `Err(story)` for the refusal of an
-    /// owed check (item 29).
+    /// allow, which is what "passes every limit" looks like, and `Err(story)` for a refusal that
+    /// names the decision it waits on (DEC-129 item 27).
     fn limit_row(
         edit: impl FnOnce(&mut Owned) -> Result<(), GateError>,
     ) -> Result<Result<ReasonCode, &'static str>, GateError> {
@@ -1331,57 +1292,66 @@ mod tests {
         Ok(())
     }
 
-    /// A crypto opening stays owed at check 2 until E6-10's implementation reads the quote
-    /// currency, while a crypto exit is untouched (DEC-129 item 34).
-    ///
-    /// §3.2 item 7 admits USD pairs only and the floor does not read
-    /// `InstrumentSnapshot::quote_currency` yet, so calling check 2 whole for crypto would let a
-    /// stablecoin pair open, even the USD pair this fixture states. The same opening in a US
-    /// equity, for which every check is whole, is allowed.
+    /// §3.2 item 7 decides a crypto opening at check 2 from its quote currency (E6-10, DEC-254,
+    /// DEC-255): a USD pair passes every check, a pair quoted in anything else or in nothing
+    /// stated is denied `crypto_pair_not_usd` there, and a crypto exit in any pair lists check 2 as
+    /// passed, as a US equity's does.
     #[test]
-    fn a_crypto_opening_is_owed_to_e6_10_while_a_crypto_exit_is_not() -> Result<(), GateError> {
-        let mut o = allowing()?;
-        o.instrument.asset_class = AssetClass::Crypto;
-        o.instrument.exchange = None;
-        o.instrument.median_dollar_volume_30d = Some(Usd::parse("90000000")?);
-        o.account.crypto_active = true;
+    fn check_2_decides_a_crypto_opening_by_its_quote_currency() -> Result<(), GateError> {
+        let pair = |quote| -> Result<Owned, GateError> {
+            let mut o = allowing()?;
+            o.instrument.asset_class = AssetClass::Crypto;
+            o.instrument.exchange = None;
+            o.instrument.median_dollar_volume_30d = Some(Usd::parse("90000000")?);
+            o.instrument.quote_currency = quote;
+            o.account.crypto_active = true;
+            Ok(o)
+        };
+        let usd_pair = pair(Some(crate::QuoteCurrency::Usd))?.decide()?;
+        assert_eq!(
+            (usd_pair.verdict, usd_pair.reason, usd_pair.checks.len()),
+            (Verdict::Allow, None, 8),
+            "a USD pair past the floor is decided and allowed, not refused as owed"
+        );
         assert!(
-            matches!(
-                o.with_input(evaluate)?,
-                Err(GateError::Unimplemented("evaluate", "E6-10"))
-            ),
-            "a crypto opening past the floor is owed E6-10's USD-pair check, not allowed"
+            usd_pair
+                .checks
+                .iter()
+                .all(|c| matches!(c, CheckOutcome::Passed(_))),
+            "a USD-pair opening passed all eight checks: {:?}",
+            usd_pair.checks
         );
 
-        let equity = allowing()?.decide()?;
-        assert_eq!(
-            (equity.verdict, equity.reason),
-            (Verdict::Allow, None),
-            "a US equity is not owed E6-10: check 2 is whole for it"
-        );
+        for quote in [Some(crate::QuoteCurrency::Other), None] {
+            let d = pair(quote)?.decide()?;
+            assert_eq!(
+                (d.verdict, d.reason, d.checks.get(1).cloned()),
+                (
+                    Verdict::Deny,
+                    Some(ReasonCode::CryptoPairNotUsd),
+                    Some(CheckOutcome::Failed(
+                        Check::UniverseAndLimits,
+                        ReasonCode::CryptoPairNotUsd
+                    ))
+                ),
+                "a crypto opening quoted in {quote:?} is not a USD pair"
+            );
 
-        o.agent
-            .positions
-            .insert(o.proposed.instrument.clone(), Qty::parse("10")?);
-        o.proposed.side = Side::Sell;
-        o.proposed.origin = Origin::RiskEngine;
-        let exit = o.with_input(evaluate)??;
-        assert_eq!(
-            exit.verdict,
-            Verdict::Allow,
-            "a crypto exit is never owed: first_owed accrues only for an opening"
-        );
-        assert_eq!(
-            exit.checks.get(..2),
-            Some(
-                &[
-                    CheckOutcome::Passed(Check::AccountAndMode),
-                    CheckOutcome::NotReached(Check::UniverseAndLimits),
-                ][..]
-            ),
-            "E6-10 owes check 2 alone for crypto: check 1 is still run and recorded as passed, and \
-             check 2 is recorded as not reached rather than passed"
-        );
+            let e = pair(quote)?.selling(Origin::RiskEngine)?.decide()?;
+            assert_eq!(
+                (e.verdict, e.checks.get(..2)),
+                (
+                    Verdict::Allow,
+                    Some(
+                        &[
+                            CheckOutcome::Passed(Check::AccountAndMode),
+                            CheckOutcome::Passed(Check::UniverseAndLimits),
+                        ][..]
+                    )
+                ),
+                "a crypto exit quoted in {quote:?} is never judged by the pair rule"
+            );
+        }
         Ok(())
     }
 
@@ -1606,9 +1576,7 @@ mod tests {
     /// §3.2's last paragraph and `AGENTS.md` rule 13, probed for every origin a sell within the
     /// position can come from, each typed by the brief's purpose table rather than by
     /// `assign_purpose`: no breach of the universe or the floor denies an exit, and check 2 is
-    /// listed `Passed` for it, or `NotReached` for crypto, whose check 2 stays owed to E6-10 for
-    /// every purpose until the floor reads the quote currency (DEC-129 items 29 and 34). Each breach
-    /// first denies an opening with its own code at check 2, so an exit's allow is never an
+    /// listed `Passed` for it, a crypto pair's as an equity's. Each breach first denies an opening with its own code at check 2, so an exit's allow is never an
     /// instrument that happens to pass the floor.
     #[test]
     fn no_floor_breach_denies_an_exit_from_any_origin() -> Result<(), GateError> {
@@ -1641,14 +1609,14 @@ mod tests {
                 let mut exit = allowing()?.selling(origin)?;
                 apply(&mut exit);
                 let e = exit.decide()?;
-                let listed = if exit.instrument.asset_class == AssetClass::Crypto {
-                    CheckOutcome::NotReached(Check::UniverseAndLimits)
-                } else {
-                    CheckOutcome::Passed(Check::UniverseAndLimits)
-                };
                 assert_eq!(
                     (e.verdict, e.reason, e.purpose, e.checks.get(1).cloned()),
-                    (Verdict::Allow, None, purpose, Some(listed)),
+                    (
+                        Verdict::Allow,
+                        None,
+                        purpose,
+                        Some(CheckOutcome::Passed(Check::UniverseAndLimits))
+                    ),
                     "{breach}: a sell from {origin:?} is allowed regardless of the floor"
                 );
             }
@@ -1791,7 +1759,7 @@ mod tests {
                 Ok((Verdict::Deny, Some(ReasonCode::AddBlockedByProtectiveOrder))),
                 Ok((Verdict::Deny, Some(ReasonCode::AddBlockedByProtectiveOrder))),
                 Ok((Verdict::Allow, None)),
-                Err("E6-10"),
+                Ok((Verdict::Allow, None)),
             ],
             "only a plain or IOC equity add is blocked by resting protection"
         );
@@ -1874,7 +1842,7 @@ mod tests {
                 Ok((Verdict::Allow, None)),
                 Ok((Verdict::Allow, None)),
                 Ok((Verdict::Allow, None)),
-                Err("E6-10"),
+                Ok((Verdict::Allow, None)),
             ],
             "below the minimum, fractional in a whole-share instrument, fractional GTC and a \
              fractional bracket are refused; the minimum itself, a fractional day order and whole \
@@ -1927,7 +1895,7 @@ mod tests {
                     with("1000", "99.99", "100", "0")(o)
                 })?,
             ],
-            [Err("allowed"), short, short, short, short, Err("E6-10")],
+            [Err("allowed"), short, short, short, short, Err("allowed")],
             "1 × 100 at exactly 100 passes, a fee of -5 cannot bring 100 within 99, the lower figure \
              binds, and crypto reads the non-marginable figure rather than the marginable one"
         );
@@ -2024,21 +1992,8 @@ mod tests {
                 })?,
             ],
             [
-                allowed,
-                budget,
-                budget,
-                budget,
-                allowed,
-                budget,
-                budget,
-                allowed,
-                allowed,
-                allowed,
-                allowed,
-                allowed,
-                allowed,
-                Err("E6-10"),
-                allowed,
+                allowed, budget, budget, budget, allowed, budget, budget, allowed, allowed,
+                allowed, allowed, allowed, allowed, allowed, allowed,
             ],
             "another agent's same-day opening elsewhere, an open same-day position and a sale of \
              this security earlier today each make required 2 (a sale of another does not); a \

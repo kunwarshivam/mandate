@@ -104,7 +104,6 @@ fn the_fixture_journal_holds_a_delivered_request() {
 /// D5: pending approvals by deadline, then resolved ones with how they ended; each with its
 /// deadline and the time left, from the fixture's clock.
 #[test]
-#[ignore = "pending E8-3"]
 fn list_orders_pending_by_deadline_then_the_resolved() {
     let mut fx = Fixture::new();
     let later = fx.ask(AGENT, "10", ASKED_AT + 60);
@@ -160,7 +159,6 @@ fn list_orders_pending_by_deadline_then_the_resolved() {
 /// A grant that acted and one re-validation skipped are told apart, and a refused or counted
 /// response leaves the approval pending.
 #[test]
-#[ignore = "pending E8-3"]
 fn list_reads_how_a_grant_ended() {
     let mut fx = Fixture::new();
     let acted = fx.ask(AGENT, "10", ASKED_AT);
@@ -219,7 +217,6 @@ fn list_reads_how_a_grant_ended() {
 /// D6, P8: `show` renders the content object exactly as committed and the code for its hash,
 /// computed here from the canonical bytes; an approval the stream does not hold is `not_pending`.
 #[test]
-#[ignore = "pending E8-3"]
 fn show_renders_the_committed_content_and_its_code() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
@@ -242,7 +239,6 @@ fn show_renders_the_committed_content_and_its_code() {
 /// when the owner ran it and a fresh assertion; nothing reaches an agent stream. Another
 /// request's code is refused first and commits nothing.
 #[test]
-#[ignore = "pending E8-3"]
 fn approve_commits_one_stepped_up_response() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
@@ -336,7 +332,6 @@ fn approve_commits_one_stepped_up_response() {
 /// The local refusals, each committing nothing: a wrong code, a deadline already passed, and an
 /// approval the runtime already ended. The same approval with the right code in time commits.
 #[test]
-#[ignore = "pending E8-3"]
 fn approve_refuses_locally_and_commits_nothing() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
@@ -396,7 +391,6 @@ fn approve_refuses_locally_and_commits_nothing() {
 /// PX-7, PX-10: `skip` takes the approval alone, needs no code, and commits a response with no
 /// step-up; a skip of an approval already ended commits nothing.
 #[test]
-#[ignore = "pending E8-3"]
 fn skip_commits_a_response_without_step_up() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
@@ -446,7 +440,6 @@ fn skip_commits_a_response_without_step_up() {
 /// outcome is "not recorded" and the message never says approved or sent; once it records an
 /// admitted grant and an `act`, the message says it was sent and the gate still decides.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_outcome_is_only_what_the_runtime_recorded() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
@@ -491,7 +484,6 @@ fn the_outcome_is_only_what_the_runtime_recorded() {
 /// A refusal and a re-validation skip are reported with their reason codes and "nothing was
 /// sent"; a response naming another submitted event is not this one's outcome.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_refusal_or_a_skip_reports_its_reason() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
@@ -619,7 +611,6 @@ fn one_id_for_every_attempt(submitted: &Submitted, attempts: &[Vec<String>], ids
 /// another writer fences it, retries with a fresh read rather than interleaving, so exactly one
 /// event is committed, under the one event id.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_fenced_append_is_retried_and_commits_once() {
     let (submitted, committed, attempts, ids) = approve_through(|j| j.fence_next = 1);
     one_id_for_every_attempt(&submitted, &attempts, &ids);
@@ -634,7 +625,6 @@ fn a_fenced_append_is_retried_and_commits_once() {
 /// DEC-257 item 16: an append behind the head (another event landed after the CLI read it) is
 /// retried at the new head, so the command commits once, after the other event.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_command_behind_the_head_retries_and_commits_once() {
     let (submitted, committed, attempts, ids) = approve_through(|j| j.behind_next = 1);
     one_id_for_every_attempt(&submitted, &attempts, &ids);
@@ -658,7 +648,6 @@ fn a_command_behind_the_head_retries_and_commits_once() {
 /// a retry of the same draft is `AlreadyCommitted`, so the command reports the stored event and
 /// commits nothing twice. A fresh id per attempt would commit the answer twice.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_lost_answer_is_retried_under_the_same_id_and_commits_once() {
     let (submitted, committed, attempts, ids) = approve_through(|j| j.ambiguous_next = 1);
     one_id_for_every_attempt(&submitted, &attempts, &ids);
@@ -674,7 +663,6 @@ fn a_lost_answer_is_retried_under_the_same_id_and_commits_once() {
 /// not yet re-validated have both sent nothing. Their messages say so and never call the action
 /// approved.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_outcomes_that_sent_nothing_say_so() {
     for outcome in [Outcome::Counted, Outcome::Admitted { revalidation: None }] {
         let said = answer("message", message(&outcome)).to_lowercase();

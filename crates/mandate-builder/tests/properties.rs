@@ -48,7 +48,7 @@ use mandate_domain::{AssetClass, AutonomyDecision, MarketSession, Purpose};
 use mandate_num::{Conviction, CostBasis, FeeRate, Signed, Unit};
 use mandate_spec::condition::{Condition, ConditionField, ConditionValue, Operator};
 use mandate_spec::document::{Autonomy, Rule, SizingMethod};
-use mandate_time::UtcNanos;
+use mandate_time::{Date, UtcNanos};
 use proptest::prelude::*;
 use proptest::test_runner::RngSeed;
 
@@ -497,6 +497,7 @@ impl Scenario {
             has_prior_fill: self.position_units > 0,
             new_instrument: false,
             thesis_confidence: Unit::ZERO,
+            risk_day: common::day(common::REFERENCE_DAY),
         }
     }
 
@@ -783,9 +784,10 @@ fn oracle_sized(scenario: &Scenario) -> OracleProposal {
     with_sizes(OracleAction::Buy { units }, &clips)
 }
 
-/// §6.2 steps 3 to 5a as a naive walk: the rule list is re-read from the start for every action,
+/// §6.2 steps 3 to 5b as a naive walk: the rule list is re-read from the start for every action,
 /// the conditions are evaluated by structural recursion over this file's own field table, and the
-/// two ceilings are applied afterwards, admission then client, by an explicit strictness ranking.
+/// three ceilings are applied afterwards, admission, client, then review, by an explicit strictness
+/// ranking. The review date is compared through [`oracle_day_number`], never `Date`'s ordering.
 fn oracle_classify(policy: &Autonomy, action: &ActionContext) -> (String, String, Option<u8>) {
     let strictness = |decision: AutonomyDecision| match decision {
         AutonomyDecision::Auto => 0u8,
@@ -826,6 +828,13 @@ fn oracle_classify(policy: &Autonomy, action: &ActionContext) -> (String, String
         decision = AutonomyDecision::Ask;
         by = "client_ceiling".to_owned();
     }
+    if let Some(review_by) = policy.review_by
+        && oracle_day_number(action.risk_day) > oracle_day_number(review_by)
+        && strictness(decision) < strictness(AutonomyDecision::Ask)
+    {
+        decision = AutonomyDecision::Ask;
+        by = "review_ceiling".to_owned();
+    }
     let approvers = if decision == AutonomyDecision::Ask {
         let two = policy
             .approval
@@ -839,6 +848,12 @@ fn oracle_classify(policy: &Autonomy, action: &ActionContext) -> (String, String
         None
     };
     (name(decision), by, approvers)
+}
+
+/// A day's place in the calendar by its own arithmetic: every month is given 32 days and every year
+/// 13 months, which keeps the order of real dates and shares nothing with `Date`'s `Ord`.
+fn oracle_day_number(day: Date) -> u32 {
+    (u32::from(day.year()) * 13 + u32::from(day.month())) * 32 + u32::from(day.day())
 }
 
 fn oracle_matches(condition: &Condition, action: &ActionContext) -> bool {
@@ -2234,6 +2249,7 @@ prop_compose! {
             position_pnl_fraction: Signed::parse(&Scenario::milli(pnl_milli).to_text())
                 .unwrap_or(Signed::ZERO),
             requested_by: RequestedBy::Agent,
+            risk_day: common::day(common::REFERENCE_DAY),
         }
     }
 }
@@ -3077,6 +3093,7 @@ fn every_rule_default_admission_and_requester_obeys_the_client_ceiling() {
                                 bought_today_usd: usd("300"),
                                 position_pnl_fraction: Signed::ZERO,
                                 requested_by: requester,
+                                risk_day: common::day(common::REFERENCE_DAY),
                             };
                             let got = classify(&policy, &action)
                                 .unwrap_or_else(|e| panic!("classify returns a decision, not {e}"));
@@ -3129,5 +3146,278 @@ fn every_rule_default_admission_and_requester_obeys_the_client_ceiling() {
         "the ceiling changes exactly the client openings the rules and the admission setting leave \
          AUTO: 13 rule-and-default pairs decide AUTO, each under 4 admission-and-new pairs that do \
          not raise it, for 2 purposes"
+    );
+}
+
+/// Dates on both sides of a month end, a year end, and a short February, so a review date and a
+/// risk day are drawn across every kind of calendar boundary.
+const REVIEW_DAYS: [&str; 8] = [
+    "2026-12-30",
+    "2026-12-31",
+    "2027-01-01",
+    "2027-01-02",
+    "2027-02-27",
+    "2027-02-28",
+    "2027-03-01",
+    "2027-03-02",
+];
+
+/// A generated policy with a review date, or none, and an action asked for by a generated requester
+/// on a generated risk day.
+fn reviewed_actions() -> impl Strategy<Value = (Autonomy, ActionContext)> {
+    (
+        well_typed_policy(),
+        action_context(),
+        prop::sample::select(REQUESTERS.to_vec()),
+        prop::option::weighted(0.9, prop::sample::select(REVIEW_DAYS.to_vec())),
+        prop::sample::select(REVIEW_DAYS.to_vec()),
+    )
+        .prop_map(|(policy, action, requester, review_by, risk_day)| {
+            (
+                Autonomy {
+                    review_by: review_by.map(common::day),
+                    ..policy
+                },
+                ActionContext {
+                    requested_by: requester,
+                    risk_day: common::day(risk_day),
+                    ..action
+                },
+            )
+        })
+}
+
+/// §6.2 step 5b, MI-32, DEC-188, against the naive walk: once the risk day is after the review
+/// date, no `open` or `increase` is AUTO whatever the rules, the default, the admission setting and
+/// the requester, a `deny` still denies, and an ASK keeps the step that reached it; on or before the
+/// review date, and with none, every decision and label is the walk's; a reducing purpose stays the
+/// built-in AUTO on every day (`AGENTS.md` rules 2 and 13).
+///
+/// "Never AUTO" is asserted directly as well as through the oracle, so a mistake shared by the oracle
+/// and the crate still fails the first assertion. Delegations (§6.2 step 4a) cannot be generated
+/// until E8-8 gives `Autonomy` one (DEC-262 item 5); the review ceiling follows the step they lift
+/// at, so E8-8's tests PR extends this property with them.
+#[test]
+fn past_the_review_date_no_opening_is_auto_and_before_it_nothing_changes() {
+    check(reviewed_actions(), |(policy, action)| {
+        let classified = classify(&policy, &action)
+            .map_err(|e| TestCaseError::fail(format!("classify returns a decision, not {e}")))?;
+        let opening = matches!(action.purpose, Purpose::Open | Purpose::Increase);
+        let past = policy.review_by.is_some_and(|review_by| {
+            oracle_day_number(action.risk_day) > oracle_day_number(review_by)
+        });
+        if opening && past {
+            prop_assert_ne!(
+                classified.decision,
+                AutonomyDecision::Auto,
+                "MI-32: past the review date no opening is AUTO"
+            );
+        }
+        if !opening {
+            prop_assert_eq!(
+                classified.decision,
+                AutonomyDecision::Auto,
+                "exits are never narrowed"
+            );
+            prop_assert_eq!(classified.by.label(), "builtin_risk_reducing");
+        }
+        let unreviewed = Autonomy {
+            review_by: None,
+            ..policy.clone()
+        };
+        let (before, before_by, _) = oracle_classify(&unreviewed, &action);
+        if before == "deny" {
+            prop_assert_eq!(
+                classified.decision,
+                AutonomyDecision::Deny,
+                "a deny still denies"
+            );
+        }
+        if before == "ask" {
+            prop_assert_eq!(
+                classified.by.label(),
+                before_by.clone(),
+                "an ASK keeps its source"
+            );
+        }
+        let (decision, by, approvers) = oracle_classify(&policy, &action);
+        if !past {
+            prop_assert_eq!(
+                &decision,
+                &before,
+                "on or before the review date nothing changes"
+            );
+            prop_assert_eq!(&by, &before_by);
+        }
+        let named = match classified.decision {
+            AutonomyDecision::Auto => "auto",
+            AutonomyDecision::Ask => "ask",
+            AutonomyDecision::Deny => "deny",
+        };
+        prop_assert_eq!(named, decision.as_str(), "the decision");
+        prop_assert_eq!(classified.by.label(), by, "what decided it");
+        prop_assert_eq!(
+            classified.approval.map(|a| a.approvers_required.get()),
+            approvers,
+            "the approvers an ASK needs, and none otherwise"
+        );
+        Ok(())
+    });
+}
+
+/// §6.2 steps 2 and 5b through `decide`: on every day a denied buy is skipped and a deferred one
+/// deferred, and an allowed buy past the review date is never AUTO and is decided as the walk
+/// decides it.
+#[test]
+fn no_buy_past_the_review_date_reaches_auto_through_decide() {
+    check(reviewed_actions(), |(policy, action)| {
+        let proposal = proposal_for(&action);
+        let Action::Buy {
+            action: opening, ..
+        } = &proposal.action
+        else {
+            return Err(TestCaseError::fail("proposal_for builds a buy"));
+        };
+        for (verdict, expected) in [
+            (GateVerdict::Deny, Outcome::Skipped),
+            (GateVerdict::Defer, Outcome::Deferred),
+        ] {
+            let outcome = decide(&policy, &proposal, verdict)
+                .map_err(|e| TestCaseError::fail(format!("decide returns an outcome, not {e}")))?;
+            prop_assert_eq!(outcome, expected);
+        }
+        let allowed = decide(&policy, &proposal, GateVerdict::Allow)
+            .map_err(|e| TestCaseError::fail(format!("decide returns an outcome, not {e}")))?;
+        let Outcome::Classified(classified) = allowed else {
+            return Err(TestCaseError::fail(format!(
+                "an allowed proposal is classified, not {allowed:?}"
+            )));
+        };
+        if policy.review_by.is_some_and(|review_by| {
+            oracle_day_number(opening.risk_day) > oracle_day_number(review_by)
+        }) {
+            prop_assert_ne!(classified.decision, AutonomyDecision::Auto, "MI-32");
+        }
+        let (decision, by, _) = oracle_classify(&policy, opening);
+        let named = match classified.decision {
+            AutonomyDecision::Auto => "auto",
+            AutonomyDecision::Ask => "ask",
+            AutonomyDecision::Deny => "deny",
+        };
+        prop_assert_eq!(named, decision.as_str());
+        prop_assert_eq!(classified.by.label(), by);
+        Ok(())
+    });
+}
+
+/// §6.2 steps 3 to 5b, MI-32, exhaustively: every rule shape of [`swept_rules`], every default, every
+/// admission setting, both values of `new_instrument`, all six purposes, all three requesters, and a
+/// risk day before, on, and after the review date, 12,636 decisions in all.
+///
+/// The expectation is computed a third way, by asking which steps can **deny** and which can **ask**
+/// rather than by ranking: a deny from the rules or the admission ceiling wins; otherwise an ask from
+/// the rules, the admission ceiling, for a client the client ceiling, or after the review date the
+/// review ceiling; otherwise AUTO. The source is the first step that reached the final decision.
+#[test]
+fn every_rule_default_admission_requester_and_day_obeys_the_review_ceiling() {
+    let decisions = [
+        AutonomyDecision::Auto,
+        AutonomyDecision::Ask,
+        AutonomyDecision::Deny,
+    ];
+    let review_by = common::day("2026-12-23");
+    let days = [
+        ("before", "2026-12-22"),
+        ("on", "2026-12-23"),
+        ("after", "2026-12-24"),
+    ];
+    let mut decided = 0u32;
+    let mut review_asks = 0u32;
+    for (rules, matched) in swept_rules() {
+        for default in decisions {
+            for admission in decisions {
+                let policy = Autonomy {
+                    review_by: Some(review_by),
+                    ..policy(rules.clone(), default, admission, None)
+                };
+                for new_instrument in [false, true] {
+                    for purpose in PURPOSES {
+                        for requester in REQUESTERS {
+                            for (when, day) in days {
+                                let action = ActionContext {
+                                    purpose,
+                                    order_usd: usd("300"),
+                                    combined_score: unit("0.8"),
+                                    instrument: asset(SWING_INSTRUMENT),
+                                    asset_class: AssetClass::UsEquity,
+                                    session: MarketSession::Regular,
+                                    first_trade_in_instrument: true,
+                                    new_instrument,
+                                    thesis_confidence: Unit::ZERO,
+                                    drawdown: Unit::ZERO,
+                                    daily_pnl_fraction: Signed::ZERO,
+                                    position_usd_after: usd("300"),
+                                    gross_usd_after: usd("300"),
+                                    bought_today_usd: usd("300"),
+                                    position_pnl_fraction: Signed::ZERO,
+                                    requested_by: requester,
+                                    risk_day: common::day(day),
+                                };
+                                let got = classify(&policy, &action).unwrap_or_else(|e| {
+                                    panic!("classify returns a decision, not {e}")
+                                });
+                                let (ruled_label, ruled) = matched.unwrap_or(("default", default));
+                                let admits = new_instrument;
+                                let client = requester == RequestedBy::Client;
+                                let after = when == "after";
+                                let (expected, source) =
+                                    if !matches!(purpose, Purpose::Open | Purpose::Increase) {
+                                        (AutonomyDecision::Auto, "builtin_risk_reducing")
+                                    } else if ruled == AutonomyDecision::Deny {
+                                        (AutonomyDecision::Deny, ruled_label)
+                                    } else if admits && admission == AutonomyDecision::Deny {
+                                        (AutonomyDecision::Deny, "admission_ceiling")
+                                    } else if ruled == AutonomyDecision::Ask {
+                                        (AutonomyDecision::Ask, ruled_label)
+                                    } else if admits && admission == AutonomyDecision::Ask {
+                                        (AutonomyDecision::Ask, "admission_ceiling")
+                                    } else if client {
+                                        (AutonomyDecision::Ask, "client_ceiling")
+                                    } else if after {
+                                        (AutonomyDecision::Ask, "review_ceiling")
+                                    } else {
+                                        (AutonomyDecision::Auto, ruled_label)
+                                    };
+                                let case = format!(
+                                    "{rules:?} default {default:?} admission {admission:?} new \
+                                     {new_instrument} {purpose:?} by {requester:?} {when}"
+                                );
+                                assert_eq!(got.decision, expected, "{case}");
+                                assert_eq!(got.by.label(), source, "{case}");
+                                assert_eq!(
+                                    got.approval.is_some(),
+                                    expected == AutonomyDecision::Ask,
+                                    "{case}: an approval exactly for an ASK"
+                                );
+                                if source == "review_ceiling" {
+                                    review_asks += 1;
+                                }
+                                decided += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        decided, 12_636,
+        "13 rule shapes × 3 defaults × 3 admission settings × 2 × 6 purposes × 3 requesters × 3 days"
+    );
+    assert_eq!(
+        review_asks, 208,
+        "the ceiling changes exactly the openings the rules, the admission setting, and the client \
+         ceiling leave AUTO, on the day after the review date: the client ceiling's 104 for each of \
+         the agent and the owner"
     );
 }

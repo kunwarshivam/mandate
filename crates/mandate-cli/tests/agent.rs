@@ -69,7 +69,6 @@ fn exit_aapl(bid: bool) -> Command {
 
 /// PX-4: pause needs no code, has none, and commits an `OwnerCommandIssued` with no step-up.
 #[test]
-#[ignore = "pending E8-3"]
 fn pause_needs_no_code() {
     let mut fx = Fixture::new();
     let mut ids = FixedIds::default();
@@ -108,7 +107,6 @@ fn pause_needs_no_code() {
 /// refused locally and commits nothing; the right one commits the command with `cli_confirm`
 /// evidence authenticated when the owner ran it.
 #[test]
-#[ignore = "pending E8-3"]
 fn resume_stop_and_acknowledge_need_the_code() {
     for (cmd, event_type, name) in [
         (Command::Resume, "OwnerCommandIssued", Some("resume")),
@@ -174,7 +172,6 @@ fn resume_stop_and_acknowledge_need_the_code() {
 /// A code is bound to what it confirms and to the control stream's head: the resume code is not
 /// the Stop code, and once another command lands the old code no longer confirms.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_code_is_bound_to_its_command_and_the_head() {
     let mut fx = Fixture::new();
     let mut ids = FixedIds::default();
@@ -218,7 +215,6 @@ fn a_code_is_bound_to_its_command_and_the_head() {
 /// DEC-158 option (c), rule 13: a kill switch is never refused. With the scope's code it carries
 /// step-up evidence; with a wrong code, or another scope's, it is still committed, with none.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_kill_switch_is_committed_with_or_without_the_code() {
     let mut fx = Fixture::new();
     let mut ids = FixedIds::default();
@@ -293,7 +289,6 @@ fn a_kill_switch_is_committed_with_or_without_the_code() {
 /// regular session; with the code it carries both the confirmed bid and the evidence, the one shape
 /// that unlocks the privilege.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_owner_exit_is_committed_with_or_without_the_code() {
     let mut fx = Fixture::new();
     let mut ids = FixedIds::default();
@@ -353,7 +348,6 @@ fn an_owner_exit_is_committed_with_or_without_the_code() {
 /// confirmed bid commits a different bid without step-up evidence, so the privilege is never
 /// carried by another bid's code.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_code_is_bound_to_every_field_it_confirms() {
     let mut fx = Fixture::new();
     let mut ids = FixedIds::default();
@@ -460,7 +454,6 @@ fn a_code_is_bound_to_every_field_it_confirms() {
 /// `status` reads the agent stream: the last mode change, whether it was the startup hold, and the
 /// approvals still pending; it commits nothing.
 #[test]
-#[ignore = "pending E8-3"]
 fn status_reads_the_mode_the_hold_and_the_pending_count() {
     let mut fx = Fixture::new();
     let first = fx.ask(AGENT, "10", ASKED_AT);
@@ -482,7 +475,6 @@ fn status_reads_the_mode_the_hold_and_the_pending_count() {
 /// A resume and a Stop committed one after the other carry two different ids, the ones the
 /// injected `Ids` minted, and nothing else.
 #[test]
-#[ignore = "pending E8-3"]
 fn each_gesture_draws_a_fresh_assertion() {
     let mut fx = Fixture::new();
     let mut ids = FixedIds::default();

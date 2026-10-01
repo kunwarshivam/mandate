@@ -555,8 +555,9 @@ impl Scene {
 /// entry's asset class, and otherwise a liquid, tradable, unhalted NASDAQ listing that last closed and
 /// now quotes at the proposal's limit price, so every check outside the mandate limits passes.
 ///
-/// A US equity only: the gate still owes check 2's "USD pairs only" for crypto (E6-10), and no
-/// `gate` case proposes one, so a crypto proposal fails here rather than at an unrelated stub.
+/// A US equity only: this arm does not read a pair's quote currency for check 2's "USD pairs only"
+/// (E6-10's harness PR), and no `gate` case proposes one, so a crypto proposal fails here rather
+/// than at a denial the case never meant.
 fn listed_equity(
     document: &Mandate,
     instrument: &AssetId,

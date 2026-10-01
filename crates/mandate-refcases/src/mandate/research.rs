@@ -49,7 +49,7 @@ use mandate_research::{
     WorkingUniverse, WorkspaceId, admit, expire_theses, fold_theses, stagger_offset,
 };
 use mandate_spec::document::OnTimeout;
-use mandate_time::UtcNanos;
+use mandate_time::{Date, UtcNanos};
 use serde_json::json;
 
 use super::{must_parse, not_implemented, num, patched, patched_json, u32_of, unknown_members};
@@ -121,12 +121,17 @@ pub(super) fn admission_case(fixture: &Json, case: &Json) -> Result<(), String> 
             .to_owned()
     })?;
     let mandate = must_parse(&patched(fixture, case)?)?;
+    ensure(mandate.autonomy.review_by.is_none(), || {
+        "an admission case states no risk clock for its first order, so its mandate may have no \
+         review date (§6.2 step 5b)"
+            .to_owned()
+    })?;
     expect_eq(
         "first_order admission_ceiling against the parsed mandate's `autonomy.admission`",
         research_decision_name(first_order.admission_ceiling),
         decision_name(mandate.autonomy.admission),
     )?;
-    let action = first_order_action(at(input, "admission_action")?, first_order)?;
+    let action = first_order_action(at(input, "admission_action")?, first_order, unstated_day()?)?;
     let decided = classify(&mandate.autonomy, &action).map_err(builder)?;
     expect_eq(
         "first_order_autonomy",
@@ -140,9 +145,17 @@ pub(super) fn admission_case(fixture: &Json, case: &Json) -> Result<(), String> 
 /// `admit` composes them. `unusual_input` must be `false`: V-018 reserves the field until the
 /// input-drift detector ships, `ActionContext` has no place for it, and a `true` would be an input
 /// no v1 decision can read.
+/// The day an admission's first order is decided on. No admission case states when its first
+/// order is decided, so [`admission_case`] refuses a mandate with a review date, the only thing
+/// that reads the day (§6.2 step 5b).
+fn unstated_day() -> Result<Date, String> {
+    Date::new(2026, 9, 22).map_err(|e| format!("the unstated day: {e}"))
+}
+
 fn first_order_action(
     stated: &Json,
     first_order: &FirstOrderFacts,
+    risk_day: Date,
 ) -> Result<ActionContext, String> {
     ensure(!bool_of(stated, "unusual_input")?, || {
         "`admission_action.unusual_input` is true, which no v1 decision reads (V-018)".to_owned()
@@ -173,6 +186,7 @@ fn first_order_action(
         bought_today_usd: usd("bought_today_usd")?,
         position_pnl_fraction: signed("position_pnl_fraction")?,
         requested_by: RequestedBy::Agent,
+        risk_day,
     })
 }
 
@@ -853,7 +867,7 @@ mod tests {
                 thesis_confidence: mandate_research::SchemaDec::from_checked_text(CONFIDENCE),
                 admission_ceiling: mandate_research::AutonomyDecision::Ask,
             };
-            let facts = super::first_order_action(stated, &first_order)?;
+            let facts = super::first_order_action(stated, &first_order, super::unstated_day()?)?;
             let mut wanted = stated.clone();
             let members = wanted.as_object_mut().ok_or("an action object")?;
             members.remove("unusual_input");

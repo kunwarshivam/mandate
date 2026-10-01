@@ -41,8 +41,10 @@
 //! `order_type` absent on a sell means a plain limit.
 //!
 //! **Cases that cannot pass yet fail at their owner.** A `trim_to_target` base asks the risk engine
-//! first (§6.2 step 1), and `mandate_risk::trim_proposals` is E6-4's stub; a crypto opening reaches
-//! `mandate_risk::evaluate`, whose check 2 is owed to E6-10 (DEC-129 item 29).
+//! first (§6.2 step 1), and `mandate_risk::trim_proposals` is E6-4's stub; a crypto opening's dry
+//! run is denied `crypto_pair_not_usd` at check 2, because this harness does not read the pinned
+//! `symbol` (`BTC/USD`) yet and states no quote currency for a pair, which the gate never reads as
+//! USD (DEC-254 items 1 and 7). E6-10's harness PR reads it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -716,6 +718,9 @@ impl Inputs {
                 has_prior_fill: flag_or(input, "has_prior_fill", !position.is_zero())?,
                 new_instrument: false,
                 thesis_confidence: Unit::ZERO,
+                risk_day: mandate_spec::risk::risk_day(now)
+                    .map_err(|e| format!("`now` has no risk day: {}", e.code()))?
+                    .day,
             },
             gate_size_factor: num(Ratio::parse(size_factor), "size_factor")?,
             outputs,
@@ -1375,9 +1380,9 @@ mod tests {
         ("MC-B30", &["mandate_risk::trim_proposals", "pending E6-4"]),
         ("MC-B31", &["mandate_risk::trim_proposals", "pending E6-4"]),
         ("MC-B32", &["mandate_risk::trim_proposals", "pending E6-4"]),
-        ("MC-B26", &["mandate_risk::evaluate", "pending E6-10"]),
-        ("MC-B27", &["mandate_risk::evaluate", "pending E6-10"]),
-        ("MC-B28", &["mandate_risk::evaluate", "pending E6-10"]),
+        ("MC-B26", &["`gate_dry_run`", "Some(CryptoPairNotUsd)"]),
+        ("MC-B27", &["`gate_dry_run`", "Some(CryptoPairNotUsd)"]),
+        ("MC-B28", &["`gate_dry_run`", "Some(CryptoPairNotUsd)"]),
     ];
 
     fn fixture() -> Result<Json, String> {

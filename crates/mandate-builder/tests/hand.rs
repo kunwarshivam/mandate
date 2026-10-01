@@ -121,6 +121,7 @@ fn opening(order_usd: &str, combined_score: &str) -> ActionContext {
         bought_today_usd: usd("0"),
         position_pnl_fraction: Signed::ZERO,
         requested_by: RequestedBy::Agent,
+        risk_day: common::day(common::REFERENCE_DAY),
     }
 }
 
@@ -3999,4 +4000,275 @@ fn decide_asks_a_client_buy_the_gate_allows_and_skips_one_it_denies() {
         ),
         other => panic!("an allowed proposal is classified, not {other:?}"),
     }
+}
+
+/// The review date the hand tests set: its last risk day, the day before, and the day after.
+const REVIEW_BY: &str = "2026-12-23";
+
+fn reviewed(policy: Autonomy) -> Autonomy {
+    Autonomy {
+        review_by: Some(common::day(REVIEW_BY)),
+        ..policy
+    }
+}
+
+fn on(day: &str, action: ActionContext) -> ActionContext {
+    ActionContext {
+        risk_day: common::day(day),
+        ..action
+    }
+}
+
+/// `propose` carries the risk day it was given to the buy it proposes, so §6.2 step 5b judges the
+/// review date by the evaluation's own risk clock and by nothing the builder picks (DEC-271).
+#[test]
+fn a_proposed_buy_carries_the_risk_day_it_was_evaluated_on() {
+    for day in ["2026-12-23", "2027-01-01"] {
+        let proposal = proposed(
+            &two_stock_swing(),
+            &flat_account(),
+            &swing_market(),
+            &RiskContext {
+                risk_day: common::day(day),
+                ..quiet_risk()
+            },
+            &[
+                output(&momentum(), SWING_INSTRUMENT, "0.8", "0.9"),
+                output(&news(), SWING_INSTRUMENT, "0.2", "0.5"),
+            ],
+        );
+        match &proposal.action {
+            Action::Buy { action, .. } => assert_eq!(action.risk_day, common::day(day)),
+            other => panic!("a buy of 7 at 100, not {other:?}"),
+        }
+    }
+}
+
+/// §6.2 step 5b, MI-32, DEC-188: the review date is the last risk day an `auto` rule stands. On it
+/// the agent's order is AUTO by the rule; on the next risk day the same order is ASK, labelled
+/// `review_ceiling` and carrying §6.4's approval, for an `open` and an `increase` alike.
+#[test]
+fn an_auto_rule_stands_on_the_review_date_and_asks_the_day_after() {
+    let policy = reviewed(base_policy());
+    for day in ["2026-12-22", REVIEW_BY] {
+        let standing = classified(&policy, &on(day, opening("300", "0.8")));
+        assert_eq!(standing.decision, AutonomyDecision::Auto, "{day}");
+        assert_eq!(standing.by, DecidedBy::Rule(rule_id("routine")), "{day}");
+    }
+    for day in ["2026-12-24", "2027-06-01"] {
+        for purpose in [Purpose::Open, Purpose::Increase] {
+            let action = ActionContext {
+                purpose,
+                ..on(day, opening("300", "0.8"))
+            };
+            let asked = classified(&policy, &action);
+            assert_eq!(asked.decision, AutonomyDecision::Ask, "{day} {purpose:?}");
+            assert_eq!(asked.by, DecidedBy::ReviewCeiling, "{day} {purpose:?}");
+            let approval = asked.approval.unwrap_or_else(|| {
+                panic!("{day} {purpose:?}: an ASK the ceiling raised carries an approval")
+            });
+            assert_eq!(approval.approvers_required.get(), 1);
+            assert_eq!(approval.on_timeout, OnTimeout::Skip);
+        }
+    }
+}
+
+/// §6.2 step 5b: past the review date an `auto` default asks too, and a `deny` admission still
+/// denies, so the ceiling is not a constant.
+#[test]
+fn past_the_review_date_an_auto_default_asks_and_a_deny_still_denies() {
+    let autopilot = reviewed(policy(
+        Vec::new(),
+        AutonomyDecision::Auto,
+        AutonomyDecision::Deny,
+        None,
+    ));
+    let standing = classified(&autopilot, &on(REVIEW_BY, opening("300", "0.8")));
+    assert_eq!(standing.decision, AutonomyDecision::Auto);
+    assert_eq!(standing.by, DecidedBy::Default);
+
+    let asked = classified(&autopilot, &on("2026-12-24", opening("300", "0.8")));
+    assert_eq!(asked.decision, AutonomyDecision::Ask);
+    assert_eq!(asked.by, DecidedBy::ReviewCeiling);
+
+    let admitted = ActionContext {
+        new_instrument: true,
+        ..on("2026-12-24", opening("300", "0.8"))
+    };
+    let denied = classified(&autopilot, &admitted);
+    assert_eq!(denied.decision, AutonomyDecision::Deny);
+    assert_eq!(denied.by, DecidedBy::AdmissionCeiling);
+}
+
+/// §6.2 steps 5 and 5b: the admission ceiling only tightens (MI-17), so an `auto` admission setting
+/// leaves the rules' `auto` standing for an admitted instrument's first order, and past the review
+/// date that is what the review ceiling turns into ASK (MC-D22's shape).
+#[test]
+fn past_the_review_date_an_admitted_first_order_asks_though_admission_is_auto() {
+    let owner_allowed = reviewed(policy(
+        base_rules(),
+        AutonomyDecision::Ask,
+        AutonomyDecision::Auto,
+        None,
+    ));
+    let admitted = |day: &str| ActionContext {
+        new_instrument: true,
+        thesis_confidence: unit("0.9"),
+        ..on(day, opening("300", "0.8"))
+    };
+    let standing = classified(&owner_allowed, &admitted(REVIEW_BY));
+    assert_eq!(standing.decision, AutonomyDecision::Auto);
+    assert_eq!(standing.by, DecidedBy::Rule(rule_id("routine")));
+
+    let asked = classified(&owner_allowed, &admitted("2026-12-24"));
+    assert_eq!(asked.decision, AutonomyDecision::Ask);
+    assert_eq!(asked.by, DecidedBy::ReviewCeiling);
+}
+
+/// §6.2 step 5b names itself only when it changed the decision (DEC-271 item 3): past the review
+/// date a `deny` rule still denies by its rule, an ASK the rules reached keeps the rule, and only
+/// the order the rules left AUTO is labelled `review_ceiling`.
+#[test]
+fn past_the_review_date_a_deny_denies_and_an_ask_keeps_its_rule() {
+    let deny_first = Rule {
+        id: rule_id("deny_big"),
+        when: compare(ConditionField::OrderUsd, Operator::Gt, decimal("800")),
+        then: AutonomyDecision::Deny,
+    };
+    let mut rules = vec![deny_first];
+    rules.extend(base_rules());
+    let policy = reviewed(policy(
+        rules,
+        AutonomyDecision::Ask,
+        AutonomyDecision::Ask,
+        None,
+    ));
+    let after = |order: &str, score: &str| on("2026-12-24", opening(order, score));
+
+    let denied = classified(&policy, &after("950", "0.9"));
+    assert_eq!(denied.decision, AutonomyDecision::Deny);
+    assert_eq!(denied.by, DecidedBy::Rule(rule_id("deny_big")));
+    assert!(denied.approval.is_none(), "a DENY carries no approval");
+
+    let low = classified(&policy, &after("300", "0.6"));
+    assert_eq!(low.decision, AutonomyDecision::Ask);
+    assert_eq!(low.by, DecidedBy::Rule(rule_id("low_score")));
+
+    let routine = classified(&policy, &after("300", "0.8"));
+    assert_eq!(routine.decision, AutonomyDecision::Ask);
+    assert_eq!(routine.by, DecidedBy::ReviewCeiling);
+}
+
+/// §6.2 steps 5a and 5b: a client's order past the review date is ASKed by the client ceiling,
+/// which comes first and leaves the review ceiling nothing to change; the agent's identical order is
+/// ASKed by the review ceiling.
+#[test]
+fn past_the_review_date_a_client_ask_keeps_the_client_ceiling() {
+    let policy = reviewed(base_policy());
+    let clients = classified(
+        &policy,
+        &requested(RequestedBy::Client, on("2026-12-24", opening("300", "0.8"))),
+    );
+    assert_eq!(clients.decision, AutonomyDecision::Ask);
+    assert_eq!(clients.by, DecidedBy::ClientCeiling);
+
+    for requester in [RequestedBy::Agent, RequestedBy::Owner] {
+        let asked = classified(
+            &policy,
+            &requested(requester, on("2026-12-24", opening("300", "0.8"))),
+        );
+        assert_eq!(asked.decision, AutonomyDecision::Ask, "{requester:?}");
+        assert_eq!(asked.by, DecidedBy::ReviewCeiling, "{requester:?}");
+    }
+}
+
+/// §6.4: an ASK the review ceiling raised needs the approvers any ASK of that size needs, and on
+/// the review date the same orders run with no approval at all.
+#[test]
+fn a_review_ceiling_ask_above_the_threshold_needs_two_approvers() {
+    let autopilot = reviewed(policy(
+        Vec::new(),
+        AutonomyDecision::Auto,
+        AutonomyDecision::Ask,
+        Some("500"),
+    ));
+    for order in ["500", "600"] {
+        let standing = classified(&autopilot, &on(REVIEW_BY, opening(order, "0.8")));
+        assert_eq!(standing.decision, AutonomyDecision::Auto, "{order}");
+        assert_eq!(
+            standing.approval, None,
+            "{order}: an AUTO carries no approval"
+        );
+    }
+    for (order, approvers) in [("500", 1), ("600", 2)] {
+        let asked = classified(&autopilot, &on("2026-12-24", opening(order, "0.8")));
+        assert_eq!(asked.by, DecidedBy::ReviewCeiling, "{order}");
+        assert_eq!(
+            asked.approval.map(|a| a.approvers_required.get()),
+            Some(approvers),
+            "{order}"
+        );
+    }
+}
+
+/// `AGENTS.md` rules 2 and 13, MI-1: past the review date every reducing purpose is still the
+/// built-in AUTO. Live: step 3 returns before any ceiling, so it holds before the ceiling exists.
+#[test]
+fn past_the_review_date_every_reducing_purpose_is_auto_by_the_builtin() {
+    let deny_all = reviewed(policy(
+        Vec::new(),
+        AutonomyDecision::Deny,
+        AutonomyDecision::Deny,
+        None,
+    ));
+    for purpose in [
+        Purpose::DiscretionaryExit,
+        Purpose::OwnerExit,
+        Purpose::RiskExit,
+        Purpose::Protective,
+    ] {
+        let exit = classified(&deny_all, &on("2027-06-01", reducing(purpose)));
+        assert_eq!(exit.decision, AutonomyDecision::Auto, "{purpose:?}");
+        assert_eq!(exit.by, DecidedBy::BuiltinRiskReducing, "{purpose:?}");
+    }
+}
+
+/// §6.2 steps 2 and 5b through `decide`: past the review date an allowed buy the rules would run is
+/// ASKed, one the gate denies is skipped with nobody asked, and a deferred one is deferred; on the
+/// review date the same buy runs.
+#[test]
+fn decide_asks_a_buy_past_the_review_date_and_skips_one_the_gate_denies() {
+    let policy = reviewed(base_policy());
+    let dated = |day: &str| {
+        let mut proposal = buy_proposal("300", "0.8");
+        if let Action::Buy { action, .. } = &mut proposal.action {
+            action.risk_day = common::day(day);
+        }
+        proposal
+    };
+    let decided = |day: &str, verdict| {
+        decide(&policy, &dated(day), verdict)
+            .unwrap_or_else(|e| panic!("decide returns an outcome, not {e}"))
+    };
+    match decided(REVIEW_BY, GateVerdict::Allow) {
+        Outcome::Classified(decision) => assert_eq!(decision.decision, AutonomyDecision::Auto),
+        other => panic!("an allowed proposal is classified, not {other:?}"),
+    }
+    match decided("2026-12-24", GateVerdict::Allow) {
+        Outcome::Classified(decision) => {
+            assert_eq!(decision.decision, AutonomyDecision::Ask);
+            assert_eq!(decision.by, DecidedBy::ReviewCeiling);
+            assert_eq!(
+                decision.approval.map(|a| a.approvers_required.get()),
+                Some(1)
+            );
+        }
+        other => panic!("an allowed proposal is classified, not {other:?}"),
+    }
+    assert_eq!(
+        decided("2026-12-24", GateVerdict::Deny),
+        Outcome::Skipped,
+        "no approval is ever requested for an order the gate would deny"
+    );
+    assert_eq!(decided("2026-12-24", GateVerdict::Defer), Outcome::Deferred);
 }
