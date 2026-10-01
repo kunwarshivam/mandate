@@ -55,11 +55,13 @@ pub struct ExecutorState {
     pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
     /// The latest quote per instrument: process-local, an input never journaled (like the tick).
     pub(crate) quotes: BTreeMap<InstrumentId, MarketObservation>,
-    /// The latest sane quote with a bid per instrument, kept past newer quotes that are not: the
-    /// exit ladder's "last sane bid within 5 minutes" (§5.6). Process-local, like `quotes`.
+    /// The latest-observed sane quote with a bid per instrument, kept past newer quotes that are
+    /// not and never replaced by an older one: the exit ladder's "last sane bid within 5 minutes"
+    /// (§5.6). Process-local, like `quotes`.
     pub(crate) sane_bids: BTreeMap<InstrumentId, MarketObservation>,
-    /// The latest quote with a last trade per instrument, kept past newer quotes that carry none:
-    /// the exit ladder's "the last trade" (§5.6, DEC-260). Process-local, like `quotes`.
+    /// The latest-observed sane quote with a last trade per instrument, kept like `sane_bids`: the
+    /// exit ladder's "the last trade", which it takes only within 5 minutes (§5.6, DEC-260 (5)).
+    /// Process-local, like `quotes`.
     pub(crate) trades: BTreeMap<InstrumentId, MarketObservation>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,

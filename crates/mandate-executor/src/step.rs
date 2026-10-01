@@ -58,15 +58,16 @@ pub fn handle(
         state.now = state.now.max(Some(*at));
     }
     if let Input::Market(observation) = &input {
-        if observation.sane && observation.bid.is_some() {
-            state
-                .sane_bids
-                .insert(observation.instrument.clone(), observation.clone());
-        }
-        if observation.last_trade.is_some() {
-            state
-                .trades
-                .insert(observation.instrument.clone(), observation.clone());
+        for (kept, carries) in [
+            (&mut state.sane_bids, observation.bid.is_some()),
+            (&mut state.trades, observation.last_trade.is_some()),
+        ] {
+            let newer = kept
+                .get(&observation.instrument)
+                .is_none_or(|held| held.observed_at <= observation.observed_at);
+            if observation.sane && carries && newer {
+                kept.insert(observation.instrument.clone(), observation.clone());
+            }
         }
         state
             .quotes

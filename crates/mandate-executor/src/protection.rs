@@ -294,19 +294,21 @@ fn next_rung(
     Ok(())
 }
 
-/// What §5.6 prices `instrument` from: the last quote with a trade and the last sane bid, oldest
-/// first, then the latest quote.
+/// What §5.6 prices `instrument` from, oldest to newest by when each was observed: the last sane
+/// quote with a trade, the last sane bid, and the latest quote.
 fn observed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Vec<MarketObservation> {
-    let latest = batch.view.quotes.get(instrument);
-    let mut kept: Vec<MarketObservation> = [&batch.view.trades, &batch.view.sane_bids]
-        .into_iter()
-        .filter_map(|kept| kept.get(instrument))
-        .filter(|quote| Some(*quote) != latest)
-        .cloned()
-        .collect();
-    kept.sort_by_key(|quote| quote.observed_at);
-    kept.dedup();
-    kept.into_iter().chain(latest.cloned()).collect()
+    let mut seen: Vec<MarketObservation> = [
+        &batch.view.trades,
+        &batch.view.sane_bids,
+        &batch.view.quotes,
+    ]
+    .into_iter()
+    .filter_map(|kept| kept.get(instrument))
+    .cloned()
+    .collect();
+    seen.sort_by_key(|quote| quote.observed_at);
+    seen.dedup();
+    seen
 }
 
 /// DEC-160 (12): an exit going at its own limit for want of a price, journaled and alerted.
@@ -1134,7 +1136,7 @@ pub struct LadderPrice {
 /// Prices one rung of trading-domain spec §5.6's ladder for a sell (a buy is symmetric).
 ///
 /// The reference bid is the best bid of a fresh, sane quote; failing that the last sane bid
-/// within five minutes; failing that the last trade. The limit is reference × (1 − offset),
+/// within five minutes; failing that the last sane trade within five minutes (DEC-260 (5)). The limit is reference × (1 − offset),
 /// rounded per §2.1. A step happens only after `exit_step_s` has elapsed, with the offset raised
 /// by `exit_offset_step` and repriced from the **current** reference, and the offset never
 /// exceeds `max_exit_offset`.
@@ -1143,8 +1145,9 @@ pub struct LadderPrice {
 /// below the floor that `OwnerExitRequested` carries (§5.5, mandate spec §6.1).
 ///
 /// `observations` run oldest to newest. "Fresh" is the newest observation, sane; "within five
-/// minutes" is [`SANE_BID_WINDOW_S`] of `now`. With no bid and no trade to price from there is no
-/// rung, and the refusal says so rather than guessing a price (rule 3).
+/// minutes" is [`SANE_BID_WINDOW_S`] of `now`, for a bid and a trade alike: an insane print or an
+/// old one prices nothing. With no such bid and no such trade there is no rung, and the refusal
+/// says so rather than guessing a price (rule 3).
 pub(crate) fn ladder_price(
     tier: ExitTier,
     observations: &[MarketObservation],
@@ -1163,7 +1166,11 @@ pub(crate) fn ladder_price(
             .rev()
             .filter(recent)
             .find_map(|quote| quote.bid),
-        observations.iter().rev().find_map(|quote| quote.last_trade),
+        observations
+            .iter()
+            .rev()
+            .filter(recent)
+            .find_map(|quote| quote.last_trade),
     ) {
         (Some(bid), _, _) => (bid, LadderReference::FreshQuote),
         (None, Some(bid), _) => (bid, LadderReference::LastSaneBid),
@@ -5718,6 +5725,75 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-260 (5), #373 round 1, blocker 1: an insane print is no last trade. A sane market at
+    /// 150 more than five minutes ago, then a print at 1000 on an insane quote: the risk exit
+    /// prices nothing from the print and goes at its own limit at once, with the alert.
+    #[test]
+    fn an_insane_print_never_prices_a_rung() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(150), Some(150), true, 0)?, &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(400)), &ports)?;
+        executor.run(observation(None, Some(1000), false, 400)?, &ports)?;
+        executor.run(sell(EXIT, "5", "151", Purpose::RiskExit)?, &ports)?;
+        let sent = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&sent)
+                .iter()
+                .map(|order| order.limit_price)
+                .collect::<Vec<_>>(),
+            vec![Some(Price::parse("151")?)]
+        );
+        assert_eq!(alerts(&sent), vec!["exit_unpriced"], "{:?}", drafted(&sent));
+        Ok(())
+    }
+
+    /// DEC-260 (5), #373 round 1, blocker 1: a trade 100,000 s old prices nothing either, though
+    /// its quote was sane; the exit falls back at once, alerted.
+    #[test]
+    fn an_old_trade_never_prices_a_rung() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(None, Some(150), true, 0)?, &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(100_000)), &ports)?;
+        executor.run(sell(EXIT, "5", "151", Purpose::RiskExit)?, &ports)?;
+        let sent = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&sent)
+                .iter()
+                .map(|order| order.limit_price)
+                .collect::<Vec<_>>(),
+            vec![Some(Price::parse("151")?)]
+        );
+        assert_eq!(alerts(&sent), vec!["exit_unpriced"], "{:?}", drafted(&sent));
+        Ok(())
+    }
+
+    /// #373 round 1, minor 2: market data that arrives out of order is read by when it was
+    /// observed. A sane bid of 150 observed at 10 arrives first, then one of 141 observed at 5:
+    /// the newer-observed 150 prices the rung (149.25), not the later-arrived 141.
+    #[test]
+    fn the_newer_observed_sane_bid_wins_over_a_later_arrival() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(10)), &ports)?;
+        executor.run(observation(Some(150), None, true, 10)?, &ports)?;
+        executor.run(observation(Some(141), None, true, 5)?, &ports)?;
+        executor.run(sell(EXIT, "5", "141", Purpose::RiskExit)?, &ports)?;
+        let sent = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&sent)
+                .iter()
+                .map(|order| order.limit_price)
+                .collect::<Vec<_>>(),
+            vec![Some(Price::parse("149.25")?)]
+        );
+        Ok(())
+    }
+
     /// A quote observed at `at`: its bid (also its mark, kept above the stop at 140 so the
     /// watchdog's stub is never reached), its last trade, and whether it is sane.
     fn observation(
@@ -5812,10 +5888,10 @@ mod sequence_tests {
 
     impl Desk {
         /// §5.6 by the oracle's own reading: there is something to price from when some sane
-        /// bid was seen within five minutes or some trade was ever seen.
+        /// quote with a bid or a trade was seen within five minutes (DEC-260 (5)).
         fn priceable(&self) -> bool {
             self.quotes.iter().any(|(at, bid, trade, sane)| {
-                trade.is_some() || (*sane && bid.is_some() && self.now.saturating_sub(*at) <= 300)
+                *sane && (bid.is_some() || trade.is_some()) && self.now.saturating_sub(*at) <= 300
             })
         }
 
@@ -6266,7 +6342,8 @@ mod ladder_tests {
     }
 
     /// §5.6: the newest sane quote first; else the last sane bid within five minutes; else the
-    /// last trade; and no price at all is refused, never guessed.
+    /// last sane trade within five minutes, a newer insane print skipped (DEC-260 (5)); and no
+    /// price at all is refused, never guessed.
     #[test]
     fn the_reference_falls_back_in_the_spec_order() -> Result<(), ExecutorError> {
         let now = RiskClock::from_secs(400);
@@ -6286,8 +6363,8 @@ mod ladder_tests {
             ),
             (
                 vec![
-                    seen(Some("150"), Some("151"), true, 99)?,
-                    seen(Some("148"), Some("152"), false, 399)?,
+                    seen(None, Some("152"), true, 350)?,
+                    seen(Some("148"), Some("1000"), false, 399)?,
                 ],
                 LadderReference::LastTrade,
                 "151.24",
@@ -6306,10 +6383,19 @@ mod ladder_tests {
                 "{quotes:?}"
             );
         }
-        assert!(matches!(
-            ladder_price(liquid()?, &[seen(None, None, true, 399)?], 0, now, None),
-            Err(ExecutorError::NotInterpreted { .. })
-        ));
+        for nothing in [
+            vec![seen(None, None, true, 399)?],
+            vec![seen(Some("148"), Some("1000"), false, 399)?],
+            vec![seen(Some("150"), Some("151"), true, 99)?],
+        ] {
+            assert!(
+                matches!(
+                    ladder_price(liquid()?, &nothing, 0, now, None),
+                    Err(ExecutorError::NotInterpreted { .. })
+                ),
+                "an insane print or one older than five minutes prices nothing: {nothing:?}"
+            );
+        }
         Ok(())
     }
 
@@ -6372,7 +6458,7 @@ mod ladder_tests {
     proptest! {
         /// DEC-160 (12): `exit_price` answers every purpose, for any observations, step, floor and
         /// limit, and never with a refusal. Its oracle is its own: a sequence's exit prices when
-        /// some sane bid is within five minutes or some trade is known; otherwise a discretionary
+        /// some sane bid or sane trade is within five minutes (DEC-260 (5)); otherwise a discretionary
         /// exit is held and every other exit falls back to its limit, raised to the floor.
         #[test]
         fn exit_price_never_refuses_any_purpose(
@@ -6418,8 +6504,7 @@ mod ladder_tests {
             let exit = !purpose.adds_risk() && purpose != Purpose::Protective;
             let priceable = seen_quotes
                 .iter()
-                .any(|(bid, _, sane, at)| bid.is_some() && *sane && *at >= 700)
-                || seen_quotes.iter().any(|(_, trade, _, _)| trade.is_some());
+                .any(|(bid, trade, sane, at)| (bid.is_some() || trade.is_some()) && *sane && *at >= 700);
             let raised = floor.map_or(limit, |floor| limit.max(floor));
             match (exit && tiered, priceable, purpose) {
                 (false, _, _) => prop_assert_eq!(priced, ExitPrice::Own(limit)),
