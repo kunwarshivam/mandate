@@ -29,8 +29,13 @@
 //! **The approval is compared both ways.** An ASK must state `approvers_required` and `on_timeout`
 //! and match both; an AUTO or a DENY carries no approval (§6.4), so a case that states either member
 //! for one fails rather than having it ignored.
+//!
+//! **Every case is the order builder's own request** (DEC-262). No family-A case states who
+//! asked, and §6.2 step 5a defines the order builder's own proposal as `requested_by: agent`, so
+//! the harness passes [`RequestedBy::Agent`]; a case that stated `requested_by` would fail as an
+//! unread member. The client ceiling is `mandate-builder`'s own tests' to pin.
 
-use mandate_builder::{ActionContext, BuilderError, Classification, classify};
+use mandate_builder::{ActionContext, BuilderError, Classification, RequestedBy, classify};
 use mandate_domain::{AssetClass, AssetId, AutonomyDecision, MarketSession, Purpose};
 use mandate_num::{Signed, Unit, Usd};
 use mandate_spec::document::OnTimeout;
@@ -119,6 +124,7 @@ fn action(id: &str, stated: &Json) -> Result<ActionContext, String> {
         gross_usd_after: usd("gross_usd_after")?,
         bought_today_usd: usd("bought_today_usd")?,
         position_pnl_fraction: signed("position_pnl_fraction")?,
+        requested_by: RequestedBy::Agent,
     })
 }
 
@@ -140,6 +146,7 @@ fn unread_facts() -> Result<ActionContext, String> {
         gross_usd_after: Usd::ZERO,
         bought_today_usd: Usd::ZERO,
         position_pnl_fraction: Signed::ZERO,
+        requested_by: RequestedBy::Agent,
     })
 }
 
