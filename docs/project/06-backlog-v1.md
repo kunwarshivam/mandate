@@ -365,18 +365,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
   (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
   journal them.
-  *Tests done (#321 review, major; DEC-173 items 13 to 15; the M7 tests correction); the
-  implementation follows:* `mandate-approval`'s admission read only the bound
+  *Done (#321 review, major; DEC-173 items 13 to 15; the M7 tests correction, then E8-3's
+  `quorum`, DEC-257):* `mandate-approval`'s admission read only the bound
   `approvers_required` and `independent_required`. It must judge check 7 against the stricter of
   those and the workspace policy overlay current at the effective time: independence if either
   requires it, the larger approver count, and an author's earlier `counted` grant not counting once
-  independence is required. `AdmissionContext.policy` now carries the overlay and
-  `mandate_approval::quorum` names the requirement; `quorum` is a stub, and `admit` fails closed
-  with its `Unimplemented` for a grant that reaches check 7 under any overlay but
-  `PolicyOverlay::NONE`. `tests/quorum.rs` holds eight tests pending E8-3 against
-  `reference/mandate/ref.py`'s `approval_quorum`. **The implementation PR** implements `quorum`,
-  calls it for every overlay, drops the author from the grants that count while independence is
-  required, and deletes the eight `#[ignore]` lines.
+  independence is required. The tests correction gave `AdmissionContext.policy` the overlay and
+  stubbed `mandate_approval::quorum`, which `admit` failed closed on under any overlay but
+  `PolicyOverlay::NONE`, with eight tests in `tests/quorum.rs` pending E8-3 against
+  `reference/mandate/ref.py`'s `approval_quorum`. The implementation PR implemented `quorum`,
+  calls it for every overlay, leaves the author out of the grants that count while independence
+  is required, and deleted the eight `#[ignore]` lines.
   *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
   control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
   would make MI-24 true as written.
@@ -1585,13 +1584,15 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
 - **The `ref.py` reading the #124 handover left for R4.** Settling time before an allocation change
   only when `at > self.t` is equivalent to settling always; settle always. Readings 1 and 2 were
   R3's and are DEC-167 item 7 (a) and (c); handover items 4 (one cash sum) and 5 (the post-loop lift
-  reset) are R2's and are in `risk/fold.rs`.
+  reset) are R2's and are in `risk/fold.rs`. *Done in R4 (DEC-167 item 8 (d)):* the fold settles
+  always.
 - **R3's status PR: fifteen MC-R cases pass.** MC-R01 to MC-R08, MC-R13, MC-R15, MC-R18 to MC-R20,
   MC-R22, and MC-R24 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` on R3 (DEC-167 item 7 (l)); proposing them for `status.toml` is founder-owned.
   *Done ([#356](https://github.com/kunwarshivam/mandate/pull/356), under DEC-77 item 3 as #335
   and #337 were):* exactly these fifteen are marked; the other nine stop at R4's inputs.
-- **DEC-167's wording after R3's tests correction** (#357 review, nits). Item 6(c) keeps the
+- **DEC-167's wording after R3's tests correction** (#357 review, nits). *Done in R4:* both edits
+  are made. Item 6(c) keeps the
   superseded sentence "so it stands when the step's own sale leaves the book flat, as in
   `ref.py`", whose attribution is wrong (`ref.py` discards `stale_mark` on a flat book); strike the
   clause now that 7(e) supersedes it. Item 7(a)'s "only the latch can come earlier" should say
@@ -1617,15 +1618,13 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   minimum order; the ADV is shown only as at least 1,000,000); (4) rename the `num` closure in
   `the_listing_and_market_are_dec_199_item_6s`, which shadows the crate's `num`; (5) shorten the
   done row's verbatim "The row as it was" copy to a pointer at its review.
-- **E8-3's check 7 tests after the overlay correction** (#354 and #355 review, nits), for E8-3's
-  implementation PR: (1) `crates/mandate-approval/tests/quorum.rs` draws a `two_approver_above_usd`
-  of `"0"`, which `schemas/policy.schema.json` excludes (`positive_decimal`); draw only ceilings a
-  workspace can hold, as DEC-173 item 15 already does for grant sets; (2) `quorum`'s doc in
-  `crates/mandate-approval/src/admit.rs` promises `ApprovalError::Unrepresentable` for an order
-  value that overflows, which `content.rs` already refuses when the request is built; say so in the
-  doc or pin it with a test; (3) document `Quorum`'s two public fields as `PolicyOverlay`'s are;
-  (4) rewrap the 165-character line the M7 bullet of `.cursor/skills/verify-mandate/feature-map.md`
-  gained; (5) DEC-173 item 12 still says `mutants.py` has 50 escalation mutants, which #355 made 52.
+- **E8-3's check 7 tests after the overlay correction** (#354 and #355 review, nits; nits 2 to 5
+  done in E8-3's `quorum` PR, DEC-257 item 4): `crates/mandate-approval/tests/quorum.rs` draws a
+  `two_approver_above_usd` of `"0"`, which `schemas/policy.schema.json` excludes
+  (`positive_decimal`); draw only ceilings a workspace can hold, as DEC-173 item 15 already does
+  for grant sets. And (#368 review, minor 3) `tests/quorum.rs`'s module doc still says its tests
+  are pending and fail on `quorum`'s `ApprovalError::Unimplemented`, which E8-3's `quorum` made
+  false. A tests correction, since DEC-77 keeps `tests/` edits out of an implementation PR.
 - **Family A's harness after its tightening** (#360 review, nits), one tests change to
   `crates/mandate-refcases/src/mandate/autonomy.rs` plus DEC-162's wording: (1) DEC-162 item 4 says
   the property test runs "over generated well-typed policies and facts", but `action_context()` pins
@@ -1647,6 +1646,36 @@ From E6-4's slice R3 (stream H2; DEC-167 item 7):
   item 7 (a)). Keep it in `hard_first` and regenerate with `reference/mandate/generate.py`, which must
   leave `fixtures/refcases/mandate.json` unchanged (checked from the crate's side: putting `ref.py`'s
   reading into the fold leaves the same fifteen MC-R cases passing).
+
+From E6-4's slice R4 (stream H2; DEC-167 item 8):
+
+- **`ref.py` holds a re-triggered scale rung back during the stepped lift (reference fix).** After
+  an acknowledgment `RiskState._ack` queues the scale rungs highest `at` first, and a rung that
+  triggers again is removed from `reset_queue` and may lift only once the queue is empty, so the 3%
+  rung can lift while the 4% rung stays active. §5.8 says highest `at` first, and the fold lifts the
+  highest active rung next (DEC-167 item 8 (b)). Re-insert a re-triggered rung in its place, or lift
+  only the highest active rung while stepping, and regenerate with `reference/mandate/generate.py`,
+  which must leave `fixtures/refcases/mandate.json` unchanged.
+- **`ref.py` journals `hold_protected` for a completed `profit_stop` goal (reference fix).** A
+  `goal_complete` input on a `profit_stop` goal (its end date) writes
+  `{"type": "GoalCompleted", "on_complete": "hold_protected"}`; the fold writes its one §3.1
+  outcome, `then: discretionary_exit_all_then_retire` (DEC-167 item 8 (f)). No reference case has
+  one.
+- **`release` journals the loss carry: the reference side (DEC-270; stream H2, first).** One
+  reference and reference-case PR, kept apart from crates (ES-22): `reference/mandate/ref.py`'s
+  `goal_complete` arm journals `AgentStopped` with `loss_carry_usd` = max(0, N − E) after
+  `PositionReleased` when `on_complete` is `release`; MC-R17's expected journal gains it; any §3.1 or
+  §5.7 wording the spec needs under DEC-270; `generate.py`, `check_cases.py`, and the fuzz rerun, and
+  `cargo xtask refcases --write`. Only MC-R17 moves.
+- **`release` journals the loss carry: the `mandate-spec` side (DEC-270; stream H2, after the
+  reference PR).** `Fold::complete_goal`'s `Release` arm journals `AgentStopped` (reason
+  `goal_complete`) with the loss carry, as `retire` does, and a test shows that releasing and
+  redeploying on the same connection opens the new agent at the carried L (through
+  `ValidationContext::from_journal` and V-032).
+- **R4's status PR: the last nine MC-R cases pass.** MC-R09 to MC-R12, MC-R14, MC-R16, MC-R17,
+  MC-R21, and MC-R23 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
+  mandate::MC-R` on R4 (DEC-167 item 8 (i)); marking them in `status.toml` follows under DEC-77
+  item 3, as #356 did for fifteen.
 
 Minor findings from the independent review of slice R2 ([#324](https://github.com/kunwarshivam/mandate/pull/324);
 held back by the freeze rule; R3 took minors 1, 2, and 4, DEC-167 item 7 (i) and (j), and minor 6,
@@ -1838,3 +1867,14 @@ item 25; held back by the freeze rule, one row each):
   removes; raise instead.
 - **Note: the `exit_origin` citation fix pulled a round-2 minor forward (#340 round 1, nit).** Item
   22 corrected the removed-instrument citation that #320 round 2 had backlogged; no action.
+- **`propose` hard-codes `RequestedBy::Agent` (#369 round 1, owed by E10-6).** DEC-262 item 2
+  stamps every buy `propose` sizes as the agent's own, because no owner or client request path
+  calls the builder yet. The request path E10-6 adds must carry the authenticated channel's
+  requester to the order it proposes (§6.2 step 5a) rather than reuse `propose`'s stamp, with a
+  test that a client's request reaches `decide` as `client`.
+- **The client-ceiling sweep has no delegation dimension (#369 round 1, owed by E8-8's tests PR).**
+  `Autonomy` holds no `delegations` until E8-8 (DEC-262 item 5), so
+  `every_rule_default_admission_and_requester_obeys_the_client_ceiling` and
+  `a_client_opening_is_never_auto_and_every_other_request_decides_as_before` cover rules, defaults,
+  admission and requester only. E8-8's tests PR adds live, spent, expired and suspended delegations
+  to both and asserts that none lifts a client's order (MI-26, MI-30).

@@ -367,6 +367,20 @@ impl UsdExact {
             .map(Usd)
     }
 
+    /// `round(self ÷ divisor, scale, mode)` as a [`Usd`]: one rounding of the exact quotient.
+    ///
+    /// Mandate spec §5.1 scales the high-water mark, the day-start equity, the capital base, and
+    /// the inherited loss by `X × (E + Δ) ÷ E`, rounded up at 12 places. The product needs more
+    /// places than a `Usd` holds, so it stays exact until this one division (DEC-167 item 5).
+    /// `division_by_zero` for a zero divisor; `too_precise` when `scale` is past what a `Usd`
+    /// stores.
+    pub fn quotient(self, divisor: Self, scale: u32, mode: Rounding) -> Result<Usd, NumError> {
+        self.0
+            .div(divisor.0, scale, mode)?
+            .to_decimal(FULL_SCALE)
+            .map(Usd)
+    }
+
     /// `truncate(self ÷ price, increment)`: the shares this amount buys at `price`, never more
     /// (§8.3 step 3's one division, trading spec §2.1's truncation to the increment).
     ///
@@ -394,5 +408,60 @@ impl UsdExact {
             return Ok(Qty::ZERO);
         }
         count.mul(increment.exact())?.to_decimal(QTY_SCALE).map(Qty)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn exact(text: &str) -> Result<UsdExact, NumError> {
+        UsdExact::parse(text)
+    }
+
+    /// §5.1's scaling: 10000 × 4500 ÷ 9500 is 4736.842105263157894…, which rounds up at 12 places
+    /// to …158 and half to even to …158 too, while 9500 ÷ 4500 × the scaled mark rounds up past
+    /// 10000 where half to even returns to it. One rounding of the exact quotient, in the mode named.
+    #[test]
+    fn a_quotient_is_rounded_once_in_the_mode_named() -> Result<(), NumError> {
+        let scaled = exact("45000000")?.quotient(exact("9500")?, 12, Rounding::Ceiling)?;
+        assert_eq!(scaled, Usd::parse("4736.842105263158")?);
+        let back = UsdExact::of(scaled).checked_mul(exact("9500")?)?.quotient(
+            exact("4500")?,
+            12,
+            Rounding::Ceiling,
+        )?;
+        assert_eq!(back, Usd::parse("10000.000000000001")?);
+        let even = UsdExact::of(scaled).checked_mul(exact("9500")?)?.quotient(
+            exact("4500")?,
+            12,
+            Rounding::HalfEven,
+        )?;
+        assert_eq!(even, Usd::parse("10000")?);
+        assert_eq!(
+            exact("-1")?.quotient(exact("3")?, 2, Rounding::Ceiling)?,
+            Usd::parse("-0.33")?,
+            "a ceiling of a negative quotient rounds toward zero"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_quotient_by_zero_or_past_a_usd_is_an_error() -> Result<(), NumError> {
+        assert_eq!(
+            exact("1")?.quotient(UsdExact::zero(), 12, Rounding::Ceiling),
+            Err(NumError::DivisionByZero)
+        );
+        assert!(
+            exact("1")?
+                .quotient(exact("3")?, 29, Rounding::Ceiling)
+                .is_err(),
+            "29 places is past the 28 a Usd stores"
+        );
+        assert_eq!(
+            exact("1")?.quotient(exact("3")?, 28, Rounding::HalfEven)?,
+            Usd::parse("0.3333333333333333333333333333")?
+        );
+        Ok(())
     }
 }

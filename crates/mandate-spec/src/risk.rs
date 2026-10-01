@@ -491,9 +491,10 @@ pub trait SessionClock {
 /// staleness on it (DEC-167 item 5). The clock is not state: two states that folded the same inputs
 /// are equal whichever clock each holds.
 ///
-/// Slices R2 and R3 fold marks, fills, clock ticks, the risk day, universe changes, a held
-/// instrument's staleness, and a `profit_stop` goal. Acknowledgments, allocation changes, floor
-/// loosening, goal completion, and retirement (slice R4) are [`SpecError::Unimplemented`].
+/// It folds every input §5.2 lists: marks, fills, clock ticks, the risk day, universe changes, a
+/// held instrument's staleness, a `profit_stop` goal, the owner's acknowledgments, allocation
+/// changes, floor loosening, goal completion, and retirement. An owner's or a version's input that
+/// is refused is an [`Outcome`] with `rejection` set, never an error.
 #[derive(Clone)]
 pub struct RiskState<'c> {
     clock: &'c dyn SessionClock,
@@ -529,9 +530,9 @@ impl<'c> RiskState<'c> {
     ///
     /// # Errors
     /// A step before the previous step's time is [`SpecError::ClockWentBackwards`]. A step between two
-    /// whole seconds of the risk clock (§5.2), a sale of more than the agent holds, and a risk day
-    /// that starts while a breach carried over the previous rollover is still undecided are
-    /// `invalid_input`. An input slice R4 folds is [`SpecError::Unimplemented`]. A step that fails
+    /// whole seconds of the risk clock (§5.2), a sale of more than the agent holds, a risk day that
+    /// starts while a breach carried over the previous rollover is still undecided, and an
+    /// allocation change at an equity that is not positive are `invalid_input`. A step that fails
     /// leaves the state as it was.
     ///
     /// An error is never an answer, neither "nothing happened" nor a refusal of the input: it is a

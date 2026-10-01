@@ -25,7 +25,7 @@ use mandate_spec::document::{ModelId, SizingMethod};
 use mandate_time::UtcNanos;
 
 use crate::BuilderError;
-use crate::autonomy::ActionContext;
+use crate::autonomy::{ActionContext, RequestedBy};
 
 /// A signal model's semantic version, exactly the schema's `major.minor.patch` of at most six
 /// digits a part.
@@ -744,6 +744,7 @@ fn buy(
             gross_usd_after: account.gross_usd.checked_add(order_usd)?,
             bought_today_usd: risk.bought_today_usd.checked_add(order_usd)?,
             position_pnl_fraction: risk.position_pnl_fraction,
+            requested_by: RequestedBy::Agent,
         },
     })
 }
