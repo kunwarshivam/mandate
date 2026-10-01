@@ -667,13 +667,14 @@ fn owner_exit(
         ("bid_size", payload::text(&bid_size)),
         ("floor", payload::text(&floor)),
         ("user", payload::text(&user)),
-        ("step_up", payload::text(&assertion)),
+        (
+            "step_up",
+            step_up.map_or_else(|| payload::text(&assertion), |(_, e)| e.clone()),
+        ),
         ("confirmed", Value::Bool(confirmation.is_some())),
     ];
-    if let Some((status, evidence)) = step_up {
-        members.retain(|(name, _)| *name != "step_up");
+    if let Some((status, _)) = step_up {
         members.push(("step_up_status", payload::text(status)));
-        members.push(("step_up", evidence.clone()));
     }
     payload::object(members)
 }

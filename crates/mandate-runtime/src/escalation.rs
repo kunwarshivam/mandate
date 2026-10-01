@@ -803,38 +803,4 @@ pub(crate) fn exit_plan(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// DEC-257 item 8: only an age outside the window is `stale`; evidence that is reused, of a
-    /// method the environment refuses, or missing is `absent`, and evidence that counts is `valid`.
-    #[test]
-    fn step_up_status_names_only_age_as_stale() {
-        assert_eq!(step_up_status(None), "valid");
-        assert_eq!(step_up_status(Some(StepUpRefusal::Stale)), "stale");
-        for absent in [
-            StepUpRefusal::Missing,
-            StepUpRefusal::Reused,
-            StepUpRefusal::Method,
-        ] {
-            assert_eq!(step_up_status(Some(absent)), "absent", "{absent:?}");
-        }
-    }
-
-    /// An exit is never asked: only `open` and `increase` bind (`AGENTS.md` rule 2).
-    #[test]
-    fn only_risk_adding_purposes_are_askable() {
-        for purpose in [
-            Purpose::RiskExit,
-            Purpose::OwnerExit,
-            Purpose::DiscretionaryExit,
-            Purpose::Protective,
-            Purpose::Flatten,
-        ] {
-            assert_eq!(askable(purpose), None, "{purpose:?}");
-        }
-        assert_eq!(askable(Purpose::Open), Some(AskablePurpose::Open));
-        assert_eq!(askable(Purpose::Increase), Some(AskablePurpose::Increase));
-        assert_eq!(purpose_of(AskablePurpose::Increase), Purpose::Increase);
-    }
-}
+mod tests;
