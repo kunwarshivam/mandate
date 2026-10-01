@@ -380,6 +380,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Follow-up (DEC-280 item 7):* `mandate-journal`'s catalogue gains `OwnerCommandRefused` (agent and
   account streams), and the runtime journals it for a refused resume or Stop, tests first, with a
   test that a refused Stop leaves exactly that event (the #395 review, major 1; DEC-278 item 12).
+  *Tests done (the M7 `OwnerCommandRefused` tests PR, DEC-291); the runtime's implementation
+  follows:* the catalogue admits it on the account and agent streams; three tests in
+  `crates/mandate-runtime/tests/approvals.rs` are pending E8-3: a refused Stop leaves exactly its
+  `OwnerCommandRefused` for each of missing, stale and reused evidence, a stale resume does the
+  same, and a refused command re-tailed after a restart writes nothing. The executor's half (a
+  refused acknowledgment) rides with E7-4 slice 5's copy of `OwnerAcknowledged` (DEC-291 item 4).
   *Follow-up (the #397 review, minors 1 to 5; one M7 tests PR before the `clap` wiring makes the
   commands reachable):* pin the closed key set of every control payload the CLI commits
   (`OwnerCommandIssued`, `ApprovalResponseSubmitted`, `OwnerAcknowledged`) in `tests/agent.rs` and
@@ -487,9 +493,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `--release` choice and the warning shown to `Command::Stop` and the payload (journal spec §9).
   *Prerequisite (DEC-257 item 17):* `mandate-journal` registers no payload schema for any agent- or
   control-stream event (`ApprovalRequested`, `ApprovalResponseSubmitted`, `OwnerCommandIssued`,
-  `OwnerAcknowledged`, and the rest), so a real journal refuses each one as `UnknownSchema` and
-  neither the runtime's nor the CLI's implementation can append through one. Register the schemas
-  as journal spec §9 closes them, with the catalogue entries above, before either implementation.
+  `OwnerAcknowledged`, `OwnerCommandRefused`, and the rest), so a real journal refuses each one as
+  `UnknownSchema` and neither the runtime's nor the CLI's implementation can append through one.
+  Register the schemas as journal spec §9 closes them, with the catalogue entries above, before
+  either implementation.
   *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
   control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
   would make MI-24 true as written.
@@ -766,6 +773,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   no user's results are aggregated; every thesis is scored after its horizon against buy-and-hold of
   the eligible basket and a broad index ETF, net of the cost model; the report states pass or fail
   against the threshold and is reproducible from the journal.
+  *Follow-up (#410 review, minor 3; DEC-282 item 9):* an evaluation whose scoreable set is empty
+  against a registered `minimum_scoreable` of zero refuses with `Num(DivisionByZero)` — fail-loud,
+  but a code that tells a caller nothing. A tests PR names the refusal (a `ResearchError` arm of
+  its own; the registry's codes are add-only) so the empty report carries its reason, with the
+  frozen surface otherwise unchanged.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -1196,7 +1208,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **Blocks E7-4 slice 5 (the trading day):** `mandate-executor` must copy the cross-stream facts
   journal spec §2 gives it (`AgentModeApplied` from the agent stream's `AgentModeChanged`,
   `TradingDayStarted`, `ClockAdvanced` crossing midnight America/New_York, `OwnerAcknowledged` from the
-  control stream), each with its `causation_id`. Before E7-4 slice 1, `step`'s `Input::Journal(_) => Ok(())` copied
+  control stream), each with its `causation_id`. An acknowledgment whose step-up does not count is
+  copied as `OwnerCommandRefused` instead (command `acknowledge`, the reason, `effective_at`), lifts
+  nothing, and is tested first to leave exactly that event (DEC-291 item 4, journal spec §2). Before E7-4 slice 1, `step`'s `Input::Journal(_) => Ok(())` copied
   nothing, silently, so `properties::every_copied_draft_cites_its_origin` sees no copied draft under any
   script and passes vacuously. The slice that adds the producer also adds a generator step (a clock
   advance crossing midnight New York, an owner acknowledgment) and asserts `seen > 0` on scripts

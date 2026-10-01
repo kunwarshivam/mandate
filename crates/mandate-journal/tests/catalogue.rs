@@ -52,6 +52,7 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("AgentModeApplied", &[ACCT], &[]),
     ("TradingDayStarted", &[ACCT, CLOCK], &[]),
     ("KillSwitchActivated", &[ACCT, AGENT], &[]),
+    ("OwnerCommandRefused", &[ACCT, AGENT], &[]),
     ("MandateVersionApplied", &[ACCT], &[MAN]),
     ("RiskDayStarted", &[ACCT], &[MAN]),
     ("RiskLimitTriggered", &[ACCT], &[MAN]),
