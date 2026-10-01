@@ -304,8 +304,7 @@
 'MC-L04' = { status = "passing", story = "E6-4" }
 'MC-L05' = { status = "passing", story = "E6-4" }
 
-# Family R (stream H, E6-4 slice R3; DEC-77 item 3, DEC-167 item 7 (l)). The other nine stop at
-# an input slice R4 folds.
+# Family R (stream H, E6-4 slices R3 and R4; DEC-77 item 3, DEC-167 items 7 (l) and 8 (i)).
 'MC-R01' = { status = "passing", story = "E6-4" }
 'MC-R02' = { status = "passing", story = "E6-4" }
 'MC-R03' = { status = "passing", story = "E6-4" }
@@ -314,12 +313,21 @@
 'MC-R06' = { status = "passing", story = "E6-4" }
 'MC-R07' = { status = "passing", story = "E6-4" }
 'MC-R08' = { status = "passing", story = "E6-4" }
+'MC-R09' = { status = "passing", story = "E6-4" }
+'MC-R10' = { status = "passing", story = "E6-4" }
+'MC-R11' = { status = "passing", story = "E6-4" }
+'MC-R12' = { status = "passing", story = "E6-4" }
 'MC-R13' = { status = "passing", story = "E6-4" }
+'MC-R14' = { status = "passing", story = "E6-4" }
 'MC-R15' = { status = "passing", story = "E6-4" }
+'MC-R16' = { status = "passing", story = "E6-4" }
+'MC-R17' = { status = "passing", story = "E6-4" }
 'MC-R18' = { status = "passing", story = "E6-4" }
 'MC-R19' = { status = "passing", story = "E6-4" }
 'MC-R20' = { status = "passing", story = "E6-4" }
+'MC-R21' = { status = "passing", story = "E6-4" }
 'MC-R22' = { status = "passing", story = "E6-4" }
+'MC-R23' = { status = "passing", story = "E6-4" }
 'MC-R24' = { status = "passing", story = "E6-4" }
 
 # Family C (stream F, E10-3; DEC-77 item 3, DEC-172).

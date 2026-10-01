@@ -3604,7 +3604,6 @@ fn a_proposed_buy_is_the_order_builders_own_request() {
 /// the `auto` rule that makes the agent's own identical order AUTO, labelled `client_ceiling` and
 /// carrying §6.4's approval.
 #[test]
-#[ignore = "pending E6-12"]
 fn a_client_opening_under_an_auto_rule_is_asked_by_the_client_ceiling() {
     let agents = classified(&base_policy(), &opening("300", "0.8"));
     assert_eq!(agents.decision, AutonomyDecision::Auto);
@@ -3637,7 +3636,6 @@ fn a_client_opening_under_an_auto_rule_is_asked_by_the_client_ceiling() {
 
 /// §6.2 step 5a: an `auto` default does not let a client's order through either.
 #[test]
-#[ignore = "pending E6-12"]
 fn a_client_opening_under_an_auto_default_is_asked() {
     let autopilot = policy(
         Vec::new(),
@@ -3680,7 +3678,6 @@ fn a_client_opening_under_an_auto_default_is_asked() {
 /// admission setting, which makes the agent's first order in an admitted instrument AUTO (MC-A13's
 /// shape), still leaves a client's ASK.
 #[test]
-#[ignore = "pending E6-12"]
 fn a_client_admission_under_an_auto_admission_setting_is_asked() {
     let admitted = ActionContext {
         new_instrument: true,
@@ -3720,7 +3717,6 @@ fn a_client_admission_under_an_auto_admission_setting_is_asked() {
 /// deny a client's order, label and all, and ask nobody. The anchor is the same rules asking a
 /// client's smaller order, so the ceiling is shown to run.
 #[test]
-#[ignore = "pending E6-12"]
 fn a_deny_still_denies_a_client_request() {
     let mut rules = vec![Rule {
         id: rule_id("too_big"),
@@ -3764,7 +3760,6 @@ fn a_deny_still_denies_a_client_request() {
 /// rules or the admission ceiling already ask about keeps that source, as `decided_by` must say
 /// what asked (§6.4).
 #[test]
-#[ignore = "pending E6-12"]
 fn an_ask_reached_before_the_client_ceiling_keeps_its_source() {
     let large = classified(
         &base_policy(),
@@ -3832,7 +3827,6 @@ fn owner_and_agent_requests_decide_as_before() {
 /// The routine order the owner's and the agent's run is asked by the ceiling, and the large one the
 /// rules already ask about keeps the rule's label.
 #[test]
-#[ignore = "pending E6-12"]
 fn a_client_request_beside_the_owners_is_asked() {
     let routine = classified(
         &base_policy(),
@@ -3851,7 +3845,6 @@ fn a_client_request_beside_the_owners_is_asked() {
 /// §6.4, MC-A10's threshold: an ASK the client ceiling raised needs two approvers strictly above
 /// `two_approver_above_usd` and one at it, like any other ASK.
 #[test]
-#[ignore = "pending E6-12"]
 fn a_client_ask_above_the_threshold_needs_two_approvers() {
     let with_threshold = policy(
         base_rules(),
@@ -3927,7 +3920,6 @@ fn every_reducing_purpose_a_client_asks_for_is_auto_by_the_builtin() {
 /// §6.2 steps 4 and 5a: a client's `open` is judged by the rules its exits skip. The rules that
 /// deny everything deny it under their own label, and rules that allow everything ask it.
 #[test]
-#[ignore = "pending E6-12"]
 fn a_client_opening_is_judged_by_the_rules_its_exits_skip() {
     let denied = classified(
         &deny_everything(),
@@ -3953,7 +3945,6 @@ fn a_client_opening_is_judged_by_the_rules_its_exits_skip() {
 /// would run the agent's own, one the gate denies is skipped with nobody asked, and a deferred one
 /// is deferred.
 #[test]
-#[ignore = "pending E6-12"]
 fn decide_asks_a_client_buy_the_gate_allows_and_skips_one_it_denies() {
     let agents = buy_proposal("300", "0.8");
     let mut clients = agents.clone();

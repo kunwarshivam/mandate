@@ -1596,13 +1596,15 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
 - **The `ref.py` reading the #124 handover left for R4.** Settling time before an allocation change
   only when `at > self.t` is equivalent to settling always; settle always. Readings 1 and 2 were
   R3's and are DEC-167 item 7 (a) and (c); handover items 4 (one cash sum) and 5 (the post-loop lift
-  reset) are R2's and are in `risk/fold.rs`.
+  reset) are R2's and are in `risk/fold.rs`. *Done in R4 (DEC-167 item 8 (d)):* the fold settles
+  always.
 - **R3's status PR: fifteen MC-R cases pass.** MC-R01 to MC-R08, MC-R13, MC-R15, MC-R18 to MC-R20,
   MC-R22, and MC-R24 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` on R3 (DEC-167 item 7 (l)); proposing them for `status.toml` is founder-owned.
   *Done ([#356](https://github.com/kunwarshivam/mandate/pull/356), under DEC-77 item 3 as #335
   and #337 were):* exactly these fifteen are marked; the other nine stop at R4's inputs.
-- **DEC-167's wording after R3's tests correction** (#357 review, nits). Item 6(c) keeps the
+- **DEC-167's wording after R3's tests correction** (#357 review, nits). *Done in R4:* both edits
+  are made. Item 6(c) keeps the
   superseded sentence "so it stands when the step's own sale leaves the book flat, as in
   `ref.py`", whose attribution is wrong (`ref.py` discards `stale_mark` on a flat book); strike the
   clause now that 7(e) supersedes it. Item 7(a)'s "only the latch can come earlier" should say
@@ -1656,6 +1658,36 @@ From E6-4's slice R3 (stream H2; DEC-167 item 7):
   item 7 (a)). Keep it in `hard_first` and regenerate with `reference/mandate/generate.py`, which must
   leave `fixtures/refcases/mandate.json` unchanged (checked from the crate's side: putting `ref.py`'s
   reading into the fold leaves the same fifteen MC-R cases passing).
+
+From E6-4's slice R4 (stream H2; DEC-167 item 8):
+
+- **`ref.py` holds a re-triggered scale rung back during the stepped lift (reference fix).** After
+  an acknowledgment `RiskState._ack` queues the scale rungs highest `at` first, and a rung that
+  triggers again is removed from `reset_queue` and may lift only once the queue is empty, so the 3%
+  rung can lift while the 4% rung stays active. §5.8 says highest `at` first, and the fold lifts the
+  highest active rung next (DEC-167 item 8 (b)). Re-insert a re-triggered rung in its place, or lift
+  only the highest active rung while stepping, and regenerate with `reference/mandate/generate.py`,
+  which must leave `fixtures/refcases/mandate.json` unchanged.
+- **`ref.py` journals `hold_protected` for a completed `profit_stop` goal (reference fix).** A
+  `goal_complete` input on a `profit_stop` goal (its end date) writes
+  `{"type": "GoalCompleted", "on_complete": "hold_protected"}`; the fold writes its one §3.1
+  outcome, `then: discretionary_exit_all_then_retire` (DEC-167 item 8 (f)). No reference case has
+  one.
+- **`release` journals the loss carry: the reference side (DEC-270; stream H2, first).** One
+  reference and reference-case PR, kept apart from crates (ES-22): `reference/mandate/ref.py`'s
+  `goal_complete` arm journals `AgentStopped` with `loss_carry_usd` = max(0, N − E) after
+  `PositionReleased` when `on_complete` is `release`; MC-R17's expected journal gains it; any §3.1 or
+  §5.7 wording the spec needs under DEC-270; `generate.py`, `check_cases.py`, and the fuzz rerun, and
+  `cargo xtask refcases --write`. Only MC-R17 moves.
+- **`release` journals the loss carry: the `mandate-spec` side (DEC-270; stream H2, after the
+  reference PR).** `Fold::complete_goal`'s `Release` arm journals `AgentStopped` (reason
+  `goal_complete`) with the loss carry, as `retire` does, and a test shows that releasing and
+  redeploying on the same connection opens the new agent at the carried L (through
+  `ValidationContext::from_journal` and V-032).
+- **R4's status PR: the last nine MC-R cases pass.** MC-R09 to MC-R12, MC-R14, MC-R16, MC-R17,
+  MC-R21, and MC-R23 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
+  mandate::MC-R` on R4 (DEC-167 item 8 (i)); marking them in `status.toml` follows under DEC-77
+  item 3, as #356 did for fifteen.
 
 Minor findings from the independent review of slice R2 ([#324](https://github.com/kunwarshivam/mandate/pull/324);
 held back by the freeze rule; R3 took minors 1, 2, and 4, DEC-167 item 7 (i) and (j), and minor 6,

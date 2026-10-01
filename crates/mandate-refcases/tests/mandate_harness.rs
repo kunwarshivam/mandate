@@ -532,7 +532,6 @@ fn every_change_case_passes_and_fails_on_each_edited_expectation() {
 /// right first event and a wrong second one could not be told from a right one here (#271 review, note
 /// 2). An empty journal still gains one stranger event.
 #[test]
-#[ignore = "pending E6-4"]
 fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
     let fixture = fixture();
     let ids = ids_of(&fixture, "risk_state");
