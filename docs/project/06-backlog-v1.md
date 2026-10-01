@@ -1160,21 +1160,27 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
   resubmitted at the same price every `exit_step_s`.
 - **E7-4 slice 5 (stream K), from slice 4b ([DEC-260](04-decision-log.md#decisions) (12)):**
-  the triggered-stop watchdog fires only in a session where the stop can trigger (§5.4: stops do
-  not trigger in extended hours), once slice 5 folds the session; and a crypto stop-limit is
-  watchdogged as soon as a sane mark is below its limit price, once slice 5 places stop-limits.
-  Until then the watchdog fires on any breach that lasts `stop_watchdog_s`.
+  a crypto stop-limit is watchdogged as soon as a sane mark is below its limit price, once slice 5
+  places stop-limits. The session condition landed with slice 5's session part (DEC-260 (15)).
 - **E7-4 slice 6's tests PR (stream K), from slice 4b (DEC-160 (11), (24)):** add pending tests
   that every kill switch whose scope covers an instrument cancels a working `*` watchdog exit
   there by its own `client_order_id` (`md-w-<record>`), an agent-scoped one included when it
   closes that instrument (§5.5's table), and that an agent-scoped kill switch never treats it as
   that agent's own: it is never counted in the agent's sub-ledger sell and never reached by
   cancel-all.
-- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 2
-  (minor A):** apply §8.2's in-session test to the exit ladder's last-trade arm once slice 5 folds
-  the session. Slice 4a takes a trade only from a sane quote within five minutes
-  ([DEC-260](04-decision-log.md#decisions) (5)); a print from outside the session the exit is in
-  must not price a rung either.
+- **E7-4 slice 5's session part, left open (stream K, DEC-260 (13), (14)):** the closing auction
+  window is §4.3's 10-minute default as a constant in `mandate-executor`'s `session`; read it from
+  the gate's effective-dated configuration (`close_window_minutes`) once the executor holds it. A
+  presumed halt is read from the latest quote only (older than `exit_step_s`, or not sane); add
+  the trading-status and LULD feed §4.4 names once the shell subscribes to it. The coordinator's
+  ruling on D1 to D3 ([#174](https://github.com/kunwarshivam/mandate/pull/174), comment
+  5926134821) decides whether a closed-market exit is held for pre-market rather than queued by
+  the broker, and whether a held exit is ever abandoned for age.
+- **E7-4 (stream K), from [#385](https://github.com/kunwarshivam/mandate/pull/385)'s review (minor
+  4):** the rule-13 oracle's waiting-exit `limit` branch
+  (`protection::sequence_tests::rule_13_script`) is dormant: no script holds an exit unexcused long
+  enough to reach it. The follow-up either makes the branch bite, with a script that holds an exit
+  unexcused and a plant it catches, or deletes it along with `quiet_since`.
 - **E7-4 (stream K), found by slice 4a's rule-13 oracle (`protection::sequence_tests::rule_13_holds_over_random_scripts`):**
   (1) a passive exit waits on its OCO's cancel confirmation with no bound and no alert: a broker
   that never confirms holds the exit for good, with the protection still resting (rule 13's broker

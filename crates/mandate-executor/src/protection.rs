@@ -18,7 +18,8 @@ use crate::intent::{
 use crate::orders::transition;
 use crate::payload::{int, text};
 use crate::ports::Ports;
-use crate::state::{EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome};
+use crate::session::{Venue, extended_hours, same_session, stops_trigger_since, venue};
+use crate::state::{EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, LoneLadder};
 use crate::types::{
     AgentId, BrokerRequest, EventId, ExitTier, IntentBody, IntentHandoff, MarketObservation, Mode,
     OcoLegs, OrderState, OrderType, ProtectionPrices, Purpose, RiskClock, SubmitOrder, TimeInForce,
@@ -109,7 +110,8 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .breaches
         .iter()
         .filter(|(instrument, since)| {
-            now.saturating_sub(since.secs()) >= wait
+            stops_trigger_since(batch.ports, instrument, batch.at())
+                .is_some_and(|open| now.saturating_sub(since.secs().max(open)) >= wait)
                 && batch
                     .view
                     .watchdogged
@@ -229,10 +231,44 @@ pub(crate) fn exit_price(
     }
 }
 
-/// An exit where §5.4's sequence runs, or will once the gate allows it (protection rests), is
-/// priced by §5.6's ladder from the last sane bid and the latest quote, oldest first; every other
-/// order keeps its intent's limit, and so does the exit of a passive sequence, which is placed as
-/// its new OCO's take-profit at that limit (§5.4) and needs nothing to price from.
+/// Whether §5.6 ladders an exit with no protection to cancel first (DEC-260 (14)): one that must be
+/// marketable where no market order may go — in extended hours, in the closing auction window, or
+/// in a presumed halt (§4.4: the latest quote stale or not sane) — and whose purpose may trade
+/// there: a risk exit, a protective order or a flatten in any of them, and an owner exit in the
+/// regular session. A discretionary exit is paced (§9.6), an instrument with no tier has no
+/// ladder, and an exit priced above a fresh sane bid is passive: each keeps its own limit.
+pub(crate) fn alone(
+    batch: &Batch<'_, '_>,
+    instrument: &InstrumentId,
+    purpose: Purpose,
+    limit: Price,
+) -> bool {
+    let fresh = batch
+        .at()
+        .secs()
+        .saturating_sub(batch.ports.config.exit_step_s);
+    let latest = batch.view.quotes.get(instrument);
+    let current = latest.filter(|quote| quote.sane && quote.observed_at.secs() >= fresh);
+    let may = purpose.exempt_from_pacing()
+        || purpose == Purpose::OwnerExit
+            && venue(batch.ports, instrument, batch.at()) != Venue::Extended;
+    let needed = match venue(batch.ports, instrument, batch.at()) {
+        Venue::Extended | Venue::Closing => true,
+        Venue::Regular => latest.is_some() && current.is_none(),
+        Venue::Closed => false,
+    };
+    may && needed
+        && batch.ports.instruments.exit_tier(instrument).is_some()
+        && !current
+            .and_then(|quote| quote.bid)
+            .is_some_and(|bid| limit > bid)
+}
+
+/// An exit where §5.4's sequence runs, or will once the gate allows it (protection rests), or one
+/// [`alone`] ladders, is priced by §5.6's ladder from the last sane bid and the latest quote,
+/// oldest first; every other order keeps its intent's limit, and so does the exit of a passive
+/// sequence, which is placed as its new OCO's take-profit at that limit (§5.4) and needs nothing
+/// to price from.
 pub(crate) fn exit_limit(
     batch: &Batch<'_, '_>,
     intent: &IntentId,
@@ -245,7 +281,9 @@ pub(crate) fn exit_limit(
         .exiting
         .get(instrument)
         .is_some_and(|sequence| sequence.passive && &sequence.intent == intent);
-    if passive || !batch.view.exiting.contains_key(instrument) && !rests(&batch.view, instrument) {
+    let unsequenced =
+        !batch.view.exiting.contains_key(instrument) && !rests(&batch.view, instrument);
+    if passive || unsequenced && !alone(batch, instrument, purpose, limit) {
         return ExitPrice::Own(limit);
     }
     let tier = batch.ports.instruments.exit_tier(instrument);
@@ -333,18 +371,29 @@ pub(crate) fn ladder_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
         .iter()
         .filter(|(instrument, sequence)| {
             !sequence.passive
-                && !sequence.ladder.floored
-                && !sequence.ladder.stepping
                 && batch.ports.instruments.exit_tier(instrument).is_some()
                 && climbs(&batch.view, sequence)
-                && sequence
-                    .ladder
+        })
+        .map(|(_, sequence)| (&sequence.intent, sequence.ladder))
+        .chain(
+            batch
+                .view
+                .ladders
+                .iter()
+                .filter(|(instrument, lone)| {
+                    batch.ports.instruments.exit_tier(instrument).is_some()
+                        && batch.view.effective_mode(&lone.agent) < Mode::Paused
+                })
+                .map(|(_, lone)| (&lone.intent, lone.ladder)),
+        )
+        .filter(|(_, ladder)| {
+            !ladder.floored
+                && !ladder.stepping
+                && ladder
                     .since
                     .is_some_and(|since| now.saturating_sub(since.secs()) >= step_s)
         })
-        .map(|(_, sequence)| {
-            ClientOrderId::for_intent(&sequence.intent)?.rung(sequence.ladder.rung)
-        })
+        .map(|(intent, ladder)| ClientOrderId::for_intent(intent)?.rung(ladder.rung))
         .collect::<Result<Vec<_>, _>>()?;
     for id in due {
         let live = batch.view.orders.get(&id).is_some_and(|order| {
@@ -374,10 +423,11 @@ pub(crate) fn ladder_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
 fn next_rung(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
-    sequence: &ExitSequence,
+    (intent, rung): (&IntentId, u32),
     qty: Qty,
+    lone: bool,
 ) -> Result<(), ExecutorError> {
-    let (agent, body) = intent_of(batch, &sequence.intent)?;
+    let (agent, body) = intent_of(batch, intent)?;
     let IntentBody::Order {
         side,
         limit,
@@ -387,7 +437,7 @@ fn next_rung(
     else {
         return Ok(());
     };
-    let step = sequence.ladder.rung.saturating_add(1);
+    let step = rung.saturating_add(1);
     let tier = batch.ports.instruments.exit_tier(instrument);
     let observations = observed(batch, instrument);
     let rung = tier.map(|tier| ladder_price(tier, &observations, step, batch.at(), None));
@@ -397,12 +447,12 @@ fn next_rung(
             rung.at_floor,
         ),
         _ => {
-            fallback(batch, &sequence.intent, instrument, limit)?;
+            fallback(batch, intent, instrument, limit)?;
             (limit, false)
         }
     };
     let request = SubmitOrder {
-        client_order_id: ClientOrderId::for_intent(&sequence.intent)?.rung(step)?,
+        client_order_id: ClientOrderId::for_intent(intent)?.rung(step)?,
         instrument: instrument.clone(),
         side,
         qty,
@@ -412,14 +462,17 @@ fn next_rung(
         stop_price: None,
         bracket: None,
         oco: None,
-        extended_hours: false,
+        extended_hours: extended_hours(batch.ports, instrument, batch.at(), purpose),
         purpose,
     };
-    let extra = vec![
+    let mut extra = vec![
         ("rung", int(u64::from(step))?),
         ("at_floor", Value::Bool(at_floor)),
     ];
-    journal_rung(batch, &request, Some(&sequence.intent), &agent, 1, extra)?;
+    if lone {
+        extra.push(("laddered", Value::Bool(true)));
+    }
+    journal_rung(batch, &request, Some(intent), &agent, 1, extra)?;
     if at_floor {
         let alerted = changed(batch, instrument, "ladder_floor", Vec::new())?;
         batch.notify(alerted, "exit_ladder_floor");
@@ -429,7 +482,8 @@ fn next_rung(
 }
 
 /// What §5.6 prices `instrument` from, oldest to newest by when each was observed: the last sane
-/// quote with a trade, the last sane bid, and the latest quote.
+/// quote with a trade, the last sane bid, and the latest quote. A trade printed in another session
+/// prices nothing (§8.2: a last trade counts only in-session).
 fn observed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Vec<MarketObservation> {
     let mut seen: Vec<MarketObservation> = [
         &batch.view.trades,
@@ -439,6 +493,12 @@ fn observed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Vec<MarketObser
     .into_iter()
     .filter_map(|kept| kept.get(instrument))
     .cloned()
+    .map(|mut quote| {
+        if !same_session(batch.ports, instrument, quote.observed_at, batch.at()) {
+            quote.last_trade = None;
+        }
+        quote
+    })
     .collect();
     seen.sort_by_key(|quote| quote.observed_at);
     seen.dedup();
@@ -773,6 +833,37 @@ pub(crate) fn protection_cancelled(
     changed(batch, instrument, "cancelled", orders).map(|_| ())
 }
 
+/// §5.6 step 2 for an exit [`alone`] ladders: a rung's confirmed step cancel submits the next
+/// rung for what it left unsold. The step was asked while the ladder climbed, and no protection
+/// returns for the remainder, so a pause since then does not end it (DEC-260 (14)).
+fn lone_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let ladders: Vec<(InstrumentId, LoneLadder)> = batch
+        .view
+        .ladders
+        .iter()
+        .map(|(instrument, lone)| (instrument.clone(), lone.clone()))
+        .collect();
+    for (instrument, lone) in ladders.into_iter().filter(|(_, lone)| lone.ladder.stepping) {
+        let rung = ClientOrderId::for_intent(&lone.intent)?.rung(lone.ladder.rung)?;
+        let left = match batch.view.orders.get(&rung) {
+            Some(order) if order.state == OrderState::Canceled => {
+                order.qty.checked_sub(order.filled_qty)?
+            }
+            _ => Qty::ZERO,
+        };
+        if left > Qty::ZERO {
+            next_rung(
+                batch,
+                &instrument,
+                (&lone.intent, lone.ladder.rung),
+                left,
+                true,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 /// After every step (§5.4): the waiting exits are re-evaluated ([`release_waiting`]); then, in an
 /// instrument where a sequence runs and no protective order rests any more, once the sequence's
 /// exit is terminal, denied or abandoned **and** no other exit there is working or waiting, the
@@ -789,6 +880,7 @@ pub(crate) fn protection_cancelled(
 /// other exits, and [`replace`] then covers what they left unsold (#286 round 2, M1′).
 pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     release_waiting(batch)?;
+    lone_steps(batch)?;
     let sequences: Vec<(InstrumentId, ExitSequence)> = batch
         .view
         .exiting
@@ -804,7 +896,8 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             Some(order) if order.state == OrderState::Canceled && steps(&batch.view, &sequence) => {
                 let left = order.qty.checked_sub(order.filled_qty)?;
                 if left > Qty::ZERO {
-                    next_rung(batch, &instrument, &sequence, left)?;
+                    let at = (&sequence.intent, sequence.ladder.rung);
+                    next_rung(batch, &instrument, at, left, false)?;
                     continue;
                 }
                 true
@@ -6528,8 +6621,8 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// A quote observed at `at`: its bid (also its mark, kept above the stop at 140 so the
-    /// watchdog's stub is never reached), its last trade, and whether it is sane.
+    /// A quote observed at `at`: its bid (also its mark, so a bid at or below the stop at 140 is a
+    /// breach the watchdog counts), its last trade, and whether it is sane.
     fn observation(
         bid: Option<u32>,
         trade: Option<u32>,
@@ -6624,10 +6717,27 @@ mod sequence_tests {
 
     impl Desk {
         /// §5.6 by the oracle's own reading: there is something to price from when some sane
-        /// quote with a bid or a trade was seen within five minutes (DEC-260 (5)).
+        /// quote with a bid, or with a trade printed in the session it is now (§8.2), was seen
+        /// within five minutes (DEC-260 (5), (16)). The sessions are 2026-09-22's, written out
+        /// from §4.3 rather than read from the calendar: a print and now are in one session when
+        /// no boundary falls after the one and at or before the other.
         fn priceable(&self) -> bool {
+            const BOUNDARIES: [i64; 5] = [
+                1_790_035_200,
+                1_790_064_000,
+                OPEN,
+                1_790_107_200,
+                1_790_121_600,
+            ];
+            let in_session = |at: i64| {
+                !BOUNDARIES
+                    .iter()
+                    .any(|boundary| at < *boundary && *boundary <= self.now)
+            };
             self.quotes.iter().any(|(at, bid, trade, sane)| {
-                *sane && (bid.is_some() || trade.is_some()) && self.now.saturating_sub(*at) <= 300
+                *sane
+                    && (bid.is_some() || trade.is_some() && in_session(*at))
+                    && self.now.saturating_sub(*at) <= 300
             })
         }
 
@@ -6859,13 +6969,13 @@ mod sequence_tests {
         })
     }
 
-    fn rule_13_script(script: &[Move]) -> Result<(), String> {
+    fn rule_13_script(start: i64, script: &[Move]) -> Result<(), String> {
         let failed = |error: ExecutorError| format!("{error:?}");
         let (config, fees) = (executor_config(), fees().map_err(failed)?);
         let ports = tiered_ports(&config, &fees);
         let mut executor = protected(&ports).map_err(failed)?;
         let mut desk = Desk {
-            now: 0,
+            now: start,
             quotes: Vec::new(),
             position: 10,
             venue: BTreeMap::from([(
@@ -6885,6 +6995,11 @@ mod sequence_tests {
             quiet_since: 0,
         };
         let agent = AgentId("agent-a".to_owned());
+        desk.deliver(
+            &mut executor,
+            &ports,
+            Input::Tick(RiskClock::from_secs(start)),
+        )?;
         for (step, next) in script.iter().enumerate() {
             let input = match *next {
                 Move::Tick(by) => {
@@ -7023,7 +7138,9 @@ mod sequence_tests {
 
     /// Rule 13, by an oracle of its own over random scripts of ticks, quotes (a bid, a trade,
     /// either, neither; sane or not; marks at, above and below the stop, so the watchdog fires), exits of every purpose and size, acknowledgments, partial
-    /// fills, cancel confirmations and pauses, against ten protected AAPL with an exit tier: no
+    /// fills, cancel confirmations and pauses, against ten protected AAPL with an exit tier, from
+    /// an instant in each session (none the calendar covers, after-hours, just before the closing
+    /// auction window, the morning, overnight, and just before the open): no
     /// input is refused; no exit is denied but for a genuine over-sell; no exit is held but for
     /// rule 13's four, or a discretionary exit with nothing to price from (DEC-160 (12)); no
     /// exit falls back to its own limit while something prices it; and none stays neither
@@ -7039,11 +7156,209 @@ mod sequence_tests {
             failure_persistence: None,
             ..ProptestConfig::default()
         };
+        let starts = prop::sample::select(vec![
+            0,
+            AFTER_HOURS,
+            CLOSING.saturating_sub(30),
+            MORNING,
+            OVERNIGHT,
+            OPEN.saturating_sub(30),
+        ]);
         TestRunner::new(config)
-            .run(&prop::collection::vec(moves(), 1..64), |script| {
-                rule_13_script(&script).map_err(TestCaseError::fail)
-            })
+            .run(
+                &(starts, prop::collection::vec(moves(), 1..64)),
+                |(start, script)| rule_13_script(start, &script).map_err(TestCaseError::fail),
+            )
             .map_err(|error| error.to_string())
+    }
+
+    /// 2026-09-22, a Tuesday, at 17:00 ET: after-hours.
+    const AFTER_HOURS: i64 = 1_790_110_800;
+    /// 11:00 ET, the regular session.
+    const MORNING: i64 = 1_790_089_200;
+    /// 15:50:00 ET, the first second of the closing auction window, and the second before it.
+    const CLOSING: i64 = 1_790_106_600;
+    /// 02:00 ET, the overnight session v1 disables (DEC-30).
+    const OVERNIGHT: i64 = 1_790_056_800;
+    /// 08:00 ET, pre-market, and 09:30 ET, the regular open.
+    const PRE_MARKET: i64 = 1_790_078_400;
+    const OPEN: i64 = 1_790_083_800;
+    /// Saturday 2026-09-26, 12:00 ET: the market is closed.
+    const SATURDAY: i64 = 1_790_438_400;
+
+    /// An unprotected position's exit at `at`, priced 150 with a quote observed `age` seconds
+    /// before: what it was submitted as.
+    fn alone_at(
+        purpose: Purpose,
+        limit: &str,
+        at: i64,
+        age: i64,
+    ) -> Result<(Executor, SubmitOrder, EventDraft), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+        executor.run(observation(Some(150), None, true, at.saturating_sub(age))?, &ports)?;
+        let ran = executor.run(sell(EXIT, "10", limit, purpose)?, &ports)?;
+        let order = submissions(&ran)
+            .first()
+            .copied()
+            .cloned()
+            .ok_or_else(|| missing("the exit's submission"))?;
+        let draft = ran
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "OrderSubmitted" => Some(draft),
+                _ => None,
+            })
+            .cloned()
+            .ok_or_else(|| missing("its OrderSubmitted"))?;
+        Ok((executor, order, draft))
+    }
+
+    /// §4.3, §5.6, DEC-260 (13), (14): in after-hours an unprotected position's risk exit goes as an
+    /// extended-hours limit at the ladder's first rung, 150 × (1 − 0.5%), journaled `laddered`;
+    /// a discretionary or owner exit keeps its own limit as a regular-session limit, which the
+    /// broker queues to the session (§5.5, §9.6), and so does an exit priced above the bid.
+    #[test]
+    fn an_after_hours_risk_exit_is_laddered_and_extended() -> Result<(), ExecutorError> {
+        let laddered = Some(Value::Bool(true));
+        let (_, order, draft) = alone_at(Purpose::RiskExit, "150", AFTER_HOURS, 0)?;
+        assert_eq!(order.limit_price, Some(Price::parse("149.25")?));
+        assert!(order.extended_hours);
+        assert_eq!(draft.payload.get("laddered").cloned(), laddered);
+        for purpose in [Purpose::DiscretionaryExit, Purpose::OwnerExit] {
+            let (_, order, draft) = alone_at(purpose, "150", AFTER_HOURS, 0)?;
+            assert_eq!(order.limit_price, Some(Price::parse("150")?), "{purpose:?}");
+            assert!(!order.extended_hours, "{purpose:?}");
+            assert_eq!(draft.payload.get("laddered"), None, "{purpose:?}");
+        }
+        let (_, passive, _) = alone_at(Purpose::RiskExit, "151", AFTER_HOURS, 0)?;
+        assert_eq!(passive.limit_price, Some(Price::parse("151")?), "above the bid");
+        assert!(passive.extended_hours, "still an extended-hours exit");
+        Ok(())
+    }
+
+    /// §4.4, §5.6: in the regular session a fresh quote leaves the exit at its own limit, and a
+    /// quote 120 s old is a presumed halt that ladders a risk or owner exit, but not a discretionary
+    /// one; in the closing auction window the risk and owner exits are laddered from a fresh quote,
+    /// and in the second before it they are not.
+    #[test]
+    fn a_presumed_halt_or_the_close_window_ladders_the_exit() -> Result<(), ExecutorError> {
+        let rung = Some(Price::parse("149.25")?);
+        let own = Some(Price::parse("150")?);
+        for (purpose, at, age, expected) in [
+            (Purpose::RiskExit, MORNING, 0, own),
+            (Purpose::RiskExit, MORNING, 120, rung),
+            (Purpose::OwnerExit, MORNING, 120, rung),
+            (Purpose::DiscretionaryExit, MORNING, 120, own),
+            (Purpose::RiskExit, CLOSING, 0, rung),
+            (Purpose::OwnerExit, CLOSING, 0, rung),
+            (Purpose::DiscretionaryExit, CLOSING, 0, own),
+            (Purpose::RiskExit, CLOSING.saturating_sub(1), 0, own),
+        ] {
+            let (_, order, _) = alone_at(purpose, "150", at, age)?;
+            assert_eq!(order.limit_price, expected, "{purpose:?} at {at}, {age} s old");
+            assert!(!order.extended_hours, "{purpose:?} at {at}");
+        }
+        Ok(())
+    }
+
+    /// DEC-260 (13): overnight and on a weekend no session is open; the exit goes at its own
+    /// limit as a regular-session limit the broker queues, never extended-hours (DEC-30) and never
+    /// laddered on a stale quote.
+    #[test]
+    fn a_closed_market_queues_the_exit_at_its_own_limit() -> Result<(), ExecutorError> {
+        for at in [OVERNIGHT, SATURDAY] {
+            let (_, order, draft) = alone_at(Purpose::RiskExit, "150", at, 120)?;
+            assert_eq!(order.limit_price, Some(Price::parse("150")?), "at {at}");
+            assert!(!order.extended_hours, "at {at}");
+            assert_eq!(draft.payload.get("laddered"), None, "at {at}");
+        }
+        Ok(())
+    }
+
+    /// §5.6 step 2 for a lone ladder: unfilled after `exit_step_s` (10 s here) the rung is cancelled
+    /// to step, and the confirmation submits `-l1` one offset step lower, 148.50, extended-hours.
+    /// A pause after the step was asked does not end it (DEC-260 (14)), but while paused no new
+    /// step is asked.
+    #[test]
+    fn a_lone_ladder_steps_and_a_pause_stops_only_new_steps() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let (mut executor, _, _) = alone_at(Purpose::RiskExit, "150", AFTER_HOURS, 0)?;
+        let early = executor.run(Input::Tick(RiskClock::from_secs(AFTER_HOURS + 9)), &ports)?;
+        assert!(cancels(&early).is_empty(), "not before exit_step_s");
+        let step = executor.run(Input::Tick(RiskClock::from_secs(AFTER_HOURS + 10)), &ports)?;
+        let exit = format!("md-{EXIT}");
+        assert_eq!(cancels(&step), vec![exit.as_str()]);
+        executor
+            .state
+            .modes
+            .insert(AgentId("agent-a".to_owned()), Mode::Paused);
+        let next = executor.run(cancel_accepted(&exit), &ports)?;
+        let rung = submissions(&next)
+            .first()
+            .copied()
+            .cloned()
+            .ok_or_else(|| missing("the next rung"))?;
+        assert_eq!(rung.client_order_id.as_str(), format!("{exit}-l1"));
+        assert_eq!(rung.limit_price, Some(Price::parse("148.5")?));
+        assert!(rung.extended_hours);
+        let paused = executor.run(Input::Tick(RiskClock::from_secs(AFTER_HOURS + 30)), &ports)?;
+        assert!(cancels(&paused).is_empty(), "paused: {:?}", drafted(&paused));
+        executor.state.modes.clear();
+        let resumed = executor.run(Input::Tick(RiskClock::from_secs(AFTER_HOURS + 31)), &ports)?;
+        assert_eq!(cancels(&resumed), vec![format!("{exit}-l1").as_str()]);
+        Ok(())
+    }
+
+    /// §8.2, #373 round 2 minor A: a last trade counts only in its own session. At 16:01 ET with
+    /// no bid at all, a print at 15:59, two minutes before but in the regular session, prices the
+    /// after-hours exit nothing, so it falls back to its own limit; a print at 16:00:30 prices it,
+    /// 149 × (1 − 0.5%) rounded up to the tick.
+    #[test]
+    fn a_trade_from_another_session_prices_no_rung() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let now = 1_790_107_260;
+        for (printed, expected) in [(now - 30, "148.26"), (now - 120, "150")] {
+            let mut executor = held(&ports)?;
+            executor.run(Input::Tick(RiskClock::from_secs(now)), &ports)?;
+            executor.run(observation(None, Some(149), true, printed)?, &ports)?;
+            let ran = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+            let order = submissions(&ran)
+                .first()
+                .copied()
+                .cloned()
+                .ok_or_else(|| missing("the exit"))?;
+            assert_eq!(order.limit_price, Some(Price::parse(expected)?), "printed {printed}");
+        }
+        Ok(())
+    }
+
+    /// §5.4, DEC-260 (12): stops do not trigger outside the regular session, so a breach that began
+    /// in pre-market is watchdogged only `stop_watchdog_s` (30 s) after the open, one in
+    /// after-hours or on a weekend never.
+    #[test]
+    fn the_watchdog_waits_for_the_regular_session() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(139), None, true, PRE_MARKET)?, &ports)?;
+        for at in [PRE_MARKET + 60, OPEN, OPEN + 29] {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            assert!(watchdog_record(&tick).is_none(), "at {at}: {:?}", drafted(&tick));
+        }
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(OPEN + 30)), &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        for at in [AFTER_HOURS, SATURDAY] {
+            let mut executor = protected(&ports)?;
+            executor.run(observation(Some(139), None, true, at)?, &ports)?;
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at + 600)), &ports)?;
+            assert!(watchdog_record(&tick).is_none(), "at {at}: {:?}", drafted(&tick));
+        }
+        Ok(())
     }
 }
 

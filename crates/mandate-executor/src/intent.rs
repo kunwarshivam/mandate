@@ -11,9 +11,10 @@ use crate::gate::{PartialGateDecision, Proposal, UNPRICED, account_stream_checks
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
 use crate::protection::{
-    ExitPrice, awaits_cancel, begin_exit, bracketed_add, crypto_add, exit_limit, fallback,
-    passive_exit, reprotect_unpriced,
+    ExitPrice, alone, awaits_cancel, begin_exit, bracketed_add, crypto_add, exit_limit, fallback,
+    passive_exit, reprotect_unpriced, rests,
 };
+use crate::session::extended_hours;
 use crate::state::IntentOutcome;
 use crate::types::{
     AgentId, BrokerRequest, GateVerdict, IntentBody, IntentHandoff, OrderType, Purpose,
@@ -234,6 +235,9 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         return Ok(());
     }
     bracketed_add(&batch.view, &instrument, purpose, protection.is_some())?;
+    let lone = !batch.view.exiting.contains_key(&instrument)
+        && !rests(&batch.view, &instrument)
+        && alone(batch, &instrument, purpose, limit);
     let limit = match exit_limit(batch, intent, &instrument, purpose, limit) {
         ExitPrice::Own(limit) | ExitPrice::Laddered(limit) => limit,
         ExitPrice::Fallback(limit) => {
@@ -246,6 +250,7 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         }
     };
     let tif = order_tif(batch, &instrument);
+    let extended_hours = extended_hours(batch.ports, &instrument, batch.at(), purpose);
     let request = SubmitOrder {
         client_order_id: ClientOrderId::for_intent(intent)?,
         instrument,
@@ -257,10 +262,16 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         stop_price: None,
         bracket: None,
         oco: None,
-        extended_hours: false,
+        extended_hours,
         purpose,
     };
-    send(batch, request, Some(intent), &agent, 1)
+    if !lone {
+        return send(batch, request, Some(intent), &agent, 1);
+    }
+    let laddered = vec![("laddered", Value::Bool(true))];
+    journal_rung(batch, &request, Some(intent), &agent, 1, laddered)?;
+    batch.broker(BrokerRequest::Submit(request));
+    Ok(())
 }
 
 /// Journals `OrderSubmitted` with every field of the request, then describes the request. The

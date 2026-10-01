@@ -53,6 +53,9 @@ pub struct ExecutorState {
     pub(crate) copied: BTreeMap<EventId, EventId>,
     /// Each instrument's running exit sequence, `unprotected_start` to `unprotected_end` (§5.4).
     pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
+    /// Each instrument's exit laddered outside a sequence (§5.6: extended hours, the closing
+    /// auction window, a presumed halt), folded from its rungs' `OrderSubmitted`.
+    pub(crate) ladders: BTreeMap<InstrumentId, LoneLadder>,
     /// The latest quote per instrument: process-local, an input never journaled (like the tick).
     pub(crate) quotes: BTreeMap<InstrumentId, MarketObservation>,
     /// The latest-observed sane quote with a bid per instrument, kept past newer quotes that are
@@ -193,6 +196,7 @@ impl ExecutorState {
             unprotected: Vec::new(),
             copied: BTreeMap::new(),
             exiting: BTreeMap::new(),
+            ladders: BTreeMap::new(),
             quotes: BTreeMap::new(),
             sane_bids: BTreeMap::new(),
             trades: BTreeMap::new(),
@@ -480,6 +484,14 @@ pub(crate) struct ExitSequence {
     /// A passive exit's (`passive_start`): it keeps the stop, so no interval opens.
     pub(crate) passive: bool,
     /// Where the exit's price ladder stands, from its journaled rungs (§5.6).
+    pub(crate) ladder: Ladder,
+}
+
+/// An exit §5.6 ladders with no protection to cancel first: its intent, agent and progress.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoneLadder {
+    pub(crate) intent: IntentId,
+    pub(crate) agent: AgentId,
     pub(crate) ladder: Ladder,
 }
 

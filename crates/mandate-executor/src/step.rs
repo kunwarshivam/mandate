@@ -210,7 +210,15 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
 /// interpretation 19). Protective orders stay. Any `to` other than `normal` is read as stricter,
 /// one of §7.4's three or a string that names no mode: cancelling openings only reduces risk
 /// (rule 3), so an unrecognised mode fails in that direction (#286 round 1, minor 4).
+///
+/// Slice 5's session part takes the account stream's own `TradingDayStarted`, which needs nothing
+/// more: the session is derived from the calendar at the step's clock ([`crate::session`]). The
+/// scheduler's, which the executor copies, is slice 5's trading-day part, with the generator step
+/// its backlog row names, and answers the stub until then.
 fn copied(batch: &mut Batch<'_, '_>, event: &FoldedEvent) -> Result<(), ExecutorError> {
+    if event.event_type == "TradingDayStarted" {
+        return trading_day(batch, event);
+    }
     let strict = event.stream == batch.view.account_stream()
         && event.event_type == "AgentModeApplied"
         && optional_text(&event.payload, "to").is_some_and(|to| to != "normal");
@@ -219,6 +227,13 @@ fn copied(batch: &mut Batch<'_, '_>, event: &FoldedEvent) -> Result<(), Executor
     };
     let agent = (agent != EVERY_AGENT).then(|| AgentId(agent.to_owned()));
     cancel_openings(batch, agent.as_ref(), None)
+}
+
+fn trading_day(batch: &Batch<'_, '_>, event: &FoldedEvent) -> Result<(), ExecutorError> {
+    if event.stream == batch.view.account_stream() {
+        return Ok(());
+    }
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
 }
 
 /// Reconciliation's broker reads and the kill switch (trading-domain spec §5.5, §11): the later
@@ -429,7 +444,7 @@ mod copied_tests {
             (false, "AgentModeApplied", "paused", true),
             (false, "AgentModeApplied", "normal", false),
             (true, "AgentModeApplied", "exits_only", false),
-            (false, "TradingDayStarted", "exits_only", false),
+            (false, "OwnerAcknowledged", "exits_only", false),
         ] {
             let mut executor = Executor::opened(&ports)?;
             resting_buy(&mut executor, "md-buy-1", "agent-a")?;

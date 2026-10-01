@@ -15,8 +15,8 @@ use crate::payload::{
     required_text, usd,
 };
 use crate::state::{
-    Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, ObservedAccount,
-    OrderDetail,
+    Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
+    ObservedAccount, OrderDetail,
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, OcoLegs,
@@ -26,9 +26,14 @@ use crate::types::{
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
 /// `causation_id` naming its origin, unless the executor originated it itself and says so with
-/// `originated`. `OwnerAcknowledged` and `TradingDayStarted` join them with the slices that
-/// interpret them, and until then answer those slices' stubs like every other event not reached.
-const COPIED: [&str; 3] = ["AgentModeApplied", "ClockAdvanced", "UniverseChanged"];
+/// `originated`. `OwnerAcknowledged` joins them with the slice that interprets it, and until then
+/// answers that slice's stub like every other event not reached.
+const COPIED: [&str; 4] = [
+    "AgentModeApplied",
+    "ClockAdvanced",
+    "TradingDayStarted",
+    "UniverseChanged",
+];
 
 /// Replays one journaled event into the state.
 ///
@@ -131,7 +136,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         }
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
-        "ClockAdvanced" | "MarkUpdated" => Ok(()),
+        "ClockAdvanced" | "MarkUpdated" | "TradingDayStarted" | "ConductBreachDetected" => Ok(()),
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
         "FeesCharged" => fees_charged(state, payload),
         "ExternalActivityIngested" => Ok(()),
@@ -163,11 +168,13 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     }
 }
 
-/// Corporate actions, reconciliation's records and snapshot, conduct breaches, recorded broker
-/// exchanges, the owner acknowledgment, the trading and risk days, protection and the kill switch
-/// (trading-domain spec §5.4 to §5.7, §6, §10, §11): the later slices of this stack. An
-/// `ExternalActivityIngested` folds as a record only: the restriction it causes is its own
-/// `AgentModeApplied`.
+/// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the owner
+/// acknowledgment, the risk day, and the kill switch (trading-domain spec §5.5 to §5.7, §6, §10,
+/// §11): the later slices of this stack. An `ExternalActivityIngested` and a
+/// `ConductBreachDetected` fold as records only: the restriction either causes is its own
+/// `AgentModeApplied`, and a conduct control never holds an exit (`AGENTS.md` rule 13). A copied
+/// `TradingDayStarted` folds as a record too: the session an order goes in is derived from the
+/// committed calendar at the step's clock ([`crate::session`]), never from a label.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }
@@ -386,19 +393,27 @@ fn rung_submitted(
         return Ok(());
     };
     let instrument = InstrumentId::new(required_text(payload, "instrument")?)?;
+    let ladder = Ladder {
+        rung: optional_int(payload, "rung")
+            .and_then(|rung| u32::try_from(rung).ok())
+            .unwrap_or(0),
+        since: Some(at),
+        floored: flag(payload, "at_floor"),
+        stepping: false,
+    };
     if let Some(sequence) = state
         .exiting
         .get_mut(&instrument)
         .filter(|sequence| sequence.intent.0.0 == intent && !sequence.passive)
     {
-        sequence.ladder = Ladder {
-            rung: optional_int(payload, "rung")
-                .and_then(|rung| u32::try_from(rung).ok())
-                .unwrap_or(0),
-            since: Some(at),
-            floored: flag(payload, "at_floor"),
-            stepping: false,
+        sequence.ladder = ladder;
+    } else if flag(payload, "laddered") {
+        let lone = LoneLadder {
+            intent: IntentId(EventId(intent.to_owned())),
+            agent: AgentId(required_text(payload, "agent")?.to_owned()),
+            ladder,
         };
+        state.ladders.insert(instrument, lone);
     }
     Ok(())
 }
@@ -410,9 +425,19 @@ fn rung_stepped(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
         return Ok(());
     }
     let id = client_order_id(payload)?;
-    for sequence in state.exiting.values_mut() {
-        if ClientOrderId::for_intent(&sequence.intent)?.rung(sequence.ladder.rung)? == id {
-            sequence.ladder.stepping = true;
+    let ladders = state
+        .exiting
+        .values_mut()
+        .map(|sequence| (&sequence.intent, &mut sequence.ladder))
+        .chain(
+            state
+                .ladders
+                .values_mut()
+                .map(|lone| (&lone.intent, &mut lone.ladder)),
+        );
+    for (intent, ladder) in ladders {
+        if ClientOrderId::for_intent(intent)?.rung(ladder.rung)? == id {
+            ladder.stepping = true;
         }
     }
     Ok(())

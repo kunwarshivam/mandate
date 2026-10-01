@@ -88,6 +88,7 @@ mod payload;
 mod ports;
 mod protection;
 mod reconcile;
+mod session;
 mod state;
 mod step;
 mod types;
