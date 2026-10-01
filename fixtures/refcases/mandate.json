@@ -19833,7 +19833,7 @@
   },
   {
    "id": "MC-D17",
-   "kind": "autonomy",
+   "kind": "review",
    "title": "On the review date's last instant an auto rule still decides",
    "base": "btc_accumulator_reviewed",
    "patch": [],
@@ -19862,7 +19862,7 @@
   },
   {
    "id": "MC-D18",
-   "kind": "autonomy",
+   "kind": "review",
    "title": "At 00:00 New York after the review date an auto rule asks",
    "base": "btc_accumulator_reviewed",
    "patch": [],
@@ -19893,7 +19893,7 @@
   },
   {
    "id": "MC-D19",
-   "kind": "autonomy",
+   "kind": "review",
    "title": "Past the review date an ask keeps the rule that asked",
    "base": "btc_accumulator_reviewed",
    "patch": [],
@@ -19924,7 +19924,7 @@
   },
   {
    "id": "MC-D20",
-   "kind": "autonomy",
+   "kind": "review",
    "title": "Past the review date a deny rule still denies",
    "base": "btc_accumulator_reviewed",
    "patch": [
@@ -19967,7 +19967,7 @@
   },
   {
    "id": "MC-D21",
-   "kind": "autonomy",
+   "kind": "review",
    "title": "Past the review date an auto default asks",
    "base": "btc_accumulator_reviewed",
    "patch": [
@@ -20009,7 +20009,7 @@
   },
   {
    "id": "MC-D22",
-   "kind": "autonomy",
+   "kind": "review",
    "title": "Past the review date an auto admission setting asks",
    "base": "btc_accumulator_reviewed",
    "patch": [
@@ -20046,7 +20046,7 @@
   },
   {
    "id": "MC-D23",
-   "kind": "autonomy",
+   "kind": "review",
    "title": "Before the review date a live delegation lifts an ask",
    "base": "btc_accumulator_reviewed",
    "patch": [
@@ -20102,7 +20102,7 @@
   },
   {
    "id": "MC-D24",
-   "kind": "autonomy",
+   "kind": "review",
    "title": "Past the review date the same delegation lifts nothing",
    "base": "btc_accumulator_reviewed",
    "patch": [
@@ -20158,7 +20158,7 @@
   },
   {
    "id": "MC-D25",
-   "kind": "autonomy",
+   "kind": "review",
    "title": "Past the review date a discretionary exit is still AUTO",
    "base": "btc_accumulator_reviewed",
    "patch": [],
@@ -20173,7 +20173,7 @@
   },
   {
    "id": "MC-D26",
-   "kind": "autonomy",
+   "kind": "review",
    "title": "Past the review date an owner exit is still AUTO",
    "base": "btc_accumulator_reviewed",
    "patch": [],
@@ -20188,7 +20188,7 @@
   },
   {
    "id": "MC-D27",
-   "kind": "autonomy",
+   "kind": "review",
    "title": "With no review date an auto rule decides at any time",
    "base": "btc_accumulator",
    "patch": [],

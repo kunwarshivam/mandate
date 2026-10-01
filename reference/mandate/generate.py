@@ -946,7 +946,7 @@ for cid, title, base, patch, now, a in REVIEW_A:
     full = dict(OPEN, **a)
     if full["purpose"] in REDUCING:
         full = {"purpose": full["purpose"]}
-    cases.append({"id": cid, "kind": "autonomy", "title": title, "base": base, "patch": patch, "now": now, "action": full,
+    cases.append({"id": cid, "kind": "review", "title": title, "base": base, "patch": patch, "now": now, "action": full,
                   "expect": autonomy(m, full, {"now": now})})
 
 # =========================================================== output
@@ -982,9 +982,9 @@ HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
 # - builder: the risk engine's trim (spec 5.5), the order builder (spec 8.3), the gate dry run, and
 #   autonomy. `session` defaults to regular; `in_close_window` to false; fee rates to 0;
 #   `has_prior_fill` to (position_qty > 0).
-# - autonomy: evaluate spec 6.2 for the given action, including the admission ceiling of 6.2 step 5. `now`,
-#   when given, is the risk clock: it judges the delegations' windows (spec 6.5) and the review date
-#   (spec 6.2 step 5b); no delegation has been used and nothing suspends one.
+# - autonomy: evaluate spec 6.2 for the given action, including the admission ceiling of 6.2 step 5.
+# - review: an autonomy case at the risk clock `now`, which judges the review date (spec 6.2 step 5b)
+#   and the delegations' windows (spec 6.5); no delegation has been used and nothing suspends one.
 # - admission: the ordered spec 8.5 checks for one thesis; the first failure is the reason, and the
 #   three shape reasons also set `ignored` (spec 8.2). `first_order_autonomy` is the decision for the
 #   first order in an admitted instrument, null when the thesis is refused.
