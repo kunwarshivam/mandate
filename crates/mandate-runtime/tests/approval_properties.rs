@@ -601,7 +601,6 @@ fn check(body: impl Fn(Vec<Step>) -> Result<(), TestCaseError>) {
 /// an exits-only, a version, a kill switch, or a Stop cancelled is ever admitted), and replaying
 /// the journal folds to the live pending set (EI-12).
 #[test]
-#[ignore = "pending E8-3"]
 fn every_approval_moves_by_the_table_and_ends_once() {
     check(|script| {
         let (journal, record, shell) = played(&script)?;
@@ -681,7 +680,6 @@ fn every_approval_moves_by_the_table_and_ends_once() {
 /// tightening to exits-only or a version applied after it has cancelled (EI-7), and one from any
 /// `actor.kind` but `user` (EI-10).
 #[test]
-#[ignore = "pending E8-3"]
 fn every_opening_walks_back_to_one_timely_admitted_grant() {
     check(|script| {
         let (journal, record, _) = played(&script)?;
