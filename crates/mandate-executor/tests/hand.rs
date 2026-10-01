@@ -5175,7 +5175,6 @@ fn at_the_open(shell: &mut Shell, ports: &mandate_executor::Ports<'_>) -> Vec<(S
 /// names the park's own `GateDecided` and a generic key, nothing about the order (`AGENTS.md`
 /// rule 6). The exit is never abandoned: at the next open it goes, from its next rung.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_parked_night_alerts_the_owner_exactly_once() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5226,7 +5225,6 @@ fn a_parked_night_alerts_the_owner_exactly_once() {
 /// the restarted process raises nothing more before the open, and still sends the exit's next
 /// rung at the open (journal spec §8; `AGENTS.md` rules 3 and 13).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_restart_in_a_parked_night_alerts_nothing_more() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
