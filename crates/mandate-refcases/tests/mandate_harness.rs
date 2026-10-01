@@ -107,7 +107,7 @@ fn passing(id: &str) -> bool {
 }
 
 /// Every kind an arm of `mandate::cases` interprets, this harness's and the other streams'.
-const INTERPRETED: [&str; 15] = [
+const INTERPRETED: [&str; 16] = [
     "schema",
     "semantic",
     "policy",
@@ -123,6 +123,7 @@ const INTERPRETED: [&str; 15] = [
     "stagger",
     "autonomy",
     "builder",
+    "review",
 ];
 
 /// A case ID's family: `MC-V` for `MC-V07`.
@@ -197,7 +198,7 @@ fn every_owned_case_key_is_read() {
 /// (E6-2, DEC-250), so no story is left to name: the rule that remains is that an uninterpreted kind
 /// fails rather than passes (DEC-85).
 ///
-/// Each of the fifteen interpreted kinds is in the fixture and reaches its arm. A kind outside them,
+/// Each of the sixteen interpreted kinds is in the fixture and reaches its arm. A kind outside them,
 /// such as a family the fixture gains before its arm lands, is allowed, and its cases fail until an arm
 /// interprets it and joins `INTERPRETED`.
 #[test]

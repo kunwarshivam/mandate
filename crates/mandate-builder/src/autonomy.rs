@@ -25,6 +25,7 @@ use mandate_spec::condition::{
 };
 use mandate_spec::document::{Approval, Autonomy, OnTimeout, Rule, RuleId};
 use mandate_spec::{DecGrammar, SchemaDec};
+use mandate_time::Date;
 
 use crate::BuilderError;
 use crate::builder::{Action, Proposal};
@@ -57,6 +58,12 @@ pub struct ActionContext {
     /// Who asked for the order (§6.2 step 5a). Not a §6.3 field: no rule can read it, and only the
     /// client ceiling does.
     pub requested_by: RequestedBy,
+    /// The risk day (§5.4) of the risk clock the decision is made at (§5.2), which §6.2 step 5b
+    /// compares with the review date. Not a §6.3 field. Required with no default, as
+    /// `requested_by` is (DEC-262 item 1): a path that builds an action must say when it decides,
+    /// and the caller derives it from the journaled risk clock, never from a wall clock or a
+    /// request (DEC-271 item 2).
+    pub risk_day: Date,
 }
 
 /// Who asked for an order (§6.2 step 5a, DEC-185, DEC-262).
@@ -152,11 +159,14 @@ pub enum DecidedBy {
     /// §6.2 step 5a raised the decision to ASK because an owner-connected client requested the
     /// order. Reported only when the ceiling changed the decision, as for the admission ceiling.
     ClientCeiling,
+    /// §6.2 step 5b raised the decision to ASK because the mandate's review date has passed
+    /// (MI-32). Reported only when the ceiling changed the decision, as for the other two.
+    ReviewCeiling,
 }
 
 impl DecidedBy {
     /// The form the reference cases and the journal write: `builtin_risk_reducing`, `rule:<id>`,
-    /// `default`, `admission_ceiling`, `client_ceiling`.
+    /// `default`, `admission_ceiling`, `client_ceiling`, `review_ceiling`.
     pub fn label(&self) -> String {
         match self {
             Self::BuiltinRiskReducing => "builtin_risk_reducing".to_owned(),
@@ -164,6 +174,7 @@ impl DecidedBy {
             Self::Default => "default".to_owned(),
             Self::AdmissionCeiling => "admission_ceiling".to_owned(),
             Self::ClientCeiling => "client_ceiling".to_owned(),
+            Self::ReviewCeiling => "review_ceiling".to_owned(),
         }
     }
 }
@@ -216,8 +227,8 @@ pub enum Outcome {
     Classified(Classification),
 }
 
-/// §6.2 steps 3 to 5a: the built-in AUTO purposes, the first matching rule, the default, the
-/// admission ceiling, and the client ceiling, in that order.
+/// §6.2 steps 3 to 5b: the built-in AUTO purposes, the first matching rule, the default, the
+/// admission ceiling, the client ceiling, and the review ceiling, in that order.
 ///
 /// Step 3 comes first and is unconditional, and that includes coming before the order path's
 /// re-check of V-017, V-018, V-020 and V-023: a malformed rule set must not be a reason a risk exit,
@@ -227,7 +238,9 @@ pub enum Outcome {
 /// applies only when `new_instrument` is true and only **tightens** (MI-17). Step 5a's applies only
 /// when an owner-connected client requested the order, comes **last**, after the admission ceiling,
 /// so no rule, default or admission setting it follows can make that order AUTO, and only tightens,
-/// so a `deny` still denies (MI-30, DEC-185).
+/// so a `deny` still denies (MI-30, DEC-185). Step 5b's applies only when the policy has a review
+/// date and the action's risk day is after it, comes after the client ceiling, and only tightens
+/// (MI-32, DEC-188, DEC-271).
 ///
 /// The whole rule set is re-checked before any rule is read, not only the rules the walk reaches: a
 /// malformed rule behind a matching one still refuses the action, because a rule set the order path
@@ -256,6 +269,10 @@ pub fn classify(policy: &Autonomy, action: &ActionContext) -> Result<Classificat
         RequestedBy::Agent | RequestedBy::Owner => (decision, by),
         RequestedBy::Client => client_ceiling(decision, by),
     };
+    let (decision, by) = match policy.review_by {
+        None => (decision, by),
+        Some(review_by) => review_ceiling(decision, by, review_by, action.risk_day)?,
+    };
     let approval = match decision {
         AutonomyDecision::Ask => Some(ApprovalRequest {
             approvers_required: approvers_required(&policy.approval, action.order_usd)?,
@@ -282,6 +299,29 @@ fn client_ceiling(decision: AutonomyDecision, by: DecidedBy) -> (AutonomyDecisio
         (decision, by)
     } else {
         (ceiled, DecidedBy::ClientCeiling)
+    }
+}
+
+/// §6.2 step 5b, MI-32: once `risk_day` is after `review_by`, the stricter of the decision so far
+/// and ASK, labelled [`DecidedBy::ReviewCeiling`] only when that changed the decision; on or before
+/// the review date, the decision and its source unchanged (DEC-271 items 1 and 3).
+///
+/// The review date is the **last** risk day `auto` stands, so the comparison is strictly after:
+/// on the date itself nothing changes (§6.6, MI-32).
+fn review_ceiling(
+    decision: AutonomyDecision,
+    by: DecidedBy,
+    review_by: Date,
+    risk_day: Date,
+) -> Result<(AutonomyDecision, DecidedBy), BuilderError> {
+    if risk_day <= review_by {
+        return Ok((decision, by));
+    }
+    let ceiled = decision.stricter(AutonomyDecision::Ask);
+    if ceiled == decision {
+        Ok((decision, by))
+    } else {
+        Ok((ceiled, DecidedBy::ReviewCeiling))
     }
 }
 
@@ -495,6 +535,7 @@ mod tests {
                     .map(|t| SchemaDec::parse(t, DecGrammar::PositiveDecimal))
                     .transpose()?,
             },
+            review_by: None,
         })
     }
 
@@ -516,6 +557,7 @@ mod tests {
             bought_today_usd: Usd::ZERO,
             position_pnl_fraction: Signed::ZERO,
             requested_by: RequestedBy::Agent,
+            risk_day: Date::new(2026, 9, 22)?,
         })
     }
 

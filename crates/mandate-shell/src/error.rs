@@ -162,6 +162,10 @@ impl ShellError {
                 stage: Stage::Connector,
                 cause: Cause::Connector(ConnectorError::Unreadable { .. }),
             } => "broker_answer_uninterpretable",
+            Self::Refused {
+                stage: Stage::Connector,
+                cause: Cause::Connector(ConnectorError::Unknown(_)),
+            } => "broker_outcome_unknown",
             Self::Refused { stage, .. } => stage.code(),
             Self::Runtime(e) => e.code(),
             Self::NonPaperEnvironment => "non_paper_environment",
@@ -283,5 +287,37 @@ mod tests {
         }
         assert_eq!(ShellError::CycleAlreadyOpen.stage(), None);
         assert_eq!(ShellError::SecondSubmission.code(), "one_order_only");
+    }
+
+    /// A request that left the process and got no answer is not one that never left it (#288
+    /// review, minor 3): the connector stage reports each of its three non-answers by its own code.
+    #[test]
+    fn the_connector_stage_tells_unsent_unread_and_unknown_apart() {
+        let refused = |cause| ShellError::Refused {
+            stage: Stage::Connector,
+            cause,
+        };
+        let codes = [
+            refused(Cause::Connector(ConnectorError::NotSent {
+                code: "refused_path",
+            }))
+            .code(),
+            refused(Cause::Connector(ConnectorError::Unreadable {
+                code: "wire",
+            }))
+            .code(),
+            refused(Cause::Connector(ConnectorError::Unknown(
+                BrokerUnknown::Timeout,
+            )))
+            .code(),
+        ];
+        assert_eq!(
+            codes,
+            [
+                "broker_request_not_sent",
+                "broker_answer_uninterpretable",
+                "broker_outcome_unknown"
+            ]
+        );
     }
 }

@@ -355,6 +355,9 @@ fn row(
                 .leveraged_etps_enabled
                 .cmp(&o.universe.leveraged_etps_enabled),
         ),
+        "/autonomy/review_by" => {
+            maximum(o.autonomy.review_by.as_ref(), n.autonomy.review_by.as_ref())
+        }
         autonomy if autonomy.starts_with("/autonomy/") => {
             classify_autonomy(&o.autonomy, &n.autonomy)?
         }
@@ -503,6 +506,7 @@ fn autonomy_reduces(old: &Autonomy, new: &Autonomy) -> bool {
                 approvers,
                 two_approver_above_usd,
             },
+        review_by: _,
     } = old;
     approvers == &new.approval.approvers
         && timeout_s == &new.approval.timeout_s

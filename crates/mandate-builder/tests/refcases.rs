@@ -36,6 +36,8 @@ use mandate_num::{Usd, UsdExact};
 use mandate_spec::DecGrammar;
 use mandate_spec::condition::{Condition, ConditionField, ConditionValue, Operator};
 use mandate_spec::document::{Approval, Autonomy, ModelId, OnTimeout, Rule, SizingMethod};
+use mandate_spec::risk;
+use mandate_time::{Date, UtcNanos};
 use serde_json::Value;
 
 fn fixture() -> Value {
@@ -205,8 +207,19 @@ fn decision_of(name: &str) -> AutonomyDecision {
     }
 }
 
+/// The risk day (§5.4) of a case's `now`, by `mandate-spec`'s own reading of the risk day (MC-T).
+fn risk_day(now: &UtcNanos) -> Date {
+    risk::risk_day(*now)
+        .unwrap_or_else(|e| panic!("`now` has a risk day: {e}"))
+        .day
+}
+
 fn autonomy_of(c: &Value) -> Autonomy {
     let block = patched(c, "autonomy");
+    assert!(
+        block.get("review_by").is_none(),
+        "family A states no time, so this harness reads no review date (§6.2 step 5b)"
+    );
     let rules = block
         .get("rules")
         .and_then(Value::as_array)
@@ -261,6 +274,7 @@ fn autonomy_of(c: &Value) -> Autonomy {
                 .and_then(Value::as_str)
                 .map(|t| dec(t, DecGrammar::PositiveDecimal)),
         },
+        review_by: None,
     }
 }
 
@@ -325,6 +339,7 @@ fn action_of(c: &Value) -> ActionContext {
         bought_today_usd: usd(&decimal("bought_today_usd", "0")),
         position_pnl_fraction: signed(&decimal("position_pnl_fraction", "0")),
         requested_by: RequestedBy::Agent,
+        risk_day: common::day(common::REFERENCE_DAY),
     }
 }
 
@@ -547,6 +562,7 @@ fn inputs(c: &Value) -> (AccountSnapshot, Market, RiskContext, Vec<ModelOutput>)
             .and_then(Value::as_bool)
             .unwrap_or(false),
         thesis_confidence: unit(&text_or("thesis_confidence", "0")),
+        risk_day: risk_day(&common::at(&text_at(input, "now"))),
     };
     let models = signal_models(c);
     let outputs = input

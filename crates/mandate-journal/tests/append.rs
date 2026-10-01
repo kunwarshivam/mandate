@@ -713,7 +713,6 @@ fn risk_clock_is_a_whole_second_and_marks_require_it() {
 /// agent subject is accepted, and an account subject is refused at its first unlisted member, in
 /// key order, before rule 14 compares the subject with `stream_id`.
 #[test]
-#[ignore = "pending E7-9"]
 fn an_agent_stream_opens_with_an_agent_subject_only() {
     let opened = edit(
         &opened_draft("paper"),

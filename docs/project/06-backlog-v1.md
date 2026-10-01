@@ -424,6 +424,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `resume`, `stop`, `kill`, `exit` and `acknowledge`, over the `ControlJournal` stubs in
   `crates/mandate-cli/src/control.rs`. The implementation PR also wires the commands into `clap`
   and `main.rs`, and gives `ControlJournal` a `mandate-journal-pg` adapter.
+  *Done (E8-3's CLI implementation, DEC-279):* the 20 tests pass; `mandate-cli` lists and shows
+  the inbox from the agent streams, commits `approve`, `skip` and every `agent` command as exactly
+  one control-stream event under one minted id, binds each code to what it confirms and the
+  control stream's head, and never refuses a kill switch or an owner exit.
+  *Follow-up (DEC-279 item 10):* wire `approvals` and `agent` into `clap` and `main.rs` with a
+  `mandate-journal-pg` `ControlJournal`, once the prerequisite below registers these events'
+  schemas; until then a real journal refuses every command they would send. Add Stop's
+  `--release` choice and the warning shown to `Command::Stop` and the payload (journal spec §9).
   *Prerequisite (DEC-257 item 17):* `mandate-journal` registers no payload schema for any agent- or
   control-stream event (`ApprovalRequested`, `ApprovalResponseSubmitted`, `OwnerCommandIssued`,
   `OwnerAcknowledged`, and the rest), so a real journal refuses each one as `UnknownSchema` and
@@ -1875,6 +1883,26 @@ risk (rule 3):
   `DecisionMade` it names in the same batch (§9.1 rule 10), and §11's `intent_action_mismatch` and
   `mode_event_mismatch` run in `mandate journal verify` and the scheduled verification, against the
   vectors' `invalid_batches` and `range_verification`.
+- **A generated `range_verification` vector with a forward reference (#384 review, major 1; DEC-168
+  item 13).** `verify_agent_stream` indexes the whole range first, so an `IntentProposed` naming a
+  `DecisionMade` later in the range is compared, and a `mode_event` naming a later event or its own
+  switch fails, at any `from_seq`. Only `mandate-journal`'s in-module tests pin this today; the next
+  journal reference PR adds generated range cases for both, at a `from_seq` above 1.
+- **Pin §9.1's ordering of `artifact_refs` and `pii_refs` ahead of rules 14 to 16 (#384 review, minor
+  2).** No vector or test breaks both an envelope check and a subject or copy rule, so swapping their
+  order passes. A tests-correction PR from stream L adds a draft that breaks both and expects the
+  envelope check's reason and path.
+- **A reference past a bounded range's end is exempted like one before its start (#384 review round
+  2, minor 3).** `verify_agent_stream` leaves unchecked a `causation_id` or `mode_event` that names no
+  event of the range, whichever side of the range the event lies on. §11 exempts only a reference
+  before the trusted start; a range with a `to_seq` needs the rule stated and a check or a test.
+- **Duplicate `event_id`s in `verify_agent_stream`'s index are unpinned (#384 review round 2, minor
+  3).** The index keeps the last row with an ID. `append` refuses a repeated `event_id`, so a stored
+  range never holds one, but no test says what a tampered range with a duplicate reports.
+- **An `invalid_drafts` vector for rule 12's `bid_size` (#384 review round 3, minor 1).** The journal
+  vectors refuse a confirmed exit without `bid` or `floor`, but none without `bid_size`; only
+  `mandate-journal`'s in-module `rule_12_needs_each_member_of_a_confirmed_bid` holds it. The next
+  journal-spec PR adds the draft (ES-22 keeps generated vectors out of a code PR).
 - **The model registry stores each pinned model's content object as an artifact.**
   `ModelOutputRecorded.content_hash` is a `sha256:` reference, so it is in `artifact_refs` (§3), and
   §11 check 6 fails `artifact_missing` unless the object is in the artifact store.
