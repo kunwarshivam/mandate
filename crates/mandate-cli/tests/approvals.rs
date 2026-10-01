@@ -1,8 +1,8 @@
 //! `mandate approvals` (M7 tests PR 4 of 4; the brief's "The CLI control surface"; mandate spec
 //! §6.4; DEC-155 item 5, DEC-257 items 5 and 9).
 //!
-//! The journal is a `MemoryJournal` whose agent streams hold approval events as the runtime writes
-//! them. Every expectation is computed here from the fixture: the content hash and the code from
+//! The journal is `tests/common`'s own in-memory `Journal`, whose agent streams hold approval
+//! events as the runtime writes them. Every expectation is computed here from the fixture: the content hash and the code from
 //! the content object's canonical bytes, the deadlines from the fixture's own clock, and what the
 //! CLI committed from the control stream's stored bytes. Each "commits nothing" case is paired with
 //! the one that commits, so a command that does nothing passes none of them.
@@ -491,15 +491,15 @@ fn a_refusal_or_a_skip_reports_its_reason() {
     let _ = TIMEOUT_S;
 }
 
-/// DEC-155 item 5: the CLI takes a new writer epoch per invocation, and when another writer fences
-/// it, retries with a fresh read rather than interleaving, so exactly one event is committed.
-#[test]
-#[ignore = "pending E8-3"]
-fn a_fenced_append_is_retried_and_commits_once() {
+/// Approves the fixture's request through a journal set up to fail once, and returns what was
+/// submitted, every event on the control stream, and the ids each append attempt carried.
+fn approve_through(
+    fault: fn(&mut common::Journal),
+) -> (Submitted, Vec<Value>, Vec<Vec<String>>, FixedIds) {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
     let mut ids = FixedIds::default();
-    fx.journal.fence_next = 1;
+    fault(&mut fx.journal);
     let submitted = answer(
         "approve",
         approve(
@@ -512,11 +512,91 @@ fn a_fenced_append_is_retried_and_commits_once() {
             at(ASKED_AT + 30),
         ),
     );
-    let committed = control(&fx);
+    let attempts = fx.journal.attempts.clone();
+    (submitted, control(&fx), attempts, ids)
+}
+
+/// DEC-155 item 2: the control-stream event id is the idempotency key, so it is minted once per
+/// command and every append attempt carries that same id.
+fn one_id_for_every_attempt(submitted: &Submitted, attempts: &[Vec<String>], ids: &FixedIds) {
+    assert_eq!(ids.events, 1, "one event id minted per command");
+    assert!(
+        attempts.len() >= 2,
+        "the fault forced a retry: {attempts:?}"
+    );
+    for attempt in attempts {
+        assert_eq!(
+            attempt,
+            &vec![submitted.event_id.clone()],
+            "a retry carries the same event id"
+        );
+    }
+}
+
+/// DEC-155 item 5, DEC-257 item 16: the CLI takes a new writer epoch per invocation, and when
+/// another writer fences it, retries with a fresh read rather than interleaving, so exactly one
+/// event is committed, under the one event id.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_fenced_append_is_retried_and_commits_once() {
+    let (submitted, committed, attempts, ids) = approve_through(|j| j.fence_next = 1);
+    one_id_for_every_attempt(&submitted, &attempts, &ids);
     assert_eq!(committed.len(), 1, "one event despite the fence");
     assert_eq!(submitted.seq, 1);
     assert_eq!(
         member_text(&committed[0], "event_id"),
         Some(submitted.event_id.as_str())
     );
+}
+
+/// DEC-257 item 16: an append behind the head (another event landed after the CLI read it) is
+/// retried at the new head, so the command commits once, after the other event.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_command_behind_the_head_retries_and_commits_once() {
+    let (submitted, committed, attempts, ids) = approve_through(|j| j.behind_next = 1);
+    one_id_for_every_attempt(&submitted, &attempts, &ids);
+    assert_eq!(
+        committed.len(),
+        2,
+        "the other writer's event, then this one"
+    );
+    assert_ne!(
+        member_text(&committed[0], "event_id"),
+        Some(submitted.event_id.as_str())
+    );
+    assert_eq!(submitted.seq, 2);
+    assert_eq!(
+        member_text(&committed[1], "event_id"),
+        Some(submitted.event_id.as_str())
+    );
+}
+
+/// Journal spec §5.1, DEC-155 item 2: an append whose answer is lost (`Ambiguous`) did commit, and
+/// a retry of the same draft is `AlreadyCommitted`, so the command reports the stored event and
+/// commits nothing twice. A fresh id per attempt would commit the answer twice.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_lost_answer_is_retried_under_the_same_id_and_commits_once() {
+    let (submitted, committed, attempts, ids) = approve_through(|j| j.ambiguous_next = 1);
+    one_id_for_every_attempt(&submitted, &attempts, &ids);
+    assert_eq!(committed.len(), 1, "the retry found the stored event");
+    assert_eq!(submitted.seq, 1);
+    assert_eq!(
+        member_text(&committed[0], "event_id"),
+        Some(submitted.event_id.as_str())
+    );
+}
+
+/// Rule 3, FR-6.6, mandate spec §6.4: a counted grant (short of the quorum) and an admitted grant
+/// not yet re-validated have both sent nothing. Their messages say so and never call the action
+/// approved.
+#[test]
+#[ignore = "pending E8-3"]
+fn the_outcomes_that_sent_nothing_say_so() {
+    for outcome in [Outcome::Counted, Outcome::Admitted { revalidation: None }] {
+        let said = answer("message", message(&outcome)).to_lowercase();
+        assert!(said.contains("nothing was sent"), "{outcome:?}: {said}");
+        assert!(!said.contains("approved"), "{outcome:?}: {said}");
+    }
 }

@@ -49,7 +49,8 @@ pub fn agent_stream(agent: &str) -> String {
     format!("agent:{WORKSPACE}:{agent}")
 }
 
-/// Fixed ids: ULID-shaped event ids starting `2`, and numbered assertion ids.
+/// Fixed ids: ULID-shaped event ids starting `2`, and numbered assertion ids. The counters are how
+/// many of each a command minted.
 #[derive(Debug, Default)]
 pub struct FixedIds {
     pub events: u64,
@@ -171,15 +172,81 @@ pub fn code_of(content: &Value) -> String {
     Digest::of(&to_canonical(content)).to_hex()[..8].to_owned()
 }
 
-/// An in-memory journal that runs §5.1's fencing and head check but validates no payload: the
-/// agent and control streams' payload schemas are not registered in `mandate-journal` yet (journal
-/// spec §9.1 closes only some agent events), so `MemoryJournal` refuses every event here as
-/// `UnknownSchema`. What the CLI commits is read back from the stored bytes.
+/// An in-memory journal that runs journal spec §5.1's idempotency, fencing and head check in that
+/// order, but validates no payload: `mandate-journal` registers no payload schema for an agent- or
+/// control-stream event yet, so its own journal refuses every event here as `UnknownSchema`
+/// (DEC-257 item 17). What the CLI commits is read back from the stored bytes.
+///
+/// Three faults are injected on the next appends, each to drive one of the CLI's retry arms:
+/// another writer taking the stream (`Fenced`), another write landing between the CLI's read of the
+/// head and its append (`HeadMismatch`), and an append that commits but whose answer is lost
+/// (`Ambiguous`), after which a retry of the same draft is `AlreadyCommitted`.
 #[derive(Debug, Default)]
 pub struct Journal {
     streams: BTreeMap<String, (u64, Vec<StoredEvent>)>,
-    /// Appends to refuse as `Fenced` before taking any, to model a concurrent writer.
+    /// Appends to refuse as `Fenced`, taking a new epoch as another writer would.
     pub fence_next: u32,
+    /// Appends before which another event lands at the current epoch, so the append is behind.
+    pub behind_next: u32,
+    /// Appends to commit and then answer `Ambiguous`.
+    pub ambiguous_next: u32,
+    /// Every append to the control stream the journal was asked for, with the event ids it carried
+    /// (the fixture's own agent-stream appends are not the CLI's).
+    pub attempts: Vec<Vec<String>>,
+    foreign: u64,
+}
+
+impl Journal {
+    fn stored(&self, event_id: &str) -> Option<&StoredEvent> {
+        self.streams
+            .values()
+            .flat_map(|(_, rows)| rows)
+            .find(|r| r.event_id == event_id)
+    }
+
+    fn store(
+        &mut self,
+        stream: &StreamId,
+        recorded_at: UtcNanos,
+        drafts: &[&[u8]],
+    ) -> Result<Vec<StoredEvent>, ControlError> {
+        let head = self.head(stream)?;
+        let mut stored = Vec::new();
+        let mut prev = head.hash;
+        for (i, bytes) in drafts.iter().enumerate() {
+            let draft = parse(bytes).map_err(|e| ControlError::Journal(format!("{e:?}")))?;
+            let text = |k: &str| {
+                draft
+                    .get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let row = StoredEvent {
+                stream_id: stream.as_str().to_owned(),
+                seq: head.seq + 1 + u64::try_from(i).unwrap(),
+                event_id: text("event_id"),
+                event_type: text("event_type"),
+                schema_version: draft
+                    .get("schema_version")
+                    .and_then(Value::as_int)
+                    .unwrap_or(0),
+                environment: text("environment"),
+                recorded_at: recorded_at.to_string(),
+                prev_hash: prev,
+                hash: Digest::of(bytes),
+                body: bytes.to_vec(),
+            };
+            prev = row.hash;
+            stored.push(row);
+        }
+        self.streams
+            .entry(stream.as_str().to_owned())
+            .or_default()
+            .1
+            .extend(stored.iter().cloned());
+        Ok(stored)
+    }
 }
 
 impl ControlJournal for Journal {
@@ -215,7 +282,33 @@ impl ControlJournal for Journal {
         recorded_at: UtcNanos,
         drafts: &[&[u8]],
     ) -> Result<AppendOutcome, ControlError> {
-        let head = self.head(stream)?;
+        let ids: Vec<String> = drafts
+            .iter()
+            .map(|bytes| {
+                parse(bytes)
+                    .ok()
+                    .and_then(|d| d.get("event_id").and_then(Value::as_str).map(str::to_owned))
+                    .unwrap_or_default()
+            })
+            .collect();
+        if stream.as_str() == CONTROL {
+            self.attempts.push(ids.clone());
+        }
+        let already: Vec<Option<StoredEvent>> =
+            ids.iter().map(|id| self.stored(id).cloned()).collect();
+        if let Some(first) = already.iter().flatten().next() {
+            let same = drafts
+                .iter()
+                .zip(&already)
+                .all(|(bytes, row)| row.as_ref().is_some_and(|r| r.body == *bytes));
+            return Ok(if same {
+                AppendOutcome::AlreadyCommitted(already.into_iter().flatten().collect())
+            } else {
+                AppendOutcome::IdempotencyConflict {
+                    stored_seq: first.seq,
+                }
+            });
+        }
         if self.fence_next > 0 {
             self.fence_next -= 1;
             let state = self.streams.entry(stream.as_str().to_owned()).or_default();
@@ -224,6 +317,20 @@ impl ControlJournal for Journal {
                 current_epoch: state.0,
             });
         }
+        if self.behind_next > 0 {
+            self.behind_next -= 1;
+            self.foreign += 1;
+            let id = format!("3{:025}", self.foreign);
+            let other = draft(
+                stream.as_str(),
+                &id,
+                "OwnerCommandIssued",
+                None,
+                object(&[("command", text("pause")), ("subject", text(OTHER_AGENT))]),
+            );
+            self.store(stream, recorded_at, &[&other])?;
+        }
+        let head = self.head(stream)?;
         if writer_epoch != head.writer_epoch {
             return Ok(AppendOutcome::Fenced {
                 current_epoch: head.writer_epoch,
@@ -235,37 +342,11 @@ impl ControlJournal for Journal {
                 actual_hash: head.hash,
             });
         }
-        let state = self.streams.entry(stream.as_str().to_owned()).or_default();
-        let mut stored = Vec::new();
-        let mut prev = head.hash;
-        for (i, bytes) in drafts.iter().enumerate() {
-            let draft = parse(bytes).map_err(|e| ControlError::Journal(format!("{e:?}")))?;
-            let text = |k: &str| {
-                draft
-                    .get(k)
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned()
-            };
-            let row = StoredEvent {
-                stream_id: stream.as_str().to_owned(),
-                seq: head.seq + 1 + u64::try_from(i).unwrap(),
-                event_id: text("event_id"),
-                event_type: text("event_type"),
-                schema_version: draft
-                    .get("schema_version")
-                    .and_then(Value::as_int)
-                    .unwrap_or(0),
-                environment: text("environment"),
-                recorded_at: recorded_at.to_string(),
-                prev_hash: prev,
-                hash: Digest::of(bytes),
-                body: bytes.to_vec(),
-            };
-            prev = row.hash;
-            stored.push(row);
+        let stored = self.store(stream, recorded_at, drafts)?;
+        if self.ambiguous_next > 0 {
+            self.ambiguous_next -= 1;
+            return Ok(AppendOutcome::Ambiguous);
         }
-        state.1.extend(stored.iter().cloned());
         Ok(AppendOutcome::Committed(stored))
     }
 }

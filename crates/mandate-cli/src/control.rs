@@ -9,11 +9,18 @@
 
 use std::fmt;
 
-use mandate_journal::{AppendOutcome, Environment, Head, MemoryJournal, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, Environment, Head, StoredEvent, StreamId};
 use mandate_time::UtcNanos;
 
-/// The reads and the one append a command makes. `mandate-journal-pg`'s journal answers it for a
-/// workspace deployment and [`MemoryJournal`] in tests; both run journal spec §5.1's append.
+/// The reads and the one append a command makes, with journal spec §5.1's append. The
+/// implementation gives it a `mandate-journal-pg` adapter for a workspace deployment; the tests
+/// answer it with their own in-memory journal in `tests/common`, because `mandate-journal`'s
+/// `MemoryJournal` validates payloads it has no schema for yet (DEC-257 item 17).
+///
+/// A command mints its control-stream event id once and retries the same draft until the journal
+/// answers `Committed` or `AlreadyCommitted`: the id is the idempotency key (DEC-155 item 2), so a
+/// retry after a fence, a head that moved, or a lost answer commits nothing twice (DEC-257 item
+/// 16).
 pub trait ControlJournal {
     /// Every committed event of `stream`, in `seq` order.
     ///
@@ -40,38 +47,6 @@ pub trait ControlJournal {
     ) -> Result<AppendOutcome, ControlError>;
 }
 
-impl ControlJournal for MemoryJournal {
-    fn rows(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, ControlError> {
-        Ok(MemoryJournal::rows(self, stream).to_vec())
-    }
-
-    fn head(&self, stream: &StreamId) -> Result<Head, ControlError> {
-        Ok(MemoryJournal::head(self, stream))
-    }
-
-    fn take_ownership(&mut self, stream: &StreamId) -> Result<u64, ControlError> {
-        Ok(MemoryJournal::take_ownership(self, stream))
-    }
-
-    fn append(
-        &mut self,
-        stream: &StreamId,
-        expected_head: u64,
-        writer_epoch: u64,
-        recorded_at: UtcNanos,
-        drafts: &[&[u8]],
-    ) -> Result<AppendOutcome, ControlError> {
-        Ok(MemoryJournal::append(
-            self,
-            stream,
-            expected_head,
-            writer_epoch,
-            recorded_at,
-            drafts,
-        ))
-    }
-}
-
 /// Who runs a command, from the CLI's workspace configuration: opaque ids only, no personal data
 /// (journal spec §6.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,8 +57,8 @@ pub struct Owner {
     pub environment: Environment,
 }
 
-/// The ids a command needs, injected so a test and a retry see the same ones: the control-stream
-/// event's ULID and a fresh step-up assertion id per gesture.
+/// The ids a command needs, injected so a test sees them: the control-stream event's ULID, minted
+/// once per command and reused on every retry, and a fresh step-up assertion id per gesture.
 pub trait Ids {
     fn event_id(&mut self) -> String;
     fn assertion_id(&mut self) -> String;

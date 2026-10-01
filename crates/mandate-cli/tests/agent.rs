@@ -5,8 +5,10 @@
 //! Resume, Stop, and acknowledge need the code `code` prints and commit nothing without it. A kill
 //! switch and an owner exit are never refused here: without the right code they are committed with
 //! no step-up evidence, which the runtime still applies without the owner-exit privilege (rule 13).
-//! Each code is bound to what it confirms and to the control stream's head, which this file checks
-//! by the code changing when the head moves and differing between scopes.
+//! Each code is bound to everything the owner confirms (the command, the agent, the instrument, the
+//! confirmed bid, bid size and floor, the acknowledged event, the kill switch's scope) and to the
+//! control stream's head, which this file checks by changing one of them at a time. No command
+//! writes an agent stream.
 //!
 //! Every test is pending until the CLI's implementation and fails on the command's
 //! `ControlError::Unimplemented` (DEC-77, DEC-110).
@@ -14,7 +16,8 @@
 mod common;
 
 use common::{
-    AGENT, ASKED_AT, CONTROL, FixedIds, Fixture, OWNER, at, body, member, member_text, owner,
+    AGENT, ASKED_AT, CONTROL, FixedIds, Fixture, OTHER_AGENT, OWNER, at, body, member, member_text,
+    owner,
 };
 use mandate_canon::Value;
 use mandate_cli::agent::{Command, Confirmed, Scope, code, command, kill, kill_code, status};
@@ -28,25 +31,40 @@ fn control(fx: &Fixture) -> Vec<Value> {
     fx.rows(CONTROL).iter().map(body).collect()
 }
 
-/// The one event a command committed, checked as the owner's on the control stream.
+/// The one event a command committed, checked as the owner's on the control stream; and since
+/// the fixtures here write no agent stream, none was written by the command either.
 fn committed_one(fx: &Fixture, before: usize) -> Value {
     let events = control(fx);
     assert_eq!(events.len(), before + 1, "one event per command");
     let event = events[before].clone();
     assert_eq!(member_text(&event, "actor.kind"), Some("user"));
     assert_eq!(member_text(&event, "actor.id"), Some(OWNER));
+    for agent in [AGENT, OTHER_AGENT] {
+        assert!(
+            fx.rows(&common::agent_stream(agent)).is_empty(),
+            "the CLI never writes an agent stream"
+        );
+    }
     event
 }
 
-fn exit_aapl(bid: bool) -> Command {
-    Command::Exit {
-        instrument: "AAPL".to_owned(),
-        bid: bid.then(|| Confirmed {
-            bid: "154.1".to_owned(),
-            bid_size: "300".to_owned(),
-            floor: "150".to_owned(),
-        }),
+fn confirmed(bid: &str, bid_size: &str, floor: &str) -> Confirmed {
+    Confirmed {
+        bid: bid.to_owned(),
+        bid_size: bid_size.to_owned(),
+        floor: floor.to_owned(),
     }
+}
+
+fn exit_of(instrument: &str, bid: Option<Confirmed>) -> Command {
+    Command::Exit {
+        instrument: instrument.to_owned(),
+        bid,
+    }
+}
+
+fn exit_aapl(bid: bool) -> Command {
+    exit_of("AAPL", bid.then(|| confirmed("154.1", "300", "150")))
 }
 
 /// PX-4: pause needs no code, has none, and commits an `OwnerCommandIssued` with no step-up.
@@ -230,6 +248,10 @@ fn a_kill_switch_is_committed_with_or_without_the_code() {
     assert_eq!(member(&event, "payload.step_up"), Some(&Value::Null));
 
     let fresh = answer("kill code", kill_code(&fx.journal, &owner(), &agent));
+    assert_ne!(
+        fresh, agent_code,
+        "the head moved, so the agent scope's old code confirms nothing"
+    );
     answer(
         "kill",
         kill(
@@ -268,7 +290,8 @@ fn a_kill_switch_is_committed_with_or_without_the_code() {
 
 /// Rule 13, the #281 obligation's CLI half: an owner exit is never refused here. Without the right
 /// code it is committed with no step-up and the bid as confirmed, so the runtime routes it for the
-/// regular session; with the code it carries the evidence that unlocks the privilege.
+/// regular session; with the code it carries both the confirmed bid and the evidence, the one shape
+/// that unlocks the privilege.
 #[test]
 #[ignore = "pending E8-3"]
 fn an_owner_exit_is_committed_with_or_without_the_code() {
@@ -296,11 +319,8 @@ fn an_owner_exit_is_committed_with_or_without_the_code() {
     assert_eq!(member_text(&event, "payload.floor"), Some("150"));
     assert_eq!(member(&event, "payload.step_up"), Some(&Value::Null));
 
-    let right = answer(
-        "code",
-        code(&fx.journal, &owner(), AGENT, &exit_aapl(false)),
-    )
-    .unwrap_or_else(|| panic!("an owner exit has a code"));
+    let right = answer("code", code(&fx.journal, &owner(), AGENT, &exit_aapl(true)))
+        .unwrap_or_else(|| panic!("an owner exit has a code"));
     answer(
         "exit",
         command(
@@ -308,17 +328,133 @@ fn an_owner_exit_is_committed_with_or_without_the_code() {
             &mut ids,
             &owner(),
             AGENT,
-            &exit_aapl(false),
+            &exit_aapl(true),
             Some(&right),
             at(ASKED_AT + 1),
         ),
     );
     let event = committed_one(&fx, 1);
-    assert_eq!(member(&event, "payload.bid"), Some(&Value::Null));
+    assert_eq!(member_text(&event, "payload.bid"), Some("154.1"));
+    assert_eq!(member_text(&event, "payload.bid_size"), Some("300"));
+    assert_eq!(member_text(&event, "payload.floor"), Some("150"));
     assert_eq!(
         member_text(&event, "payload.step_up.method"),
         Some("cli_confirm")
     );
+    assert_eq!(
+        member(&event, "payload.step_up.authenticated_at").and_then(Value::as_int),
+        u64::try_from(ASKED_AT + 1).ok()
+    );
+}
+
+/// DEC-257 item 13, mandate spec §6.1, DEC-66: a code is bound to everything the owner confirms.
+/// Changing only the agent, the instrument, the confirmed bid, bid size or floor, whether a bid was
+/// confirmed at all, or the acknowledged event gives a different code; and a code typed for one
+/// confirmed bid commits a different bid without step-up evidence, so the privilege is never
+/// carried by another bid's code.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_code_is_bound_to_every_field_it_confirms() {
+    let mut fx = Fixture::new();
+    let mut ids = FixedIds::default();
+    let of = |agent: &str, cmd: &Command, fx: &Fixture| {
+        answer("code", code(&fx.journal, &owner(), agent, cmd))
+            .unwrap_or_else(|| panic!("{cmd:?} has a code"))
+    };
+    let ack = |n: u64| Command::Acknowledge {
+        event: common::runtime_id(n),
+    };
+    let base = of(AGENT, &exit_aapl(true), &fx);
+    let changed = [
+        ("the agent", of(OTHER_AGENT, &exit_aapl(true), &fx)),
+        (
+            "the instrument",
+            of(
+                AGENT,
+                &exit_of("MSFT", Some(confirmed("154.1", "300", "150"))),
+                &fx,
+            ),
+        ),
+        (
+            "the bid",
+            of(
+                AGENT,
+                &exit_of("AAPL", Some(confirmed("154.2", "300", "150"))),
+                &fx,
+            ),
+        ),
+        (
+            "the bid size",
+            of(
+                AGENT,
+                &exit_of("AAPL", Some(confirmed("154.1", "301", "150"))),
+                &fx,
+            ),
+        ),
+        (
+            "the floor",
+            of(
+                AGENT,
+                &exit_of("AAPL", Some(confirmed("154.1", "300", "149"))),
+                &fx,
+            ),
+        ),
+        (
+            "whether a bid was confirmed",
+            of(AGENT, &exit_aapl(false), &fx),
+        ),
+    ];
+    for (what, other) in &changed {
+        assert_ne!(&base, other, "changing only {what} changes the code");
+    }
+    assert_ne!(
+        of(AGENT, &ack(42), &fx),
+        of(AGENT, &ack(43), &fx),
+        "the acknowledged event"
+    );
+    assert_ne!(
+        of(AGENT, &Command::Resume, &fx),
+        of(OTHER_AGENT, &Command::Resume, &fx),
+        "the agent, for a resume"
+    );
+
+    let lower_bid = exit_of("AAPL", Some(confirmed("150", "300", "150")));
+    answer(
+        "exit",
+        command(
+            &mut fx.journal,
+            &mut ids,
+            &owner(),
+            AGENT,
+            &lower_bid,
+            Some(&base),
+            at(ASKED_AT),
+        ),
+    );
+    let event = committed_one(&fx, 0);
+    assert_eq!(member_text(&event, "payload.bid"), Some("150"));
+    assert_eq!(
+        member(&event, "payload.step_up"),
+        Some(&Value::Null),
+        "another bid's code carries no evidence for this one"
+    );
+    let other_events_code = of(AGENT, &ack(43), &fx);
+    assert_eq!(
+        command(
+            &mut fx.journal,
+            &mut ids,
+            &owner(),
+            AGENT,
+            &ack(42),
+            Some(&other_events_code),
+            at(ASKED_AT + 1),
+        ),
+        Err(ControlError::Refused {
+            reason: "step_up_missing"
+        }),
+        "another event's acknowledgment code confirms nothing"
+    );
+    assert_eq!(control(&fx).len(), 1);
 }
 
 /// `status` reads the agent stream: the last mode change, whether it was the startup hold, and the
