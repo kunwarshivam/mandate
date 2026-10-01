@@ -1182,6 +1182,17 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   calendar's first date, which `session` reads as the regular session. Move them onto calendar
   dates in their own DEC-77 tests PR; after it, an instant before the calendar's range is held
   `session_unknown` like one after it.
+- **E7-4 slice 5's trading-day part (stream K), from the session part ([DEC-260](04-decision-log.md#decisions)
+  (13)):** fold `TradingDayStarted` together with what the reference-case harness then reaches:
+  §5.4's GTC re-placement at the buffer day (`hand::protection_is_re_placed_at_the_buffer_day`,
+  `protection_is_not_re_placed_early`, `a_protective_order_submits_with_no_buying_power`), the
+  harness's startup reconciliation, which today holds its openings
+  `startup_reconciliation_pending` (RC-14 `add_via_bracket`, RC-15
+  `restriction_from_a_closing_only_reject`, RC-21, RC-22), RC-14's journal order
+  (`unprotected_window_start` expected after the gate), and the cases the fold alone lets pass
+  (RC-07 `unposted_crypto_fees_reconcile`, RC-14 `passive_exit_becomes_oco_take_profit`, RC-15
+  `status_not_active`, `external_order_detected`, `unexplained_403s`). RC-24 ×2 go live with it:
+  the session part already prices them (both pass with the fold, shown in its PR).
 - **E7-4 slice 6 (stream K), moved from slice 5 by the coordinator's ruling D3 on
   [#174](https://github.com/kunwarshivam/mandate/pull/174) (5926142854):** the four kill-switch
   session tests (`hand::an_automated_flatten_defers_equity_sells_to_the_session`,
