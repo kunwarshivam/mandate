@@ -215,7 +215,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   my mandate passes its review date unconfirmed, so that an abandoned account stops acting alone
   ([DEC-188](04-decision-log.md#decisions)). Waits on the spec change for `autonomy.review_by` (MI-32). *Accepted when:*
   past the date, autonomous paths decide `ask`, positions and exits are untouched, and re-confirming
-  (a neutral version with step-up) restores them.
+  (a version moving the date later, with step-up) restores them. The spec change is MI-32, V-046, and §6.2 step 5b
+  with the MC-D cases ([DEC-271](04-decision-log.md#decisions) to [DEC-273](04-decision-log.md#decisions): re-confirming is
+  risk-increasing and carries the delegations over). Owed after it: `mandate-spec` parsing the field, V-046, and its
+  §9.2 row (stream F), then the spec change that makes the date required on every version holding an `auto` or a
+  delegation, with the base mandates (DEC-272 item 3). Also owed, from #380's rulings: the vectors for journal spec §9.1
+  rule 7's clause that `decided_by: review_ceiling` requires `autonomy: ask` (the clause is in the spec). One code PR
+  carries the invalid draft `decision_review_ceiling_on_auto` and the valid draft `decision_review_ceiling_asked`, the
+  validator rule `7.review_ceiling_label` and its mutant in `reference/journal/generate.py`, the regenerated
+  `journal.yaml` and `fixtures/refcases/journal.json`, and the agent-stream harness's count
+  (`crates/mandate-refcases/src/journal/agent_stream.rs`, 106 to 108), as DEC-177 items 6 and 14 did (ES-22).
 
 ### E7 Alpaca connector and recovery
 

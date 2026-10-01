@@ -81,6 +81,13 @@ def get(doc, path):
         doc = doc[int(p)] if isinstance(doc, list) else doc[p]
     return doc
 
+def get_or_none(doc, path):
+    """`get`, with `None` for a member one side of a version change does not hold (an optional field set or removed)."""
+    try:
+        return get(doc, path)
+    except (KeyError, IndexError):
+        return None
+
 def apply_patch(doc, patch):
     doc = copy.deepcopy(doc)
     for op in patch:
@@ -176,6 +183,8 @@ PLATFORM_DEFAULTABLE = {   # path -> required value (None = any value)
     "/universe/leveraged_etps_enabled": False, "/universe/leveraged_etp_disclosure_version": None,
     "/environment": "paper",
 }
+REVIEW_DEFAULT_DAYS = 90    # §7: the platform default for autonomy.review_by, counted from the validation date (DEC-188)
+REVIEW_MAX_DAYS = 180       # V-046: a review date set or moved is at most this far after the validation date
 OWNER_SOURCES = ("user_stated", "user_entered", "platform_proposed")
 NEVER_PROPOSED = ["/universe/pinned_instruments", "/environment", "/connection_id"]
 
@@ -191,6 +200,29 @@ def valid_date(s):
         return True
     except ValueError:
         return False
+
+def days_after(day, n):
+    return (datetime.strptime(day, "%Y-%m-%d") + timedelta(days=n)).strftime("%Y-%m-%d")
+
+def review_errors(m, ctx):
+    """V-015 and V-046 for `autonomy.review_by` (§3, §4.1, DEC-188, DEC-272). A date the version sets or moves lies in
+    [validation date, validation date + 180 days]; one carried unchanged is not re-checked, so a lapsed date can stay
+    lapsed through a reducing version; and once a version sets it, every later version does."""
+    errs = set()
+    rb = m["autonomy"].get("review_by")
+    prev = ctx.get("previous_version")
+    prev_rb = (prev.get("autonomy") or {}).get("review_by") if prev is not None else None
+    if prev_rb is not None and rb is None:
+        errs.add("V-046")
+    if rb is None or rb == prev_rb:
+        return errs
+    if not valid_date(rb):
+        errs.add("V-015")
+        return errs
+    vd = ctx["validation_date"]
+    if not vd <= rb <= days_after(vd, REVIEW_MAX_DAYS):
+        errs.add("V-046")
+    return errs
 
 def worst_case(m):
     r, p = m["risk"], m["protection"]
@@ -228,13 +260,19 @@ def delegation_errors(m, prev):
             errs.add("V-043")
     if prev is not None and "autonomy" in prev:
         carried = {d["id"] for d in prev["autonomy"].get("delegations", [])} & set(ids)
-        if carried and classify(without_delegations(prev), without_delegations(m))[0] == "risk_increasing":
+        if carried and classify(without_delegations(prev, review_by_of=m), without_delegations(m))[0] == "risk_increasing":
             errs.add("V-042")
     return errs
 
-def without_delegations(m):
+def without_delegations(m, review_by_of=None):
+    """`m` with no delegations. With `review_by_of`, `m` also takes that version's review date, so V-042 classifies a
+    version with its review date left out: re-confirming carries the delegations over (DEC-188, DEC-273)."""
     out = copy.deepcopy(m)
     out["autonomy"].pop("delegations", None)
+    if review_by_of is not None:
+        out["autonomy"].pop("review_by", None)
+        if "review_by" in review_by_of["autonomy"]:
+            out["autonomy"]["review_by"] = review_by_of["autonomy"]["review_by"]
     return out
 
 def semantic(m, ctx):
@@ -315,7 +353,10 @@ def semantic(m, ctx):
             continue
         if pv["source"] == "platform_default":
             allowed = next((k for k in PLATFORM_DEFAULTABLE if path == k or path.startswith(k + "/")), None)
-            if allowed is None or (PLATFORM_DEFAULTABLE[allowed] is not None and get(m, allowed) != PLATFORM_DEFAULTABLE[allowed]) \
+            if path == "/autonomy/review_by":
+                if m["autonomy"].get("review_by") != days_after(ctx["validation_date"], REVIEW_DEFAULT_DAYS):
+                    errs.add("V-020")
+            elif allowed is None or (PLATFORM_DEFAULTABLE[allowed] is not None and get(m, allowed) != PLATFORM_DEFAULTABLE[allowed]) \
                     or (allowed == "/autonomy/approval/approvers" and multi):
                 errs.add("V-020")
         elif pv["source"] not in OWNER_SOURCES or not pv["confirmed"]:
@@ -356,6 +397,7 @@ def semantic(m, ctx):
     if sum(-D(x["factor"]).as_tuple().exponent for x in lad if x["action"] == "scale_sizes" and x["factor"] is not None) > 12:
         errs.add("V-040")
     errs |= delegation_errors(m, prev)
+    errs |= review_errors(m, ctx)
     carry = D(ctx.get("connection_loss_carry_usd", "0"))
     if carry >= D(m["capital"]["max_loss_from_allocation"]) * D(m["capital"]["allocation_usd"]):
         errs.add("V-032")
@@ -996,6 +1038,16 @@ def delegation_lift(m, a, res, st):
             return d["id"]
     return None
 
+def review_passed(m, st):
+    """§6.2 step 5b (MI-32): the review date has passed once the risk day of the risk clock is after it, so the date
+    itself is the last risk day autonomy stands. With no risk clock to judge by, it has passed (rule 3)."""
+    rb = m["autonomy"].get("review_by")
+    if rb is None:
+        return False
+    if st is None or "now" not in st:
+        return True
+    return risk_day(st["now"])["risk_day"] > rb
+
 def autonomy(m, a, st=None):
     au = m["autonomy"]
     if a["purpose"] in REDUCING:
@@ -1014,6 +1066,8 @@ def autonomy(m, a, st=None):
         res = {"decision": au["admission"], "by": "admission_ceiling"}
     if a.get("requested_by", "agent") == "client" and STRICT[res["decision"]] < STRICT["ask"]:
         res = {"decision": "ask", "by": "client_ceiling"}
+    if review_passed(m, st) and STRICT[res["decision"]] < STRICT["ask"]:
+        res = {"decision": "ask", "by": "review_ceiling"}
     if res["decision"] == "ask":
         t = au["approval"]["two_approver_above_usd"]
         res["approvers_required"] = 2 if t is not None and D(a["order_usd"]) > D(t) else 1
@@ -1496,7 +1550,7 @@ def classify(old, new):
     if "/environment" not in paths and "/connection_id" not in paths and pinning_switch(old, new, paths):
         return "risk_reducing", paths
     for p in paths:
-        a, b = get(old, p), get(new, p)
+        a, b = get_or_none(old, p), get_or_none(new, p)
         if p in ("/environment", "/connection_id"):
             return "invalid", paths
         if any(p == x or p.startswith(x + "/") for x in NEUTRAL):
@@ -1530,6 +1584,8 @@ def classify(old, new):
             res.add("increasing" if set(b) - set(a) else "reducing")
         elif p == "/behavior/research":
             res.add("increasing" if b is not None else "reducing")
+        elif p == "/autonomy/review_by":
+            res.add("increasing" if b is None or (a is not None and b > a) else "reducing")
         elif p.startswith("/autonomy"):
             res.add(classify_autonomy(old["autonomy"], new["autonomy"]))
         elif p == "/goal/end_date":
@@ -1558,11 +1614,18 @@ CONTENT_KEYS = ("action", "trigger", "evidence", "risk_impact", "reference_mark"
 DEFAULT_SENTENCE = "If you do nothing, this action is skipped"
 SCORE_LABEL = "combined model score, not a probability of profit"
 
-def approval_content(m, req, figures):
-    """The §6.4 content object whose SHA-256 is the content hash; `figures` are the §6.3 values at the request."""
-    r, rules = m["risk"], {x["id"]: x for x in m["autonomy"]["rules"]}
+def approval_trigger(m, req):
+    """The §6.4 content object's `trigger`: the owner's confirmed rule verbatim when a rule asked, else null."""
+    rules = {x["id"]: x for x in m["autonomy"]["rules"]}
     by = req["decided_by"]
     rule = rules.get(by[len("rule:"):]) if by.startswith("rule:") else None
+    return {"mandate_version": req["mandate_version"], "decided_by": by, "requested_by": req.get("requested_by", "agent"),
+            "client": req.get("client") if req.get("requested_by") == "client" else None,
+            "rule": None if rule is None else {"id": rule["id"], "when": rule["when"], "then": rule["then"]}}
+
+def approval_content(m, req, figures):
+    """The §6.4 content object whose SHA-256 is the content hash; `figures` are the §6.3 values at the request."""
+    r = m["risk"]
     E = D(figures["agent_equity"])
     ladder = [D(x["at"]) for x in r["drawdown_ladder"]]
     caps = {"order_usd": r["max_order_usd"], "position_usd_after": norm(min(D(r["max_position_usd"]), D(r["max_position_fraction"]) * E)),
@@ -1571,9 +1634,7 @@ def approval_content(m, req, figures):
     return {
         "action": {k: req[k] for k in ("instrument", "asset_class", "side", "qty")} | {"limit": req["limit_price"]}
                   | {"order_usd": norm(D(req["qty"]) * D(req["limit_price"])), "purpose": req["purpose"]},
-        "trigger": {"mandate_version": req["mandate_version"], "decided_by": by, "requested_by": req.get("requested_by", "agent"),
-                    "client": req.get("client") if req.get("requested_by") == "client" else None,
-                    "rule": None if rule is None else {"id": rule["id"], "when": rule["when"], "then": rule["then"]}},
+        "trigger": approval_trigger(m, req),
         "evidence": {"combined_score": {"value": req["combined_score"], "label": SCORE_LABEL}, "outputs": req.get("outputs", [])},
         "risk_impact": [{"field": f, "value": norm(D(req["qty"]) * D(req["limit_price"])) if f == "order_usd" else figures[f], "cap": caps[f]}
                         for f in ("order_usd", "position_usd_after", "gross_usd_after", "bought_today_usd", "drawdown", "daily_pnl_fraction")],
