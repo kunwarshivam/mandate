@@ -1755,6 +1755,15 @@ risk (rule 3):
   `DecisionMade` it names in the same batch (§9.1 rule 10), and §11's `intent_action_mismatch` and
   `mode_event_mismatch` run in `mandate journal verify` and the scheduled verification, against the
   vectors' `invalid_batches` and `range_verification`.
+- **A generated `range_verification` vector with a forward reference (#384 review, major 1; DEC-168
+  item 13).** `verify_agent_stream` indexes the whole range first, so an `IntentProposed` naming a
+  `DecisionMade` later in the range is compared, and a `mode_event` naming a later event or its own
+  switch fails, at any `from_seq`. Only `mandate-journal`'s in-module tests pin this today; the next
+  journal reference PR adds generated range cases for both, at a `from_seq` above 1.
+- **Pin §9.1's ordering of `artifact_refs` and `pii_refs` ahead of rules 14 to 16 (#384 review, minor
+  2).** No vector or test breaks both an envelope check and a subject or copy rule, so swapping their
+  order passes. A tests-correction PR from stream L adds a draft that breaks both and expects the
+  envelope check's reason and path.
 - **The model registry stores each pinned model's content object as an artifact.**
   `ModelOutputRecorded.content_hash` is a `sha256:` reference, so it is in `artifact_refs` (§3), and
   §11 check 6 fails `artifact_missing` unless the object is in the artifact store.

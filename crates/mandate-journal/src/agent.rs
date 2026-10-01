@@ -183,55 +183,65 @@ pub struct AgentStreamFailure {
 }
 
 /// Runs §11's `intent_action_mismatch` and `mode_event_mismatch` over `rows` of one agent stream,
-/// in order, after [`crate::verify_events`] passed them. A reference to an event before the range
-/// is not checked, except that on a full chain (`from_seq` 1) a `mode_event` naming no earlier
-/// event fails. Rows of any other stream type pass, since neither check applies there.
+/// after [`crate::verify_events`] passed them, reporting the first failing event in `seq` order.
+/// Every event of the range is indexed first, so a reference to an event anywhere in the range is
+/// checked: an `IntentProposed` naming a `DecisionMade` later in the range is still compared, and a
+/// `mode_event` naming a later event, or its own switch, fails (DEC-168 item 13). Only a reference
+/// to an event outside the range is left unchecked, except that on a full chain (`from_seq` 1) a
+/// `mode_event` naming no event fails. Rows of any other stream type pass, since neither check
+/// applies there.
 pub fn verify_agent_stream(
     rows: &[StoredEvent],
     start: TrustedStart,
 ) -> Result<(), AgentStreamFailure> {
-    let mut seen: BTreeMap<String, (String, Value)> = BTreeMap::new();
-    for row in rows {
-        let agent =
-            StreamId::parse(&row.stream_id).is_some_and(|s| s.stream_type() == StreamType::Agent);
-        let Some(body) = parse(&row.body).ok().filter(|_| agent) else {
-            continue;
-        };
-        let payload = body.get("payload").cloned().unwrap_or(Value::Null);
+    let events: Vec<(&StoredEvent, Value)> = rows
+        .iter()
+        .filter(|row| {
+            StreamId::parse(&row.stream_id).is_some_and(|s| s.stream_type() == StreamType::Agent)
+        })
+        .filter_map(|row| Some((row, parse(&row.body).ok()?)))
+        .collect();
+    let payload = |body: &Value| body.get("payload").cloned().unwrap_or(Value::Null);
+    let index: BTreeMap<&str, (u64, &str, Value)> = events
+        .iter()
+        .map(|(row, body)| {
+            let entry = (row.seq, row.event_type.as_str(), payload(body));
+            (row.event_id.as_str(), entry)
+        })
+        .collect();
+    for (row, body) in &events {
         let fail = |check| {
             Err(AgentStreamFailure {
                 seq: row.seq,
                 check,
             })
         };
-        let named = |member: &Value| member.as_str().and_then(|id| seen.get(id));
+        let named = |member: Option<&Value>| member.and_then(Value::as_str).map(|id| index.get(id));
+        let own = payload(body);
         match row.event_type.as_str() {
             "IntentProposed" => {
-                if let Some((cause_type, cause)) = body.get("causation_id").and_then(named)
-                    && cause_type == "DecisionMade"
-                    && first_differing_action(&payload, cause).is_some()
+                if let Some(Some((_, "DecisionMade", decision))) = named(body.get("causation_id"))
+                    && first_differing_action(&own, decision).is_some()
                 {
                     return fail(AgentStreamCheck::IntentActionMismatch);
                 }
             }
             "KillSwitchActivated" => {
-                let mode_event = payload.get("mode_event").unwrap_or(&Value::Null);
-                if *mode_event != Value::Null {
-                    let applied = match named(mode_event) {
-                        None => start.from_seq != 1,
-                        Some((named_type, named_payload)) => {
-                            named_type == "AgentModeChanged"
-                                && Payload(named_payload).text("reason") == "kill_switch"
-                        }
-                    };
-                    if !applied {
-                        return fail(AgentStreamCheck::ModeEventMismatch);
+                let applied = match named(own.get("mode_event")) {
+                    None => true,
+                    Some(None) => start.from_seq != 1,
+                    Some(Some((seq, named_type, named_payload))) => {
+                        *seq < row.seq
+                            && *named_type == "AgentModeChanged"
+                            && Payload(named_payload).text("reason") == "kill_switch"
                     }
+                };
+                if !applied {
+                    return fail(AgentStreamCheck::ModeEventMismatch);
                 }
             }
             _ => {}
         }
-        seen.insert(row.event_id.clone(), (row.event_type.clone(), payload));
     }
     Ok(())
 }
@@ -898,6 +908,67 @@ mod tests {
             })
             .collect();
         assert_eq!(verify_agent_stream(&moved, TrustedStart::GENESIS), Ok(()));
+        Ok(())
+    }
+
+    /// One `{seq, path, value}` change setting `path` of the chain event at `seq` to the event ID
+    /// of the chain event at `named`.
+    fn naming(section: &Value, seq: u64, path: &str, named: u64) -> Result<Value, String> {
+        let id = text(&Value::Object(base(section, named)?), "event_id").to_owned();
+        parse(format!(r#"{{"seq":{seq},"path":"{path}","value":"{id}"}}"#).as_bytes())
+            .map_err(|e| format!("{e:?}"))
+    }
+
+    /// `rows` from `from_seq` on, with that seq as the trusted start.
+    fn verify_from(rows: &[StoredEvent], from_seq: u64) -> Result<(), AgentStreamFailure> {
+        let range: Vec<StoredEvent> = rows.iter().filter(|r| r.seq >= from_seq).cloned().collect();
+        let start = TrustedStart {
+            from_seq,
+            prev_hash: Digest::ZERO,
+        };
+        verify_agent_stream(&range, start)
+    }
+
+    /// #384 review, major 1: an intent naming a decision later in the range is compared with it,
+    /// whatever the range's start (DEC-168 item 13).
+    #[test]
+    fn an_intent_naming_a_later_decision_in_the_range_is_compared() -> Result<(), String> {
+        let section = section()?;
+        let change = naming(&section, 5, "causation_id", 8)?;
+        let tampered = rows(&section, &[change])?;
+        for from_seq in [1, 2, 5] {
+            let wanted = AgentStreamFailure {
+                seq: 5,
+                check: AgentStreamCheck::IntentActionMismatch,
+            };
+            assert_eq!(
+                verify_from(&tampered, from_seq),
+                Err(wanted),
+                "from {from_seq}"
+            );
+        }
+        assert_eq!(verify_from(&tampered, 6), Ok(()));
+        Ok(())
+    }
+
+    /// #384 review, minor 1: a `mode_event` naming its own switch, or any event not earlier in the
+    /// range, fails at every start that holds the switch (DEC-168 item 13).
+    #[test]
+    fn a_kill_switch_naming_itself_fails_at_every_start() -> Result<(), String> {
+        let section = section()?;
+        let change = naming(&section, 13, "payload.mode_event", 13)?;
+        let tampered = rows(&section, &[change])?;
+        for from_seq in [1, 2, 5, 12, 13] {
+            let wanted = AgentStreamFailure {
+                seq: 13,
+                check: AgentStreamCheck::ModeEventMismatch,
+            };
+            assert_eq!(
+                verify_from(&tampered, from_seq),
+                Err(wanted),
+                "from {from_seq}"
+            );
+        }
         Ok(())
     }
 }
