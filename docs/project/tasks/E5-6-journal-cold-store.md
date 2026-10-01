@@ -55,7 +55,10 @@ story. Fill every section; write "none" rather than deleting one.
    `mandate-journal` (2) and `mandate-canon` (0).
 2. **The manifest's six fields and their JSON names are pinned** (DEC-263): `stream`,
    `first_seq`, `last_seq`, `first_prev_hash`, `last_hash`, `file_sha256`, canonicalized by the
-   same rules as every journal byte. The spec names the fields in prose; the names are this
+   same rules as every journal byte. The canonical bytes are a `CanonicalBytes` newtype — the
+   wrapper carries the canonical-form invariant a bare `Vec<u8>` would lose, the way
+   `mandate-research`'s `ContentHash` carries a content digest — with one live test pinning the
+   accessor's read-back contract for the mutation gate (DEC-253 item 2). The spec names the fields in prose; the names are this
    design's, pinned by a test that builds the object itself. The manifest hash a
    `SegmentExported` event references is the digest of exactly these bytes.
 3. **`of` derives, `parse` reads, and both refuse** (DEC-263): `of` takes one contiguous
@@ -75,8 +78,10 @@ story. Fill every section; write "none" rather than deleting one.
    walked by `mandate_journal::verify_events` from the trusted start, whose per-event failures
    surface unchanged. An event before the trusted start is not checked by that range (§11's own
    rule), and the walk honours it by starting at `from_seq`, never at the segment's first event.
-6. **The TSA check's structural scope** (DEC-265): `tsa_token_invalid` fires unless the token
-   artifact contains the anchor's imprint — SHA-256 of the 32 raw root bytes (§10,
+6. **The TSA check's structural scope** (DEC-265): the check's failure is
+   `ColdFailure::TsaTokenInvalid` — one failure surface for the whole cold verification (the
+   per-event `Event`, the per-segment `Segment`, the token's `TsaTokenInvalid`) — and it fires
+   unless the token artifact contains the anchor's imprint — SHA-256 of the 32 raw root bytes (§10,
    `tsa_imprint`) — so a token that does not even claim this anchor's root fails. Containing
    the root itself is not containing the imprint. Signature verification, the chain, and
    revocation are the crypto half: Proposed, because each needs a dependency this crate does not

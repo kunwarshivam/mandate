@@ -278,11 +278,22 @@ pub enum ColdError {
 
 #[cfg(test)]
 mod tests {
-    use super::ColdCheck;
+    use super::{CanonicalBytes, ColdCheck};
 
     /// The spec's three cold check codes, pinned live because the pending E5-6 tests do not run
     /// under the mutation gate (DEC-253 item 2), so a code arm no live test reads would be a
     /// mutant nothing catches.
+    /// The newtype reads its bytes back exactly: the accessor's contract, pinned live for the
+    /// mutation gate while the crate's real tests are pending (DEC-253 item 2), and permanent
+    /// once they land.
+    #[test]
+    fn canonical_bytes_read_back_exactly() {
+        let bytes = CanonicalBytes(vec![7, 9]);
+        assert_eq!(bytes.as_slice().to_vec(), vec![7, 9]);
+        let empty = CanonicalBytes(Vec::new());
+        assert!(empty.as_slice().is_empty());
+    }
+
     #[test]
     fn the_cold_check_codes_are_pinned() {
         assert_eq!(
