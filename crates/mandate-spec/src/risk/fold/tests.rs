@@ -812,47 +812,6 @@ fn action_of(action: &str) -> Result<LadderAction, String> {
     }
 }
 
-/// What R4 folds is `unimplemented`, never a silent answer, and leaves the state as it was:
-/// acknowledgments, allocation changes, floor loosening, retirement, and goal completion.
-#[test]
-fn every_input_left_to_r4_is_unimplemented_and_changes_nothing() -> Result<(), String> {
-    let mandate = ladder_only(&[])?;
-    let mut state = open(&mandate, &equity()?, &Every)?;
-    one(&mut state, mark(1, "98"))?;
-    let before = state.clone();
-    let loosened = SchemaDec::parse("0.2", DecGrammar::OpenFraction).map_err(|e| e.to_string())?;
-    for input in [
-        Input::OwnerAcknowledged {
-            restriction: Latch::DrawdownLadder,
-        },
-        Input::AllocationChange {
-            delta_usd: usd("100")?,
-        },
-        Input::FloorLoosened {
-            new_max_loss_from_allocation: loosened,
-            confirmed_at: at(1)?,
-            independent_approval: true,
-        },
-        Input::AgentStopped {
-            reason: StopReason::OwnerStop,
-        },
-        Input::GoalComplete,
-    ] {
-        let step = Step {
-            at: at(2)?,
-            session: MarketSession::Regular,
-            input,
-        };
-        assert_eq!(
-            state.step(&step).map(|_| ()).map_err(|e| e.code()),
-            Err("unimplemented"),
-            "{step:?}"
-        );
-        assert_eq!(state, before, "{step:?} changed nothing");
-    }
-    Ok(())
-}
-
 /// A breach still confirming at the rollover keeps confirming against the previous day's E₀ and is
 /// not the new day's `pending` (§5.4). It is decided within `breach_confirm_s`, so one still
 /// undecided at the next rollover is `invalid_input`, and the refused step changes nothing. One the
@@ -1295,3 +1254,5 @@ proptest! {
         }
     }
 }
+
+mod owner;
