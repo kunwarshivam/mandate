@@ -449,6 +449,15 @@ mod tests {
         ];
         assert!(out_of_order(&s), "fills out of execution order");
         s.fills_today = vec![
+            fill(TEN_AM, "AAPL", Side::Buy, "1")?,
+            fill(TEN_AM, "AAPL", Side::Sell, "1")?,
+        ];
+        assert_eq!(
+            s.fold()?.ledger.window_count,
+            1,
+            "two fills at one instant are in order"
+        );
+        s.fills_today = vec![
             fill("2026-09-21T10:01:00-04:00", "BTCUSD", Side::Buy, "1")?,
             fill(TEN_AM, "BTCUSD", Side::Sell, "1")?,
         ];
