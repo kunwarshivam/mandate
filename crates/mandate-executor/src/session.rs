@@ -28,12 +28,14 @@ pub(crate) enum Venue {
     Closed,
 }
 
-/// The US-equities session span `instrument` is in at `at`, or `None` for crypto, for an instant
+/// The US-equities session span `instrument` is in at `at` — an instrument the snapshot does not
+/// classify takes the equity sessions, failing closed (#400 round 1, minor 3) — or `None` for
+/// crypto, for an instant
 /// the calendar does not cover, and for a closed market. An instant before the calendar's first
 /// date is read as the regular session, as before this slice: only the tests' 1970 clocks reach
 /// it (DEC-260 (13)); one after its last date is closed ([`after_range`]).
 fn span(ports: &Ports<'_>, instrument: &InstrumentId, at: RiskClock) -> Option<SessionSpan> {
-    if ports.instruments.asset_class(instrument) != Some(AssetClass::UsEquity) {
+    if ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto) {
         return None;
     }
     let calendar = ExchangeCalendar::us_equities().ok()?;
@@ -73,7 +75,7 @@ fn after_range(at: RiskClock) -> bool {
 
 /// The venue for `instrument` at `at`.
 pub(crate) fn venue(ports: &Ports<'_>, instrument: &InstrumentId, at: RiskClock) -> Venue {
-    let equity = ports.instruments.asset_class(instrument) == Some(AssetClass::UsEquity);
+    let equity = ports.instruments.asset_class(instrument) != Some(AssetClass::Crypto);
     match span(ports, instrument, at) {
         Some(found) => match found.session() {
             Session::PreMarket | Session::AfterHours => Venue::Extended,
@@ -89,8 +91,9 @@ pub(crate) fn venue(ports: &Ports<'_>, instrument: &InstrumentId, at: RiskClock)
 }
 
 /// Why an equity order at `at` waits for the next session (DEC-260 (13), the coordinator's ruling
-/// D1): `session_closed` while no v1 session is open and the calendar names a trading day ahead,
-/// whose pre-market open ends the hold; `session_unknown` when it cannot, so the order stays
+/// D1): `session_closed` while no v1 session is open and either the instant is a trading day's
+/// overnight session, which that day's pre-market open ends (#400 round 1, minor 1), or the
+/// calendar names a trading day ahead; `session_unknown` when it cannot, so the order stays
 /// held, never sent overnight or queued blind. `None` while a session is open.
 pub(crate) fn closed_hold(
     ports: &Ports<'_>,
@@ -100,7 +103,7 @@ pub(crate) fn closed_hold(
     if venue(ports, instrument, at) != Venue::Closed {
         return None;
     }
-    Some(if reopens(at) {
+    Some(if span(ports, instrument, at).is_some() || reopens(at) {
         SESSION_CLOSED
     } else {
         SESSION_UNKNOWN
@@ -254,6 +257,26 @@ mod venue_tests {
         assert!(same_session(&ports, &aapl, at(OPEN), at(CLOSE - 1)));
         assert!(!same_session(&ports, &aapl, at(CLOSE - 1), at(CLOSE)));
         assert!(same_session(&ports, &aapl, at(0), at(1)));
+        for closed in [
+            SATURDAY,
+            AFTER_HOURS_CLOSE,
+            PRE_MARKET - 1,
+            AFTER_THE_CALENDAR,
+        ] {
+            for purpose in [
+                Purpose::RiskExit,
+                Purpose::Protective,
+                Purpose::Flatten,
+                Purpose::OwnerExit,
+                Purpose::DiscretionaryExit,
+                Purpose::Open,
+            ] {
+                assert!(
+                    !extended_hours(&ports, &aapl, at(closed), purpose),
+                    "never extended-hours overnight or closed (DEC-30): {purpose:?} at {closed}"
+                );
+            }
+        }
         for (purpose, expected) in [
             (Purpose::RiskExit, true),
             (Purpose::Protective, true),
@@ -273,6 +296,42 @@ mod venue_tests {
                 "{purpose:?}"
             );
         }
+        Ok(())
+    }
+
+    struct Unclassified;
+
+    impl InstrumentSnapshot for Unclassified {
+        fn asset_class(&self, _instrument: &InstrumentId) -> Option<AssetClass> {
+            None
+        }
+
+        fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
+            None
+        }
+
+        fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+            None
+        }
+    }
+
+    /// #400 round 1, minor 3: an instrument the snapshot does not classify takes the equity
+    /// sessions, failing closed, never the regular session crypto's continuous one would give it.
+    #[test]
+    fn an_unclassified_instrument_takes_the_equity_sessions() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Unclassified,
+            config: &config,
+            fees: &fees,
+        };
+        let aapl = aapl()?;
+        assert_eq!(venue(&ports, &aapl, at(SATURDAY)), Venue::Closed);
+        assert_eq!(venue(&ports, &aapl, at(PRE_MARKET)), Venue::Extended);
+        assert_eq!(venue(&ports, &aapl, at(AFTER_THE_CALENDAR)), Venue::Closed);
+        assert_eq!(stops_trigger_since(&ports, &aapl, at(OPEN + 5)), Some(OPEN));
         Ok(())
     }
 

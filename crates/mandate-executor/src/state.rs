@@ -510,6 +510,9 @@ pub(crate) struct Ladder {
     pub(crate) floored: bool,
     /// The current rung's cancel was a step's, so its confirmation submits the next rung.
     pub(crate) stepping: bool,
+    /// The step's confirmation came while no session was open: the next rung waits for the next
+    /// open, priced fresh then, and the hold was journaled (DEC-260 (18)).
+    pub(crate) parked: bool,
 }
 
 /// The restriction a reconciliation places for one subject — an instrument, or external activity

@@ -330,6 +330,24 @@ fn gate_decided(
                 record.outcome = IntentOutcome::Denied;
             }
         }
+        "hold" if flag(payload, "parked") => {
+            let ladders = state
+                .exiting
+                .values_mut()
+                .map(|sequence| (&sequence.intent, &mut sequence.ladder))
+                .chain(
+                    state
+                        .ladders
+                        .values_mut()
+                        .map(|lone| (&lone.intent, &mut lone.ladder)),
+                );
+            for (intent, ladder) in ladders {
+                if intent == &id {
+                    ladder.parked = true;
+                }
+            }
+            return Ok(());
+        }
         "hold" | "defer" => {
             if flag(payload, "held_long") {
                 state.held_long.insert(id.clone());
@@ -398,6 +416,7 @@ fn rung_submitted(
         since: Some(at),
         floored: flag(payload, "at_floor"),
         stepping: false,
+        parked: false,
     };
     if let Some(sequence) = state
         .exiting
@@ -848,15 +867,24 @@ fn protection_changed(
                 optional_text(payload, "agent"),
             ) {
                 let prices = prices_of(payload)?;
+                let intent = IntentId(EventId(intent.to_owned()));
+                let ladder = match state.ladders.get(&instrument) {
+                    Some(lone) if lone.intent == intent && !passive => {
+                        let resumed = lone.ladder;
+                        state.ladders.remove(&instrument);
+                        resumed
+                    }
+                    _ => Ladder::default(),
+                };
                 state.exiting.insert(
                     instrument.clone(),
                     ExitSequence {
-                        intent: IntentId(EventId(intent.to_owned())),
+                        intent,
                         entry: ClientOrderId::parse(entry)?,
                         agent: AgentId(agent.to_owned()),
                         prices,
                         passive,
-                        ladder: Ladder::default(),
+                        ladder,
                     },
                 );
             }
@@ -876,7 +904,16 @@ fn protection_changed(
         "interval_limit" | "unprotected_end" => {
             let ends = action == "unprotected_end";
             if ends {
-                state.exiting.remove(&instrument);
+                if let Some(sequence) = state.exiting.remove(&instrument) {
+                    if sequence.ladder.parked {
+                        let lone = LoneLadder {
+                            intent: sequence.intent,
+                            agent: sequence.agent,
+                            ladder: sequence.ladder,
+                        };
+                        state.ladders.insert(instrument.clone(), lone);
+                    }
+                }
             }
             if let Some(open) = state
                 .unprotected
