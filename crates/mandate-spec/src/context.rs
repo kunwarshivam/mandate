@@ -118,6 +118,32 @@ pub enum JournaledFact {
     },
 }
 
+impl JournaledFact {
+    /// The fact one journal record maps to (journal spec v0.7 §9.2's mapping table, E7-10), or
+    /// `None` for a record that maps to none: a `ConfigSnapshotRegistered` of any kind but
+    /// `model_version`, and every event type the table does not name.
+    ///
+    /// `payload` is the record's payload as `append` stored it. `documents` returns the stored
+    /// canonical mandate document a version names, which an `AgentDeployed` is read from: the
+    /// connection, environment, allocation, and pinned instruments are the document's, never restated
+    /// in the record. `account_connection` is the connection the record's account stream belongs to,
+    /// which no record names yet (DEC-261 item 10), so an `AccountSnapshotRecorded` needs it.
+    ///
+    /// `Err` when the record cannot be mapped: a deployment whose document is not stored, or does
+    /// not hash to the version it is stored under; a snapshot with no connection given; or a member
+    /// the fact needs that the payload does not hold in §9.2's form. A record that cannot be mapped is
+    /// refused, never skipped, because a fact the fold never sees takes the value that refuses only
+    /// for facts that add (module doc), and a dropped `ConnectionRevoked` would not.
+    pub fn from_record(
+        _event_type: &str,
+        _payload: &Value,
+        _documents: &dyn Fn(&Digest) -> Option<Value>,
+        _account_connection: Option<&ConnectionId>,
+    ) -> Result<Option<Self>, SpecError> {
+        Err(SpecError::Unimplemented)
+    }
+}
+
 /// The workspace's members, as the identity service counts them (V-024).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Membership {

@@ -356,6 +356,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   #413). It maps each record to its fact, and the vectors are in `journal.yaml`'s `control_stream`
   section. `PlatformOperatorAction` stays open (DEC-261 item 9, Proposed), so its schema and the
   `ModelWithdrawn` mapping wait for the operator service's specification.
+  *Tests PR* ([DEC-303](04-decision-log.md#decisions)): 17 pending tests against stubs in
+  `mandate-journal`'s `control` module and `mandate-spec`'s `JournaledFact::from_record`. Three live
+  tests keep `AccountSnapshotRecorded` unregistered until stream K's writer conforms (DEC-261 item 7).
 
 ### E8 Escalation and approvals
 
