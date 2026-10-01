@@ -392,6 +392,25 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   (a real journal refuses `ApprovalRevalidated` until then), and it fills `PendingApproval` with the
   bound request, folds `MarkUpdated`, the control stream's assertions and its copies, and hands a
   one-instrument owner exit as an agent-scoped flatten (DEC-257 item 7).
+  *Done (E8-3's runtime implementation, DEC-278):* the 20 tests pass; `mandate-runtime` asks with
+  the content object, its hash, the `cli_inbox` delivery and one opaque notification, admits each
+  `ApprovalResponseSubmitted` through `mandate_approval::admit` and re-validates a grant in the same
+  batch, and copies each `OwnerCommandIssued`, never refusing a kill switch or an owner exit. The
+  `mandate-journal` prerequisite below is still open, so the shell cannot yet append these events
+  through a real journal.
+  *Follow-up (DEC-278 item 12; DEC-156 item 5):* the runtime does not yet bound asking: at most 10
+  requests per agent per America/New_York risk day, no re-ask of an instrument the owner skipped
+  until the next risk day or applied version, none for one `timeout_s` after a timeout, and each
+  suppressed ask recorded as `DecisionMade.ask_suppressed`. `mandate_approval::ask_permit` and
+  `AskLedger` exist; fold the ledger and call them before `escalation::ask`, tests first (MC-E25 to
+  MC-E28).
+  *Follow-up (DEC-278 item 11; a tests correction):* bump `FOLD_VERSION` and regenerate
+  `tests/golden-journal.json` with an approval's request, delivery, response, and re-validation and
+  a folded mark, since the fold now derives approvals, marks, and the control stream's assertions
+  and copies from them.
+  *Follow-up (DEC-278 item 3):* the request's `risk_impact` is empty. When the gate's dry run
+  exposes the §6.3 figures (`position_usd_after`, `gross_usd_after`, `bought_today_usd`, `drawdown`,
+  `daily_pnl_fraction`) and the mandate's caps, put them in the content object.
   *Follow-up (DEC-257 item 12):* `PolicyChanged`'s payload is only "level, diff" in journal spec §9,
   so the runtime neither folds the overlay check 7 reads nor has a two-approver runtime case
   (PB-22). Close the payload, then fold it and add the cases in a tests correction.
