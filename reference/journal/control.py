@@ -41,6 +41,7 @@ from common import (
     digest_strings,
     draft_of,
     hash_chain,
+    is_timestamp,
     is_ulid,
     list_of,
     normalize_decimal,
@@ -71,6 +72,7 @@ SPEC = "docs/specs/journal.md v0.7 §9.2 (DEC-261)"
 # --------------------------------------------------------------------------- closed schemas (§9.2)
 
 DATE = T("date")
+RISK_CLOCK = T("risk_clock")
 POINTER = T("pointer")
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
@@ -131,6 +133,7 @@ SCHEMAS: dict[tuple[str, str], T] = {
         ("model_cash", opt(DEC)),
         ("cash_band", opt(DEC)),
         ("cash_in_band", opt(BOOL)),
+        ("risk_clock", RISK_CLOCK),
     ),
 }
 REFUSAL = rec(
@@ -189,6 +192,16 @@ def loose_date(text: str) -> bool:
 
 def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> list[Violation]:
     """`type_violations` with §9.2's two new types: `pointer` and `date` (refused as `id` is)."""
+    if ty.kind == "risk_clock":
+        if value is None and "types.risk_clock_nullable" in skip:
+            return []
+        if not isinstance(value, str):
+            return [Violation("types", "schema", path)]
+        whole = value.endswith(".000000000Z") or "types.risk_clock_whole" in skip
+        ok = is_timestamp(value) and whole
+        if not ok and "types.risk_clock" not in skip:
+            return [Violation("types", "non_canonical", path)]
+        return []
     if ty.kind in ("pointer", "date"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
@@ -707,7 +720,13 @@ def base_drafts(v3: dict) -> dict[str, dict]:
             account,
             "AccountSnapshotRecorded",
             "2026-09-21T14:05:00.000000000Z",
-            {**account_values, "model_cash": "10000.5", "cash_band": "1.25", "cash_in_band": True},
+            {
+                **account_values,
+                "model_cash": "10000.5",
+                "cash_band": "1.25",
+                "cash_in_band": True,
+                "risk_clock": "2026-09-21T14:05:00.000000000Z",
+            },
             EXECUTOR,
         ),
         "snapshot_fees": draft(
@@ -715,7 +734,13 @@ def base_drafts(v3: dict) -> dict[str, dict]:
             account,
             "AccountSnapshotRecorded",
             "2026-09-21T21:00:00.000000000Z",
-            {**account_values, "model_cash": None, "cash_band": None, "cash_in_band": None},
+            {
+                **account_values,
+                "model_cash": None,
+                "cash_band": None,
+                "cash_in_band": None,
+                "risk_clock": "2026-09-21T21:00:00.000000000Z",
+            },
             EXECUTOR,
         ),
         "refused_stop": draft(
@@ -1187,6 +1212,46 @@ def invalid_drafts() -> list[dict]:
             "payload.model_cash",
         ),
         invalid(
+            "snapshot_risk_clock_absent",
+            "§9.2 AccountSnapshotRecorded.risk_clock: the executor folds every event at its clock",
+            "snapshot_fees",
+            [delete("payload.risk_clock")],
+            "schema",
+            "payload.risk_clock",
+        ),
+        invalid(
+            "snapshot_risk_clock_as_seconds",
+            "§9.2 risk_clock: a whole-second timestamp, never integer seconds (§2)",
+            "snapshot_fees",
+            [change("payload.risk_clock", 1790024400)],
+            "schema",
+            "payload.risk_clock",
+        ),
+        invalid(
+            "snapshot_risk_clock_not_a_timestamp",
+            "§9.2 risk_clock: a §4.7 timestamp, whole second or not (month 13 here)",
+            "snapshot_reconciled",
+            [change("payload.risk_clock", "2026-13-21T14:05:00.000000000Z")],
+            "non_canonical",
+            "payload.risk_clock",
+        ),
+        invalid(
+            "snapshot_risk_clock_null",
+            "§9.2 risk_clock: required and never null",
+            "snapshot_reconciled",
+            [change("payload.risk_clock", None)],
+            "schema",
+            "payload.risk_clock",
+        ),
+        invalid(
+            "snapshot_risk_clock_off_the_second",
+            "§9.2 risk_clock: a whole second (§2)",
+            "snapshot_reconciled",
+            [change("payload.risk_clock", "2026-09-21T14:05:00.000000001Z")],
+            "non_canonical",
+            "payload.risk_clock",
+        ),
+        invalid(
             "snapshot_multiplier_text",
             "§9.1 integer",
             "snapshot_reconciled",
@@ -1639,6 +1704,9 @@ VALIDATOR_MUTANTS = (
     "types.pointer",
     "types.date",
     "types.date_length",
+    "types.risk_clock",
+    "types.risk_clock_whole",
+    "types.risk_clock_nullable",
     "artifact_refs",
     "config_refs.required",
     *(f"rule.{n}" for n in range(17, 25)),
