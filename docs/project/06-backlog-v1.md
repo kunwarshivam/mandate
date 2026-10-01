@@ -215,7 +215,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   my mandate passes its review date unconfirmed, so that an abandoned account stops acting alone
   ([DEC-188](04-decision-log.md#decisions)). Waits on the spec change for `autonomy.review_by` (MI-32). *Accepted when:*
   past the date, autonomous paths decide `ask`, positions and exits are untouched, and re-confirming
-  (a neutral version with step-up) restores them.
+  (a version moving the date later, with step-up) restores them. The spec change is MI-32, V-046, and §6.2 step 5b
+  with the MC-D cases ([DEC-271](04-decision-log.md#decisions) to [DEC-273](04-decision-log.md#decisions): re-confirming is
+  risk-increasing and carries the delegations over). Owed after it: `mandate-spec` parsing the field, V-046, and its
+  §9.2 row (stream F), then the spec change that makes the date required on every version holding an `auto` or a
+  delegation, with the base mandates (DEC-272 item 3).
 
 ### E7 Alpaca connector and recovery
 

@@ -852,10 +852,107 @@ cases.append({"id": "MC-N23", "kind": "stagger",
                                      stagger_offset("ws_a", "th-2", 900)],
                          "window_s": 900}})
 
+# =========================================================== M. the review date (§6.2 step 5b, MI-32, V-046; DEC-188)
+# The validation date is CTX's 2026-09-24, so the platform default is 2026-12-23 and the latest date V-046 allows
+# is 2027-03-23. 2026-12-23 is in Eastern Standard Time: its last instant is 2026-12-24T04:59:59Z.
+REVIEW_BY = "2026-12-23"
+derived("btc_accumulator_reviewed", "btc_accumulator", [{"op": "add", "path": "/autonomy/review_by", "value": REVIEW_BY}],
+        "adds a review date, the platform default for the validation date 2026-09-24")
+LAST_INSTANT = "2026-12-24T04:59:59.000000000Z"
+PASSED = "2026-12-24T05:00:00.000000000Z"
+REVIEW_DELEGATION = {"id": "d1", "lifts": "rule:large_orders", "when": {"field": "purpose", "op": "in", "value": ["increase", "open"]},
+                     "max_order_usd": "1000", "max_orders": 3, "max_total_usd": "3000",
+                     "starts_at": "2026-12-20T00:00:00.000000000Z", "expires_at": "2027-01-10T00:00:00.000000000Z",
+                     "source_approval_id": None}
+with_review_delegation = apply_patch(MB["btc_accumulator_reviewed"], [{"op": "add", "path": "/autonomy/delegations", "value": [REVIEW_DELEGATION]}])
+SEM_D = [
+    ("MC-D01", "A review date at the platform default is valid", [{"op": "add", "path": "/autonomy/review_by", "value": REVIEW_BY}],
+     {"provenance": {"/autonomy/review_by": PU("platform_default")}}),
+    ("MC-D02", "A platform-default review date other than 90 days after validation is refused",
+     [{"op": "add", "path": "/autonomy/review_by", "value": "2027-01-22"}], {"provenance": {"/autonomy/review_by": PU("platform_default")}}),
+    ("MC-D03", "A review date on the validation date is valid", [{"op": "add", "path": "/autonomy/review_by", "value": "2026-09-24"}], {}),
+    ("MC-D04", "A review date 180 days after validation is valid", [{"op": "add", "path": "/autonomy/review_by", "value": "2027-03-23"}], {}),
+    ("MC-D05", "A review date 181 days after validation is refused", [{"op": "add", "path": "/autonomy/review_by", "value": "2027-03-24"}], {}),
+    ("MC-D06", "A new review date before the validation date is refused", [{"op": "add", "path": "/autonomy/review_by", "value": "2026-09-23"}], {}),
+    ("MC-D07", "A review date that is not a calendar date is refused", [{"op": "add", "path": "/autonomy/review_by", "value": "2026-11-31"}], {}),
+    ("MC-D08", "A lapsed review date carried unchanged stays valid", [{"op": "add", "path": "/autonomy/review_by", "value": "2026-06-01"}],
+     {"previous_version": {"environment": "paper", "connection_id": "conn_alpaca_paper_01", "autonomy": {"review_by": "2026-06-01"}}}),
+    ("MC-D09", "A version cannot remove a review date its previous version set", [],
+     {"previous_version": {"environment": "paper", "connection_id": "conn_alpaca_paper_01", "autonomy": {"review_by": "2026-06-01"}}}),
+    ("MC-D10", "A lapsed review date moved but still before validation is refused",
+     [{"op": "add", "path": "/autonomy/review_by", "value": "2026-05-01"}],
+     {"previous_version": {"environment": "paper", "connection_id": "conn_alpaca_paper_01", "autonomy": {"review_by": "2026-06-01"}}}),
+]
+for cid, title, patch, ctx in SEM_D:
+    m = apply_patch(MB["btc_accumulator"], patch)
+    assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
+    errs, warns = semantic(m, dict(CTX, **ctx))
+    cases.append({"id": cid, "kind": "semantic", "title": title, "base": "btc_accumulator", "patch": patch, "context": ctx,
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+RECONFIRM = [{"op": "add", "path": "/autonomy/delegations", "value": [REVIEW_DELEGATION]}, rep("/autonomy/review_by", "2027-03-01")]
+for cid, title, extra in [
+    ("MC-D11", "Re-confirming moves the review date and carries the delegation over", []),
+    ("MC-D12", "A re-confirmation that also raises a limit carries no delegation over", [rep("/risk/max_daily_loss", "0.03")]),
+]:
+    patch = RECONFIRM + extra
+    m = apply_patch(MB["btc_accumulator_reviewed"], patch)
+    assert V.is_valid(m), cid
+    ctx = {"previous_version": with_review_delegation}
+    errs, warns = semantic(m, dict(CTX, **ctx))
+    cases.append({"id": cid, "kind": "semantic", "title": title, "base": "btc_accumulator_reviewed", "patch": patch, "context": ctx,
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+CH_D = [
+    ("MC-D13", "Set a review date where there was none", "btc_accumulator", [{"op": "add", "path": "/autonomy/review_by", "value": REVIEW_BY}]),
+    ("MC-D14", "Move the review date earlier", "btc_accumulator_reviewed", [rep("/autonomy/review_by", "2026-11-01")]),
+    ("MC-D15", "Move the review date later (re-confirming)", "btc_accumulator_reviewed", [rep("/autonomy/review_by", "2027-03-01")]),
+    ("MC-D16", "Remove the review date", "btc_accumulator_reviewed", [{"op": "remove", "path": "/autonomy/review_by"}]),
+]
+for cid, title, base, patch in CH_D:
+    old = MB[base]
+    new = apply_patch(old, patch)
+    assert V.is_valid(new), cid
+    got, paths = classify(old, new)
+    cases.append({"id": cid, "kind": "change", "title": title, "base": base, "patch": patch,
+                  "expect": {"classification": got, "changed_paths": paths, "old_version": version(old), "new_version": version(new),
+                             "step_up_required": got == "risk_increasing"}})
+OPEN = {"purpose": "open", "order_usd": "300", "combined_score": "0.8", "instrument": BTC, "asset_class": "crypto",
+        "session": "crypto", "first_trade_in_instrument": False, "drawdown": "0", "daily_pnl_fraction": "0",
+        "position_usd_after": "0", "gross_usd_after": "0", "bought_today_usd": "0", "position_pnl_fraction": "0",
+        "new_instrument": False, "thesis_confidence": "0"}
+DENY_FIRST = {"op": "add", "path": "/autonomy/rules/0",
+              "value": {"id": "deny_big", "when": {"field": "order_usd", "op": "gt", "value": "800"}, "then": "deny"}}
+REVIEW_A = [
+    ("MC-D17", "On the review date's last instant an auto rule still decides", "btc_accumulator_reviewed", [], LAST_INSTANT, {}),
+    ("MC-D18", "At 00:00 New York after the review date an auto rule asks", "btc_accumulator_reviewed", [], PASSED, {}),
+    ("MC-D19", "Past the review date an ask keeps the rule that asked", "btc_accumulator_reviewed", [], PASSED,
+     {"order_usd": "950", "combined_score": "0.9"}),
+    ("MC-D20", "Past the review date a deny rule still denies", "btc_accumulator_reviewed", [DENY_FIRST], PASSED,
+     {"order_usd": "950", "combined_score": "0.9"}),
+    ("MC-D21", "Past the review date an auto default asks", "btc_accumulator_reviewed", [rep("/autonomy/rules", []), rep("/autonomy/default", "auto")],
+     PASSED, {}),
+    ("MC-D22", "Past the review date an auto admission setting asks", "btc_accumulator_reviewed", [rep("/autonomy/admission", "auto")],
+     PASSED, {"new_instrument": True, "thesis_confidence": "0.9"}),
+    ("MC-D23", "Before the review date a live delegation lifts an ask", "btc_accumulator_reviewed",
+     [{"op": "add", "path": "/autonomy/delegations", "value": [REVIEW_DELEGATION]}], LAST_INSTANT, {"order_usd": "950", "combined_score": "0.9"}),
+    ("MC-D24", "Past the review date the same delegation lifts nothing", "btc_accumulator_reviewed",
+     [{"op": "add", "path": "/autonomy/delegations", "value": [REVIEW_DELEGATION]}], PASSED, {"order_usd": "950", "combined_score": "0.9"}),
+    ("MC-D25", "Past the review date a discretionary exit is still AUTO", "btc_accumulator_reviewed", [], PASSED, {"purpose": "discretionary_exit"}),
+    ("MC-D26", "Past the review date an owner exit is still AUTO", "btc_accumulator_reviewed", [], PASSED, {"purpose": "owner_exit"}),
+    ("MC-D27", "With no review date an auto rule decides at any time", "btc_accumulator", [], "2027-09-24T14:00:00.000000000Z", {}),
+]
+for cid, title, base, patch, now, a in REVIEW_A:
+    m = apply_patch(MB[base], patch)
+    V.validate(m)
+    full = dict(OPEN, **a)
+    if full["purpose"] in REDUCING:
+        full = {"purpose": full["purpose"]}
+    cases.append({"id": cid, "kind": "autonomy", "title": title, "base": base, "patch": patch, "now": now, "action": full,
+                  "expect": autonomy(m, full, {"now": now})})
+
 # =========================================================== output
 HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
 #
-# Generated by a reference implementation that is fuzzed against invariants MI-1 to MI-20
+# Generated by a reference implementation that is fuzzed against invariants MI-1 to MI-32
 # (spec 1.1); every expected value is computed, not typed.
 #
 # HARNESS RULES
@@ -885,7 +982,9 @@ HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
 # - builder: the risk engine's trim (spec 5.5), the order builder (spec 8.3), the gate dry run, and
 #   autonomy. `session` defaults to regular; `in_close_window` to false; fee rates to 0;
 #   `has_prior_fill` to (position_qty > 0).
-# - autonomy: evaluate spec 6.2 for the given action, including the admission ceiling of 6.2 step 5.
+# - autonomy: evaluate spec 6.2 for the given action, including the admission ceiling of 6.2 step 5. `now`,
+#   when given, is the risk clock: it judges the delegations' windows (spec 6.5) and the review date
+#   (spec 6.2 step 5b); no delegation has been used and nothing suspends one.
 # - admission: the ordered spec 8.5 checks for one thesis; the first failure is the reason, and the
 #   three shape reasons also set `ignored` (spec 8.2). `first_order_autonomy` is the decision for the
 #   first order in an admitted instrument, null when the thesis is refused.
