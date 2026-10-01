@@ -1719,8 +1719,7 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   `a_later_proposal_waits_for_a_full_fill_on_its_side` (identical buys with no fill, a partial
   fill, and more), and `the_conduct_figures_are_the_fill_steps` with
   `the_opposite_fill_interval_runs_from_the_fill_step`, which catch the plant that takes the
-  conduct figures from the proposal. RC-09's third step is a crypto proposal, which waits for
-  E6-10's harness PR. The executor (E7-3) calls the fold account-wide and journals
+  conduct figures from the proposal. E6-10's harness reads RC-09's crypto step (DEC-285). The executor (E7-3) calls the fold account-wide and journals
   `DayTradeFold::today`. **A fold error refuses openings only** (#370 review, major 1): E7-3 must
   still route exits and protective orders when `fold_day_trades` fails (`AGENTS.md` rule 13), and
   E7-3's tests PR carries the pending test
@@ -1731,6 +1730,17 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   (`AGENTS.md` rule 12) and `Gate::decide` refuses a short, but a `day_trade_count` expectation
   reaches the fold without that refusal. Refuse a negative `SignedQty` there instead of taking
   its magnitude.
+- **Read `crypto_status` in the trading-domain harness** (DEC-285 item 5). The driver hands the gate
+  a crypto-active account because no crypto-proposing case states `crypto_status`, and
+  `trading_domain_gate_harness.rs` pins it as pending E6-10, initial and in an update. When a case
+  needs it, a tests correction (DEC-77) drops those two assertions, and the harness reads it as
+  check 1's `crypto_active`.
+- **RC-09's `alpaca_intraday_margin` variant cannot pass as written** (founder; DEC-285 item 6).
+  Its `expect_overrides.step_1: { decision: { verdict: allow } }` merges into a decision that
+  keeps `reason_code: legacy_pdt_day_trade_budget`, so the expectation is an allow with a deny's
+  code. Under DEC-259 item 7, its step 3 would also wait, because step 1 is allowed and never
+  filled. The fix is a YAML change: state the whole decision in the override, and fill step 1 or
+  drop step 3 in the variant.
 - **Drive the trading-domain gate cases through the real order path once E7-4 and E7-5 do**
   (the coordinator's ruling on #370, item 2). DEC-259 item 7 is a reading of the reference harness
   only: it decides a later proposal once the earlier allowed ones were filled in full by `fill`

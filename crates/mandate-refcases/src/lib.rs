@@ -154,3 +154,46 @@ pub(crate) fn expect_eq<T: PartialEq + std::fmt::Debug>(
         format!("{what}: expected {expected:?}, got {actual:?}")
     })
 }
+
+/// A crypto pair's quote currency from its `symbol` written `BASE/QUOTE` (trading-domain spec
+/// §2.3), as both harnesses that build a crypto listing read it (DEC-285). `USD` is
+/// [`mandate_risk::QuoteCurrency::Usd`] and any other quote, a stablecoin included, is
+/// [`mandate_risk::QuoteCurrency::Other`]. A symbol without exactly one `/` between two non-empty
+/// parts, `BTCUSD` among them, states none, which the gate never reads as USD (DEC-254 item 1).
+pub(crate) fn quote_currency_of(symbol: &str) -> Option<mandate_risk::QuoteCurrency> {
+    match symbol.split('/').collect::<Vec<_>>().as_slice() {
+        [base, "USD"] if !base.is_empty() => Some(mandate_risk::QuoteCurrency::Usd),
+        [base, quote] if !base.is_empty() && !quote.is_empty() => {
+            Some(mandate_risk::QuoteCurrency::Other)
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_risk::QuoteCurrency;
+
+    use crate::quote_currency_of;
+
+    /// Each symbol's quote currency, typed by hand: only a `BASE/USD` pair is USD (DEC-285).
+    #[test]
+    fn a_symbol_names_its_quote_after_the_slash() {
+        let table = [
+            ("BTC/USD", Some(QuoteCurrency::Usd)),
+            ("ETH/USD", Some(QuoteCurrency::Usd)),
+            ("BTC/USDT", Some(QuoteCurrency::Other)),
+            ("BTC/USDC", Some(QuoteCurrency::Other)),
+            ("BTC/EUR", Some(QuoteCurrency::Other)),
+            ("BTC/usd", Some(QuoteCurrency::Other)),
+            ("BTCUSD", None),
+            ("/USD", None),
+            ("BTC/", None),
+            ("BTC/USD/X", None),
+            ("", None),
+        ];
+        for (symbol, wanted) in table {
+            assert_eq!(quote_currency_of(symbol), wanted, "{symbol}");
+        }
+    }
+}

@@ -14,7 +14,8 @@
 //! fields from `initial.account` and `broker_account_update` steps ([`gate`], DEC-199); E6-6 adds
 //! the day-trade regime and its figures from `initial.account` and the `day_trade_count`
 //! expectation (DEC-284), and decides a later proposal once every earlier allowed one was filled
-//! in full (DEC-259 item 7). A case that uses anything owned by a later story fails with "not
+//! in full (DEC-259 item 7); E6-10 decides crypto proposals, reading a pair's quote currency from
+//! its `symbol` (DEC-285). A case that uses anything owned by a later story fails with "not
 //! interpreted until <story>" for each such item; anything the vocabulary does not know fails as
 //! unknown. Every key of every interpreted expectation is checked.
 
@@ -371,7 +372,7 @@ fn pending(case: &Json) -> BTreeSet<String> {
             note(format!("expectation `agent_mode` after `{event}`"), story);
         }
         if event == "propose_order" {
-            pending_proposal(case, data, expect, &mut note);
+            pending_proposal(data, expect, &mut note);
         }
         if event == "broker_account_update" {
             let members = data.and_then(Json::as_object).unwrap_or(&empty);
@@ -428,12 +429,10 @@ fn a_proposal_follows_one_not_filled_in_full(steps: &[Json]) -> bool {
     false
 }
 
-/// What a `propose_order` step needs beyond [`gate`]: a later story's member, a crypto instrument
-/// (its quote currency for check 2's USD pairs, read by E6-10's harness PR), and the
+/// What a `propose_order` step needs beyond [`gate`]: a later story's member, and the
 /// `buying_power` after the proposal, which counts the submitted order's reservation (the account
 /// ledger, E7-5).
 fn pending_proposal(
-    case: &Json,
     data: Option<&Json>,
     expect: &Map<String, Json>,
     note: &mut impl FnMut(String, &str),
@@ -444,14 +443,6 @@ fn pending_proposal(
         if let Some(story) = owner(PENDING_PROPOSAL, key) {
             note(format!("proposal field `{key}`"), story);
         }
-    }
-    let class = data
-        .get("instrument")
-        .and_then(Json::as_str)
-        .and_then(|name| case.get("instruments")?.get(name)?.get("asset_class"))
-        .and_then(Json::as_str);
-    if class == Some("crypto") {
-        note("`propose_order` on a crypto instrument".to_owned(), "E6-10");
     }
     if expect.contains_key("buying_power") {
         note(
