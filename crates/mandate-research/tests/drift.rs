@@ -16,6 +16,9 @@
 //! (equality does not cross) and a just-under neighbour (it does), a cited source never observed
 //! is unusual, a refused observation quarantines its source's baseline until a new one forms, and
 //! the report ignores which source arrived first or how two sources' observations interleave.
+//! Round 3 pins the gap measure's 31-gap divisor with sub-second gaps (a 14.8 s collapse crosses,
+//! a 15.2 s neighbour does not) and the duplicate measure's scope (replays confined to the
+//! baseline, outside the recent window, read quiet).
 
 use mandate_canon::Digest;
 use mandate_research::drift::{DriftMeasure, DriftState, InputClass, InputObservation};
@@ -860,4 +863,105 @@ fn a_refused_observation_quarantines_the_baseline_until_a_new_one_forms() {
         "32 quiet observations after the refusal form a new baseline (1 860 s span, 60 s gaps, 1 000 bytes), and the source reads quiet again"
     );
     assert_eq!(recovered.measure, None);
+}
+
+#[test]
+#[ignore = "pending E17-5"]
+fn the_gap_divisor_is_the_baseline_s_31_gaps() {
+    let source = feed("feed-a");
+    let mut collapsing = quiet(&source);
+    let crossing_times = [
+        t_nanos(2_400, 0),
+        t_nanos(2_414, 800_000_000),
+        t(2_514),
+        t(2_614),
+        t(2_714),
+        t(2_814),
+        t(2_914),
+        t(3_014),
+    ];
+    for (j, at) in crossing_times.into_iter().enumerate() {
+        collapsing.push(news(
+            &source,
+            at,
+            u64::try_from(90 + j).expect("a fixture index fits"),
+            1_000,
+        ));
+    }
+    let verdict = fold(&collapsing)
+        .report()
+        .expect("the report is total")
+        .source(&source)
+        .expect("the verdict is looked up")
+        .expect("the observed source has a verdict");
+    assert!(
+        verdict.unusual,
+        "a 14.8 s smallest gap crosses: 4 x 31 x 14.8 s is 1 835.2 s, under the baseline's 1 860 s span"
+    );
+    assert_eq!(
+        verdict.measure,
+        Some(DriftMeasure::GapCollapse),
+        "the arrival measure is quiet (the window spans 614 s against a 155 s bar), so the gap crossing is the one reported"
+    );
+    let mut above = quiet(&source);
+    let neighbour_times = [
+        t_nanos(2_400, 0),
+        t_nanos(2_415, 200_000_000),
+        t(2_515),
+        t(2_615),
+        t(2_715),
+        t(2_815),
+        t(2_915),
+        t(3_015),
+    ];
+    for (j, at) in neighbour_times.into_iter().enumerate() {
+        above.push(news(
+            &source,
+            at,
+            u64::try_from(90 + j).expect("a fixture index fits"),
+            1_000,
+        ));
+    }
+    let verdict = fold(&above)
+        .report()
+        .expect("the report is total")
+        .source(&source)
+        .expect("the verdict is looked up")
+        .expect("the observed source has a verdict");
+    assert!(
+        !verdict.unusual,
+        "a 15.2 s smallest gap is above the bar — 4 x 31 x 15.2 s is 1 884.8 s, over the 1 860 s span — and a 32-gap divisor would read the 14.8 s collapse above quiet while a 30-gap divisor would cross here: the pair pins the divisor at 31"
+    );
+    assert_eq!(verdict.measure, None);
+}
+
+#[test]
+#[ignore = "pending E17-5"]
+fn replays_confined_to_the_baseline_do_not_cross() {
+    let source = feed("feed-a");
+    let history: Vec<InputObservation> = (0..40)
+        .map(|i| {
+            let replayed = (4..8).contains(&i);
+            let n = if replayed {
+                999
+            } else {
+                u64::try_from(i).expect("a fixture index fits")
+            };
+            news(&source, t(i * 60), n, 1_000)
+        })
+        .collect();
+    let verdict = fold(&history)
+        .report()
+        .expect("the report is total")
+        .source(&source)
+        .expect("the verdict is looked up")
+        .expect("the observed source has a verdict");
+    assert!(
+        !verdict.unusual,
+        "four replays of one hash sit inside the baseline (observations 5 to 8), outside the recent window (the last 8, all distinct): the duplicate measure reads the recent window alone, and nothing else crosses"
+    );
+    assert_eq!(
+        verdict.measure, None,
+        "a history whose recent window is quiet reads quiet, whatever the baseline holds"
+    );
 }

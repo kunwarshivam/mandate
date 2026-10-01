@@ -166,6 +166,8 @@ cargo xtask ci pending
 | 18 | A refusal leaves no residue: the pre-refusal history still feeds the measures | `a_refused_observation_quarantines_the_baseline_until_a_new_one_forms` |
 | 19 | The report remembers fold order, so which source arrived first changes it | `the_report_is_independent_of_the_sources_arrival_order` |
 | 20 | The duplicate measure is evaluated after the timing measures | `replayed_content_crosses_the_duplicate_measure` (the window crosses both, and duplicate must be the one reported) |
+| 21 | The gap measure divides by 32 (or 30) gaps instead of the baseline's 31 | `the_gap_divisor_is_the_baseline_s_31_gaps` (a 14.8 s collapse crosses under 31 and not 32; a 15.2 s neighbour is quiet under 31 and not 30) |
+| 22 | The duplicate measure counts the whole history, not the recent window | `replays_confined_to_the_baseline_do_not_cross` (four replays inside the baseline, outside the recent 8, read quiet) |
 
 ## Not done
 
