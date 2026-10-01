@@ -681,11 +681,12 @@ fn commanded(
         "owner_exit" => OwnerCommandKind::OwnerExit,
         _ => return Err(payload::non_canonical("command")),
     };
+    let judged_at = processed_at(state, submitted);
     let authority = mandate_approval::owner_command(
         kind,
         evidence.as_ref(),
         clock(submitted),
-        clock(processed_at(state, submitted)),
+        clock(judged_at),
         environment,
         &used,
     )?;
@@ -720,12 +721,8 @@ fn commanded(
             let judged = judged(refusal, evidence.as_ref(), confirmed_bid(event)?, user)?;
             owner_exit(state, event, &judged, ports, batch)
         }
-        (OwnerCommandKind::Resume, Some(why)) => {
-            refused("resume", why, processed_at(state, submitted), cause, batch)
-        }
-        (OwnerCommandKind::Stop, Some(why)) => {
-            refused("stop", why, processed_at(state, submitted), cause, batch)
-        }
+        (OwnerCommandKind::Resume, Some(why)) => refused("resume", why, judged_at, cause, batch),
+        (OwnerCommandKind::Stop, Some(why)) => refused("stop", why, judged_at, cause, batch),
         (OwnerCommandKind::Acknowledge, _) => Ok(()),
     }
 }
@@ -736,7 +733,7 @@ fn commanded(
 /// effective time it was judged at, with the `OwnerCommandIssued` as `causation_id`.
 ///
 /// # Errors
-/// [`RuntimeError::Unimplemented`] in the tests PR (DEC-77).
+/// [`RuntimeError`] when the draft cannot be written.
 fn refused(
     command: &'static str,
     refusal: StepUpRefusal,
@@ -744,8 +741,19 @@ fn refused(
     cause: Option<EventId>,
     batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
-    let _ = (command, refusal, judged_at, cause, batch);
-    Err(RuntimeError::Unimplemented { story: "E8-3" })
+    let reason = match refusal {
+        StepUpRefusal::Missing => "step_up_missing",
+        StepUpRefusal::Stale => "step_up_stale",
+        StepUpRefusal::Reused => "step_up_reused",
+        StepUpRefusal::Method => "step_up_method",
+    };
+    let body = payload::object(vec![
+        ("command", payload::text(command)),
+        ("effective_at", payload::seconds(judged_at, "effective_at")?),
+        ("reason", payload::text(reason)),
+    ])?;
+    batch.journal("OwnerCommandRefused", cause, body)?;
+    Ok(())
 }
 
 /// The scope a control-stream kill switch names. Whether it reaches this deployment is
