@@ -122,7 +122,7 @@ cargo xtask ci pending
    checked by that range, and a tampered event before the trusted start must not fail it.
 4. A gap is reported at the seq the range expected, not the seq the segment claims: the failure
    names where the chain broke, which only the range knows.
-5. An unparseable manifest is a `segment_manifest_mismatch`, not a new error code: §11's list is
+5. An unparsable manifest is a `segment_manifest_mismatch`, not a new error code: §11's list is
    closed, and a manifest that is not a manifest fails the only check it can.
 6. The token's structural check reads the artifact's bytes as stored; the artifact's existence
    and content hash are the per-event artifact checks' business (§11 checks 6 and 7), not the

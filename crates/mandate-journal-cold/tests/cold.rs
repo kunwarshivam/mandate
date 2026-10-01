@@ -464,7 +464,7 @@ fn an_event_before_the_trusted_start_is_not_checked() {
 
 #[test]
 #[ignore = "pending E5-6"]
-fn an_unparseable_manifest_fails_the_mismatch_check_at_the_expected_seq() {
+fn an_unparsable_manifest_fails_the_mismatch_check_at_the_expected_seq() {
     let all = rows();
     let first = segment(&all[0..4]);
     let parts = [first, (b"not a manifest".to_vec(), Vec::new())];
