@@ -24,7 +24,7 @@ use mandate_spec::document::{
     Approval, ApproverRef, Autonomy, ModelId, OnTimeout, Rule, RuleId, SizingMethod,
 };
 use mandate_spec::{DecGrammar, SchemaDec};
-use mandate_time::UtcNanos;
+use mandate_time::{Date, UtcNanos};
 
 pub fn usd(text: &str) -> Usd {
     Usd::parse(text).unwrap_or_else(|e| panic!("`{text}` is a USD amount: {e}"))
@@ -69,6 +69,16 @@ pub fn basis(text: &str) -> CostBasis {
 pub fn at(text: &str) -> UtcNanos {
     UtcNanos::parse_rfc3339(text).unwrap_or_else(|e| panic!("`{text}` is a timestamp: {e}"))
 }
+
+/// A calendar date, `YYYY-MM-DD`.
+pub fn day(text: &str) -> Date {
+    Date::parse(text).unwrap_or_else(|e| panic!("`{text}` is a date: {e}"))
+}
+
+/// The risk day the reference cases' builder and autonomy inputs are evaluated on (MC-B's `now`
+/// is 2026-09-22, and family A states no time). Nothing reads it unless a policy has a review
+/// date (§6.2 step 5b).
+pub const REFERENCE_DAY: &str = "2026-09-22";
 
 pub fn asset(text: &str) -> AssetId {
     AssetId::parse(text).unwrap_or_else(|e| panic!("`{text}` is an asset id: {e}"))
@@ -252,6 +262,7 @@ pub fn quiet_risk() -> RiskContext {
         has_prior_fill: false,
         new_instrument: false,
         thesis_confidence: Unit::ZERO,
+        risk_day: day(REFERENCE_DAY),
     }
 }
 
@@ -348,6 +359,7 @@ pub fn policy(
             two_approver_above_usd: two_approver_above_usd
                 .map(|t| dec(t, DecGrammar::PositiveDecimal)),
         },
+        review_by: None,
     }
 }
 

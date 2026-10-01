@@ -503,8 +503,10 @@ fn autonomy_reduces(old: &Autonomy, new: &Autonomy) -> bool {
                 approvers,
                 two_approver_above_usd,
             },
+        review_by,
     } = old;
-    approvers == &new.approval.approvers
+    review_by == &new.review_by
+        && approvers == &new.approval.approvers
         && timeout_s == &new.approval.timeout_s
         && on_timeout == &new.approval.on_timeout
         && maximum(
