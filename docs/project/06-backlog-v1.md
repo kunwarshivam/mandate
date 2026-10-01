@@ -365,18 +365,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
   (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
   journal them.
-  *Tests done (#321 review, major; DEC-173 items 13 to 15; the M7 tests correction); the
-  implementation follows:* `mandate-approval`'s admission read only the bound
+  *Done (#321 review, major; DEC-173 items 13 to 15; the M7 tests correction, then E8-3's
+  `quorum`, DEC-257):* `mandate-approval`'s admission read only the bound
   `approvers_required` and `independent_required`. It must judge check 7 against the stricter of
   those and the workspace policy overlay current at the effective time: independence if either
   requires it, the larger approver count, and an author's earlier `counted` grant not counting once
-  independence is required. `AdmissionContext.policy` now carries the overlay and
-  `mandate_approval::quorum` names the requirement; `quorum` is a stub, and `admit` fails closed
-  with its `Unimplemented` for a grant that reaches check 7 under any overlay but
-  `PolicyOverlay::NONE`. `tests/quorum.rs` holds eight tests pending E8-3 against
-  `reference/mandate/ref.py`'s `approval_quorum`. **The implementation PR** implements `quorum`,
-  calls it for every overlay, drops the author from the grants that count while independence is
-  required, and deletes the eight `#[ignore]` lines.
+  independence is required. The tests correction gave `AdmissionContext.policy` the overlay and
+  stubbed `mandate_approval::quorum`, which `admit` failed closed on under any overlay but
+  `PolicyOverlay::NONE`, with eight tests in `tests/quorum.rs` pending E8-3 against
+  `reference/mandate/ref.py`'s `approval_quorum`. The implementation PR implemented `quorum`,
+  calls it for every overlay, leaves the author out of the grants that count while independence
+  is required, and deleted the eight `#[ignore]` lines.
   *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
   control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
   would make MI-24 true as written.
@@ -1617,15 +1616,13 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   minimum order; the ADV is shown only as at least 1,000,000); (4) rename the `num` closure in
   `the_listing_and_market_are_dec_199_item_6s`, which shadows the crate's `num`; (5) shorten the
   done row's verbatim "The row as it was" copy to a pointer at its review.
-- **E8-3's check 7 tests after the overlay correction** (#354 and #355 review, nits), for E8-3's
-  implementation PR: (1) `crates/mandate-approval/tests/quorum.rs` draws a `two_approver_above_usd`
-  of `"0"`, which `schemas/policy.schema.json` excludes (`positive_decimal`); draw only ceilings a
-  workspace can hold, as DEC-173 item 15 already does for grant sets; (2) `quorum`'s doc in
-  `crates/mandate-approval/src/admit.rs` promises `ApprovalError::Unrepresentable` for an order
-  value that overflows, which `content.rs` already refuses when the request is built; say so in the
-  doc or pin it with a test; (3) document `Quorum`'s two public fields as `PolicyOverlay`'s are;
-  (4) rewrap the 165-character line the M7 bullet of `.cursor/skills/verify-mandate/feature-map.md`
-  gained; (5) DEC-173 item 12 still says `mutants.py` has 50 escalation mutants, which #355 made 52.
+- **E8-3's check 7 tests after the overlay correction** (#354 and #355 review, nits; nits 2 to 5
+  done in E8-3's `quorum` PR, DEC-257 item 4): `crates/mandate-approval/tests/quorum.rs` draws a
+  `two_approver_above_usd` of `"0"`, which `schemas/policy.schema.json` excludes
+  (`positive_decimal`); draw only ceilings a workspace can hold, as DEC-173 item 15 already does
+  for grant sets. And (#368 review, minor 3) `tests/quorum.rs`'s module doc still says its tests
+  are pending and fail on `quorum`'s `ApprovalError::Unimplemented`, which E8-3's `quorum` made
+  false. A tests correction, since DEC-77 keeps `tests/` edits out of an implementation PR.
 - **Family A's harness after its tightening** (#360 review, nits), one tests change to
   `crates/mandate-refcases/src/mandate/autonomy.rs` plus DEC-162's wording: (1) DEC-162 item 4 says
   the property test runs "over generated well-typed policies and facts", but `action_context()` pins
