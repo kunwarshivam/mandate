@@ -3,7 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
+use mandate_approval::{ActorKind, Notification};
 use mandate_canon::Value;
+use mandate_journal::Environment;
 use mandate_num::{Price, Qty};
 
 /// The scheduler's whole-second risk clock (mandate spec §5.2). The only time the core knows:
@@ -71,6 +73,10 @@ impl Deployment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlattenRequest {
     pub initiator: Initiator,
+    /// The one instrument an owner exit closes, or `None` for a kill switch's whole agent. The plan
+    /// then sells exactly the agent's sub-ledger quantity of that instrument and cancels only its
+    /// orders in it (mandate spec §6.1, trading-domain spec §5.5; DEC-257).
+    pub instrument: Option<InstrumentId>,
     pub confirmation: Option<OwnerConfirmation>,
     /// The client order ids of every intent the fold still holds outstanding.
     pub working_orders: Vec<String>,
@@ -205,6 +211,9 @@ pub struct FoldedEvent {
     pub event_id: EventId,
     pub event_type: String,
     pub causation_id: Option<EventId>,
+    /// The envelope's `actor.kind` (journal spec §3). Admission admits a response only from a
+    /// `user` (check 3, EI-10), so a reader that cannot tell gives anything but `User`.
+    pub actor: ActorKind,
     pub payload: Value,
 }
 
@@ -229,21 +238,6 @@ pub struct ModelOutput {
     pub content: Value,
 }
 
-/// What an approver said, or that nobody did.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ApprovalVerdict {
-    Approved { responder: String, step_up: String },
-    Denied { responder: String },
-}
-
-/// An approval response arriving from the escalation path (mandate spec §6.4).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApprovalOutcome {
-    pub approval: EventId,
-    pub verdict: ApprovalVerdict,
-    pub at: RiskClock,
-}
-
 /// Everything that can reach the core.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Input {
@@ -251,12 +245,14 @@ pub enum Input {
     /// may re-hand an intent, and the only one that journals the startup hold.
     Started(WriterEpoch),
     /// An event tailed from a followed stream in `seq` order. The only variant carrying a position.
+    /// The owner's answers and commands arrive this way, as the control stream's
+    /// `ApprovalResponseSubmitted` and `OwnerCommandIssued`, whose `event_id` is the idempotency key
+    /// and whose `actor` admission checks (DEC-155 item 2, mandate spec §6.1).
     Journal(FoldedEvent),
     /// The scheduler's tick.
     Tick(RiskClock),
     Observation(Observation),
     ModelOutput(ModelOutput),
-    ApprovalResponse(ApprovalOutcome),
     Command(Command),
 }
 
@@ -341,12 +337,19 @@ pub enum Effect {
     Intent(IntentHandoff),
     Timer(TimerRequest),
     Notify(NotificationRef),
+    /// An approval request's notification: its opaque id and one closed generic text, with no field
+    /// for anything else (`AGENTS.md` rule 6, EI-9). It follows the `ApprovalRequested` draft it
+    /// names in the same list, so it never points at an uncommitted request (rule 5).
+    NotifyApproval(Notification),
 }
 
 /// A proposal the order plan produced, before the dry run and the autonomy classification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Proposal {
     pub instrument: InstrumentId,
+    /// What the drift band reads at re-validation: 100 bp for `us_equity`, 200 bp for `crypto`
+    /// (DEC-156 item 3).
+    pub asset_class: AssetClass,
     pub side: Side,
     pub qty: Qty,
     pub limit: Price,
@@ -370,12 +373,37 @@ pub enum Autonomy {
     Deny,
 }
 
+/// `OrderPlan::classify`'s answer: the classification and the `DecidedBy` label of what decided it
+/// (`rule:<id>`, `default`, `admission_ceiling`, …). An approval request binds the label and check 10
+/// compares it with the label at re-validation (DEC-156 item 4). `None` when the classifier cannot
+/// name what decided.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Classified {
+    pub autonomy: Autonomy,
+    pub decided_by: Option<String>,
+}
+
 /// The mandate view `mandate-spec` will provide. Only what the runtime reads is here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MandateView {
     pub version: String,
     pub working_universe: BTreeSet<InstrumentId>,
     pub restricted_instruments: BTreeSet<InstrumentId>,
+    pub approval: ApprovalSettings,
+}
+
+/// What admission reads of the mandate version and its connection (mandate spec §6.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalSettings {
+    /// `autonomy.approval.approvers`, as the opaque user ids admission compares (check 3).
+    pub approvers: BTreeSet<String>,
+    /// The version's author, whom independent approval excludes (check 7).
+    pub author: String,
+    /// `autonomy.approval.timeout_s`: the deadline is the request's risk clock plus this.
+    pub timeout_s: i64,
+    /// The connection's environment: `cli_confirm` step-up is admitted on `paper` only (DEC-155
+    /// item 4).
+    pub environment: Environment,
 }
 
 /// The signal inputs a decision reads: the outputs the fold holds, by model then instrument.
