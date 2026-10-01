@@ -979,6 +979,139 @@ for cid, title, base, patch, now, a in REVIEW_A:
         e["trigger"] = approval_trigger(m, {"mandate_version": version(m), "decided_by": e["by"], "requested_by": "agent"})
     cases.append({"id": cid, "kind": "review", "title": title, "base": base, "patch": patch, "now": now, "action": full, "expect": e})
 
+# =========================================================== N. escalation (§6.1, §6.4; MI-21 to MI-25; DEC-155, DEC-156, DEC-158, DEC-173)
+E_T0 = "2026-09-22T14:00:00.000000000Z"
+E_CTX = {"approvers": ["u1", "u2"], "author": "u1", "environment": "paper", "timeout_s": 300,
+         "inbox": 1, "push_channels": [], "quiet_hours": None}
+E_BOUND = {"instrument": ABC, "asset_class": "us_equity", "side": "buy", "qty": "10", "limit_price": "155",
+           "purpose": "open", "mandate_version": "sha256:v1", "decided_by": "rule:big_order", "combined_score": "0.7",
+           "reference_mark": {"price": "155", "seq": 2}, "approvers_required": 1, "independent_required": False,
+           "timeout_s": 300}
+E_NOW = {"mandate_version": "sha256:v1", "mode": "normal", "instrument_restricted": False, "in_working_universe": True,
+         "classification": {"decision": "ask", "by": "rule:big_order"}, "dry_run": {"verdict": "allow", "reason": None},
+         "mark": "155"}
+
+def e_at(s, t0=E_T0):
+    return fmt(T(t0) + timedelta(seconds=s))
+
+def e_run(ctx, start, script):
+    """The case's expectation: each input's drafts, as `escalation_step` gives them, folded before the next input.
+    A `tick` is preceded by the scheduler's `ClockAdvanced`, and a `fold` input is an event folded with no step."""
+    st = escalation_fold([], start)
+    out = []
+    for inp in script:
+        if inp["kind"] == "fold":
+            escalation_apply(st, inp["event"])
+            out.append({"drafts": []})
+            continue
+        if inp["kind"] == "tick":
+            escalation_apply(st, {"type": "ClockAdvanced", "clock": inp["at"]})
+        drafts = escalation_step(st, inp, ctx)
+        for d in drafts:
+            escalation_apply(st, d)
+        out.append({"drafts": json.loads(json.dumps(drafts, default=sorted))})
+    return out
+
+def e_hash(ctx, start, bound):
+    asked = e_run(ctx, start, [{"kind": "ask", "approval": "ap1", "bound": bound}])
+    return asked[0]["drafts"][0]["content_hash"]
+
+def e_resp(src, at, hash_, t0=E_T0, **kw):
+    r = {"source": src, "approval": "ap1", "actor_kind": "user", "responder": "u2", "verdict": "approved",
+         "content_hash": hash_, "submitted_at": e_at(at, t0),
+         "step_up": {"assertion": f"as-{src}", "authenticated_at": e_at(at, t0), "method": "cli_confirm"}}
+    return r | kw
+
+def e_case(cid, title, script, ctx=E_CTX, start=E_T0):
+    cases.append({"id": cid, "kind": "escalation", "op": "lifecycle", "title": title, "context": ctx, "start": start,
+                  "script": script, "expect": e_run(ctx, start, script)})
+
+def e_grant_case(cid, title, bound=E_BOUND, now=E_NOW, ctx=E_CTX, start=E_T0, pre=(), **resp):
+    h = e_hash(ctx, start, bound)
+    ask = {"kind": "ask", "approval": "ap1", "bound": bound}
+    r = e_resp("ctl1", 30, h, start) | resp
+    e_case(cid, title, [ask, *pre, {"kind": "response", "response": r, "now": now}], ctx, start)
+
+H1 = e_hash(E_CTX, E_T0, E_BOUND)
+ASK1 = {"kind": "ask", "approval": "ap1", "bound": E_BOUND}
+e_grant_case("MC-E01", "A timely admitted grant acts with exactly the bound order")
+e_grant_case("MC-E02", "An admitted skip ends the approval, needs no step-up, and sends nothing", verdict="skipped", step_up=None)
+e_case("MC-E03", "The deadline skips: ApprovalTimedOut, and a grant read after it is not pending",
+       [ASK1, {"kind": "tick", "at": e_at(300)}, {"kind": "response", "response": e_resp("ctl1", 290, H1), "now": E_NOW}])
+e_case("MC-E04", "A response submitted exactly at the deadline is late",
+       [ASK1, {"kind": "response", "response": e_resp("ctl1", 300, H1), "now": E_NOW}])
+e_case("MC-E05", "Late by the folded clock: an early submitted_at read once the clock reached the deadline is late",
+       [ASK1, {"kind": "fold", "event": {"type": "MarkUpdated", "clock": e_at(300)}},
+        {"kind": "response", "response": e_resp("ctl1", 100, H1), "now": E_NOW}])
+e_case("MC-E06", "A duplicate response, re-tailed with the same source, is copied and acts once",
+       [ASK1, {"kind": "response", "response": e_resp("ctl1", 30, H1), "now": E_NOW},
+        {"kind": "response", "response": e_resp("ctl1", 30, H1), "now": E_NOW}])
+e_grant_case("MC-E07", "A wrong content hash is refused as content_mismatch", content_hash="sha256:" + "f" * 64)
+e_case("MC-E08", "A response to a cancelled approval is not pending",
+       [ASK1, {"kind": "cancel", "reason": "version_applied"}, {"kind": "response", "response": e_resp("ctl1", 30, H1), "now": E_NOW}])
+e_case("MC-E09", "A response from an agent or a system actor is refused as not_an_approver",
+       [ASK1, {"kind": "response", "response": e_resp("ctl1", 30, H1, actor_kind="agent"), "now": E_NOW},
+        {"kind": "response", "response": e_resp("ctl2", 31, H1, actor_kind="system"), "now": E_NOW}])
+e_grant_case("MC-E10", "A response from a broker actor is refused as not_an_approver", actor_kind="broker")
+e_grant_case("MC-E11", "A response from a platform_operator actor is refused as not_an_approver", actor_kind="platform_operator")
+e_grant_case("MC-E12", "A user not in approvers is refused as not_an_approver", responder="u3")
+e_grant_case("MC-E13", "A grant with no step-up evidence is refused as step_up_missing", step_up=None)
+e_grant_case("MC-E14", "Step-up evidence 301 s old at the effective time is refused as step_up_stale",
+             step_up={"assertion": "as-stale", "authenticated_at": e_at(30 - 301), "method": "cli_confirm"})
+e_case("MC-E15", "A reused step-up assertion is refused as step_up_reused",
+       [ASK1, {"kind": "response", "response": e_resp("ctl1", 30, "sha256:" + "f" * 64), "now": E_NOW},
+        {"kind": "response", "response": e_resp("ctl2", 31, H1) | {"step_up": {"assertion": "as-ctl1",
+         "authenticated_at": e_at(31), "method": "cli_confirm"}}, "now": E_NOW}])
+E_LIVE = dict(E_CTX, environment="live")
+e_grant_case("MC-E16", "cli_confirm on a live connection is refused as step_up_method", ctx=E_LIVE)
+e_grant_case("MC-E17", "Re-validation skips a grant whose mandate version changed (version_changed)",
+             now=dict(E_NOW, mandate_version="sha256:v2"))
+e_grant_case("MC-E18", "Re-validation skips a grant while the mode is exits_only (mode)", now=dict(E_NOW, mode="exits_only"))
+e_grant_case("MC-E19", "Re-validation skips a grant re-classified deny (reclassified_deny)",
+             now=dict(E_NOW, classification={"decision": "deny", "by": "rule:no_more"}))
+e_grant_case("MC-E20", "Re-validation skips a grant re-classified ask by another rule (reclassified_other_trigger)",
+             now=dict(E_NOW, classification={"decision": "ask", "by": "rule:other"}))
+e_grant_case("MC-E21", "Drift exactly at the 100 bp equity band acts", now=dict(E_NOW, mark="156.55"))
+e_grant_case("MC-E22", "Drift one unit beyond the band on a falling price skips (drift)", now=dict(E_NOW, mark="153.449999999"))
+e_grant_case("MC-E23", "A request with no reference mark skips on re-validation (drift)", bound=dict(E_BOUND, reference_mark=None))
+E_BTC = dict(E_BOUND, instrument=BTC, asset_class="crypto", qty="0.01", limit_price="50000",
+             reference_mark={"price": "50000", "seq": 7})
+e_grant_case("MC-E24", "Crypto drifts within its 200 bp band: a 150 bp move acts, where the equity band would skip",
+             bound=E_BTC, now=dict(E_NOW, mark="50750"))
+
+def e_permit(cid, title, ledger, queries):
+    cases.append({"id": cid, "kind": "escalation", "op": "ask_permit", "title": title, "ledger": ledger,
+                  "queries": queries, "expect": [{"suppressed": ask_permit(ledger, q["instrument"], q["at"])} for q in queries]})
+
+TEN = [{"event": "requested", "instrument": ABC, "at": e_at(60 * i)} for i in range(10)]
+e_permit("MC-E25", "The eleventh ask in a risk day is suppressed (budget), and the next risk day asks again",
+         TEN, [{"instrument": ABC, "at": e_at(601)}, {"instrument": ABC, "at": "2026-09-23T14:00:00.000000000Z"}])
+DST = "2026-11-01T03:00:00.000000000Z"
+e_permit("MC-E26", "The ask budget resets at 00:00 America/New_York across the DST change, not at UTC midnight",
+         [{"event": "requested", "instrument": ABC, "at": e_at(60 * i, DST)} for i in range(10)],
+         [{"instrument": ABC, "at": "2026-11-01T03:59:59.000000000Z"}, {"instrument": ABC, "at": "2026-11-01T04:00:00.000000000Z"}])
+e_permit("MC-E27", "An owner skip suppresses re-asking that instrument until the next risk day",
+         [{"event": "requested", "instrument": ABC, "at": e_at(0)}, {"event": "owner_skipped", "instrument": ABC, "at": e_at(10)}],
+         [{"instrument": ABC, "at": e_at(3600)}, {"instrument": BTC, "at": e_at(3600)},
+          {"instrument": ABC, "at": "2026-09-23T14:00:00.000000000Z"}])
+e_permit("MC-E28", "A timeout suppresses re-asking that instrument for one timeout_s",
+         [{"event": "requested", "instrument": ABC, "at": e_at(0)},
+          {"event": "timed_out", "instrument": ABC, "at": e_at(300), "timeout_s": 300}],
+         [{"instrument": ABC, "at": e_at(599)}, {"instrument": ABC, "at": e_at(600)}])
+QH = {"start": "23:00", "end": "07:00"}
+e_grant_case("MC-E29", "A request at 02:00 New York inside quiet hours is delivered to cli_inbox and grantable",
+             ctx=dict(E_CTX, quiet_hours=QH), start="2026-09-22T06:00:00.000000000Z")
+E30Q = [{"channel": c, "at": a} for c, a in [
+    ("push", "2026-07-16T03:00:00.000000000Z"), ("push", "2026-07-16T11:00:00.000000000Z"),
+    ("push", "2026-12-16T04:00:00.000000000Z"), ("push", "2026-12-16T12:00:00.000000000Z"),
+    ("cli_inbox", "2026-12-16T04:00:00.000000000Z")]]
+cases.append({"id": "MC-E30", "kind": "escalation", "op": "deliver_now",
+              "title": "A push is suppressed at 23:00 and sent at 07:00 New York in both DST states; cli_inbox always delivers",
+              "quiet_hours": QH, "queries": E30Q,
+              "expect": [{"status": deliver_now(q["channel"], QH, q["at"])} for q in E30Q]})
+e_case("MC-E31", "A grant batched with a cancelling exits-only restriction is not pending and never acts (DEC-131 item 25(j))",
+       [ASK1, {"kind": "batch", "reason": "mode_tightened", "responses": [e_resp("ctl1", 30, H1)], "now": E_NOW}])
+
 # =========================================================== output
 HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
 #
@@ -1026,6 +1159,14 @@ HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
 # - agent_flatten: the agent-scoped kill-switch plan (trading spec 5.5).
 # - goal: goal completion (spec 3.1) for the given state.
 # - change: classify `base` against the patched mandate (spec 9.2).
+# - escalation: the approval lifecycle of spec 6.1 and 6.4. `op: lifecycle` runs `script` from `start` under
+#   `context` (approvers, author, environment, timeout_s, cli_inbox, push channels, quiet hours): `ask` binds
+#   `bound` as approval `ap1`; `tick` is the scheduler's ClockAdvanced, then expiry; `fold` folds `event` and steps
+#   nothing (its clock still advances the folded clock); `response` is one ApprovalResponseSubmitted re-validated
+#   against `now`; `cancel` and `batch` cancel every pending approval with `reason`, and `batch` then judges its
+#   responses in the same step. `expect[i].drafts` are the agent-stream drafts of input i, in order. `op:
+#   ask_permit` judges each query against `ledger` (spec 6.4, asking is bounded); `op: deliver_now` judges each
+#   query's channel under `quiet_hours`.
 """
 
 class Dumper(yaml.SafeDumper):

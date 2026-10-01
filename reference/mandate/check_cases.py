@@ -382,6 +382,78 @@ req("MC-C34", C["MC-C34"]["expect"]["classification"] == "invalid", "invalid")
 req("MC-T02", C["MC-T02"]["expect"]["length_s"] == 82800, "23 h")
 req("MC-T04", C["MC-T04"]["expect"]["length_s"] == 90000, "25 h")
 
+# escalation (§6.1, §6.4): each title's outcome, read from the drafts of the step that judges it
+def esc(cid):
+    return [[(x["type"], x.get("result"), x.get("reason")) for x in st["drafts"]] for st in C[cid]["expect"]]
+
+def esc_last(cid):
+    return esc(cid)[-1]
+
+ACTED = [("ApprovalResponded", "admitted", None), ("ApprovalRevalidated", "act", None), ("IntentProposed", None, None)]
+def refused(reason):
+    return [("ApprovalResponded", "refused", reason)]
+def skipped(reason):
+    return [("ApprovalResponded", "admitted", None), ("ApprovalRevalidated", "skip", reason)]
+
+for cid in ("MC-E01", "MC-E21", "MC-E24", "MC-E29"):
+    req(cid, esc_last(cid) == ACTED, "acts")
+for cid in sorted(c for c in C if c.startswith("MC-E") and C[c]["op"] == "lifecycle"):
+    first = esc(cid)[0]
+    req(cid, [t for t, _, _ in first] == ["ApprovalRequested", "ApprovalDelivered"], "the request is delivered in its own step")
+    for st in C[cid]["expect"]:
+        for x in st["drafts"]:
+            if x["type"] == "IntentProposed":
+                b = C[cid]["script"][0]["bound"]
+                req(cid, all(x[k] == b[k] for k in ("instrument", "side", "qty", "limit_price", "purpose")), "the bound order")
+        if not any(x["type"] == "ApprovalRevalidated" and x["result"] == "act" for x in st["drafts"]):
+            req(cid, all(x["type"] != "IntentProposed" for x in st["drafts"]), "only an act proposes")
+req("MC-E01", C["MC-E01"]["expect"][1]["drafts"][0]["verdict"] == "approved", "a grant")
+req("MC-E02", esc_last("MC-E02") == [("ApprovalResponded", "admitted", None)] and
+    C["MC-E02"]["script"][1]["response"]["step_up"] is None, "an admitted skip without step-up, nothing re-validated")
+req("MC-E03", esc("MC-E03")[1] == [("ApprovalTimedOut", None, None)] and esc_last("MC-E03") == refused("not_pending"), "timeout, then not pending")
+req("MC-E03", C["MC-E03"]["expect"][1]["drafts"][0]["on_timeout"] == "skip", "the default is a skip")
+req("MC-E04", esc_last("MC-E04") == refused("late") and
+    C["MC-E04"]["script"][1]["response"]["submitted_at"] == C["MC-E04"]["expect"][0]["drafts"][0]["deadline"], "submitted at the deadline")
+req("MC-E05", esc_last("MC-E05") == refused("late") and
+    C["MC-E05"]["script"][2]["response"]["submitted_at"] < C["MC-E05"]["expect"][0]["drafts"][0]["deadline"], "early submission, late clock")
+req("MC-E06", esc("MC-E06")[1] == ACTED and esc_last("MC-E06") == [], "copied and acted once")
+for cid, reason in [("MC-E07", "content_mismatch"), ("MC-E10", "not_an_approver"), ("MC-E11", "not_an_approver"),
+                    ("MC-E12", "not_an_approver"), ("MC-E13", "step_up_missing"), ("MC-E14", "step_up_stale"),
+                    ("MC-E16", "step_up_method")]:
+    req(cid, esc_last(cid) == refused(reason), reason)
+req("MC-E08", esc("MC-E08")[1] == [("ApprovalCanceled", None, "version_applied")] and esc_last("MC-E08") == refused("not_pending"), "cancelled")
+req("MC-E09", esc("MC-E09")[1:] == [refused("not_an_approver")] * 2 and
+    [s["response"]["actor_kind"] for s in C["MC-E09"]["script"][1:]] == ["agent", "system"], "agent and system")
+req("MC-E10", C["MC-E10"]["script"][1]["response"]["actor_kind"] == "broker", "broker")
+req("MC-E11", C["MC-E11"]["script"][1]["response"]["actor_kind"] == "platform_operator", "platform_operator")
+req("MC-E12", C["MC-E12"]["script"][1]["response"]["responder"] not in C["MC-E12"]["context"]["approvers"], "not listed")
+req("MC-E15", esc_last("MC-E15") == refused("step_up_reused"), "reused")
+req("MC-E16", C["MC-E16"]["context"]["environment"] == "live", "live")
+for cid, reason in [("MC-E17", "version_changed"), ("MC-E18", "mode"), ("MC-E19", "reclassified_deny"),
+                    ("MC-E20", "reclassified_other_trigger"), ("MC-E22", "drift"), ("MC-E23", "drift")]:
+    req(cid, esc_last(cid) == skipped(reason), reason)
+for cid, ok in [("MC-E21", True), ("MC-E22", False)]:
+    now = C[cid]["script"][1]["now"]["mark"]
+    ref_ = C[cid]["script"][0]["bound"]["reference_mark"]["price"]
+    req(cid, (abs(Decimal(now) - Decimal(ref_)) * 10000 <= 100 * Decimal(ref_)) == ok and Decimal(now) != Decimal(ref_), "the band edge")
+req("MC-E22", Decimal(C["MC-E22"]["script"][1]["now"]["mark"]) < Decimal("155"), "a falling price")
+req("MC-E23", C["MC-E23"]["script"][0]["bound"]["reference_mark"] is None, "no reference mark")
+m24 = (Decimal(C["MC-E24"]["script"][1]["now"]["mark"]) / Decimal("50000") - 1) * 10000
+req("MC-E24", C["MC-E24"]["script"][0]["bound"]["asset_class"] == "crypto" and 100 < m24 <= 200, "between the two bands")
+req("MC-E25", [q["suppressed"] for q in C["MC-E25"]["expect"]] == ["budget", None] and len(C["MC-E25"]["ledger"]) == 10, "budget then a new day")
+req("MC-E26", [q["suppressed"] for q in C["MC-E26"]["expect"]] == ["budget", None], "resets at New York midnight")
+req("MC-E26", all(q["at"][:10] == "2026-11-01" for q in C["MC-E26"]["queries"]), "both queries on one UTC day")
+req("MC-E27", [q["suppressed"] for q in C["MC-E27"]["expect"]] == ["skipped_today", None, None], "until the next day, this instrument only")
+req("MC-E28", [q["suppressed"] for q in C["MC-E28"]["expect"]] == ["recent_timeout", None], "one timeout_s")
+local = datetime.fromisoformat(C["MC-E29"]["start"][:19] + "+00:00").astimezone(ZoneInfo("America/New_York"))
+req("MC-E29", local.hour == 2 and C["MC-E29"]["context"]["quiet_hours"] is not None, "02:00 New York under quiet hours")
+req("MC-E30", [q["status"] for q in C["MC-E30"]["expect"]] ==
+    ["suppressed_quiet_hours", "delivered", "suppressed_quiet_hours", "delivered", "delivered"], "push hours, both DST states")
+offsets = {datetime.fromisoformat(q["at"][:19] + "+00:00").astimezone(ZoneInfo("America/New_York")).utcoffset() for q in C["MC-E30"]["queries"]}
+req("MC-E30", len(offsets) == 2, "both DST states")
+req("MC-E31", esc_last("MC-E31") == [("ApprovalCanceled", None, "mode_tightened")] + refused("not_pending"), "cancelled first, in one step")
+req("MC-E", sum(c.startswith("MC-E") for c in C) == 31, "31 escalation cases")
+
 print("cases", len(C), "title assertion failures", len(bad))
 for b in bad:
     print(" ", b)

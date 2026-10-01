@@ -44,6 +44,14 @@
 # - agent_flatten: the agent-scoped kill-switch plan (trading spec 5.5).
 # - goal: goal completion (spec 3.1) for the given state.
 # - change: classify `base` against the patched mandate (spec 9.2).
+# - escalation: the approval lifecycle of spec 6.1 and 6.4. `op: lifecycle` runs `script` from `start` under
+#   `context` (approvers, author, environment, timeout_s, cli_inbox, push channels, quiet hours): `ask` binds
+#   `bound` as approval `ap1`; `tick` is the scheduler's ClockAdvanced, then expiry; `fold` folds `event` and steps
+#   nothing (its clock still advances the folded clock); `response` is one ApprovalResponseSubmitted re-validated
+#   against `now`; `cancel` and `batch` cancel every pending approval with `reason`, and `batch` then judges its
+#   responses in the same step. `expect[i].drafts` are the agent-stream drafts of input i, in order. `op:
+#   ask_permit` judges each query against `ledger` (spec 6.4, asking is bounded); `op: deliver_now` judges each
+#   query's channel under `quiet_hours`.
 
 version: 4
 spec: docs/specs/mandate.md (v0.6)
@@ -10529,3 +10537,2236 @@ cases:
     position_usd_after: '0', gross_usd_after: '0', bought_today_usd: '0', position_pnl_fraction: '0', new_instrument: false,
     thesis_confidence: '0'}
   expect: {decision: auto, by: 'rule:routine'}
+- id: MC-E01
+  kind: escalation
+  op: lifecycle
+  title: A timely admitted grant acts with exactly the bound order
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: admitted
+      reason: null
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+      quorum: {required: 1, independent: false}
+    - {type: ApprovalRevalidated, approval: ap1, result: act, reason: null, clock: '2026-09-22T14:00:00.000000000Z'}
+    - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, qty: '10', limit_price: '155', purpose: open,
+      mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
+- id: MC-E02
+  kind: escalation
+  op: lifecycle
+  title: An admitted skip ends the approval, needs no step-up, and sends nothing
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response: {source: ctl1, approval: ap1, actor_kind: user, responder: u2, verdict: skipped, content_hash: 'sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88',
+      submitted_at: '2026-09-22T14:00:30.000000000Z', step_up: null}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - {type: ApprovalResponded, approval: ap1, source: ctl1, responder: u2, verdict: skipped, step_up: null, clock: '2026-09-22T14:00:00.000000000Z',
+      result: admitted, reason: null, effective_at: '2026-09-22T14:00:30.000000000Z'}
+- id: MC-E03
+  kind: escalation
+  op: lifecycle
+  title: 'The deadline skips: ApprovalTimedOut, and a grant read after it is not pending'
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - {kind: tick, at: '2026-09-22T14:05:00.000000000Z'}
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:04:50.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:04:50.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - {type: ApprovalTimedOut, approval: ap1, on_timeout: skip, clock: '2026-09-22T14:05:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:04:50.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:05:00.000000000Z'
+      result: refused
+      reason: not_pending
+      effective_at: '2026-09-22T14:05:00.000000000Z'
+- id: MC-E04
+  kind: escalation
+  op: lifecycle
+  title: A response submitted exactly at the deadline is late
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:05:00.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:05:00.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:05:00.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: late
+      effective_at: '2026-09-22T14:05:00.000000000Z'
+- id: MC-E05
+  kind: escalation
+  op: lifecycle
+  title: 'Late by the folded clock: an early submitted_at read once the clock reached the deadline is late'
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: fold
+    event: {type: MarkUpdated, clock: '2026-09-22T14:05:00.000000000Z'}
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:01:40.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:01:40.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts: []
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:01:40.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:05:00.000000000Z'
+      result: refused
+      reason: late
+      effective_at: '2026-09-22T14:05:00.000000000Z'
+- id: MC-E06
+  kind: escalation
+  op: lifecycle
+  title: A duplicate response, re-tailed with the same source, is copied and acts once
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: admitted
+      reason: null
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+      quorum: {required: 1, independent: false}
+    - {type: ApprovalRevalidated, approval: ap1, result: act, reason: null, clock: '2026-09-22T14:00:00.000000000Z'}
+    - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, qty: '10', limit_price: '155', purpose: open,
+      mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts: []
+- id: MC-E07
+  kind: escalation
+  op: lifecycle
+  title: A wrong content hash is refused as content_mismatch
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: content_mismatch
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+- id: MC-E08
+  kind: escalation
+  op: lifecycle
+  title: A response to a cancelled approval is not pending
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - {kind: cancel, reason: version_applied}
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - {type: ApprovalCanceled, approval: ap1, reason: version_applied, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: not_pending
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+- id: MC-E09
+  kind: escalation
+  op: lifecycle
+  title: A response from an agent or a system actor is refused as not_an_approver
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: agent
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  - kind: response
+    response:
+      source: ctl2
+      approval: ap1
+      actor_kind: system
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:31.000000000Z'
+      step_up: {assertion: as-ctl2, authenticated_at: '2026-09-22T14:00:31.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: not_an_approver
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl2
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl2, authenticated_at: '2026-09-22T14:00:31.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: not_an_approver
+      effective_at: '2026-09-22T14:00:31.000000000Z'
+- id: MC-E10
+  kind: escalation
+  op: lifecycle
+  title: A response from a broker actor is refused as not_an_approver
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: broker
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: not_an_approver
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+- id: MC-E11
+  kind: escalation
+  op: lifecycle
+  title: A response from a platform_operator actor is refused as not_an_approver
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: platform_operator
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: not_an_approver
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+- id: MC-E12
+  kind: escalation
+  op: lifecycle
+  title: A user not in approvers is refused as not_an_approver
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u3
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u3
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: not_an_approver
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+- id: MC-E13
+  kind: escalation
+  op: lifecycle
+  title: A grant with no step-up evidence is refused as step_up_missing
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response: {source: ctl1, approval: ap1, actor_kind: user, responder: u2, verdict: approved, content_hash: 'sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88',
+      submitted_at: '2026-09-22T14:00:30.000000000Z', step_up: null}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - {type: ApprovalResponded, approval: ap1, source: ctl1, responder: u2, verdict: approved, step_up: null, clock: '2026-09-22T14:00:00.000000000Z',
+      result: refused, reason: step_up_missing, effective_at: '2026-09-22T14:00:30.000000000Z'}
+- id: MC-E14
+  kind: escalation
+  op: lifecycle
+  title: Step-up evidence 301 s old at the effective time is refused as step_up_stale
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-stale, authenticated_at: '2026-09-22T13:55:29.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-stale, authenticated_at: '2026-09-22T13:55:29.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: step_up_stale
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+- id: MC-E15
+  kind: escalation
+  op: lifecycle
+  title: A reused step-up assertion is refused as step_up_reused
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  - kind: response
+    response:
+      source: ctl2
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:31.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:31.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: content_mismatch
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl2
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:31.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: step_up_reused
+      effective_at: '2026-09-22T14:00:31.000000000Z'
+- id: MC-E16
+  kind: escalation
+  op: lifecycle
+  title: cli_confirm on a live connection is refused as step_up_method
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: live
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: step_up_method
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+- id: MC-E17
+  kind: escalation
+  op: lifecycle
+  title: Re-validation skips a grant whose mandate version changed (version_changed)
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v2
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: admitted
+      reason: null
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+      quorum: {required: 1, independent: false}
+    - {type: ApprovalRevalidated, approval: ap1, result: skip, reason: version_changed, clock: '2026-09-22T14:00:00.000000000Z'}
+- id: MC-E18
+  kind: escalation
+  op: lifecycle
+  title: Re-validation skips a grant while the mode is exits_only (mode)
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: exits_only
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: admitted
+      reason: null
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+      quorum: {required: 1, independent: false}
+    - {type: ApprovalRevalidated, approval: ap1, result: skip, reason: mode, clock: '2026-09-22T14:00:00.000000000Z'}
+- id: MC-E19
+  kind: escalation
+  op: lifecycle
+  title: Re-validation skips a grant re-classified deny (reclassified_deny)
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: deny, by: 'rule:no_more'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: admitted
+      reason: null
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+      quorum: {required: 1, independent: false}
+    - {type: ApprovalRevalidated, approval: ap1, result: skip, reason: reclassified_deny, clock: '2026-09-22T14:00:00.000000000Z'}
+- id: MC-E20
+  kind: escalation
+  op: lifecycle
+  title: Re-validation skips a grant re-classified ask by another rule (reclassified_other_trigger)
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:other'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: admitted
+      reason: null
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+      quorum: {required: 1, independent: false}
+    - {type: ApprovalRevalidated, approval: ap1, result: skip, reason: reclassified_other_trigger, clock: '2026-09-22T14:00:00.000000000Z'}
+- id: MC-E21
+  kind: escalation
+  op: lifecycle
+  title: Drift exactly at the 100 bp equity band acts
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '156.55'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: admitted
+      reason: null
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+      quorum: {required: 1, independent: false}
+    - {type: ApprovalRevalidated, approval: ap1, result: act, reason: null, clock: '2026-09-22T14:00:00.000000000Z'}
+    - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, qty: '10', limit_price: '155', purpose: open,
+      mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
+- id: MC-E22
+  kind: escalation
+  op: lifecycle
+  title: Drift one unit beyond the band on a falling price skips (drift)
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '153.449999999'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: admitted
+      reason: null
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+      quorum: {required: 1, independent: false}
+    - {type: ApprovalRevalidated, approval: ap1, result: skip, reason: drift, clock: '2026-09-22T14:00:00.000000000Z'}
+- id: MC-E23
+  kind: escalation
+  op: lifecycle
+  title: A request with no reference mark skips on re-validation (drift)
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound: {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, asset_class: us_equity, side: buy, qty: '10', limit_price: '155',
+      purpose: open, mandate_version: 'sha256:v1', decided_by: 'rule:big_order', combined_score: '0.7', reference_mark: null,
+      approvers_required: 1, independent_required: false, timeout_s: 300}
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:2c6a5283911dbce7302354c956fa3c0d2e81d15bd1be9fff0ce18bd36efdf16c
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, asset_class: us_equity, side: buy, qty: '10', limit_price: '155',
+      purpose: open, mandate_version: 'sha256:v1', decided_by: 'rule:big_order', combined_score: '0.7', reference_mark: null,
+      approvers_required: 1, independent_required: false, timeout_s: 300, approval: ap1, deadline: '2026-09-22T14:05:00.000000000Z',
+      content_hash: 'sha256:2c6a5283911dbce7302354c956fa3c0d2e81d15bd1be9fff0ce18bd36efdf16c', type: ApprovalRequested,
+      clock: '2026-09-22T14:00:00.000000000Z'}
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: admitted
+      reason: null
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+      quorum: {required: 1, independent: false}
+    - {type: ApprovalRevalidated, approval: ap1, result: skip, reason: drift, clock: '2026-09-22T14:00:00.000000000Z'}
+- id: MC-E24
+  kind: escalation
+  op: lifecycle
+  title: 'Crypto drifts within its 200 bp band: a 150 bp move acts, where the equity band would skip'
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+      asset_class: crypto
+      side: buy
+      qty: '0.01'
+      limit_price: '50000'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '50000', seq: 7}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:717022a911da8892ba8bfe027363de767c0e073eb50889a1df9da6957f2fa2a9
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '50750'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+      asset_class: crypto
+      side: buy
+      qty: '0.01'
+      limit_price: '50000'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '50000', seq: 7}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:717022a911da8892ba8bfe027363de767c0e073eb50889a1df9da6957f2fa2a9
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: admitted
+      reason: null
+      effective_at: '2026-09-22T14:00:30.000000000Z'
+      quorum: {required: 1, independent: false}
+    - {type: ApprovalRevalidated, approval: ap1, result: act, reason: null, clock: '2026-09-22T14:00:00.000000000Z'}
+    - {instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001, side: buy, qty: '0.01', limit_price: '50000', purpose: open,
+      mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
+- id: MC-E25
+  kind: escalation
+  op: ask_permit
+  title: The eleventh ask in a risk day is suppressed (budget), and the next risk day asks again
+  ledger:
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:00:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:01:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:02:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:03:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:04:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:05:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:06:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:07:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:08:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:09:00.000000000Z'}
+  queries:
+  - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:10:01.000000000Z'}
+  - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-23T14:00:00.000000000Z'}
+  expect:
+  - {suppressed: budget}
+  - {suppressed: null}
+- id: MC-E26
+  kind: escalation
+  op: ask_permit
+  title: The ask budget resets at 00:00 America/New_York across the DST change, not at UTC midnight
+  ledger:
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T03:00:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T03:01:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T03:02:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T03:03:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T03:04:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T03:05:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T03:06:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T03:07:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T03:08:00.000000000Z'}
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T03:09:00.000000000Z'}
+  queries:
+  - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T03:59:59.000000000Z'}
+  - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-11-01T04:00:00.000000000Z'}
+  expect:
+  - {suppressed: budget}
+  - {suppressed: null}
+- id: MC-E27
+  kind: escalation
+  op: ask_permit
+  title: An owner skip suppresses re-asking that instrument until the next risk day
+  ledger:
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:00:00.000000000Z'}
+  - {event: owner_skipped, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:00:10.000000000Z'}
+  queries:
+  - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T15:00:00.000000000Z'}
+  - {instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001, at: '2026-09-22T15:00:00.000000000Z'}
+  - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-23T14:00:00.000000000Z'}
+  expect:
+  - {suppressed: skipped_today}
+  - {suppressed: null}
+  - {suppressed: null}
+- id: MC-E28
+  kind: escalation
+  op: ask_permit
+  title: A timeout suppresses re-asking that instrument for one timeout_s
+  ledger:
+  - {event: requested, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:00:00.000000000Z'}
+  - {event: timed_out, instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:05:00.000000000Z', timeout_s: 300}
+  queries:
+  - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:09:59.000000000Z'}
+  - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, at: '2026-09-22T14:10:00.000000000Z'}
+  expect:
+  - {suppressed: recent_timeout}
+  - {suppressed: null}
+- id: MC-E29
+  kind: escalation
+  op: lifecycle
+  title: A request at 02:00 New York inside quiet hours is delivered to cli_inbox and grantable
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: {start: '23:00', end: '07:00'}
+  start: '2026-09-22T06:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: response
+    response:
+      source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:f71cd0d29b7759bd70ee28c8cffffb5f21c8176b3061e966eaacd65701c21b97
+      submitted_at: '2026-09-22T06:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T06:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T06:05:00.000000000Z'
+      content_hash: sha256:f71cd0d29b7759bd70ee28c8cffffb5f21c8176b3061e966eaacd65701c21b97
+      type: ApprovalRequested
+      clock: '2026-09-22T06:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T06:00:00.000000000Z'}
+  - drafts:
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T06:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T06:00:00.000000000Z'
+      result: admitted
+      reason: null
+      effective_at: '2026-09-22T06:00:30.000000000Z'
+      quorum: {required: 1, independent: false}
+    - {type: ApprovalRevalidated, approval: ap1, result: act, reason: null, clock: '2026-09-22T06:00:00.000000000Z'}
+    - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, qty: '10', limit_price: '155', purpose: open,
+      mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T06:00:00.000000000Z'}
+- id: MC-E30
+  kind: escalation
+  op: deliver_now
+  title: A push is suppressed at 23:00 and sent at 07:00 New York in both DST states; cli_inbox always delivers
+  quiet_hours: {start: '23:00', end: '07:00'}
+  queries:
+  - {channel: push, at: '2026-07-16T03:00:00.000000000Z'}
+  - {channel: push, at: '2026-07-16T11:00:00.000000000Z'}
+  - {channel: push, at: '2026-12-16T04:00:00.000000000Z'}
+  - {channel: push, at: '2026-12-16T12:00:00.000000000Z'}
+  - {channel: cli_inbox, at: '2026-12-16T04:00:00.000000000Z'}
+  expect:
+  - {status: suppressed_quiet_hours}
+  - {status: delivered}
+  - {status: suppressed_quiet_hours}
+  - {status: delivered}
+  - {status: delivered}
+- id: MC-E31
+  kind: escalation
+  op: lifecycle
+  title: A grant batched with a cancelling exits-only restriction is not pending and never acts (DEC-131 item 25(j))
+  context:
+    approvers: [u1, u2]
+    author: u1
+    environment: paper
+    timeout_s: 300
+    inbox: 1
+    push_channels: []
+    quiet_hours: null
+  start: '2026-09-22T14:00:00.000000000Z'
+  script:
+  - kind: ask
+    approval: ap1
+    bound:
+      instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+  - kind: batch
+    reason: mode_tightened
+    responses:
+    - source: ctl1
+      approval: ap1
+      actor_kind: user
+      responder: u2
+      verdict: approved
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      submitted_at: '2026-09-22T14:00:30.000000000Z'
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+    now:
+      mandate_version: sha256:v1
+      mode: normal
+      instrument_restricted: false
+      in_working_universe: true
+      classification: {decision: ask, by: 'rule:big_order'}
+      dry_run: {verdict: allow, reason: null}
+      mark: '155'
+  expect:
+  - drafts:
+    - instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005
+      asset_class: us_equity
+      side: buy
+      qty: '10'
+      limit_price: '155'
+      purpose: open
+      mandate_version: sha256:v1
+      decided_by: rule:big_order
+      combined_score: '0.7'
+      reference_mark: {price: '155', seq: 2}
+      approvers_required: 1
+      independent_required: false
+      timeout_s: 300
+      approval: ap1
+      deadline: '2026-09-22T14:05:00.000000000Z'
+      content_hash: sha256:377d20002a9e4abcb17ff24b79eca8b8a72c260210e9b5fe3c62315a55f97a88
+      type: ApprovalRequested
+      clock: '2026-09-22T14:00:00.000000000Z'
+    - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
+  - drafts:
+    - {type: ApprovalCanceled, approval: ap1, reason: mode_tightened, clock: '2026-09-22T14:00:00.000000000Z'}
+    - type: ApprovalResponded
+      approval: ap1
+      source: ctl1
+      responder: u2
+      verdict: approved
+      step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
+      clock: '2026-09-22T14:00:00.000000000Z'
+      result: refused
+      reason: not_pending
+      effective_at: '2026-09-22T14:00:30.000000000Z'
