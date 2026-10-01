@@ -1745,11 +1745,11 @@ From E6-4's slice R4 (stream H2; DEC-167 item 8):
   reference PR).** `Fold::complete_goal`'s `Release` arm journals `AgentStopped` (reason
   `goal_complete`) with the loss carry, as `retire` does, and a test shows that releasing and
   redeploying on the same connection opens the new agent at the carried L (through
-  `ValidationContext::from_journal` and V-032). In `agent/h2-dec-270-mandate-spec`.
+  `ValidationContext::from_journal` and V-032). Merged in [#387](https://github.com/kunwarshivam/mandate/pull/387).
 - **MC-R17 back to passing (DEC-277; E6-4, stream H2).** The DEC-270 reference PR changes MC-R17's
   expected journal and marks it `pending`, the one flip DEC-277 allows. The `mandate-spec` side above
   must bring it back: the status PR that follows it marks MC-R17 `passing` again, with MC-R25,
-  MC-R26, and MC-V68.
+  MC-R26, and MC-V68. Done in `agent/h2-dec-270-status` (DEC-77 item 3), after [#387](https://github.com/kunwarshivam/mandate/pull/387).
 - **DEC-277's exception for the `journal` and `trading_domain` suites (the #381 review, round 2,
   minor 1).** `fixture_entry_changed` in `xtask/src/main.rs` finds a case by an object whose `id` is
   its `status.toml` key, which matches the `mandate` suite but no `journal` key and not
@@ -1770,7 +1770,11 @@ From E6-4's slice R4 (stream H2; DEC-167 item 8):
   `agent_equity` 9850 after the release: the released position stays valued on the agent's books at
   the last mark, which is what makes the carry "E before the release" (DEC-274 item 2). Add a
   sentence to its note in `generate.py` saying so, so a later change that zeroes the released
-  quantity is seen to break the reading rather than taken as a fix.
+  quantity is seen to break the reading rather than taken as a fix. Say too why the quantity must
+  stay: a mark after the retirement still moves `agent_equity` and journals the ladder, the daily
+  loss, and the floor on a holding the owner has taken, which nothing acts on while the agent is
+  `stopped` (the #387 review, minor 2). With it, rewrap `complete_goal`'s doc comment in
+  `crates/mandate-spec/src/risk/fold/owner.rs` to the file's 100-column width (minor 1).
 - **R4's status PR: the last nine MC-R cases pass.** MC-R09 to MC-R12, MC-R14, MC-R16, MC-R17,
   MC-R21, and MC-R23 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` on R4 (DEC-167 item 8 (i)); marking them in `status.toml` follows under DEC-77
