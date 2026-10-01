@@ -1073,13 +1073,54 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
     let started = fs::metadata(&diff_file)
         .and_then(|meta| meta.modified())
         .context("timing the diff this run reads")?;
-    let status = Command::new("cargo")
-        .current_dir(root)
-        .args(args)
+    let status = mutants_job_cargo(root, &args)
         .status()
         .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
     fs::remove_file(&diff_file).ok();
     mutants_outcome(root, &crates, status?.code(), started)
+}
+
+/// The build directory a caller may export for their own builds. The mutants job's `cargo` children
+/// that build — the pre-flight's test listing and the mutants run — take it out of their
+/// environment: `cargo mutants` builds its baseline and each of the `--jobs` concurrent mutant
+/// copies in scratch copies of the tree, and every build of the same package from every copy writes
+/// the same artifact basename (`<package>-<metadata hash>`) into the target directory it is given,
+/// so one directory shared by the baseline, the mutant copies, and the pre-flight's build of the
+/// unmutated source can have one build's binary judge another's source and flip either verdict:
+/// #419's review met a caught mutant reported missed, and
+/// `a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict` plants the opposite, a missed
+/// mutant reported caught, the direction a gate must never fail in (#419 review, nit 3). With the
+/// variable out of the environment each scratch copy builds in a target tree of its own, which is
+/// how the run is judged when no directory is exported.
+const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
+
+/// A `cargo` child of the mutants job that builds, with the caller's [`CARGO_TARGET_DIR`] out of its
+/// environment: the pre-flight's `cargo nextest list`, which builds the very packages the run is
+/// about to judge, and the `cargo mutants` run itself. The job's other `cargo` children —
+/// `cargo mutants --list` and `cargo metadata` — build nothing, so they carry none of this state.
+fn mutants_job_cargo(root: &Path, args: &[&str]) -> Command {
+    let mut cargo = Command::new("cargo");
+    cargo
+        .current_dir(root)
+        .args(args)
+        .env_remove(CARGO_TARGET_DIR);
+    cargo
+}
+
+/// The captured stdout of a [`mutants_job_cargo`] child, or its stderr in the failure, as
+/// `output_in` reports a child that fails.
+fn mutants_job_cargo_output(root: &Path, args: &[&str]) -> Result<String> {
+    let out = mutants_job_cargo(root, args)
+        .output()
+        .context("starting `cargo nextest list` (is it installed? see AGENTS.md)")?;
+    if !out.status.success() {
+        bail!(
+            "`cargo {}` failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    String::from_utf8(out.stdout).context("non-UTF-8 output")
 }
 
 /// Every mutant the run is about to test must have at least one live test that can judge it, or the
@@ -1118,7 +1159,7 @@ fn live_tests_judge_every_mutant(root: &Path, diff_path: &str) -> Result<Listed>
     let mut args = vec!["nextest", "list", "--locked", "--message-format", "json"];
     args.extend(packages.iter().map(String::as_str));
     eprintln!("    $ cargo {}", args.join(" "));
-    let listing = output_in(root, "cargo", &args)?;
+    let listing = mutants_job_cargo_output(root, &args)?;
     let live = live_test_counts(&listing)?;
     report(unjudged_mutants(&mutants, &live), "mutants")?;
     Ok(Listed::Mutants)
@@ -2659,13 +2700,14 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, MUTANTS_OUT, MutatedCrate, PendingTest, PendingTestRun, TestOutcome,
-        backticked_paths, base_ref_in, ci, classify, contains_dec_id, contains_word, failure_cause,
-        first_panic_line, generated_pending_markers, has_pending_tests, is_pending_marker,
-        is_stub_function, listed_mutant_counts, live_test_counts, mutant_verdicts, mutants,
-        mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, repo_root, spec_guard_problems, status_flip_problems, test_binary,
-        test_outcomes, unjudged_mutants, verdicts,
+        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANTS_OUT, MutatedCrate, PendingTest,
+        PendingTestRun, TestOutcome, backticked_paths, base_ref_in, ci, classify, contains_dec_id,
+        contains_word, failure_cause, first_panic_line, generated_pending_markers,
+        has_pending_tests, is_pending_marker, is_stub_function, listed_mutant_counts,
+        live_test_counts, mutant_verdicts, mutants, mutants_outcome, mutated_crates, names_a_stub,
+        output_in, pending_problems, pending_tests, plain_comment_lines, repo_root,
+        spec_guard_problems, status_flip_problems, test_binary, test_outcomes, unjudged_mutants,
+        verdicts,
     };
 
     #[test]
@@ -3574,6 +3616,100 @@ mod tests {
         assert!(
             mutants(&fx.0, None).is_ok(),
             "with no base there is no diff to judge, so the job has nothing to do"
+        );
+        Ok(())
+    }
+
+    /// Marks the re-run child of `a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict`: the
+    /// child is the process whose `cargo` children the gate spawns, and it runs with
+    /// `CARGO_TARGET_DIR` in its environment, which the test cannot set in its own process because
+    /// `unsafe` environment mutation is forbidden workspace-wide.
+    const MUTANTS_TARGET_DIR_CHILD: &str = "XTASK_MUTANTS_TARGET_DIR_CHILD";
+
+    /// A `CARGO_TARGET_DIR` the caller exported must not flip the gate's verdict (#419 review, nit
+    /// 3, the backlog row this change lands). The variable has to be in the environment the gate's
+    /// `cargo` children inherit, which is this process's own, so the test re-runs itself as a child
+    /// with the variable pointing at a directory of its own. The child runs the existing test's own
+    /// sequence — every mutant caught once, then the one that survives — and the parent asserts the
+    /// child's exit status, and that no build tree of the gate's appears in the caller's directory:
+    /// a shared verdict can flip on one run and not the next, but a pass-through always builds
+    /// there, so this half cannot pass by luck.
+    #[test]
+    fn a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict() -> Result<()> {
+        if env::var_os(MUTANTS_TARGET_DIR_CHILD).is_none() {
+            let dir =
+                env::temp_dir().join(format!("mandate-xtask-mutants-env-{}", std::process::id()));
+            if dir.exists() {
+                fs::remove_dir_all(&dir)?;
+            }
+            fs::create_dir_all(&dir)?;
+            let child = Command::new(env::current_exe().context("finding this test's binary")?)
+                .arg("--exact")
+                .arg("tests::a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict")
+                .env(MUTANTS_TARGET_DIR_CHILD, "1")
+                .env(CARGO_TARGET_DIR, &dir)
+                .status()
+                .context("re-running this test with a caller's CARGO_TARGET_DIR")?;
+            let built = fs::read_dir(&dir)?
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+                .count();
+            fs::remove_dir_all(&dir).ok();
+            assert!(
+                child.success(),
+                "the child above ran the gate with CARGO_TARGET_DIR={} and its verdict held",
+                dir.display()
+            );
+            assert_eq!(
+                built, 0,
+                "the gate builds in the repository it was given, so the caller's directory holds \
+                 no build tree of its own (`cargo generate-lockfile`'s `.rustc_info.json` cache \
+                 file, which the fixture's own setup writes, is not one)"
+            );
+            return Ok(());
+        }
+        assert!(
+            env::var_os(CARGO_TARGET_DIR).is_some(),
+            "the parent sets the caller's target directory on this child"
+        );
+        let fx = Fixture::gated("mutants-env")?;
+        let base = fs::read_to_string(fx.0.join("base"))?;
+        let base = base.trim();
+        fx.write(
+            "crates/probe/tests/live.rs",
+            concat!(
+                "#[test]\n",
+                "fn the_code_names_the_refusal() {\n",
+                "    assert_eq!(probe::code(true), \"refused\");\n",
+                "    assert_eq!(probe::code(false), \"accepted\");\n",
+                "}\n",
+            ),
+        )?;
+        fx.commit()?;
+        mutants(&fx.0, Some(base))
+            .context("every mutant caught, with the caller's target directory exported")?;
+        fx.write(
+            "crates/covered/tests/covered.rs",
+            concat!(
+                "#[test]\n",
+                "fn the_flag_is_negated() {\n",
+                "    assert!(covered::negate(false));\n",
+                "}\n",
+            ),
+        )?;
+        fx.commit()?;
+        let missed = mutants(&fx.0, Some(base)).expect_err(
+            "a live mutant no live test catches is still the run's own missed-mutant status, \
+             whatever directory the caller exported",
+        );
+        let missed = format!("{missed:#}");
+        assert_eq!(
+            missed, "mutants: 1 problem(s)",
+            "the caller's CARGO_TARGET_DIR cannot stand in for the mutant's own build"
+        );
+        assert!(
+            fx.0.join(MUTANTS_OUT).exists(),
+            "and the verdict is the run's own, so the run did happen"
         );
         Ok(())
     }

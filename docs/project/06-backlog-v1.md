@@ -1838,11 +1838,6 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   crypto order's `tif` today, so `day` and `gtc` decide alike and no test can tell them apart. When
   E6-8's session rules or the executor first read a crypto order's `tif`, add the test that a
   crypto proposal with no `tif` is decided as `gtc`.
-- **`cargo xtask ci mutants` should clear `CARGO_TARGET_DIR`** (#419 review, nit 3). With a custom
-  `CARGO_TARGET_DIR` exported, `cargo mutants --jobs 2` has the baseline and both concurrent mutant
-  copies share one target directory, and the #419 reviewer got a spurious `MISSED` from it. A
-  shared directory could flip a verdict the other way too, so xtask should unset the variable
-  before invoking `cargo mutants`.
 - **Drive the trading-domain gate cases through the real order path once E7-4 and E7-5 do**
   (the coordinator's ruling on #370, item 2). DEC-259 item 7 is a reading of the reference harness
   only: it decides a later proposal once the earlier allowed ones were filled in full by `fill`
