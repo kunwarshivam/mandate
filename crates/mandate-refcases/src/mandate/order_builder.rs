@@ -41,10 +41,9 @@
 //! `order_type` absent on a sell means a plain limit.
 //!
 //! **Cases that cannot pass yet fail at their owner.** A `trim_to_target` base asks the risk engine
-//! first (§6.2 step 1), and `mandate_risk::trim_proposals` is E6-4's stub; a crypto opening's dry
-//! run is denied `crypto_pair_not_usd` at check 2, because this harness does not read the pinned
-//! `symbol` (`BTC/USD`) yet and states no quote currency for a pair, which the gate never reads as
-//! USD (DEC-254 items 1 and 7). E6-10's harness PR reads it.
+//! first (§6.2 step 1), and `mandate_risk::trim_proposals` is E6-4's stub. A crypto pair's quote
+//! currency is read from the pinned instrument's `symbol` (`BTC/USD`), and a symbol that does not
+//! name USD as its quote is never read as USD (DEC-254 items 1 and 7, DEC-285).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -563,6 +562,8 @@ struct Inputs {
     now: UtcNanos,
     instrument: AssetId,
     asset_class: AssetClass,
+    /// The pinned instrument's quote currency, from its `symbol` (DEC-285).
+    quote_currency: Option<gate::QuoteCurrency>,
     position: Qty,
     bid: Price,
     ask: Price,
@@ -684,6 +685,7 @@ impl Inputs {
             now,
             instrument,
             asset_class,
+            quote_currency: crate::quote_currency_of(&pinned.symbol),
             position,
             bid,
             ask,
@@ -1133,7 +1135,11 @@ fn listing(
         ptp_no_exception: false,
         etp: gate::EtpClass::Plain,
         etp_classified_at: Some(stated.now),
-        quote_currency: equity.then_some(gate::QuoteCurrency::Usd),
+        quote_currency: if equity {
+            Some(gate::QuoteCurrency::Usd)
+        } else {
+            stated.quote_currency
+        },
         prior_close: Some(stated.bid),
         median_dollar_volume_20d: Some(liquid),
         median_dollar_volume_30d: Some(liquid),
@@ -1368,17 +1374,15 @@ mod tests {
     const PLANTED: &str = "zz_planted";
 
     /// The cases that pass against the merged `mandate-builder` and `mandate-risk`.
-    const PASSING: [&str; 25] = [
+    const PASSING: [&str; 28] = [
         "MC-B01", "MC-B02", "MC-B03", "MC-B04", "MC-B05", "MC-B06", "MC-B07", "MC-B08", "MC-B09",
         "MC-B10", "MC-B11", "MC-B12", "MC-B13", "MC-B14", "MC-B15", "MC-B16", "MC-B18", "MC-B19",
-        "MC-B20", "MC-B21", "MC-B22", "MC-B23", "MC-B24", "MC-B25", "MC-B29",
+        "MC-B20", "MC-B21", "MC-B22", "MC-B23", "MC-B24", "MC-B25", "MC-B26", "MC-B27", "MC-B28",
+        "MC-B29",
     ];
 
     /// The cases that cannot pass yet, each with what owes them and what its failure must say.
-    /// MC-B26 to MC-B28's failure names no story: the gate denies their crypto proposals
-    /// `crypto_pair_not_usd` because this harness does not yet read a pair's quote currency from
-    /// its pinned `symbol`, which E6-10's harness PR adds (DEC-254 item 7).
-    const OWED: [(&str, &str, &[&str]); 7] = [
+    const OWED: [(&str, &str, &[&str]); 4] = [
         (
             "MC-B17",
             "E6-4",
@@ -1398,21 +1402,6 @@ mod tests {
             "MC-B32",
             "E6-4",
             &["mandate_risk::trim_proposals", "pending E6-4"],
-        ),
-        (
-            "MC-B26",
-            "E6-10's harness PR",
-            &["`gate_dry_run`", "Some(CryptoPairNotUsd)"],
-        ),
-        (
-            "MC-B27",
-            "E6-10's harness PR",
-            &["`gate_dry_run`", "Some(CryptoPairNotUsd)"],
-        ),
-        (
-            "MC-B28",
-            "E6-10's harness PR",
-            &["`gate_dry_run`", "Some(CryptoPairNotUsd)"],
         ),
     ];
 
@@ -1718,6 +1707,32 @@ mod tests {
         crate::expect_eq("cases listed", PASSING.len() + OWED.len(), seen)
     }
 
+    /// MC-B26's pinned pair is read from its base's `symbol` (DEC-285): `BTC/USD` passes, and a
+    /// pair quoted in a stablecoin, or a symbol that names no quote, fails at check 2 with
+    /// `crypto_pair_not_usd`.
+    #[test]
+    fn a_pinned_pair_s_quote_currency_is_its_symbol_s() -> Result<(), String> {
+        let fixture = fixture()?;
+        let with_symbol = |symbol: &str| -> Result<Json, String> {
+            let mut copy = fixture.clone();
+            let pinned = copy
+                .pointer_mut("/bases/btc_accumulator/mandate/universe/pinned_instruments/0")
+                .and_then(Json::as_object_mut)
+                .ok_or("btc_accumulator pins one instrument")?;
+            pinned.insert("symbol".to_owned(), json!(symbol));
+            Ok(copy)
+        };
+        run(with_symbol("BTC/USD")?, "MC-B26")?;
+        for symbol in ["BTC/USDT", "BTCUSD", "BTC/usd"] {
+            fails_naming(
+                run(with_symbol(symbol)?, "MC-B26"),
+                "Some(CryptoPairNotUsd)",
+                &format!("MC-B26 pinned as {symbol}"),
+            )?;
+        }
+        Ok(())
+    }
+
     /// Every expected member, and every member of a dry run and an outcome, is compared and none is
     /// optional: each one edited, and each one dropped, fails the case naming it, a member planted
     /// beside them fails naming the plant, and each enum-valued one swapped for a sibling variant
@@ -1756,7 +1771,7 @@ mod tests {
                 )?;
             }
         }
-        crate::expect_eq("doctorings, counted from the fixture", doctorings, 768)
+        crate::expect_eq("doctorings, counted from the fixture", doctorings, 888)
     }
 
     /// A hold reaches neither the gate nor approval, so a hold that states either fails naming it,
@@ -1852,9 +1867,9 @@ mod tests {
             }
         }
         crate::expect_eq(
-            "plants: four objects per case, forty-eight outputs and two working orders",
+            "plants: four objects per case, fifty-one outputs and two working orders",
             plants,
-            25 * 4 + 48 + 2,
+            28 * 4 + 51 + 2,
         )
     }
 
@@ -1965,7 +1980,7 @@ mod tests {
                 }
             }
         }
-        crate::expect_eq("inputs refused, counted from the fixture", refused, 981)
+        crate::expect_eq("inputs refused, counted from the fixture", refused, 1087)
     }
 
     /// The builder and the gate see one account: the gate state's equity, the instrument's market

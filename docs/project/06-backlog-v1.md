@@ -1789,18 +1789,38 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   `a_later_proposal_waits_for_a_full_fill_on_its_side` (identical buys with no fill, a partial
   fill, and more), and `the_conduct_figures_are_the_fill_steps` with
   `the_opposite_fill_interval_runs_from_the_fill_step`, which catch the plant that takes the
-  conduct figures from the proposal. RC-09's third step is a crypto proposal, which waits for
-  E6-10's harness PR. The executor (E7-3) calls the fold account-wide and journals
-  `DayTradeFold::today`. **A fold error refuses openings only** (#370 review, major 1): E7-3 must
-  still route exits and protective orders when `fold_day_trades` fails (`AGENTS.md` rule 13), and
-  E7-3's tests PR carries the pending test
-  `a_failed_day_trade_fold_refuses_openings_and_still_routes_exits` for it.
+  conduct figures from the proposal. E6-10's harness reads RC-09's crypto step (DEC-285). The
+  executor (E7-3) calls the fold account-wide and journals `DayTradeFold::today`. **A fold error
+  refuses openings only** (#370 review, major 1): E7-3 must still route exits and protective
+  orders when `fold_day_trades` fails (`AGENTS.md` rule 13), and E7-3's tests PR carries the
+  pending test `a_failed_day_trade_fold_refuses_openings_and_still_routes_exits` for it.
 - **Refuse a short position in the trading-domain day-trade fold structurally** (#412 review,
   nit 3). `trading_domain::gate::Gate::fold` reads each equity position as `position.qty().abs()`,
   so a short would fold as if held long and understate the day-trade count. No v1 case holds one
   (`AGENTS.md` rule 12) and `Gate::decide` refuses a short, but a `day_trade_count` expectation
   reaches the fold without that refusal. Refuse a negative `SignedQty` there instead of taking
   its magnitude.
+- **Read `crypto_status` in the trading-domain harness** (DEC-285 item 5). The driver hands the gate
+  a crypto-active account because no crypto-proposing case states `crypto_status`, and
+  `trading_domain_gate_harness.rs` pins it as pending E6-10, initial and in an update. When a case
+  needs it, a tests correction (DEC-77) drops those two assertions, and the harness reads it as
+  check 1's `crypto_active`.
+- **RC-09's `alpaca_intraday_margin` variant cannot pass as written** (founder; DEC-285 item 6).
+  Its `expect_overrides.step_1: { decision: { verdict: allow } }` merges into a decision that
+  keeps `reason_code: legacy_pdt_day_trade_budget`, so the expectation is an allow with a deny's
+  code. Under DEC-259 item 7, its step 3 would also wait, because step 1 is allowed and never
+  filled. The fix is a YAML change: state the whole decision in the override, and fill step 1 or
+  drop step 3 in the variant.
+- **Pin DEC-285 item 3's `gtc` for a crypto proposal with no `tif`** (#419 review, minor 2). The
+  trading-domain driver reads an absent crypto `tif` as `gtc`, but nothing in the gate reads a
+  crypto order's `tif` today, so `day` and `gtc` decide alike and no test can tell them apart. When
+  E6-8's session rules or the executor first read a crypto order's `tif`, add the test that a
+  crypto proposal with no `tif` is decided as `gtc`.
+- **`cargo xtask ci mutants` should clear `CARGO_TARGET_DIR`** (#419 review, nit 3). With a custom
+  `CARGO_TARGET_DIR` exported, `cargo mutants --jobs 2` has the baseline and both concurrent mutant
+  copies share one target directory, and the #419 reviewer got a spurious `MISSED` from it. A
+  shared directory could flip a verdict the other way too, so xtask should unset the variable
+  before invoking `cargo mutants`.
 - **Drive the trading-domain gate cases through the real order path once E7-4 and E7-5 do**
   (the coordinator's ruling on #370, item 2). DEC-259 item 7 is a reading of the reference harness
   only: it decides a later proposal once the earlier allowed ones were filled in full by `fill`

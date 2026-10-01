@@ -20,6 +20,12 @@
 //!   last fill's instant as the latest fill on its side, and one order today if it opened or
 //!   increased. Its working order, reservation and partial fills stay `actions`' (E7-4) and the
 //!   account ledger's (E7-5), and this reading lapses when their order path drives these cases.
+//! - **A crypto pair** (DEC-285) is quoted in the currency its `symbol` names (`BTC/USD` is USD,
+//!   any other quote is not, and a symbol naming none states none), trades on no exchange, has the
+//!   header's passing 30-day volume, and has its `min_trade_increment` (else the smallest `Qty`)
+//!   as its minimum order. A proposal with no `tif` is `gtc`. A buy's fee is taken from the asset
+//!   it receives, so it reserves no cash; the copy is filled as a taker, since the accounting
+//!   needs a liquidity for a crypto fill.
 //! - **The day-trade regime** (§9.2, DEC-284) is `initial.account.regime`, which the alpaca
 //!   profile defaults to `intraday_margin` and a generic margin account must state; a cash account
 //!   states none and is handed `legacy_pdt`, which check 8 never reads for one. `last_equity` is
@@ -56,7 +62,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{
-    Account, AccountType, AssetClass, Config, Execution, Input, Reservations, Side,
+    Account, AccountType, AssetClass, Config, Execution, Input, Liquidity, Reservations, Side,
 };
 use mandate_num::{Fraction, Price, Qty, Ratio, Rounding, ShareIncrement, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits};
@@ -77,8 +83,9 @@ use super::{
 use crate::{Json, at, ensure, list_at, str_at, u64_at};
 
 /// §7.3's account fields, read from `initial.account` and from `broker_account_update` data.
-/// `crypto_status` is not among them: it gates only a crypto opening, which this driver does not
-/// propose until E6-10's harness PR reads a pair's quote currency.
+/// `crypto_status` is not among them: no case that proposes crypto states one, and the account is
+/// crypto-active as the case file's header defaults it, so reading it waits for a case that needs
+/// it (DEC-285).
 pub(super) const STATUS_FIELDS: &[&str] = &[
     "status",
     "trading_blocked",
@@ -136,11 +143,20 @@ pub(super) struct Gate {
     config: GateConfig,
     registered: BTreeSet<String>,
     exchanges: BTreeMap<String, Exchange>,
+    pairs: BTreeMap<String, Pair>,
     state: AccountState,
     day_trades: DayTradeFigures,
     fills: Vec<AccountFill>,
     working: Option<Order>,
     filled: Vec<Order>,
+}
+
+/// A crypto instrument's `symbol` and `min_trade_increment`, as check 2 and §5.3 rule 2 read them
+/// (DEC-285).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Pair {
+    quote_currency: Option<QuoteCurrency>,
+    min_order_size: Qty,
 }
 
 /// §9.2's regime as `initial.account` states it, or as the alpaca profile defaults it.
@@ -184,10 +200,14 @@ impl Gate {
             })
             .collect::<Result<_, String>>()?;
         let mut exchanges = BTreeMap::new();
+        let mut pairs = BTreeMap::new();
         let listed = at(case, "instruments")?
             .as_object()
             .ok_or("`instruments` is not an object")?;
         for (name, listing) in listed {
+            if listing.get("asset_class").and_then(Json::as_str) == Some("crypto") {
+                pairs.insert(name.clone(), pair(name, listing)?);
+            }
             if let Some(code) = listing.get("exchange") {
                 let code = code
                     .as_str()
@@ -199,6 +219,7 @@ impl Gate {
             config: gate_config(at(&resolved_config(fixture, case)?, "gate")?)?,
             registered,
             exchanges,
+            pairs,
             state: AccountState::Active,
             day_trades: day_trade_figures(case)?,
             fills: Vec::new(),
@@ -406,9 +427,6 @@ impl Gate {
             name.as_str().ok_or("`name` is not a string")?;
         }
         let (name, id, class, fractionable) = instrument(instruments, str_at(data, "instrument")?)?;
-        ensure(*class == AssetClass::UsEquity, || {
-            format!("`{name}` is not a US equity; a crypto proposal waits for E6-10")
-        })?;
         let side = match str_at(data, "side")? {
             "buy" => Side::Buy,
             "sell" => Side::Sell,
@@ -425,7 +443,9 @@ impl Gate {
         )?;
         let origin = origin_named(str_at(data, "purpose")?)?;
         let whole = num(qty.portion(Fraction::ONE, ShareIncrement::Whole), "qty")? == qty;
+        let crypto = *class == AssetClass::Crypto;
         let tif = match d.get("tif").map(Json::as_str) {
+            None if crypto => TimeInForce::Gtc,
             None if whole => TimeInForce::Day,
             None => return Err("a fractional proposal states no `tif`".to_owned()),
             Some(Some("day")) => TimeInForce::Day,
@@ -442,9 +462,20 @@ impl Gate {
                 )
             }
         };
-        let exchange = *self.exchanges.get(name).ok_or_else(|| {
+        let exchange = self.exchanges.get(name).copied();
+        ensure(crypto || exchange.is_some(), || {
             format!("instrument `{name}` states no `exchange`, which the eligibility floor reads")
         })?;
+        let pair = if crypto {
+            Some(
+                *self
+                    .pairs
+                    .get(name)
+                    .ok_or_else(|| format!("crypto instrument `{name}` was not read"))?,
+            )
+        } else {
+            None
+        };
 
         let mut marked = account.clone();
         if account.mark(id).is_none() && account.positions().any(|(held, _)| held == id) {
@@ -493,7 +524,7 @@ impl Gate {
                         side,
                         qty_gross: qty,
                         price: limit_price,
-                        liquidity: None,
+                        liquidity: crypto.then_some(Liquidity::Taker),
                         executed_at: now,
                     }),
                     accounting,
@@ -578,7 +609,7 @@ impl Gate {
         };
         let listing = listing(
             proposed.clone(),
-            exchange,
+            (exchange, pair),
             fractionable.unwrap_or(false),
             limit_price,
             now,
@@ -748,21 +779,41 @@ fn day_trade_figures(case: &Json) -> Result<DayTradeFigures, String> {
     })
 }
 
-/// DEC-199 item 6's listing: active, tradable and unhalted on `exchange` with a current status
-/// feed, a plain ETP classified at `now`, last closed at the limit price, a 90,000,000 median dollar
-/// volume (the liquid collar tier), one share its minimum order, and fractionable only when the
-/// case says so.
+/// DEC-199 item 6's listing: active, tradable and unhalted with a current status feed, a plain ETP
+/// classified at `now`, last closed at the limit price, and fractionable only when the case says
+/// so. A US equity trades on `exchange` in USD with a 90,000,000 median 20-day dollar volume (the
+/// liquid collar tier) and one share its minimum order. A crypto pair is quoted in the currency its
+/// `symbol` names, with the same 90,000,000 as its 30-day median (the case file's header: absent
+/// crypto volume fields pass) and its `min_trade_increment` as its minimum order (DEC-285).
 fn listing(
     instrument: AssetId,
-    exchange: Exchange,
+    (exchange, pair): (Option<Exchange>, Option<Pair>),
     fractionable: bool,
     limit_price: Price,
     now: UtcNanos,
 ) -> Result<InstrumentSnapshot, String> {
+    let liquid = Some(num(Usd::parse("90000000"), "a median dollar volume")?);
+    let one_share = num(Qty::parse("1"), "min_order_size")?;
+    let (asset_class, quote_currency, median_20d, median_30d, min_order_size) = match pair {
+        None => (
+            AssetClass::UsEquity,
+            Some(QuoteCurrency::Usd),
+            liquid,
+            None,
+            one_share,
+        ),
+        Some(pair) => (
+            AssetClass::Crypto,
+            pair.quote_currency,
+            None,
+            liquid,
+            pair.min_order_size,
+        ),
+    };
     Ok(InstrumentSnapshot {
         instrument,
-        asset_class: AssetClass::UsEquity,
-        exchange: Some(exchange),
+        asset_class,
+        exchange,
         status_active: true,
         tradable: true,
         fractionable,
@@ -770,13 +821,39 @@ fn listing(
         ptp_no_exception: false,
         etp: EtpClass::Plain,
         etp_classified_at: Some(now),
-        quote_currency: Some(QuoteCurrency::Usd),
+        quote_currency,
         prior_close: Some(limit_price),
-        median_dollar_volume_20d: Some(num(Usd::parse("90000000"), "median_dollar_volume_20d")?),
-        median_dollar_volume_30d: None,
-        min_order_size: num(Qty::parse("1"), "min_order_size")?,
+        median_dollar_volume_20d: median_20d,
+        median_dollar_volume_30d: median_30d,
+        min_order_size,
         halted: false,
         status_feed_current: true,
+    })
+}
+
+/// The smallest quantity a `Qty` holds, a crypto pair's minimum order when the case states no
+/// `min_trade_increment`, so that the harness never refuses a quantity the case sizes to (DEC-285).
+const QTY_UNIT: &str = "0.000000001";
+
+/// A crypto instrument's quote currency, from its `symbol` ([`crate::quote_currency_of`]), and
+/// its minimum order (DEC-285). An instrument that states no `symbol` states no quote currency.
+fn pair(name: &str, listing: &Json) -> Result<Pair, String> {
+    let quote_currency = match listing.get("symbol") {
+        None => None,
+        Some(symbol) => {
+            let symbol = symbol
+                .as_str()
+                .ok_or_else(|| format!("instrument `{name}`: `symbol` is not a string"))?;
+            crate::quote_currency_of(symbol)
+        }
+    };
+    let increment = match listing.get("min_trade_increment") {
+        None => QTY_UNIT.to_owned(),
+        Some(_) => dec_at(listing, "min_trade_increment")?.as_str().to_owned(),
+    };
+    Ok(Pair {
+        quote_currency,
+        min_order_size: num(Qty::parse(&increment), "min_trade_increment")?,
     })
 }
 
