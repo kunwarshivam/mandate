@@ -587,7 +587,7 @@ mod tests {
     /// Round 1's minor 1: DEC-266 fixes the evaluation order, and the gap-before-length pair is
     /// the one no integration case pins. This window crosses both — a 1 s smallest gap against
     /// a 60 s baseline mean, and a 5 000-byte recent mean against a 1 000-byte baseline — while
-    /// the arrival measure stays quiet (a 701 s span against a 155 s bar), so the reported
+    /// the arrival measure stays quiet (a 601 s span against a 155 s bar), so the reported
     /// measure is the gap, and the arm swap fails here.
     #[test]
     fn the_gap_measure_is_reported_when_the_length_crosses_too() -> Result<(), ResearchError> {
