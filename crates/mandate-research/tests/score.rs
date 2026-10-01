@@ -142,7 +142,6 @@ fn input<'a>(
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn a_series_refuses_unordered_or_empty_closes() {
     let ordered = series("asset-a", &[(100, "10"), (200, "11")]);
     assert_eq!(
@@ -168,7 +167,6 @@ fn a_series_refuses_unordered_or_empty_closes() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_entry_close_is_the_first_strictly_after_as_of() {
     let series = series("asset-a", &[(100, "10"), (200, "11"), (300, "12")]);
     assert_eq!(
@@ -187,7 +185,6 @@ fn the_entry_close_is_the_first_strictly_after_as_of() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_exit_close_is_the_last_at_or_before_the_horizon() {
     let series = series("asset-a", &[(100, "10"), (200, "11"), (300, "12")]);
     assert_eq!(
@@ -207,7 +204,6 @@ fn the_exit_close_is_the_last_at_or_before_the_horizon() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn a_window_edge_without_a_close_on_its_side_is_an_error() {
     let series = series("asset-a", &[(100, "10"), (200, "11")]);
     assert!(
@@ -227,7 +223,6 @@ fn a_window_edge_without_a_close_on_its_side_is_an_error() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn buy_and_hold_rounds_once_at_twelve_places() {
     let falling = series("asset-a", &[(101, "3"), (999, "1")]);
     assert_eq!(
@@ -243,7 +238,6 @@ fn buy_and_hold_rounds_once_at_twelve_places() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_basket_is_the_equal_weighted_mean_of_its_members() {
     let first = series("basket-1", &[(101, "10"), (999, "11")]);
     let second = series("basket-2", &[(101, "100"), (999, "98")]);
@@ -255,7 +249,6 @@ fn the_basket_is_the_equal_weighted_mean_of_its_members() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn a_long_thesis_scores_its_window_net_of_the_round_trip_cost() {
     let cost = thesis("th-1", "asset-a", 100, 1_000, "0.01");
     let instruments = BTreeMap::from([(
@@ -284,7 +277,6 @@ fn a_long_thesis_scores_its_window_net_of_the_round_trip_cost() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn excess_subtracts_each_baseline_over_the_same_window() {
     let one = thesis("th-1", "asset-a", 100, 1_000, "0.01");
     let instruments = BTreeMap::from([(
@@ -310,7 +302,6 @@ fn excess_subtracts_each_baseline_over_the_same_window() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn a_non_long_thesis_is_unscoreable_and_never_counts() {
     let long = thesis("th-1", "asset-a", 100, 1_000, "0");
     let mut other = thesis("th-2", "asset-b", 100, 1_000, "0");
@@ -353,7 +344,6 @@ fn a_non_long_thesis_is_unscoreable_and_never_counts() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn a_thesis_without_a_series_is_unscoreable_and_never_counts() {
     let scored = thesis("th-1", "asset-a", 100, 1_000, "0");
     let missing = thesis("th-2", "asset-b", 100, 1_000, "0");
@@ -384,7 +374,6 @@ fn a_thesis_without_a_series_is_unscoreable_and_never_counts() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn a_thesis_with_no_close_on_an_edge_is_unscoreable_and_never_counts() {
     let scored = thesis("th-1", "asset-a", 100, 1_000, "0");
     let no_entry = thesis("th-2", "asset-b", 500, 1_000, "0");
@@ -438,7 +427,6 @@ fn a_thesis_with_no_close_on_an_edge_is_unscoreable_and_never_counts() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_window_refuses_an_early_run() {
     let (theses, instruments, basket, index) = five_theses("400");
     let registered = decision(6);
@@ -452,7 +440,6 @@ fn the_window_refuses_an_early_run() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn unscoreable_theses_never_count_toward_the_minimum() {
     let scored = thesis("th-1", "asset-a", 100, 1_000, "0");
     let missing = thesis("th-2", "asset-b", 100, 1_000, "0");
@@ -483,7 +470,6 @@ fn unscoreable_theses_never_count_toward_the_minimum() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn a_thesis_outside_the_registered_window_is_refused() {
     let (mut theses, instruments, basket, index) = five_theses("400");
     theses.push(thesis("th-6", "asset-6", 100, 20_000, "0"));
@@ -498,7 +484,6 @@ fn a_thesis_outside_the_registered_window_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_lower_bound_is_the_mean_less_the_ceilinged_margin() {
     let (theses, instruments, basket, index) = five_theses("400");
     let registered = decision(2);
@@ -530,7 +515,6 @@ fn the_lower_bound_is_the_mean_less_the_ceilinged_margin() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn a_single_thesis_has_no_dispersion_and_the_bound_is_the_mean() {
     let one = thesis("th-1", "asset-a", 100, 1_000, "0");
     let instruments = BTreeMap::from([(
@@ -553,7 +537,6 @@ fn a_single_thesis_has_no_dispersion_and_the_bound_is_the_mean() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn pass_requires_the_bound_above_zero_against_both_baselines() {
     let (theses, instruments, basket, index) = five_theses("420");
     let registered = decision(2);
@@ -583,7 +566,6 @@ fn pass_requires_the_bound_above_zero_against_both_baselines() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn every_scored_thesis_shows_its_lineage_s_revision_count() {
     let mut revised = thesis("th-2", "asset-2", 100, 1_000, "0");
     revised.revision = 2;
@@ -615,7 +597,6 @@ fn every_scored_thesis_shows_its_lineage_s_revision_count() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_scorecard_is_independent_of_the_input_order() {
     let (theses, instruments, _flat_basket, index) = five_theses("400");
     let basket = vec![
@@ -650,7 +631,6 @@ fn the_scorecard_is_independent_of_the_input_order() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_sigma_root_is_ceilinged_so_the_margin_is_never_understated() {
     let rising = thesis("th-1", "asset-a", 100, 1_000, "0");
     let milder = thesis("th-2", "asset-b", 100, 1_000, "0");
@@ -705,7 +685,6 @@ fn the_sigma_root_is_ceilinged_so_the_margin_is_never_understated() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_window_edges_are_inclusive() {
     let at_from = thesis("th-1", "asset-a", 100, 1_000, "0");
     let at_to = thesis("th-2", "asset-b", 100, 2_000, "0");
@@ -796,7 +775,6 @@ fn the_window_edges_are_inclusive() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn each_row_excess_uses_its_own_window() {
     let earlier = thesis("th-1", "asset-a", 100, 1_000, "0");
     let later = thesis("th-2", "asset-b", 2_000, 3_000, "0");
@@ -847,7 +825,6 @@ fn each_row_excess_uses_its_own_window() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_report_recomputes_from_its_own_fields() {
     let (theses, instruments, basket, index) = five_theses("400");
     let registered = decision(2);
@@ -933,7 +910,6 @@ fn the_report_recomputes_from_its_own_fields() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn an_empty_basket_is_an_error() {
     let refusal = basket_return(&[], t(100), t(1_000))
         .expect_err("an empty basket refuses, never a quiet zero");
