@@ -2,13 +2,20 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.13 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.14:** §9.2's `legacy_pdt` day trade is stated as an opening and a closing of the same
+  position on one trade date. A sale of an overnight position followed by a same-day repurchase
+  is not a day trade; a later sale of the repurchased shares is one. "Selling and purchasing" is
+  the short sale and its cover, which v1 never takes. This is the founder's reading
+  ([DEC-269](../project/04-decision-log.md#decisions)), and it matches FINRA Rule 4210(f)(8)(B)
+  and the broker's own count. `required`'s +1 after a same-day sale is unchanged, and so is every
+  reference case.
 - **v0.13:** §3.2 item 7's "USD pairs only" gets a reason code of its own, `crypto_pair_not_usd`,
   registered in the reference-case file beside the floor's other codes. A pair the research agent
   admitted is in the working universe, so reporting it as `not_in_working_universe` would say
@@ -826,9 +833,14 @@ meet deficits.
 
 **`legacy_pdt` (generic brokers not yet transitioned):**
 
-- Day trade = purchasing and selling, or selling and purchasing, the same security on the same
-  trading day in a margin account; shares held overnight are sold first; each same-day
-  open-then-close counts once. Window = today plus the 4 prior trading days.
+- Day trade = an opening and a closing of the same position in the same security on one trade
+  date (§2.2) in a margin account: purchasing and then selling, or, for a short position, selling
+  and then purchasing to cover, which v1 never takes (§9.3). Shares held overnight are sold first,
+  so a sale that takes only shares held overnight closes no same-day open, and a sale of an
+  overnight position followed by a same-day repurchase is **not** a day trade
+  ([DEC-269](../project/04-decision-log.md#decisions), FINRA Rule 4210(f)(8)(B)); a later sale
+  of the repurchased shares is one. Each same-day open-then-close counts once. Window = today plus
+  the 4 prior trading days.
 - remaining = 3 − count if prior-close equity < threshold, else unlimited; an account already
   flagged as a pattern day trader with equity below the threshold has remaining = 0.
 - An opening order is allowed only if remaining ≥ required, where required = 1 + (1 if the same

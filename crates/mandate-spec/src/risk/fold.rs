@@ -1,13 +1,11 @@
 //! The §5 fold (DEC-167 item 5): the agent sub-ledger over marks and fills, the high-water mark, the
 //! ladder, breach confirmation with the hard trigger, the daily loss over risk days, the lifetime
 //! floor, a `profit_stop` goal, the instrument's staleness and universe restrictions, and the
-//! effective mode (slices R2 and R3).
-//!
-//! What it does not fold yet is [`SpecError::Unimplemented`], never a silent answer:
-//! acknowledgments, allocation changes, floor loosening, goal completion, and retirement are slice
-//! R4's.
+//! effective mode (slices R2 and R3), and the owner's and the version's inputs: acknowledgments,
+//! allocation changes, floor loosening, goal completion, and retirement (slice R4).
 
 mod daily;
+mod owner;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,12 +17,12 @@ use self::daily::{DailyLatch, Rollover};
 use super::limits::{Figures, Limits, Readings};
 use super::{
     Confirmation, GoalReason, Input, InstrumentRestriction, KillScope, LiftReason, LimitKey,
-    Opening, Outcome, RemovalReason, Restriction, RestrictionReason, RiskEvent, SessionClock,
-    Snapshot, Step, ThenAction, TriggerReason, UniverseChange, add_seconds, hard_wait_s,
-    rung_index, size_factor,
+    Opening, Outcome, Rejection, RemovalReason, Restriction, RestrictionReason, RiskEvent,
+    SessionClock, Snapshot, Step, ThenAction, TriggerReason, UniverseChange, add_seconds,
+    hard_wait_s, rung_index, size_factor,
 };
 use crate::SpecError;
-use crate::document::{LadderAction, LadderRung, LimitAction, Pointer};
+use crate::document::{LadderAction, LadderRung, LimitAction, OnComplete, Pointer};
 use crate::validate::ValidatedMandate;
 
 /// The places §5.2 reports the drawdown and the daily P&L fraction at, rounded half to even.
@@ -74,6 +72,14 @@ pub(super) struct Fold {
     restrictions: BTreeSet<Restriction>,
     instrument_restrictions: BTreeSet<InstrumentRestriction>,
     mode: AgentMode,
+    /// The goal's `on_complete`, which a `profit_stop` does not have (§3.1).
+    on_complete: Option<OnComplete>,
+    /// Set by a completed goal's `disarm_ladder`: the rungs and the daily loss are no longer
+    /// evaluated, and the floor still is (§3.1).
+    disarmed: bool,
+    /// Set by an acknowledgment of the ladder: until no scale rung is active, only the highest
+    /// active one counts towards its lift, so sizes return one rung at a time (§5.8).
+    stepping: bool,
 }
 
 /// A `scale_sizes` rung's timers (§5.5), in session seconds.
@@ -189,6 +195,9 @@ impl Fold {
             restrictions: BTreeSet::new(),
             instrument_restrictions: BTreeSet::new(),
             mode: AgentMode::Normal,
+            on_complete: document.goal.on_complete(),
+            disarmed: false,
+            stepping: false,
         })
     }
 
@@ -204,10 +213,30 @@ impl Fold {
         Ok((next, outcome))
     }
 
+    /// One input. An allocation change applies after time has been settled at its instant, with no
+    /// time passing (§5.1): the settling is a clock tick at that instant, and its events come first.
+    /// Settling unconditionally is the same as settling only when time has passed, since a tick at
+    /// the previous input's instant changes nothing.
+    fn fold(&mut self, clock: &dyn SessionClock, step: &Step) -> Result<Outcome, SpecError> {
+        if !matches!(step.input, Input::AllocationChange { .. }) {
+            return self.evaluate(clock, step);
+        }
+        let settle = Step {
+            at: step.at,
+            session: step.session,
+            input: Input::Clock,
+        };
+        let mut journal = self.evaluate(clock, &settle)?.journal;
+        let mut outcome = self.evaluate(clock, step)?;
+        journal.append(&mut outcome.journal);
+        outcome.journal = journal;
+        Ok(outcome)
+    }
+
     /// One input in §5.2's order: settle time, apply the input, E then H, the rungs in ladder order,
     /// the daily loss, the floor, the profit stop, the instrument's restrictions, then the effective
     /// mode.
-    fn fold(&mut self, clock: &dyn SessionClock, step: &Step) -> Result<Outcome, SpecError> {
+    fn evaluate(&mut self, clock: &dyn SessionClock, step: &Step) -> Result<Outcome, SpecError> {
         on_the_risk_clock(step.at)?;
         if step.at < self.at {
             return Err(SpecError::ClockWentBackwards);
@@ -221,7 +250,7 @@ impl Fold {
         let before = self.instrument_restrictions.clone();
         let mut journal = Vec::new();
         self.age_mark(session_s)?;
-        let read = self.apply(step, wall_s, &mut journal)?;
+        let (read, rejection) = self.apply(step, wall_s, &mut journal)?;
         let figures = self.settle_equity()?;
         let readings = self.limits.conditions(&figures)?;
         let moment = Moment {
@@ -244,7 +273,7 @@ impl Fold {
             snapshot: self.snapshot()?,
             journal,
             pending: self.pending(),
-            rejection: None,
+            rejection,
         })
     }
 
@@ -288,10 +317,14 @@ impl Fold {
 
     /// E, then H = max(H, E) (§5.2), as the five figures the conditions read.
     fn settle_equity(&mut self) -> Result<Figures, SpecError> {
-        let equity = self.equity()?;
-        self.high_water = self.high_water.max(equity);
+        self.high_water = self.high_water.max(self.equity()?);
+        self.figures()
+    }
+
+    /// The five figures the conditions read, as the state holds them.
+    fn figures(&self) -> Result<Figures, SpecError> {
         Ok(Figures {
-            equity,
+            equity: self.equity()?,
             high_water: self.high_water,
             day_start: self.day_start,
             capital: self.capital,
@@ -313,22 +346,26 @@ impl Fold {
         Ok(())
     }
 
+    /// Applies the input: what it did to the mark, and the refusal of an owner's or a version's
+    /// input, which leaves the state as it was (DEC-128 item 16).
     fn apply(
         &mut self,
         step: &Step,
         wall_s: u64,
         journal: &mut Vec<RiskEvent>,
-    ) -> Result<Read, SpecError> {
-        match &step.input {
-            Input::Mark { bid, sane } => Ok(self.read_mark(*bid, *sane, step.session)),
+    ) -> Result<(Read, Option<Rejection>), SpecError> {
+        let refused = match &step.input {
+            Input::Mark { bid, sane } => {
+                return Ok((self.read_mark(*bid, *sane, step.session), None));
+            }
             Input::Fill { side, qty, price } => {
                 self.fill(*side, *qty, *price)?;
-                Ok(Read::Nothing)
+                None
             }
-            Input::Clock => Ok(Read::Nothing),
+            Input::Clock => None,
             Input::RiskDayStarted => {
                 self.start_day(wall_s, journal)?;
-                Ok(Read::Nothing)
+                None
             }
             Input::UniverseChanged {
                 instrument,
@@ -336,14 +373,30 @@ impl Fold {
                 reason,
             } => {
                 self.change_universe(instrument, *change, *reason, journal);
-                Ok(Read::Nothing)
+                None
             }
-            Input::OwnerAcknowledged { .. }
-            | Input::AllocationChange { .. }
-            | Input::FloorLoosened { .. }
-            | Input::AgentStopped { .. }
-            | Input::GoalComplete => fold_later(&step.input),
-        }
+            Input::OwnerAcknowledged { restriction } => self.acknowledge(*restriction, journal)?,
+            Input::AllocationChange { delta_usd } => self.allocate(*delta_usd, journal)?,
+            Input::FloorLoosened {
+                new_max_loss_from_allocation,
+                confirmed_at,
+                independent_approval,
+            } => self.loosen_floor(
+                new_max_loss_from_allocation,
+                *confirmed_at,
+                *independent_approval,
+                journal,
+            )?,
+            Input::AgentStopped { reason } => {
+                self.retire(*reason, journal)?;
+                None
+            }
+            Input::GoalComplete => {
+                self.complete_goal(journal);
+                None
+            }
+        };
+        Ok((Read::Nothing, refused))
     }
 
     /// For an equity only a regular-session mark counts; crypto counts every mark. A counted sane
@@ -421,11 +474,17 @@ impl Fold {
         moment: Moment,
         journal: &mut Vec<RiskEvent>,
     ) -> Result<(), SpecError> {
+        if self.disarmed {
+            return Ok(());
+        }
+        let head = self.stepping.then(|| self.highest_active());
         let actions: Vec<LadderAction> = self.ladder.iter().map(|rung| rung.action).collect();
         for (index, action) in actions.into_iter().enumerate() {
             let key = LimitKey::DrawdownRung(rung_index(index)?);
             match action {
-                LadderAction::ScaleSizes => self.scale_rung(key, readings, moment, journal)?,
+                LadderAction::ScaleSizes => {
+                    self.scale_rung(key, readings, moment, head, journal)?
+                }
                 LadderAction::ExitsOnly => {
                     let limit = Limit {
                         key,
@@ -444,6 +503,33 @@ impl Fold {
                 }
             }
         }
+        self.queue_lifts(readings)
+    }
+
+    /// The highest active scale rung, which V-010's ascending `at` makes the highest index.
+    fn highest_active(&self) -> Option<u8> {
+        self.scale
+            .iter()
+            .rev()
+            .find(|(_, rung)| rung.active_s.is_some())
+            .map(|(index, _)| *index)
+    }
+
+    /// Which rungs count the next interval towards their lift: an active one below its lift level,
+    /// and while sizes are stepping back after a reset only the highest active one (§5.8). A rung
+    /// that does not count starts its delay again. Stepping ends once no scale rung is active.
+    fn queue_lifts(&mut self, readings: &Readings) -> Result<(), SpecError> {
+        let head = self.highest_active();
+        self.stepping = self.stepping && head.is_some();
+        let stepping = self.stepping;
+        for (index, rung) in &mut self.scale {
+            rung.lifting = rung.active_s.is_some()
+                && below_lift(readings, *index)?
+                && (!stepping || head == Some(*index));
+            if !rung.lifting {
+                rung.lift_s = 0;
+            }
+        }
         Ok(())
     }
 
@@ -453,11 +539,15 @@ impl Fold {
     /// The delay credits no more session seconds than wall seconds passed, so a calendar that
     /// over-reports its session can never lift a rung early. Active time and staleness take the
     /// clock's count as it is, since an over-report only makes a trim or a stale mark come sooner.
+    ///
+    /// While sizes step back after a reset, `head` is the highest active rung, the only one that
+    /// may lift (§5.8).
     fn scale_rung(
         &mut self,
         key: LimitKey,
         readings: &Readings,
         moment: Moment,
+        head: Option<Option<u8>>,
         journal: &mut Vec<RiskEvent>,
     ) -> Result<(), SpecError> {
         let LimitKey::DrawdownRung(index) = key else {
@@ -466,14 +556,7 @@ impl Fold {
             });
         };
         let (hit, _) = reading(readings, key)?;
-        let below_lift =
-            readings
-                .below_lift
-                .get(&index)
-                .copied()
-                .ok_or(SpecError::InvalidInput {
-                    what: "a rung the conditions did not read",
-                })?;
+        let below_lift = below_lift(readings, index)?;
         let lift_after_s = u64::from(self.scale_lift_after_s);
         let rung = self.scale.get_mut(&index).ok_or(SpecError::InvalidInput {
             what: "a scale_sizes rung the state did not open with",
@@ -493,7 +576,11 @@ impl Fold {
                     reason: None,
                 });
             }
-        } else if rung.active_s.is_some() && below_lift && rung.lift_s >= lift_after_s {
+        } else if rung.active_s.is_some()
+            && below_lift
+            && rung.lift_s >= lift_after_s
+            && head.is_none_or(|highest| highest == Some(index))
+        {
             rung.active_s = None;
             journal.push(RiskEvent::RiskLimitLifted {
                 limit: key,
@@ -501,15 +588,11 @@ impl Fold {
                 reason: None,
             });
         }
-        rung.lifting = rung.active_s.is_some() && below_lift;
-        if !rung.lifting {
-            rung.lift_s = 0;
-        }
         Ok(())
     }
 
     /// A rung or the floor, which confirms (§5.6) and then holds until its own lift path, none of
-    /// which a mark is (§5.7, §5.8): a latched one is not evaluated again until R4's paths lift it.
+    /// which a mark is (§5.7, §5.8): a latched one is not evaluated again until its own path lifts it.
     fn confirm(
         &mut self,
         limit: Limit,
@@ -560,7 +643,9 @@ impl Fold {
         let Some(hit) = reading else {
             return Ok(());
         };
-        if self.restrictions.contains(&Restriction::GoalComplete) {
+        if self.restrictions.contains(&Restriction::GoalComplete)
+            || self.restrictions.contains(&Restriction::Retired)
+        {
             return Ok(());
         }
         let key = LimitKey::ProfitStop;
@@ -695,11 +780,15 @@ impl Fold {
     }
 
     /// A `daily_loss` restriction asks for the mode of the action that set it: `flatten_and_pause`
-    /// pauses (§5.4), which [`Restriction::mode`] alone cannot say. Every other restriction's mode is
-    /// its own.
+    /// pauses (§5.4), which [`Restriction::mode`] alone cannot say, until the owner acknowledges it
+    /// once flat. Every other restriction's mode is its own.
     fn mode_of(&self, restriction: Restriction) -> AgentMode {
         match (restriction, self.daily_action) {
-            (Restriction::DailyLoss, LimitAction::FlattenAndPause) => AgentMode::Paused,
+            (Restriction::DailyLoss, LimitAction::FlattenAndPause)
+                if !self.daily.is_some_and(|latch| latch.acknowledged) =>
+            {
+                AgentMode::Paused
+            }
             _ => restriction.mode(),
         }
     }
@@ -721,6 +810,17 @@ fn reading(readings: &Readings, key: LimitKey) -> Result<(bool, bool), SpecError
         .copied()
         .ok_or(SpecError::InvalidInput {
             what: "a limit the conditions did not read",
+        })
+}
+
+/// Whether a rung's drawdown is back past its lift level (§5.5).
+fn below_lift(readings: &Readings, index: u8) -> Result<bool, SpecError> {
+    readings
+        .below_lift
+        .get(&index)
+        .copied()
+        .ok_or(SpecError::InvalidInput {
+            what: "a rung the conditions did not read",
         })
 }
 
@@ -747,12 +847,6 @@ fn elapsed_s(from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
         .checked_sub(from.secs())
         .and_then(|seconds| u64::try_from(seconds).ok())
         .ok_or(SpecError::ClockWentBackwards)
-}
-
-/// Slice R4: acknowledgments, allocation changes, floor loosening, retirement, and goal completion.
-fn fold_later(input: &Input) -> Result<Read, SpecError> {
-    let _ = input;
-    Err(SpecError::Unimplemented)
 }
 
 #[cfg(test)]

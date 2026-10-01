@@ -1504,13 +1504,25 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   asserts only the quantity bound for them, not `sent == proposed`, which
   `a_slice_binds_only_below_the_proposal_and_names_its_cap` covers separately. Assert it in the
   property too.
-- **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
-  every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
-  held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;
-  DEC-129 item 6), and interpret RC-09's and RC-09B's `regime`, `prior_day_trades`,
-  `last_equity`, `multiplier` and `day_trade_count` in `mandate-refcases`. Slice 1 (#221) reads the
-  ledger as an input the caller folds, so until slice 2 lands an agent-scoped ledger would
-  undercount the account's day trades (#221 review, round 1, minor).
+- **E6-6 slice 2:** the account-wide fold is `mandate_risk::fold_day_trades` (DEC-259). Still
+  owed: interpret RC-09's and RC-09B's `regime`, `prior_day_trades`, `last_equity`, `multiplier`
+  and `day_trade_count` in `mandate-refcases`, driving the ledger through `fold_day_trades` from the
+  case's fills. That changes RC-09B's pending reason, which
+  `trading_domain_gate_harness.rs`'s `every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for`
+  pins, so a tests correction comes first (DEC-77); both cases also carry a second `propose_order`
+  step, which DEC-199 item 3 refuses until E7-4 and E7-5 unless a narrower reading lets a later
+  proposal be decided once every earlier allowed one has filled in full; and RC-09's third step is
+  a crypto proposal, which waits for E6-10. The executor (E7-3) calls the fold account-wide and
+  journals `DayTradeFold::today`. **A fold error refuses openings only** (#370 review, major 1):
+  E7-3 must still route exits and protective orders when `fold_day_trades` fails (`AGENTS.md`
+  rule 13), and E7-3's tests PR carries the pending test
+  `a_failed_day_trade_fold_refuses_openings_and_still_routes_exits` for it.
+- **Lift §2.2's trade date onto `ExchangeCalendar`** (#370 review, minor 1). `mandate-risk`'s
+  `daytrades::trading_day` re-states `TradingCalendar::equity_trade_date`'s 20:00 ET cutoff over
+  the committed exchange calendar, and `the_trade_date_agrees_with_the_accounting_calendar` pins
+  the two together across 2026's holidays, both daylight-saving changes and the cutoff. Give
+  `mandate-time`'s `ExchangeCalendar` an `equity_trade_date` of its own and call it from both, so
+  the rule lives once.
 
 From the independent review of E6-2's autonomy slice ([#216](https://github.com/kunwarshivam/mandate/pull/216)
 round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
@@ -1604,13 +1616,15 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
 - **The `ref.py` reading the #124 handover left for R4.** Settling time before an allocation change
   only when `at > self.t` is equivalent to settling always; settle always. Readings 1 and 2 were
   R3's and are DEC-167 item 7 (a) and (c); handover items 4 (one cash sum) and 5 (the post-loop lift
-  reset) are R2's and are in `risk/fold.rs`.
+  reset) are R2's and are in `risk/fold.rs`. *Done in R4 (DEC-167 item 8 (d)):* the fold settles
+  always.
 - **R3's status PR: fifteen MC-R cases pass.** MC-R01 to MC-R08, MC-R13, MC-R15, MC-R18 to MC-R20,
   MC-R22, and MC-R24 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` on R3 (DEC-167 item 7 (l)); proposing them for `status.toml` is founder-owned.
   *Done ([#356](https://github.com/kunwarshivam/mandate/pull/356), under DEC-77 item 3 as #335
   and #337 were):* exactly these fifteen are marked; the other nine stop at R4's inputs.
-- **DEC-167's wording after R3's tests correction** (#357 review, nits). Item 6(c) keeps the
+- **DEC-167's wording after R3's tests correction** (#357 review, nits). *Done in R4:* both edits
+  are made. Item 6(c) keeps the
   superseded sentence "so it stands when the step's own sale leaves the book flat, as in
   `ref.py`", whose attribution is wrong (`ref.py` discards `stale_mark` on a flat book); strike the
   clause now that 7(e) supersedes it. Item 7(a)'s "only the latch can come earlier" should say
@@ -1664,6 +1678,36 @@ From E6-4's slice R3 (stream H2; DEC-167 item 7):
   item 7 (a)). Keep it in `hard_first` and regenerate with `reference/mandate/generate.py`, which must
   leave `fixtures/refcases/mandate.json` unchanged (checked from the crate's side: putting `ref.py`'s
   reading into the fold leaves the same fifteen MC-R cases passing).
+
+From E6-4's slice R4 (stream H2; DEC-167 item 8):
+
+- **`ref.py` holds a re-triggered scale rung back during the stepped lift (reference fix).** After
+  an acknowledgment `RiskState._ack` queues the scale rungs highest `at` first, and a rung that
+  triggers again is removed from `reset_queue` and may lift only once the queue is empty, so the 3%
+  rung can lift while the 4% rung stays active. §5.8 says highest `at` first, and the fold lifts the
+  highest active rung next (DEC-167 item 8 (b)). Re-insert a re-triggered rung in its place, or lift
+  only the highest active rung while stepping, and regenerate with `reference/mandate/generate.py`,
+  which must leave `fixtures/refcases/mandate.json` unchanged.
+- **`ref.py` journals `hold_protected` for a completed `profit_stop` goal (reference fix).** A
+  `goal_complete` input on a `profit_stop` goal (its end date) writes
+  `{"type": "GoalCompleted", "on_complete": "hold_protected"}`; the fold writes its one §3.1
+  outcome, `then: discretionary_exit_all_then_retire` (DEC-167 item 8 (f)). No reference case has
+  one.
+- **`release` journals the loss carry: the reference side (DEC-270; stream H2, first).** One
+  reference and reference-case PR, kept apart from crates (ES-22): `reference/mandate/ref.py`'s
+  `goal_complete` arm journals `AgentStopped` with `loss_carry_usd` = max(0, N − E) after
+  `PositionReleased` when `on_complete` is `release`; MC-R17's expected journal gains it; any §3.1 or
+  §5.7 wording the spec needs under DEC-270; `generate.py`, `check_cases.py`, and the fuzz rerun, and
+  `cargo xtask refcases --write`. Only MC-R17 moves.
+- **`release` journals the loss carry: the `mandate-spec` side (DEC-270; stream H2, after the
+  reference PR).** `Fold::complete_goal`'s `Release` arm journals `AgentStopped` (reason
+  `goal_complete`) with the loss carry, as `retire` does, and a test shows that releasing and
+  redeploying on the same connection opens the new agent at the carried L (through
+  `ValidationContext::from_journal` and V-032).
+- **R4's status PR: the last nine MC-R cases pass.** MC-R09 to MC-R12, MC-R14, MC-R16, MC-R17,
+  MC-R21, and MC-R23 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
+  mandate::MC-R` on R4 (DEC-167 item 8 (i)); marking them in `status.toml` follows under DEC-77
+  item 3, as #356 did for fifteen.
 
 Minor findings from the independent review of slice R2 ([#324](https://github.com/kunwarshivam/mandate/pull/324);
 held back by the freeze rule; R3 took minors 1, 2, and 4, DEC-167 item 7 (i) and (j), and minor 6,
@@ -1855,3 +1899,14 @@ item 25; held back by the freeze rule, one row each):
   removes; raise instead.
 - **Note: the `exit_origin` citation fix pulled a round-2 minor forward (#340 round 1, nit).** Item
   22 corrected the removed-instrument citation that #320 round 2 had backlogged; no action.
+- **`propose` hard-codes `RequestedBy::Agent` (#369 round 1, owed by E10-6).** DEC-262 item 2
+  stamps every buy `propose` sizes as the agent's own, because no owner or client request path
+  calls the builder yet. The request path E10-6 adds must carry the authenticated channel's
+  requester to the order it proposes (§6.2 step 5a) rather than reuse `propose`'s stamp, with a
+  test that a client's request reaches `decide` as `client`.
+- **The client-ceiling sweep has no delegation dimension (#369 round 1, owed by E8-8's tests PR).**
+  `Autonomy` holds no `delegations` until E8-8 (DEC-262 item 5), so
+  `every_rule_default_admission_and_requester_obeys_the_client_ceiling` and
+  `a_client_opening_is_never_auto_and_every_other_request_decides_as_before` cover rules, defaults,
+  admission and requester only. E8-8's tests PR adds live, spent, expired and suspended delegations
+  to both and asserts that none lifts a client's order (MI-26, MI-30).
