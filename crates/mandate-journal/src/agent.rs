@@ -3,7 +3,7 @@
 //! clause, and §11's two agent-stream per-range checks. Every rule only refuses a draft or fails a
 //! range; none changes what a writer may do.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Value, parse};
 
@@ -202,13 +202,16 @@ pub fn verify_agent_stream(
         .filter_map(|row| Some((row, parse(&row.body).ok()?)))
         .collect();
     let payload = |body: &Value| body.get("payload").cloned().unwrap_or(Value::Null);
-    let index: BTreeMap<&str, (u64, &str, Value)> = events
+    let index: BTreeMap<&str, (&str, Value)> = events
         .iter()
         .map(|(row, body)| {
-            let entry = (row.seq, row.event_type.as_str(), payload(body));
-            (row.event_id.as_str(), entry)
+            (
+                row.event_id.as_str(),
+                (row.event_type.as_str(), payload(body)),
+            )
         })
         .collect();
+    let mut earlier: BTreeSet<&str> = BTreeSet::new();
     for (row, body) in &events {
         let fail = |check| {
             Err(AgentStreamFailure {
@@ -220,21 +223,23 @@ pub fn verify_agent_stream(
         let own = payload(body);
         match row.event_type.as_str() {
             "IntentProposed" => {
-                if let Some(Some((_, "DecisionMade", decision))) = named(body.get("causation_id"))
+                if let Some(Some(("DecisionMade", decision))) = named(body.get("causation_id"))
                     && first_differing_action(&own, decision).is_some()
                 {
                     return fail(AgentStreamCheck::IntentActionMismatch);
                 }
             }
             "KillSwitchActivated" => {
-                let applied = match named(own.get("mode_event")) {
+                let applied = match own.get("mode_event").and_then(Value::as_str) {
                     None => true,
-                    Some(None) => start.from_seq != 1,
-                    Some(Some((seq, named_type, named_payload))) => {
-                        *seq < row.seq
-                            && *named_type == "AgentModeChanged"
-                            && Payload(named_payload).text("reason") == "kill_switch"
-                    }
+                    Some(id) => match index.get(id) {
+                        None => start.from_seq != 1,
+                        Some((named_type, named_payload)) => {
+                            earlier.contains(id)
+                                && *named_type == "AgentModeChanged"
+                                && Payload(named_payload).text("reason") == "kill_switch"
+                        }
+                    },
                 };
                 if !applied {
                     return fail(AgentStreamCheck::ModeEventMismatch);
@@ -242,6 +247,7 @@ pub fn verify_agent_stream(
             }
             _ => {}
         }
+        earlier.insert(row.event_id.as_str());
     }
     Ok(())
 }
