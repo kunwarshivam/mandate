@@ -11,7 +11,6 @@ use mandate_canon::Value;
 use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::fold::single_holder;
-use crate::gate::SESSION_UNKNOWN;
 use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
@@ -884,10 +883,13 @@ fn lone_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
 
 /// The coordinator's ruling on #400 round 1, blocker 1 (DEC-260 (18)): a ladder step whose next
 /// rung would fall while no v1 session is open submits nothing. The exit is journaled held, once,
-/// `session_closed` (`session_unknown` where the calendar names no open, alerted), `parked` so the
-/// fold neither gates it again nor resends its first rung; a sequence's protection is re-placed
+/// `session_closed` (`session_unknown` where the calendar names no open), `parked` so the fold
+/// neither gates it again nor resends its first rung; a sequence's protection is re-placed
 /// meanwhile, and at the first tick of the next open the ladder resumes from the next rung, priced
-/// fresh, its clock starting there ([`lone_steps`]).
+/// fresh, its clock starting there ([`lone_steps`]). The park alerts the owner once, with its
+/// record's id and its reason as the key, and is `held_long` from the start, since it lasts until
+/// the next open: no second alert follows at `max_intent_age_s` (the ruling on #400 round 2,
+/// DEC-260 (19); `AGENTS.md` rule 6).
 fn park(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
@@ -902,12 +904,11 @@ fn park(
         ("verdict", text("hold")),
         ("reason_code", text(reason)),
         ("parked", Value::Bool(true)),
+        ("held_long", Value::Bool(true)),
         ("evaluation", text("account_stream_only")),
     ];
     let decided = batch.journal("GateDecided", None, pairs)?;
-    if reason == SESSION_UNKNOWN {
-        batch.notify(decided, SESSION_UNKNOWN);
-    }
+    batch.notify(decided, reason);
     Ok(())
 }
 
@@ -7696,7 +7697,6 @@ mod sequence_tests {
     /// alerts the owner **once**, `session_closed`, naming the park's own record; nothing else is
     /// raised before the 04:00 open, swept every half hour, and the exit is never abandoned.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_sequence_parked_overnight_alerts_the_owner_exactly_once() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = tiered_ports(&config, &fees);

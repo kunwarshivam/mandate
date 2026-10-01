@@ -1077,7 +1077,9 @@ From E10-1's slice-V implementation (DEC-161):
 - **Journal spec v0.7 §9.2's follow-ups ([DEC-261](04-decision-log.md#decisions)).** Until each
   lands, the drafts it names stay refused at `append`, which adds no risk (rule 3).
   - **Stream K:** the executor's fee-step `AccountSnapshotRecorded` writes `model_cash`, `cash_band`,
-    and `cash_in_band` as `null`, not absent (§4.2). **E7-10's implementation must not register
+    and `cash_in_band` as `null`, not absent (§4.2), and every snapshot writes `risk_clock` as a
+    whole-second timestamp, not integer seconds (DEC-302; `payload::clock` writes integers on every
+    account-stream event). **E7-10's implementation must not register
     `AccountSnapshotRecorded` until this lands.** The fee step pauses every agent and alerts the owner,
     and refusing its snapshot at `append` must never stop it (rules 3 and 13, DEC-261 item 7). E7-10's
     tests PR pins that ordering with a pending test.
@@ -1402,16 +1404,6 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the session part already prices them (both pass with the fold, shown in its PR). Restore
   `TradingDayStarted` to `properties::every_catalogue_event_is_interpreted_or_named`'s
   `INTERPRETED` in the same change (#400 round 1, major 3).
-- **E7-4 slice 6 (stream K), from [#400](https://github.com/kunwarshivam/mandate/pull/400) round 2
-  (the coordinator's ruling 5930410998):** a ladder that parks at the close
-  ([DEC-260](04-decision-log.md#decisions) (18)) alerts the owner once, when it parks, for
-  `session_closed` as for `session_unknown`. The alert carries generic text and an opaque id only
-  (`AGENTS.md` rule 6), and the park also counts in what `exit_held_long` reports. Today a
-  `session_closed` park journals its hold and raises nothing, so an exit can wait 8 hours
-  overnight unannounced. Add a test asserting exactly one notification across a parked night.
-  Slice 6's tests PR adds the three pending tests ([DEC-260](04-decision-log.md#decisions) (19));
-  its implementation PR deletes this row. The oracle's nit from the same round is done there
-  (DEC-260 (20)).
 - **E7-4 slice 7 (stream K), moved from slice 5 by the coordinator's ruling D3 on
   [#174](https://github.com/kunwarshivam/mandate/pull/174) (5926142854):** the four kill-switch
   session tests (`hand::an_automated_flatten_defers_equity_sells_to_the_session`,
@@ -1841,11 +1833,6 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   crypto order's `tif` today, so `day` and `gtc` decide alike and no test can tell them apart. When
   E6-8's session rules or the executor first read a crypto order's `tif`, add the test that a
   crypto proposal with no `tif` is decided as `gtc`.
-- **`cargo xtask ci mutants` should clear `CARGO_TARGET_DIR`** (#419 review, nit 3). With a custom
-  `CARGO_TARGET_DIR` exported, `cargo mutants --jobs 2` has the baseline and both concurrent mutant
-  copies share one target directory, and the #419 reviewer got a spurious `MISSED` from it. A
-  shared directory could flip a verdict the other way too, so xtask should unset the variable
-  before invoking `cargo mutants`.
 - **Drive the trading-domain gate cases through the real order path once E7-4 and E7-5 do**
   (the coordinator's ruling on #370, item 2). DEC-259 item 7 is a reading of the reference harness
   only: it decides a later proposal once the earlier allowed ones were filled in full by `fill`
