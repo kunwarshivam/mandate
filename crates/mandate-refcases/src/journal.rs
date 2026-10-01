@@ -15,6 +15,8 @@ use serde_json::json;
 
 use crate::{Case, Json, at, ensure, expect_eq, list_at, str_at, to_canon, u64_at};
 
+mod agent_stream;
+
 const FIXTURE_VERSION: u64 = 3;
 /// `recorded_at` for appends the vectors do not time.
 const APPEND_TIME: &str = "2026-09-21T14:00:02.000000000Z";
@@ -87,6 +89,7 @@ pub fn cases(fixture: &Arc<Json>) -> Vec<Case> {
             add(format!("journal::{prefix}::{name}"), run, name.to_owned());
         }
     }
+    out.extend(agent_stream::cases(fixture));
     out
 }
 
