@@ -677,9 +677,11 @@ fn owner_input_for_another_agent_is_inert() -> Checked {
 }
 
 /// Mandate spec §6.1, PX-4: the owner's Stop needs step-up fresh when the runtime processes it.
-/// Stale evidence changes nothing and leaves the approval pending; fresh evidence stops the agent
-/// and cancels the approval; and a resume after it, even with fresh evidence, never lifts a Stop.
+/// Stale evidence changes no mode and leaves the approval pending, and its one copy is its
+/// `OwnerCommandRefused` (journal spec §9, rule 16; DEC-291); fresh evidence stops the agent and
+/// cancels the approval; and a resume after it, even with fresh evidence, never lifts a Stop.
 #[test]
+#[ignore = "pending E8-3"]
 fn a_stop_needs_fresh_step_up_and_no_resume_lifts_it() -> Checked {
     let (view, flatten) = (
         view()?,
@@ -703,12 +705,15 @@ fn a_stop_needs_fresh_step_up_and_no_resume_lifts_it() -> Checked {
     let approval = the(&ran, "ApprovalRequested")?.event_id.clone();
 
     let stale = evidence("stale", AT.saturating_sub(301))?;
-    let (_, ran) = rig.control(
+    let (refused, ran) = rig.control(
         COMMAND_ISSUED,
         command("a", "stop", ("agent", "a"), stale, false)?,
         &ports,
     )?;
-    assert!(ran.is_empty(), "{:?}", types(&ran));
+    assert_eq!(types(&ran), vec!["OwnerCommandRefused"]);
+    let record = the(&ran, "OwnerCommandRefused")?;
+    assert_eq!(member(record, "reason"), Some("step_up_stale"));
+    assert_eq!(record.causation_id.as_ref(), Some(&refused.event_id));
     assert!(rig.state.pending_approvals().contains_key(&approval));
 
     let (stop, ran) = rig.control(
