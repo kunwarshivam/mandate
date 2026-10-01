@@ -377,6 +377,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Follow-up (DEC-280):* a harness arm for `kind: escalation` in `mandate-refcases`, tests first,
   driving `mandate-approval` (and the runtime for `op: lifecycle`), then the status PR that flips
   the rows it passes.
+  *Part done (DEC-292):* the arm interprets `ask_permit` and `deliver_now` through
+  `mandate-approval`, and MC-E25 to MC-E28, MC-E30 and MC-E32 pass; their `status.toml` rows are the
+  status PR's. Still open: the `lifecycle` op's runtime driver for the other 26 cases, which fail
+  naming the op until it lands.
   *Follow-up (DEC-280 item 7):* `mandate-journal`'s catalogue gains `OwnerCommandRefused` (agent and
   account streams), and the runtime journals it for a refused resume or Stop, tests first, with a
   test that a refused Stop leaves exactly that event (the #395 review, major 1; DEC-278 item 12).

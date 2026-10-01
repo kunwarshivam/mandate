@@ -7,8 +7,9 @@
 //! `thesis_expiry`, and `stagger` — is interpreted in [`research`], and stream H's family A,
 //! `autonomy`, in [`autonomy`], and its family B, `builder`, in [`order_builder`] (DEC-250). Stream
 //! G's families G (`gate`) and F (`agent_flatten`) are interpreted in [`risk_gate`] against
-//! `mandate-risk` (DEC-178). That is every kind the fixture holds; a kind no arm interprets **fails**
-//! naming it rather than passing quietly, the DEC-85 rule.
+//! `mandate-risk` (DEC-178), and stream M7's family E, `escalation`, in [`escalation`] (DEC-292).
+//! That is every kind the fixture holds; a kind no arm interprets **fails** naming it rather than
+//! passing quietly, the DEC-85 rule.
 //!
 //! The same rule holds inside an owned family. Every key of every owned case is read, and a case that
 //! carries a key this harness does not know fails naming it, so no case can pass while part of it is
@@ -39,6 +40,7 @@ use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
 use crate::{Case, Json, at, ensure, expect_eq, list_at, str_at, to_canon, u64_at};
 
 mod autonomy;
+mod escalation;
 mod order_builder;
 mod research;
 mod risk_gate;
@@ -122,6 +124,9 @@ fn run_listed(fixture: &Json, index: usize) -> Result<(), String> {
         .get(index)
         .ok_or("case index out of range")?;
     let kind = str_at(case, "kind")?;
+    if kind == "escalation" {
+        return escalation::escalation_case(case);
+    }
     unread_keys(case)?;
     match kind {
         "schema" => schema_case(fixture, case),
