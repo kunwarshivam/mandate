@@ -749,9 +749,10 @@ fn a_fractional_proposal_needs_a_day_tif_and_a_fractionable_instrument() {
     );
 }
 
-/// RC-09 and RC-09B are not pinned here: E6-6's harness changes their pending reasons step by step,
-/// and each case's own trial in `tests/refcases.rs`, gated by `status.toml`, is its test (the
-/// coordinator's ruling on #370, item 1).
+/// RC-09 and RC-09B are not pinned here: E6-6's harness changes their pending reasons step by step
+/// (the coordinator's ruling on #370, item 1). Each case's trial in `tests/refcases.rs` runs only
+/// with `--include-ignored` until `status.toml` marks it passing; from then on the spec guard holds
+/// it.
 #[test]
 fn every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for() {
     let pending = [
