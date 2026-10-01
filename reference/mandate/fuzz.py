@@ -1,7 +1,7 @@
-"""Property-based fuzz of the reference implementation against the invariants of mandate spec §1.1 (MI-1 to MI-30)."""
+"""Property-based fuzz of the reference implementation against the invariants of mandate spec §1.1 (MI-1 to MI-32)."""
 import copy, itertools, json, random, sys
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from ref import *  # noqa: F401,F403
 from ref import D
@@ -24,6 +24,8 @@ def rand_mandate(cls):
     r["daily_loss_action"] = rng.choice(["exits_only", "flatten_and_pause"])
     r["max_daily_loss"] = rng.choice(["0.02", "0.05", "0.1"])
     m["capital"]["max_loss_from_allocation"] = rng.choice(["0.08", "0.1", "0.2"])
+    if cls == "crypto":
+        m["goal"]["on_complete"] = rng.choice(["hold_protected", "disarm_ladder", "release"])
     if rng.random() < 0.5:
         r["drawdown_ladder"] = [{"at": "0.02", "action": "scale_sizes", "factor": "0.75"},
                                 {"at": "0.04", "action": "scale_sizes", "factor": "0.5"},
@@ -189,7 +191,36 @@ def run(m, cls, steps, start, L="0"):
         for e in o["journal"]:
             if e["type"] == "AgentStopped":
                 check(D(e["loss_carry_usd"]) == max(D(0), D_net - E), "MI-14 loss carry is the net dollar loss", (s, o))
+        # §5.8: sizes step back from the highest active scale rung, so the active ones are always the shallowest
+        active = {D(rs.lad[i]["at"]) for i, st in rs.scale.items() if st["active"]}
+        check(all(D(rs.lad[i]["at"]) in active for i in rs.scale if active and D(rs.lad[i]["at"]) < max(active)),
+              "§5.8 the active scale rungs are the shallowest", (s, o))
+        # §3.1: a completed profit_stop goal's one outcome is the discretionary exit, then retirement
+        for e in o["journal"]:
+            if e["type"] == "GoalCompleted" and m["goal"]["type"] == "profit_stop":
+                check(e.get("then") == "discretionary_exit_all_then_retire" and "on_complete" not in e,
+                      "§3.1 a profit_stop goal completes with its one outcome", (s, o))
+        if s["event"] == "goal_complete" and m["goal"].get("on_complete") == "release" and "retired" not in before[0]:
+            RELEASES[0] += 1
+        # MI-14 and DEC-270: every retirement, a release included, journals the carry once; a redeploy on the
+        # connection is refused (V-032) or opens at that L, so its floor sits the released loss above C x (1 - f)
+        if "retired" in rs.restrictions and "retired" not in before[0]:
+            stops = [e for e in o["journal"] if e["type"] == "AgentStopped"]
+            check(len(stops) == 1, "MI-14 a retirement journals AgentStopped once, release included", (s, o))
+            if stops:
+                carry = max(D(0), D_net - E)
+                budget = D(m["capital"]["max_loss_from_allocation"]) * D(m["capital"]["allocation_usd"])
+                again, _ = semantic(m, dict(base.CTX, connection_loss_carry_usd=stops[0]["loss_carry_usd"]))
+                check(("V-032" in again) == (carry >= budget), "MI-14 a redeploy is refused exactly when the carry uses the floor budget", (s, o))
+                fresh = RiskState(m, "0", "1", cls, s["at"], inherited_loss=stops[0]["loss_carry_usd"])
+                Cn = D(m["capital"]["allocation_usd"])
+                floor = Cn * (1 - D(m["capital"]["max_loss_from_allocation"])) + carry
+                check(fresh.conditions(E=floor, H=Cn, E0=Cn, C=Cn)["lifetime_floor"][0]
+                      and not fresh.conditions(E=floor + D("0.01"), H=Cn, E0=Cn, C=Cn)["lifetime_floor"][0],
+                      "MI-14 a release never lets a redeploy reset the lifetime floor", (s, o, floor))
     return outs
+
+RELEASES = [0]
 
 def fuzz_risk(n_runs):
     for k in range(n_runs):
@@ -209,6 +240,35 @@ def fuzz_risk(n_runs):
         c = run(m, cls, [steps[i] for i in keep], start, L)
         strip = lambda o: {x: y for x, y in o.items() if x != "pending"}
         check([strip(a[i]) for i in keep] == [strip(x) for x in c], "MI-13 no-event ticks are replay-safe", k)
+    check(RELEASES[0] > 0, "the fuzz exercised a release (DEC-270)", RELEASES[0])
+
+def fuzz_stepped_lift(n_runs):
+    """§5.8's stepped lift, which the general walk rarely reaches: latch the exits_only rung, acknowledge, then wander
+    across the scale rungs' trigger and lift levels so a lifted rung can trigger again while the others step back."""
+    start = "2026-09-21T13:35:00.000000000Z"
+    for k in range(n_runs):
+        m = rand_mandate("crypto")
+        m["risk"]["drawdown_ladder"] = [{"at": "0.02", "action": "scale_sizes", "factor": "0.75"},
+                                        {"at": "0.04", "action": "scale_sizes", "factor": "0.5"},
+                                        {"at": "0.06", "action": "exits_only", "factor": None},
+                                        {"at": "0.08", "action": "flatten_and_pause", "factor": None}]
+        m["risk"]["breach_confirm_s"] = 0
+        m["risk"]["max_daily_loss"] = "0.5"
+        m["risk"]["scale_lift_after_s"] = rng.choice([60, 300, 600])
+        m["capital"]["max_loss_from_allocation"] = "0.5"
+        V.validate(m)
+        t = T(start) + timedelta(seconds=60)
+        steps = [{"event": "mark", "at": fmt(t), "bid": "53000", "session": "crypto", "sane": True}]
+        t += timedelta(seconds=60)
+        steps.append({"event": "owner_acknowledged", "at": fmt(t), "session": "crypto", "restriction": "drawdown_ladder"})
+        for _ in range(rng.randint(10, 40)):
+            t += timedelta(seconds=rng.choice([30, 60, 120, 300, 600, 900]))
+            if rng.random() < 0.25:
+                steps.append({"event": "clock", "at": fmt(t), "session": "crypto"})
+            else:
+                steps.append({"event": "mark", "at": fmt(t), "bid": str(rng.choice(range(48500, 53600, 100))),
+                              "session": "crypto", "sane": True})
+        run(m, "crypto", steps, start)
 
 def fuzz_gate(n):
     m = copy.deepcopy(base.swing)
@@ -846,6 +906,172 @@ def fuzz_delegation_rules(n):
         errs = semantic(new, dict(base.CTX, previous_version=m))[0]
         check(("V-042" in errs) == (increasing and carried),
               "V-042 refuses exactly a carried delegation in a version risk-increasing elsewhere", (increasing, carried, errs))
+# ------------------------------------------------------------------ the review date (§6.2 step 5b, MI-32, V-046; DEC-188)
+# The oracles below find the instant the review date passes by building 00:00 America/New_York on the next calendar
+# day with zoneinfo, never through `risk_day`, and bound V-046 with date ordinals, never through `days_after`.
+REVIEW_TZ = ZoneInfo("America/New_York")
+REVIEW_DATES = ["2026-09-19", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-25", "2026-10-31", "2027-03-13"]
+REVIEW_OFFSETS_S = [-5 * 3600, -4 * 3600, -3600, -1, 0, 1, 3600, 4 * 3600, 5 * 3600]
+
+def own_review_end(rb):
+    """The first instant past `rb`: 00:00 America/New_York on the following calendar day."""
+    nd = date.fromordinal(date.fromisoformat(rb).toordinal() + 1)
+    return datetime(nd.year, nd.month, nd.day, tzinfo=REVIEW_TZ).astimezone(timezone.utc)
+
+def own_passed(rb, t):
+    return rb is not None and t >= own_review_end(rb)
+
+def review_times(rbs):
+    """Risk-clock instants on both sides of each review date's end, a few hours either way so that a UTC-day reading
+    and a New York-day reading disagree, plus instants spread over the delegation windows."""
+    out = [own_review_end(rb) + timedelta(seconds=rng.choice(REVIEW_OFFSETS_S)) for rb in rbs for _ in range(3)]
+    out += [DELEG_NOW + timedelta(seconds=rng.randint(-4 * 86400, 6 * 86400)) for _ in range(6)]
+    return out
+
+def rand_reviewed_mandate():
+    """A mandate with random rules, default, admission and, often, delegations, and a review date."""
+    m = rand_delegated_mandate(any_source=rng.random() < 0.3) if rng.random() < 0.6 else None
+    if m is None:
+        m = copy.deepcopy(base.btc)
+        m["autonomy"]["rules"] = [rand_rule(i) for i in range(rng.randint(0, 4))]
+        m["autonomy"]["default"] = rng.choice(["ask", "deny", "auto", "auto"])
+        m["autonomy"]["admission"] = rng.choice(["ask", "deny", "auto"])
+    m["autonomy"]["review_by"] = rng.choice(REVIEW_DATES)
+    V.validate(m)
+    return m
+
+def without_review(m):
+    out = copy.deepcopy(m)
+    out["autonomy"].pop("review_by", None)
+    return out
+
+def rand_review_action():
+    a = rand_autonomy_action()
+    if rng.random() < 0.2:
+        return {"purpose": rng.choice(sorted(REDUCING))}
+    if rng.random() < 0.3:
+        a["requested_by"] = rng.choice(["agent", "owner", "client"])
+    return a
+
+def fuzz_review(n):
+    """MI-32: from 00:00 America/New_York after the review date, no auto survives for an opening or an increase,
+    whatever the rules, the default, a delegation, or the admission setting say; a deny still denies and an ask keeps
+    its own source; exits stay built-in AUTO; before the date every decision, label, and delegation id is what it is
+    with no review date. Versions apply at random instants, so a re-confirmation racing the date is judged by the
+    version in effect at each decision, which the oracle folds from its own application log."""
+    for _ in range(n):
+        m = rand_reviewed_mandate()
+        versions = [(DELEG_NOW - timedelta(days=30), m)]
+        if rng.random() < 0.4:
+            later = copy.deepcopy(m)
+            later["autonomy"]["review_by"] = rng.choice([d for d in REVIEW_DATES if d > m["autonomy"]["review_by"]] or ["2027-06-01"])
+            versions.append((own_review_end(m["autonomy"]["review_by"]) + timedelta(seconds=rng.choice(REVIEW_OFFSETS_S)), later))
+        rbs = [v["autonomy"]["review_by"] for _, v in versions]
+        for t in sorted(review_times(rbs)):
+            in_effect = [v for at_, v in versions if at_ <= t][-1]
+            rb = in_effect["autonomy"]["review_by"]
+            st = rand_state(t, {}, trouble_p=0.2)
+            a = rand_review_action()
+            r, r0 = autonomy(in_effect, a, st), autonomy(without_review(in_effect), a, st)
+            ctx = (in_effect["autonomy"], a, st, r0, r)
+            if a["purpose"] in REDUCING:
+                check(r == {"decision": "auto", "by": "builtin_risk_reducing"}, "MI-32 an exit stays built-in AUTO past the review date", ctx)
+            elif own_passed(rb, t):
+                check(r["decision"] != "auto", "MI-32 no auto survives past the review date", ctx)
+                check(r["decision"] == ("deny" if r0["decision"] == "deny" else "ask"),
+                      "MI-32 past the review date a deny still denies and everything else asks", ctx)
+                check(r0["decision"] != "ask" or r == r0, "MI-32 an ask past the review date keeps its own source", ctx)
+                check(r0["decision"] != "auto" or r["by"] == "review_ceiling", "MI-32 the review ceiling names itself", ctx)
+            else:
+                check(r == r0, "MI-32 before the review date nothing changes", ctx)
+            if a["purpose"] not in REDUCING:
+                check(autonomy(in_effect, a)["decision"] != "auto", "MI-32 with no risk clock to judge by, nothing is auto", ctx)
+
+def own_review_class(old_rb, new_rb):
+    if old_rb == new_rb:
+        return None
+    if new_rb is None or (old_rb is not None and new_rb > old_rb):
+        return "increasing"
+    return "reducing"
+
+def fuzz_review_changes(n):
+    """§9.2 and MI-11, MI-29 for the review date: moving it earlier or setting it is reducing, moving it later or
+    removing it is increasing, and a version classified reducing or neutral never decides less strictly at any instant."""
+    choices = [None] + REVIEW_DATES
+    for _ in range(n):
+        old = rand_reviewed_mandate()
+        old["autonomy"]["review_by"] = rng.choice(choices)
+        if old["autonomy"]["review_by"] is None:
+            del old["autonomy"]["review_by"]
+        new = copy.deepcopy(old)
+        new_rb = rng.choice(choices)
+        new["autonomy"].pop("review_by", None)
+        if new_rb is not None:
+            new["autonomy"]["review_by"] = new_rb
+        other = rng.random() < 0.4
+        if other:
+            kept = {k: new["autonomy"][k] for k in ("review_by", "delegations") if k in new["autonomy"]}
+            new["autonomy"] = dict(mutate({k: v for k, v in new["autonomy"].items() if k not in kept}), **kept)
+        old_rb = old["autonomy"].get("review_by")
+        c, paths = classify(old, new)
+        own = own_review_class(old_rb, new_rb)
+        if not other and own is not None:
+            check(c == {"increasing": "risk_increasing", "reducing": "risk_reducing"}[own],
+                  "§9.2 the review date classifies as its own row", (old_rb, new_rb, c))
+        if own == "increasing":
+            check(c == "risk_increasing", "§9.2 a later or removed review date is risk-increasing", (old_rb, new_rb, c, paths))
+        if c not in ("risk_reducing", "neutral"):
+            continue
+        for t in review_times([x for x in (old_rb, new_rb) if x is not None]):
+            st = rand_state(t, {}, trouble_p=0.1)
+            a = rand_review_action()
+            d0, d1 = autonomy(old, a, st)["decision"], autonomy(new, a, st)["decision"]
+            check(STRICT[d1] >= STRICT[d0], "MI-11 a reducing review-date change never loosens autonomy",
+                  (old["autonomy"], new["autonomy"], a, st, d0, d1))
+
+def fuzz_review_rules(n):
+    """V-046 and V-020 for the review date, and V-042's carry on re-confirmation, against bounds the oracle computes
+    from date ordinals: a date set or moved lies in [validation date, validation date + 180 days]; one carried unchanged
+    is never re-checked; a set date is never removed; a platform default is exactly the validation date + 90 days; and
+    re-confirming carries the delegations over unless the version is risk-increasing elsewhere."""
+    for _ in range(n):
+        vd = date(2026, 9, 24) + timedelta(days=rng.randint(-200, 200))
+        prev_rb = rng.choice([None, None, (vd + timedelta(days=rng.randint(-120, 180))).isoformat()])
+        offset = rng.choice([-400, -1, 0, 1, 89, 90, 91, 179, 180, 181, 400, rng.randint(-200, 200)])
+        rb = rng.choice([None, prev_rb, (vd + timedelta(days=offset)).isoformat()])
+        m = copy.deepcopy(base.btc)
+        if rb is not None:
+            m["autonomy"]["review_by"] = rb
+        ctx = dict(base.CTX, validation_date=vd.isoformat())
+        if prev_rb is not None or rng.random() < 0.5:
+            ctx["previous_version"] = {"environment": m["environment"], "connection_id": m["connection_id"],
+                                       "autonomy": {} if prev_rb is None else {"review_by": prev_rb}}
+        source = rng.choice(["user_entered", "platform_default", "platform_proposed"])
+        if rb is not None:
+            ctx["provenance"] = {"/autonomy/review_by": {"source": source, "confirmed": True}}
+        errs = semantic(m, ctx)[0]
+        prev = prev_rb if "previous_version" in ctx else None
+        span = None if rb is None else date.fromisoformat(rb).toordinal() - vd.toordinal()
+        bad = (prev is not None and rb is None) or (rb is not None and rb != prev and not 0 <= span <= 180)
+        check(("V-046" in errs) == bad, "V-046 refuses exactly a removed date or a new one outside 180 days of validation",
+              (vd, prev, rb, errs))
+        default_ok = rb is None or source != "platform_default" or span == 90
+        check(("V-020" in errs) != default_ok, "V-020 accepts a platform-default review date only at 90 days", (vd, rb, source, errs))
+        d = copy.deepcopy(base.btc)
+        d["autonomy"]["review_by"] = "2026-09-20"
+        d["autonomy"]["delegations"] = [{"id": "d1", "lifts": "rule:large_orders", "when": {"field": "purpose", "op": "in", "value": ["increase", "open"]},
+                                         "max_order_usd": "500", "max_orders": 2, "max_total_usd": "1000",
+                                         "starts_at": fmt(DELEG_NOW), "expires_at": fmt(DELEG_NOW + timedelta(days=10)), "source_approval_id": None}]
+        renewed = copy.deepcopy(d)
+        renewed["autonomy"]["review_by"] = rng.choice(["2026-10-01", "2026-12-23", "2027-03-23"])
+        elsewhere = rng.choice([None, "0.03", "0.01"])
+        if elsewhere is not None:
+            renewed["risk"]["max_daily_loss"] = elsewhere
+        errs = semantic(renewed, dict(base.CTX, previous_version=d))[0]
+        check(("V-042" in errs) == (elsewhere == "0.03"),
+              "V-042 re-confirming carries delegations over unless the version is risk-increasing elsewhere", (elsewhere, errs))
+        check("V-046" not in errs, "V-046 a re-confirmation inside 180 days is valid", errs)
+
 # ------------------------------------------------------------------ escalation (§6.1, §6.4; MI-21 to MI-25)
 # The oracles below keep their own integer clock, deadlines, pending set, grant sets, and assertion ledger, and
 # compute New York wall time with datetime.fromtimestamp; none of them calls the admission or re-validation code.
@@ -1325,13 +1551,13 @@ def fuzz_owner_controls(n):
 
 def fuzz_content(n):
     """§6.4 content and rule 6: exactly the nine keys; the trigger's rule is the owner's confirmed rule verbatim, or
-    null for the default and both ceilings; the trigger names who asked and the client (DEC-185); the choices end
+    null for the default and the three ceilings; the trigger names who asked and the client (DEC-185); the choices end
     with exactly the delegation shapes offered (DEC-181); every bound field moves the hash; a notification carries no
     sentinel of the request."""
     m = copy.deepcopy(base.swing)
     for _ in range(n):
         m["autonomy"]["rules"] = [rand_rule(i) for i in range(rng.randint(0, 3))]
-        labels = [f"rule:{r['id']}" for r in m["autonomy"]["rules"]] + ["default", "admission_ceiling", "client_ceiling"]
+        labels = [f"rule:{r['id']}" for r in m["autonomy"]["rules"]] + ["default", "admission_ceiling", "client_ceiling", "review_ceiling"]
         requested_by = rng.choice(["agent", "owner", "client"])
         shapes = rng.choice([[], ["like_this_until_close"], ["like_this_until_close", "this_instrument", "this_kind"]])
         req = {"approval": "01J" + "SENTINELAPPROVAL"[:10].upper() + "0" * 13, "instrument": "SENTINELINSTR", "asset_class": "us_equity",
@@ -1369,6 +1595,7 @@ def fuzz_content(n):
 if __name__ == "__main__":
     fuzz_ladder_precision(300)
     fuzz_risk(400)
+    fuzz_stepped_lift(300)
     fuzz_gate(300)
     fuzz_builder(400)
     fuzz_admission(300)
@@ -1381,6 +1608,9 @@ if __name__ == "__main__":
     fuzz_delegation_changes(600)
     fuzz_delegation_rules(400)
     fuzz_client_ceiling(400)
+    fuzz_review(600)
+    fuzz_review_changes(600)
+    fuzz_review_rules(600)
     fuzz_escalation(3000)
     fuzz_policy_quorum(1000)
     fuzz_drift(600)

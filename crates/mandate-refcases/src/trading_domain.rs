@@ -385,7 +385,7 @@ fn pending(case: &Json) -> BTreeSet<String> {
 }
 
 /// What a `propose_order` step needs beyond [`gate`]: a later story's member, a crypto instrument
-/// (check 2's USD pairs, E6-10), a margin account at a broker other than alpaca, whose day-trade
+/// (its quote currency for check 2's USD pairs, read by E6-10's harness PR), a margin account at a broker other than alpaca, whose day-trade
 /// regime the case must state (E6-6; check 8 reads no regime for a cash account), and the
 /// `buying_power` after the proposal, which counts the submitted order's reservation (the account
 /// ledger, E7-5).

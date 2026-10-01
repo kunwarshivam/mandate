@@ -392,7 +392,7 @@ impl Fold {
                 None
             }
             Input::GoalComplete => {
-                self.complete_goal(journal);
+                self.complete_goal(journal)?;
                 None
             }
         };

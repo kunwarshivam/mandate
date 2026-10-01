@@ -22,7 +22,7 @@ use mandate_num::{
     UsdExact,
 };
 use mandate_spec::document::{ModelId, SizingMethod};
-use mandate_time::UtcNanos;
+use mandate_time::{Date, UtcNanos};
 
 use crate::BuilderError;
 use crate::autonomy::{ActionContext, RequestedBy};
@@ -334,6 +334,10 @@ pub struct RiskContext {
     pub has_prior_fill: bool,
     pub new_instrument: bool,
     pub thesis_confidence: Unit,
+    /// The risk day (§5.4) of the risk clock the evaluation runs at, carried to the proposed
+    /// action for §6.2 step 5b's review date (DEC-271). The caller derives it from the journaled
+    /// risk clock, as it does `bought_today_usd`'s day.
+    pub risk_day: Date,
 }
 
 /// Why the builder proposed nothing.
@@ -745,6 +749,7 @@ fn buy(
             bought_today_usd: risk.bought_today_usd.checked_add(order_usd)?,
             position_pnl_fraction: risk.position_pnl_fraction,
             requested_by: RequestedBy::Agent,
+            risk_day: risk.risk_day,
         },
     })
 }
@@ -850,8 +855,8 @@ mod tests {
         })
     }
 
-    fn quiet() -> RiskContext {
-        RiskContext {
+    fn quiet() -> Result<RiskContext, Box<dyn Error>> {
+        Ok(RiskContext {
             size_factor: SizeFraction::ONE,
             drawdown: Unit::ZERO,
             daily_pnl_fraction: mandate_num::Signed::ZERO,
@@ -860,7 +865,8 @@ mod tests {
             has_prior_fill: true,
             new_instrument: false,
             thesis_confidence: Unit::ZERO,
-        }
+            risk_day: Date::new(2026, 9, 22)?,
+        })
     }
 
     #[test]
@@ -869,7 +875,7 @@ mod tests {
             &mandate()?,
             &account("5")?,
             &crossed()?,
-            &quiet(),
+            &quiet()?,
             &[output("-1")?],
             now()?,
         )?;
@@ -894,7 +900,7 @@ mod tests {
                 &mandate()?,
                 &account("0")?,
                 &crossed()?,
-                &quiet(),
+                &quiet()?,
                 &[output("1")?],
                 now()?,
             )

@@ -425,6 +425,10 @@
           },
           "description": "Optional. Owner-created, bounded, expiring permissions that turn an ask into auto inside the envelope (spec §6.5, DEC-181). Every delegation is user_entered and confirmed (V-022); V-041 to V-043 are semantic."
         },
+        "review_by": {
+          "$ref": "#/$defs/date",
+          "description": "Optional. The review date: the last risk day on which any auto or delegation stands; from 00:00 America/New_York after it, every auto and every delegation decides ask until a version moves it (spec §6.2 step 5b, MI-32, DEC-188). Platform default: the validation date + 90 days (§7); V-046 bounds a date set or moved to at most 180 days after the validation date and keeps it once set."
+        },
         "approval": {
           "type": "object",
           "additionalProperties": false,

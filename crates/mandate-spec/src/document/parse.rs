@@ -83,6 +83,15 @@ struct Members<'a> {
 }
 
 impl<'a> Members<'a> {
+    /// The member `name` when the document has it: a member the schema does not require
+    /// (`autonomy.review_by`). Its absence is a value, not an error.
+    fn optional(&self, name: &str) -> Option<Node<'a>> {
+        self.members.get(name).map(|value| Node {
+            value,
+            path: format!("{}/{name}", self.path),
+        })
+    }
+
     /// The member `name`, or [`ParseError::MissingMember`]: every listed member is required.
     fn get(&self, name: &str) -> Parsed<Node<'a>> {
         let path = format!("{}/{name}", self.path);
@@ -634,7 +643,7 @@ fn ladder_rung(node: &Node<'_>) -> Parsed<LadderRung> {
 }
 
 fn autonomy(node: &Node<'_>) -> Parsed<Autonomy> {
-    let m = node.members("rules default admission approval")?;
+    let m = node.members("rules default admission approval review_by")?;
     let approval = m.get("approval")?;
     let approval = approval.members("timeout_s on_timeout approvers two_approver_above_usd")?;
     Ok(Autonomy {
@@ -655,7 +664,15 @@ fn autonomy(node: &Node<'_>) -> Parsed<Autonomy> {
             two_approver_above_usd: approval
                 .dec_or_null("two_approver_above_usd", DecGrammar::PositiveDecimal)?,
         },
+        review_by: m.optional("review_by").map(review_date).transpose()?,
     })
+}
+
+/// `autonomy.review_by` (§3, §6.6, DEC-188): the date it names. A date the schema's pattern admits
+/// but the calendar does not is refused here, never read as "no review date", so a malformed date
+/// cannot switch the review off (DEC-271 item 6).
+fn review_date(node: Node<'_>) -> Parsed<Date> {
+    node.date()?.ok_or_else(|| node.off_pattern())
 }
 
 fn rule(node: &Node<'_>) -> Parsed<Rule> {

@@ -893,3 +893,23 @@ fn a_condition_string_is_a_decimal_only_on_a_decimal_field() -> Result<(), Strin
     );
     Ok(())
 }
+
+/// `Members::optional` finds a member the schema does not require at its own pointer, and nothing
+/// for a member the object lacks (`autonomy.review_by`, DEC-271 item 6): a reader that never found
+/// it would load a document's review date as none.
+#[test]
+fn an_optional_member_is_found_where_it_is_and_nowhere_else() -> Result<(), String> {
+    let value = json(r#"{"review_by": "2026-12-23"}"#)?;
+    let object = value.as_object().ok_or("an object")?;
+    let members = super::Members {
+        members: object,
+        path: "/autonomy".to_owned(),
+    };
+    let found = members
+        .optional("review_by")
+        .ok_or("a member the object has is found")?;
+    assert_eq!(found.path, "/autonomy/review_by");
+    assert_eq!(found.value, &text("2026-12-23"));
+    assert!(members.optional("delegations").is_none());
+    Ok(())
+}

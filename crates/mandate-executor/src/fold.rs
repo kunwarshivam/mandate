@@ -15,7 +15,7 @@ use crate::payload::{
     required_text, usd,
 };
 use crate::state::{
-    Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, ObservedAccount,
+    Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, ObservedAccount,
     OrderDetail,
 };
 use crate::types::{
@@ -98,9 +98,13 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     match kind {
         "IntentReceived" => intent_received(state, payload, at),
         "GateDecided" => gate_decided(state, payload, at),
-        "OrderSubmitted" => order_submitted(state, event),
+        "OrderSubmitted" => {
+            rung_submitted(state, payload, at)?;
+            order_submitted(state, event)
+        }
         "OrderStateChanged" => {
             adoption(state, event)?;
+            rung_stepped(state, payload)?;
             order_state_changed(state, payload, at)
         }
         "CompensatingEvent" => {
@@ -369,6 +373,49 @@ fn request_of(
         extended_hours: flag(payload, "extended_hours"),
         purpose: optional_text(payload, "purpose").map_or(Ok(Purpose::Open), purpose_of)?,
     })
+}
+
+/// §5.6: the sequence's exit, or a later rung of it, was submitted, and the ladder's clock
+/// restarts from it.
+fn rung_submitted(
+    state: &mut ExecutorState,
+    payload: &Value,
+    at: RiskClock,
+) -> Result<(), ExecutorError> {
+    let Some(intent) = optional_text(payload, "intent_id") else {
+        return Ok(());
+    };
+    let instrument = InstrumentId::new(required_text(payload, "instrument")?)?;
+    if let Some(sequence) = state
+        .exiting
+        .get_mut(&instrument)
+        .filter(|sequence| sequence.intent.0.0 == intent && !sequence.passive)
+    {
+        sequence.ladder = Ladder {
+            rung: optional_int(payload, "rung")
+                .and_then(|rung| u32::try_from(rung).ok())
+                .unwrap_or(0),
+            since: Some(at),
+            floored: flag(payload, "at_floor"),
+            stepping: false,
+        };
+    }
+    Ok(())
+}
+
+/// §5.6 step 2: the current rung's cancel was asked for a step, so its confirmation submits the
+/// next rung rather than ending the sequence.
+fn rung_stepped(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    if !flag(payload, "ladder_step") {
+        return Ok(());
+    }
+    let id = client_order_id(payload)?;
+    for sequence in state.exiting.values_mut() {
+        if ClientOrderId::for_intent(&sequence.intent)?.rung(sequence.ladder.rung)? == id {
+            sequence.ladder.stepping = true;
+        }
+    }
+    Ok(())
 }
 
 fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
@@ -786,6 +833,7 @@ fn protection_changed(
                         agent: AgentId(agent.to_owned()),
                         prices,
                         passive,
+                        ladder: Ladder::default(),
                     },
                 );
             }
@@ -798,6 +846,10 @@ fn protection_changed(
                 });
             }
         }
+        "watchdog" => {
+            state.watchdogged.insert(instrument.clone(), at);
+        }
+        "exit_unpriced" | "ladder_floor" => {}
         "interval_limit" | "unprotected_end" => {
             let ends = action == "unprotected_end";
             if ends {
@@ -906,6 +958,12 @@ fn leg_agent(
     if entry.is_some() {
         return entry;
     }
+    single_holder(state, instrument)
+}
+
+/// The position's single holder (§5.4's leg-agent rule, DEC-160 (3)(b)): the one agent whose
+/// attributed lots make up the whole open quantity, else none.
+pub(crate) fn single_holder(state: &ExecutorState, instrument: &InstrumentId) -> Option<AgentId> {
     let mut lots: BTreeMap<&AgentId, SignedQty> = BTreeMap::new();
     for order in state
         .orders

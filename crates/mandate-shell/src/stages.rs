@@ -97,8 +97,9 @@ impl Stage {
     /// The stable reason code the run reports when this stage does not answer (ADR-0001 ES-09). The
     /// process exits with it and prints it on one line of stderr. The connector's is
     /// `broker_request_not_sent`, a request that never left the process; one the broker answered
-    /// and the connector could not read is `broker_answer_uninterpretable` instead, which
-    /// [`crate::ShellError::code`] tells apart by the cause (#248 review).
+    /// and the connector could not read is `broker_answer_uninterpretable` instead, and one that
+    /// left with no answer is `broker_outcome_unknown`, which [`crate::ShellError::code`] tells
+    /// apart by the cause (#248 review, #288 review minor 3).
     pub fn code(self) -> &'static str {
         match self {
             Self::FlattenProbe => "exit_path_unavailable",

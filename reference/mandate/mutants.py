@@ -9,6 +9,17 @@ MUTANTS = {
     "additive capital base": ("self.C, self.L = H1, E01, C1, L1", "self.C, self.L = H1, E01, self.C + d, L1"),
     "hard trigger latches on one quote": ("        if quote and (t - self.hard_first[key]).total_seconds() >= self.hard_wait():", "        if True:"),
     "loss carry ignores withdrawals": ("        self.net_contributed += d\n", ""),
+    "release retires without a loss carry": ('                self._retire("goal_complete", ev)\n',
+                                             '                self.restrictions["retired"] = "stopped"\n'),
+    "release carries no loss": ('                self._retire("goal_complete", ev)\n',
+                                '                self._retire("goal_complete", ev)\n                ev[-1]["loss_carry_usd"] = "0"\n'),
+    "a re-triggered scale rung is held back during the stepped lift": (
+        '                        if self.reset_queue:\n'
+        '                            self.reset_queue = sorted(self.reset_queue + [i], key=lambda j: D(self.lad[j]["at"]), reverse=True)\n',
+        '                        if i in self.reset_queue:\n                            self.reset_queue.remove(i)\n'),
+    "a profit_stop goal completes as hold_protected": (
+        '            ev.append({"type": "GoalCompleted", "then": "discretionary_exit_all_then_retire"})',
+        '            ev.append({"type": "GoalCompleted", "on_complete": "hold_protected"})'),
     "allocation increase allowed while latched": ("        if d > 0 and (self.latched or self.daily is not None):", "        if False:"),
     "daily lift ignores the minimum delay": ('(t - self.daily["at"]).total_seconds() >= self.daily_min', "True"),
     "flatten acknowledged while not flat": ('            if "drawdown_flatten" in self.restrictions and self.qty > 0:\n'
@@ -181,12 +192,44 @@ MUTANTS = {
     "quiet hours suppress the inbox": ('    if channel == "cli_inbox" or quiet_hours is None:', '    if quiet_hours is None:'),
     "quiet hours include their end": ('% 1440 < (end - start) % 1440', '% 1440 <= (end - start) % 1440'),
     "the trigger drops the owner's rule": ('"rule": None if rule is None else {"id": rule["id"], "when": rule["when"], "then": rule["then"]}', '"rule": None'),
+    "the review ceiling's trigger names a rule": ('    rule = rules.get(by[len("rule:"):]) if by.startswith("rule:") else None\n    return {"mandate_version"',
+                                                  '    rule = rules.get(by[len("rule:"):]) if by.startswith("rule:") else (next(iter(rules.values()), None) if by == "review_ceiling" else None)\n    return {"mandate_version"'),
+    "the review ceiling is skipped": ('    if review_passed(m, st) and STRICT[res["decision"]] < STRICT["ask"]:',
+                                      '    if False:'),
+    "the review date passes on the date itself": ('    return risk_day(st["now"])["risk_day"] > rb', '    return risk_day(st["now"])["risk_day"] >= rb'),
+    "the review date passes at UTC midnight": ('    return risk_day(st["now"])["risk_day"] > rb', '    return st["now"][:10] > rb'),
+    "no risk clock reads as before the review date": ('    if st is None or "now" not in st:\n        return True',
+                                                      '    if st is None or "now" not in st:\n        return False'),
+    "the review ceiling turns a deny into ask": ('    if review_passed(m, st) and STRICT[res["decision"]] < STRICT["ask"]:',
+                                                 '    if review_passed(m, st):'),
+    "the review ceiling relabels an ask": ('    if review_passed(m, st) and STRICT[res["decision"]] < STRICT["ask"]:',
+                                           '    if review_passed(m, st) and STRICT[res["decision"]] <= STRICT["ask"]:'),
+    "a delegation still lifts past the review date": (
+        '    if review_passed(m, st) and STRICT[res["decision"]] < STRICT["ask"]:',
+        '    if review_passed(m, st) and STRICT[res["decision"]] < STRICT["ask"] and "delegation_id" not in res:'),
+    "the review date holds exits": ('        return {"decision": "auto", "by": "builtin_risk_reducing"}\n    res = None',
+                                    '        return {"decision": "ask" if review_passed(m, st) else "auto", "by": "builtin_risk_reducing"}\n    res = None'),
+    "a later review date is reducing": (
+        '        elif p == "/autonomy/review_by":\n            res.add("increasing" if b is None or (a is not None and b > a) else "reducing")',
+        '        elif p == "/autonomy/review_by":\n            res.add("increasing" if b is None else "reducing")'),
+    "removing the review date is reducing": (
+        '        elif p == "/autonomy/review_by":\n            res.add("increasing" if b is None or (a is not None and b > a) else "reducing")',
+        '        elif p == "/autonomy/review_by":\n            res.add("increasing" if b is not None and a is not None and b > a else "reducing")'),
+    "V-046 re-checks a carried date": ('    if rb is None or rb == prev_rb:\n        return errs', '    if rb is None:\n        return errs'),
+    "V-046 lets a set date be removed": ('    if prev_rb is not None and rb is None:\n        errs.add("V-046")', '    if False:\n        errs.add("V-046")'),
+    "V-046 allows 181 days": ('    if not vd <= rb <= days_after(vd, REVIEW_MAX_DAYS):', '    if not vd <= rb <= days_after(vd, REVIEW_MAX_DAYS + 1):'),
+    "V-046 allows a date before validation": ('    if not vd <= rb <= days_after(vd, REVIEW_MAX_DAYS):', '    if not rb <= days_after(vd, REVIEW_MAX_DAYS):'),
+    "a platform-default review date may be any date": (
+        '                if m["autonomy"].get("review_by") != days_after(ctx["validation_date"], REVIEW_DEFAULT_DAYS):', '                if False:'),
+    "re-confirming drops the delegations": ('classify(without_delegations(prev, review_by_of=m), without_delegations(m))',
+                                            'classify(without_delegations(prev), without_delegations(m))'),
     "a bound field does not move the content hash": ('content_hash({k: req[k] for k in sorted(req)})', 'content_hash({k: req[k] for k in sorted(req) if k != "limit_price"})'),
 }
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
-         "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
+         "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
          "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_client_ceiling(300); "
+         "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
          "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
          "print(len(FAIL))")
 

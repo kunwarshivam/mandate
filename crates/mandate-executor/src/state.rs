@@ -55,6 +55,22 @@ pub struct ExecutorState {
     pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
     /// The latest quote per instrument: process-local, an input never journaled (like the tick).
     pub(crate) quotes: BTreeMap<InstrumentId, MarketObservation>,
+    /// The latest-observed sane quote with a bid per instrument, kept past newer quotes that are
+    /// not and never replaced by an older one: the exit ladder's "last sane bid within 5 minutes"
+    /// (§5.6). Process-local, like `quotes`.
+    pub(crate) sane_bids: BTreeMap<InstrumentId, MarketObservation>,
+    /// The latest-observed sane quote with a last trade per instrument, kept like `sane_bids`: the
+    /// exit ladder's "the last trade", which it takes only within 5 minutes (§5.6, DEC-260 (5)).
+    /// Process-local, like `quotes`.
+    pub(crate) trades: BTreeMap<InstrumentId, MarketObservation>,
+    /// When each instrument's current breach began: the first sane mark at or below its resting
+    /// stop since a sane mark above it, the triggered-stop watchdog's clock (§5.4). Process-local,
+    /// like `quotes`, so a restart starts the clock again from the next breaching mark.
+    pub(crate) breaches: BTreeMap<InstrumentId, RiskClock>,
+    /// When the triggered-stop watchdog last fired in each instrument, from its journaled record:
+    /// a breach fires only if it began after, so one breach is watchdogged once (§5.4, DEC-260
+    /// (11)).
+    pub(crate) watchdogged: BTreeMap<InstrumentId, RiskClock>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
     pub(crate) modes: BTreeMap<AgentId, Mode>,
@@ -178,6 +194,10 @@ impl ExecutorState {
             copied: BTreeMap::new(),
             exiting: BTreeMap::new(),
             quotes: BTreeMap::new(),
+            sane_bids: BTreeMap::new(),
+            trades: BTreeMap::new(),
+            breaches: BTreeMap::new(),
+            watchdogged: BTreeMap::new(),
             positions: BTreeMap::new(),
             fills: BTreeSet::new(),
             modes: BTreeMap::new(),
@@ -459,6 +479,22 @@ pub(crate) struct ExitSequence {
     pub(crate) prices: Option<ProtectionPrices>,
     /// A passive exit's (`passive_start`): it keeps the stop, so no interval opens.
     pub(crate) passive: bool,
+    /// Where the exit's price ladder stands, from its journaled rungs (§5.6).
+    pub(crate) ladder: Ladder,
+}
+
+/// The exit price ladder's progress (§5.6), folded from each rung's `OrderSubmitted` and its
+/// stepping cancel, so a restart resumes it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Ladder {
+    /// The current rung: 0 is the exit's own order, n its `-l{n}` (§2.3).
+    pub(crate) rung: u32,
+    /// When the current rung was submitted, from which `exit_step_s` runs.
+    pub(crate) since: Option<RiskClock>,
+    /// The current rung is at `max_exit_offset`: it rests, and never steps again.
+    pub(crate) floored: bool,
+    /// The current rung's cancel was a step's, so its confirmation submits the next rung.
+    pub(crate) stepping: bool,
 }
 
 /// The restriction a reconciliation places for one subject — an instrument, or external activity

@@ -20,6 +20,23 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-188](../project/04-decision-log.md#decisions), read by
+  [DEC-271](../project/04-decision-log.md#decisions) to [DEC-273](../project/04-decision-log.md#decisions)):**
+  the review date. `autonomy.review_by` is the last risk day on which any `auto` or delegation
+  stands; from 00:00 America/New_York after it, every `auto` and every delegation decides `ask`
+  until a version moves it, and exits are untouched (§3, §6.2 step 5b, §6.6, MI-32). The platform
+  default is the validation date + 90 days (§7); V-046 bounds a date set or moved to at most 180
+  days after the validation date and keeps a set date set (§4.1); moving it later is risk-increasing
+  and carries the delegations over, so re-confirming restores them (§9.2, V-042); the approval
+  content and `DecisionMade` may name `review_ceiling` (§6.4, §10, journal spec §9). The field is
+  optional and absent means no review date, so no existing reference case changes; the MC-D cases
+  are added (§11).
+- **v0.6, amended ([DEC-270](../project/04-decision-log.md#decisions), [DEC-274](../project/04-decision-log.md#decisions)):**
+  `on_complete: release` retires the agent with its loss carry: `AgentStopped` (reason
+  `goal_complete`) follows `PositionReleased` and carries max(0, N − E) to the connection, so
+  releasing and redeploying cannot reset the floor (§3.1, §5.7, MI-14). It only tightens: MC-R17's
+  journal gains the event, and MC-R25, MC-R26, and MC-V68 show the carry, the redeploy at the
+  carried L, and V-032 counting it.
 - **v0.6, amended ([DEC-185](../project/04-decision-log.md#decisions)):** the client ceiling: an
   order an owner-connected client requested is never `auto` (§6.2 step 5a, MI-30), the approval card
   names the client from the content object's `trigger` and its `decided_by` may be `client_ceiling`
@@ -127,6 +144,7 @@ changes, acknowledgments, version changes, approval requests and responses, and 
 | MI-28 | While the agent's effective mode is not `normal`, a drawdown rung is active, a limit is accumulating breach time or latched, or a kill switch in the agent's scope is engaged, every decision is what it would be with no delegations |
 | MI-29 | A version classified risk-reducing or neutral never lets a delegation lift a decision the previous version's delegations would not have lifted, given the same usage (the delegation half of MI-11) |
 | MI-30 | An `open` or `increase` order an owner-connected client requested (`requested_by: client`, DEC-141) is never `auto`: it is `ask`, or `deny` when the rules deny, whatever the rules, the default, a delegation, or the admission setting say. Orders the owner or the agent requested are decided exactly as without this rule ([DEC-185](../project/04-decision-log.md#decisions)) |
+| MI-32 | **Silence ends autonomy** ([DEC-188](../project/04-decision-log.md#decisions)). From 00:00 America/New_York after `autonomy.review_by` in the version in effect, judged on the risk clock, no `open` or `increase` is `auto`: it is `ask`, or `deny` when the decision without the review date denies, whatever the rules, the default, or a delegation say, and an `ask` keeps its own source. The admission ceiling only tightens (MI-17), so it never yields an `auto` of its own: an `auto` admission setting leaves the rules' `auto` standing, and that is what the review ceiling turns into `ask`. Exits stay built-in AUTO (MI-1). Before that instant, and with no review date, every decision, label, and delegation id is what it would be without this rule. With no risk clock to judge by, nothing is `auto` (checked against an independent oracle that builds the instant from the calendar date) |
 
 ## 2. Lifecycle
 
@@ -239,6 +257,7 @@ decimal strings; the schema gives each field's bounds.
 | `autonomy.rules[]`, `default`, `approval` | Autonomy rules and approval settings (§6) |
 | `autonomy.admission` | Ceiling on the autonomy decision for the first order in a newly admitted instrument (§6.2); platform default `ask` |
 | `autonomy.delegations[]` | Optional. Owner-created, bounded, expiring permissions that turn an `ask` into `auto` (§6.5); at most 20, in evaluation order. Absent means none |
+| `autonomy.review_by` | Optional. The **review date** (§6.6): the last risk day (§5.4) on which any `auto` or delegation stands. Platform default: the validation date + 90 days (§7). Absent means no review date |
 | `notifications` | Channels and quiet hours |
 
 **Set-like arrays are sorted and unique** (V-009) so that equal mandates hash equally: pinned
@@ -268,7 +287,7 @@ it. `null` means no end.
 |---|---|
 | `hold_protected` | **Holding:** restriction `goal_complete` (mode `exits_only`); protection and every risk limit stay armed |
 | `disarm_ladder` | Holding, but the drawdown ladder and daily loss are disarmed; protection and the lifetime floor stay armed |
-| `release` | The agent cancels its protective orders, the ledger records `PositionReleased`, the positions become the owner's external holdings, claims are released, and the agent retires |
+| `release` | The agent cancels its protective orders, the ledger records `PositionReleased`, the positions become the owner's external holdings, claims are released, and the agent retires (`AgentStopped`, reason `goal_complete`), carrying its net dollar loss to the connection as any retirement does (§5.7, [DEC-270](../project/04-decision-log.md#decisions)) |
 
 - **Holding:** the owner is alerted when it starts. The owner can later release (step-up; journaled
   as `PositionReleased`, including the warning shown that the positions will be unprotected) or
@@ -332,8 +351,9 @@ and is recorded in `MandateConfirmed`.
 | V-039 | Every pinned instrument's `asset_class` is in `universe.asset_classes` |
 | V-040 | The `factor`s of the `scale_sizes` rungs have at most 12 fractional digits in total, so the size factor of every set of active rungs is exact at 12 places: the places of the size fraction the order builder multiplies its targets by (§8.3 step 2), which is also within the 24 the risk state reports it at (§5.5; [DEC-167](../project/04-decision-log.md#decisions)) |
 | V-041 | Delegation ids are unique. Each delegation's `lifts` is `default` while `autonomy.default` is `ask`, or `rule:<id>` naming a rule whose `then` is `ask`; and `starts_at` < `expires_at` ≤ `starts_at` + 30 days (2,592,000 s). A version that makes the named rule or the default anything but `ask`, or removes the rule, must remove the delegation too ([DEC-181](../project/04-decision-log.md#decisions)) |
-| V-042 | A version that is risk-increasing on any path other than `autonomy.delegations` (§9.2, classified with the delegations removed from both versions) carries no delegation over from the previous version: every delegation id it holds is new. The owner re-creates what they still want, with the step-up that version needs anyway |
+| V-042 | A version that is risk-increasing on any path other than `autonomy.delegations` and `autonomy.review_by` (§9.2, classified with the delegations removed from both versions and the new version's review date in both) carries no delegation over from the previous version: every delegation id it holds is new. The owner re-creates what they still want, with the step-up that version needs anyway |
 | V-043 | Each delegation's caps fit inside the envelope: `max_order_usd` ≤ `risk.max_order_usd`, `max_order_usd` ≤ `max_total_usd`, and `max_total_usd` ≤ `capital.allocation_usd`; and when `two_approver_above_usd` is set, `max_order_usd` ≤ it, so a delegation never stands in for a second approver. The gate enforces every limit regardless (§6.5); this keeps a delegation from even appearing to widen one |
+| V-046 | An `autonomy.review_by` the version sets or moves (absent from, or different from, the previous version's) is not before the validation date and at most 180 days after it; one carried unchanged is not checked again, so a lapsed date stays lapsed through a version that changes something else. A version whose previous version set a review date sets one too ([DEC-188](../project/04-decision-log.md#decisions), [DEC-272](../project/04-decision-log.md#decisions)) |
 
 ### 4.2 Warnings and the confirmation screen
 
@@ -550,7 +570,8 @@ Applies to `exits_only` and `flatten_and_pause` rungs, daily loss, the lifetime 
   rejected (`waiting_period`), as is a version that leaves E at or below the new floor
   (`still_below_new_floor`) or does not loosen (`not_loosening`).
 - **Inherited loss L.** Each connection keeps a **loss carry**: the sum, over agents retired on it
-  in the last 90 days, of their **net dollar loss** max(0, N − E) at retirement (§5.1). Withdrawals
+  in the last 90 days, of their **net dollar loss** max(0, N − E) at retirement (§5.1), whether the
+  owner stopped the agent or a completed goal released its positions (§3.1). Withdrawals
   lower N and E equally, so withdrawing before retiring cannot shrink the carry (MI-14). A new agent
   on the connection starts with L = the carry, so retiring and redeploying cannot reset the floor.
   Deployment is rejected if the carry ≥ `max_loss_from_allocation` × allocation (V-032).
@@ -682,6 +703,15 @@ stream with `causation_id` and judges it there; nothing the owner's client check
      own proposal), `owner` (the owner through the web app or CLI), or `client` (through the MCP
      server of E10-6). The platform sets it from the authenticated channel, never from the request's
      content, and the order builder carries it from the request to the order it proposes.
+   - **5b. Review ceiling** ([DEC-188](../project/04-decision-log.md#decisions), §6.6). If
+     `autonomy.review_by` is set and the risk day (§5.4) of the risk clock is after it, the decision
+     becomes the stricter of the result so far and `ask` (MI-32): no `auto` rule, `auto` default, or
+     delegation acts alone on a mandate nobody has confirmed since its review date. The admission
+     ceiling only tightens (MI-17), so an `auto` admission setting yields no `auto` of its own; an
+     `auto` it leaves standing is the rules', which this step catches. With no risk clock to judge
+     by, the date has passed (`AGENTS.md` rule 3). Like the two ceilings before it, it names itself
+     (`review_ceiling`) only when it changed the decision, so an `ask` keeps its own source and a
+     `deny` its own.
 6. `auto` → submit (the gate runs again at submission). `deny` → skip. `ask` → approval (§6.4).
 
 ### 6.3 Condition language
@@ -729,7 +759,7 @@ has exactly these keys, and everything an approver is shown comes from it:
 | Key | Content |
 |---|---|
 | `action` | `instrument`, `asset_class`, `side` (`buy`), `qty`, `limit` (the limit price), `order_usd` (limit price × quantity), and `purpose` |
-| `trigger` | `mandate_version`; `decided_by`, the label of what asked (`rule:<id>`, `default`, `admission_ceiling`, or `client_ceiling`); `requested_by` (`agent`, `owner`, or `client`) and `client`, the name the owner gave the connected client when connecting it, or `null` unless `requested_by` is `client` (§6.2 step 5a; the approver is shown "Requested by your connected agent" with that name); and `rule`, the owner's confirmed rule `{id, when, then}` exactly as the mandate holds it, or `null` for `default`, `admission_ceiling`, and `client_ceiling` |
+| `trigger` | `mandate_version`; `decided_by`, the label of what asked (`rule:<id>`, `default`, `admission_ceiling`, `client_ceiling`, or `review_ceiling`); `requested_by` (`agent`, `owner`, or `client`) and `client`, the name the owner gave the connected client when connecting it, or `null` unless `requested_by` is `client` (§6.2 step 5a; the approver is shown "Requested by your connected agent" with that name); and `rule`, the owner's confirmed rule `{id, when, then}` exactly as the mandate holds it, or `null` for `default`, `admission_ceiling`, `client_ceiling`, and `review_ceiling` |
 | `evidence` | `combined_score` as `{value, label}`, labeled "combined model score, not a probability of profit"; and `outputs`, one `{event_id, artifact, label}` per model output used (the artifact hash or `null`, and the author label below) |
 | `risk_impact` | One `{field, value, cap}` for each of `order_usd`, `position_usd_after`, `gross_usd_after`, `bought_today_usd`, `drawdown`, and `daily_pnl_fraction`: its §6.3 value at the request and the mandate cap it is measured against, respectively `max_order_usd`; min(`max_position_usd`, `max_position_fraction` × E); min(`max_gross_exposure_usd`, E); `null`; the lowest ladder rung's `at`; and `max_daily_loss` (§5.5, §8.3) |
 | `reference_mark` | The last `MarkUpdated` for the instrument as `{price, seq}`, or `null` |
@@ -945,6 +975,54 @@ suspended, and when a version removes it. V-041 removes it with the rule it lift
 every delegation from a version that is risk-increasing elsewhere. Expiry and exhaustion are runtime
 states, not versions; the owner is told when a delegation ends (`OwnerAlertSent`, opaque text only,
 `AGENTS.md` rule 6). Across restart, usage and suspension are rebuilt from the journal (MI-8).
+Past the review date (§6.6) a delegation may still match, but the review ceiling turns what it
+lifted back into `ask`; that decision names no delegation, so it uses none of the caps.
+
+### 6.6 The review date ([DEC-188](../project/04-decision-log.md#decisions))
+
+Silence ends autonomy instead of extending it (`AGENTS.md` rule 3, applied over time). A mandate
+nobody has confirmed since its review date keeps running, but nothing in it acts alone.
+
+- **What it is.** `autonomy.review_by` is a calendar date, an envelope field like every other
+  (rule 11): the owner enters or confirms it, and the compiler fills the platform default, the
+  validation date + 90 days, which the confirmation screen shows marked "platform default" (§7).
+  It is the **last risk day** (§5.4) on which any `auto` or delegation stands, read like
+  `goal.end_date` (§3.1): it passes at 00:00 America/New_York after it, so the same date is the
+  same instant in both daylight-saving states.
+- **What it changes.** From that instant, §6.2 step 5b turns every `auto` an `open` or `increase`
+  would get into `ask`: the rules', the default's, and a delegation's, including on the first order
+  in a newly admitted instrument, where an `auto` admission setting leaves the rules' `auto`
+  standing (the admission ceiling only tightens, MI-17) (MI-32). A `deny` still denies, an `ask`
+  keeps its source, and the `ask` times out to `skip` (§6.4). Nothing is flattened, cancelled, or held: exits, protective orders, risk exits, owner
+  exits, and kill switches are built-in AUTO at step 3, before the ceiling (MI-1, `AGENTS.md`
+  rules 2 and 13), and positions keep their protection.
+- **Time base.** Only the risk clock judges it (§5.2), never `event_time` or a client's clock, so
+  replay gives the same decisions (MI-8) and a skewed clock cannot keep autonomy alive. A decision
+  the ceiling changed journals `DecisionMade` with `decided_by: review_ceiling` (§10).
+- **How it ends: re-confirming.** The owner confirms a version that moves the date later, with
+  step-up: a later date is risk-increasing (§9.2), so it needs step-up as DEC-188 asks and applies
+  at the next safe point (§2.2), and MI-11 holds. V-046 keeps the new date within 180 days of the
+  validation date, so every confirmation buys at most about six months. V-042 classifies a version
+  with its review date left out, so a re-confirmation that changes nothing else carries every
+  delegation over, and they lift again within their own windows and caps; one that also adds risk
+  elsewhere carries none (V-042).
+- **Other versions.** Setting a date where there was none, or moving it earlier, is
+  risk-reducing. A version that changes something else and keeps the date unchanged is valid even
+  when the date has lapsed (V-046 does not check a carried date), so the owner can tighten a limit
+  without being made to re-arm autonomy. A set date can never be removed (V-046). A version
+  validated before the date and applied after it decides `ask` from the moment it applies until
+  one moves the date: the ceiling reads the version in effect at each decision.
+- **What it does not do.** It never changes a limit, the gate, an approval already pending, or a
+  human's answer to an ask: a grant to an `ask` is the owner's decision, not autonomy. A delegation
+  created past the date (§6.5, an approval-card shape) is valid but lifts nothing until a version
+  moves the date.
+- **Attack list.** A careless owner who never returns: every `auto` becomes `ask`, every `ask`
+  times out to `skip`, and the positions stay protected. A skewed or replayed clock: only the
+  journaled risk clock counts. A version racing the date: the version in effect at the decision
+  decides, and a re-confirmation is risk-increasing, so it waits for a safe point and step-up. A
+  delegation granted after the date: it lifts nothing. A connected client: it can neither confirm a
+  version nor move the date (DEC-141 item 1). A pushed-out date: at most 180 days from
+  validation (V-046). Removing the date: refused (V-046).
 
 ## 7. Compiler and platform proposals (DEC-97)
 
@@ -959,6 +1037,7 @@ states, not versions; the owner is told when a delegation ends (`OwnerAlertSent`
 | `autonomy.approval.approvers` | Any, in a single-user workspace only; in a multi-user workspace the user must enter it |
 | `autonomy.default` | `ask` |
 | `autonomy.admission` | `ask` |
+| `autonomy.review_by` | The validation date + 90 days ([DEC-188](../project/04-decision-log.md#decisions)) |
 | `universe.leveraged_etps_enabled`, `leveraged_etp_disclosure_version` | `false`, `null` |
 
 - **Input:** the user's plain-language description (stored as an artifact), optional form fields,
@@ -1274,7 +1353,8 @@ invalid (V-031).
 | `autonomy.admission` | Part of the autonomy row: reducing only if it becomes stricter (auto → ask → deny) |
 | `end_date` | Increasing if later or removed (null); reducing if earlier |
 | `leveraged_etps_enabled` on, `protection.enabled` off | Increasing (the reverse is reducing) |
-| Autonomy (every `autonomy` path except `delegations`) | Reducing only if every change is one of the following; anything else (reordering rules, or changing a field, operator, or compound condition, approvers, or the approval timeout) is increasing:<br>• a `then` or the `default` made stricter (auto → ask → deny);<br>• a rule added whose `then` is at least as strict as every later rule and the default;<br>• a rule removed when every later rule and the default are at least as strict as its `then`;<br>• in a single-comparison `auto` rule, one value changed so it matches less often;<br>• in a single-comparison `ask`/`deny` rule, one value changed so it matches more often, when no later rule and not the default is stricter;<br>• `two_approver_above_usd` set or lowered |
+| `autonomy.review_by` ([DEC-188](../project/04-decision-log.md#decisions), §6.6) | Increasing if later or removed; reducing if set where there was none, or earlier. V-042 leaves it out, so a re-confirmation carries the delegations over |
+| Autonomy (every `autonomy` path except `delegations` and `review_by`) | Reducing only if every change is one of the following; anything else (reordering rules, or changing a field, operator, or compound condition, approvers, or the approval timeout) is increasing:<br>• a `then` or the `default` made stricter (auto → ask → deny);<br>• a rule added whose `then` is at least as strict as every later rule and the default;<br>• a rule removed when every later rule and the default are at least as strict as its `then`;<br>• in a single-comparison `auto` rule, one value changed so it matches less often;<br>• in a single-comparison `ask`/`deny` rule, one value changed so it matches more often, when no later rule and not the default is stricter;<br>• `two_approver_above_usd` set or lowered |
 | `autonomy.delegations` ([DEC-181](../project/04-decision-log.md#decisions)) | Classified on its own, with the rest of `autonomy` classified by the row above with the delegations removed from both versions. Reducing only if every change is one of the following; anything else (adding one, reordering, or changing `lifts`, `when`, or `source_approval_id`) is increasing:<br>• a delegation removed;<br>• a delegation narrowed: same `id`, `lifts`, `when`, and `source_approval_id`, with no cap larger, `starts_at` no earlier, and `expires_at` no later.<br>Expiry and exhaustion are runtime states, never versions (§6.5) |
 | Notifications | Removing a channel: increasing. Adding a channel or changing quiet hours: neutral |
 | `name` | Neutral |
@@ -1297,7 +1377,7 @@ delegation changes against random actions, times, usage, and suspension states.
 | `MandateVersionApplied`, `HighWaterMarkReset`, `PositionReleased`, `UniverseChanged` | account | §5.10 |
 | `ThesisProposed`, `ThesisRevised` | agent | Research agent id, version, and content hash; thesis id, lineage id, revision, and (for a revision) the predecessor and what it changed; instrument, direction, horizon, evidence and sources, corroboration, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); the admission decision and its reason (§8.5) |
 | `OwnerExitRequested`, `ApprovalRequested` … `ApprovalCanceled` | agent | §5.10, §6.4; the content object inline (large parts by artifact reference) and its hash, the bound fields, approvers, admission and re-validation results, step-up evidence; the delegation shapes offered appear in the content object's `choices`, and `ApprovalResponded` records the shape chosen and, if one, the new mandate version and delegation id |
-| `DecisionMade` | agent | Journal spec §9; its autonomy classification names the source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling) and `requested_by` and, when §6.2 step 4a lifted the decision, `delegation_id`. Delegation usage (§6.5) is counted from these events |
+| `DecisionMade` | agent | Journal spec §9; its autonomy classification names the source (`rule:<id>`, `default`, built-in, the admission ceiling, the client ceiling, or the review ceiling) and `requested_by` and, when §6.2 step 4a lifted the decision, `delegation_id`. Delegation usage (§6.5) is counted from these events |
 
 A mandate version and its records are retained at least 6 years after the later of its
 supersession and the closing (or release) of every position opened under it (trading spec §13).
@@ -1305,7 +1385,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 298 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 328 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1317,9 +1397,9 @@ harness pins the case count.
 | Family | IDs | Covers |
 |---|---|---|
 | Schema | MC-S01 to MC-S31 | Structural rejects, including `on_complete`, the 300 s confirmation cap, per-model output age, `max_instruments` bounds, the research object, `autonomy.admission` |
-| Semantic | MC-V01 to MC-V67 | Every V-rule and warning, the closed platform-default list, loss carry, the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
+| Semantic | MC-V01 to MC-V68 | Every V-rule and warning, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
 | Policy | MC-P01 to MC-P22 | Nearest-level reporting, each key kind, the retail profile (DEC-98), the internal research profile (DEC-103), paper-only environments, the research keys, platform maximums |
-| Risk state | MC-R01 to MC-R24 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a universe change as a risk input |
+| Risk state | MC-R01 to MC-R26 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |
 | Gate | MC-G01 to MC-G16 | Position cap, order size, group cooldown, orders per day, gross exposure, exits exempt, the working universe (including an empty one, which denies every opening) |
 | Order builder | MC-B01 to MC-B32 | Exit and buy conviction, freshness, clipping, band, trim and its guards, deferral, averaging down, accumulate clips with fees |
@@ -1330,6 +1410,7 @@ harness pins the case count.
 | Lineage | MC-N17 to MC-N19, MC-N24, MC-N27, MC-N28 | The revision cap and retirement, the instrument retirement removes, that an earlier check's refusal retires nothing, that retirement leaves what another lineage holds, no score carried forward, a revision without a predecessor |
 | Thesis expiry | MC-N20 to MC-N22 | The horizon, invalidation before it, a retired lineage |
 | Stagger | MC-N23 | The deterministic per-workspace offset inside the window |
+| Review date | MC-D01 to MC-D27 | V-046's bounds and its carried and removed dates, the platform default, re-confirming with a delegation (V-042), the §9.2 row, and, as `kind: review` cases at a stated risk clock, §6.2 step 5b either side of 00:00 New York after the date: rules, default, admission, a delegation, a deny, an ask's own source, exits, and no date ([DEC-188](../project/04-decision-log.md#decisions)) |
 | Change | MC-C01 to MC-C48 | Every classification row, including rule addition, removal, and reordering, the pinning switch, pinning a mandate that had no research agent, the research fields, and the admission ceiling |
 
 ## 12. Open questions

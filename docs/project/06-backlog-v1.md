@@ -215,7 +215,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   my mandate passes its review date unconfirmed, so that an abandoned account stops acting alone
   ([DEC-188](04-decision-log.md#decisions)). Waits on the spec change for `autonomy.review_by` (MI-32). *Accepted when:*
   past the date, autonomous paths decide `ask`, positions and exits are untouched, and re-confirming
-  (a neutral version with step-up) restores them.
+  (a version moving the date later, with step-up) restores them. The spec change is MI-32, V-046, and §6.2 step 5b
+  with the MC-D cases ([DEC-271](04-decision-log.md#decisions) to [DEC-273](04-decision-log.md#decisions): re-confirming is
+  risk-increasing and carries the delegations over). Owed after it: `mandate-spec` parsing the field, V-046, and its
+  §9.2 row (stream F), then the spec change that makes the date required on every version holding an `auto` or a
+  delegation, with the base mandates (DEC-272 item 3). Also owed, from #380's rulings: the vectors for journal spec §9.1
+  rule 7's clause that `decided_by: review_ceiling` requires `autonomy: ask` (the clause is in the spec). One code PR
+  carries the invalid draft `decision_review_ceiling_on_auto` and the valid draft `decision_review_ceiling_asked`, the
+  validator rule `7.review_ceiling_label` and its mutant in `reference/journal/generate.py`, the regenerated
+  `journal.yaml` and `fixtures/refcases/journal.json`, and the agent-stream harness's count
+  (`crates/mandate-refcases/src/journal/agent_stream.rs`, 106 to 108), as DEC-177 items 6 and 14 did (ES-22).
 
 ### E7 Alpaca connector and recovery
 
@@ -376,6 +385,40 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `reference/mandate/ref.py`'s `approval_quorum`. The implementation PR implemented `quorum`,
   calls it for every overlay, leaves the author out of the grants that count while independence
   is required, and deleted the eight `#[ignore]` lines.
+  *Tests done (M7 tests PR 3 of 4, DEC-257 items 5 to 12); the runtime's implementation follows:*
+  `crates/mandate-runtime/tests/approvals.rs` and `approval_properties.rs` hold 20 tests pending
+  E8-3 for the grant path, owner commands on the control stream, and the #281 owner-exit
+  obligation. The implementation PR needs, first, the `mandate-journal` catalogue entries above
+  (a real journal refuses `ApprovalRevalidated` until then), and it fills `PendingApproval` with the
+  bound request, folds `MarkUpdated`, the control stream's assertions and its copies, and hands a
+  one-instrument owner exit as an agent-scoped flatten (DEC-257 item 7).
+  *Follow-up (DEC-257 item 12):* `PolicyChanged`'s payload is only "level, diff" in journal spec §9,
+  so the runtime neither folds the overlay check 7 reads nor has a two-approver runtime case
+  (PB-22). Close the payload, then fold it and add the cases in a tests correction.
+  *Follow-up (DEC-257 item 12):* no agent-stream event records a refused resume or Stop; specify
+  one (or say a refusal leaves only the control-stream command) so the runtime can journal it.
+  *Follow-up (DEC-257 item 12; stream I):* `Input::Command` still carries the owner's pause,
+  resume, Stop, exit and kill switch with no step-up judged; retire those for the control stream's
+  `OwnerCommandIssued` once the shell tails it, leaving only the risk-limit and operator switches.
+  *Tests done (M7 tests PR 4 of 4, DEC-257 items 13 to 17); the CLI's implementation follows:*
+  `crates/mandate-cli/tests/approvals.rs` and `agent.rs` hold 15 tests pending E8-3 for
+  `mandate approvals list`, `show`, `approve` and `skip`, and `mandate agent status`, `pause`,
+  `resume`, `stop`, `kill`, `exit` and `acknowledge`, over the `ControlJournal` stubs in
+  `crates/mandate-cli/src/control.rs`. The implementation PR also wires the commands into `clap`
+  and `main.rs`, and gives `ControlJournal` a `mandate-journal-pg` adapter.
+  *Done (E8-3's CLI implementation, DEC-279):* the 20 tests pass; `mandate-cli` lists and shows
+  the inbox from the agent streams, commits `approve`, `skip` and every `agent` command as exactly
+  one control-stream event under one minted id, binds each code to what it confirms and the
+  control stream's head, and never refuses a kill switch or an owner exit.
+  *Follow-up (DEC-279 item 10):* wire `approvals` and `agent` into `clap` and `main.rs` with a
+  `mandate-journal-pg` `ControlJournal`, once the prerequisite below registers these events'
+  schemas; until then a real journal refuses every command they would send. Add Stop's
+  `--release` choice and the warning shown to `Command::Stop` and the payload (journal spec §9).
+  *Prerequisite (DEC-257 item 17):* `mandate-journal` registers no payload schema for any agent- or
+  control-stream event (`ApprovalRequested`, `ApprovalResponseSubmitted`, `OwnerCommandIssued`,
+  `OwnerAcknowledged`, and the rest), so a real journal refuses each one as `UnknownSchema` and
+  neither the runtime's nor the CLI's implementation can append through one. Register the schemas
+  as journal spec §9 closes them, with the catalogue entries above, before either implementation.
   *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
   control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
   would make MI-24 true as written.
@@ -1111,12 +1154,48 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the coordinator moved from 3a to slice 2 (#267, comment 5862923162): under rule 13 no exit waits
   for the startup reconciliation, so the plant gets weight only with the first opening through
   `fault::protected` (slice 2's add). Slice 2's PR shows each of the three red.
-- **E7-4 slice 4 (stream K), from #264's review (comment 5862761692):** (a) name the do-nothing
-  finding in slice 4's PR: a permissive `ladder_price` turns `fault::crash_at_confirmation_before_exit_submit`
-  green, and only `protection::sequence_tests::an_unprotected_exit_never_reaches_the_ladder_stub`
-  catches it; (b) pin the fault fixture's exact recovered cash rather than §11's ±15.40 band;
-  (c) make the fault fixture's `equity` and `buying_power` consistent with its cash before any
-  slice reads buying power from it.
+- **E7-4 slice 6's tests PR (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373)
+  round 1 (major 1):** §5.5 exempts kill-switch and mandate-limit flatten exits from the agent's
+  mode, but slice 4a's ladder stops stepping while the agent is `paused` or `stopped`
+  ([DEC-260](04-decision-log.md#decisions) (3)), and the gate's `mode_failure` holds every
+  risk-reducing order at `paused` or stricter. Add a pending test: while the agent is paused, a
+  flatten's ladder steps, its step cancel does not end the sequence, and `mode_failure` lets that
+  flatten through. Slice 6 narrows `climbs` and the gate together to make it pass.
+- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1
+  (minor 1):** wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
+  `exit_limit` and `next_rung`, which pass none today, so §5.6's "never below an owner exit's
+  floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
+  `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
+  resubmitted at the same price every `exit_step_s`.
+- **E7-4 slice 5 (stream K), from slice 4b ([DEC-260](04-decision-log.md#decisions) (12)):**
+  the triggered-stop watchdog fires only in a session where the stop can trigger (§5.4: stops do
+  not trigger in extended hours), once slice 5 folds the session; and a crypto stop-limit is
+  watchdogged as soon as a sane mark is below its limit price, once slice 5 places stop-limits.
+  Until then the watchdog fires on any breach that lasts `stop_watchdog_s`.
+- **E7-4 slice 6's tests PR (stream K), from slice 4b (DEC-160 (11), (24)):** add pending tests
+  that every kill switch whose scope covers an instrument cancels a working `*` watchdog exit
+  there by its own `client_order_id` (`md-w-<record>`), an agent-scoped one included when it
+  closes that instrument (§5.5's table), and that an agent-scoped kill switch never treats it as
+  that agent's own: it is never counted in the agent's sub-ledger sell and never reached by
+  cancel-all.
+- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 2
+  (minor A):** apply §8.2's in-session test to the exit ladder's last-trade arm once slice 5 folds
+  the session. Slice 4a takes a trade only from a sane quote within five minutes
+  ([DEC-260](04-decision-log.md#decisions) (5)); a print from outside the session the exit is in
+  must not price a rung either.
+- **E7-4 (stream K), found by slice 4a's rule-13 oracle (`protection::sequence_tests::rule_13_holds_over_random_scripts`):**
+  (1) a passive exit waits on its OCO's cancel confirmation with no bound and no alert: a broker
+  that never confirms holds the exit for good, with the protection still resting (rule 13's broker
+  hold, so no risk is added, but rule 3 wants the wait bounded). Bound it as rule 5's wait is
+  (`unknown_absent_window_s`, then query the order and alert), with a test. (2) `release_held`
+  journals only an allow, so when a held exit's cause changes (paused, then nothing to price; or
+  an allow that would now over-sell beside other exits) the journal's last verdict names a cause
+  that has gone; journal a changed hold reason once. (3) A later rung is sized from the fold's
+  filled quantity when the step's cancel is confirmed; a fill the broker reports after that
+  confirmation (`LateFillApplied`) is not netted, so the rung could sell more than the position
+  by that fill (rule 12). The same lag sizes §5.4's re-placement. Size from the broker's own
+  report of the cancelled order, or hold the rung for it, before slice 2 lets protected
+  positions exist outside the tests (DEC-160 (4)).
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
@@ -1667,23 +1746,54 @@ From E6-4's slice R4 (stream H2; DEC-167 item 8):
   rung can lift while the 4% rung stays active. §5.8 says highest `at` first, and the fold lifts the
   highest active rung next (DEC-167 item 8 (b)). Re-insert a re-triggered rung in its place, or lift
   only the highest active rung while stepping, and regenerate with `reference/mandate/generate.py`,
-  which must leave `fixtures/refcases/mandate.json` unchanged.
+  which must leave `fixtures/refcases/mandate.json` unchanged. In `agent/h2-dec-270-reference` (DEC-275).
 - **`ref.py` journals `hold_protected` for a completed `profit_stop` goal (reference fix).** A
   `goal_complete` input on a `profit_stop` goal (its end date) writes
   `{"type": "GoalCompleted", "on_complete": "hold_protected"}`; the fold writes its one §3.1
   outcome, `then: discretionary_exit_all_then_retire` (DEC-167 item 8 (f)). No reference case has
-  one.
+  one. In `agent/h2-dec-270-reference` (DEC-275).
 - **`release` journals the loss carry: the reference side (DEC-270; stream H2, first).** One
   reference and reference-case PR, kept apart from crates (ES-22): `reference/mandate/ref.py`'s
   `goal_complete` arm journals `AgentStopped` with `loss_carry_usd` = max(0, N − E) after
   `PositionReleased` when `on_complete` is `release`; MC-R17's expected journal gains it; any §3.1 or
   §5.7 wording the spec needs under DEC-270; `generate.py`, `check_cases.py`, and the fuzz rerun, and
-  `cargo xtask refcases --write`. Only MC-R17 moves.
+  `cargo xtask refcases --write`. Only MC-R17 moves. Merged in [#386](https://github.com/kunwarshivam/mandate/pull/386)
+  (DEC-274), with MC-R25, MC-R26, and MC-V68 for the carry and the redeploy, after the harness PR
+  [#381](https://github.com/kunwarshivam/mandate/pull/381) (DEC-276, DEC-277).
 - **`release` journals the loss carry: the `mandate-spec` side (DEC-270; stream H2, after the
   reference PR).** `Fold::complete_goal`'s `Release` arm journals `AgentStopped` (reason
   `goal_complete`) with the loss carry, as `retire` does, and a test shows that releasing and
   redeploying on the same connection opens the new agent at the carried L (through
-  `ValidationContext::from_journal` and V-032).
+  `ValidationContext::from_journal` and V-032). Merged in [#387](https://github.com/kunwarshivam/mandate/pull/387).
+- **MC-R17 back to passing (DEC-277; E6-4, stream H2).** The DEC-270 reference PR changes MC-R17's
+  expected journal and marks it `pending`, the one flip DEC-277 allows. The `mandate-spec` side above
+  must bring it back: the status PR that follows it marks MC-R17 `passing` again, with MC-R25,
+  MC-R26, and MC-V68. Done in `agent/h2-dec-270-status` (DEC-77 item 3), after [#387](https://github.com/kunwarshivam/mandate/pull/387).
+- **DEC-277's exception for the `journal` and `trading_domain` suites (the #381 review, round 2,
+  minor 1).** `fixture_entry_changed` in `xtask/src/main.rs` finds a case by an object whose `id` is
+  its `status.toml` key, which matches the `mandate` suite but no `journal` key and not
+  `trading_domain`'s compound `RC-NN::sub_case` or version rows, so a flip there always reads
+  "unchanged" and is refused. Extend the lookup to those key shapes, with fixture-repository tests in
+  each suite.
+- **Narrow DEC-277's exception to the case's expectation (the #381 review, round 2, minor 2).** The
+  guard allows a `passing` → `pending` flip when any part of the case's fixture entry changes; allow
+  it only when the entry's expectation members change (`expect`, or a risk-state step's `expect`), a
+  tightening, so a title or note edit cannot take a case back to pending.
+- **§5.10's `GoalCompleted` reason for a completed `profit_stop` goal (the #386 review, minor 1).** The
+  journal table names `GoalCompleted`'s reasons as `profit_stop_reached`, `target_qty`, `max_spend`,
+  and `end_date`, but a `profit_stop` goal completed by its end date journals no reason in either
+  `ref.py` or the fold (`then: discretionary_exit_all_then_retire` only, DEC-275). Decide whether it
+  carries `end_date`, as an accumulate goal's `goal::status` would, and move the spec, `ref.py`, and
+  the fold together.
+- **MC-R25's note pins E before the release (the #386 review, minor 2).** MC-R25 expects
+  `agent_equity` 9850 after the release: the released position stays valued on the agent's books at
+  the last mark, which is what makes the carry "E before the release" (DEC-274 item 2). Add a
+  sentence to its note in `generate.py` saying so, so a later change that zeroes the released
+  quantity is seen to break the reading rather than taken as a fix. Say too why the quantity must
+  stay: a mark after the retirement still moves `agent_equity` and journals the ladder, the daily
+  loss, and the floor on a holding the owner has taken, which nothing acts on while the agent is
+  `stopped` (the #387 review, minor 2). With it, rewrap `complete_goal`'s doc comment in
+  `crates/mandate-spec/src/risk/fold/owner.rs` to the file's 100-column width (minor 1).
 - **R4's status PR: the last nine MC-R cases pass.** MC-R09 to MC-R12, MC-R14, MC-R16, MC-R17,
   MC-R21, and MC-R23 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` on R4 (DEC-167 item 8 (i)); marking them in `status.toml` follows under DEC-77
@@ -1755,6 +1865,26 @@ risk (rule 3):
   `DecisionMade` it names in the same batch (§9.1 rule 10), and §11's `intent_action_mismatch` and
   `mode_event_mismatch` run in `mandate journal verify` and the scheduled verification, against the
   vectors' `invalid_batches` and `range_verification`.
+- **A generated `range_verification` vector with a forward reference (#384 review, major 1; DEC-168
+  item 13).** `verify_agent_stream` indexes the whole range first, so an `IntentProposed` naming a
+  `DecisionMade` later in the range is compared, and a `mode_event` naming a later event or its own
+  switch fails, at any `from_seq`. Only `mandate-journal`'s in-module tests pin this today; the next
+  journal reference PR adds generated range cases for both, at a `from_seq` above 1.
+- **Pin §9.1's ordering of `artifact_refs` and `pii_refs` ahead of rules 14 to 16 (#384 review, minor
+  2).** No vector or test breaks both an envelope check and a subject or copy rule, so swapping their
+  order passes. A tests-correction PR from stream L adds a draft that breaks both and expects the
+  envelope check's reason and path.
+- **A reference past a bounded range's end is exempted like one before its start (#384 review round
+  2, minor 3).** `verify_agent_stream` leaves unchecked a `causation_id` or `mode_event` that names no
+  event of the range, whichever side of the range the event lies on. §11 exempts only a reference
+  before the trusted start; a range with a `to_seq` needs the rule stated and a check or a test.
+- **Duplicate `event_id`s in `verify_agent_stream`'s index are unpinned (#384 review round 2, minor
+  3).** The index keeps the last row with an ID. `append` refuses a repeated `event_id`, so a stored
+  range never holds one, but no test says what a tampered range with a duplicate reports.
+- **An `invalid_drafts` vector for rule 12's `bid_size` (#384 review round 3, minor 1).** The journal
+  vectors refuse a confirmed exit without `bid` or `floor`, but none without `bid_size`; only
+  `mandate-journal`'s in-module `rule_12_needs_each_member_of_a_confirmed_bid` holds it. The next
+  journal-spec PR adds the draft (ES-22 keeps generated vectors out of a code PR).
 - **The model registry stores each pinned model's content object as an artifact.**
   `ModelOutputRecorded.content_hash` is a `sha256:` reference, so it is in `artifact_refs` (§3), and
   §11 check 6 fails `artifact_missing` unless the object is in the artifact store.

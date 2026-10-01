@@ -2711,7 +2711,6 @@ fn an_exit_follows_cancel_confirm_regate_submit_replace() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_exit_never_submits_before_the_cancel_is_confirmed() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2744,7 +2743,6 @@ fn an_exit_never_submits_before_the_cancel_is_confirmed() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_order_submitted_without_protection_is_marketable() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3098,7 +3096,6 @@ fn a_terminal_partly_filled_entry_is_oco_d_at_once() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unprotected_interval_at_the_limit_cancels_re_places_and_alerts() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3221,7 +3218,6 @@ fn protection_is_not_re_placed_early() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_stop_at_its_trigger_price_without_a_fill_is_watchdogged() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3247,7 +3243,6 @@ fn a_stop_at_its_trigger_price_without_a_fill_is_watchdogged() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_watchdog_exit_is_a_risk_exit_through_the_ladder() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3277,8 +3272,9 @@ fn the_watchdog_exit_is_a_risk_exit_through_the_ladder() {
     );
     assert_eq!(
         submission.limit_price,
-        Some(price("138.305")),
-        "the liquid-equity tier's 0.5% off a 139 reference bid, rounded per §2.1"
+        Some(price("138.31")),
+        "the liquid-equity tier's 0.5% off a 139 reference bid, 138.305, rounded up to the cent \
+         (§2.1: a sell limit rounds up to the tick; DEC-260 (6))"
     );
 }
 
@@ -3526,7 +3522,6 @@ fn a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction() 
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_ladder_prices_from_a_fresh_sane_quote_first() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3560,7 +3555,6 @@ fn the_ladder_prices_from_a_fresh_sane_quote_first() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_ladder_falls_back_to_the_last_sane_bid_then_the_last_trade() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3645,7 +3639,6 @@ fn step_rung(
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_ladder_steps_only_after_the_interval() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3693,7 +3686,6 @@ fn the_ladder_steps_only_after_the_interval() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_ladder_never_prices_below_the_floor() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4110,8 +4102,9 @@ fn an_owner_exit_outside_the_session_prices_from_the_confirmed_bid() {
     let limit = sell.limit_price.expect("priced through the ladder");
     assert_eq!(
         limit,
-        price("154.225"),
-        "155 x (1 - 0.005) from the confirmed bid, not from a quote nobody saw (§5.5, §5.6)"
+        price("154.23"),
+        "155 x (1 - 0.005) = 154.225 from the confirmed bid, not from a quote nobody saw, rounded \
+         up to the equity tick (§2.1, §5.5, §5.6; DEC-260 (6))"
     );
     assert!(
         limit >= price("150.35"),
@@ -4501,7 +4494,6 @@ fn a_reducing_sell_cancels_the_resting_opening_buys_first() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_reducing_sell_waits_for_the_cancel_confirmation() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

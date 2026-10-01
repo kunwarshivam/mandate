@@ -9,10 +9,10 @@ use crate::payload;
 use crate::ports::{IdGen, Ports};
 use crate::state::{RuntimeState, UnresolvedAppend};
 use crate::types::{
-    ApprovalOutcome, ApprovalVerdict, Autonomy, Command, DryRunVerdict, Effect, EventDraft,
-    EventId, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope, MandateView,
-    Mode, ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal, Purpose,
-    RiskClock, Seq, TimerId, TimerRequest, WriterEpoch,
+    Autonomy, Command, DryRunVerdict, Effect, EventDraft, EventId, FlattenRequest, Initiator,
+    Input, IntentBody, IntentHandoff, KillScope, MandateView, Mode, ModelOutput, NotificationRef,
+    Observation, OwnerConfirmation, Proposal, Purpose, RiskClock, Seq, TimerId, TimerRequest,
+    WriterEpoch,
 };
 
 /// How long an ASKed action waits before the `skip` timeout fires (mandate spec §6.4).
@@ -123,6 +123,7 @@ fn flattened(
 ) -> crate::types::FlattenPlan {
     ports.flatten.plan(&FlattenRequest {
         initiator,
+        instrument: None,
         confirmation,
         working_orders: state.working_orders(),
     })
@@ -165,10 +166,6 @@ fn applied(
         }
         Input::ModelOutput(output) => {
             batch.journal("ModelOutputRecorded", None, modelled(output)?)?;
-            Ok(())
-        }
-        Input::ApprovalResponse(outcome) => {
-            batch.journal("ApprovalResponded", None, responded(state, outcome)?)?;
             Ok(())
         }
         Input::Journal(_) | Input::Started(_) | Input::Command(_) => Ok(()),
@@ -461,7 +458,7 @@ fn decide(
         return Ok(());
     }
     let verdict = ports.gate.check(&proposal);
-    let autonomy = ports.plan.classify(ports.view, &proposal);
+    let autonomy = ports.plan.classify(ports.view, &proposal).autonomy;
     let decision = batch.journal(
         "DecisionMade",
         None,
@@ -684,28 +681,6 @@ fn modelled(output: &ModelOutput) -> Result<Value, RuntimeError> {
         ("as_of", payload::seconds_text(output.as_of)),
         ("expires_at", payload::seconds_text(output.expires_at)),
         ("content", output.content.clone()),
-    ])
-}
-
-/// An approver's response. A response for an approval the fold no longer knows — one a kill switch,
-/// a tightening, a version change, or the `skip` timeout has already removed — is recorded as
-/// refused and acts on nothing (DEC-131 item 11).
-fn responded(state: &RuntimeState, outcome: &ApprovalOutcome) -> Result<Value, RuntimeError> {
-    let known = state.pending_approvals().contains_key(&outcome.approval);
-    let (verdict, responder, step_up) = match &outcome.verdict {
-        ApprovalVerdict::Approved { responder, step_up } => {
-            ("approved", responder.as_str(), step_up.as_str())
-        }
-        ApprovalVerdict::Denied { responder } => ("denied", responder.as_str(), ""),
-    };
-    let result = if known { "recorded" } else { "refused" };
-    payload::object(vec![
-        ("approval", payload::text(&outcome.approval.0)),
-        ("verdict", payload::text(verdict)),
-        ("responder", payload::text(responder)),
-        ("step_up", payload::text(step_up)),
-        ("result", payload::text(result)),
-        ("at", payload::seconds_text(outcome.at)),
     ])
 }
 

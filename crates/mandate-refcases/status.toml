@@ -1,5 +1,7 @@
-# Reference-case status (ADR-0001 ES-11, DEC-77). Founder-owned: a case marked passing must pass
-# and never returns to pending. Cases not listed are pending and run only with --include-ignored.
+# Reference-case status (ADR-0001 ES-11, DEC-77, DEC-277). Founder-owned: a case marked passing must
+# pass; it returns to pending only in a change that edits its expected output in fixtures/refcases/,
+# and the implementation that follows brings it back; it never drops out of this file. The spec guard
+# checks both against the merge base. Cases not listed are pending and run only with --include-ignored.
 
 [journal]
 'version' = { status = "passing", story = "E5-1" }
@@ -242,6 +244,7 @@
 'MC-V65' = { status = "passing", story = "E17-1" }
 'MC-V66' = { status = "passing", story = "E10-1" }
 'MC-V67' = { status = "passing", story = "E10-1" }
+'MC-V68' = { status = "passing", story = "E10-1" }
 'MC-T01' = { status = "passing", story = "E6-4" }
 'MC-T02' = { status = "passing", story = "E6-4" }
 'MC-T03' = { status = "passing", story = "E6-4" }
@@ -329,6 +332,8 @@
 'MC-R22' = { status = "passing", story = "E6-4" }
 'MC-R23' = { status = "passing", story = "E6-4" }
 'MC-R24' = { status = "passing", story = "E6-4" }
+'MC-R25' = { status = "passing", story = "E6-4" }
+'MC-R26' = { status = "passing", story = "E6-4" }
 
 # Family C (stream F, E10-3; DEC-77 item 3, DEC-172).
 'MC-C01' = { status = "passing", story = "E10-3" }
@@ -379,3 +384,33 @@
 'MC-C46' = { status = "passing", story = "E10-3" }
 'MC-C47' = { status = "passing", story = "E10-3" }
 'MC-C48' = { status = "passing", story = "E10-3" }
+
+# Family D, the review date (stream H, E6-14; DEC-188, DEC-271 to DEC-273): pending until `mandate-spec` parses
+# `autonomy.review_by` and the harness arms read it.
+'MC-D01' = { status = "pending", story = "E6-14" }
+'MC-D02' = { status = "pending", story = "E6-14" }
+'MC-D03' = { status = "pending", story = "E6-14" }
+'MC-D04' = { status = "pending", story = "E6-14" }
+'MC-D05' = { status = "pending", story = "E6-14" }
+'MC-D06' = { status = "pending", story = "E6-14" }
+'MC-D07' = { status = "pending", story = "E6-14" }
+'MC-D08' = { status = "pending", story = "E6-14" }
+'MC-D09' = { status = "pending", story = "E6-14" }
+'MC-D10' = { status = "pending", story = "E6-14" }
+'MC-D11' = { status = "pending", story = "E6-14" }
+'MC-D12' = { status = "pending", story = "E6-14" }
+'MC-D13' = { status = "pending", story = "E6-14" }
+'MC-D14' = { status = "pending", story = "E6-14" }
+'MC-D15' = { status = "pending", story = "E6-14" }
+'MC-D16' = { status = "pending", story = "E6-14" }
+'MC-D17' = { status = "pending", story = "E6-14" }
+'MC-D18' = { status = "pending", story = "E6-14" }
+'MC-D19' = { status = "pending", story = "E6-14" }
+'MC-D20' = { status = "pending", story = "E6-14" }
+'MC-D21' = { status = "pending", story = "E6-14" }
+'MC-D22' = { status = "pending", story = "E6-14" }
+'MC-D23' = { status = "pending", story = "E6-14" }
+'MC-D24' = { status = "pending", story = "E6-14" }
+'MC-D25' = { status = "pending", story = "E6-14" }
+'MC-D26' = { status = "pending", story = "E6-14" }
+'MC-D27' = { status = "pending", story = "E6-14" }

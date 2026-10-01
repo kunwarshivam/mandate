@@ -274,9 +274,10 @@ impl Fold {
     /// The goal completed, so its `on_complete` applies (§3.1): `hold_protected` and `disarm_ladder`
     /// restrict the agent to `goal_complete`, `disarm_ladder` also stops the ladder and the daily loss
     /// while the floor stays armed, and `release` hands the position to the owner and retires the
-    /// agent. A `profit_stop` has no `on_complete`: its one outcome is a discretionary exit of every
+    /// agent as any retirement does, carrying its net dollar loss to the connection (§5.7, DEC-270),
+    /// with E still valuing the position at the last mark. A `profit_stop` has no `on_complete`: its one outcome is a discretionary exit of every
     /// position and then retirement, under `goal_complete` (DEC-167 item 8).
-    pub(super) fn complete_goal(&mut self, journal: &mut Vec<RiskEvent>) {
+    pub(super) fn complete_goal(&mut self, journal: &mut Vec<RiskEvent>) -> Result<(), SpecError> {
         let Some(on_complete) = self.on_complete else {
             journal.push(RiskEvent::GoalCompleted {
                 reason: None,
@@ -284,7 +285,7 @@ impl Fold {
                 on_complete: None,
             });
             self.restrictions.insert(Restriction::GoalComplete);
-            return;
+            return Ok(());
         };
         journal.push(RiskEvent::GoalCompleted {
             reason: None,
@@ -294,7 +295,7 @@ impl Fold {
         match on_complete {
             OnComplete::Release => {
                 journal.push(RiskEvent::PositionReleased { qty: self.qty });
-                self.restrictions.insert(Restriction::Retired);
+                self.retire(StopReason::GoalComplete, journal)?;
             }
             OnComplete::HoldProtected => {
                 self.restrictions.insert(Restriction::GoalComplete);
@@ -307,6 +308,7 @@ impl Fold {
                     .retain(|key, _| *key == LimitKey::LifetimeFloor);
             }
         }
+        Ok(())
     }
 
     /// The agent retires (§5.7): the connection carries its net dollar loss, max(0, N − E), which a

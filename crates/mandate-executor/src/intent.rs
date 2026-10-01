@@ -1,21 +1,23 @@
 //! The intent protocol (E7-2): received, gated, submitted under a derived id, and — after a
 //! confirmed absence — resubmitted under the same id or abandoned.
 
-use mandate_accounting::AssetClass;
+use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
 
 use crate::batch::Batch;
 use crate::codec::{order_type_name, purpose_name, side_name, tif_name};
 use crate::error::ExecutorError;
-use crate::gate::{PartialGateDecision, Proposal, account_stream_checks};
+use crate::gate::{PartialGateDecision, Proposal, UNPRICED, account_stream_checks};
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
 use crate::protection::{
-    awaits_cancel, begin_exit, bracketed_add, crypto_add, exit_limit, passive_exit,
+    ExitPrice, awaits_cancel, begin_exit, bracketed_add, crypto_add, exit_limit, fallback,
+    passive_exit, reprotect_unpriced,
 };
 use crate::state::IntentOutcome;
 use crate::types::{
-    AgentId, BrokerRequest, IntentBody, IntentHandoff, OrderType, Purpose, SubmitOrder, TimeInForce,
+    AgentId, BrokerRequest, GateVerdict, IntentBody, IntentHandoff, OrderType, Purpose,
+    SubmitOrder, TimeInForce,
 };
 
 /// `Input::Intent`: deduplicated by the fold lookup, journaled as `IntentReceived`, then gated.
@@ -98,8 +100,12 @@ fn begin_and_submit(
     if decide(batch, intent)?.0.verdict_name() == ALLOW {
         begin_exit(batch, intent)?;
     }
-    if gate(batch, intent, always)? == ALLOW {
-        submit(batch, intent)?;
+    match gate(batch, intent, always)? {
+        ALLOW => submit(batch, intent)?,
+        HOLD if decide(batch, intent)?.0.reason_code() == UNPRICED => {
+            reprotect_unpriced(batch, intent)?;
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -118,9 +124,9 @@ fn decide(
         instrument,
         side,
         qty,
+        limit,
         purpose,
         protection,
-        ..
     } = &body
     else {
         return Err(ExecutorError::NotInterpreted {
@@ -140,7 +146,17 @@ fn decide(
         },
         batch.ports,
     )?;
-    Ok((decision, *purpose))
+    let unpriced = *purpose == Purpose::DiscretionaryExit
+        && decision.verdict == GateVerdict::Allow
+        && exit_limit(batch, intent, instrument, *purpose, *limit) == ExitPrice::Held;
+    Ok((
+        if unpriced {
+            decision.unpriced()
+        } else {
+            decision
+        },
+        *purpose,
+    ))
 }
 
 /// Runs the binding gate on an intent, journals the decision, and answers its verdict name:
@@ -154,7 +170,7 @@ fn gate(
     let (decision, purpose) = decide(batch, intent)?;
     let verdict = decision.verdict_name();
     if verdict == ALLOW || always {
-        batch.journal(
+        let decided = batch.journal(
             "GateDecided",
             None,
             vec![
@@ -166,6 +182,9 @@ fn gate(
                 ("evaluation", text("account_stream_only")),
             ],
         )?;
+        if decision.reason_code() == UNPRICED {
+            batch.notify(decided, UNPRICED);
+        }
     }
     Ok(verdict)
 }
@@ -183,8 +202,19 @@ pub(crate) fn intent_of(
     Ok((record.agent.clone(), body.clone()))
 }
 
+/// An order's time in force: GTC for crypto, DAY otherwise; an exit's later rungs take the same.
+pub(crate) fn order_tif(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> TimeInForce {
+    match batch.ports.instruments.asset_class(instrument) {
+        Some(AssetClass::Crypto) => TimeInForce::Gtc,
+        _ => TimeInForce::Day,
+    }
+}
+
 /// The first submission of an intent: journaled as `OrderSubmitted` naming the id the request
-/// carries, and only then described (journal spec §5.2, `AGENTS.md` rule 5).
+/// carries, and only then described (journal spec §5.2, `AGENTS.md` rule 5). An exit with nothing
+/// to price from goes at its own limit, journaled and alerted (DEC-160 (12)); a discretionary one
+/// is held before the gate allows it ([`decide`]), so one found unpriced after its allow goes the
+/// same way rather than being dropped (rule 13).
 fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorError> {
     let (agent, body) = intent_of(batch, intent)?;
     let IntentBody::Order {
@@ -204,11 +234,18 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         return Ok(());
     }
     bracketed_add(&batch.view, &instrument, purpose, protection.is_some())?;
-    let limit = exit_limit(batch, &instrument, purpose, limit)?;
-    let tif = match batch.ports.instruments.asset_class(&instrument) {
-        Some(AssetClass::Crypto) => TimeInForce::Gtc,
-        _ => TimeInForce::Day,
+    let limit = match exit_limit(batch, intent, &instrument, purpose, limit) {
+        ExitPrice::Own(limit) | ExitPrice::Laddered(limit) => limit,
+        ExitPrice::Fallback(limit) => {
+            fallback(batch, intent, &instrument, limit)?;
+            limit
+        }
+        ExitPrice::Held => {
+            fallback(batch, intent, &instrument, limit)?;
+            limit
+        }
     };
+    let tif = order_tif(batch, &instrument);
     let request = SubmitOrder {
         client_order_id: ClientOrderId::for_intent(intent)?,
         instrument,
@@ -249,6 +286,18 @@ pub(crate) fn journal_submission(
     agent: &AgentId,
     attempt: u32,
 ) -> Result<(), ExecutorError> {
+    journal_rung(batch, request, intent, agent, attempt, Vec::new())
+}
+
+/// [`journal_submission`] with `extra` fields: a ladder rung's `rung` and `at_floor` (§5.6).
+pub(crate) fn journal_rung(
+    batch: &mut Batch<'_, '_>,
+    request: &SubmitOrder,
+    intent: Option<&IntentId>,
+    agent: &AgentId,
+    attempt: u32,
+    extra: Vec<(&'static str, Value)>,
+) -> Result<(), ExecutorError> {
     let mut pairs = vec![
         ("client_order_id", text(request.client_order_id.as_str())),
         ("agent", text(agent.0.clone())),
@@ -275,6 +324,7 @@ pub(crate) fn journal_submission(
         pairs.push(("take_profit", text(oco.take_profit.to_string())));
         pairs.push(("stop", text(oco.stop.to_string())));
     }
+    pairs.extend(extra);
     batch.journal("OrderSubmitted", None, pairs)?;
     Ok(())
 }

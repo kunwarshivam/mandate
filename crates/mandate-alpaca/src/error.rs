@@ -16,7 +16,7 @@ pub enum TransportError {
     Connect,
     #[error("the request failed")]
     Request,
-    #[error("the path is not a paper trading endpoint; nothing was sent")]
+    #[error("the path is not an allowed paper trading or market data endpoint; nothing was sent")]
     RefusedPath,
 }
 
