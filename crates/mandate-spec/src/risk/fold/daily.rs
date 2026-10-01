@@ -13,13 +13,17 @@ use crate::risk::{Confirmation, LimitKey, Restriction, RiskEvent, TriggerReason}
 /// A latched daily loss (§5.4).
 ///
 /// A renewal writes a fresh latch, so it is unacknowledged whatever came before: only a
-/// `flatten_and_pause` daily loss is acknowledged, and its acknowledgment is slice R4's.
+/// `flatten_and_pause` daily loss is acknowledged, and a renewed one pauses the agent again until the
+/// owner acknowledges the new breach (DEC-167 item 8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DailyLatch {
     /// When it latched or was last renewed, which `daily_breach_min_s` counts from.
     since: UtcNanos,
     /// Whether a risk day has started since then, which both the lift and a renewal wait for.
     day_started: bool,
+    /// Whether the owner acknowledged a `flatten_and_pause` daily loss once flat, which moves its
+    /// restriction to `exits_only` and lets it lift (§5.4).
+    pub(super) acknowledged: bool,
 }
 
 impl DailyLatch {
@@ -27,6 +31,7 @@ impl DailyLatch {
         Self {
             since,
             day_started: false,
+            acknowledged: false,
         }
     }
 }
@@ -94,8 +99,10 @@ impl Fold {
     /// A renewal is a breach of the new day's line confirmed by breach time, or at the 1.25x level on
     /// one sane quote: it only extends a latch that already holds, so it adds no restriction and
     /// fires no kill switch. The lift needs the new day and `daily_breach_min_s` since the breach, and
-    /// for `flatten_and_pause` the owner's acknowledgment, which is slice R4's, so that action does not
-    /// lift yet.
+    /// for `flatten_and_pause` the owner's acknowledgment.
+    ///
+    /// A ladder disarmed by a completed goal disarms the daily loss with it (§3.1): nothing is
+    /// evaluated, and a latch already held stays.
     pub(super) fn daily_loss(
         &mut self,
         readings: &Readings,
@@ -103,6 +110,9 @@ impl Fold {
         moment: Moment,
         journal: &mut Vec<RiskEvent>,
     ) -> Result<(), SpecError> {
+        if self.disarmed {
+            return Ok(());
+        }
         let limit = Limit {
             key: LimitKey::MaxDailyLoss,
             action: self.daily_action.into(),
@@ -132,7 +142,7 @@ impl Fold {
                 action: limit.action,
                 reason: Some(TriggerReason::NewDayBreach),
             });
-        } else if self.daily_action == LimitAction::ExitsOnly
+        } else if (self.daily_action == LimitAction::ExitsOnly || latch.acknowledged)
             && elapsed_s(latch.since, self.at)? >= u64::from(self.daily_breach_min_s)
         {
             self.daily = None;

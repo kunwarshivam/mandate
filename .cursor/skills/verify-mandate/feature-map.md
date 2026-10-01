@@ -133,8 +133,8 @@ Planned by [the E6-2 task brief](../../../docs/project/tasks/E6-2-autonomy-and-o
 DEC-130. The implementation lands in two slices. Slice 1 (autonomy, DEC-152) implements §6.2 in
 `autonomy.rs` and §6.3's `Condition::matches` in `mandate-spec`, and its 40 tests are live: family A
 (`MC-A01` to `MC-A16`), 16 hand tests and 8 properties. Slice 2 (the builder) implements §8.1 to
-§8.3 in `builder.rs` and the sizing arithmetic in `mandate-num`, and the rest go live: family B
-(the 28 builder cases), 46 hand tests, 18 properties, and the two `mandate-num` tests. No test in
+§8.3 in `builder.rs` and the sizing arithmetic in `mandate-num`, and the rest go live: family B (the
+28 builder cases), 46 hand tests, 18 properties, and the two `mandate-num` tests. No E6-2 test in
 the crate is pending.
 
 - **Spec:** `docs/specs/mandate.md` §6.1 to §6.4 (purposes, the evaluation order, the condition
@@ -183,6 +183,25 @@ the crate is pending.
   harness with `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A
   mandate::autonomy mandate::MC-B mandate::order_builder` (the flag runs cases `status.toml` does
   not yet list as passing).
+
+## The client ceiling (E6-12)
+
+Planned by [the E6-12 task brief](../../../docs/project/tasks/E6-12-client-ceiling.md) and DEC-262.
+The DEC-77 tests PR ([#369](https://github.com/kunwarshivam/mandate/pull/369)) stubbed
+`client_ceiling` with 12 tests pending on it; the implementation PR makes them live, and no E6-12
+test is pending.
+
+- **Spec:** `docs/specs/mandate.md` §6.2 step 5a and MI-30 (DEC-185), §6.4's `decided_by`.
+- **Code:** `crates/mandate-builder/src/autonomy.rs` (`RequestedBy`, `ActionContext::requested_by`,
+  `DecidedBy::ClientCeiling`, and the ceiling as the last step of `classify`), and the one line of
+  `crates/mandate-builder/src/builder.rs` that stamps `propose`'s buys as the agent's own.
+- **Tests:** `crates/mandate-builder/tests/hand.rs` (twelve tests, from
+  `a_proposed_buy_is_the_order_builders_own_request` on),
+  `crates/mandate-builder/tests/properties.rs` (two generated properties against the naive rule walk
+  extended by step 5a, and an exhaustive sweep of 4,212 decisions with its own deny-or-ask oracle).
+  Planted bugs: the task brief.
+- **Reference cases:** none; no mandate case states `requested_by` (DEC-262 item 7).
+- **Run:** `cargo nextest run -p mandate-builder --run-ignored all`.
 
 ## Agent runtime and kill switches
 
@@ -544,9 +563,11 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `crates/mandate-spec/src/risk.rs` (the risk-state types, breach confirmation, risk days),
   `crates/mandate-spec/src/risk/limits.rs` (the §5.2 and §5.6 comparisons),
   `crates/mandate-spec/src/risk/fold.rs` (the fold over marks, fills, clock ticks, universe changes,
-  staleness, and a `profit_stop` goal, slices R2 and R3; the rest of §5 is `unimplemented` until R4,
-  DEC-167 items 5 to 7), `crates/mandate-spec/src/risk/fold/daily.rs` (the daily loss over risk
-  days: the rollover, a breach carried over it, the renewal, and the lift),
+  staleness, a `profit_stop` goal, and the stepwise lift after a reset, slices R2 to R4, DEC-167
+  items 5 to 8), `crates/mandate-spec/src/risk/fold/daily.rs` (the daily loss over risk days: the
+  rollover, a breach carried over it, the renewal, and the lift),
+  `crates/mandate-spec/src/risk/fold/owner.rs` (acknowledgments, allocation changes, floor
+  loosening, goal completion, and retirement, slice R4),
   `crates/mandate-spec/src/goal.rs`, `crates/mandate-spec/src/change.rs` (the version and §9.2
   classification), `crates/mandate-spec/src/condition.rs` (the §6.3 language, owned here and nowhere
   else), `crates/mandate-spec/src/context.rs` (`ValidationContext::from_journal`, the fold over
@@ -582,8 +603,11 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   restart, and a clock that over-reports, severe rungs that a receding drawdown does not lift, the
   whole-second monotone risk clock, staleness, the crypto and equity clocks, the floor's carry,
   fills, the daily action, a breach carried over the rollover, the renewal, the daily hard wait
-  across midnight, the profit stop, every input left to R4, and a lift property whose oracle is a
-  run rule);
+  across midnight, the profit stop, and a lift property whose oracle is a run rule);
+  `crates/mandate-spec/src/risk/fold/tests/owner.rs` (slice R4's edges, and two properties: an
+  allocation change never triggers or lifts a limit, against the same walk with a tick in its place
+  and §5.1 recomputed on `i128` counts; and the ladder is monotone, against the latched rungs
+  rebuilt from the journal); `crates/mandate-num/src/sizing.rs`'s tests (`UsdExact::quotient`);
   `crates/mandate-domain/tests/domain.rs` (live). Planted bugs per test: the task brief and the E10-3
   tests and implementation PRs.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
@@ -655,12 +679,11 @@ proves each pending test fails on them (DEC-110).
   `fuzz_ask_budget`, `fuzz_quiet_hours`, `fuzz_owner_controls`, `fuzz_content`) and
   mutation-checked by `reference/mandate/mutants.py`. Check 7's quorum is the stricter of the bound
   requirement and the policy overlay (DEC-173 item 13).
-- **Code:** `mandate-approval` (layer 1; E8-1, E8-2 and E8-3 implemented but check 7's policy
-  overlay, DEC-173 item 14):
+- **Code:** `mandate-approval` (layer 1; E8-1, E8-2 and E8-3 implemented, check 7's policy overlay
+  included, DEC-173 item 13):
   `crates/mandate-approval/src/content.rs` (`BoundAction`, `content_object`, `content_hash`,
   `confirmation_code`), `crates/mandate-approval/src/admit.rs` (`admit`: checks 1 to 7;
-  `PolicyOverlay`, and `quorum`, a stub that `admit` fails closed on under any overlay but
-  `PolicyOverlay::NONE`),
+  `PolicyOverlay`, and `quorum`, the stricter of the bound requirement and the overlay),
   `crates/mandate-approval/src/revalidate.rs` (`revalidate`: checks 8 to 12, `GrantedOrder`),
   `crates/mandate-approval/src/drift.rs`, `crates/mandate-approval/src/budget.rs`,
   `crates/mandate-approval/src/notify.rs` (the closed `Notification`),
@@ -676,8 +699,9 @@ proves each pending test fails on them (DEC-110).
   and `crates/mandate-approval/tests/grant_properties.rs` (the check-table, clock-accumulator,
   principal, assertion-ledger, scaled-integer drift, field-comparer and kill-switch oracles), all
   live; and `crates/mandate-approval/tests/quorum.rs` (check 7 against the policy overlay, with
-  its own scaled-integer oracle), pending E8-3 but for three live tests. In-module tests in `src/stepup.rs` probe step-up evidence at the clock's extremes against an
-  `i128` oracle, and `src/drift.rs` a drift too large to compute.
+  its own scaled-integer oracle), all live. In-module tests in `src/stepup.rs` probe step-up
+  evidence at the clock's extremes against an `i128` oracle, and `src/drift.rs` a drift too large
+  to compute.
 - **Run:** `cargo nextest run -p mandate-approval`; `cargo xtask ci pending`.
 
 ## Reference-case harness
