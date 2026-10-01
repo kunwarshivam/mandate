@@ -493,7 +493,10 @@ fn is_pinning_switch(old: &Mandate, new: &Mandate, paths: &[Pointer]) -> bool {
 ///
 /// The blocks are destructured whole, here and in [`kept_rule_reduces`], so a field added to
 /// [`Autonomy`], [`Approval`], or [`Rule`] does not compile until it is compared: an uncompared
-/// field would let a change to it alone read as reducing.
+/// field would let a change to it alone read as reducing. The one field named and not compared is
+/// `review_by`: §9.2 classifies it by its own row, which [`classify`] reaches on its own path
+/// (`/autonomy/review_by`, DEC-273), so a change to it alone never comes here, and comparing it
+/// here would turn an earlier review date beside a stricter rule into a risk-increasing change.
 fn autonomy_reduces(old: &Autonomy, new: &Autonomy) -> bool {
     let Autonomy {
         rules: _,
