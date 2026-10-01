@@ -1,6 +1,7 @@
 """Asserts that every reference case demonstrates what its title claims (AGENTS.md: validate fixtures)."""
 import pathlib
 import sys
+from decimal import Decimal
 from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 import yaml
@@ -114,6 +115,43 @@ req("MC-R16", s[0]["agent_mode"] == "exits_only" and s[1]["restrictions"] == ["g
     "disarmed ladder and daily; floor armed")
 s = steps("MC-R17")
 req("MC-R17", s[0]["agent_mode"] == "stopped" and any(j["type"] == "PositionReleased" for j in s[0]["journal"]), "released")
+
+
+def released_with_carry(cid):
+    """A release retires the agent: `AgentStopped` (reason goal_complete) right after `PositionReleased`, carrying
+    max(0, N - E) recomputed from the case's own figures (DEC-270, MI-14)."""
+    c = C[cid]
+    x = [st for st in c["steps"] if st["event"] == "goal_complete"][-1]
+    marks = [st["bid"] for st in c["steps"] if st["event"] == "mark"]
+    mark = Decimal(marks[-1]) if marks else Decimal(c["initial"]["avg_cost"])
+    allocation = Decimal(d["bases"][c["base"]]["mandate"]["capital"]["allocation_usd"])
+    equity = allocation + Decimal(c["initial"]["position_qty"]) * (mark - Decimal(c["initial"]["avg_cost"]))
+    carry = max(Decimal(0), allocation - equity)
+    types = [j["type"] for j in x["expect"]["journal"]]
+    stopped = [j for j in x["expect"]["journal"] if j["type"] == "AgentStopped"]
+    req(cid, types[:3] == ["GoalCompleted", "PositionReleased", "AgentStopped"] and len(stopped) == 1
+        and stopped[0]["reason"] == "goal_complete" and Decimal(stopped[0]["loss_carry_usd"]) == carry
+        and Decimal(x["expect"]["agent_equity"]) == equity and x["expect"]["restrictions"] == ["retired"],
+        f"release journals AgentStopped with the net dollar loss {carry}")
+    return Decimal(stopped[0]["loss_carry_usd"]) if stopped else None
+
+
+released_with_carry("MC-R17")
+carry = released_with_carry("MC-R25")
+req("MC-R25", carry is not None and carry > 0, "the release leaves a positive carry")
+v68 = C["MC-V68"]
+budget = (Decimal(d["bases"][v68["base"]]["mandate"]["capital"]["max_loss_from_allocation"])
+          * Decimal(next(p["value"] for p in v68["patch"] if p["path"] == "/capital/allocation_usd")))
+req("MC-V68", carry is not None and Decimal(v68["context"]["connection_loss_carry_usd"]) == carry and carry >= budget
+    and v68["expect"]["violations"] == ["V-032"], "a redeploy is refused on the carry the release left (V-032)")
+r26 = C["MC-R26"]
+s = steps("MC-R26")
+f26 = Decimal(d["bases"][r26["base"]]["mandate"]["capital"]["max_loss_from_allocation"])
+c26, e26 = Decimal(s[1]["capital_base"]), Decimal(s[1]["agent_equity"])
+req("MC-R26", carry is not None and Decimal(r26["initial"]["inherited_loss_usd"]) == carry
+    and "lifetime_floor" not in s[0]["restrictions"] and "lifetime_floor" in s[1]["restrictions"]
+    and c26 * (1 - f26) < e26 <= c26 * (1 - f26) + carry,
+    "the redeploy's floor sits the carried L above C x (1 - f): it latches where a fresh connection's would not")
 s = steps("MC-R18")
 req("MC-R18", s[1]["restrictions"] == ["hard_breach"] and s[2]["agent_mode"] == "exits_only" and s[3]["agent_mode"] == "paused", "two-quote flatten")
 s = steps("MC-R19")

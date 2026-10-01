@@ -2,15 +2,16 @@
 //! interpret, and never lets a case pass for the wrong reason (DEC-85, DEC-128).
 //!
 //! Added in review round 1 of the tests PR, which found the three tests the brief names absent. They
-//! matter because the harness is the thing that decides whether 202 reference cases are being checked
+//! matter because the harness is the thing that decides whether the reference cases are being checked
 //! or merely being run: the first run of this suite had 31 cases "passing", thirty of them because a
 //! parse that rejects everything satisfies a `schema_valid: false`.
 
+use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use mandate_num::Usd;
-use mandate_refcases::{Json, mandate, read_fixture};
+use mandate_refcases::{CaseStatus, Json, mandate, parse_status, read_fixture};
 use mandate_spec::document::LadderAction;
 use mandate_spec::risk::{LimitKey, RiskEvent, TriggerReason};
 use serde_json::json;
@@ -29,21 +30,81 @@ fn run(fixture: Json, id: &str) -> Result<(), String> {
     (case.run)()
 }
 
-/// The families this harness owns, by case-ID prefix, each with its kind and the number of cases spec
-/// §11 lists for it (`MC-S01` to `MC-S31`, and so on).
+/// The families this harness owns, by case-ID prefix, each with its kind. Each one's size is the number
+/// of cases spec §11 lists for it (`MC-S01` to `MC-S31`, and so on), read by `listed_size`.
 ///
 /// Every count in this file is over these families alone. A family another harness owns, or one the
 /// fixture gains before any arm interprets it, changes none of them; a case added to or dropped from
-/// one of these families fails `the_fixture_holds_the_families_this_stream_expects`, naming the family.
-const OWNED: [(&str, &str, usize); 7] = [
-    ("MC-S", "schema", 31),
-    ("MC-V", "semantic", 67),
-    ("MC-P", "policy", 22),
-    ("MC-C", "change", 48),
-    ("MC-R", "risk_state", 24),
-    ("MC-T", "risk_day", 5),
-    ("MC-L", "goal", 5),
+/// one of these families without §11 saying so fails `the_fixture_holds_the_families_this_stream_expects`,
+/// naming the family.
+const OWNED: [(&str, &str); 7] = [
+    ("MC-S", "schema"),
+    ("MC-V", "semantic"),
+    ("MC-P", "policy"),
+    ("MC-C", "change"),
+    ("MC-R", "risk_state"),
+    ("MC-T", "risk_day"),
+    ("MC-L", "goal"),
 ];
+
+/// The number of cases spec §11's table lists for the family `prefix`, from its `<prefix>01 to
+/// <prefix>NN` range (DEC-276).
+///
+/// The spec and the fixture are both protected paths, so they change together in one reference PR
+/// (ES-22), while this file is code and cannot ship with them. Reading the size here rather than
+/// pinning it lets a reference PR add a case without turning `main` red, and still fails any case the
+/// fixture gains or drops that §11 does not list.
+fn listed_size(prefix: &str) -> usize {
+    let range = format!("{prefix}01 to {prefix}");
+    let sizes: Vec<usize> = section_11()
+        .lines()
+        .filter(|line| line.starts_with('|'))
+        .filter_map(|line| line.split(&range).nth(1))
+        .map(|rest| {
+            rest.chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .expect("a family's last case number")
+        })
+        .collect();
+    assert_eq!(
+        sizes.len(),
+        1,
+        "spec §11 lists family {prefix} as one `{range}NN` range"
+    );
+    sizes.into_iter().next().expect("the family's size")
+}
+
+/// Spec §11, read once.
+fn section_11() -> &'static str {
+    static SECTION: OnceLock<String> = OnceLock::new();
+    SECTION.get_or_init(|| {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/specs/mandate.md");
+        let spec = std::fs::read_to_string(&path).expect("the mandate spec");
+        spec.split("\n## 11.")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .expect("spec §11")
+            .to_owned()
+    })
+}
+
+/// `status.toml`, parsed once.
+fn status() -> &'static BTreeMap<String, CaseStatus> {
+    static STATUS: OnceLock<BTreeMap<String, CaseStatus>> = OnceLock::new();
+    STATUS.get_or_init(|| {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("status.toml");
+        parse_status(&std::fs::read_to_string(&path).expect("status.toml"))
+            .expect("a well-formed status.toml")
+    })
+}
+
+/// Whether `status.toml` marks the case `passing`. A case it lists as `pending`, or does not list, is
+/// pending (DEC-77 item 1), and need not pass yet.
+fn passing(id: &str) -> bool {
+    status().get(&format!("mandate::{id}")) == Some(&CaseStatus::Passing)
+}
 
 /// Every kind an arm of `mandate::cases` interprets, this harness's and the other streams'.
 const INTERPRETED: [&str; 15] = [
@@ -83,14 +144,14 @@ fn ids_where(fixture: &Json, owned: impl Fn(&str) -> bool) -> Vec<String> {
 
 /// The ids of every case of the seven owned families.
 fn owned_ids(fixture: &Json) -> Vec<String> {
-    ids_where(fixture, |f| OWNED.iter().any(|(prefix, _, _)| *prefix == f))
+    ids_where(fixture, |f| OWNED.iter().any(|(prefix, _)| *prefix == f))
 }
 
 /// The ids of the owned family whose kind is `kind`.
 fn ids_of(fixture: &Json, kind: &str) -> Vec<String> {
-    let (prefix, _, _) = OWNED
+    let (prefix, _) = OWNED
         .iter()
-        .find(|(_, owned, _)| *owned == kind)
+        .find(|(_, owned)| *owned == kind)
         .unwrap_or_else(|| panic!("`{kind}` is not an owned family's kind"));
     ids_where(fixture, |f| f == *prefix)
 }
@@ -120,7 +181,11 @@ fn every_owned_case_key_is_read() {
             "{id}: the failure must name the key it did not read, got: {failure}"
         );
     }
-    assert_eq!(checked, 202, "the seven owned families are 202 cases");
+    let listed: usize = OWNED.iter().map(|(prefix, _)| listed_size(prefix)).sum();
+    assert_eq!(
+        checked, listed,
+        "the seven owned families are the cases spec §11 lists for them"
+    );
 }
 
 /// A case of a kind no arm interprets fails naming the kind, so nobody can mistake it for covered; and
@@ -257,7 +322,8 @@ fn a_wrong_expected_value_fails_the_case() {
 fn the_fixture_holds_the_families_this_stream_expects() {
     let fixture = fixture();
     let cases = fixture["cases"].as_array().expect("a case list");
-    for (prefix, kind, count) in OWNED {
+    for (prefix, kind) in OWNED {
+        let count = listed_size(prefix);
         let mut ids = ids_where(&fixture, |f| f == prefix);
         ids.sort();
         let listed: Vec<String> = (1..=count).map(|n| format!("{prefix}{n:02}")).collect();
@@ -342,10 +408,28 @@ fn every_owned_expectation_member_is_read() {
             "{id}: the failure must name the expectation it did not read, got: {failure}"
         );
     }
+    let risk_cases = ids_of(&fixture, "risk_state");
+    let risk_steps: usize = fixture["cases"]
+        .as_array()
+        .expect("a case list")
+        .iter()
+        .filter(|c| risk_cases.iter().any(|id| c["id"] == id.as_str()))
+        .map(|c| c["steps"].as_array().map_or(0, Vec::len))
+        .sum();
     assert_eq!(
         (top_level, in_steps),
-        (178, 111),
-        "both sweeps must have been exercised over every expectation the owned cases carry"
+        (
+            owned_ids(&fixture)
+                .len()
+                .saturating_sub(listed_size("MC-R")),
+            risk_steps
+        ),
+        "both sweeps must have been exercised over every expectation the owned cases carry: one \
+         top-level expectation per case outside family R, and one per step of family R"
+    );
+    assert!(
+        top_level > 0 && in_steps > 0,
+        "neither sweep may be vacuous"
     );
 }
 
@@ -512,8 +596,34 @@ fn every_change_case_passes_and_fails_on_each_edited_expectation() {
     );
 }
 
-/// Every MC-R case passes as the fixture states it, and fails, naming the member and its step, when any
-/// one expectation of any one step is edited.
+/// The edits `every_risk_state_case_passes_and_fails_on_each_edited_expectation` makes on one case,
+/// counted from the fixture alone: one per member of each step, except that a non-empty journal is
+/// edited once per member of each of its events, and a non-empty name set once per name and twice more
+/// (a name dropped, a stranger added).
+fn risk_state_edits(case: &Json) -> usize {
+    case["steps"]
+        .as_array()
+        .expect("a step list")
+        .iter()
+        .flat_map(|step| step["expect"].as_object().expect("a step expectation"))
+        .map(|(member, value)| match value.as_array() {
+            Some(events) if member == "journal" && !events.is_empty() => events
+                .iter()
+                .map(|e| e.as_object().expect("a journal event").len())
+                .sum(),
+            Some(names) if !names.is_empty() => names.len() + 2,
+            _ => 1,
+        })
+        .sum()
+}
+
+/// Every MC-R case `status.toml` marks passing passes as the fixture states it, and fails, naming the
+/// member and its step, when any one expectation of any one step is edited.
+///
+/// A pending case (DEC-77 item 1) is left to `refcases.rs`, which runs it only with
+/// `--include-ignored`: a reference PR can move a case's expectation ahead of the code that meets it,
+/// as DEC-270 moved MC-R17's journal, and the code cannot ship with that PR (ES-22, DEC-276). The
+/// other sweeps in this file still read every key and member of a pending case.
 ///
 /// The risk-state arm's read-every-key half, for the reason the goal test above gives. The member sweep
 /// in `every_owned_expectation_member_is_read` shows a member the harness does not know is refused; this
@@ -534,8 +644,25 @@ fn every_change_case_passes_and_fails_on_each_edited_expectation() {
 #[test]
 fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
     let fixture = fixture();
-    let ids = ids_of(&fixture, "risk_state");
-    assert_eq!(ids.len(), 24, "family R is 24 cases");
+    let family = ids_of(&fixture, "risk_state");
+    assert_eq!(
+        family.len(),
+        listed_size("MC-R"),
+        "family R is the cases spec §11 lists"
+    );
+    let ids: Vec<String> = family.into_iter().filter(|id| passing(id)).collect();
+    assert!(!ids.is_empty(), "at least one MC-R case is passing");
+    let listed_passing: Vec<String> = status()
+        .iter()
+        .filter(|(key, state)| key.starts_with("mandate::MC-R") && **state == CaseStatus::Passing)
+        .map(|(key, _)| key.trim_start_matches("mandate::").to_owned())
+        .collect();
+    let mut swept = ids.clone();
+    swept.sort();
+    assert_eq!(
+        swept, listed_passing,
+        "the sweep covers exactly the MC-R cases status.toml marks passing"
+    );
     let mut edits = 0;
     for id in &ids {
         if let Err(failure) = run(fixture.clone(), id) {
@@ -656,12 +783,18 @@ fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
             }
         }
     }
+    let expected: usize = fixture["cases"]
+        .as_array()
+        .expect("a case list")
+        .iter()
+        .filter(|c| ids.iter().any(|id| c["id"] == id.as_str()))
+        .map(risk_state_edits)
+        .sum();
     assert_eq!(
-        edits, 2_097,
-        "every member of every step of the 24 cases was edited once, every member of every one of the \
-         138 journal events, every one of the 106 names the three name sets list, each in place of its \
-         list's first element alone, and each of the 79 non-empty name sets once with a name dropped \
-         and once with a stranger added"
+        edits, expected,
+        "every member of every step of the passing cases was edited once, every member of every \
+         journal event, every name the three name sets list, each in place of its list's first element \
+         alone, and each non-empty name set once with a name dropped and once with a stranger added"
     );
 }
 
@@ -724,7 +857,11 @@ fn every_risk_day_case_passes_and_fails_on_each_edited_expectation() {
 fn every_risk_state_step_field_and_initial_field_is_read() {
     let fixture = fixture();
     let ids = ids_of(&fixture, "risk_state");
-    assert_eq!(ids.len(), 24, "family R is 24 cases");
+    assert_eq!(
+        ids.len(),
+        listed_size("MC-R"),
+        "family R is the cases spec §11 lists"
+    );
     let planted = "a_field_the_harness_does_not_read".to_owned();
     let mut steps_planted = 0;
     for id in &ids {
@@ -760,7 +897,11 @@ fn every_risk_state_step_field_and_initial_field_is_read() {
             );
         }
     }
-    assert_eq!(steps_planted, 24, "every case's first step was doctored");
+    assert_eq!(
+        steps_planted,
+        ids.len(),
+        "every case's first step was doctored"
+    );
 }
 
 /// A step whose `event` the harness does not apply fails its case, naming the kind.

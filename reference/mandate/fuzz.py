@@ -24,6 +24,8 @@ def rand_mandate(cls):
     r["daily_loss_action"] = rng.choice(["exits_only", "flatten_and_pause"])
     r["max_daily_loss"] = rng.choice(["0.02", "0.05", "0.1"])
     m["capital"]["max_loss_from_allocation"] = rng.choice(["0.08", "0.1", "0.2"])
+    if cls == "crypto":
+        m["goal"]["on_complete"] = rng.choice(["hold_protected", "disarm_ladder", "release"])
     if rng.random() < 0.5:
         r["drawdown_ladder"] = [{"at": "0.02", "action": "scale_sizes", "factor": "0.75"},
                                 {"at": "0.04", "action": "scale_sizes", "factor": "0.5"},
@@ -189,7 +191,36 @@ def run(m, cls, steps, start, L="0"):
         for e in o["journal"]:
             if e["type"] == "AgentStopped":
                 check(D(e["loss_carry_usd"]) == max(D(0), D_net - E), "MI-14 loss carry is the net dollar loss", (s, o))
+        # §5.8: sizes step back from the highest active scale rung, so the active ones are always the shallowest
+        active = {D(rs.lad[i]["at"]) for i, st in rs.scale.items() if st["active"]}
+        check(all(D(rs.lad[i]["at"]) in active for i in rs.scale if active and D(rs.lad[i]["at"]) < max(active)),
+              "§5.8 the active scale rungs are the shallowest", (s, o))
+        # §3.1: a completed profit_stop goal's one outcome is the discretionary exit, then retirement
+        for e in o["journal"]:
+            if e["type"] == "GoalCompleted" and m["goal"]["type"] == "profit_stop":
+                check(e.get("then") == "discretionary_exit_all_then_retire" and "on_complete" not in e,
+                      "§3.1 a profit_stop goal completes with its one outcome", (s, o))
+        if s["event"] == "goal_complete" and m["goal"].get("on_complete") == "release" and "retired" not in before[0]:
+            RELEASES[0] += 1
+        # MI-14 and DEC-270: every retirement, a release included, journals the carry once; a redeploy on the
+        # connection is refused (V-032) or opens at that L, so its floor sits the released loss above C x (1 - f)
+        if "retired" in rs.restrictions and "retired" not in before[0]:
+            stops = [e for e in o["journal"] if e["type"] == "AgentStopped"]
+            check(len(stops) == 1, "MI-14 a retirement journals AgentStopped once, release included", (s, o))
+            if stops:
+                carry = max(D(0), D_net - E)
+                budget = D(m["capital"]["max_loss_from_allocation"]) * D(m["capital"]["allocation_usd"])
+                again, _ = semantic(m, dict(base.CTX, connection_loss_carry_usd=stops[0]["loss_carry_usd"]))
+                check(("V-032" in again) == (carry >= budget), "MI-14 a redeploy is refused exactly when the carry uses the floor budget", (s, o))
+                fresh = RiskState(m, "0", "1", cls, s["at"], inherited_loss=stops[0]["loss_carry_usd"])
+                Cn = D(m["capital"]["allocation_usd"])
+                floor = Cn * (1 - D(m["capital"]["max_loss_from_allocation"])) + carry
+                check(fresh.conditions(E=floor, H=Cn, E0=Cn, C=Cn)["lifetime_floor"][0]
+                      and not fresh.conditions(E=floor + D("0.01"), H=Cn, E0=Cn, C=Cn)["lifetime_floor"][0],
+                      "MI-14 a release never lets a redeploy reset the lifetime floor", (s, o, floor))
     return outs
+
+RELEASES = [0]
 
 def fuzz_risk(n_runs):
     for k in range(n_runs):
@@ -209,6 +240,35 @@ def fuzz_risk(n_runs):
         c = run(m, cls, [steps[i] for i in keep], start, L)
         strip = lambda o: {x: y for x, y in o.items() if x != "pending"}
         check([strip(a[i]) for i in keep] == [strip(x) for x in c], "MI-13 no-event ticks are replay-safe", k)
+    check(RELEASES[0] > 0, "the fuzz exercised a release (DEC-270)", RELEASES[0])
+
+def fuzz_stepped_lift(n_runs):
+    """§5.8's stepped lift, which the general walk rarely reaches: latch the exits_only rung, acknowledge, then wander
+    across the scale rungs' trigger and lift levels so a lifted rung can trigger again while the others step back."""
+    start = "2026-09-21T13:35:00.000000000Z"
+    for k in range(n_runs):
+        m = rand_mandate("crypto")
+        m["risk"]["drawdown_ladder"] = [{"at": "0.02", "action": "scale_sizes", "factor": "0.75"},
+                                        {"at": "0.04", "action": "scale_sizes", "factor": "0.5"},
+                                        {"at": "0.06", "action": "exits_only", "factor": None},
+                                        {"at": "0.08", "action": "flatten_and_pause", "factor": None}]
+        m["risk"]["breach_confirm_s"] = 0
+        m["risk"]["max_daily_loss"] = "0.5"
+        m["risk"]["scale_lift_after_s"] = rng.choice([60, 300, 600])
+        m["capital"]["max_loss_from_allocation"] = "0.5"
+        V.validate(m)
+        t = T(start) + timedelta(seconds=60)
+        steps = [{"event": "mark", "at": fmt(t), "bid": "53000", "session": "crypto", "sane": True}]
+        t += timedelta(seconds=60)
+        steps.append({"event": "owner_acknowledged", "at": fmt(t), "session": "crypto", "restriction": "drawdown_ladder"})
+        for _ in range(rng.randint(10, 40)):
+            t += timedelta(seconds=rng.choice([30, 60, 120, 300, 600, 900]))
+            if rng.random() < 0.25:
+                steps.append({"event": "clock", "at": fmt(t), "session": "crypto"})
+            else:
+                steps.append({"event": "mark", "at": fmt(t), "bid": str(rng.choice(range(48500, 53600, 100))),
+                              "session": "crypto", "sane": True})
+        run(m, "crypto", steps, start)
 
 def fuzz_gate(n):
     m = copy.deepcopy(base.swing)
@@ -1535,6 +1595,7 @@ def fuzz_content(n):
 if __name__ == "__main__":
     fuzz_ladder_precision(300)
     fuzz_risk(400)
+    fuzz_stepped_lift(300)
     fuzz_gate(300)
     fuzz_builder(400)
     fuzz_admission(300)

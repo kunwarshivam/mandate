@@ -31,6 +31,12 @@ builder, versioning, change classification, and the records kept.
   content and `DecisionMade` may name `review_ceiling` (§6.4, §10, journal spec §9). The field is
   optional and absent means no review date, so no existing reference case changes; the MC-D cases
   are added (§11).
+- **v0.6, amended ([DEC-270](../project/04-decision-log.md#decisions), [DEC-274](../project/04-decision-log.md#decisions)):**
+  `on_complete: release` retires the agent with its loss carry: `AgentStopped` (reason
+  `goal_complete`) follows `PositionReleased` and carries max(0, N − E) to the connection, so
+  releasing and redeploying cannot reset the floor (§3.1, §5.7, MI-14). It only tightens: MC-R17's
+  journal gains the event, and MC-R25, MC-R26, and MC-V68 show the carry, the redeploy at the
+  carried L, and V-032 counting it.
 - **v0.6, amended ([DEC-185](../project/04-decision-log.md#decisions)):** the client ceiling: an
   order an owner-connected client requested is never `auto` (§6.2 step 5a, MI-30), the approval card
   names the client from the content object's `trigger` and its `decided_by` may be `client_ceiling`
@@ -281,7 +287,7 @@ it. `null` means no end.
 |---|---|
 | `hold_protected` | **Holding:** restriction `goal_complete` (mode `exits_only`); protection and every risk limit stay armed |
 | `disarm_ladder` | Holding, but the drawdown ladder and daily loss are disarmed; protection and the lifetime floor stay armed |
-| `release` | The agent cancels its protective orders, the ledger records `PositionReleased`, the positions become the owner's external holdings, claims are released, and the agent retires |
+| `release` | The agent cancels its protective orders, the ledger records `PositionReleased`, the positions become the owner's external holdings, claims are released, and the agent retires (`AgentStopped`, reason `goal_complete`), carrying its net dollar loss to the connection as any retirement does (§5.7, [DEC-270](../project/04-decision-log.md#decisions)) |
 
 - **Holding:** the owner is alerted when it starts. The owner can later release (step-up; journaled
   as `PositionReleased`, including the warning shown that the positions will be unprotected) or
@@ -564,7 +570,8 @@ Applies to `exits_only` and `flatten_and_pause` rungs, daily loss, the lifetime 
   rejected (`waiting_period`), as is a version that leaves E at or below the new floor
   (`still_below_new_floor`) or does not loosen (`not_loosening`).
 - **Inherited loss L.** Each connection keeps a **loss carry**: the sum, over agents retired on it
-  in the last 90 days, of their **net dollar loss** max(0, N − E) at retirement (§5.1). Withdrawals
+  in the last 90 days, of their **net dollar loss** max(0, N − E) at retirement (§5.1), whether the
+  owner stopped the agent or a completed goal released its positions (§3.1). Withdrawals
   lower N and E equally, so withdrawing before retiring cannot shrink the carry (MI-14). A new agent
   on the connection starts with L = the carry, so retiring and redeploying cannot reset the floor.
   Deployment is rejected if the carry ≥ `max_loss_from_allocation` × allocation (V-032).
@@ -701,9 +708,10 @@ stream with `causation_id` and judges it there; nothing the owner's client check
      becomes the stricter of the result so far and `ask` (MI-32): no `auto` rule, `auto` default, or
      delegation acts alone on a mandate nobody has confirmed since its review date. The admission
      ceiling only tightens (MI-17), so an `auto` admission setting yields no `auto` of its own; an
-     `auto` it leaves standing is the rules', which this step catches. With no risk clock to judge by, the date has passed (`AGENTS.md` rule 3). Like the
-     two ceilings before it, it names itself (`review_ceiling`) only when it changed the decision,
-     so an `ask` keeps its own source and a `deny` its own.
+     `auto` it leaves standing is the rules', which this step catches. With no risk clock to judge
+     by, the date has passed (`AGENTS.md` rule 3). Like the two ceilings before it, it names itself
+     (`review_ceiling`) only when it changed the decision, so an `ask` keeps its own source and a
+     `deny` its own.
 6. `auto` → submit (the gate runs again at submission). `deny` → skip. `ask` → approval (§6.4).
 
 ### 6.3 Condition language
@@ -984,8 +992,8 @@ nobody has confirmed since its review date keeps running, but nothing in it acts
 - **What it changes.** From that instant, §6.2 step 5b turns every `auto` an `open` or `increase`
   would get into `ask`: the rules', the default's, and a delegation's, including on the first order
   in a newly admitted instrument, where an `auto` admission setting leaves the rules' `auto`
-  standing (the admission ceiling only tightens, MI-17) (MI-32). A `deny` still denies, an `ask` keeps its source, and the `ask` times out to `skip`
-  (§6.4). Nothing is flattened, cancelled, or held: exits, protective orders, risk exits, owner
+  standing (the admission ceiling only tightens, MI-17) (MI-32). A `deny` still denies, an `ask`
+  keeps its source, and the `ask` times out to `skip` (§6.4). Nothing is flattened, cancelled, or held: exits, protective orders, risk exits, owner
   exits, and kill switches are built-in AUTO at step 3, before the ceiling (MI-1, `AGENTS.md`
   rules 2 and 13), and positions keep their protection.
 - **Time base.** Only the risk clock judges it (§5.2), never `event_time` or a client's clock, so
@@ -1377,7 +1385,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 325 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 328 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1389,9 +1397,9 @@ harness pins the case count.
 | Family | IDs | Covers |
 |---|---|---|
 | Schema | MC-S01 to MC-S31 | Structural rejects, including `on_complete`, the 300 s confirmation cap, per-model output age, `max_instruments` bounds, the research object, `autonomy.admission` |
-| Semantic | MC-V01 to MC-V67 | Every V-rule and warning, the closed platform-default list, loss carry, the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
+| Semantic | MC-V01 to MC-V68 | Every V-rule and warning, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
 | Policy | MC-P01 to MC-P22 | Nearest-level reporting, each key kind, the retail profile (DEC-98), the internal research profile (DEC-103), paper-only environments, the research keys, platform maximums |
-| Risk state | MC-R01 to MC-R24 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a universe change as a risk input |
+| Risk state | MC-R01 to MC-R26 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |
 | Gate | MC-G01 to MC-G16 | Position cap, order size, group cooldown, orders per day, gross exposure, exits exempt, the working universe (including an empty one, which denies every opening) |
 | Order builder | MC-B01 to MC-B32 | Exit and buy conviction, freshness, clipping, band, trim and its guards, deferral, averaging down, accumulate clips with fees |

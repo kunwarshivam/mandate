@@ -16,9 +16,10 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `DecisionMade`'s `decided_by` may be `review_ceiling`, the review date of
   [mandate spec §6.2 step 5b](mandate.md#62-evaluation), the same label the approval content's
   `trigger.decided_by` carries ([mandate spec §6.4](mandate.md#64-approvals), where its
-  `trigger.rule` is `null`). Only the label set grows here. The rule 7 clause that refuses it unless
-  `autonomy` is `ask` lands with its vectors in a later change, because the agent-stream harness
-  pins the vector count in code (backlog E6-14).
+  `trigger.rule` is `null`). Rule 7 refuses it unless `autonomy` is `ask`, as it refuses
+  `client_ceiling`. The clause's vectors (an invalid and a valid draft), the generator's validator
+  rule and mutant, and the agent-stream harness's count follow in one code change (ES-22; backlog
+  E6-14), as DEC-177 items 6 and 14 did.
 - **v0.6 ([DEC-177](../project/04-decision-log.md#decisions)):** §9.1 closes the payload schemas of
   the agent stream's `StreamOpened`, `ObservationRecorded`, `ModelOutputRecorded`, `DecisionMade`,
   `IntentProposed`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`, and rules on
@@ -569,8 +570,10 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
    `payload.client_id`; a decision `requested_by` `client` with purpose `open` or `increase` is
    never `auto`, whatever decided it (the client ceiling, mandate spec §6.2 step 5a, MI-30) —
    `payload.autonomy`; and `decided_by` is `client_ceiling` only when `requested_by` is `client` and
-   `autonomy` is `ask` — `payload.decided_by`. So the record itself refuses a connected client's
-   opening that ran unasked.
+   `autonomy` is `ask` — `payload.decided_by`; and `decided_by` is `review_ceiling` only when
+   `autonomy` is `ask` (the review ceiling, mandate spec §6.2 step 5b, MI-32) —
+   `payload.decided_by`. So the record itself refuses a connected client's opening that ran
+   unasked, and a decision that claims the review ceiling and ran unasked.
 8. `DecisionMade`: `exit_origin` is non-null exactly when `purpose` is `discretionary_exit` —
    `payload.exit_origin`. A decision was produced by a §8.3 evaluation exactly when `purpose` is
    `open` or `increase` or `exit_origin` is `signal`; `exit_conviction`, `buy_conviction`, and

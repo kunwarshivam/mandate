@@ -14,9 +14,9 @@ use mandate_canon::Value;
 use mandate_executor::BrokerRequest;
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_runtime::{
-    Autonomy, Deployment, DryRunVerdict, Effect, EventDraft, FlattenPlan, FlattenPlanner,
-    FlattenRequest, FoldedEvent, GateDryRun, Input, IntentHandoff, MandateView, OrderPlan, Ports,
-    Proposal, Purpose, RiskClock, RuntimeState, SignalInputs, WriterEpoch,
+    ActorKind, Autonomy, Classified, Deployment, DryRunVerdict, Effect, EventDraft, FlattenPlan,
+    FlattenPlanner, FlattenRequest, FoldedEvent, GateDryRun, Input, IntentHandoff, MandateView,
+    OrderPlan, Ports, Proposal, Purpose, RiskClock, RuntimeState, SignalInputs, WriterEpoch,
 };
 use mandate_time::UtcNanos;
 
@@ -242,6 +242,7 @@ impl<'s> Session<'s> {
                 Effect::Intent(handoff) => self.hand(&handoff)?,
                 Effect::Timer(_) => {}
                 Effect::Notify(notification) => self.report.alerts.push(notification.message_key),
+                Effect::NotifyApproval(_) => self.report.alerts.push("approval_needed"),
             }
         }
         Ok(())
@@ -412,6 +413,7 @@ impl<'s> Session<'s> {
                 event_id: mandate_runtime::EventId(row.event_id.clone()),
                 event_type: row.event_type.clone(),
                 causation_id: causation.clone().map(mandate_runtime::EventId),
+                actor: TRACER_ACTOR,
                 payload: payload.clone(),
             },
         )?;
@@ -447,6 +449,12 @@ impl<'s> Session<'s> {
         }
     }
 }
+
+/// The actor every event the tracer folds is read as. The tracer folds only its agent and account
+/// streams, where no response is admitted from anyone, and reads no control stream; `system` is
+/// what admission never admits (EI-10), so the control-stream tail that maps the envelope's
+/// `actor.kind` is stream L's, with the tail itself (M7 brief, Decisions needed 5).
+const TRACER_ACTOR: ActorKind = ActorKind::System;
 
 /// The payload and causation a stored body carries, read from its canonical bytes rather than from
 /// anything the shell remembers, so what is folded is what was committed.
@@ -497,7 +505,8 @@ impl OrderPlan for Bridge<'_> {
         proposal
     }
 
-    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Autonomy {
+    /// The stage classifier names no `DecidedBy` label, so its answer carries none.
+    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Classified {
         let answer = self.classifier.classify(view, proposal);
         let autonomy = map::autonomy_of(&answer);
         let cause = match answer {
@@ -513,7 +522,10 @@ impl OrderPlan for Bridge<'_> {
                 cause,
             });
         }
-        autonomy
+        Classified {
+            autonomy,
+            decided_by: None,
+        }
     }
 }
 

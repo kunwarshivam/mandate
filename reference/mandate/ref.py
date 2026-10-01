@@ -710,16 +710,16 @@ class RiskState:
         elif kind == "floor_loosened":
             err = self._loosen_floor(s, ev, t)
         elif kind == "agent_stopped":
-            ev.append({"type": "AgentStopped", "reason": s.get("reason", "owner_stop"),
-                       "loss_carry_usd": norm(max(D(0), self.net_contributed - self.equity()))})
-            self.restrictions["retired"] = "stopped"
-            self.retired = True
+            self._retire(s.get("reason", "owner_stop"), ev)
+        elif kind == "goal_complete" and self.m["goal"]["type"] == "profit_stop":
+            ev.append({"type": "GoalCompleted", "then": "discretionary_exit_all_then_retire"})
+            self.restrictions["goal_complete"] = "exits_only"
         elif kind == "goal_complete":
-            oc = self.m["goal"].get("on_complete", "hold_protected")
+            oc = self.m["goal"]["on_complete"]
             ev.append({"type": "GoalCompleted", "on_complete": oc})
             if oc == "release":
                 ev.append({"type": "PositionReleased", "qty": norm(self.qty)})
-                self.restrictions["retired"] = "stopped"
+                self._retire("goal_complete", ev)
             else:
                 self.restrictions["goal_complete"] = "exits_only"
                 if oc == "disarm_ladder":
@@ -744,8 +744,8 @@ class RiskState:
                     st["lift_acc"] = 0.0
                     if not st["active"]:
                         st["active"] = True
-                        if i in self.reset_queue:
-                            self.reset_queue.remove(i)
+                        if self.reset_queue:
+                            self.reset_queue = sorted(self.reset_queue + [i], key=lambda j: D(self.lad[j]["at"]), reverse=True)
                         ev.append({"type": "RiskLimitTriggered", "limit": key, "action": "scale_sizes"})
                 elif st["active"]:
                     can_lift = H - E < (at - self.hyst) * H and (not self.reset_queue or self.reset_queue[0] == i)
@@ -843,6 +843,14 @@ class RiskState:
             out["error"] = err
         out.update(extra)
         return out
+
+    def _retire(self, reason, ev):
+        """Retirement (§5.7, MI-14): the connection carries the net dollar loss max(0, N - E), whether the
+        owner stopped the agent or a completed goal released its positions (DEC-270)."""
+        ev.append({"type": "AgentStopped", "reason": reason,
+                   "loss_carry_usd": norm(max(D(0), self.net_contributed - self.equity()))})
+        self.restrictions["retired"] = "stopped"
+        self.retired = True
 
     def _apply_daily(self, ev):
         if self.daily_action == "exits_only":
