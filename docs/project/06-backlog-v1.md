@@ -391,6 +391,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Follow-up (DEC-257 item 12; stream I):* `Input::Command` still carries the owner's pause,
   resume, Stop, exit and kill switch with no step-up judged; retire those for the control stream's
   `OwnerCommandIssued` once the shell tails it, leaving only the risk-limit and operator switches.
+  *Tests done (M7 tests PR 4 of 4, DEC-257 items 13 to 17); the CLI's implementation follows:*
+  `crates/mandate-cli/tests/approvals.rs` and `agent.rs` hold 15 tests pending E8-3 for
+  `mandate approvals list`, `show`, `approve` and `skip`, and `mandate agent status`, `pause`,
+  `resume`, `stop`, `kill`, `exit` and `acknowledge`, over the `ControlJournal` stubs in
+  `crates/mandate-cli/src/control.rs`. The implementation PR also wires the commands into `clap`
+  and `main.rs`, and gives `ControlJournal` a `mandate-journal-pg` adapter.
+  *Prerequisite (DEC-257 item 17):* `mandate-journal` registers no payload schema for any agent- or
+  control-stream event (`ApprovalRequested`, `ApprovalResponseSubmitted`, `OwnerCommandIssued`,
+  `OwnerAcknowledged`, and the rest), so a real journal refuses each one as `UnknownSchema` and
+  neither the runtime's nor the CLI's implementation can append through one. Register the schemas
+  as journal spec §9 closes them, with the catalogue entries above, before either implementation.
   *Follow-up (#321 review, minor 1):* broaden §6.1's single-use assertion ledger to any
   control-stream event carrying step-up evidence (`DisclosureAccepted`, `PolicyChanged`), which
   would make MI-24 true as written.
