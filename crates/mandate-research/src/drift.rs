@@ -14,13 +14,17 @@
 //!
 //! 1. [`DriftMeasure::NoBaseline`] — fewer than [`BASELINE_WINDOW`] observations ever seen:
 //!    unusual, fail-safe, because an unproven source's inputs escalate until its baseline fills;
-//! 2. [`DriftMeasure::DuplicateContent`] — one content hash at least [`DUPLICATE_MINIMUM`] of the
+//! 2. [`DriftMeasure::DegenerateBaseline`] — the baseline's 32 observations all arrived in one
+//!    instant, so its zero span can be crossed by no fraction of itself and the timing measures
+//!    below are unreachable for exactly the fastest flood, the R-05 shape: unusual, failing
+//!    closed (DEC-267 item 6, tightened in round 1);
+//! 3. [`DriftMeasure::DuplicateContent`] — one content hash at least [`DUPLICATE_MINIMUM`] of the
 //!    recent window: a replayed or spammed payload;
-//! 3. [`DriftMeasure::ArrivalRate`] — the recent window's span under [`ARRIVAL_FACTOR`] of the
+//! 4. [`DriftMeasure::ArrivalRate`] — the recent window's span under [`ARRIVAL_FACTOR`] of the
 //!    baseline's: a flood;
-//! 4. [`DriftMeasure::GapCollapse`] — the recent window's smallest inter-arrival gap under
+//! 5. [`DriftMeasure::GapCollapse`] — the recent window's smallest inter-arrival gap under
 //!    [`GAP_FACTOR`] of the baseline's mean gap;
-//! 5. [`DriftMeasure::LengthShift`] — the recent window's mean byte length beyond
+//! 6. [`DriftMeasure::LengthShift`] — the recent window's mean byte length beyond
 //!    [`LENGTH_FACTOR`] times the baseline's, or under its inverse.
 //!
 //! A refused observation quarantines its source: a timestamp before the source's last breaks
@@ -112,6 +116,10 @@ pub struct InputObservation {
 pub enum DriftMeasure {
     /// The source has not filled its baseline: unusual, fail-safe.
     NoBaseline,
+    /// The baseline's observations all arrived in one instant, so its zero span cannot be crossed
+    /// by a fraction of itself and the timing measures cannot exonerate the source: unusual,
+    /// failing closed (DEC-267 item 6, round 1's major 2).
+    DegenerateBaseline,
     /// One content hash repeats through the recent window.
     DuplicateContent,
     /// The recent window arrived in a fraction of the baseline's time.
@@ -246,12 +254,16 @@ fn first_crossed(effective: &[InputObservation]) -> Option<DriftMeasure> {
     measured(baseline, recent)
 }
 
-/// The measured verdicts for a history that supplies both windows, in evaluation order; the
-/// first crossing is the one reported (the house style of mandate spec §8.5).
+/// The measured verdicts for a history that supplies both windows: the baseline's own health
+/// first — a span of zero can exonerate nothing — then the window measures in DEC-266's order;
+/// the first crossing is the one reported (the house style of mandate spec §8.5).
 fn measured(
     baseline: &[InputObservation; BASELINE_WINDOW],
     recent: &[InputObservation; RECENT_WINDOW],
 ) -> Option<DriftMeasure> {
+    if window_span(baseline) == 0 {
+        return Some(DriftMeasure::DegenerateBaseline);
+    }
     if duplicate_repeats(recent) {
         return Some(DriftMeasure::DuplicateContent);
     }
@@ -470,6 +482,146 @@ mod tests {
             BASELINE_WINDOW.saturating_sub(1),
             "the gap divisor is the baseline's own gaps: one fewer than its observations"
         );
+    }
+
+    /// DEC-266's quiet history in the module's own words: 40 observations a minute apart,
+    /// distinct content, 1 000 bytes each — the same shape `tests/drift.rs`'s `quiet` builds.
+    fn quiet_history(source: &SourceId) -> Result<Vec<InputObservation>, ResearchError> {
+        let arrivals: Vec<Arrival> = (0..40)
+            .map(|index| (60, 0, u64::try_from(index).unwrap_or(0), 1_000))
+            .collect();
+        observations_of(source, &arrivals, BASE_SECS)
+    }
+
+    /// Eight instants from `start`, advancing by the seven `gaps` between them, on whole
+    /// seconds: the boundary cases in `tests/drift.rs` name their spans the same way.
+    fn eight_at(start: i64, gaps: [i64; 7]) -> Result<Vec<UtcNanos>, ResearchError> {
+        let mut at = start;
+        let mut times = vec![UtcNanos::from_parts(at, 0)?];
+        for gap in gaps {
+            at = at.saturating_add(gap);
+            times.push(UtcNanos::from_parts(at, 0)?);
+        }
+        Ok(times)
+    }
+
+    /// DEC-267 item 1: the order check reads the whole history's last, not the trusted
+    /// suffix's. After a refusal, a stamp between the refused one and the pre-refusal last is
+    /// refused too — it precedes an instant the quarantine refuses to trust — and
+    /// re-quarantines; the trusted-suffix reading would fold it and seed the new baseline from
+    /// timing the quarantine rejects, and the plant that reads the check that way fails here
+    /// (round 1's major 1).
+    #[test]
+    fn a_stamp_between_the_refused_one_and_the_pre_refusal_last_is_refused_too()
+    -> Result<(), ResearchError> {
+        let source = SourceId::new("feed-a")?;
+        let mut state = DriftState::new();
+        for observation in &quiet_history(&source)? {
+            state.observe(observation)?;
+        }
+        let refused = UtcNanos::from_parts(BASE_SECS, 0)?;
+        let between = UtcNanos::from_parts(BASE_SECS, 1)?;
+        assert!(matches!(
+            state.observe(&observation(&source, refused, 999, 1_000)),
+            Err(ResearchError::ObservationOutOfOrder)
+        ));
+        assert!(
+            matches!(
+                state.observe(&observation(&source, between, 998, 1_000)),
+                Err(ResearchError::ObservationOutOfOrder)
+            ),
+            "the whole history's last still binds after a refusal: a stamp before it is \
+             refused, not folded into the post-refusal baseline"
+        );
+        Ok(())
+    }
+
+    /// DEC-267 item 6, tightened in round 1 (major 2): a baseline whose 32 observations all
+    /// arrived in one instant has a zero span, and a zero span cannot be crossed by a fraction
+    /// of itself, so both timing measures are unreachable for exactly the fastest flood — the
+    /// R-05 shape. Such a baseline reads unusual in its own right, whatever follows it: the
+    /// reviewer's witness is 32 distinct inputs at one instant and then an 8-input burst a
+    /// second apart 23 days later, which the pre-tightening code read quiet.
+    #[test]
+    fn a_baseline_that_never_spread_is_unusual_whatever_follows() -> Result<(), ResearchError> {
+        let source = SourceId::new("feed-a")?;
+        let mut state = DriftState::new();
+        for index in 0..32 {
+            state.observe(&observation(
+                &source,
+                UtcNanos::from_parts(BASE_SECS, 0)?,
+                u64::try_from(index).unwrap_or(0).saturating_add(500),
+                1_000,
+            ))?;
+        }
+        let burst_start = BASE_SECS.saturating_add(23_i64.saturating_mul(86_400));
+        for (index, gap) in (0..8).zip([0, 1, 1, 1, 1, 1, 1, 1]) {
+            let at = UtcNanos::from_parts(burst_start.saturating_add(gap), 0)?;
+            state.observe(&observation(
+                &source,
+                at,
+                u64::try_from(index).unwrap_or(0).saturating_add(600),
+                1_000,
+            ))?;
+        }
+        let quiet_fallback = SourceDrift {
+            source: source.clone(),
+            unusual: false,
+            measure: None,
+        };
+        let verdict = state.report()?.source(&source)?.unwrap_or(quiet_fallback);
+        assert!(
+            verdict.unusual,
+            "a baseline that never spread cannot exonerate its source: the timing measures \
+             have no span to compare against"
+        );
+        assert_eq!(
+            verdict.measure,
+            Some(DriftMeasure::DegenerateBaseline),
+            "the baseline's own health is checked before the window measures, so the reported \
+             crossing names the degenerate baseline rather than a window that happens to be quiet"
+        );
+        Ok(())
+    }
+
+    /// Round 1's minor 1: DEC-266 fixes the evaluation order, and the gap-before-length pair is
+    /// the one no integration case pins. This window crosses both — a 1 s smallest gap against
+    /// a 60 s baseline mean, and a 5 000-byte recent mean against a 1 000-byte baseline — while
+    /// the arrival measure stays quiet (a 701 s span against a 155 s bar), so the reported
+    /// measure is the gap, and the arm swap fails here.
+    #[test]
+    fn the_gap_measure_is_reported_when_the_length_crosses_too() -> Result<(), ResearchError> {
+        let source = SourceId::new("feed-a")?;
+        let mut history = quiet_history(&source)?;
+        let gaps = [1, 100, 100, 100, 100, 100, 100];
+        for (index, at) in eight_at(BASE_SECS.saturating_add(2_400), gaps)?
+            .into_iter()
+            .enumerate()
+        {
+            history.push(observation(
+                &source,
+                at,
+                u64::try_from(index).unwrap_or(0).saturating_add(90),
+                5_000,
+            ));
+        }
+        let quiet_fallback = SourceDrift {
+            source: source.clone(),
+            unusual: false,
+            measure: None,
+        };
+        let verdict = fold_of(&history)?
+            .report()?
+            .source(&source)?
+            .unwrap_or(quiet_fallback);
+        assert!(verdict.unusual);
+        assert_eq!(
+            verdict.measure,
+            Some(DriftMeasure::GapCollapse),
+            "the window crosses the gap and the length measures both; DEC-266's order reports \
+             the gap"
+        );
+        Ok(())
     }
 
     /// The base instant every generated history walks forward from: 2025-01-01, far inside
