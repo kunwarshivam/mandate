@@ -1786,7 +1786,13 @@ const STUB_MARKERS: [&str; 5] = [
 /// since #196 (the protected lead has no bracket); they passed only on a stub's report from a case
 /// shrinking moved past, which [`failure_cause`] no longer reads (DEC-164; #196 review, round 1,
 /// finding 5; #199 review, round 1, finding 4).
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
+///
+/// The last 3 are E7-4 slice 6's parked-exit alert (the coordinator's ruling on #400 round 2,
+/// DEC-260 (19)). Slice 5 already parks a ladder at the close and journals the hold; what slice 6
+/// adds is the alert and the `held_long` mark on that same path, which live tests walk, so no stub
+/// can stand on it without failing them: these fail on the park's missing alert instead. Slice 6's
+/// implementation PR deletes the 3 rows with their `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1826,6 +1832,18 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "no_interval_exceeds_the_limit_without_an_alert",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_parked_night_alerts_the_owner_exactly_once",
+    ),
+    (
+        "crates/mandate-executor/tests/hand.rs",
+        "a_restart_in_a_parked_night_alerts_nothing_more",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_sequence_parked_overnight_alerts_the_owner_exactly_once",
     ),
 ];
 

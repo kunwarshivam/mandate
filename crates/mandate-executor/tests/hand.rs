@@ -5043,3 +5043,217 @@ fn every_error_code_is_stable_and_unique() {
         "the set is closed: a new variant adds a row here and a match arm in `code()`"
     );
 }
+
+/// 2026-09-22, a Tuesday, at 19:59:57 ET: three seconds before the after-hours session ends.
+const INTO_THE_CLOSE: i64 = 1_790_121_597;
+/// The Wednesday's 04:00 ET pre-market open, which ends that night's park.
+const NEXT_OPEN: i64 = 1_790_150_400;
+
+/// A risk exit for ten AAPL held with no protection resting, at a 150 bid three seconds before
+/// the after-hours session ends: §5.6 ladders it alone, and its first rung goes after-hours at
+/// 149.25; its step is asked at 20:00:03 and confirmed in the overnight session, where no rung
+/// may go, so the ladder parks (DEC-260 (14), (18)). Answers the shell, the rung's client order
+/// id, and the step's confirmation.
+fn parked_in_the_night(ports: &mandate_executor::Ports<'_>) -> (Shell, String, common::Ran) {
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for event in protected_position_events(2).into_iter().take(3) {
+        shell.fold_one(&event).expect("the position folds");
+    }
+    let mut shell = shell.restart_ready(ports);
+    shell.run(Input::Tick(clock(INTO_THE_CLOSE)), ports);
+    shell.run(
+        Input::Market(quote(AAPL, "150", "150.2", INTO_THE_CLOSE)),
+        ports,
+    );
+    let sent = shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "10", "150")),
+        ports,
+    );
+    let first = sent
+        .submissions()
+        .first()
+        .copied()
+        .cloned()
+        .expect("the exit's first rung goes after-hours");
+    assert_eq!(first.limit_price, Some(price("149.25")), "150 x (1 - 0.5%)");
+    assert!(
+        first.extended_hours,
+        "after-hours, so marked extended (§5.5)"
+    );
+    let rung = first.client_order_id.as_str().to_owned();
+    let (stepped, parked) = step_rung(&mut shell, ports, INTO_THE_CLOSE + 6, &rung);
+    assert!(
+        stepped.requests.iter().any(|request| matches!(
+            request,
+            BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == rung
+        )),
+        "the rung is cancelled to step at 20:00:03: {:?}",
+        stepped.requests
+    );
+    assert!(
+        parked.submissions().is_empty(),
+        "no rung goes in the overnight session: {:?}",
+        parked.submissions()
+    );
+    (shell, rung, parked)
+}
+
+/// Every notification a step raised.
+fn notes_of(ran: &common::Ran) -> Vec<mandate_executor::NotificationRef> {
+    ran.effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Notify(note) => Some(note.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The night after the park, swept with a quote and a tick every half hour from `from` to the
+/// second before the next open: every notification raised, and anything sent or abandoned.
+fn sweep_the_night(
+    shell: &mut Shell,
+    ports: &mandate_executor::Ports<'_>,
+    from: i64,
+) -> (Vec<mandate_executor::NotificationRef>, Vec<String>) {
+    let mut notes = Vec::new();
+    let mut wrong = Vec::new();
+    let mut instants: Vec<i64> = (0..)
+        .map(|n| from + n * 1_800)
+        .take_while(|at| *at < NEXT_OPEN)
+        .collect();
+    instants.push(NEXT_OPEN - 1);
+    for at in instants {
+        for input in [
+            Input::Market(quote(AAPL, "150", "150.2", at)),
+            Input::Tick(clock(at)),
+        ] {
+            let ran = shell.run(input, ports);
+            notes.extend(notes_of(&ran));
+            wrong.extend(
+                ran.submissions()
+                    .iter()
+                    .map(|order| format!("{} sent at {at}", order.client_order_id.as_str())),
+            );
+            wrong.extend(
+                ran.draft_types()
+                    .into_iter()
+                    .filter(|kind| *kind == "OrderAbandoned")
+                    .map(|kind| format!("{kind} at {at}")),
+            );
+        }
+    }
+    (notes, wrong)
+}
+
+/// At the next open, priced from a 151 bid then: the rungs sent.
+fn at_the_open(shell: &mut Shell, ports: &mandate_executor::Ports<'_>) -> Vec<(String, bool)> {
+    shell.run(Input::Market(quote(AAPL, "151", "151.2", NEXT_OPEN)), ports);
+    let opened = shell.run(Input::Tick(clock(NEXT_OPEN)), ports);
+    opened
+        .submissions()
+        .iter()
+        .map(|order| {
+            assert_eq!(
+                order.limit_price,
+                Some(price("149.49")),
+                "151 x (1 - 1%), the next rung"
+            );
+            (
+                order.client_order_id.as_str().to_owned(),
+                order.extended_hours,
+            )
+        })
+        .collect()
+}
+
+/// The coordinator's ruling on #400 round 2 (5930410998, backlog E7-4 slice 6): a ladder that
+/// parks at the close alerts the owner **once**, when it parks, for `session_closed` as for
+/// `session_unknown`, so an exit never waits out an 8-hour night unannounced; and the park counts
+/// in what `exit_held_long` reports, so no second alert follows at `max_intent_age_s`. The alert
+/// names the park's own `GateDecided` and a generic key, nothing about the order (`AGENTS.md`
+/// rule 6). The exit is never abandoned: at the next open it goes, from its next rung.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_parked_night_alerts_the_owner_exactly_once() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, rung, parked) = parked_in_the_night(&ports);
+    let park = parked
+        .draft("GateDecided")
+        .cloned()
+        .expect("the park is journaled");
+    assert_eq!(park.payload.get("verdict"), Some(&text("hold")));
+    assert_eq!(
+        park.payload.get("reason_code"),
+        Some(&text("session_closed"))
+    );
+    assert_eq!(
+        park.payload.get("parked"),
+        Some(&mandate_canon::Value::Bool(true))
+    );
+    assert_eq!(
+        park.payload.get("held_long"),
+        Some(&mandate_canon::Value::Bool(true)),
+        "the park counts as a long hold from the start: nothing opens before 04:00"
+    );
+    let mut notes = notes_of(&parked);
+    let (night, wrong) = sweep_the_night(&mut shell, &ports, INTO_THE_CLOSE + 60);
+    notes.extend(night);
+    assert!(wrong.is_empty(), "{wrong:?}");
+    assert_eq!(
+        notes.len(),
+        1,
+        "exactly one notification across the parked night: {notes:?}"
+    );
+    assert_eq!(
+        notes[0].subject_event, park.event_id,
+        "the alert names the park's own record"
+    );
+    assert_eq!(notes[0].message_key, "session_closed");
+    assert_eq!(
+        at_the_open(&mut shell, &ports),
+        vec![(format!("{rung}-l1"), true)],
+        "the exit goes at the 04:00 open from its next rung, extended, never abandoned"
+    );
+}
+
+/// The same park across a restart in the night: the journal carries the park and its alert, so
+/// the restarted process raises nothing more before the open, and still sends the exit's next
+/// rung at the open (journal spec §8; `AGENTS.md` rules 3 and 13).
+#[test]
+#[ignore = "pending E7-4"]
+fn a_restart_in_a_parked_night_alerts_nothing_more() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (shell, rung, parked) = parked_in_the_night(&ports);
+    assert_eq!(
+        parked.notifications,
+        vec!["session_closed"],
+        "the park alerts once, when it parks"
+    );
+    let (mut restarted, started) = shell.restart(&ports);
+    assert!(
+        started.notifications.is_empty(),
+        "a restart re-alerts nothing: {:?}",
+        started.notifications
+    );
+    let (notes, wrong) = sweep_the_night(&mut restarted, &ports, INTO_THE_CLOSE + 3_600);
+    assert!(wrong.is_empty(), "{wrong:?}");
+    assert!(
+        notes.is_empty(),
+        "nothing more is raised after the restart: {notes:?}"
+    );
+    assert_eq!(
+        at_the_open(&mut restarted, &ports),
+        vec![(format!("{rung}-l1"), true)],
+        "the exit still goes at the open"
+    );
+}
