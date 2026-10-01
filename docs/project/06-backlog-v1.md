@@ -1124,6 +1124,11 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
   `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
   resubmitted at the same price every `exit_step_s`.
+- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 2
+  (minor A):** apply §8.2's in-session test to the exit ladder's last-trade arm once slice 5 folds
+  the session. Slice 4a takes a trade only from a sane quote within five minutes
+  ([DEC-260](04-decision-log.md#decisions) (5)); a print from outside the session the exit is in
+  must not price a rung either.
 - **E7-4 (stream K), found by slice 4a's rule-13 oracle (`protection::sequence_tests::rule_13_holds_over_random_scripts`):**
   (1) a passive exit waits on its OCO's cancel confirmation with no bound and no alert: a broker
   that never confirms holds the exit for good, with the protection still resting (rule 13's broker
