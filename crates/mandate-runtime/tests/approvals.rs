@@ -269,7 +269,8 @@ fn a_skip_ends_the_approval_and_sends_nothing() {
 }
 
 /// PB-1, EI-2: the deadline skips and acts on nothing, and a grant the owner submitted before the
-/// deadline but that the runtime reads after the timeout is not pending.
+/// deadline but that the runtime reads after the timeout is not pending; read before it, the same
+/// grant acts.
 #[test]
 #[ignore = "pending E8-3"]
 fn the_timeout_never_acts_and_a_grant_read_after_it_is_not_pending() {
@@ -287,6 +288,10 @@ fn the_timeout_never_acts_and_a_grant_read_after_it_is_not_pending() {
     let grant = Answer::grant(next_control_seq(&shell), &asked, DEADLINE - 10).event();
     let ran = tail(&mut shell, &grant, &ports);
     refused_with(&ran, &asked, &grant.event_id, "not_pending");
+
+    let (mut shell, asked) = asking_shell(&ports, Some(BOUND_LIMIT));
+    let grant = Answer::grant(next_control_seq(&shell), &asked, DEADLINE - 10).event();
+    acted(&tail(&mut shell, &grant, &ports), &asked, &grant.event_id);
 }
 
 /// PB-2, PB-3, EI-15: the effective time is the later of `submitted_at` and the folded clock, so a
@@ -547,6 +552,10 @@ fn an_approval_under_a_changed_version_is_not_pending() {
     let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 20).event();
     let ran = tail(&mut shell, &grant, &ports);
     refused_with(&ran, &asked, &grant.event_id, "not_pending");
+
+    let (mut shell, asked) = asking_shell(&ports, Some(BOUND_LIMIT));
+    let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 20).event();
+    acted(&tail(&mut shell, &grant, &ports), &asked, &grant.event_id);
 }
 
 /// PB-13, EI-8: a kill switch is applied whatever the approval state and cancels the approval, so
@@ -576,6 +585,10 @@ fn a_grant_read_after_a_kill_switch_is_not_pending() {
     let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 30).event();
     let ran = tail(&mut shell, &grant, &ports);
     refused_with(&ran, &asked, &grant.event_id, "not_pending");
+
+    let (mut shell, asked) = asking_shell(&ports, Some(BOUND_LIMIT));
+    let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 30).event();
+    acted(&tail(&mut shell, &grant, &ports), &asked, &grant.event_id);
 }
 
 /// Checks 10 and 11, PB-6, EI-5: a grant whose order is now classified `deny`, or `ask` by another

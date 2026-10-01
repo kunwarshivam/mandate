@@ -83,10 +83,10 @@ pub fn version_applied(seq: u64, version: &str, at: i64) -> FoldedEvent {
     )
 }
 
-/// A control-stream event id: ULID-shaped like every journal id, and starting `1`, so no fixture
-/// id the runtime derives (which start `0`) can equal one.
+/// A control-stream event id: ULID-shaped like every journal id, spelled in Crockford letters as
+/// `derived_id` is, and starting `1`, so no id the runtime derives (which start `0`) can equal one.
 pub fn control_id(seq: u64) -> EventId {
-    EventId(format!("1{seq:025}"))
+    EventId(format!("1{}", super::letters(seq, 25)))
 }
 
 /// One control-stream event from a user, as the CLI commits it.

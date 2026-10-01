@@ -1,6 +1,6 @@
 //! The approval path's invariants over random scripts (M7 tests PR 3 of 4; the brief's "Oracles":
 //! the transition table, the causation walker, the field comparer, and the clock accumulator;
-//! EI-1 to EI-7, EI-12, EI-15; DEC-173 item 10).
+//! EI-1 to EI-7, EI-10, EI-12, EI-15; DEC-173 item 10).
 //!
 //! A script asks, answers (timely or late, with a right or wrong hash, fresh, stale, reused or no
 //! step-up, from listed or unlisted principals), re-tails answers, moves marks, tightens and
@@ -44,6 +44,10 @@ enum Step {
     Retail,
     Mark(&'static str),
     Mode(&'static str),
+    /// Fold a copied exits-only without handing it in, then answer: the answer's own step applies
+    /// the tightening and cancels in the same batch as it judges the answer (DEC-131 item 25(j),
+    /// PB-21).
+    AnswerAfterTightening(Answering),
     Version,
     Restart,
 }
@@ -58,7 +62,7 @@ struct Answering {
     reuse_assertion: bool,
     right_hash: bool,
     listed: bool,
-    user: bool,
+    actor: ActorKind,
 }
 
 fn answering() -> impl Strategy<Value = Answering> {
@@ -74,10 +78,26 @@ fn answering() -> impl Strategy<Value = Answering> {
         prop::bool::weighted(0.1),
         prop::bool::weighted(0.85),
         prop::bool::weighted(0.85),
-        prop::bool::weighted(0.85),
+        prop_oneof![
+            6 => Just(ActorKind::User),
+            1 => prop::sample::select(vec![
+                ActorKind::System,
+                ActorKind::Agent,
+                ActorKind::Broker,
+                ActorKind::PlatformOperator,
+            ]),
+        ],
     )
         .prop_map(
-            |(approve, submitted_after, step_up_age, reuse_assertion, right_hash, listed, user)| {
+            |(
+                approve,
+                submitted_after,
+                step_up_age,
+                reuse_assertion,
+                right_hash,
+                listed,
+                actor,
+            )| {
                 Answering {
                     approve,
                     submitted_after,
@@ -85,7 +105,7 @@ fn answering() -> impl Strategy<Value = Answering> {
                     reuse_assertion,
                     right_hash,
                     listed,
-                    user,
+                    actor,
                 }
             },
         )
@@ -98,6 +118,7 @@ fn step() -> impl Strategy<Value = Step> {
         1 => Just(Step::Retail),
         1 => prop::sample::select(vec!["155", "156.55", "157", "150"]).prop_map(Step::Mark),
         1 => prop::sample::select(vec!["exits_only", "normal"]).prop_map(Step::Mode),
+        1 => answering().prop_map(Step::AnswerAfterTightening),
         1 => Just(Step::Version),
         1 => Just(Step::Restart),
     ]
@@ -130,6 +151,10 @@ struct Record {
     requests: BTreeMap<EventId, (i64, String)>,
     answers: BTreeMap<EventId, Generated>,
     used: BTreeSet<String>,
+    /// The requests no answer can be admitted to any more, by the oracle's own reading: those a
+    /// tightening to exits-only or a version applied after them has cancelled (mandate spec §5.9 and
+    /// §2.2, EI-7), and those an answer it judged admissible has already ended (quorum 1).
+    closed: BTreeSet<EventId>,
     last_answer: Option<FoldedEvent>,
     assertions: u64,
 }
@@ -188,10 +213,26 @@ impl Run<'_> {
                 self.fold_and_step(&event)
             }
             Step::Mode(mode) => {
+                if *mode == "exits_only" {
+                    self.close_every_request();
+                }
                 let event = mode_applied(next_account_seq(&self.shell), mode, self.record.clock);
                 self.fold_and_step(&event)
             }
+            Step::AnswerAfterTightening(a) => {
+                self.close_every_request();
+                let event = mode_applied(
+                    next_account_seq(&self.shell),
+                    "exits_only",
+                    self.record.clock,
+                );
+                self.shell
+                    .fold_one(&event)
+                    .map_err(|e| TestCaseError::fail(format!("{}: {e}", event.event_type)))?;
+                self.answer(a)
+            }
             Step::Version => {
+                self.close_every_request();
                 let event = version_applied(next_account_seq(&self.shell), "v1", self.record.clock);
                 self.fold_and_step(&event)
             }
@@ -213,6 +254,11 @@ impl Run<'_> {
                 self.step(Input::Started(epoch))
             }
         }
+    }
+
+    fn close_every_request(&mut self) {
+        let known: Vec<EventId> = self.record.requests.keys().cloned().collect();
+        self.record.closed.extend(known);
     }
 
     fn answer(&mut self, a: &Answering) -> Result<(), TestCaseError> {
@@ -264,21 +310,21 @@ impl Run<'_> {
             submitted_at,
             step_up: step_up.clone(),
             responder: if a.listed { OWNER } else { AUTHOR }.to_owned(),
-            actor: if a.user {
-                ActorKind::User
-            } else {
-                ActorKind::Agent
-            },
+            actor: a.actor,
         };
         let admissible = deadline != i64::MIN
             && a.right_hash
             && !hash.is_empty()
             && a.listed
-            && a.user
+            && a.actor == ActorKind::User
+            && !self.record.closed.contains(&approval)
             && effective < deadline
             && fresh_step_up;
         if let Some(e) = &step_up {
             self.record.used.insert(e.assertion.clone());
+        }
+        if admissible {
+            self.record.closed.insert(approval.clone());
         }
         let event = answer.event();
         self.record.answers.insert(
@@ -352,6 +398,7 @@ fn played(script: &[Step]) -> Result<(Vec<Read>, Record, Shell), TestCaseError> 
             requests: BTreeMap::new(),
             answers: BTreeMap::new(),
             used: BTreeSet::new(),
+            closed: BTreeSet::new(),
             last_answer: None,
             assertions: 0,
         },
@@ -426,7 +473,7 @@ fn check(body: impl Fn(Vec<Step>) -> Result<(), TestCaseError>) {
     }
 }
 
-/// EI-6, EI-7, DEC-173 item 10, the transition-table oracle: every approval event follows a
+/// EI-6, DEC-173 item 10, the transition-table oracle: every approval event follows a
 /// move the brief's lifecycle allows, every approval ends in exactly one terminal event once
 /// every deadline has passed, every control-stream answer is copied exactly once however often
 /// it is tailed, and replaying the journal folds to the live pending set (EI-12).
@@ -497,11 +544,13 @@ fn every_approval_moves_by_the_table_and_ends_once() {
     });
 }
 
-/// EI-1, EI-3, EI-4, EI-15, the causation walker, field comparer and clock accumulator: every
-/// opening intent's causation is an `act` re-validation of an approval the oracle generated a
-/// request for, admitted from an answer the oracle's own clock and record judge admissible, with
-/// exactly the bound action; at most one intent per approval; and no answer the oracle judges
-/// inadmissible is ever admitted.
+/// EI-1, EI-3, EI-4, EI-7, EI-10, EI-15, the causation walker, field comparer and clock
+/// accumulator: every opening intent's causation is an `act` re-validation of an approval the
+/// oracle generated a request for, admitted from an answer the oracle's own clock and record judge
+/// admissible, with exactly the bound action; at most one intent per approval; and an answer is
+/// admitted exactly when the oracle judges it admissible. Inadmissible includes an answer to a request a
+/// tightening to exits-only or a version applied after it has cancelled (EI-7), and one from any
+/// `actor.kind` but `user` (EI-10).
 #[test]
 #[ignore = "pending E8-3"]
 fn every_opening_walks_back_to_one_timely_admitted_grant() {
@@ -529,12 +578,13 @@ fn every_opening_walks_back_to_one_timely_admitted_grant() {
                 ))
             })?;
             prop_assert_eq!(event.text("approval"), Some(generated.approval.0.as_str()));
+            prop_assert_eq!(
+                event.text("result") == Some("admitted"),
+                generated.admissible,
+                "admitted exactly the answers the oracle judges admissible: {:?}",
+                generated
+            );
             if event.text("result") == Some("admitted") {
-                prop_assert!(
-                    generated.admissible,
-                    "admitted an inadmissible answer: {:?}",
-                    generated
-                );
                 prop_assert_eq!(
                     event.text("verdict"),
                     Some(if generated.approve {
