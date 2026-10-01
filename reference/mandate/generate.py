@@ -183,6 +183,23 @@ SEM = [
     ("MC-V67", "Platform-proposed envelope field left unconfirmed", "research_equity", [],
      {"provenance": {"/universe/max_instruments": PU("platform_proposed", False)}}),
 ]
+RELEASE_START = "2026-09-21T14:00:00.000000000Z"
+RELEASE_STEPS = [{"event": "mark", "at": "2026-09-21T14:01:00.000000000Z", "bid": "54000", "session": "crypto", "sane": True},
+                 {"event": "goal_complete", "at": "2026-09-21T14:02:00.000000000Z", "session": "crypto"}]
+
+def release_carry():
+    """The loss carry MC-R25's release journals, computed by the risk state rather than typed, so MC-V68 and MC-R26
+    redeploy on exactly what the connection carries (DEC-270)."""
+    rs = RiskState(apply_patch(MB["btc_accumulator"], [rep("/goal/on_complete", "release")]), "0.15", "55000", "crypto",
+                   RELEASE_START, mark_max_age_s=doc["harness_defaults"]["mark_max_age_s"])
+    journal = [e for s in RELEASE_STEPS for e in rs.step(s)["journal"]]
+    return next(e["loss_carry_usd"] for e in journal if e["type"] == "AgentStopped")
+
+RELEASE_CARRY = release_carry()
+SEM.append(("MC-V68", "A released agent's loss carry counts against a redeploy on the same connection", "btc_accumulator",
+            [rep("/capital/allocation_usd", "1500"), rep("/risk/max_position_usd", "1500"), rep("/risk/max_gross_exposure_usd", "1500")],
+            {"connection_loss_carry_usd": RELEASE_CARRY}))
+
 for cid, title, base, patch, ctx in SEM:
     m = apply_patch(MB[base], patch)
     assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
@@ -257,6 +274,7 @@ def at(hh, mm, ss=0, day=21):
 def risk_case(cid, title, base, patch, qty, cost, cls, start, steps, note=None, L="0"):
     m = apply_patch(MB[base], patch)
     assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
+    assert not semantic(m, CTX)[0], (cid, "a risk case's mandate passes every V-rule", semantic(m, CTX)[0])
     rs = RiskState(m, qty, cost, cls, start, inherited_loss=L, mark_max_age_s=doc["harness_defaults"]["mark_max_age_s"])
     out = [{**s, "expect": rs.step(s)} for s in steps]
     c = {"id": cid, "kind": "risk_state", "title": title, "base": base, "patch": patch,
@@ -412,6 +430,16 @@ risk_case("MC-R23", "Withdrawals cannot shrink the loss carried to the connectio
            {"event": "agent_stopped", "at": at(14, 4), "session": "crypto"}],
           note="Reviewer probe: the agent loses about 850, is flat, withdraws 9000, and retires. The carry is the net dollar loss.")
 
+risk_case("MC-R25", "on_complete release with a loss: the connection carries max(0, N - E)", "btc_accumulator_release",
+          [], "0.15", "55000", "crypto", RELEASE_START, RELEASE_STEPS,
+          note="E = 10000 + 0.15 x (54000 - 55000) = 9850 and N = 10000, so the release retires the agent with a carry of 150, "
+               "as agent_stopped would (DEC-270, MI-14).")
+risk_case("MC-R26", "A redeploy after a release opens at the carried L", "btc_accumulator",
+          ISO + [rep("/risk/breach_confirm_s", 0)], "0.1", "60000", "crypto",
+          at(14, 0), [mk(at(14, 1), "51600", "crypto"), mk(at(14, 2), "51500", "crypto")], L=RELEASE_CARRY,
+          note="L is MC-R25's carry, 150. Floor: E <= C x (1 - 0.1) + L = 9000 + 150 = 9150. E = 9160 at 51600 latches the "
+               "ladder but stays above the floor; E = 9150 at 51500 latches it, 150 above the floor a fresh connection would "
+               "have (§5.7, V-032).")
 risk_case("MC-R24", "A removed instrument is exits-only in that instrument; re-admission clears it", "research_equity",
           [], "10", "100", "us_equity", at(14, 0),
           [mk(at(14, 1), "100"),
