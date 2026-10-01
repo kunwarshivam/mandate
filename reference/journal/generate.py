@@ -506,7 +506,6 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         rule("7.client_ceiling", not (client and adds_risk and p["autonomy"] == "auto"), "schema", "payload.autonomy")
         ceiling_label = by != "client_ceiling" or (client and asked)
         rule("7.client_ceiling_label", ceiling_label, "schema", "payload.decided_by")
-        rule("7.review_ceiling_label", by != "review_ceiling" or asked, "schema", "payload.decided_by")
         discretionary = p["purpose"] == "discretionary_exit"
         rule("8.exit_origin", (p["exit_origin"] is not None) == discretionary, "schema", "payload.exit_origin")
         evaluated = adds_risk or p["exit_origin"] == "signal"
@@ -1543,14 +1542,6 @@ def invalid_drafts() -> list[dict]:
             "payload.decided_by",
         ),
         invalid(
-            "decision_review_ceiling_on_auto",
-            "§9.1 rule 7",
-            "decision",
-            [change("payload.decided_by", "review_ceiling")],
-            "schema",
-            "payload.decided_by",
-        ),
-        invalid(
             "decision_discretionary_exit_without_origin",
             "§9.1 rule 8",
             "goal_exit",
@@ -1869,12 +1860,6 @@ def valid_drafts() -> list[dict]:
                 change("payload.autonomy", "ask"),
                 change("payload.decided_by", "client_ceiling"),
             ],
-        ),
-        valid(
-            "decision_review_ceiling_asked",
-            "§9.1 rule 7",
-            "decision",
-            [change("payload.autonomy", "ask"), change("payload.decided_by", "review_ceiling")],
         ),
         valid(
             "decision_client_request_asked_by_rule",
@@ -2464,7 +2449,6 @@ VALIDATOR_MUTANTS = (
     "rule.7.client_id",
     "rule.7.client_ceiling",
     "rule.7.client_ceiling_label",
-    "rule.7.review_ceiling_label",
     "rule.8.exit_origin",
     "rule.12.step_up",
     "rule.15.agent",

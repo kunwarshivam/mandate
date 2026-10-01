@@ -219,7 +219,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   with the MC-D cases ([DEC-271](04-decision-log.md#decisions) to [DEC-273](04-decision-log.md#decisions): re-confirming is
   risk-increasing and carries the delegations over). Owed after it: `mandate-spec` parsing the field, V-046, and its
   §9.2 row (stream F), then the spec change that makes the date required on every version holding an `auto` or a
-  delegation, with the base mandates (DEC-272 item 3).
+  delegation, with the base mandates (DEC-272 item 3). Also owed, from #380 round 1: journal spec §9.1 rule 7's clause
+  that `decided_by: review_ceiling` requires `autonomy: ask`, with an invalid and a valid draft and a validator mutant
+  in `reference/journal/generate.py`; it needs the agent-stream harness's pinned vector count
+  (`crates/mandate-refcases/src/journal/agent_stream.rs`, 106) to move with it, which ES-22 keeps out of a spec PR.
 
 ### E7 Alpaca connector and recovery
 

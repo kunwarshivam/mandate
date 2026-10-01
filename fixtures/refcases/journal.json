@@ -2175,22 +2175,6 @@
     }
    },
    {
-    "name": "decision_review_ceiling_on_auto",
-    "clause": "§9.1 rule 7",
-    "base_seq": 4,
-    "changes": [
-     {
-      "path": "payload.decided_by",
-      "value": "review_ceiling"
-     }
-    ],
-    "expect": {
-     "outcome": "Invalid",
-     "reason": "schema",
-     "path": "payload.decided_by"
-    }
-   },
-   {
     "name": "decision_discretionary_exit_without_origin",
     "clause": "§9.1 rule 8",
     "base_seq": 8,
@@ -2841,24 +2825,6 @@
      {
       "path": "payload.decided_by",
       "value": "client_ceiling"
-     }
-    ],
-    "expect": {
-     "outcome": "Valid"
-    }
-   },
-   {
-    "name": "decision_review_ceiling_asked",
-    "clause": "§9.1 rule 7",
-    "base_seq": 4,
-    "changes": [
-     {
-      "path": "payload.autonomy",
-      "value": "ask"
-     },
-     {
-      "path": "payload.decided_by",
-      "value": "review_ceiling"
      }
     ],
     "expect": {
