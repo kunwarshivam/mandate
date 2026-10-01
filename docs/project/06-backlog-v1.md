@@ -1718,13 +1718,14 @@ From E6-4's slice R4 (stream H2; DEC-167 item 8):
   `goal_complete` arm journals `AgentStopped` with `loss_carry_usd` = max(0, N − E) after
   `PositionReleased` when `on_complete` is `release`; MC-R17's expected journal gains it; any §3.1 or
   §5.7 wording the spec needs under DEC-270; `generate.py`, `check_cases.py`, and the fuzz rerun, and
-  `cargo xtask refcases --write`. Only MC-R17 moves. In `agent/h2-dec-270-reference` (DEC-274), with MC-R25, MC-R26, and
-  MC-V68 for the carry and the redeploy; it waits on the harness PR (DEC-276).
+  `cargo xtask refcases --write`. Only MC-R17 moves. Merged in [#386](https://github.com/kunwarshivam/mandate/pull/386)
+  (DEC-274), with MC-R25, MC-R26, and MC-V68 for the carry and the redeploy, after the harness PR
+  [#381](https://github.com/kunwarshivam/mandate/pull/381) (DEC-276, DEC-277).
 - **`release` journals the loss carry: the `mandate-spec` side (DEC-270; stream H2, after the
   reference PR).** `Fold::complete_goal`'s `Release` arm journals `AgentStopped` (reason
   `goal_complete`) with the loss carry, as `retire` does, and a test shows that releasing and
   redeploying on the same connection opens the new agent at the carried L (through
-  `ValidationContext::from_journal` and V-032).
+  `ValidationContext::from_journal` and V-032). In `agent/h2-dec-270-mandate-spec`.
 - **MC-R17 back to passing (DEC-277; E6-4, stream H2).** The DEC-270 reference PR changes MC-R17's
   expected journal and marks it `pending`, the one flip DEC-277 allows. The `mandate-spec` side above
   must bring it back: the status PR that follows it marks MC-R17 `passing` again, with MC-R25,
@@ -1739,6 +1740,17 @@ From E6-4's slice R4 (stream H2; DEC-167 item 8):
   guard allows a `passing` → `pending` flip when any part of the case's fixture entry changes; allow
   it only when the entry's expectation members change (`expect`, or a risk-state step's `expect`), a
   tightening, so a title or note edit cannot take a case back to pending.
+- **§5.10's `GoalCompleted` reason for a completed `profit_stop` goal (the #386 review, minor 1).** The
+  journal table names `GoalCompleted`'s reasons as `profit_stop_reached`, `target_qty`, `max_spend`,
+  and `end_date`, but a `profit_stop` goal completed by its end date journals no reason in either
+  `ref.py` or the fold (`then: discretionary_exit_all_then_retire` only, DEC-275). Decide whether it
+  carries `end_date`, as an accumulate goal's `goal::status` would, and move the spec, `ref.py`, and
+  the fold together.
+- **MC-R25's note pins E before the release (the #386 review, minor 2).** MC-R25 expects
+  `agent_equity` 9850 after the release: the released position stays valued on the agent's books at
+  the last mark, which is what makes the carry "E before the release" (DEC-274 item 2). Add a
+  sentence to its note in `generate.py` saying so, so a later change that zeroes the released
+  quantity is seen to break the reading rather than taken as a fix.
 - **R4's status PR: the last nine MC-R cases pass.** MC-R09 to MC-R12, MC-R14, MC-R16, MC-R17,
   MC-R21, and MC-R23 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` on R4 (DEC-167 item 8 (i)); marking them in `status.toml` follows under DEC-77
