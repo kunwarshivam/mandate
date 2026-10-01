@@ -376,7 +376,7 @@ Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) 
 implementation PRs fill the crate in story by story: E6-3 has landed `evaluate` and `agent_flatten`,
 E6-9 check 3's halt and no market orders under a presumed halt (a market exit is re-priced),
 E6-7 check 2's eligibility floor, E6-6 `session_at`, check 3's sessions, the rest of check 4,
-check 7's buying power and check 8's `legacy_pdt` budget, and E6-8 check 5's mark and collar,
+check 7's buying power and check 8's `legacy_pdt` budget with its account-wide ledger fold, and E6-8 check 5's mark and collar,
 check 6's conduct controls, the pacing of an allowed exit, `evaluate_cancel` and `surveillance`
 (DEC-163). Until every check exists the gate fails closed for adding risk (DEC-129 item 29): a
 crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by reading
@@ -393,7 +393,7 @@ crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by re
 - **Code:** `mandate-risk`: `crates/mandate-risk/src/lib.rs` (the gate's inputs, the eight §9.1
   checks as `Check`, the four verdicts, `ReasonCode` with the registered spelling of each, `Origin`
   and the `Purpose` it maps to, `GateError`, and the signatures of `evaluate`, `evaluate_cancel`,
-  `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
+  `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten`, `fold_day_trades` and
   `surveillance`), `crates/mandate-risk/src/gate.rs` (`evaluate`: the eight checks in order,
   purpose assignment, check 1 whole, the working universe, §5.3 rules 3 and 9, §5.1's limit-only
   openings, the re-pricing of a market exit, and the fail-closed
@@ -405,6 +405,9 @@ crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by re
   `crates/mandate-risk/src/session.rs` (`session_at` from the committed calendar and check 3's
   session and auction-window rules), `crates/mandate-risk/src/account_rules.rs` (§5.3 rules 2 and
   4 to 8, buying power with the fee reservation, and the `legacy_pdt` day-trade budget),
+  `crates/mandate-risk/src/daytrades.rs` (`fold_day_trades`, §9.2's `legacy_pdt` ledger folded
+  account-wide from every agent's fills, DEC-259, with its in-module hand tests and a running-total
+  oracle property),
   `crates/mandate-risk/src/conduct.rs` (check 5's fresh quote and collar, check 6's conduct
   controls, the collar, participation and close-window pacing of an allowed exit, and
   `evaluate_cancel`'s minimum resting time, trading spec §8.2 and §9.6),

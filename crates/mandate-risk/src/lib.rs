@@ -44,7 +44,8 @@
 //! and 28). E6-7 adds check 2's eligibility floor (§3.2, items 1 to 7 in list order), which makes
 //! checks 1 and 2 whole. E6-6 adds [`session_at`] and check 3's session rules, the rest of check 4
 //! (§5.3 rules 2 and 4 to 8, and §5.1's limit-only openings), check 7's buying power with the fee
-//! reservation, and check 8's `legacy_pdt` budget, which makes checks 3, 4, 7 and 8 whole. E6-8
+//! reservation, and check 8's `legacy_pdt` budget, which makes checks 3, 4, 7 and 8 whole, and
+//! its second slice [`fold_day_trades`], the budget's ledger folded account-wide (DEC-259). E6-8
 //! adds check 5 (mark freshness and the collar), check 6's market-conduct controls, the pacing an
 //! allowed exit is sent with, [`evaluate_cancel`]'s minimum resting time and the [`surveillance`]
 //! report (§9.6, DEC-163), which leaves only check 2 for crypto owed, to E6-10.
@@ -64,6 +65,7 @@ use thiserror::Error;
 
 mod account_rules;
 mod conduct;
+mod daytrades;
 mod flatten;
 mod floor;
 mod gate;
@@ -247,6 +249,8 @@ pub enum GateError {
     InstrumentUnknown,
     #[error("a day-trade ledger entry precedes one already folded")]
     DayTradeLedgerOutOfOrder,
+    #[error("a fill sells more of an instrument than the account held")]
+    DayTradeLedgerInconsistent,
     #[error("{0} is not implemented yet (pending {1})")]
     Unimplemented(&'static str, &'static str),
     #[error(transparent)]
@@ -267,6 +271,7 @@ impl GateError {
             Self::ConfigOutOfRange => "config_out_of_range",
             Self::InstrumentUnknown => "instrument_unknown",
             Self::DayTradeLedgerOutOfOrder => "day_trade_ledger_out_of_order",
+            Self::DayTradeLedgerInconsistent => "day_trade_ledger_inconsistent",
             Self::Unimplemented(_, _) => "unimplemented",
             Self::Num(e) => e.code(),
             Self::Time(e) => e.code(),
@@ -757,6 +762,67 @@ pub struct DayTradeLedger {
     pub flagged_pattern_day_trader: bool,
     pub sold_earlier_today: BTreeSet<AssetId>,
     pub open_same_day_positions: BTreeSet<AssetId>,
+}
+
+/// A day trade on one trading day in one instrument: one of the broker's reported day trades
+/// before today, or one [`fold_day_trades`] counted today.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DayTrade {
+    pub date: Date,
+    pub instrument: AssetId,
+}
+
+/// One fill on the account, by any agent: the fold's view of an execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountFill {
+    pub at: UtcNanos,
+    pub instrument: AssetId,
+    pub asset_class: AssetClass,
+    pub side: Side,
+    pub qty: Qty,
+}
+
+/// What §9.2's `legacy_pdt` ledger is folded from. Every field is the **account's**, across every
+/// agent trading it, because the budget is the account's (DEC-150 item 7): a ledger folded from one
+/// agent's fills would undercount it.
+#[derive(Debug, Clone)]
+pub struct DayTradeInput<'a> {
+    /// The risk clock's latest tick; today is its trading day (§2.2's trade date).
+    pub now: UtcNanos,
+    /// Day trades on trading days before today, as the broker reported them or an earlier fold
+    /// counted them. Only those inside the window count; one dated today or later is an error.
+    pub earlier: &'a [DayTrade],
+    /// The account's US-equity quantity per instrument at the start of today: the shares held
+    /// overnight, which a sell takes first.
+    pub held_overnight: &'a BTreeMap<AssetId, Qty>,
+    /// Today's fills on the account, in execution order, none after `now`. Crypto fills are read
+    /// for their order only, since crypto never counts.
+    pub fills_today: &'a [AccountFill],
+    /// The broker's pattern-day-trader flag, passed through to the ledger.
+    pub flagged_pattern_day_trader: bool,
+}
+
+/// The ledger check 8 reads, and today's day trades for the executor to journal and to pass back
+/// as [`DayTradeInput::earlier`] once the day is over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DayTradeFold {
+    pub ledger: DayTradeLedger,
+    pub today: Vec<DayTrade>,
+}
+
+/// §9.2's `legacy_pdt` ledger, folded account-wide: the window is today plus the four prior trading
+/// days of the committed calendar, a sell takes shares held overnight first, each same-day
+/// open-then-close counts once, fractional day trades count, and crypto never does (DEC-129
+/// item 6, DEC-259).
+///
+/// # Errors
+/// [`GateError::DayTradeLedgerOutOfOrder`] for fills out of execution order, after `now`, or
+/// (for an equity) outside today's trading day, and for an earlier day trade dated today or
+/// later; [`GateError::DayTradeLedgerInconsistent`] for a sell of more than the account held;
+/// [`GateError::ConfigOutOfRange`] for a date outside the committed calendar. Every error is a
+/// refusal to decide an opening, never a smaller count.
+pub fn fold_day_trades(input: &DayTradeInput<'_>) -> Result<DayTradeFold, GateError> {
+    daytrades::fold(input)
 }
 
 /// The whole gate: §9.1's eight checks in order, stopping at the first failure.
