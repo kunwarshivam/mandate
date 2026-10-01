@@ -675,7 +675,7 @@ mod tests {
     use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
 
     use super::{AgentStreamCheck, AgentStreamFailure, check_batch, verify_agent_stream};
-    use crate::{Draft, StoredEvent, TrustedStart};
+    use crate::{Draft, Invalid, StoredEvent, TrustedStart};
 
     fn section() -> Result<Value, String> {
         let path =
@@ -1049,6 +1049,223 @@ mod tests {
         )?;
         assert_eq!(verify_from(&tampered, 1), mode_event_mismatch_at(13));
         assert_eq!(verify_from(&rows(&section, &[])?, 1), Ok(()));
+        Ok(())
+    }
+
+    /// The chain event at `seq` with `changes`, each a dotted path and the JSON text of its value,
+    /// parsed as a draft.
+    fn edited(
+        section: &Value,
+        seq: u64,
+        changes: &[(&str, &str)],
+    ) -> Result<Result<Draft, Invalid>, String> {
+        let items: Vec<String> = changes
+            .iter()
+            .map(|(path, value)| format!(r#"{{"path":"{path}","value":{value}}}"#))
+            .collect();
+        let case = format!(r#"{{"base_seq":{seq},"changes":[{}]}}"#, items.join(","));
+        let case = parse(case.as_bytes()).map_err(|e| format!("{e:?}"))?;
+        Ok(Draft::parse(&draft(section, &case)?))
+    }
+
+    fn refused_at(result: Result<Draft, Invalid>) -> Option<(String, String)> {
+        result.err().map(|e| (e.reason.code().to_owned(), e.path))
+    }
+
+    /// Each value §9.1 lists that no chain event or vector uses is accepted where it is valid, so
+    /// no allowed value can drop out of its list unnoticed (#384 round 3 sweep).
+    #[test]
+    fn every_listed_value_no_vector_uses_is_accepted() -> Result<(), String> {
+        let section = section()?;
+        let mut cases: Vec<(u64, Vec<(&str, String)>)> = Vec::new();
+        for tif in ["gtc", "ioc"] {
+            cases.push((4, vec![("payload.tif", format!("{tif:?}"))]));
+            cases.push((5, vec![("payload.tif", format!("{tif:?}"))]));
+        }
+        for ignored in [
+            "not_pinned",
+            "model_withdrawn",
+            "output_limits",
+            "not_in_universe",
+            "direction_not_allowed",
+            "horizon_mismatch",
+            "revision_without_predecessor",
+        ] {
+            cases.push((3, vec![("payload.ignored", format!("{ignored:?}"))]));
+        }
+        cases.push((4, vec![("payload.purpose", r#""increase""#.to_owned())]));
+        for reason in ["skipped_today", "recent_timeout"] {
+            cases.push((
+                4,
+                vec![
+                    ("payload.autonomy", r#""ask""#.to_owned()),
+                    ("payload.ask_suppressed", format!("{reason:?}")),
+                ],
+            ));
+        }
+        for purpose in ["discretionary_exit", "risk_exit"] {
+            cases.push((7, vec![("payload.purpose", format!("{purpose:?}"))]));
+        }
+        for reason in ["restriction_changed", "awaiting_reconciliation"] {
+            cases.push((11, vec![("payload.reason", format!("{reason:?}"))]));
+        }
+        cases.push((13, vec![("payload.scope", r#""connection""#.to_owned())]));
+        cases.push((
+            13,
+            vec![("payload.initiator", r#""platform_operator""#.to_owned())],
+        ));
+        cases.push((12, vec![("payload.scope", r#""connection""#.to_owned())]));
+        cases.push((
+            12,
+            vec![
+                ("payload.scope", r#""workspace""#.to_owned()),
+                ("payload.subject", r#""ws_01J8Z2""#.to_owned()),
+            ],
+        ));
+        let clips = [
+            "max_order_usd",
+            "position_cap",
+            "gross_exposure_cap",
+            "target_qty",
+            "max_spend_usd",
+            "max_avg_price",
+        ];
+        for clip in clips {
+            cases.push((4, vec![("payload.clips_applied", format!("[{clip:?}]"))]));
+        }
+        let all = clips
+            .iter()
+            .map(|c| format!("{c:?}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        cases.push((4, vec![("payload.clips_applied", format!("[{all}]"))]));
+        assert_eq!(cases.len(), 29);
+        for (seq, changes) in &cases {
+            let changes: Vec<(&str, &str)> =
+                changes.iter().map(|(p, v)| (*p, v.as_str())).collect();
+            let parsed = edited(&section, *seq, &changes)?.map(|_| ());
+            assert_eq!(parsed, Ok(()), "seq {seq}: {changes:?}");
+        }
+        Ok(())
+    }
+
+    /// Rule 8: off a §8.3 evaluation each number is `null` and each list is empty, and on one each
+    /// number is set; every member is held by its own case.
+    #[test]
+    fn rule_8_holds_each_number_and_list_on_its_own() -> Result<(), String> {
+        let section = section()?;
+        let output = text(&Value::Object(base(&section, 3)?), "event_id").to_owned();
+        let goal_exit = [
+            ("payload.exit_conviction", r#""0.5""#.to_owned()),
+            ("payload.buy_conviction", r#""0.5""#.to_owned()),
+            ("payload.combined_score", r#""0.5""#.to_owned()),
+            ("payload.outputs_used", format!("[{output:?}]")),
+            (
+                "payload.model_weights",
+                r#"[{"key":"quant.momentum","value":"0.1"}]"#.to_owned(),
+            ),
+            ("payload.clips_applied", r#"["max_order_usd"]"#.to_owned()),
+        ];
+        for (path, value) in &goal_exit {
+            let refused = refused_at(edited(&section, 8, &[(path, value)])?);
+            assert_eq!(
+                refused,
+                Some(("schema".to_owned(), (*path).to_owned())),
+                "{path}"
+            );
+        }
+        for path in [
+            "payload.exit_conviction",
+            "payload.buy_conviction",
+            "payload.combined_score",
+        ] {
+            let refused = refused_at(edited(&section, 4, &[(path, "null")])?);
+            assert_eq!(
+                refused,
+                Some(("schema".to_owned(), path.to_owned())),
+                "{path}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Rule 12 (#384 round 3, minor 1): a confirmed exit needs the whole bid; without any one of
+    /// `bid`, `bid_size` and `floor` it is refused at that member.
+    #[test]
+    fn rule_12_needs_each_member_of_a_confirmed_bid() -> Result<(), String> {
+        let section = section()?;
+        for path in ["payload.bid", "payload.bid_size", "payload.floor"] {
+            let refused = refused_at(edited(&section, 9, &[(path, "null")])?);
+            assert_eq!(
+                refused,
+                Some(("schema".to_owned(), path.to_owned())),
+                "{path}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Rule 10's batch clause compares each action member: an intent that differs from its
+    /// decision in one member alone is refused at that member.
+    #[test]
+    fn a_batch_is_refused_at_each_differing_action_member() -> Result<(), String> {
+        let section = section()?;
+        let goal_exit = Value::Object(base(&section, 8)?);
+        let decision = Draft::parse(&to_canonical(&goal_exit)).map_err(|e| e.to_string())?;
+        let cause = format!("{:?}", text(&goal_exit, "event_id"));
+        let matching = [
+            ("causation_id", cause.as_str()),
+            ("payload.side", r#""sell""#),
+            ("payload.limit_price", r#""150.25""#),
+            ("payload.purpose", r#""discretionary_exit""#),
+        ];
+        let intent = |more: &[(&str, &str)]| -> Result<Draft, String> {
+            let changes: Vec<(&str, &str)> = matching.iter().chain(more).copied().collect();
+            edited(&section, 5, &changes)?.map_err(|e| e.to_string())
+        };
+        let same = intent(&[])?;
+        assert_eq!(check_batch(&[decision.clone(), same]), Ok(()));
+        let differing: [(&[(&str, &str)], &str); 4] = [
+            (
+                &[(
+                    "payload.instrument_id",
+                    r#""5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f""#,
+                )],
+                "payload.instrument_id",
+            ),
+            (
+                &[
+                    ("payload.type", r#""market""#),
+                    ("payload.limit_price", "null"),
+                ],
+                "payload.type",
+            ),
+            (&[("payload.tif", r#""gtc""#)], "payload.tif"),
+            (&[("payload.qty", r#""9""#)], "payload.qty"),
+        ];
+        for (more, path) in differing {
+            let refused = check_batch(&[decision.clone(), intent(more)?])
+                .err()
+                .map(|(i, e)| (i, e.reason.code(), e.path));
+            assert_eq!(refused, Some((1, "schema", path.to_owned())), "{path}");
+        }
+        let opening = Draft::parse(&to_canonical(&Value::Object(base(&section, 4)?)))
+            .map_err(|e| e.to_string())?;
+        let opening_cause = format!("{:?}", text(&Value::Object(base(&section, 4)?), "event_id"));
+        let sold = edited(
+            &section,
+            5,
+            &[
+                ("causation_id", opening_cause.as_str()),
+                ("payload.side", r#""sell""#),
+                ("payload.purpose", r#""discretionary_exit""#),
+            ],
+        )?
+        .map_err(|e| e.to_string())?;
+        let refused = check_batch(&[opening, sold])
+            .err()
+            .map(|(i, e)| (i, e.reason.code(), e.path));
+        assert_eq!(refused, Some((1, "schema", "payload.side".to_owned())));
         Ok(())
     }
 }
