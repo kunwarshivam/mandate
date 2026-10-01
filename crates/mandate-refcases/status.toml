@@ -385,12 +385,13 @@
 'MC-C47' = { status = "passing", story = "E10-3" }
 'MC-C48' = { status = "passing", story = "E10-3" }
 
-# Family D, the review date (stream H, E6-14; DEC-188, DEC-271 to DEC-273): pending until `mandate-spec` parses
-# `autonomy.review_by` and the harness arms read it.
+# Family D, the review date (stream H, E6-14; DEC-188, DEC-271 to DEC-273). Passing since #396. MC-D01 and
+# MC-D05 to MC-D12 wait on V-046, the V-020 default and the V-042 carry in `mandate-spec` (stream F); MC-D23 and
+# MC-D24 on delegations in the order path (E8-8).
 'MC-D01' = { status = "pending", story = "E6-14" }
-'MC-D02' = { status = "pending", story = "E6-14" }
-'MC-D03' = { status = "pending", story = "E6-14" }
-'MC-D04' = { status = "pending", story = "E6-14" }
+'MC-D02' = { status = "passing", story = "E6-14" }
+'MC-D03' = { status = "passing", story = "E6-14" }
+'MC-D04' = { status = "passing", story = "E6-14" }
 'MC-D05' = { status = "pending", story = "E6-14" }
 'MC-D06' = { status = "pending", story = "E6-14" }
 'MC-D07' = { status = "pending", story = "E6-14" }
@@ -399,18 +400,18 @@
 'MC-D10' = { status = "pending", story = "E6-14" }
 'MC-D11' = { status = "pending", story = "E6-14" }
 'MC-D12' = { status = "pending", story = "E6-14" }
-'MC-D13' = { status = "pending", story = "E6-14" }
-'MC-D14' = { status = "pending", story = "E6-14" }
-'MC-D15' = { status = "pending", story = "E6-14" }
-'MC-D16' = { status = "pending", story = "E6-14" }
-'MC-D17' = { status = "pending", story = "E6-14" }
-'MC-D18' = { status = "pending", story = "E6-14" }
-'MC-D19' = { status = "pending", story = "E6-14" }
-'MC-D20' = { status = "pending", story = "E6-14" }
-'MC-D21' = { status = "pending", story = "E6-14" }
-'MC-D22' = { status = "pending", story = "E6-14" }
+'MC-D13' = { status = "passing", story = "E6-14" }
+'MC-D14' = { status = "passing", story = "E6-14" }
+'MC-D15' = { status = "passing", story = "E6-14" }
+'MC-D16' = { status = "passing", story = "E6-14" }
+'MC-D17' = { status = "passing", story = "E6-14" }
+'MC-D18' = { status = "passing", story = "E6-14" }
+'MC-D19' = { status = "passing", story = "E6-14" }
+'MC-D20' = { status = "passing", story = "E6-14" }
+'MC-D21' = { status = "passing", story = "E6-14" }
+'MC-D22' = { status = "passing", story = "E6-14" }
 'MC-D23' = { status = "pending", story = "E6-14" }
 'MC-D24' = { status = "pending", story = "E6-14" }
-'MC-D25' = { status = "pending", story = "E6-14" }
-'MC-D26' = { status = "pending", story = "E6-14" }
-'MC-D27' = { status = "pending", story = "E6-14" }
+'MC-D25' = { status = "passing", story = "E6-14" }
+'MC-D26' = { status = "passing", story = "E6-14" }
+'MC-D27' = { status = "passing", story = "E6-14" }
