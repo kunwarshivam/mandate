@@ -28,8 +28,8 @@ use std::collections::BTreeSet;
 use common::{asset, basis, dec, digest, fee, frac, mark, price, qty, rule_id, signed, unit, usd};
 use mandate_builder::{
     AccountSnapshot, AccumulateGoal, Action, ActionContext, BuilderMandate, Direction, GateVerdict,
-    GoalKind, Limits, Market, ModelOutput, Outcome, RiskContext, SignalModel, Sizes, Sizing,
-    classify, decide, propose,
+    GoalKind, Limits, Market, ModelOutput, Outcome, RequestedBy, RiskContext, SignalModel, Sizes,
+    Sizing, classify, decide, propose,
 };
 use mandate_domain::{AssetClass, AutonomyDecision, MarketSession, Purpose};
 use mandate_num::{Usd, UsdExact};
@@ -324,6 +324,7 @@ fn action_of(c: &Value) -> ActionContext {
         gross_usd_after: usd(&decimal("gross_usd_after", "0")),
         bought_today_usd: usd(&decimal("bought_today_usd", "0")),
         position_pnl_fraction: signed(&decimal("position_pnl_fraction", "0")),
+        requested_by: RequestedBy::Agent,
     }
 }
 

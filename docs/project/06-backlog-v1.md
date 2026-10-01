@@ -1847,3 +1847,14 @@ item 25; held back by the freeze rule, one row each):
   removes; raise instead.
 - **Note: the `exit_origin` citation fix pulled a round-2 minor forward (#340 round 1, nit).** Item
   22 corrected the removed-instrument citation that #320 round 2 had backlogged; no action.
+- **`propose` hard-codes `RequestedBy::Agent` (#369 round 1, owed by E10-6).** DEC-262 item 2
+  stamps every buy `propose` sizes as the agent's own, because no owner or client request path
+  calls the builder yet. The request path E10-6 adds must carry the authenticated channel's
+  requester to the order it proposes (§6.2 step 5a) rather than reuse `propose`'s stamp, with a
+  test that a client's request reaches `decide` as `client`.
+- **The client-ceiling sweep has no delegation dimension (#369 round 1, owed by E8-8's tests PR).**
+  `Autonomy` holds no `delegations` until E8-8 (DEC-262 item 5), so
+  `every_rule_default_admission_and_requester_obeys_the_client_ceiling` and
+  `a_client_opening_is_never_auto_and_every_other_request_decides_as_before` cover rules, defaults,
+  admission and requester only. E8-8's tests PR adds live, spent, expired and suspended delegations
+  to both and asserts that none lifts a client's order (MI-26, MI-30).

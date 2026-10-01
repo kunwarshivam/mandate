@@ -54,6 +54,26 @@ pub struct ActionContext {
     pub gross_usd_after: Usd,
     pub bought_today_usd: Usd,
     pub position_pnl_fraction: Signed,
+    /// Who asked for the order (§6.2 step 5a). Not a §6.3 field: no rule can read it, and only the
+    /// client ceiling does.
+    pub requested_by: RequestedBy,
+}
+
+/// Who asked for an order (§6.2 step 5a, DEC-185, DEC-262).
+///
+/// The platform sets it from the **authenticated channel**, never from the request's content, so it
+/// is a required field with no default: a path that builds an [`ActionContext`] must say which
+/// channel it came from. [`propose`](crate::propose) sizes only from signal-model outputs, which
+/// §6.2 step 5a defines as `agent`, the order builder's own proposal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RequestedBy {
+    /// The order builder's own proposal.
+    Agent,
+    /// The owner, through Owlhead's web app or CLI.
+    Owner,
+    /// An owner-connected client through the MCP server (DEC-141, E10-6). Its opening and
+    /// increasing orders are never AUTO (MI-30).
+    Client,
 }
 
 /// The projection of an action onto the §6.3 field names.
@@ -129,17 +149,21 @@ pub enum DecidedBy {
     Rule(RuleId),
     Default,
     AdmissionCeiling,
+    /// §6.2 step 5a raised the decision to ASK because an owner-connected client requested the
+    /// order. Reported only when the ceiling changed the decision, as for the admission ceiling.
+    ClientCeiling,
 }
 
 impl DecidedBy {
     /// The form the reference cases and the journal write: `builtin_risk_reducing`, `rule:<id>`,
-    /// `default`, `admission_ceiling`.
+    /// `default`, `admission_ceiling`, `client_ceiling`.
     pub fn label(&self) -> String {
         match self {
             Self::BuiltinRiskReducing => "builtin_risk_reducing".to_owned(),
             Self::Rule(id) => format!("rule:{}", id.as_str()),
             Self::Default => "default".to_owned(),
             Self::AdmissionCeiling => "admission_ceiling".to_owned(),
+            Self::ClientCeiling => "client_ceiling".to_owned(),
         }
     }
 }
@@ -192,15 +216,18 @@ pub enum Outcome {
     Classified(Classification),
 }
 
-/// §6.2 steps 3 to 5: the built-in AUTO purposes, the first matching rule, the default, and the
-/// admission ceiling, in that order.
+/// §6.2 steps 3 to 5a: the built-in AUTO purposes, the first matching rule, the default, the
+/// admission ceiling, and the client ceiling, in that order.
 ///
 /// Step 3 comes first and is unconditional, and that includes coming before the order path's
 /// re-check of V-017, V-018, V-020 and V-023: a malformed rule set must not be a reason a risk exit,
 /// an owner exit, a protective order or a discretionary exit is refused (`AGENTS.md` rule 13,
 /// MI-1, DEC-05). The rules are validated only on the path that reads them.
 /// Step 4 takes the **first** matching rule, not the last and not the strictest. Step 5's ceiling
-/// applies only when `new_instrument` is true and only **tightens** (MI-17).
+/// applies only when `new_instrument` is true and only **tightens** (MI-17). Step 5a's applies only
+/// when an owner-connected client requested the order, comes **last**, after the admission ceiling,
+/// so no rule, default or admission setting it follows can make that order AUTO, and only tightens,
+/// so a `deny` still denies (MI-30, DEC-185).
 ///
 /// The whole rule set is re-checked before any rule is read, not only the rules the walk reaches: a
 /// malformed rule behind a matching one still refuses the action, because a rule set the order path
@@ -225,6 +252,10 @@ pub fn classify(policy: &Autonomy, action: &ActionContext) -> Result<Classificat
     } else {
         (ruled, ruled_by)
     };
+    let (decision, by) = match action.requested_by {
+        RequestedBy::Agent | RequestedBy::Owner => (decision, by),
+        RequestedBy::Client => client_ceiling(decision, by)?,
+    };
     let approval = match decision {
         AutonomyDecision::Ask => Some(ApprovalRequest {
             approvers_required: approvers_required(&policy.approval, action.order_usd)?,
@@ -237,6 +268,16 @@ pub fn classify(policy: &Autonomy, action: &ActionContext) -> Result<Classificat
         by,
         approval,
     })
+}
+
+/// §6.2 step 5a, MI-30: the stricter of the decision so far and ASK, labelled
+/// [`DecidedBy::ClientCeiling`] only when that changed the decision.
+fn client_ceiling(
+    decision: AutonomyDecision,
+    by: DecidedBy,
+) -> Result<(AutonomyDecision, DecidedBy), BuilderError> {
+    let _ = (decision, by);
+    Err(BuilderError::Unimplemented)
 }
 
 /// §6.2 step 2 and then steps 3 to 6: the gate's verdict in, an outcome out.
@@ -469,6 +510,7 @@ mod tests {
             gross_usd_after: Usd::ZERO,
             bought_today_usd: Usd::ZERO,
             position_pnl_fraction: Signed::ZERO,
+            requested_by: RequestedBy::Agent,
         })
     }
 

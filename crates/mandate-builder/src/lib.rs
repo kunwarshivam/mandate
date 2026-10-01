@@ -32,8 +32,8 @@
 //! and the [`Condition`](mandate_spec::condition::Condition) tree from `mandate-spec`. This crate
 //! imports them rather than carrying the copies the merged brief proposed, because F landed first.
 //! What is this crate's is §6.2's order, the built-in AUTO purposes, the admission ceiling, the
-//! approver count, every [`Facts`](mandate_spec::condition::Facts) implementation, and the whole of
-//! §8.3.
+//! client ceiling, the approver count, every [`Facts`](mandate_spec::condition::Facts)
+//! implementation, and the whole of §8.3.
 //!
 //! `MarketSession` carries five variants and §6.3's `session` field names four. The mapping is the
 //! identity on `pre_market`, `regular`, `after_hours` and `crypto`;
@@ -51,8 +51,8 @@ mod autonomy;
 mod builder;
 
 pub use autonomy::{
-    ActionContext, ApprovalRequest, Classification, DecidedBy, GateVerdict, Outcome, classify,
-    decide,
+    ActionContext, ApprovalRequest, Classification, DecidedBy, GateVerdict, Outcome, RequestedBy,
+    classify, decide,
 };
 pub use builder::{
     AccountSnapshot, AccumulateGoal, Action, BuilderMandate, Clip, Combined, Direction, GoalKind,
@@ -82,9 +82,9 @@ use mandate_time::TimeError;
 /// item 8).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BuilderError {
-    /// The stubs of this story's tests PR returned this, so every pending test failed on them
-    /// (DEC-77, DEC-83, DEC-110). Nothing returns it since the implementation; it stays because
-    /// `tests/vocabulary.rs` pins every stable code, and removing it is a tests change of its own.
+    /// A stub of a DEC-77 tests PR returns this, so every pending test fails on it (DEC-77, DEC-83,
+    /// DEC-110): today the §6.2 step 5a client ceiling's (E6-12). `tests/vocabulary.rs` pins its
+    /// stable code.
     #[error("the order builder is not implemented yet")]
     Unimplemented,
     /// v1 has one sizing method and no calibration (DEC-47), so any other is refused rather than
