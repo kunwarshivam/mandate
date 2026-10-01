@@ -374,8 +374,8 @@ fn range(fx: &Json, name: &str) -> Result<(), String> {
     let case = named(section, &["range_verification"], name)?;
     let rows = tampered_rows(section, case)?;
     let from_seq = u64_at(case, "from_seq")?;
-    let prev_hash = match from_seq.checked_sub(1).filter(|s| *s > 0) {
-        None => Digest::ZERO,
+    let prev_hash = match from_seq.checked_sub(1) {
+        None | Some(0) => Digest::ZERO,
         Some(before) => {
             rows.iter()
                 .find(|r| r.seq == before)
@@ -401,5 +401,268 @@ fn range(fx: &Json, name: &str) -> Result<(), String> {
             want,
         ),
         Ok(()) => Err(format!("expected {want:?}, but the range verified")),
+    }
+}
+
+/// The harness's own mechanics, live while the agent stream's checks are stubs (E7-9): driven
+/// through the version-3 account chain as a stand-in section, which `mandate-journal` already
+/// appends and verifies, and through the real section where no journal check is involved. Every
+/// assertion holds as well once `verify_agent_stream` is implemented, since a stand-in range only
+/// asserts that the per-event checks passed.
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use mandate_canon::Digest;
+    use serde_json::json;
+
+    use super::{
+        appended_before, artifact_store, artifacts, batch, cases, chain_append, chain_seq,
+        event_type, invalid, named, range, tampered_rows, valid,
+    };
+    use crate::{Json, read_fixture};
+
+    fn fixture() -> Json {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
+        read_fixture(&dir, "journal.json")
+            .map(|f| (*f).clone())
+            .unwrap_or_default()
+    }
+
+    fn get<'a>(value: &'a Json, pointer: &str) -> &'a Json {
+        value.pointer(pointer).unwrap_or(&Json::Null)
+    }
+
+    /// Replaces the member at `pointer`, which must exist.
+    fn set(value: &mut Json, pointer: &str, to: Json) {
+        let slot = value.pointer_mut(pointer);
+        assert!(slot.is_some(), "no {pointer}");
+        if let Some(slot) = slot {
+            *slot = to;
+        }
+    }
+
+    /// The fixture with `agent_stream` replaced by the account chain and these case lists.
+    fn stand_in(mut lists: Json) -> Json {
+        let mut fx = fixture();
+        let chain = get(&fx, "/chain").clone();
+        let artifacts = get(&fx, "/agent_stream/artifacts").clone();
+        if let Some(section) = lists.as_object_mut() {
+            section.insert("chain".to_owned(), chain);
+            section.insert("artifacts".to_owned(), artifacts);
+        }
+        set(&mut fx, "/agent_stream", lists);
+        fx
+    }
+
+    fn draft(name: &str, changes: Json, expect: Json) -> Json {
+        json!({"name": name, "base_seq": 2, "changes": changes, "expect": expect})
+    }
+
+    #[test]
+    fn every_case_of_the_section_is_registered_under_its_family() {
+        let ids: Vec<String> = cases(&Arc::new(fixture()))
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(ids.len(), 106);
+        for id in [
+            "journal::agent_stream::artifacts",
+            "journal::agent_stream::StreamOpened::chain::seq_1",
+            "journal::agent_stream::DecisionMade::chain::seq_8",
+            "journal::agent_stream::chain::append",
+            "journal::agent_stream::OwnerExitRequested::invalid::owner_exit_floor_absent",
+            "journal::agent_stream::AgentModeChanged::valid::mode_owner_pause",
+            "journal::agent_stream::batch::decision_and_its_intent",
+            "journal::agent_stream::range::intent_repeats_another_action",
+        ] {
+            assert!(ids.iter().any(|i| i == id), "{id}");
+        }
+        let fx = fixture();
+        let section = get(&fx, "/agent_stream");
+        assert_eq!(event_type(section, 4), Ok("DecisionMade"));
+        assert_eq!(
+            event_type(section, 99),
+            Err("the chain has no seq 99".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_case_is_found_in_any_list_it_names_and_only_there() {
+        let fx = fixture();
+        let section = get(&fx, "/agent_stream");
+        let name = "intent_limit_differs_from_its_decision";
+        let found = named(section, &["valid_batches", "invalid_batches"], name);
+        assert_eq!(found.map(|c| get(c, "/name").clone()), Ok(json!(name)));
+        assert_eq!(
+            named(section, &["valid_batches"], name).err(),
+            Some(format!("no case `{name}` in [\"valid_batches\"]"))
+        );
+    }
+
+    #[test]
+    fn the_artifacts_are_their_canonical_bytes_and_their_references() {
+        let fx = fixture();
+        assert_eq!(artifacts(&fx, ""), Ok(()));
+        let store = artifact_store(get(&fx, "/agent_stream")).unwrap_or_default();
+        let refs: Vec<String> = store
+            .keys()
+            .map(|d| format!("sha256:{}", d.to_hex()))
+            .collect();
+        let mut listed: Vec<String> = get(&fx, "/agent_stream/artifacts")
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|a| get(a, "/ref").as_str().map(str::to_owned))
+            .collect();
+        let first = listed.first().cloned().unwrap_or_default();
+        listed.sort();
+        assert_eq!(refs, listed);
+        assert!(!store.is_empty());
+        assert!(store.iter().all(|(d, bytes)| Digest::of(bytes) == *d));
+
+        let zeros = format!("sha256:{}", "0".repeat(64));
+        let mut edited = fx.clone();
+        set(&mut edited, "/agent_stream/artifacts/0/ref", json!(zeros));
+        assert_eq!(
+            artifacts(&edited, ""),
+            Err(format!(
+                "quote_snapshot: ref: expected {first:?}, got {zeros:?}"
+            ))
+        );
+        set(&mut edited, "/agent_stream/artifacts", json!([]));
+        assert_eq!(
+            artifacts(&edited, ""),
+            Err("`artifacts` is empty".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_chain_event_reproduces_its_bytes_and_a_wrong_hash_fails() {
+        let fx = stand_in(json!({}));
+        assert_eq!(chain_seq(&fx, "1"), Ok(()));
+        let mut edited = fx.clone();
+        set(
+            &mut edited,
+            "/agent_stream/chain/1/hash",
+            json!("0".repeat(64)),
+        );
+        assert!(chain_seq(&edited, "1").is_err());
+
+        let rows = appended_before(get(&fx, "/agent_stream"), 3)
+            .map(|(journal, stream, _)| journal.rows(&stream).len());
+        assert_eq!(rows, Ok(2));
+
+        let mut broken = fx.clone();
+        set(
+            &mut broken,
+            "/agent_stream/chain/4/hash",
+            json!("0".repeat(64)),
+        );
+        let failed = chain_append(&broken, "").err().unwrap_or_default();
+        assert!(failed.contains("chain seq 5: stored hash"), "{failed}");
+    }
+
+    #[test]
+    fn a_draft_passes_only_with_the_outcome_reason_and_path_it_gets() {
+        let bad_qty = json!([{"path": "payload.qty", "value": "1.5.0"}]);
+        let fx = stand_in(json!({
+            "invalid_drafts": [
+                draft("bad_qty", bad_qty.clone(),
+                    json!({"outcome": "Invalid", "reason": "non_canonical", "path": "payload.qty"})),
+                draft("bad_qty_wrong_path", bad_qty.clone(),
+                    json!({"outcome": "Invalid", "reason": "non_canonical", "path": "payload.side"})),
+                draft("qty_deleted", json!([{"path": "payload.qty", "delete": true}]),
+                    json!({"outcome": "Invalid", "reason": "schema", "path": "payload.qty"})),
+            ],
+            "valid_drafts": [
+                draft("as_written", json!([]), json!({"outcome": "Valid"})),
+                draft("refused", bad_qty, json!({"outcome": "Valid"})),
+            ],
+        }));
+        assert_eq!(invalid(&fx, "bad_qty"), Ok(()));
+        assert_eq!(invalid(&fx, "qty_deleted"), Ok(()));
+        assert_eq!(
+            invalid(&fx, "bad_qty_wrong_path"),
+            Err(
+                "refusal (draft, reason, path): expected (0, \"non_canonical\", \"payload.side\"), \
+                 got (0, \"non_canonical\", \"payload.qty\")"
+                    .to_owned()
+            )
+        );
+        assert_eq!(valid(&fx, "as_written"), Ok(()));
+        let refused = valid(&fx, "refused").err().unwrap_or_default();
+        assert!(
+            refused.starts_with("expected Valid, got Invalid"),
+            "{refused}"
+        );
+        assert_eq!(
+            valid(&fx, "bad_qty"),
+            Err("no case `bad_qty` in [\"valid_drafts\"]".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_batch_commits_or_is_refused_at_its_draft_index() {
+        let member = |base: u64, changes: Json| json!({"base_seq": base, "changes": changes});
+        let no_verdict = json!([{"path": "payload.verdict", "delete": true}]);
+        let refused_at = |index: u64| json!({"outcome": "Invalid", "reason": "schema", "path": "payload.verdict", "draft_index": index});
+        let fx = stand_in(json!({
+            "valid_batches": [
+                {"name": "two", "drafts": [member(2, json!([])), member(3, json!([]))],
+                 "expect": {"outcome": "Valid"}},
+                {"name": "one", "drafts": [member(2, json!([]))], "expect": {"outcome": "Valid"}},
+            ],
+            "invalid_batches": [
+                {"name": "second_refused", "drafts": [member(2, json!([])), member(3, no_verdict.clone())],
+                 "expect": refused_at(1)},
+                {"name": "wrong_index", "drafts": [member(2, json!([])), member(3, no_verdict)],
+                 "expect": refused_at(0)},
+            ],
+        }));
+        assert_eq!(batch(&fx, "two"), Ok(()));
+        assert_eq!(batch(&fx, "second_refused"), Ok(()));
+        assert_eq!(
+            batch(&fx, "one"),
+            Err("batch `one` has one draft".to_owned())
+        );
+        assert_eq!(
+            batch(&fx, "wrong_index"),
+            Err(
+                "refusal (draft, reason, path): expected (0, \"schema\", \"payload.verdict\"), \
+                 got (1, \"schema\", \"payload.verdict\")"
+                    .to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn a_tampered_range_is_rechained_and_passes_every_per_event_check() {
+        let case = |from_seq: u64| {
+            json!({"name": format!("from_{from_seq}"), "from_seq": from_seq,
+                   "changes": [{"seq": 2, "path": "payload.qty", "value": "3"}],
+                   "expect": {"code": "intent_action_mismatch", "seq": 4}})
+        };
+        let fx = stand_in(json!({"range_verification": [case(1), case(3)]}));
+        let rows = tampered_rows(get(&fx, "/agent_stream"), &case(1)).unwrap_or_default();
+        let bodies: Vec<String> = rows
+            .iter()
+            .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+            .collect();
+        assert_eq!(bodies.len(), 5);
+        assert!(bodies.get(1).is_some_and(|b| b.contains("\"qty\":\"3\"")));
+        assert!(bodies.first().is_some_and(|b| !b.contains("\"qty\"")));
+        assert!(
+            rows.windows(2)
+                .all(|w| matches!(w, [a, b] if b.prev_hash == a.hash))
+        );
+        for name in ["from_1", "from_3"] {
+            let failed = range(&fx, name).err().unwrap_or_default();
+            assert!(
+                !failed.is_empty() && !failed.contains("per-event"),
+                "{name}: {failed}"
+            );
+        }
     }
 }

@@ -379,3 +379,17 @@ fn a_closed_agent_stream_schema_refuses_an_unlisted_member() {
         );
     }
 }
+
+/// §9.1 closes these schemas, so on an agent stream none of them is refused for want of one.
+#[test]
+fn a_closed_agent_stream_event_is_never_an_unknown_schema() {
+    for (event_type, _, required) in SPEC
+        .iter()
+        .filter(|(event_type, _, _)| CLOSED_ON_AGENT.contains(event_type))
+    {
+        let refused = Draft::parse(&draft(event_type, AGENT, required))
+            .map(|_| ())
+            .unwrap_err();
+        assert_ne!(refused.reason, InvalidReason::UnknownSchema, "{event_type}");
+    }
+}
