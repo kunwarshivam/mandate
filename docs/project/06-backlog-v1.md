@@ -423,6 +423,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   drawn from the event id; and a refusal's message says whether the deadline has passed.
   `mandate-cli` is safety-critical (`xtask/layers.toml`, CODEOWNERS, the lint header). Still open:
   the `clap` wiring and a `mandate-journal-pg` `ControlJournal` (DEC-279 item 10).
+  *Done (the #414 review, minor 1 and nits 1 and 4):* an exhausted kill switch's report says
+  running it again commits another, which a test pins against a pause's; `recorded` reads the
+  workspace with `strip_prefix`; `ulid`'s dead fallbacks are documented.
+  *Follow-up (the #414 review, nit 2):* cap `earlier`'s scan of heads before the last event, which
+  today runs one derivation per earlier event of the control stream.
+  *Follow-up (the #414 review, nit 3):* `backoff`'s doc says the jitter makes two racing
+  invocations stop fencing each other; it differs between two different commands only, since the
+  same command derives the same id and so the same jitter.
   *Follow-up (#343 review, minor 1; a tests correction):* a new family that reuses an owned family's
   kind (for example an `MC-E01` of kind `semantic`) now moves no count in `mandate_harness.rs` and
   runs through that family's arm, where on `main` before #343 it failed two counts. `unread_keys`
