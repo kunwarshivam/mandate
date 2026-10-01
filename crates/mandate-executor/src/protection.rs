@@ -7374,6 +7374,32 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// D1 in a running sequence: an exit allowed at 19:59:50 ET, after-hours, whose protective
+    /// cancel is confirmed after 20:00 finds no session open; it is held `session_closed`, and
+    /// the protection is re-placed at once for the position rather than left cancelled through
+    /// the night.
+    #[test]
+    fn a_sequence_that_runs_into_the_close_re_protects() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let late = 1_790_121_590;
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(late)), &ports)?;
+        executor.run(observation(Some(150), None, true, late)?, &ports)?;
+        let ran = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&ran), vec![OCO]);
+        executor.run(Input::Tick(RiskClock::from_secs(late + 15)), &ports)?;
+        let closed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert!(
+            submissions(&closed)
+                .iter()
+                .all(|order| order.purpose == Purpose::Protective)
+        );
+        assert!(!ocos(&closed).is_empty(), "{:?}", drafted(&closed));
+        assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        Ok(())
+    }
+
     /// D1's fail-safe: on the calendar's last Friday evening (2028-12-29, 21:00 ET) no next
     /// pre-market open can be named, so the exit is held `session_unknown` and alerted, and stays
     /// held; never sent as a queued limit or an overnight extended-hours one.
