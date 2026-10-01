@@ -390,6 +390,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   not count writes exactly its `OwnerCommandRefused` (`command`, `effective_at`, `reason`, with the
   `OwnerCommandIssued` as `causation_id`), and the fold reads it as a copy, so a re-tailed command
   writes nothing.
+  *Follow-up (the #413 review, minor 3):* give `mandate-approval` one `From<StepUpRefusal> for
+  Refusal` mapping and one reason-code table, retiring the three tables kept by hand today
+  (`mandate-runtime`'s `refusal_code`, its `OwnerCommandRefused` reasons, and `step_up_status`'s
+  input), so a new refusal cannot be coded differently in two places.
   *Follow-up (the #397 review, minors 1 to 5; one M7 tests PR before the `clap` wiring makes the
   commands reachable):* pin the closed key set of every control payload the CLI commits
   (`OwnerCommandIssued`, `ApprovalResponseSubmitted`, `OwnerAcknowledged`) in `tests/agent.rs` and
