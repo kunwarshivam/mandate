@@ -88,7 +88,10 @@ E8-8's tests PR extends both properties with them.
 
 **Per-test do-nothing bar.** Each pending test fails on the stub as committed, on the identity
 (`Ok((decision, by))`), on a constant ASK labelled `review_ceiling`, and, for the two
-`mandate-spec` tests, on a parse that accepts the member and ignores it.
+`mandate-spec` tests, on a parse that reads the member and drops it. The row test fails on that
+stub only because §9.2's row reads the parsed `Option<Date>`, not the document's text: a row that
+read the text would classify the change from the document and pass while the parse dropped the date
+(#389 round 1, minor 1, shown on the implementation PR).
 
 ## Planted bugs
 

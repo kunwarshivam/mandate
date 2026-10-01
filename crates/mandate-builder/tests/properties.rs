@@ -3198,7 +3198,6 @@ fn reviewed_actions() -> impl Strategy<Value = (Autonomy, ActionContext)> {
 /// until E8-8 gives `Autonomy` one (DEC-262 item 5); the review ceiling follows the step they lift
 /// at, so E8-8's tests PR extends this property with them.
 #[test]
-#[ignore = "pending E6-14"]
 fn past_the_review_date_no_opening_is_auto_and_before_it_nothing_changes() {
     check(reviewed_actions(), |(policy, action)| {
         let classified = classify(&policy, &action)
@@ -3270,7 +3269,6 @@ fn past_the_review_date_no_opening_is_auto_and_before_it_nothing_changes() {
 /// deferred, and an allowed buy past the review date is never AUTO and is decided as the walk
 /// decides it.
 #[test]
-#[ignore = "pending E6-14"]
 fn no_buy_past_the_review_date_reaches_auto_through_decide() {
     check(reviewed_actions(), |(policy, action)| {
         let proposal = proposal_for(&action);
@@ -3321,7 +3319,6 @@ fn no_buy_past_the_review_date_reaches_auto_through_decide() {
 /// the rules, the admission ceiling, for a client the client ceiling, or after the review date the
 /// review ceiling; otherwise AUTO. The source is the first step that reached the final decision.
 #[test]
-#[ignore = "pending E6-14"]
 fn every_rule_default_admission_requester_and_day_obeys_the_review_ceiling() {
     let decisions = [
         AutonomyDecision::Auto,

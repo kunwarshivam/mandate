@@ -668,11 +668,11 @@ fn autonomy(node: &Node<'_>) -> Parsed<Autonomy> {
     })
 }
 
-/// `autonomy.review_by` (§3, §6.6, DEC-188): the date it names. A stub until E6-14's
-/// implementation PR (DEC-77), so a document that sets a review date fails closed with
-/// [`ParseError::Unimplemented`] rather than loading without it.
-fn review_date(_node: Node<'_>) -> Parsed<Date> {
-    Err(ParseError::Unimplemented)
+/// `autonomy.review_by` (§3, §6.6, DEC-188): the date it names. A date the schema's pattern admits
+/// but the calendar does not is refused here, never read as "no review date", so a malformed date
+/// cannot switch the review off (DEC-271 item 6).
+fn review_date(node: Node<'_>) -> Parsed<Date> {
+    node.date()?.ok_or_else(|| node.off_pattern())
 }
 
 fn rule(node: &Node<'_>) -> Parsed<Rule> {
