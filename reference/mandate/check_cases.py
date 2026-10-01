@@ -143,7 +143,7 @@ req("MC-V68", carry is not None and Decimal(v68["context"]["connection_loss_carr
     and v68["expect"]["violations"] == ["V-032"], "a redeploy is refused on the carry the release left (V-032)")
 r26 = C["MC-R26"]
 s = steps("MC-R26")
-f26 = Decimal(next(p["value"] for p in r26["patch"] if p["path"] == "/capital/max_loss_from_allocation"))
+f26 = Decimal(d["bases"][r26["base"]]["mandate"]["capital"]["max_loss_from_allocation"])
 c26, e26 = Decimal(s[1]["capital_base"]), Decimal(s[1]["agent_equity"])
 req("MC-R26", carry is not None and Decimal(r26["initial"]["inherited_loss_usd"]) == carry
     and "lifetime_floor" not in s[0]["restrictions"] and "lifetime_floor" in s[1]["restrictions"]

@@ -274,6 +274,7 @@ def at(hh, mm, ss=0, day=21):
 def risk_case(cid, title, base, patch, qty, cost, cls, start, steps, note=None, L="0"):
     m = apply_patch(MB[base], patch)
     assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
+    assert not semantic(m, CTX)[0], (cid, "a risk case's mandate passes every V-rule", semantic(m, CTX)[0])
     rs = RiskState(m, qty, cost, cls, start, inherited_loss=L, mark_max_age_s=doc["harness_defaults"]["mark_max_age_s"])
     out = [{**s, "expect": rs.step(s)} for s in steps]
     c = {"id": cid, "kind": "risk_state", "title": title, "base": base, "patch": patch,
@@ -434,10 +435,11 @@ risk_case("MC-R25", "on_complete release with a loss: the connection carries max
           note="E = 10000 + 0.15 x (54000 - 55000) = 9850 and N = 10000, so the release retires the agent with a carry of 150, "
                "as agent_stopped would (DEC-270, MI-14).")
 risk_case("MC-R26", "A redeploy after a release opens at the carried L", "btc_accumulator",
-          ISO + [rep("/risk/breach_confirm_s", 0), rep("/capital/max_loss_from_allocation", "0.05")], "0.1", "60000", "crypto",
-          at(14, 0), [mk(at(14, 1), "56600", "crypto"), mk(at(14, 2), "56500", "crypto")], L=RELEASE_CARRY,
-          note="L is MC-R25's carry, 150. Floor: E <= C x (1 - 0.05) + L = 9500 + 150 = 9650. E = 9660 at 56600 stays above it; "
-               "E = 9650 at 56500 latches it, 150 above the floor a fresh connection would have (§5.7, V-032).")
+          ISO + [rep("/risk/breach_confirm_s", 0)], "0.1", "60000", "crypto",
+          at(14, 0), [mk(at(14, 1), "51600", "crypto"), mk(at(14, 2), "51500", "crypto")], L=RELEASE_CARRY,
+          note="L is MC-R25's carry, 150. Floor: E <= C x (1 - 0.1) + L = 9000 + 150 = 9150. E = 9160 at 51600 latches the "
+               "ladder but stays above the floor; E = 9150 at 51500 latches it, 150 above the floor a fresh connection would "
+               "have (§5.7, V-032).")
 risk_case("MC-R24", "A removed instrument is exits-only in that instrument; re-admission clears it", "research_equity",
           [], "10", "100", "us_equity", at(14, 0),
           [mk(at(14, 1), "100"),
