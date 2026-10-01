@@ -7313,6 +7313,8 @@ mod sequence_tests {
             OVERNIGHT,
             OPEN.saturating_sub(30),
             1_790_121_590,
+            1_790_121_590,
+            1_790_121_590,
             SATURDAY,
             1_788_789_600,
             1_514_739_600,
