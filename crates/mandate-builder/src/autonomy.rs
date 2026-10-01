@@ -271,7 +271,7 @@ pub fn classify(policy: &Autonomy, action: &ActionContext) -> Result<Classificat
     };
     let (decision, by) = match policy.review_by {
         None => (decision, by),
-        Some(review_by) => review_ceiling(decision, by, review_by, action.risk_day)?,
+        Some(review_by) => review_ceiling(decision, by, review_by, action.risk_day),
     };
     let approval = match decision {
         AutonomyDecision::Ask => Some(ApprovalRequest {
@@ -313,15 +313,15 @@ fn review_ceiling(
     by: DecidedBy,
     review_by: Date,
     risk_day: Date,
-) -> Result<(AutonomyDecision, DecidedBy), BuilderError> {
+) -> (AutonomyDecision, DecidedBy) {
     if risk_day <= review_by {
-        return Ok((decision, by));
+        return (decision, by);
     }
     let ceiled = decision.stricter(AutonomyDecision::Ask);
     if ceiled == decision {
-        Ok((decision, by))
+        (decision, by)
     } else {
-        Ok((ceiled, DecidedBy::ReviewCeiling))
+        (ceiled, DecidedBy::ReviewCeiling)
     }
 }
 
