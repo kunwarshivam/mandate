@@ -1112,12 +1112,19 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the coordinator moved from 3a to slice 2 (#267, comment 5862923162): under rule 13 no exit waits
   for the startup reconciliation, so the plant gets weight only with the first opening through
   `fault::protected` (slice 2's add). Slice 2's PR shows each of the three red.
-- **E7-4 slice 4 (stream K), from #264's review (comment 5862761692):** (a) name the do-nothing
-  finding in slice 4's PR: a permissive `ladder_price` turns `fault::crash_at_confirmation_before_exit_submit`
-  green, and only `protection::sequence_tests::an_unprotected_exit_never_reaches_the_ladder_stub`
-  catches it; (b) pin the fault fixture's exact recovered cash rather than §11's ±15.40 band;
-  (c) make the fault fixture's `equity` and `buying_power` consistent with its cash before any
-  slice reads buying power from it.
+- **E7-4 (stream K), found by slice 4a's rule-13 oracle (`protection::sequence_tests::rule_13_holds_over_random_scripts`):**
+  (1) a passive exit waits on its OCO's cancel confirmation with no bound and no alert: a broker
+  that never confirms holds the exit for good, with the protection still resting (rule 13's broker
+  hold, so no risk is added, but rule 3 wants the wait bounded). Bound it as rule 5's wait is
+  (`unknown_absent_window_s`, then query the order and alert), with a test. (2) `release_held`
+  journals only an allow, so when a held exit's cause changes (paused, then nothing to price; or
+  an allow that would now over-sell beside other exits) the journal's last verdict names a cause
+  that has gone; journal a changed hold reason once. (3) A later rung is sized from the fold's
+  filled quantity when the step's cancel is confirmed; a fill the broker reports after that
+  confirmation (`LateFillApplied`) is not netted, so the rung could sell more than the position
+  by that fill (rule 12). The same lag sizes §5.4's re-placement. Size from the broker's own
+  report of the cancelled order, or hold the rung for it, before slice 2 lets protected
+  positions exist outside the tests (DEC-160 (4)).
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
