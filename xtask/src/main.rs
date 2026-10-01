@@ -2472,11 +2472,11 @@ fn spec_guard_problems(root: &Path, base: &str, pr_body: &str) -> Result<Vec<Str
         &["diff", "--name-only", &format!("{base}...HEAD")],
     )?;
     let (protected, code) = classify(changed.lines());
+    let mut problems = status_flip_problems(root, base)?;
     if protected.is_empty() {
         eprintln!("    spec-guard: no protected paths changed");
-        return Ok(Vec::new());
+        return Ok(problems);
     }
-    let mut problems = Vec::new();
     let messages = format!(
         "{pr_body}\n{}",
         output_in(
@@ -2495,6 +2495,104 @@ fn spec_guard_problems(root: &Path, base: &str, pr_body: &str) -> Result<Vec<Str
         problems.push(format!("specs, schemas, or reference cases changed together with code ({} code files); split the change", code.len()));
     }
     Ok(problems)
+}
+
+/// The founder-owned reference-case status file (ADR-0001 ES-11).
+const STATUS_TOML: &str = "crates/mandate-refcases/status.toml";
+
+/// ES-11 as DEC-277 amends it: a case `status.toml` marks `passing` at `base` never goes absent, and
+/// goes `pending` only when the same change edits that case's entry in `fixtures/refcases/`, which is
+/// a spec or reference change to what the case asserts. Compares `base` with the working tree; a case
+/// whose entry no fixture names by `id` counts as unchanged, so its flip is refused.
+fn status_flip_problems(root: &Path, base: &str) -> Result<Vec<String>> {
+    let Ok(before) = output_in(root, "git", &["show", &format!("{base}:{STATUS_TOML}")]) else {
+        return Ok(Vec::new());
+    };
+    let before = statuses(&before).context("status.toml at the base")?;
+    let after = match fs::read_to_string(root.join(STATUS_TOML)) {
+        Ok(text) => statuses(&text).context("status.toml in the working tree")?,
+        Err(_) => BTreeMap::new(),
+    };
+    let mut problems = Vec::new();
+    for ((suite, case), status) in &before {
+        if status != "passing" {
+            continue;
+        }
+        match after
+            .get(&(suite.clone(), case.clone()))
+            .map(String::as_str)
+        {
+            Some("passing") => {}
+            None => problems.push(format!(
+                "status.toml: `{suite}::{case}` went from passing to absent; a passing case never \
+                 regresses (ES-11, DEC-277)"
+            )),
+            Some(_) => {
+                if !fixture_entry_changed(root, base, suite, case)? {
+                    problems.push(format!(
+                        "status.toml: `{suite}::{case}` went from passing to pending, but its entry in \
+                         fixtures/refcases/ did not change; only a change to what the case asserts may \
+                         take it back to pending (ES-11, DEC-277)"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(problems)
+}
+
+/// Every case's status, keyed by suite and case ID.
+fn statuses(text: &str) -> Result<BTreeMap<(String, String), String>> {
+    let table: toml::Table = text.parse()?;
+    let mut out = BTreeMap::new();
+    for (suite, cases) in &table {
+        let cases = cases
+            .as_table()
+            .with_context(|| format!("`{suite}` must be a table"))?;
+        for (case, entry) in cases {
+            let status = entry
+                .get("status")
+                .and_then(toml::Value::as_str)
+                .with_context(|| format!("`{suite}::{case}` has no status"))?;
+            out.insert((suite.clone(), case.clone()), status.to_owned());
+        }
+    }
+    Ok(out)
+}
+
+/// Whether the entry whose `id` is `case`, anywhere in `fixtures/refcases/<suite>.json` (`_` read as
+/// `-`), differs between `base` and the working tree. An entry on one side only counts as changed.
+fn fixture_entry_changed(root: &Path, base: &str, suite: &str, case: &str) -> Result<bool> {
+    let path = format!("fixtures/refcases/{}.json", suite.replace('_', "-"));
+    let before: Option<serde_json::Value> =
+        output_in(root, "git", &["show", &format!("{base}:{path}")])
+            .ok()
+            .map(|text| serde_json::from_str(&text))
+            .transpose()
+            .with_context(|| format!("{path} at the base"))?;
+    let after: Option<serde_json::Value> = fs::read_to_string(root.join(&path))
+        .ok()
+        .map(|text| serde_json::from_str(&text))
+        .transpose()
+        .with_context(|| format!("{path} in the working tree"))?;
+    let entry = |doc: &Option<serde_json::Value>| {
+        doc.as_ref().and_then(|d| entry_with_id(d, case)).cloned()
+    };
+    Ok(entry(&before) != entry(&after))
+}
+
+/// The first object, depth first, whose `id` is `id`.
+fn entry_with_id<'a>(value: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map)
+            if map.get("id").and_then(serde_json::Value::as_str) == Some(id) =>
+        {
+            Some(value)
+        }
+        serde_json::Value::Object(map) => map.values().find_map(|v| entry_with_id(v, id)),
+        serde_json::Value::Array(items) => items.iter().find_map(|v| entry_with_id(v, id)),
+        _ => None,
+    }
 }
 
 /// Splits changed paths into protected paths and code paths. A protected file under a code
@@ -2548,8 +2646,8 @@ mod tests {
         first_panic_line, generated_pending_markers, has_pending_tests, is_pending_marker,
         is_stub_function, listed_mutant_counts, live_test_counts, mutant_verdicts, mutants,
         mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, repo_root, spec_guard_problems, test_binary, test_outcomes,
-        unjudged_mutants, verdicts,
+        plain_comment_lines, repo_root, spec_guard_problems, status_flip_problems, test_binary,
+        test_outcomes, unjudged_mutants, verdicts,
     };
 
     #[test]
@@ -3933,6 +4031,132 @@ mod tests {
                 "crates/fx/tests/untracked.rs:3: `untracked_and_passing` (pending E1-2) passes on this change's code",
             ]
         );
+        Ok(())
+    }
+
+    /// A status file with five passing cases and one pending, and a fixture naming all six.
+    fn status_fixture(name: &str) -> Result<(Fixture, String)> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-{name}-{}", std::process::id()));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        let fx = Fixture(dir);
+        fx.write(
+            "crates/mandate-refcases/status.toml",
+            concat!(
+                "[mandate]\n",
+                "'MC-A' = { status = \"passing\", story = \"E1-1\" }\n",
+                "'MC-B' = { status = \"passing\", story = \"E1-1\" }\n",
+                "'MC-C' = { status = \"pending\", story = \"E1-1\" }\n",
+                "'MC-D' = { status = \"passing\", story = \"E1-1\" }\n",
+                "'MC-E' = { status = \"passing\", story = \"E1-1\" }\n",
+                "[trading_domain]\n",
+                "'TD-A' = { status = \"passing\", story = \"E1-1\" }\n",
+            ),
+        )?;
+        let cases: Vec<Value> = ["MC-A", "MC-B", "MC-C", "MC-D", "MC-E"]
+            .iter()
+            .map(|id| json!({"id": id, "expect": {"journal": ["Old"]}}))
+            .collect();
+        fx.write(
+            "fixtures/refcases/mandate.json",
+            &json!({"cases": cases}).to_string(),
+        )?;
+        fx.write(
+            "fixtures/refcases/trading-domain.json",
+            &json!({"cases": [{"id": "TD-A", "expect": {"fill": "1"}}]}).to_string(),
+        )?;
+        output_in(&fx.0, "git", &["init", "-q", "-b", "main"])?;
+        fx.commit_with("base")?;
+        let base = fx.git(&["rev-parse", "HEAD"])?;
+        Ok((fx, base))
+    }
+
+    /// ES-11 as DEC-277 amends it. Planted against one base: a passing case going pending with its
+    /// fixture entry unchanged (MC-A), one going absent although its entry changed (MC-B), and one
+    /// going pending while only another case's entry changed (MC-E) are refused, naming each; one
+    /// going pending with its own entry changed (MC-D, in `trading_domain` too, read from
+    /// `trading-domain.json`) and a pending case going passing (MC-C) are allowed. The spec guard
+    /// reports the same refusals.
+    #[test]
+    fn a_passing_case_goes_pending_only_with_its_own_fixture_entry_and_never_absent() -> Result<()>
+    {
+        let (fx, base) = status_fixture("status-flips")?;
+        assert_eq!(status_flip_problems(&fx.0, &base)?, Vec::<String>::new());
+        fx.write(
+            "crates/mandate-refcases/status.toml",
+            concat!(
+                "[mandate]\n",
+                "'MC-A' = { status = \"pending\", story = \"E1-1\" }\n",
+                "'MC-C' = { status = \"passing\", story = \"E1-1\" }\n",
+                "'MC-D' = { status = \"pending\", story = \"E1-1\" }\n",
+                "'MC-E' = { status = \"pending\", story = \"E1-1\" }\n",
+                "[trading_domain]\n",
+                "'TD-A' = { status = \"pending\", story = \"E1-1\" }\n",
+            ),
+        )?;
+        let cases: Vec<Value> = ["MC-A", "MC-B", "MC-C", "MC-D", "MC-E"]
+            .iter()
+            .map(|id| {
+                let moved = ["MC-B", "MC-D"].contains(id);
+                json!({"id": id, "expect": {"journal": [if moved { "New" } else { "Old" }]}})
+            })
+            .collect();
+        fx.write(
+            "fixtures/refcases/mandate.json",
+            &json!({"cases": cases}).to_string(),
+        )?;
+        fx.write(
+            "fixtures/refcases/trading-domain.json",
+            &json!({"cases": [{"id": "TD-A", "expect": {"fill": "2"}}]}).to_string(),
+        )?;
+        let problems = status_flip_problems(&fx.0, &base)?;
+        let named: Vec<&str> = problems
+            .iter()
+            .map(|p| p.split('`').nth(1).unwrap_or_default())
+            .collect();
+        assert_eq!(
+            named,
+            ["mandate::MC-A", "mandate::MC-B", "mandate::MC-E"],
+            "{problems:?}"
+        );
+        assert!(problems[0].contains("passing to pending"), "{problems:?}");
+        assert!(problems[1].contains("passing to absent"), "{problems:?}");
+        assert!(problems[2].contains("passing to pending"), "{problems:?}");
+
+        fx.commit_with("flips, citing DEC-9")?;
+        let guarded = spec_guard_problems(&fx.0, &base, "")?;
+        assert_eq!(
+            guarded.len(),
+            3,
+            "the spec guard refuses the same three: {guarded:?}"
+        );
+        Ok(())
+    }
+
+    /// A status file the base does not have yet has nothing to regress from, and deleting the whole
+    /// file takes every passing case to absent.
+    #[test]
+    fn a_new_status_file_flips_nothing_and_a_deleted_one_drops_every_passing_case() -> Result<()> {
+        let (fx, base) = status_fixture("status-deleted")?;
+        fs::remove_file(fx.0.join("crates/mandate-refcases/status.toml"))?;
+        let problems = status_flip_problems(&fx.0, &base)?;
+        assert_eq!(
+            problems.len(),
+            5,
+            "MC-A, MC-B, MC-D, MC-E, TD-A: {problems:?}"
+        );
+        assert!(
+            problems.iter().all(|p| p.contains("passing to absent")),
+            "{problems:?}"
+        );
+        fx.commit_with("no status yet")?;
+        let empty = fx.git(&["rev-parse", "HEAD"])?;
+        fx.write(
+            "crates/mandate-refcases/status.toml",
+            "[mandate]\n'MC-A' = { status = \"pending\", story = \"E1-1\" }\n",
+        )?;
+        assert_eq!(status_flip_problems(&fx.0, &empty)?, Vec::<String>::new());
         Ok(())
     }
 
