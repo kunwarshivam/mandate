@@ -896,8 +896,46 @@ impl Fraction {
         self.0.is_zero()
     }
 
+    /// `self + step × times`, never above `cap`: an offset raised a step at a time and held at its
+    /// ceiling (trading-domain spec §5.6's exit ladder, `max_exit_offset`). Exact, so no rounding;
+    /// `overflow` only at the decimal's range, which no fraction reaches.
+    pub fn stepped(self, step: Self, times: u32, cap: Self) -> Result<Self, NumError> {
+        let raised = step
+            .0
+            .checked_mul(Decimal::from(times))
+            .and_then(|added| self.0.checked_add(added))
+            .ok_or(NumError::Overflow)?;
+        Ok(Self(raised.min(cap.0)))
+    }
+
     fn exact(self) -> Exact {
         Exact::of(self.0)
+    }
+}
+
+#[cfg(test)]
+mod stepped_tests {
+    use super::{Fraction, NumError};
+
+    /// §5.6's liquid tier: 0.5% raised by 0.5% a step, held at 3%.
+    #[test]
+    fn an_offset_rises_a_step_at_a_time_and_holds_at_its_cap() -> Result<(), NumError> {
+        let (start, step, cap) = (
+            Fraction::parse("0.005")?,
+            Fraction::parse("0.005")?,
+            Fraction::parse("0.03")?,
+        );
+        let offsets = (0..8)
+            .map(|times| start.stepped(step, times, cap))
+            .collect::<Result<Vec<_>, _>>()?;
+        let expected = [
+            "0.005", "0.01", "0.015", "0.02", "0.025", "0.03", "0.03", "0.03",
+        ]
+        .map(Fraction::parse)
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(offsets, expected);
+        Ok(())
     }
 }
 

@@ -8,7 +8,7 @@ use crate::orders::{
 };
 use crate::payload::optional_text;
 use crate::ports::Ports;
-use crate::protection::{bound, cancel_openings, overdue_openings, settle, watched};
+use crate::protection::{bound, cancel_openings, ladder_steps, overdue_openings, settle, watched};
 use crate::reconcile::run;
 use crate::state::{EVERY_AGENT, ExecutorState, UnresolvedAppend};
 use crate::types::{
@@ -58,6 +58,16 @@ pub fn handle(
         state.now = state.now.max(Some(*at));
     }
     if let Input::Market(observation) = &input {
+        if observation.sane && observation.bid.is_some() {
+            state
+                .sane_bids
+                .insert(observation.instrument.clone(), observation.clone());
+        }
+        if observation.last_trade.is_some() {
+            state
+                .trades
+                .insert(observation.instrument.clone(), observation.clone());
+        }
         state
             .quotes
             .insert(observation.instrument.clone(), observation.clone());
@@ -142,7 +152,8 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             lookups_due(batch);
             release_held(batch)?;
             overdue_openings(batch)?;
-            bound(batch)
+            bound(batch)?;
+            ladder_steps(batch)
         }
         Input::Intent(handoff) => received(batch, handoff),
         Input::Broker(Err(_)) => silence(batch),
