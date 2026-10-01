@@ -9,9 +9,10 @@
     clippy::as_conversions
 )]
 //! The research-agent contract of [mandate spec §8](../../../docs/specs/mandate.md#8-signal-models-and-the-order-builder)
-//! as code: a thesis in, and an admission, a lineage fold, a removal, or a stagger offset out
-//! (backlog E17-2, E17-3, E17-7, and E17-9's fold;
-//! [task brief](../../../docs/project/tasks/M5-J-research-thin-slice.md), DEC-132).
+//! as code: a thesis in, and an admission, a lineage fold, a removal, a stagger offset, an
+//! input-drift verdict, or a forward-paper scorecard out
+//! (backlog E17-2, E17-3, E17-5, E17-7, E17-8's scoring half, and E17-9's fold;
+//! [task brief](../../../docs/project/tasks/M5-J-research-thin-slice.md), DEC-132, DEC-281).
 //!
 //! **This crate never calls a model.** A model output arrives as a [`Thesis`] value that something
 //! else produced, and there is no HTTP client, no prompt, no artifact store, and no provider here.
@@ -46,8 +47,9 @@
 //! risk (MI-19), and it is the only path by which anything here shrinks the universe: a lowered
 //! `max_instruments` refuses further admissions and never removes (DEC-132 item 14).
 //!
-//! No entry point returns [`ResearchError::Unimplemented`] any more; the variant stays only because
-//! the tests PR's `rules.rs` pins its code, so removing it is a tests correction (DEC-77).
+//! The `score` module's six entry points are stubs that return
+//! [`ResearchError::Unimplemented`] until E17-8's implementation lands; every other entry point has
+//! its implementation and returns its own typed errors (DEC-77).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -56,6 +58,7 @@ use mandate_num::Usd;
 use mandate_time::UtcNanos;
 
 pub mod drift;
+pub mod score;
 pub mod spec_types;
 
 pub use spec_types::{
@@ -1181,8 +1184,27 @@ pub enum ResearchError {
     EmptyInvalidation,
     #[error("an observation's timestamp precedes the last one already folded for its source")]
     ObservationOutOfOrder,
-    /// Returned by no entry point since the implementation landed; kept for the tests PR's pinned
-    /// code only (DEC-77).
+    /// A close series must hold at least one close
+    #[error("a close series must hold at least one close")]
+    EmptyCloses,
+    /// A close series's instants must strictly advance
+    #[error("a close series's instants must strictly advance")]
+    ClosesOutOfOrder,
+    /// No close of the series falls strictly after the instant
+    #[error("no close of the series falls strictly after the instant")]
+    NoCloseAfter,
+    /// No close of the series falls at or before the instant
+    #[error("no close of the series falls at or before the instant")]
+    NoCloseOnOrBefore,
+    /// The registered window has not closed: fewer scoreable theses than the minimum
+    #[error("the registered window has not closed: fewer scoreable theses than the minimum")]
+    WindowNotClosed,
+    /// A thesis's horizon closes outside the registered window
+    #[error("a thesis's horizon closes outside the registered window")]
+    ThesisOutsideWindow,
+    /// Returned by the stubs of a story not yet implemented — E17-8's six `score` entry points
+    /// until its implementation PR lands, each call naming itself and its story; every implemented
+    /// entry point returns its own typed errors instead (DEC-77).
     #[error("{0} is not implemented yet (pending {1})")]
     Unimplemented(&'static str, &'static str),
     #[error(transparent)]
@@ -1209,6 +1231,12 @@ impl ResearchError {
             Self::EmptyId => "empty_id",
             Self::EmptyInvalidation => "empty_invalidation",
             Self::ObservationOutOfOrder => "observation_out_of_order",
+            Self::EmptyCloses => "empty_closes",
+            Self::ClosesOutOfOrder => "closes_out_of_order",
+            Self::NoCloseAfter => "no_close_after",
+            Self::NoCloseOnOrBefore => "no_close_on_or_before",
+            Self::WindowNotClosed => "window_not_closed",
+            Self::ThesisOutsideWindow => "thesis_outside_window",
             Self::Unimplemented(_, _) => "unimplemented",
             Self::SpecType(_) => "spec_type",
             Self::Num(e) => e.code(),
