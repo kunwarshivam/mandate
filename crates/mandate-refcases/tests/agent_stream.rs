@@ -43,55 +43,46 @@ fn assert_family(family: &str, accepting: &str, refusing: &str) {
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn the_agent_stream_opens_with_its_own_subject() {
     assert_family("StreamOpened", "::chain::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn an_observation_references_its_data_and_never_carries_it() {
     assert_family("ObservationRecorded", "::chain::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn a_model_output_is_recorded_as_given() {
     assert_family("ModelOutputRecorded", "::chain::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn a_decision_records_its_evaluation_its_gate_and_who_decided() {
     assert_family("DecisionMade", "::valid::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn an_intent_is_long_only_and_names_its_cause() {
     assert_family("IntentProposed", "::chain::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn a_mode_change_is_never_looser_than_the_owner_set() {
     assert_family("AgentModeChanged", "::valid::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn a_kill_switch_names_its_own_subject_and_an_owner_switch_its_command() {
     assert_family("KillSwitchActivated", "::valid::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn an_owner_exit_records_the_owner_and_step_up_whatever_the_bid() {
     assert_family("OwnerExitRequested", "::valid::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn a_batch_is_refused_when_an_intent_differs_from_its_decision() {
     assert_family(
         "batch",
@@ -101,7 +92,6 @@ fn a_batch_is_refused_when_an_intent_differs_from_its_decision() {
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn the_chain_verifies_and_each_tampered_range_fails_its_own_check() {
     assert_family("chain", "::append", "::append");
     assert_family(
@@ -135,7 +125,6 @@ fn run(fixture: Json, id: &str) -> Result<(), String> {
 /// The harness reads every key of every expectation: each case passes as generated, and fails
 /// once its expected reason, path, draft index, outcome, range code, or range seq is changed.
 #[test]
-#[ignore = "pending E7-9"]
 fn every_expectation_key_is_read() {
     let floor = "journal::agent_stream::OwnerExitRequested::invalid::owner_exit_floor_absent";
     let pause = "journal::agent_stream::AgentModeChanged::valid::mode_owner_pause";
@@ -241,7 +230,6 @@ fn every_expectation_key_is_read() {
 /// Rule 10 compares decimals by value (§4.6): an intent that writes its decision's quantity and
 /// limit with trailing zeros repeats the decision, and one a hundredth off does not.
 #[test]
-#[ignore = "pending E7-9"]
 fn an_intent_is_compared_with_its_decision_by_value() {
     let id = "journal::agent_stream::batch::decision_and_its_intent";
     let with_intent_changes = |changes: Json| {
@@ -266,7 +254,6 @@ fn an_intent_is_compared_with_its_decision_by_value() {
 /// start is after the event it names, the reference is left to the full-chain run and the range
 /// verifies.
 #[test]
-#[ignore = "pending E7-9"]
 fn a_reference_before_the_range_is_left_to_the_full_chain() {
     let name = "kill_switch_names_no_event_on_the_full_chain";
     let id = format!("journal::agent_stream::range::{name}");
@@ -696,7 +683,6 @@ fn sweep() -> Vec<Sweep> {
 /// member table is §9.1's, written out here, and must name exactly the members of the chain event
 /// each sweep starts from.
 #[test]
-#[ignore = "pending E7-9"]
 fn every_member_is_required_and_typed() {
     let mut fixture = fixture();
     for (event_type, base, members) in SCHEMAS {
