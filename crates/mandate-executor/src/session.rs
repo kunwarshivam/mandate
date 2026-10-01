@@ -29,10 +29,9 @@ pub(crate) enum Venue {
 }
 
 /// The US-equities session span `instrument` is in at `at`, or `None` for crypto, for an instant
-/// the calendar does not cover, and for a closed market. An instant before or after the
-/// calendar's whole range is read as the regular session, as before this slice (DEC-260 (13)):
-/// production clocks are always inside it, and a closed market inside it is told apart by
-/// [`covered`].
+/// the calendar does not cover, and for a closed market. An instant before the calendar's first
+/// date is read as the regular session, as before this slice: only the tests' 1970 clocks reach
+/// it (DEC-260 (13)); one after its last date is closed ([`after_range`]).
 fn span(ports: &Ports<'_>, instrument: &InstrumentId, at: RiskClock) -> Option<SessionSpan> {
     if ports.instruments.asset_class(instrument) != Some(AssetClass::UsEquity) {
         return None;
@@ -59,6 +58,19 @@ fn covered(at: RiskClock) -> bool {
         .is_some_and(|((date, _), calendar)| calendar.is_trading_day(date).is_ok())
 }
 
+/// Whether `at` falls after the calendar's last date. No session can be named there, so an equity
+/// exit is held `session_unknown` and alerted rather than read as the regular session, which
+/// would quietly queue every exit the day the calendar ran out (the coordinator's ruling on D1's
+/// range, 5926945398).
+fn after_range(at: RiskClock) -> bool {
+    let calendar = ExchangeCalendar::us_equities().ok();
+    UtcNanos::from_parts(at.secs(), 0)
+        .ok()
+        .and_then(|now| new_york_date_and_hour(now).ok())
+        .zip(calendar)
+        .is_some_and(|((date, _), calendar)| date > calendar.valid_to())
+}
+
 /// The venue for `instrument` at `at`.
 pub(crate) fn venue(ports: &Ports<'_>, instrument: &InstrumentId, at: RiskClock) -> Venue {
     let equity = ports.instruments.asset_class(instrument) == Some(AssetClass::UsEquity);
@@ -71,7 +83,7 @@ pub(crate) fn venue(ports: &Ports<'_>, instrument: &InstrumentId, at: RiskClock)
             }
             Session::Regular => Venue::Regular,
         },
-        None if equity && covered(at) => Venue::Closed,
+        None if equity && (covered(at) || after_range(at)) => Venue::Closed,
         None => Venue::Regular,
     }
 }
@@ -189,6 +201,8 @@ mod venue_tests {
     const CLOSE: i64 = 1_790_107_200;
     const AFTER_HOURS_CLOSE: i64 = 1_790_121_600;
     const SATURDAY: i64 = 1_790_438_400;
+    /// 2029-01-03, a Wednesday, 11:00 ET: past the calendar's last date (2028-12-31).
+    const AFTER_THE_CALENDAR: i64 = 1_862_150_400;
 
     fn at(secs: i64) -> RiskClock {
         RiskClock::from_secs(secs)
@@ -218,6 +232,7 @@ mod venue_tests {
             (AFTER_HOURS_CLOSE, Venue::Closed),
             (SATURDAY, Venue::Closed),
             (0, Venue::Regular),
+            (AFTER_THE_CALENDAR, Venue::Closed),
         ] {
             assert_eq!(venue(&ports, &aapl, at(secs)), expected, "at {secs}");
         }

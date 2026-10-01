@@ -7401,26 +7401,28 @@ mod sequence_tests {
     }
 
     /// D1's fail-safe: on the calendar's last Friday evening (2028-12-29, 21:00 ET) no next
-    /// pre-market open can be named, so the exit is held `session_unknown` and alerted, and stays
-    /// held; never sent as a queued limit or an overnight extended-hours one.
+    /// pre-market open can be named, and past its last date (2029-01-03, 11:00 ET) no session at
+    /// all, so the exit is held `session_unknown` and alerted, and stays held; never sent as a
+    /// queued limit or an overnight extended-hours one.
     #[test]
     fn a_closed_market_with_no_next_open_holds_and_alerts() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = tiered_ports(&config, &fees);
-        let at = 1_861_754_400;
-        let mut executor = held(&ports)?;
-        executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
-        executor.run(observation(Some(150), None, true, at)?, &ports)?;
-        let ran = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
-        assert!(submissions(&ran).is_empty());
-        assert_eq!(gate_reasons(&ran), vec!["session_unknown"]);
-        assert!(
-            alerts(&ran).contains(&"session_unknown"),
-            "{:?}",
-            alerts(&ran)
-        );
-        let later = executor.run(Input::Tick(RiskClock::from_secs(at + 86_400)), &ports)?;
-        assert!(submissions(&later).is_empty());
+        for at in [1_861_754_400, 1_862_150_400] {
+            let mut executor = held(&ports)?;
+            executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            executor.run(observation(Some(150), None, true, at)?, &ports)?;
+            let ran = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+            assert!(submissions(&ran).is_empty());
+            assert_eq!(gate_reasons(&ran), vec!["session_unknown"]);
+            assert!(
+                alerts(&ran).contains(&"session_unknown"),
+                "{:?}",
+                alerts(&ran)
+            );
+            let later = executor.run(Input::Tick(RiskClock::from_secs(at + 86_400)), &ports)?;
+            assert!(submissions(&later).is_empty());
+        }
         Ok(())
     }
 
