@@ -34,13 +34,16 @@ const NONE: &[&str] = &[];
 /// The catalogue entry for `event_type`. `TradingDayStarted` and `ClockAdvanced` are owned by the
 /// scheduler and copied into account streams by the executor (spec §2); `OwnerAcknowledged` is
 /// recorded in the control stream and copied into the account stream, where it is a risk input
-/// (mandate spec §5.2, DEC-81).
+/// (mandate spec §5.2, DEC-81). `OwnerCommandRefused` is the copy in its place of a resume or Stop
+/// the agent runtime refused, or of an acknowledgment the executor refused, for its step-up
+/// (mandate spec §6.1); its payload schema is not closed yet (journal spec §9.1).
 pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
     let e = match event_type {
         "StreamOpened" => entry(&[Account, Agent, Control, Scheduler], NONE),
         "TradingDayStarted" | "ClockAdvanced" => entry(&[Account, Scheduler], NONE),
         "KillSwitchActivated" => entry(&[Account, Agent], NONE),
         "OwnerAcknowledged" => entry(&[Account, Control], NONE),
+        "OwnerCommandRefused" => entry(&[Account, Agent], NONE),
 
         "IntentReceived" => entry(ACCOUNT, &[MAN]),
         "GateDecided" => entry(ACCOUNT, &[FEE, CAL, INS, RULE, MAN]),
