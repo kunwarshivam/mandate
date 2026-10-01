@@ -709,6 +709,16 @@ fn calendar(fixture: &Json, name: &str) -> Result<TradingCalendar, String> {
     .map_err(|e| format!("calendar `{name}`: {e}"))
 }
 
+/// The members a US-equity instrument may state: a listing on an exchange, and whether it trades in
+/// fractions. A pair's `symbol` or `min_trade_increment` on an equity is refused, never ignored,
+/// since the driver gives an equity a one-share minimum of its own (DEC-85, DEC-285).
+const EQUITY_MEMBERS: &[&str] = &["asset_class", "exchange", "fractionable"];
+
+/// The members a crypto pair may state: its `symbol`, which names its quote currency, and its
+/// `min_trade_increment`. An `exchange` or `fractionable` on a pair is refused, since check 2 reads
+/// no exchange for crypto and a pair is always traded in its increment (DEC-285).
+const CRYPTO_MEMBERS: &[&str] = &["asset_class", "symbol", "min_trade_increment"];
+
 /// Name, ID, asset class, and `fractionable` when the snapshot gives it.
 type Instruments = Vec<(String, InstrumentId, AssetClass, Option<bool>)>;
 
@@ -720,22 +730,19 @@ fn instruments(case: &Json) -> Result<Instruments, String> {
         .iter()
         .map(|(name, fields_of)| {
             let what = format!("instrument `{name}`");
-            fields(
-                fields_of,
-                &what,
-                &[
-                    "asset_class",
-                    "exchange",
-                    "fractionable",
-                    "symbol",
-                    "min_trade_increment",
-                ],
-            )?;
             let class = match str_at(fields_of, "asset_class")? {
                 "us_equity" => AssetClass::UsEquity,
                 "crypto" => AssetClass::Crypto,
                 other => return Err(format!("{what}: unknown asset_class `{other}`")),
             };
+            fields(
+                fields_of,
+                &what,
+                match class {
+                    AssetClass::UsEquity => EQUITY_MEMBERS,
+                    AssetClass::Crypto => CRYPTO_MEMBERS,
+                },
+            )?;
             let id = InstrumentId::new(name).map_err(|e| format!("{what}: {e}"))?;
             let fractionable = match fields_of.get("fractionable") {
                 None => None,

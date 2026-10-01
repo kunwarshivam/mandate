@@ -887,3 +887,77 @@ fn a_crypto_pair_s_minimum_order_is_its_increment() -> Result<(), String> {
         Ok(()),
     )
 }
+
+/// An instrument states only its own class's members (DEC-85, DEC-285): an equity's `symbol` or
+/// `min_trade_increment`, or a pair's `exchange` or `fractionable`, fails the case naming it.
+#[test]
+fn an_instrument_states_only_its_class_s_members() -> Result<(), String> {
+    let stating = |instrument: &'static str, key: &'static str, value: Json| -> Edit {
+        Box::new(move |c| put(c, &["instruments", instrument], key, value))
+    };
+    let rows: [(&str, &str, &str, Json); 4] = [
+        ("RC-09B", "AAPL", "symbol", json!("AAPL/USD")),
+        ("RC-09B", "AAPL", "min_trade_increment", json!("0.01")),
+        ("RC-09", "BTCUSD", "exchange", json!("NASDAQ")),
+        ("RC-09", "BTCUSD", "fractionable", json!(true)),
+    ];
+    for (case, instrument, key, value) in rows {
+        expect_eq(
+            &format!("{case}: `{instrument}` stating `{key}`"),
+            run_edited(case, stating(instrument, key, value)),
+            Err(format!("instrument `{instrument}`: unknown key `{key}`")),
+        )?;
+    }
+    Ok(())
+}
+
+/// RC-09's crypto fill reaches the accounting as crypto, as it reaches the gate's day-trade fold
+/// (§6.4, typed by hand): 0.01 BTC bought at 60,000.00 as a taker pays 25 bps, 0.000025 BTC, from
+/// the asset received, so 0.009975 BTC is held, $600.00 leaves settled cash at once, and no cash
+/// fee accrues. The fill the fold reads is crypto too, so it never counts as a day trade.
+#[test]
+fn rc_09_s_crypto_fill_is_crypto_to_the_accounting_and_the_gate() -> Result<(), String> {
+    let (fixture, mut case) = case_named("RC-09")?;
+    object_at(&mut case, &[])?.remove("variants");
+    let config = config(&fixture, &case)?;
+    let instruments = instruments(&case)?;
+    let mut account = initial(
+        &case,
+        BrokerProfile::parse(str_at(&case, "broker_profile")?)?,
+        &instruments,
+    )?;
+    let mut gate = Gate::read(&fixture, &case)?;
+    let steps = list_at(&case, "steps")?;
+    for n in 0..2 {
+        let step = steps.get(n).ok_or("RC-09 has three steps")?;
+        run_step(&mut account, &mut gate, step, n, &instruments, &config)?;
+    }
+    let (_, btc, _, _) = instruments
+        .iter()
+        .find(|(name, _, _, _)| name == "BTCUSD")
+        .ok_or("RC-09 lists BTCUSD")?;
+    let num = |text: &str| Qty::parse(text).map_err(|e| e.to_string());
+    expect_eq(
+        "BTCUSD held, net of the fee in kind",
+        account.position(btc).qty().abs(),
+        num("0.009975")?,
+    )?;
+    expect_eq(
+        "settled cash",
+        account.settled(),
+        Usd::parse("9400").map_err(|e| e.to_string())?,
+    )?;
+    expect_eq(
+        "cash fees accrued",
+        account.fees_accrued().map_err(|e| e.to_string())?,
+        Usd::ZERO,
+    )?;
+    expect_eq(
+        "the fold's view of the fill",
+        gate.fills
+            .iter()
+            .map(|f| (f.instrument.as_str().to_owned(), f.asset_class, f.qty))
+            .collect::<Vec<_>>(),
+        vec![("BTCUSD".to_owned(), AssetClass::Crypto, num("0.01")?)],
+    )
+}
