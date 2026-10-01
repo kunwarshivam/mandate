@@ -7313,9 +7313,9 @@ mod sequence_tests {
             MORNING,
             OVERNIGHT,
             OPEN.saturating_sub(30),
-            1_790_121_590,
-            1_790_121_590,
-            1_790_121_590,
+            TEN_SECONDS_BEFORE_THE_NIGHT,
+            TEN_SECONDS_BEFORE_THE_NIGHT,
+            TEN_SECONDS_BEFORE_THE_NIGHT,
             SATURDAY,
             1_788_789_600,
             1_514_739_600,
@@ -7330,6 +7330,30 @@ mod sequence_tests {
             .map_err(|error| error.to_string())
     }
 
+    /// #400 round 2's nit: the random oracle reached the composed plant (an exit's step into the
+    /// close sent as an extended-hours rung) in 7 of 9 runs, so a run could miss it. This script
+    /// reaches it on every run: a risk exit at 19:59:50 ET goes after-hours once the OCO's cancel
+    /// is confirmed, its first rung is acknowledged, its step is asked at 20:00:05, and the step's
+    /// confirmation falls in the overnight session, where the oracle wants no rung sent and the
+    /// exit held `session_closed` and parked (DEC-260 (18)); it stays parked through the night.
+    #[test]
+    fn rule_13_holds_for_a_step_into_the_close() -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(150), None, true),
+            Move::Exit(0, 4, 150),
+            Move::Confirm,
+            Move::Ack,
+            Move::Tick(15),
+            Move::Confirm,
+            Move::Tick(3_600),
+            Move::Quote(Some(150), None, true),
+            Move::Tick(3_600),
+        ];
+        rule_13_script(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// 2026-09-22, a Tuesday, at 19:59:50 ET: ten seconds before the after-hours session ends.
+    const TEN_SECONDS_BEFORE_THE_NIGHT: i64 = 1_790_121_590;
     /// 2026-09-22, a Tuesday, at 17:00 ET: after-hours.
     const AFTER_HOURS: i64 = 1_790_110_800;
     /// 11:00 ET, the regular session.
@@ -7663,6 +7687,85 @@ mod sequence_tests {
         assert!(
             executor.state.ladders.is_empty() && executor.state.exiting.contains_key(&aapl()?),
             "the parked ladder resumes inside the new sequence, not beside it"
+        );
+        Ok(())
+    }
+
+    /// The coordinator's ruling on #400 round 2 (5930410998) for a sequence's ladder: the step
+    /// confirmed in the overnight session parks it and re-protects the position, and the park
+    /// alerts the owner **once**, `session_closed`, naming the park's own record; nothing else is
+    /// raised before the 04:00 open, swept every half hour, and the exit is never abandoned.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_sequence_parked_overnight_alerts_the_owner_exactly_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let late = 1_790_121_595;
+        let open = 1_790_150_400;
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(late)), &ports)?;
+        executor.run(observation(Some(150), None, true, late)?, &ports)?;
+        executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = format!("md-{EXIT}");
+        executor.run(Input::Tick(RiskClock::from_secs(late + 10)), &ports)?;
+        let night = executor.run(cancel_accepted(&exit), &ports)?;
+        let park = night
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "GateDecided" => {
+                    Some(draft.event_id.clone())
+                }
+                _ => None,
+            })
+            .ok_or_else(|| missing("the park"))?;
+        let mut notes: Vec<(EventId, &str)> = night
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Notify(note) => Some((note.subject_event.clone(), note.message_key)),
+                _ => None,
+            })
+            .collect();
+        let mut at = late + 60;
+        while at < open {
+            for input in [
+                observation(Some(150), None, true, at)?,
+                Input::Tick(RiskClock::from_secs(at)),
+            ] {
+                let ran = executor.run(input, &ports)?;
+                assert!(
+                    submissions(&ran).is_empty(),
+                    "nothing is sent overnight, at {at}"
+                );
+                assert!(
+                    !ran.iter().any(|effect| matches!(
+                        effect,
+                        Effect::Journal(draft) if draft.event_type == "OrderAbandoned"
+                    )),
+                    "the exit is never abandoned, at {at}"
+                );
+                notes.extend(ran.iter().filter_map(|effect| match effect {
+                    Effect::Notify(note) => Some((note.subject_event.clone(), note.message_key)),
+                    _ => None,
+                }));
+            }
+            at += 1_800;
+        }
+        assert_eq!(notes, vec![(park, "session_closed")]);
+        assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        let mut folded = ExecutorState::new(executor.state.scope.clone());
+        for event in &executor.journal {
+            fold(&mut folded, event)?;
+        }
+        let intent = IntentId(EventId(EXIT.to_owned()));
+        assert!(
+            folded.held_long.contains(&intent),
+            "the park is what `exit_held_long` reports: the journal folds it into the held-long set"
+        );
+        assert!(
+            !folded.held.contains(&intent),
+            "and it is never in the held set `exit_held_long`'s re-journal walks, which is what keeps \
+             the night to one alert"
         );
         Ok(())
     }
