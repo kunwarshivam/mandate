@@ -759,6 +759,9 @@ fn a_fractional_proposal_needs_a_day_tif_and_a_fractionable_instrument() {
     );
 }
 
+/// RC-09 and RC-09B are not pinned here: E6-6's harness changes their pending reasons step by step,
+/// and each case's own trial in `tests/refcases.rs`, gated by `status.toml`, is its test (the
+/// coordinator's ruling on #370, item 1).
 #[test]
 fn every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for() {
     let pending = [
@@ -785,10 +788,6 @@ fn every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for() {
         (
             "RC-17",
             "`deploy_agent` steps not interpreted until E7-5; a second `propose_order` step in one case not interpreted until E7-4 and E7-5; expectation `buying_power` after `propose_order` not interpreted until E7-5; initial `agents` not interpreted until E7-5; proposal field `agent` not interpreted until E7-5",
-        ),
-        (
-            "RC-09B",
-            "`propose_order` on a `generic` margin account's day-trade regime not interpreted until E6-6; a second `propose_order` step in one case not interpreted until E7-4 and E7-5; expectation `day_trade_count` not interpreted until E6-6; initial account `last_equity` not interpreted until E6-6; initial account `prior_day_trades` not interpreted until E6-6; initial account `regime` not interpreted until E6-6",
         ),
         (
             "RC-22",
