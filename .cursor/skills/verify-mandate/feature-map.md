@@ -532,12 +532,17 @@ crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by re
 - **Spec:** `docs/specs/journal.md` §6.2, §10, §11, §12; DEC-263 to DEC-265;
   `docs/project/tasks/E5-6-journal-cold-store.md`.
 - **Code:** `mandate-journal-cold`: `crates/mandate-journal-cold/src/lib.rs` (the segment manifest
-  and its canonical bytes, `import_line`, `verify_range`'s per-range checks, `verify_tsa`'s
-  structural scope, the inclusion proof, the export bundle's digest — pending E5-6's
+  and its canonical bytes — fallible above the canonical integer bound, `SeqUnrepresentable` —
+  `import_line`, `verify_range`'s per-range checks with the both-direction segment chain,
+  `tsa_imprint_matches`'s structural scope and the fail-closed `verify_tsa` entry point
+  (`TsaVerificationIncomplete` until DEC-265 item 1's crypto half lands), the inclusion proof
+  with its `MalformedAnchor` refusal, the export bundle's digest — pending E5-6's
   implementation behind `Unimplemented` stubs).
 - **Tests:** `crates/mandate-journal-cold/tests/cold.rs` (the manifest's six fields and their
-  canonical bytes, the importer's split, each cold check at its bar, the range walk's
-  reachability, the token's imprint containment, the proof's sibling roots, the export digest).
+  canonical bytes with an independent oracle, the importer's split, each cold check at its bar,
+  the range walk's reachability and its overlapping-segment refusal, the token's imprint
+  containment and the entry point's refusal, the proof's sibling roots, the lying anchor, the
+  export digest).
 - **Run:** `cargo nextest run -p mandate-journal-cold`.
 
 ## Content-addressed artifacts
