@@ -30,8 +30,8 @@ use common::{
 use mandate_builder::{
     AccountSnapshot, AccumulateGoal, Action, ActionContext, BuilderMandate, Classification, Clip,
     Combined, DecidedBy, GateVerdict, GoalKind, HoldReason, Limits, Market, ModelOutput,
-    OrderShape, Outcome, Proposal, RiskContext, SignalModel, Sizes, Sizing, classify, combine,
-    decide, propose,
+    OrderShape, Outcome, Proposal, RequestedBy, RiskContext, SignalModel, Sizes, Sizing, classify,
+    combine, decide, propose,
 };
 use mandate_domain::{AssetClass, AutonomyDecision, MarketSession, Purpose};
 use mandate_num::{Signed, SizeFraction, Unit, UsdExact};
@@ -120,6 +120,7 @@ fn opening(order_usd: &str, combined_score: &str) -> ActionContext {
         gross_usd_after: usd("0"),
         bought_today_usd: usd("0"),
         position_pnl_fraction: Signed::ZERO,
+        requested_by: RequestedBy::Agent,
     }
 }
 
@@ -3567,5 +3568,333 @@ fn every_declared_refusal_is_reachable() {
         classified(&at_one, &opening("300", "0.8")).by,
         DecidedBy::Rule(rule_id("possible")),
         "one is inside the interval, so the bound is closed"
+    );
+}
+
+/// The same facts asked for by `requester` (§6.2 step 5a).
+fn requested(requester: RequestedBy, action: ActionContext) -> ActionContext {
+    ActionContext {
+        requested_by: requester,
+        ..action
+    }
+}
+
+/// §6.2 step 5a, DEC-262: `propose` sizes only from signal-model outputs, which is the order
+/// builder's own proposal, so every buy it proposes is requested by the agent and none carries a
+/// requester it was never given.
+#[test]
+fn a_proposed_buy_is_the_order_builders_own_request() {
+    let proposal = proposed(
+        &two_stock_swing(),
+        &flat_account(),
+        &swing_market(),
+        &quiet_risk(),
+        &[
+            output(&momentum(), SWING_INSTRUMENT, "0.8", "0.9"),
+            output(&news(), SWING_INSTRUMENT, "0.2", "0.5"),
+        ],
+    );
+    match &proposal.action {
+        Action::Buy { action, .. } => assert_eq!(action.requested_by, RequestedBy::Agent),
+        other => panic!("a buy of 7 at 100, not {other:?}"),
+    }
+}
+
+/// §6.2 step 5a, MI-30, DEC-185: an `open` or `increase` a connected client requested is ASK under
+/// the `auto` rule that makes the agent's own identical order AUTO, labelled `client_ceiling` and
+/// carrying §6.4's approval.
+#[test]
+#[ignore = "pending E6-12"]
+fn a_client_opening_under_an_auto_rule_is_asked_by_the_client_ceiling() {
+    let agents = classified(&base_policy(), &opening("300", "0.8"));
+    assert_eq!(agents.decision, AutonomyDecision::Auto);
+    assert_eq!(agents.by, DecidedBy::Rule(rule_id("routine")));
+
+    for purpose in [Purpose::Open, Purpose::Increase] {
+        let action = ActionContext {
+            purpose,
+            ..requested(RequestedBy::Client, opening("300", "0.8"))
+        };
+        let asked = classified(&base_policy(), &action);
+        assert_eq!(asked.decision, AutonomyDecision::Ask, "{purpose:?}");
+        assert_eq!(asked.by, DecidedBy::ClientCeiling, "{purpose:?}");
+        let approval = asked.approval.unwrap_or_else(|| {
+            panic!("{purpose:?}: an ASK the ceiling raised carries an approval")
+        });
+        assert_eq!(approval.approvers_required.get(), 1, "{purpose:?}");
+        assert_eq!(approval.on_timeout, OnTimeout::Skip, "{purpose:?}");
+    }
+}
+
+/// §6.2 step 5a: an `auto` default does not let a client's order through either.
+#[test]
+#[ignore = "pending E6-12"]
+fn a_client_opening_under_an_auto_default_is_asked() {
+    let autopilot = policy(
+        Vec::new(),
+        AutonomyDecision::Auto,
+        AutonomyDecision::Ask,
+        None,
+    );
+    let agents = classified(&autopilot, &opening("300", "0.8"));
+    assert_eq!(agents.decision, AutonomyDecision::Auto);
+    assert_eq!(agents.by, DecidedBy::Default);
+
+    let clients = classified(
+        &autopilot,
+        &requested(RequestedBy::Client, opening("300", "0.8")),
+    );
+    assert_eq!(clients.decision, AutonomyDecision::Ask);
+    assert_eq!(clients.by, DecidedBy::ClientCeiling);
+}
+
+/// §6.2 steps 5 and 5a: the client ceiling comes after the admission ceiling, so an owner's `auto`
+/// admission setting, which makes the agent's first order in an admitted instrument AUTO (MC-A13's
+/// shape), still leaves a client's ASK.
+#[test]
+#[ignore = "pending E6-12"]
+fn a_client_admission_under_an_auto_admission_setting_is_asked() {
+    let admitted = ActionContext {
+        new_instrument: true,
+        thesis_confidence: unit("0.9"),
+        ..opening("300", "0.8")
+    };
+    let owner_allowed = policy(
+        base_rules(),
+        AutonomyDecision::Auto,
+        AutonomyDecision::Auto,
+        None,
+    );
+    let agents = classified(&owner_allowed, &admitted);
+    assert_eq!(agents.decision, AutonomyDecision::Auto);
+    assert_eq!(agents.by, DecidedBy::Rule(rule_id("routine")));
+
+    let clients = classified(&owner_allowed, &requested(RequestedBy::Client, admitted));
+    assert_eq!(clients.decision, AutonomyDecision::Ask);
+    assert_eq!(clients.by, DecidedBy::ClientCeiling);
+}
+
+/// §6.2 step 5a, DEC-05: the ceiling only tightens, so a `deny` rule and a `deny` admission still
+/// deny a client's order, label and all, and ask nobody. The anchor is the same rules asking a
+/// client's smaller order, so the ceiling is shown to run.
+#[test]
+#[ignore = "pending E6-12"]
+fn a_deny_still_denies_a_client_request() {
+    let mut rules = vec![Rule {
+        id: rule_id("too_big"),
+        when: compare(ConditionField::OrderUsd, Operator::Gt, decimal("1000")),
+        then: AutonomyDecision::Deny,
+    }];
+    rules.extend(base_rules());
+    let with_deny = policy(rules, AutonomyDecision::Auto, AutonomyDecision::Ask, None);
+    let denied = classified(
+        &with_deny,
+        &requested(RequestedBy::Client, opening("1500", "0.8")),
+    );
+    assert_eq!(denied.decision, AutonomyDecision::Deny);
+    assert_eq!(denied.by, DecidedBy::Rule(rule_id("too_big")));
+    assert_eq!(denied.approval, None, "a DENY is never overridden");
+
+    let strict_admission = policy(
+        base_rules(),
+        AutonomyDecision::Auto,
+        AutonomyDecision::Deny,
+        None,
+    );
+    let admitted = ActionContext {
+        new_instrument: true,
+        ..requested(RequestedBy::Client, opening("300", "0.8"))
+    };
+    let ceiling_denied = classified(&strict_admission, &admitted);
+    assert_eq!(ceiling_denied.decision, AutonomyDecision::Deny);
+    assert_eq!(ceiling_denied.by, DecidedBy::AdmissionCeiling);
+    assert_eq!(ceiling_denied.approval, None);
+
+    let asked = classified(
+        &with_deny,
+        &requested(RequestedBy::Client, opening("300", "0.8")),
+    );
+    assert_eq!(asked.decision, AutonomyDecision::Ask);
+    assert_eq!(asked.by, DecidedBy::ClientCeiling);
+}
+
+/// §6.2 step 5a: the ceiling names itself only when it changed the decision. A client's order the
+/// rules or the admission ceiling already ask about keeps that source, as `decided_by` must say
+/// what asked (§6.4).
+#[test]
+#[ignore = "pending E6-12"]
+fn an_ask_reached_before_the_client_ceiling_keeps_its_source() {
+    let large = classified(
+        &base_policy(),
+        &requested(RequestedBy::Client, opening("950", "0.9")),
+    );
+    assert_eq!(large.decision, AutonomyDecision::Ask);
+    assert_eq!(large.by, DecidedBy::Rule(rule_id("large_orders")));
+
+    let defaulted = classified(
+        &policy(
+            Vec::new(),
+            AutonomyDecision::Ask,
+            AutonomyDecision::Ask,
+            None,
+        ),
+        &requested(RequestedBy::Client, opening("300", "0.8")),
+    );
+    assert_eq!(defaulted.decision, AutonomyDecision::Ask);
+    assert_eq!(defaulted.by, DecidedBy::Default);
+
+    let admitted = ActionContext {
+        new_instrument: true,
+        ..requested(RequestedBy::Client, opening("300", "0.8"))
+    };
+    let raised = classified(&base_policy(), &admitted);
+    assert_eq!(raised.decision, AutonomyDecision::Ask);
+    assert_eq!(
+        raised.by,
+        DecidedBy::AdmissionCeiling,
+        "the admission ceiling raised it first, so the client ceiling changed nothing"
+    );
+
+    let routine = classified(
+        &base_policy(),
+        &requested(RequestedBy::Client, opening("300", "0.8")),
+    );
+    assert_eq!(routine.by, DecidedBy::ClientCeiling);
+}
+
+/// §6.2 step 5a, MI-30: orders the owner or the agent requested are decided exactly as without the
+/// rule. The client's identical order is the anchor.
+#[test]
+#[ignore = "pending E6-12"]
+fn owner_and_agent_requests_decide_as_before() {
+    for requester in [RequestedBy::Agent, RequestedBy::Owner] {
+        let decided = classified(&base_policy(), &requested(requester, opening("300", "0.8")));
+        assert_eq!(decided.decision, AutonomyDecision::Auto, "{requester:?}");
+        assert_eq!(
+            decided.by,
+            DecidedBy::Rule(rule_id("routine")),
+            "{requester:?}"
+        );
+        assert_eq!(decided.approval, None, "{requester:?}");
+    }
+    let clients = classified(
+        &base_policy(),
+        &requested(RequestedBy::Client, opening("300", "0.8")),
+    );
+    assert_eq!(clients.decision, AutonomyDecision::Ask);
+}
+
+/// §6.4, MC-A10's threshold: an ASK the client ceiling raised needs two approvers strictly above
+/// `two_approver_above_usd` and one at it, like any other ASK.
+#[test]
+#[ignore = "pending E6-12"]
+fn a_client_ask_above_the_threshold_needs_two_approvers() {
+    let with_threshold = policy(
+        base_rules(),
+        AutonomyDecision::Ask,
+        AutonomyDecision::Ask,
+        Some("500"),
+    );
+    let above = classified(
+        &with_threshold,
+        &requested(RequestedBy::Client, opening("600", "0.8")),
+    );
+    assert_eq!(above.by, DecidedBy::ClientCeiling);
+    assert_eq!(above.approval.map(|a| a.approvers_required.get()), Some(2));
+
+    let at = classified(
+        &with_threshold,
+        &requested(RequestedBy::Client, opening("500", "0.8")),
+    );
+    assert_eq!(at.by, DecidedBy::ClientCeiling);
+    assert_eq!(at.approval.map(|a| a.approvers_required.get()), Some(1));
+}
+
+/// `AGENTS.md` rules 2 and 13, §6.2 step 3: exits are never narrowed. Every reducing purpose a
+/// client asked for is AUTO by the built-in under rules that deny everything, while a client's
+/// `open` under rules that allow everything is still asked.
+#[test]
+#[ignore = "pending E6-12"]
+fn a_client_exit_is_still_auto_by_the_builtin() {
+    let deny_everything = policy(
+        vec![Rule {
+            id: rule_id("deny_all"),
+            when: compare(ConditionField::OrderUsd, Operator::Gte, decimal("0")),
+            then: AutonomyDecision::Deny,
+        }],
+        AutonomyDecision::Deny,
+        AutonomyDecision::Deny,
+        None,
+    );
+    for purpose in [
+        Purpose::DiscretionaryExit,
+        Purpose::OwnerExit,
+        Purpose::RiskExit,
+        Purpose::Protective,
+    ] {
+        let exit = classified(
+            &deny_everything,
+            &requested(RequestedBy::Client, reducing(purpose)),
+        );
+        assert_eq!(exit.decision, AutonomyDecision::Auto, "{purpose:?}");
+        assert_eq!(exit.by, DecidedBy::BuiltinRiskReducing, "{purpose:?}");
+        assert_eq!(exit.approval, None, "{purpose:?}");
+    }
+    let allow_everything = policy(
+        Vec::new(),
+        AutonomyDecision::Auto,
+        AutonomyDecision::Auto,
+        None,
+    );
+    let opening_action = classified(
+        &allow_everything,
+        &requested(RequestedBy::Client, opening("300", "0.8")),
+    );
+    assert_eq!(opening_action.decision, AutonomyDecision::Ask);
+}
+
+/// §6.2 steps 2 and 5a through `decide`: a client's buy the gate allows is ASKed under rules that
+/// would run the agent's own, one the gate denies is skipped with nobody asked, and a deferred one
+/// is deferred.
+#[test]
+#[ignore = "pending E6-12"]
+fn decide_asks_a_client_buy_the_gate_allows_and_skips_one_it_denies() {
+    let agents = buy_proposal("300", "0.8");
+    let mut clients = agents.clone();
+    if let Action::Buy { action, .. } = &mut clients.action {
+        action.requested_by = RequestedBy::Client;
+    }
+    let policy = base_policy();
+    match decide(&policy, &agents, GateVerdict::Allow)
+        .unwrap_or_else(|e| panic!("decide returns an outcome, not {e}"))
+    {
+        Outcome::Classified(decision) => {
+            assert_eq!(decision.decision, AutonomyDecision::Auto, "the agent's own");
+        }
+        other => panic!("an allowed proposal is classified, not {other:?}"),
+    }
+    match decide(&policy, &clients, GateVerdict::Allow)
+        .unwrap_or_else(|e| panic!("decide returns an outcome, not {e}"))
+    {
+        Outcome::Classified(decision) => {
+            assert_eq!(decision.decision, AutonomyDecision::Ask);
+            assert_eq!(decision.by, DecidedBy::ClientCeiling);
+            assert_eq!(
+                decision.approval.map(|a| a.approvers_required.get()),
+                Some(1)
+            );
+        }
+        other => panic!("an allowed proposal is classified, not {other:?}"),
+    }
+    assert_eq!(
+        decide(&policy, &clients, GateVerdict::Deny)
+            .unwrap_or_else(|e| panic!("decide returns an outcome, not {e}")),
+        Outcome::Skipped,
+        "no approval is ever requested for an order the gate would deny"
+    );
+    assert_eq!(
+        decide(&policy, &clients, GateVerdict::Defer)
+            .unwrap_or_else(|e| panic!("decide returns an outcome, not {e}")),
+        Outcome::Deferred
     );
 }

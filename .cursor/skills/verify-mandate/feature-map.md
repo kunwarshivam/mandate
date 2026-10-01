@@ -133,8 +133,8 @@ Planned by [the E6-2 task brief](../../../docs/project/tasks/E6-2-autonomy-and-o
 DEC-130. The implementation lands in two slices. Slice 1 (autonomy, DEC-152) implements §6.2 in
 `autonomy.rs` and §6.3's `Condition::matches` in `mandate-spec`, and its 40 tests are live: family A
 (`MC-A01` to `MC-A16`), 16 hand tests and 8 properties. Slice 2 (the builder) implements §8.1 to
-§8.3 in `builder.rs` and the sizing arithmetic in `mandate-num`, and the rest go live: family B
-(the 28 builder cases), 46 hand tests, 18 properties, and the two `mandate-num` tests. No test in
+§8.3 in `builder.rs` and the sizing arithmetic in `mandate-num`, and the rest go live: family B (the
+28 builder cases), 46 hand tests, 18 properties, and the two `mandate-num` tests. No E6-2 test in
 the crate is pending.
 
 - **Spec:** `docs/specs/mandate.md` §6.1 to §6.4 (purposes, the evaluation order, the condition
@@ -183,6 +183,24 @@ the crate is pending.
   harness with `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A
   mandate::autonomy mandate::MC-B mandate::order_builder` (the flag runs cases `status.toml` does
   not yet list as passing).
+
+## The client ceiling (E6-12)
+
+Planned by [the E6-12 task brief](../../../docs/project/tasks/E6-12-client-ceiling.md) and DEC-262.
+The DEC-77 tests PR stubs `client_ceiling` and leaves 12 tests pending on it; the implementation PR
+makes them live.
+
+- **Spec:** `docs/specs/mandate.md` §6.2 step 5a and MI-30 (DEC-185), §6.4's `decided_by`.
+- **Code:** `crates/mandate-builder/src/autonomy.rs` (`RequestedBy`, `ActionContext::requested_by`,
+  `DecidedBy::ClientCeiling`, and the ceiling as the last step of `classify`), and the one line of
+  `crates/mandate-builder/src/builder.rs` that stamps `propose`'s buys as the agent's own.
+- **Tests:** `crates/mandate-builder/tests/hand.rs` (nine pending tests and one live one, from
+  `a_proposed_buy_is_the_order_builders_own_request` on),
+  `crates/mandate-builder/tests/properties.rs` (two generated properties against the naive rule walk
+  extended by step 5a, and an exhaustive sweep of 4,212 decisions with its own deny-or-ask oracle).
+  Planted bugs: the task brief.
+- **Reference cases:** none; no mandate case states `requested_by` (DEC-262 item 7).
+- **Run:** `cargo nextest run -p mandate-builder --run-ignored all`.
 
 ## Agent runtime and kill switches
 

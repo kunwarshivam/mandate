@@ -41,8 +41,8 @@ use common::{
 };
 use mandate_builder::{
     AccountSnapshot, AccumulateGoal, Action, ActionContext, BuilderMandate, GateVerdict, GoalKind,
-    HoldReason, Limits, Market, ModelOutput, Outcome, Proposal, RiskContext, SignalModel, Sizing,
-    classify, decide, propose,
+    HoldReason, Limits, Market, ModelOutput, Outcome, Proposal, RequestedBy, RiskContext,
+    SignalModel, Sizing, classify, decide, propose,
 };
 use mandate_domain::{AssetClass, AutonomyDecision, MarketSession, Purpose};
 use mandate_num::{Conviction, CostBasis, FeeRate, Signed, Unit};
@@ -783,9 +783,9 @@ fn oracle_sized(scenario: &Scenario) -> OracleProposal {
     with_sizes(OracleAction::Buy { units }, &clips)
 }
 
-/// §6.2 steps 3 to 5 as a naive walk: the rule list is re-read from the start for every action, the
-/// conditions are evaluated by structural recursion over this file's own field table, and the
-/// ceiling is applied afterwards by an explicit strictness ranking.
+/// §6.2 steps 3 to 5a as a naive walk: the rule list is re-read from the start for every action,
+/// the conditions are evaluated by structural recursion over this file's own field table, and the
+/// two ceilings are applied afterwards, admission then client, by an explicit strictness ranking.
 fn oracle_classify(policy: &Autonomy, action: &ActionContext) -> (String, String, Option<u8>) {
     let strictness = |decision: AutonomyDecision| match decision {
         AutonomyDecision::Auto => 0u8,
@@ -819,6 +819,12 @@ fn oracle_classify(policy: &Autonomy, action: &ActionContext) -> (String, String
     if action.new_instrument && strictness(policy.admission) > strictness(decision) {
         decision = policy.admission;
         by = "admission_ceiling".to_owned();
+    }
+    if action.requested_by == RequestedBy::Client
+        && strictness(decision) < strictness(AutonomyDecision::Ask)
+    {
+        decision = AutonomyDecision::Ask;
+        by = "client_ceiling".to_owned();
     }
     let approvers = if decision == AutonomyDecision::Ask {
         let two = policy
@@ -2227,6 +2233,7 @@ prop_compose! {
             bought_today_usd: usd(&bought_today.to_string()),
             position_pnl_fraction: Signed::parse(&Scenario::milli(pnl_milli).to_text())
                 .unwrap_or(Signed::ZERO),
+            requested_by: RequestedBy::Agent,
         }
     }
 }
@@ -2857,5 +2864,269 @@ fn coverage_reached(seed: u64, what: &str) {
         missing.is_empty(),
         "seed {seed}: {what} never reached {missing:?}, so the properties that depend on them are \
          not evidence; counts were {seen:?}"
+    );
+}
+
+const REQUESTERS: [RequestedBy; 3] = [RequestedBy::Agent, RequestedBy::Owner, RequestedBy::Client];
+
+/// A generated action asked for by every requester in turn, so one policy is judged for all three.
+fn requested_actions() -> impl Strategy<Value = (Autonomy, ActionContext, RequestedBy)> {
+    (
+        well_typed_policy(),
+        action_context(),
+        prop::sample::select(REQUESTERS.to_vec()),
+    )
+}
+
+/// §6.2 step 5a, MI-30, DEC-185, against the naive walk: a client's `open` or `increase` is never
+/// AUTO whatever the rules, the default and the admission setting, a `deny` still denies, the
+/// owner's and the agent's requests are decided exactly as the walk without the ceiling decides
+/// them, and a reducing purpose stays the built-in AUTO for every requester (`AGENTS.md` rules 2
+/// and 13).
+///
+/// "Never AUTO" is asserted directly as well as through the oracle, so a mistake shared by the
+/// oracle and the crate still fails the first assertion.
+#[test]
+#[ignore = "pending E6-12"]
+fn a_client_opening_is_never_auto_and_every_other_request_decides_as_before() {
+    check(requested_actions(), |(policy, action, requester)| {
+        let action = ActionContext {
+            requested_by: requester,
+            ..action
+        };
+        let classified = classify(&policy, &action)
+            .map_err(|e| TestCaseError::fail(format!("classify returns a decision, not {e}")))?;
+        let opening = matches!(action.purpose, Purpose::Open | Purpose::Increase);
+        if requester == RequestedBy::Client && opening {
+            prop_assert_ne!(
+                classified.decision,
+                AutonomyDecision::Auto,
+                "MI-30: a client's opening is never AUTO"
+            );
+        }
+        if !opening {
+            prop_assert_eq!(
+                classified.decision,
+                AutonomyDecision::Auto,
+                "exits are never narrowed"
+            );
+            prop_assert_eq!(classified.by.label(), "builtin_risk_reducing");
+        }
+        let agents = ActionContext {
+            requested_by: RequestedBy::Agent,
+            ..action.clone()
+        };
+        let (unceiled, _, _) = oracle_classify(&policy, &agents);
+        if unceiled == "deny" {
+            prop_assert_eq!(
+                classified.decision,
+                AutonomyDecision::Deny,
+                "the ceiling only tightens, so a deny still denies"
+            );
+        }
+        let (decision, by, approvers) = oracle_classify(&policy, &action);
+        let named = match classified.decision {
+            AutonomyDecision::Auto => "auto",
+            AutonomyDecision::Ask => "ask",
+            AutonomyDecision::Deny => "deny",
+        };
+        prop_assert_eq!(named, decision.as_str(), "the decision");
+        prop_assert_eq!(classified.by.label(), by, "what decided it");
+        prop_assert_eq!(
+            classified.approval.map(|a| a.approvers_required.get()),
+            approvers,
+            "the approvers an ASK needs, and none otherwise"
+        );
+        Ok(())
+    });
+}
+
+/// §6.2 steps 2 and 5a through `decide`: whatever the requester, a denied buy is skipped and a
+/// deferred one deferred, and an allowed client buy is never AUTO.
+#[test]
+#[ignore = "pending E6-12"]
+fn no_client_buy_reaches_auto_through_decide() {
+    check(requested_actions(), |(policy, action, requester)| {
+        let proposal = proposal_for(&ActionContext {
+            requested_by: requester,
+            ..action
+        });
+        let Action::Buy {
+            action: opening, ..
+        } = &proposal.action
+        else {
+            return Err(TestCaseError::fail("proposal_for builds a buy"));
+        };
+        for (verdict, expected) in [
+            (GateVerdict::Deny, Outcome::Skipped),
+            (GateVerdict::Defer, Outcome::Deferred),
+        ] {
+            let outcome = decide(&policy, &proposal, verdict)
+                .map_err(|e| TestCaseError::fail(format!("decide returns an outcome, not {e}")))?;
+            prop_assert_eq!(outcome, expected);
+        }
+        let allowed = decide(&policy, &proposal, GateVerdict::Allow)
+            .map_err(|e| TestCaseError::fail(format!("decide returns an outcome, not {e}")))?;
+        let Outcome::Classified(classified) = allowed else {
+            return Err(TestCaseError::fail(format!(
+                "an allowed proposal is classified, not {allowed:?}"
+            )));
+        };
+        if requester == RequestedBy::Client {
+            prop_assert_ne!(classified.decision, AutonomyDecision::Auto, "MI-30");
+        }
+        let (decision, by, _) = oracle_classify(&policy, opening);
+        let named = match classified.decision {
+            AutonomyDecision::Auto => "auto",
+            AutonomyDecision::Ask => "ask",
+            AutonomyDecision::Deny => "deny",
+        };
+        prop_assert_eq!(named, decision.as_str());
+        prop_assert_eq!(classified.by.label(), by);
+        Ok(())
+    });
+}
+
+/// The rule shapes the exhaustive sweep runs: none, one matching rule, or one that does not match
+/// followed by one that does, each with every `then`.
+fn swept_rules() -> Vec<(Vec<Rule>, Option<(&'static str, AutonomyDecision)>)> {
+    let decisions = [
+        AutonomyDecision::Auto,
+        AutonomyDecision::Ask,
+        AutonomyDecision::Deny,
+    ];
+    let matching = || Condition::Compare {
+        field: ConditionField::Purpose,
+        op: Operator::In,
+        value: ConditionValue::List(vec!["open".to_owned(), "increase".to_owned()]),
+    };
+    let missing = || compare(ConditionField::OrderUsd, Operator::Gt, decimal("1000000"));
+    let mut shapes = vec![(Vec::new(), None)];
+    for then in decisions {
+        shapes.push((
+            vec![Rule {
+                id: rule_id("first"),
+                when: matching(),
+                then,
+            }],
+            Some(("rule:first", then)),
+        ));
+        for skipped in decisions {
+            shapes.push((
+                vec![
+                    Rule {
+                        id: rule_id("first"),
+                        when: missing(),
+                        then: skipped,
+                    },
+                    Rule {
+                        id: rule_id("second"),
+                        when: matching(),
+                        then,
+                    },
+                ],
+                Some(("rule:second", then)),
+            ));
+        }
+    }
+    shapes
+}
+
+/// §6.2 steps 3 to 5a, MI-30, exhaustively: every rule shape of [`swept_rules`], every default,
+/// every admission setting, both values of `new_instrument`, all six purposes, and all three
+/// requesters, 4,212 decisions in all.
+///
+/// The expectation is computed a third way, by asking which steps can **deny** and which can
+/// **ask** rather than by ranking: a deny from the rules or the admission ceiling wins; otherwise
+/// an ask from the rules, the admission ceiling or, for a client, the client ceiling; otherwise
+/// AUTO. The source is the first step that reached the final decision. Delegations (§6.2 step 4a)
+/// are not in the sweep because `Autonomy` cannot hold one until E8-8 (DEC-262); the client ceiling
+/// is the last step, so whatever step 4a adds is decided before it.
+#[test]
+#[ignore = "pending E6-12"]
+fn every_rule_default_admission_and_requester_obeys_the_client_ceiling() {
+    let decisions = [
+        AutonomyDecision::Auto,
+        AutonomyDecision::Ask,
+        AutonomyDecision::Deny,
+    ];
+    let mut decided = 0u32;
+    let mut client_asks = 0u32;
+    for (rules, matched) in swept_rules() {
+        for default in decisions {
+            for admission in decisions {
+                let policy = policy(rules.clone(), default, admission, None);
+                for new_instrument in [false, true] {
+                    for purpose in PURPOSES {
+                        for requester in REQUESTERS {
+                            let action = ActionContext {
+                                purpose,
+                                order_usd: usd("300"),
+                                combined_score: unit("0.8"),
+                                instrument: asset(SWING_INSTRUMENT),
+                                asset_class: AssetClass::UsEquity,
+                                session: MarketSession::Regular,
+                                first_trade_in_instrument: true,
+                                new_instrument,
+                                thesis_confidence: Unit::ZERO,
+                                drawdown: Unit::ZERO,
+                                daily_pnl_fraction: Signed::ZERO,
+                                position_usd_after: usd("300"),
+                                gross_usd_after: usd("300"),
+                                bought_today_usd: usd("300"),
+                                position_pnl_fraction: Signed::ZERO,
+                                requested_by: requester,
+                            };
+                            let got = classify(&policy, &action)
+                                .unwrap_or_else(|e| panic!("classify returns a decision, not {e}"));
+                            let (ruled_label, ruled) = matched.unwrap_or(("default", default));
+                            let admits = new_instrument;
+                            let client = requester == RequestedBy::Client;
+                            let (expected, source) =
+                                if !matches!(purpose, Purpose::Open | Purpose::Increase) {
+                                    (AutonomyDecision::Auto, "builtin_risk_reducing")
+                                } else if ruled == AutonomyDecision::Deny {
+                                    (AutonomyDecision::Deny, ruled_label)
+                                } else if admits && admission == AutonomyDecision::Deny {
+                                    (AutonomyDecision::Deny, "admission_ceiling")
+                                } else if ruled == AutonomyDecision::Ask {
+                                    (AutonomyDecision::Ask, ruled_label)
+                                } else if admits && admission == AutonomyDecision::Ask {
+                                    (AutonomyDecision::Ask, "admission_ceiling")
+                                } else if client {
+                                    (AutonomyDecision::Ask, "client_ceiling")
+                                } else {
+                                    (AutonomyDecision::Auto, ruled_label)
+                                };
+                            let case = format!(
+                                "{rules:?} default {default:?} admission {admission:?} new \
+                                 {new_instrument} {purpose:?} by {requester:?}"
+                            );
+                            assert_eq!(got.decision, expected, "{case}");
+                            assert_eq!(got.by.label(), source, "{case}");
+                            assert_eq!(
+                                got.approval.is_some(),
+                                expected == AutonomyDecision::Ask,
+                                "{case}: an approval exactly for an ASK"
+                            );
+                            if client && source == "client_ceiling" {
+                                client_asks += 1;
+                            }
+                            decided += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        decided, 4_212,
+        "13 rule shapes × 3 defaults × 3 admission settings × 2 × 6 purposes × 3 requesters"
+    );
+    assert_eq!(
+        client_asks, 104,
+        "the ceiling changes exactly the client openings the rules and the admission setting leave \
+         AUTO: 13 rule-and-default pairs decide AUTO, each under 4 admission-and-new pairs that do \
+         not raise it, for 2 purposes"
     );
 }
