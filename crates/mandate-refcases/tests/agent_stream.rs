@@ -83,7 +83,6 @@ fn an_owner_exit_records_the_owner_and_step_up_whatever_the_bid() {
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn a_batch_is_refused_when_an_intent_differs_from_its_decision() {
     assert_family(
         "batch",
@@ -93,7 +92,6 @@ fn a_batch_is_refused_when_an_intent_differs_from_its_decision() {
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn the_chain_verifies_and_each_tampered_range_fails_its_own_check() {
     assert_family("chain", "::append", "::append");
     assert_family(
@@ -127,7 +125,6 @@ fn run(fixture: Json, id: &str) -> Result<(), String> {
 /// The harness reads every key of every expectation: each case passes as generated, and fails
 /// once its expected reason, path, draft index, outcome, range code, or range seq is changed.
 #[test]
-#[ignore = "pending E7-9"]
 fn every_expectation_key_is_read() {
     let floor = "journal::agent_stream::OwnerExitRequested::invalid::owner_exit_floor_absent";
     let pause = "journal::agent_stream::AgentModeChanged::valid::mode_owner_pause";
@@ -233,7 +230,6 @@ fn every_expectation_key_is_read() {
 /// Rule 10 compares decimals by value (§4.6): an intent that writes its decision's quantity and
 /// limit with trailing zeros repeats the decision, and one a hundredth off does not.
 #[test]
-#[ignore = "pending E7-9"]
 fn an_intent_is_compared_with_its_decision_by_value() {
     let id = "journal::agent_stream::batch::decision_and_its_intent";
     let with_intent_changes = |changes: Json| {
@@ -258,7 +254,6 @@ fn an_intent_is_compared_with_its_decision_by_value() {
 /// start is after the event it names, the reference is left to the full-chain run and the range
 /// verifies.
 #[test]
-#[ignore = "pending E7-9"]
 fn a_reference_before_the_range_is_left_to_the_full_chain() {
     let name = "kill_switch_names_no_event_on_the_full_chain";
     let id = format!("journal::agent_stream::range::{name}");

@@ -168,10 +168,6 @@ pub enum InvalidReason {
     PiiRefs,
     #[error("risk_clock is earlier than the stream's last risk_clock")]
     RiskClockRegressed,
-    /// The stub's answer for an agent-stream batch of more than one draft until rule 10's batch
-    /// clause lands (E7-9). Nothing writes such a batch yet, so it refuses nothing that was accepted.
-    #[error("the agent stream's payload checks (§9.1) are not implemented yet")]
-    Unimplemented,
 }
 
 impl InvalidReason {
@@ -194,7 +190,6 @@ impl InvalidReason {
             Self::ArtifactRefs => "artifact_refs",
             Self::PiiRefs => "pii_refs",
             Self::RiskClockRegressed => "risk_clock_regressed",
-            Self::Unimplemented => "unimplemented",
         }
     }
 }
@@ -422,10 +417,7 @@ impl MemoryJournal {
             }
             batch.push(draft);
         }
-        if stream.stream_type() == StreamType::Agent
-            && batch.len() > 1
-            && let Err((draft, error)) = check_batch(&batch)
-        {
+        if let Err((draft, error)) = check_batch(&batch) {
             return AppendOutcome::Invalid { draft, error };
         }
 

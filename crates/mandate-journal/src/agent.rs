@@ -3,7 +3,9 @@
 //! clause, and §11's two agent-stream per-range checks. Every rule only refuses a draft or fails a
 //! range; none changes what a writer may do.
 
-use mandate_canon::Value;
+use std::collections::BTreeMap;
+
+use mandate_canon::{Value, parse};
 
 use crate::schema::{Ty, is_ident};
 use crate::{Draft, Invalid, InvalidReason, StoredEvent, StreamId, StreamType, TrustedStart};
@@ -125,8 +127,32 @@ pub(crate) fn subject_and_copy(
 /// `IntentProposed` whose `DecisionMade` is in the batch repeats its action members, decimals
 /// compared by value. Reported at the first such intent, at its first differing member.
 pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
-    let _ = drafts;
-    Err((0, Invalid::new(InvalidReason::Unimplemented, "")))
+    let decisions: BTreeMap<&str, &Draft> = drafts
+        .iter()
+        .filter(|d| governs(d.stream_id(), d.event_type()) && d.event_type() == "DecisionMade")
+        .map(|d| (d.event_id(), d))
+        .collect();
+    for (i, draft) in drafts.iter().enumerate() {
+        if !governs(draft.stream_id(), draft.event_type()) || draft.event_type() != "IntentProposed"
+        {
+            continue;
+        }
+        let fields = draft.fields();
+        let cause = fields
+            .get("causation_id")
+            .and_then(Value::as_str)
+            .and_then(|id| decisions.get(id));
+        if let (Some(cause), Some(mine)) = (cause, fields.get("payload")) {
+            let theirs = cause.fields().get("payload").unwrap_or(&Value::Null);
+            if let Some(member) = first_differing_action(mine, theirs) {
+                return Err((
+                    i,
+                    Invalid::new(InvalidReason::Schema, format!("payload.{member}")),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// §11's per-range checks that span agent-stream events.
@@ -137,8 +163,6 @@ pub enum AgentStreamCheck {
     /// A `KillSwitchActivated`'s `mode_event` names no earlier `AgentModeChanged` with reason
     /// `kill_switch`.
     ModeEventMismatch,
-    /// The stub's answer until E7-9's range checks land.
-    Unimplemented,
 }
 
 impl AgentStreamCheck {
@@ -147,7 +171,6 @@ impl AgentStreamCheck {
         match self {
             Self::IntentActionMismatch => "intent_action_mismatch",
             Self::ModeEventMismatch => "mode_event_mismatch",
-            Self::Unimplemented => "unimplemented",
         }
     }
 }
@@ -167,11 +190,69 @@ pub fn verify_agent_stream(
     rows: &[StoredEvent],
     start: TrustedStart,
 ) -> Result<(), AgentStreamFailure> {
-    let _ = (rows, start);
-    Err(AgentStreamFailure {
-        seq: 0,
-        check: AgentStreamCheck::Unimplemented,
-    })
+    let mut seen: BTreeMap<String, (String, Value)> = BTreeMap::new();
+    for row in rows {
+        let agent =
+            StreamId::parse(&row.stream_id).is_some_and(|s| s.stream_type() == StreamType::Agent);
+        let Some(body) = parse(&row.body).ok().filter(|_| agent) else {
+            continue;
+        };
+        let payload = body.get("payload").cloned().unwrap_or(Value::Null);
+        let fail = |check| {
+            Err(AgentStreamFailure {
+                seq: row.seq,
+                check,
+            })
+        };
+        let named = |member: &Value| member.as_str().and_then(|id| seen.get(id));
+        match row.event_type.as_str() {
+            "IntentProposed" => {
+                if let Some((cause_type, cause)) = body.get("causation_id").and_then(named)
+                    && cause_type == "DecisionMade"
+                    && first_differing_action(&payload, cause).is_some()
+                {
+                    return fail(AgentStreamCheck::IntentActionMismatch);
+                }
+            }
+            "KillSwitchActivated" => {
+                let mode_event = payload.get("mode_event").unwrap_or(&Value::Null);
+                if *mode_event != Value::Null {
+                    let applied = match named(mode_event) {
+                        None => start.from_seq != 1,
+                        Some((named_type, named_payload)) => {
+                            named_type == "AgentModeChanged"
+                                && Payload(named_payload).text("reason") == "kill_switch"
+                        }
+                    };
+                    if !applied {
+                        return fail(AgentStreamCheck::ModeEventMismatch);
+                    }
+                }
+            }
+            _ => {}
+        }
+        seen.insert(row.event_id.clone(), (row.event_type.clone(), payload));
+    }
+    Ok(())
+}
+
+/// The members `IntentProposed` repeats from its `DecisionMade`, in rule 10's order.
+const ACTION: [&str; 7] = [
+    "instrument_id",
+    "side",
+    "type",
+    "tif",
+    "qty",
+    "limit_price",
+    "purpose",
+];
+
+/// The first action member in which two payloads differ. Both were normalized on the way in
+/// (§4.6), so equal decimal values have equal text.
+fn first_differing_action(mine: &Value, theirs: &Value) -> Option<&'static str> {
+    ACTION
+        .into_iter()
+        .find(|member| mine.get(member) != theirs.get(member))
 }
 
 const OWNER_MODE_REASONS: [&str; 3] = ["owner_pause", "owner_resume", "owner_stop"];
@@ -573,9 +654,10 @@ static OWNER_EXIT_REQUESTED: Ty = Ty::Record(&[
 mod tests {
     use std::path::Path;
 
-    use mandate_canon::{Key, Object, Value, parse, to_canonical};
+    use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
 
-    use crate::Draft;
+    use super::{AgentStreamCheck, AgentStreamFailure, check_batch, verify_agent_stream};
+    use crate::{Draft, StoredEvent, TrustedStart};
 
     fn section() -> Result<Value, String> {
         let path =
@@ -691,6 +773,131 @@ mod tests {
             );
             assert_eq!(refused, Some(wanted), "{}", text(case, "name"));
         }
+        Ok(())
+    }
+
+    fn number(value: &Value, name: &str) -> u64 {
+        value.get(name).and_then(Value::as_int).unwrap_or_default()
+    }
+
+    #[test]
+    fn each_batch_commits_or_is_refused_at_its_draft_and_member() -> Result<(), String> {
+        let section = section()?;
+        let valid = list(&section, "valid_batches");
+        let invalid = list(&section, "invalid_batches");
+        assert_eq!((valid.len(), invalid.len()), (1, 3));
+        for case in valid.iter().chain(invalid) {
+            let drafts = list(case, "drafts")
+                .iter()
+                .map(|member| Draft::parse(&draft(&section, member)?).map_err(|e| format!("{e}")))
+                .collect::<Result<Vec<_>, String>>()?;
+            let expect = case.get("expect").ok_or("no expect")?;
+            let got = check_batch(&drafts)
+                .err()
+                .map(|(i, e)| (u64::try_from(i).ok(), e.reason.code().to_owned(), e.path));
+            let wanted = (text(expect, "outcome") == "Invalid").then(|| {
+                (
+                    Some(number(expect, "draft_index")),
+                    text(expect, "reason").to_owned(),
+                    text(expect, "path").to_owned(),
+                )
+            });
+            assert_eq!(got, wanted, "{}", text(case, "name"));
+        }
+        Ok(())
+    }
+
+    /// The chain's bodies with `changes` applied, as stored rows; the range checks read only the
+    /// columns and the body, so the hashes are not recomputed here.
+    fn rows(section: &Value, changes: &[Value]) -> Result<Vec<StoredEvent>, String> {
+        let mut out = Vec::new();
+        for entry in list(section, "chain") {
+            let seq = number(entry, "seq");
+            let mut body = entry
+                .get("body")
+                .and_then(Value::as_object)
+                .cloned()
+                .ok_or("no body")?;
+            for change in changes.iter().filter(|c| number(c, "seq") == seq) {
+                apply(&mut body, change)?;
+            }
+            let body = Value::Object(body);
+            out.push(StoredEvent {
+                stream_id: text(&body, "stream_id").to_owned(),
+                seq,
+                event_id: text(&body, "event_id").to_owned(),
+                event_type: text(&body, "event_type").to_owned(),
+                schema_version: 1,
+                environment: text(&body, "environment").to_owned(),
+                recorded_at: text(&body, "recorded_at").to_owned(),
+                prev_hash: Digest::ZERO,
+                hash: Digest::ZERO,
+                body: to_canonical(&body),
+            });
+        }
+        Ok(out)
+    }
+
+    #[test]
+    fn each_tampered_range_fails_its_check_at_its_seq_and_the_chain_verifies() -> Result<(), String>
+    {
+        let section = section()?;
+        let chain = rows(&section, &[])?;
+        assert_eq!(chain.len(), 13);
+        assert_eq!(verify_agent_stream(&chain, TrustedStart::GENESIS), Ok(()));
+        let cases = list(&section, "range_verification");
+        assert_eq!(cases.len(), 4);
+        for case in cases {
+            let tampered = rows(&section, list(case, "changes"))?;
+            let expect = case.get("expect").ok_or("no expect")?;
+            let check = match text(expect, "code") {
+                "intent_action_mismatch" => AgentStreamCheck::IntentActionMismatch,
+                _ => AgentStreamCheck::ModeEventMismatch,
+            };
+            assert_eq!(check.code(), text(expect, "code"));
+            let start = TrustedStart {
+                from_seq: number(case, "from_seq"),
+                prev_hash: Digest::ZERO,
+            };
+            let wanted = AgentStreamFailure {
+                seq: number(expect, "seq"),
+                check,
+            };
+            assert_eq!(
+                verify_agent_stream(&tampered, start),
+                Err(wanted),
+                "{}",
+                text(case, "name")
+            );
+            let from_the_switch: Vec<StoredEvent> =
+                tampered.iter().filter(|r| r.seq >= 12).cloned().collect();
+            let partial = TrustedStart {
+                from_seq: 12,
+                prev_hash: Digest::ZERO,
+            };
+            let unresolved = text(case, "name") == "kill_switch_names_no_event_on_the_full_chain";
+            if unresolved {
+                assert_eq!(verify_agent_stream(&from_the_switch, partial), Ok(()));
+            }
+        }
+        let other_stream: Vec<StoredEvent> = chain
+            .iter()
+            .cloned()
+            .map(|mut r| {
+                r.stream_id = "acct:ws_1:ACCT1".to_owned();
+                r
+            })
+            .collect();
+        let tampered = rows(&section, list(cases.first().ok_or("no case")?, "changes"))?;
+        let moved: Vec<StoredEvent> = tampered
+            .into_iter()
+            .zip(other_stream)
+            .map(|(mut r, o)| {
+                r.stream_id = o.stream_id;
+                r
+            })
+            .collect();
+        assert_eq!(verify_agent_stream(&moved, TrustedStart::GENESIS), Ok(()));
         Ok(())
     }
 }
