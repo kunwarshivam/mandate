@@ -22,12 +22,16 @@
 //! included or dropped.
 //!
 //! **The boundary rule is no-lookahead at both edges** (R-27's whole point): the entry price is
-//! the first close *strictly after* the thesis's `as_of` — the first price the thesis could have
-//! acted on; a close at the same instant is the model's own, not one it could trade — and the
-//! exit price is the last close *at or before* the horizon end, so nothing past the horizon is
-//! ever read. An edge with no close on its side of the rule makes the thesis **unscoreable**:
-//! excluded, named with its reason, and never counted toward the mean *or* the minimum, so a
-//! data gap can never help an evaluation pass.
+//! the first close *strictly after* the thesis's `as_of` **and at or before the horizon end** —
+//! the first price inside the window the thesis claims; a close at the same instant is the
+//! model's own, not one it could trade, and a close past the horizon is a price the thesis could
+//! never have acted on either — and the exit price is the last close *at or before* the horizon
+//! end, so nothing past the horizon is ever read, at either edge. An edge with no close on its
+//! side of the rule makes the thesis **unscoreable**: excluded, named with its reason, and never
+//! counted toward the mean *or* the minimum, so a data gap can never help an evaluation pass —
+//! a thesis whose closes all lie outside its window, and the degenerate window whose horizon
+//! closes at or before its own `as_of`, are unscoreable the same way, never a figure
+//! (DEC-282 item 8).
 //!
 //! The scorecard is the report and recomputes from its own fields, its rows ordered by thesis
 //! id, so the same journal and the same series give an identical scorecard every run.
@@ -123,7 +127,7 @@ pub struct ClosedThesis {
     /// The thesis's direction; v1 scores `Long` only.
     pub direction: Direction,
     /// The model's knowledge instant (§8.2's `as_of`): the entry edge reads the first close
-    /// strictly after it.
+    /// strictly after it, inside the horizon.
     pub as_of: UtcNanos,
     /// The horizon end (§8.2's `expires_at`): the exit edge reads the last close at or before
     /// it, and the horizon must close inside the registered window.
@@ -154,7 +158,8 @@ pub struct EvaluationInput<'a> {
 /// silent drop, and never counted toward the mean or the minimum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnscoreableReason {
-    /// No close strictly after `as_of`: the entry edge has no price.
+    /// No close strictly after `as_of` and at or before the horizon end: the entry edge has no
+    /// price inside the thesis's own window.
     NoEntryClose,
     /// No close at or before the horizon end: the exit edge has no price.
     NoExitClose,
@@ -187,7 +192,8 @@ pub struct ScoredThesis {
     pub revision: u32,
     /// The instrument the thesis is about.
     pub instrument: AssetId,
-    /// The entry price the score used: the first close strictly after `as_of`.
+    /// The entry price the score used: the first close strictly after `as_of`, at or before the
+    /// horizon end.
     pub entry: Price,
     /// The exit price the score used: the last close at or before the horizon end.
     pub exit: Price,
@@ -241,18 +247,44 @@ pub struct Scorecard {
     pub passed: bool,
 }
 
+/// The first close strictly after `as_of` — the search the frozen entry boundary and the scoring
+/// path's own windowed entry share, so the strictly-after rule exists once.
+fn first_close_after(series: &CloseSeries, as_of: UtcNanos) -> Option<&ObservedClose> {
+    series.closes.iter().find(|observed| observed.at > as_of)
+}
+
 /// The entry boundary (DEC-281 item 3): the first close strictly after `as_of`, the first
 /// price the thesis could have acted on. A close at the same instant is not it.
 ///
 /// # Errors
 /// Returns [`ResearchError::NoCloseAfter`] when the series holds no close after the instant.
 pub fn entry_close(series: &CloseSeries, as_of: UtcNanos) -> Result<Price, ResearchError> {
-    series
-        .closes
-        .iter()
-        .find(|observed| observed.at > as_of)
+    first_close_after(series, as_of)
         .map(|observed| observed.price)
         .ok_or(ResearchError::NoCloseAfter)
+}
+
+/// The scoring path's entry boundary (DEC-282 item 8): the first close strictly after `as_of`
+/// **and at or before `horizon_end`** — the first price inside the window the thesis claims, so
+/// a close past the horizon is never read at the entry either. A first close that lies past the
+/// horizon leaves the window without a price the thesis could have acted on: no entry, the same
+/// [`ResearchError::NoCloseAfter`] the frozen boundary returns when no close follows `as_of` at
+/// all.
+///
+/// # Errors
+/// Returns [`ResearchError::NoCloseAfter`] when the series holds no close strictly after
+/// `as_of` and at or before `horizon_end` — a degenerate window, whose `horizon_end` sits at or
+/// before its own `as_of`, holds no such close whatever the series carries.
+fn entry_close_within(
+    series: &CloseSeries,
+    as_of: UtcNanos,
+    horizon_end: UtcNanos,
+) -> Result<Price, ResearchError> {
+    let observed = first_close_after(series, as_of).ok_or(ResearchError::NoCloseAfter)?;
+    if observed.at > horizon_end {
+        return Err(ResearchError::NoCloseAfter);
+    }
+    Ok(observed.price)
 }
 
 /// The exit boundary (DEC-281 item 3): the last close at or before the horizon end — nothing
@@ -271,8 +303,11 @@ pub fn exit_close(series: &CloseSeries, horizon_end: UtcNanos) -> Result<Price, 
         .ok_or(ResearchError::NoCloseOnOrBefore)
 }
 
-/// Buy-and-hold over the window the boundary rules pick: `(exit − entry) ÷ entry`, one rounding
-/// at 12 places half-even (DEC-127 item 4's report scale).
+/// Buy-and-hold over the window the boundary rules pick — the exit the last close at or before
+/// `horizon_end`, the entry the first close strictly after `as_of` and at or before
+/// `horizon_end` (DEC-282 item 8, so a close past the horizon is never read at either edge):
+/// `(exit − entry) ÷ entry`, one rounding at 12 places half-even (DEC-127 item 4's report
+/// scale).
 ///
 /// # Errors
 /// Returns [`ResearchError`] for either edge's boundary failure, and
@@ -282,8 +317,8 @@ pub fn buy_and_hold(
     as_of: UtcNanos,
     horizon_end: UtcNanos,
 ) -> Result<Ratio, ResearchError> {
-    let entry = entry_close(series, as_of)?;
     let exit = exit_close(series, horizon_end)?;
+    let entry = entry_close_within(series, as_of, horizon_end)?;
     window_return(entry, exit)
 }
 
@@ -339,23 +374,23 @@ pub fn evaluate(input: &EvaluationInput<'_>) -> Result<Scorecard, ResearchError>
             });
             continue;
         };
-        let entry = match entry_close(series, thesis.as_of) {
-            Ok(price) => price,
-            Err(ResearchError::NoCloseAfter) => {
-                unscoreable.push(Unscoreable {
-                    thesis: thesis.thesis.clone(),
-                    reason: UnscoreableReason::NoEntryClose,
-                });
-                continue;
-            }
-            Err(other) => return Err(other),
-        };
         let exit = match exit_close(series, thesis.horizon_end) {
             Ok(price) => price,
             Err(ResearchError::NoCloseOnOrBefore) => {
                 unscoreable.push(Unscoreable {
                     thesis: thesis.thesis.clone(),
                     reason: UnscoreableReason::NoExitClose,
+                });
+                continue;
+            }
+            Err(other) => return Err(other),
+        };
+        let entry = match entry_close_within(series, thesis.as_of, thesis.horizon_end) {
+            Ok(price) => price,
+            Err(ResearchError::NoCloseAfter) => {
+                unscoreable.push(Unscoreable {
+                    thesis: thesis.thesis.clone(),
+                    reason: UnscoreableReason::NoEntryClose,
                 });
                 continue;
             }
@@ -630,6 +665,312 @@ mod tests {
             card.unscoreable.first().map(|each| each.reason),
             Some(UnscoreableReason::NotScoreableDirection),
             "the direction is checked before the series is looked up"
+        );
+        Ok(())
+    }
+
+    /// DEC-282 item 8 (#410 round 1's blocker): a thesis whose closes all lie outside its own
+    /// window — none strictly after `as_of` and at or before `horizon_end` — has no entry
+    /// price: unscoreable with `NoEntryClose`, never counted toward the minimum. The unbounded
+    /// entry read the close at t(9000), 8000 seconds past the horizon, and scored a backwards
+    /// window against the close at t(50), before `as_of`; both price orders are pinned, and the
+    /// close at `as_of` itself stays the model's own, never an entry.
+    #[test]
+    fn a_thesis_whose_closes_all_lie_outside_its_window_is_unscoreable() -> Result<(), ResearchError>
+    {
+        let scored = long_thesis("th-1", "asset-a")?;
+        let gapped = long_thesis("th-2", "asset-b")?;
+        let basket = vec![two_closes("basket-1", "100", "100")?];
+        let index = two_closes("index", "400", "400")?;
+        let registered = EvaluationDecision {
+            window: EvaluationWindow {
+                from: t(0)?,
+                to: t(10_000)?,
+            },
+            minimum_scoreable: 1,
+            z: Ratio::parse("1.645")?,
+        };
+        let gapped_series = |late: &str, early: &str| -> Result<CloseSeries, ResearchError> {
+            CloseSeries::new(
+                AssetId::new("asset-b")?,
+                vec![
+                    ObservedClose {
+                        at: t(50)?,
+                        price: Price::parse(early)?,
+                    },
+                    ObservedClose {
+                        at: t(100)?,
+                        price: Price::parse("250")?,
+                    },
+                    ObservedClose {
+                        at: t(9000)?,
+                        price: Price::parse(late)?,
+                    },
+                ],
+            )
+        };
+        let card_of = |late: &str, early: &str| -> Result<Scorecard, ResearchError> {
+            let instruments = BTreeMap::from([
+                (
+                    AssetId::new("asset-a")?,
+                    two_closes("asset-a", "100", "120")?,
+                ),
+                (AssetId::new("asset-b")?, gapped_series(late, early)?),
+            ]);
+            evaluate(&EvaluationInput {
+                decision: &registered,
+                theses: &[scored.clone(), gapped.clone()],
+                instruments: &instruments,
+                basket: &basket,
+                index: &index,
+            })
+        };
+        for (late, early) in [("100", "500"), ("500", "100")] {
+            let card = card_of(late, early)?;
+            assert_eq!(
+                card.scoreable_count, 1,
+                "the gap thesis never scores, whichever way its outside-window prices lean"
+            );
+            assert_eq!(
+                card.unscoreable,
+                vec![Unscoreable {
+                    thesis: ThesisId::new("th-2")?,
+                    reason: UnscoreableReason::NoEntryClose,
+                }],
+                "the thesis's only closes sit before `as_of`, at `as_of` itself, and past the horizon: no price inside the window it claims"
+            );
+        }
+        let instruments =
+            BTreeMap::from([(AssetId::new("asset-b")?, gapped_series("100", "500")?)]);
+        assert!(
+            matches!(
+                evaluate(&EvaluationInput {
+                    decision: &registered,
+                    theses: &[gapped],
+                    instruments: &instruments,
+                    basket: &basket,
+                    index: &index,
+                }),
+                Err(ResearchError::WindowNotClosed)
+            ),
+            "one unscoreable thesis against a minimum of one: the gap does not close the window"
+        );
+        Ok(())
+    }
+
+    /// DEC-282 item 8's degenerate window (#410 round 1's second-order finding): a horizon that
+    /// closes at or before the thesis's own `as_of` leaves the entry interval empty, so the
+    /// thesis is unscoreable, never a figure — the review's fixture (closes at t(50) and
+    /// t(150), `as_of` t(140), `horizon_end` t(60)) scored −0.5 off the inverted window. Pinned
+    /// at both edges of the degeneracy: the horizon strictly before `as_of`, and exactly at it.
+    #[test]
+    fn a_degenerate_window_is_unscoreable_never_a_figure() -> Result<(), ResearchError> {
+        let scored = long_thesis("th-1", "asset-a")?;
+        let mut inverted = long_thesis("th-2", "asset-b")?;
+        inverted.as_of = t(140)?;
+        inverted.horizon_end = t(60)?;
+        let mut empty_interval = long_thesis("th-3", "asset-c")?;
+        empty_interval.as_of = t(100)?;
+        empty_interval.horizon_end = t(100)?;
+        let degenerate_series = |instrument: &str| -> Result<CloseSeries, ResearchError> {
+            CloseSeries::new(
+                AssetId::new(instrument)?,
+                vec![
+                    ObservedClose {
+                        at: t(50)?,
+                        price: Price::parse("100")?,
+                    },
+                    ObservedClose {
+                        at: t(150)?,
+                        price: Price::parse("200")?,
+                    },
+                ],
+            )
+        };
+        let instruments = BTreeMap::from([
+            (
+                AssetId::new("asset-a")?,
+                two_closes("asset-a", "100", "120")?,
+            ),
+            (AssetId::new("asset-b")?, degenerate_series("asset-b")?),
+            (AssetId::new("asset-c")?, degenerate_series("asset-c")?),
+        ]);
+        let basket = vec![two_closes("basket-1", "100", "100")?];
+        let index = two_closes("index", "400", "400")?;
+        let registered = EvaluationDecision {
+            window: EvaluationWindow {
+                from: t(0)?,
+                to: t(10_000)?,
+            },
+            minimum_scoreable: 1,
+            z: Ratio::parse("1.645")?,
+        };
+        let card = evaluate(&EvaluationInput {
+            decision: &registered,
+            theses: &[scored, inverted.clone(), empty_interval.clone()],
+            instruments: &instruments,
+            basket: &basket,
+            index: &index,
+        })?;
+        assert_eq!(card.scoreable_count, 1, "only the healthy thesis scores");
+        assert_eq!(
+            card.unscoreable,
+            vec![
+                Unscoreable {
+                    thesis: ThesisId::new("th-2")?,
+                    reason: UnscoreableReason::NoEntryClose,
+                },
+                Unscoreable {
+                    thesis: ThesisId::new("th-3")?,
+                    reason: UnscoreableReason::NoEntryClose,
+                },
+            ],
+            "a horizon at or before `as_of` holds no close strictly after `as_of` and at or before itself: the entry edge has no price"
+        );
+        let strict = EvaluationDecision {
+            window: EvaluationWindow {
+                from: t(0)?,
+                to: t(10_000)?,
+            },
+            minimum_scoreable: 2,
+            z: Ratio::parse("1.645")?,
+        };
+        assert!(
+            matches!(
+                evaluate(&EvaluationInput {
+                    decision: &strict,
+                    theses: &[inverted, empty_interval],
+                    instruments: &instruments,
+                    basket: &basket,
+                    index: &index,
+                }),
+                Err(ResearchError::WindowNotClosed)
+            ),
+            "two degenerate windows against a minimum of two: no figure, and the window does not close"
+        );
+        Ok(())
+    }
+
+    /// DEC-282 item 8's upper edge: a close exactly at `horizon_end` is inside the window — it
+    /// is the entry when it is the first close after `as_of`, and the exit besides, so the
+    /// window return is a figure (zero), not a refusal; the closes around it, before `as_of`
+    /// and past the horizon, are never read.
+    #[test]
+    fn a_close_exactly_at_the_horizon_is_the_entry_and_the_exit() -> Result<(), ResearchError> {
+        let at_horizon = long_thesis("th-1", "asset-a")?;
+        let instruments = BTreeMap::from([(
+            AssetId::new("asset-a")?,
+            CloseSeries::new(
+                AssetId::new("asset-a")?,
+                vec![
+                    ObservedClose {
+                        at: t(50)?,
+                        price: Price::parse("300")?,
+                    },
+                    ObservedClose {
+                        at: t(1000)?,
+                        price: Price::parse("120")?,
+                    },
+                    ObservedClose {
+                        at: t(2000)?,
+                        price: Price::parse("999")?,
+                    },
+                ],
+            )?,
+        )]);
+        let basket = vec![two_closes("basket-1", "100", "100")?];
+        let index = two_closes("index", "400", "400")?;
+        let registered = EvaluationDecision {
+            window: EvaluationWindow {
+                from: t(0)?,
+                to: t(10_000)?,
+            },
+            minimum_scoreable: 1,
+            z: Ratio::parse("1.645")?,
+        };
+        let card = evaluate(&EvaluationInput {
+            decision: &registered,
+            theses: &[at_horizon],
+            instruments: &instruments,
+            basket: &basket,
+            index: &index,
+        })?;
+        assert_eq!(card.scoreable_count, 1);
+        assert_eq!(
+            card.theses
+                .first()
+                .map(|row| (row.entry, row.exit, row.net_return)),
+            Some((
+                Price::parse("120")?,
+                Price::parse("120")?,
+                Ratio::parse("0")?
+            )),
+            "the close at the horizon itself is the first close inside the window, and the last close at or before the horizon: entry and exit are one close, so the window return is zero, a figure"
+        );
+        Ok(())
+    }
+
+    /// DEC-282 item 3's precedence with both refusals live (#410 round 1, minor 2): a thesis
+    /// whose horizon closes outside the registered window is refused before the scoreable count
+    /// is consulted, so the answer names the input-integrity failure even when the scoreable
+    /// theses also fall below the registered minimum — the same input without the outside
+    /// thesis refuses with `WindowNotClosed`, so both refusals are live and the order is what
+    /// this pin reads.
+    #[test]
+    fn a_thesis_outside_the_window_is_refused_before_the_minimum() -> Result<(), ResearchError> {
+        let first = long_thesis("th-1", "asset-a")?;
+        let second = long_thesis("th-2", "asset-b")?;
+        let mut outside = long_thesis("th-3", "asset-c")?;
+        outside.horizon_end = t(20_000)?;
+        let instruments = BTreeMap::from([
+            (
+                AssetId::new("asset-a")?,
+                two_closes("asset-a", "100", "120")?,
+            ),
+            (
+                AssetId::new("asset-b")?,
+                two_closes("asset-b", "100", "110")?,
+            ),
+            (
+                AssetId::new("asset-c")?,
+                two_closes("asset-c", "100", "100")?,
+            ),
+        ]);
+        let basket = vec![two_closes("basket-1", "100", "100")?];
+        let index = two_closes("index", "400", "400")?;
+        let strict = EvaluationDecision {
+            window: EvaluationWindow {
+                from: t(0)?,
+                to: t(10_000)?,
+            },
+            minimum_scoreable: 5,
+            z: Ratio::parse("1.645")?,
+        };
+        assert!(
+            matches!(
+                evaluate(&EvaluationInput {
+                    decision: &strict,
+                    theses: &[first.clone(), second.clone(), outside],
+                    instruments: &instruments,
+                    basket: &basket,
+                    index: &index,
+                }),
+                Err(ResearchError::ThesisOutsideWindow)
+            ),
+            "two scoreable theses against a minimum of five, and one horizon past `to`: the outside thesis is refused first"
+        );
+        assert!(
+            matches!(
+                evaluate(&EvaluationInput {
+                    decision: &strict,
+                    theses: &[first, second],
+                    instruments: &instruments,
+                    basket: &basket,
+                    index: &index,
+                }),
+                Err(ResearchError::WindowNotClosed)
+            ),
+            "the same two theses without the outside one: the count refusal is live too"
         );
         Ok(())
     }

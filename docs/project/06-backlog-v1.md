@@ -754,6 +754,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   no user's results are aggregated; every thesis is scored after its horizon against buy-and-hold of
   the eligible basket and a broad index ETF, net of the cost model; the report states pass or fail
   against the threshold and is reproducible from the journal.
+  *Follow-up (#410 review, minor 3; DEC-282 item 9):* an evaluation whose scoreable set is empty
+  against a registered `minimum_scoreable` of zero refuses with `Num(DivisionByZero)` — fail-loud,
+  but a code that tells a caller nothing. A tests PR names the refusal (a `ResearchError` arm of
+  its own; the registry's codes are add-only) so the empty report carries its reason, with the
+  frozen surface otherwise unchanged.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
