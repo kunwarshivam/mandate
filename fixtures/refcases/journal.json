@@ -4907,6 +4907,38 @@
     }
    },
    {
+    "name": "snapshot_risk_clock_not_a_timestamp",
+    "clause": "§9.2 risk_clock: a §4.7 timestamp, whole second or not (month 13 here)",
+    "base_draft": "snapshot_reconciled",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-13-21T14:05:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "snapshot_risk_clock_null",
+    "clause": "§9.2 risk_clock: required and never null",
+    "base_draft": "snapshot_reconciled",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
     "name": "snapshot_risk_clock_off_the_second",
     "clause": "§9.2 risk_clock: a whole second (§2)",
     "base_draft": "snapshot_reconciled",

@@ -193,10 +193,13 @@ def loose_date(text: str) -> bool:
 def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> list[Violation]:
     """`type_violations` with §9.2's two new types: `pointer` and `date` (refused as `id` is)."""
     if ty.kind == "risk_clock":
+        if value is None and "types.risk_clock_nullable" in skip:
+            return []
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
-        whole = value.endswith(".000000000Z") or "types.risk_clock" in skip
-        if not (is_timestamp(value) and whole):
+        whole = value.endswith(".000000000Z") or "types.risk_clock_whole" in skip
+        ok = is_timestamp(value) and whole
+        if not ok and "types.risk_clock" not in skip:
             return [Violation("types", "non_canonical", path)]
         return []
     if ty.kind in ("pointer", "date"):
@@ -1225,6 +1228,22 @@ def invalid_drafts() -> list[dict]:
             "payload.risk_clock",
         ),
         invalid(
+            "snapshot_risk_clock_not_a_timestamp",
+            "§9.2 risk_clock: a §4.7 timestamp, whole second or not (month 13 here)",
+            "snapshot_reconciled",
+            [change("payload.risk_clock", "2026-13-21T14:05:00.000000000Z")],
+            "non_canonical",
+            "payload.risk_clock",
+        ),
+        invalid(
+            "snapshot_risk_clock_null",
+            "§9.2 risk_clock: required and never null",
+            "snapshot_reconciled",
+            [change("payload.risk_clock", None)],
+            "schema",
+            "payload.risk_clock",
+        ),
+        invalid(
             "snapshot_risk_clock_off_the_second",
             "§9.2 risk_clock: a whole second (§2)",
             "snapshot_reconciled",
@@ -1686,6 +1705,8 @@ VALIDATOR_MUTANTS = (
     "types.date",
     "types.date_length",
     "types.risk_clock",
+    "types.risk_clock_whole",
+    "types.risk_clock_nullable",
     "artifact_refs",
     "config_refs.required",
     *(f"rule.{n}" for n in range(17, 25)),

@@ -15,8 +15,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 - **v0.7, amended ([DEC-302](../project/04-decision-log.md#decisions)):** §9.2's
   `AccountSnapshotRecorded` gains `risk_clock`, which the executor writes on every account-stream
   event and folds each event at; v0.7 had missed it, so a conforming snapshot could not have been
-  replayed. The new `risk_clock` type is a whole-second timestamp. The vectors gain three invalid
-  drafts: the member absent, as integer seconds (the executor's form today), and off the second.
+  replayed. The new `risk_clock` type is a whole-second timestamp. The vectors gain five invalid
+  drafts: the member absent, `null`, as integer seconds (the executor's form today), not a
+  timestamp, and off the second.
 - **v0.7 ([DEC-261](../project/04-decision-log.md#decisions)):** §9.2 closes the payload schemas of
   the control-stream and account-stream records among those `ValidationContext::from_journal` reads
   ([DEC-169](../project/04-decision-log.md#decisions)).
