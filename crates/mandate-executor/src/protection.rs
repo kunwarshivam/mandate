@@ -1136,10 +1136,10 @@ pub struct LadderPrice {
 /// Prices one rung of trading-domain spec §5.6's ladder for a sell (a buy is symmetric).
 ///
 /// The reference bid is the best bid of a fresh, sane quote; failing that the last sane bid
-/// within five minutes; failing that the last sane trade within five minutes (DEC-260 (5)). The limit is reference × (1 − offset),
-/// rounded per §2.1. A step happens only after `exit_step_s` has elapsed, with the offset raised
-/// by `exit_offset_step` and repriced from the **current** reference, and the offset never
-/// exceeds `max_exit_offset`.
+/// within five minutes; failing that the last sane trade within five minutes (DEC-260 (5)). The
+/// limit is reference × (1 − offset), rounded per §2.1. A step happens only after `exit_step_s`
+/// has elapsed, with the offset raised by `exit_offset_step` and repriced from the **current**
+/// reference, and the offset never exceeds `max_exit_offset`.
 ///
 /// An owner exit outside the regular session prices from the bid the owner confirmed and never
 /// below the floor that `OwnerExitRequested` carries (§5.5, mandate spec §6.1).
@@ -5746,6 +5746,44 @@ mod sequence_tests {
             vec![Some(Price::parse("151")?)]
         );
         assert_eq!(alerts(&sent), vec!["exit_unpriced"], "{:?}", drafted(&sent));
+        Ok(())
+    }
+
+    /// DEC-260 (5), #373 round 2, minor B: an insane print never displaces the last sane trade.
+    /// A sane trade at 150 at 0, then an insane print at 1000 at 5: an exit at 5 still prices
+    /// from 150 (149.25) with no alert; once that trade is more than five minutes old, at 400, an
+    /// exit takes the fallback at its own limit with the alert.
+    #[test]
+    fn an_insane_print_never_displaces_the_last_sane_trade() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        for (at, limit, alerted) in [(5, "149.25", false), (400, "151", true)] {
+            let mut executor = protected(&ports)?;
+            executor.run(observation(None, Some(150), true, 0)?, &ports)?;
+            executor.run(Input::Tick(RiskClock::from_secs(5)), &ports)?;
+            executor.run(observation(None, Some(1000), false, 5)?, &ports)?;
+            executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            executor.run(sell(EXIT, "5", "151", Purpose::RiskExit)?, &ports)?;
+            let sent = executor.run(cancel_accepted(OCO), &ports)?;
+            assert_eq!(
+                submissions(&sent)
+                    .iter()
+                    .map(|order| order.limit_price)
+                    .collect::<Vec<_>>(),
+                vec![Some(Price::parse(limit)?)],
+                "at {at}"
+            );
+            assert_eq!(
+                alerts(&sent),
+                if alerted {
+                    vec!["exit_unpriced"]
+                } else {
+                    Vec::new()
+                },
+                "at {at}: {:?}",
+                drafted(&sent)
+            );
+        }
         Ok(())
     }
 
