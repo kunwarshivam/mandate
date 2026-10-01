@@ -8,6 +8,7 @@
 //! rule 12). Its local checks are a convenience: the runtime makes every one of them again.
 
 use std::fmt;
+use std::time::Duration;
 
 use mandate_canon::{Digest, Int, Key, Object, Value, parse, to_canonical};
 use mandate_journal::{AppendOutcome, Environment, Head, StoredEvent, StreamId};
@@ -18,10 +19,11 @@ use mandate_time::UtcNanos;
 /// answer it with their own in-memory journal in `tests/common`, because `mandate-journal`'s
 /// `MemoryJournal` validates payloads it has no schema for yet (DEC-257 item 17).
 ///
-/// A command mints its control-stream event id once and retries the same draft until the journal
-/// answers `Committed` or `AlreadyCommitted`: the id is the idempotency key (DEC-155 item 2), so a
-/// retry after a fence, a head that moved, or a lost answer commits nothing twice (DEC-257 item
-/// 16).
+/// A command derives its control-stream event id from what the owner chose and the head it was
+/// decided at, and retries the same draft until the journal answers `Committed` or
+/// `AlreadyCommitted`: the id is the idempotency key (DEC-155 item 2), so a retry after a fence, a
+/// head that moved, or a lost answer commits nothing twice (DEC-257 item 16), and a re-run of a
+/// command that did commit finds it (DEC-290).
 pub trait ControlJournal {
     /// Every committed event of `stream`, in `seq` order.
     ///
@@ -46,6 +48,9 @@ pub trait ControlJournal {
         recorded_at: UtcNanos,
         drafts: &[&[u8]],
     ) -> Result<AppendOutcome, ControlError>;
+    /// The pause before the next attempt, after one the journal answered with a retry. The
+    /// deployment's adapter sleeps; a test records it.
+    fn wait(&mut self, delay: Duration);
 }
 
 /// Who runs a command, from the CLI's workspace configuration: opaque ids only, no personal data
@@ -58,10 +63,9 @@ pub struct Owner {
     pub environment: Environment,
 }
 
-/// The ids a command needs, injected so a test sees them: the control-stream event's ULID, minted
-/// once per command and reused on every retry, and a fresh step-up assertion id per gesture.
+/// The ids a command mints, injected so a test sees them: a fresh step-up assertion id per gesture.
+/// The control-stream event id is not minted but derived (DEC-290).
 pub trait Ids {
-    fn event_id(&mut self) -> String;
     fn assertion_id(&mut self) -> String;
 }
 
@@ -124,11 +128,21 @@ pub fn agent_stream(owner: &Owner, agent: &str) -> Result<StreamId, ControlError
         .ok_or_else(|| ControlError::Journal("not an agent id".to_owned()))
 }
 
+/// An account's stream, `acct:{workspace}:{account}` (journal spec §2), which `status` reads for
+/// the agent's restrictions.
+///
+/// # Errors
+/// [`ControlError::Journal`] for an id that is not a stream id's.
+pub fn account_stream(owner: &Owner, account: &str) -> Result<StreamId, ControlError> {
+    StreamId::parse(&format!("acct:{}:{account}", owner.workspace))
+        .ok_or_else(|| ControlError::Journal("not an account id".to_owned()))
+}
+
 /// How many times a command re-reads and appends its one draft before it gives up. Each retry
-/// follows a fence, a head that moved, or a lost answer (DEC-257 item 16); one that keeps meeting
-/// them is reported rather than retried for ever, and a report commits nothing twice either way,
-/// because every attempt carries the same event id.
-const ATTEMPTS: usize = 8;
+/// follows a fence, a head that moved, or a lost answer (DEC-257 item 16), after a [`backoff`];
+/// one that keeps meeting them is reported rather than retried for ever, and a report commits
+/// nothing twice either way, because every attempt carries the same event id.
+const ATTEMPTS: u32 = 8;
 
 /// One stored event's envelope, parsed from its canonical bytes.
 ///
@@ -180,7 +194,7 @@ pub(crate) fn seconds(secs: i64) -> Result<Value, ControlError> {
 ///
 /// # Errors
 /// As [`seconds`].
-pub(crate) fn step_up(ids: &mut dyn Ids, now: Now) -> Result<Value, ControlError> {
+fn step_up(ids: &mut dyn Ids, now: Now) -> Result<Value, ControlError> {
     object(vec![
         ("assertion_id", text(&ids.assertion_id())),
         ("authenticated_at", seconds(now.secs)?),
@@ -242,56 +256,254 @@ fn draft(
     Ok(to_canonical(&fields))
 }
 
-/// Commits exactly one control-stream event (DEC-155 items 2 and 5, DEC-257 item 16). The event id
-/// is minted once; every attempt takes a new writer epoch, reads the head afresh, and appends the
-/// same bytes, so a fence, a moved head, or a lost answer is retried, and a retry of an append that
-/// did commit answers `AlreadyCommitted` with the stored event rather than storing a second.
+/// A command the owner decided, before it is committed: what the owner chose (`key`, the payload's
+/// members other than the owner's second and the step-up evidence), whether the owner's
+/// confirmation counts at the control stream's head it was decided at, and the event id derived
+/// from all three (DEC-290).
+#[derive(Debug, Clone)]
+pub(crate) struct Decided {
+    stream: StreamId,
+    event_type: &'static str,
+    key: Vec<(&'static str, Value)>,
+    /// Whether the command carries step-up evidence: the owner typed the code it needs at `head`.
+    pub(crate) stepped_up: bool,
+    event_id: String,
+}
+
+/// What [`decide`] found: a command to commit, or the same command already committed as the
+/// control stream's last event and not yet recorded by its runtime, which a re-run reports rather
+/// than committing twice (DEC-290).
+#[derive(Debug)]
+pub(crate) enum Decision {
+    Fresh(Decided),
+    Committed(Submitted),
+}
+
+/// Whether a command carries step-up evidence.
+#[derive(Clone, Copy)]
+pub(crate) enum Confirmation<'a> {
+    /// The owner typed a code bound to the control stream's head: the function answers whether it
+    /// is the code the command needs at a given head.
+    AtHead(&'a dyn Fn(u64) -> Result<bool, ControlError>),
+    /// Whether it does, whatever the head: a grant's code is bound to the request's content.
+    Fixed(bool),
+}
+
+impl Confirmation<'_> {
+    fn at(self, head: u64) -> Result<bool, ControlError> {
+        match self {
+            Self::AtHead(confirmed) => confirmed(head),
+            Self::Fixed(confirmed) => Ok(confirmed),
+        }
+    }
+}
+
+/// Reads the control stream's head and derives the command's event id from `key`, whether it is
+/// confirmed at that head, and the head, so the same choice confirmed the same way at the same
+/// head is the same event across retries and invocations (DEC-290; the #397 review, minor 4).
+///
+/// # Errors
+/// [`ControlError::Journal`] when the journal cannot be read; whatever `confirmed` answers.
+pub(crate) fn decide(
+    journal: &dyn ControlJournal,
+    owner: &Owner,
+    event_type: &'static str,
+    key: Vec<(&'static str, Value)>,
+    confirmed: Confirmation<'_>,
+) -> Result<Decision, ControlError> {
+    let stream = control_stream(owner)?;
+    let head = journal.head(&stream)?.seq;
+    let chosen = object(key.clone())?;
+    if let Some(earlier) = earlier(journal, &stream, event_type, &chosen, confirmed, head)? {
+        return Ok(Decision::Committed(earlier));
+    }
+    let stepped_up = confirmed.at(head)?;
+    let event_id = derive(&stream, event_type, &chosen, stepped_up, head)?;
+    Ok(Decision::Fresh(Decided {
+        stream,
+        event_type,
+        key,
+        stepped_up,
+        event_id,
+    }))
+}
+
+/// The same command, committed as the control stream's last event when it was decided at any
+/// head before that event, and not yet recorded by the runtime that copies it. Any earlier head
+/// counts, because an event that landed between the command's read of the head and its append
+/// leaves the command last but decided further back. Only the last event is read, so a command
+/// repeated after any other command is committed again; and a code that confirms at the head now
+/// is a new gesture, never a re-run, whose code could confirm only at a head before its own event
+/// (DEC-290 item 5).
+///
+/// # Errors
+/// [`ControlError::Journal`] when the journal cannot be read; [`ControlError::Unimplemented`] in
+/// the tests PR when the last event is the same command (DEC-77).
+fn earlier(
+    journal: &dyn ControlJournal,
+    stream: &StreamId,
+    event_type: &str,
+    chosen: &Value,
+    confirmed: Confirmation<'_>,
+    head: u64,
+) -> Result<Option<Submitted>, ControlError> {
+    if matches!(confirmed, Confirmation::AtHead(_)) && confirmed.at(head)? {
+        return Ok(None);
+    }
+    let Some(last) = journal.rows(stream)?.pop() else {
+        return Ok(None);
+    };
+    for before in (0..last.seq).rev() {
+        if derive(stream, event_type, chosen, confirmed.at(before)?, before)? == last.event_id {
+            return Err(ControlError::Unimplemented { story: "E8-3" });
+        }
+    }
+    Ok(None)
+}
+
+/// The ULID-shaped event id of `chosen` decided at `head`: the first 128 bits of the SHA-256 of a
+/// canonical object naming the stream, the event type, the choice, whether it is stepped up, and
+/// the head, in ULID's 26 Crockford base-32 digits. The ULID's time component carries no meaning
+/// (journal spec §3).
+fn derive(
+    stream: &StreamId,
+    event_type: &str,
+    chosen: &Value,
+    stepped_up: bool,
+    head: u64,
+) -> Result<String, ControlError> {
+    let bound = object(vec![
+        ("control_head", text(&head.to_string())),
+        ("event_type", text(event_type)),
+        ("key", chosen.clone()),
+        ("stepped_up", Value::Bool(stepped_up)),
+        ("stream", text(stream.as_str())),
+    ])?;
+    let digest = Digest::of(&to_canonical(&bound));
+    let mut high = [0_u8; 16];
+    high.copy_from_slice(&digest.as_bytes()[..16]);
+    Ok(ulid(u128::from_be_bytes(high)))
+}
+
+/// `n` in ULID's 26 Crockford base-32 digits, most significant first.
+fn ulid(n: u128) -> String {
+    const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    (0..ULID_LEN)
+        .rev()
+        .map(|digit| {
+            let index = (n >> (digit * 5)) & 0x1f;
+            char::from(ALPHABET[usize::try_from(index).unwrap_or_default()])
+        })
+        .collect()
+}
+
+const ULID_LEN: u32 = 26;
+
+/// The pause before retry `retry` (1 for the first retry) of the command whose id is `event_id`:
+/// doubling from [`FIRST_BACKOFF`] to at most [`LAST_BACKOFF`], plus a jitter below that base drawn
+/// from the id, so two invocations racing for the stream stop fencing each other (DEC-290; the
+/// #397 review, minor 4). Public so its tests can judge it directly; until it is implemented the
+/// append loop pauses [`FIRST_BACKOFF`] before every retry.
+///
+/// # Errors
+/// [`ControlError::Unimplemented`] in the tests PR (DEC-77).
+pub fn backoff(retry: u32, event_id: &str) -> Result<Duration, ControlError> {
+    let _ = (retry, event_id, FIRST_BACKOFF, LAST_BACKOFF);
+    Err(ControlError::Unimplemented { story: "E8-3" })
+}
+
+/// One attempt at appending `bytes`, the draft of `event_id`: its stored `seq` once the journal
+/// holds it, or `None` for an answer that is retried.
+fn attempt(
+    journal: &mut dyn ControlJournal,
+    stream: &StreamId,
+    event_id: &str,
+    bytes: &[u8],
+    now: Now,
+) -> Result<Option<u64>, ControlError> {
+    let epoch = journal.take_ownership(stream)?;
+    let head = journal.head(stream)?.seq;
+    match journal.append(stream, head, epoch, now.at, &[bytes])? {
+        AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows) => rows
+            .iter()
+            .find(|row| row.event_id == event_id)
+            .map(|row| Some(row.seq))
+            .ok_or_else(|| ControlError::Journal("the stored event is missing".into())),
+        AppendOutcome::Fenced { .. }
+        | AppendOutcome::HeadMismatch { .. }
+        | AppendOutcome::Ambiguous
+        | AppendOutcome::Unavailable => Ok(None),
+        AppendOutcome::IdempotencyConflict { stored_seq } => Err(ControlError::Journal(format!(
+            "another event is stored under this id at seq {stored_seq}"
+        ))),
+        AppendOutcome::Invalid { error, .. } => {
+            Err(ControlError::Journal(format!("refused: {error:?}")))
+        }
+    }
+}
+
+const FIRST_BACKOFF: Duration = Duration::from_millis(100);
+const LAST_BACKOFF: Duration = Duration::from_secs(2);
+
+/// Commits exactly one control-stream event (DEC-155 items 2 and 5, DEC-257 item 16, DEC-290): the
+/// owner's choice, the second the owner ran the command at under each of `timed`, and, when the
+/// command is stepped up, fresh `cli_confirm` evidence, minted here so a command [`decide`] found
+/// committed spends none. Every attempt takes a new writer epoch, reads the head afresh, and appends the same
+/// bytes after a [`backoff`], so a fence, a moved head, or a lost answer is retried, and a retry of
+/// an append that did commit answers `AlreadyCommitted` with the stored event rather than storing a
+/// second.
 ///
 /// # Errors
 /// [`ControlError::Journal`] when the journal refuses the draft, reports a conflicting event under
-/// the id, or keeps answering with a retry after [`ATTEMPTS`].
+/// the id, or keeps answering with a retry after [`ATTEMPTS`], naming the event id, which a re-run
+/// finds only if nothing else has been committed since: the id is derived at the head the command
+/// was decided at, and an event that landed between that read and the append moves the head a
+/// re-run decides at (DEC-290 item 5).
 pub(crate) fn commit(
     journal: &mut dyn ControlJournal,
     ids: &mut dyn Ids,
     owner: &Owner,
-    event_type: &str,
-    payload: Value,
+    decided: Decided,
+    timed: &[&'static str],
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    let stream = control_stream(owner)?;
-    let event_id = ids.event_id();
-    let bytes = draft(owner, &stream, &event_id, event_type, payload, now)?;
-    for _ in 0..ATTEMPTS {
-        let epoch = journal.take_ownership(&stream)?;
-        let head = journal.head(&stream)?.seq;
-        match journal.append(&stream, head, epoch, now.at, &[&bytes])? {
-            AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows) => {
-                let stored = rows
-                    .iter()
-                    .find(|row| row.event_id == event_id)
-                    .ok_or_else(|| ControlError::Journal("the stored event is missing".into()))?;
-                return Ok(Submitted {
-                    event_id,
-                    seq: stored.seq,
-                });
-            }
-            AppendOutcome::Fenced { .. }
-            | AppendOutcome::HeadMismatch { .. }
-            | AppendOutcome::Ambiguous
-            | AppendOutcome::Unavailable => {}
-            AppendOutcome::IdempotencyConflict { stored_seq } => {
-                return Err(ControlError::Journal(format!(
-                    "another event is stored under this id at seq {stored_seq}"
-                )));
-            }
-            AppendOutcome::Invalid { error, .. } => {
-                return Err(ControlError::Journal(format!("refused: {error:?}")));
-            }
-        }
+    let Decided {
+        stream,
+        event_type,
+        mut key,
+        stepped_up,
+        event_id,
+    } = decided;
+    for name in timed {
+        key.push((name, seconds(now.secs)?));
     }
-    Err(ControlError::Journal(
-        "the control stream did not settle; the command was committed at most once".to_owned(),
-    ))
+    let evidence = if stepped_up {
+        step_up(ids, now)?
+    } else {
+        Value::Null
+    };
+    key.push(("step_up", evidence));
+    let payload = object(key)?;
+    let bytes = draft(owner, &stream, &event_id, event_type, payload, now)?;
+    let mut retries = 1..ATTEMPTS;
+    loop {
+        if let Some(stored) = attempt(journal, &stream, &event_id, &bytes, now)? {
+            return Ok(Submitted {
+                event_id,
+                seq: stored,
+            });
+        }
+        let Some(retry) = retries.next() else {
+            break;
+        };
+        let _ = retry;
+        journal.wait(FIRST_BACKOFF);
+    }
+    Err(ControlError::Journal(format!(
+        "the control stream did not settle after {ATTEMPTS} attempts; the command may have been \
+         committed once, as event {event_id}; if nothing else has been committed since, running \
+         it again finds it rather than committing it twice"
+    )))
 }
 
 #[cfg(test)]

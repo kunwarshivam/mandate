@@ -7,10 +7,17 @@
 //! CLI committed from the control stream's stored bytes. Each "commits nothing" case is paired with
 //! the one that commits, so a command that does nothing passes none of them.
 //!
-//! Every test but the fixture check is pending until the CLI's implementation and fails on the
-//! command's `ControlError::Unimplemented` (DEC-77, DEC-110).
+//! The #397 review's follow-ups (DEC-290) add: the closed member set of every response the CLI
+//! commits; a refusal's message that says whether the deadline has passed; a pause between append
+//! attempts that grows and differs between commands; and a re-run of an answer that did commit
+//! finding it, while a re-answer after the runtime refused one is committed. The tests of what is
+//! not implemented yet are pending E8-3 and fail on the command's `ControlError::Unimplemented`
+//! (DEC-77, DEC-110).
 
 mod common;
+
+use std::collections::BTreeSet;
+use std::time::Duration;
 
 use common::{
     AGENT, ASKED_AT, CONTROL, FixedIds, Fixture, OTHER_AGENT, OWNER, TIMEOUT_S, at, body, code_of,
@@ -20,7 +27,7 @@ use mandate_canon::Value;
 use mandate_cli::approvals::{
     Ended, Outcome, Revalidated, State, approve, list, message, outcome, show, skip,
 };
-use mandate_cli::control::{ControlError, ControlJournal, Submitted};
+use mandate_cli::control::{ControlError, ControlJournal, Submitted, backoff};
 use mandate_journal::AppendOutcome;
 
 fn answer<T>(what: &str, result: Result<T, ControlError>) -> T {
@@ -458,7 +465,7 @@ fn the_outcome_is_only_what_the_runtime_recorded() {
     );
     let nothing = answer("outcome", outcome(&fx.journal, &owner(), AGENT, &submitted));
     assert_eq!(nothing, Outcome::NotRecorded);
-    let waiting = answer("message", message(&nothing)).to_lowercase();
+    let waiting = answer("message", message(&nothing, at(ASKED_AT + 30))).to_lowercase();
     assert!(
         !waiting.contains("approved") && !waiting.contains("sent"),
         "{waiting}"
@@ -477,12 +484,14 @@ fn the_outcome_is_only_what_the_runtime_recorded() {
             revalidation: Some(Revalidated::Act)
         }
     );
-    let sent = answer("message", message(&acted)).to_lowercase();
+    let sent = answer("message", message(&acted, at(ASKED_AT + 30))).to_lowercase();
     assert!(sent.contains("sent") && sent.contains("gate"), "{sent}");
 }
 
-/// A refusal and a re-validation skip are reported with their reason codes and "nothing was
-/// sent"; a response naming another submitted event is not this one's outcome.
+/// A refusal is reported with its reason code and the request's deadline, and a re-validation skip
+/// with its reason and "nothing was sent"; a response naming another submitted event is not this
+/// one's outcome. What a refusal's message says is
+/// `a_refusal_says_whether_the_deadline_has_passed`'s.
 #[test]
 fn a_refusal_or_a_skip_reports_its_reason() {
     let mut fx = Fixture::new();
@@ -523,13 +532,9 @@ fn a_refusal_or_a_skip_reports_its_reason() {
     assert_eq!(
         refused,
         Outcome::Refused {
-            reason: "step_up_stale".to_owned()
+            reason: "step_up_stale".to_owned(),
+            deadline_s: asked.deadline,
         }
-    );
-    let said = answer("message", message(&refused)).to_lowercase();
-    assert!(
-        said.contains("step_up_stale") && said.contains("nothing was sent"),
-        "{said}"
     );
 
     let skipped = Outcome::Admitted {
@@ -537,13 +542,12 @@ fn a_refusal_or_a_skip_reports_its_reason() {
             reason: "drift".to_owned(),
         }),
     };
-    let said = answer("message", message(&skipped)).to_lowercase();
+    let said = answer("message", message(&skipped, at(ASKED_AT + 30))).to_lowercase();
     assert!(
         said.contains("drift") && said.contains("nothing was sent"),
         "{said}"
     );
     let _ = TIMEOUT_S;
-
     let other = fx.ask(AGENT, "4", ASKED_AT);
     let second = answer(
         "approve",
@@ -565,11 +569,17 @@ fn a_refusal_or_a_skip_reports_its_reason() {
     );
 }
 
-/// Approves the fixture's request through a journal set up to fail once, and returns what was
-/// submitted, every event on the control stream, and the ids each append attempt carried.
-fn approve_through(
-    fault: fn(&mut common::Journal),
-) -> (Submitted, Vec<Value>, Vec<Vec<String>>, FixedIds) {
+/// What one approval through a faulty journal left: what was submitted, every event on the control
+/// stream, the ids each append attempt carried, and the pauses between attempts.
+struct Through {
+    submitted: Submitted,
+    committed: Vec<Value>,
+    attempts: Vec<Vec<String>>,
+    waits: Vec<Duration>,
+}
+
+/// Approves the fixture's request through a journal set up to fail once.
+fn approve_through(fault: fn(&mut common::Journal)) -> Through {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "10", ASKED_AT);
     let mut ids = FixedIds::default();
@@ -586,14 +596,22 @@ fn approve_through(
             at(ASKED_AT + 30),
         ),
     );
-    let attempts = fx.journal.attempts.clone();
-    (submitted, control(&fx), attempts, ids)
+    Through {
+        submitted,
+        committed: control(&fx),
+        attempts: fx.journal.attempts.clone(),
+        waits: fx.journal.waits.clone(),
+    }
 }
 
-/// DEC-155 item 2: the control-stream event id is the idempotency key, so it is minted once per
-/// command and every append attempt carries that same id.
-fn one_id_for_every_attempt(submitted: &Submitted, attempts: &[Vec<String>], ids: &FixedIds) {
-    assert_eq!(ids.events, 1, "one event id minted per command");
+/// DEC-155 item 2: the control-stream event id is the idempotency key, so every append attempt
+/// carries the one id the command derived. The pauses between attempts are the backoff tests'.
+fn one_id_for_every_attempt(through: &Through) {
+    let Through {
+        submitted,
+        attempts,
+        ..
+    } = through;
     assert!(
         attempts.len() >= 2,
         "the fault forced a retry: {attempts:?}"
@@ -612,8 +630,13 @@ fn one_id_for_every_attempt(submitted: &Submitted, attempts: &[Vec<String>], ids
 /// event is committed, under the one event id.
 #[test]
 fn a_fenced_append_is_retried_and_commits_once() {
-    let (submitted, committed, attempts, ids) = approve_through(|j| j.fence_next = 1);
-    one_id_for_every_attempt(&submitted, &attempts, &ids);
+    let through = approve_through(|j| j.fence_next = 1);
+    one_id_for_every_attempt(&through);
+    let Through {
+        submitted,
+        committed,
+        ..
+    } = through;
     assert_eq!(committed.len(), 1, "one event despite the fence");
     assert_eq!(submitted.seq, 1);
     assert_eq!(
@@ -626,8 +649,13 @@ fn a_fenced_append_is_retried_and_commits_once() {
 /// retried at the new head, so the command commits once, after the other event.
 #[test]
 fn a_command_behind_the_head_retries_and_commits_once() {
-    let (submitted, committed, attempts, ids) = approve_through(|j| j.behind_next = 1);
-    one_id_for_every_attempt(&submitted, &attempts, &ids);
+    let through = approve_through(|j| j.behind_next = 1);
+    one_id_for_every_attempt(&through);
+    let Through {
+        submitted,
+        committed,
+        ..
+    } = through;
     assert_eq!(
         committed.len(),
         2,
@@ -649,8 +677,13 @@ fn a_command_behind_the_head_retries_and_commits_once() {
 /// commits nothing twice. A fresh id per attempt would commit the answer twice.
 #[test]
 fn a_lost_answer_is_retried_under_the_same_id_and_commits_once() {
-    let (submitted, committed, attempts, ids) = approve_through(|j| j.ambiguous_next = 1);
-    one_id_for_every_attempt(&submitted, &attempts, &ids);
+    let through = approve_through(|j| j.ambiguous_next = 1);
+    one_id_for_every_attempt(&through);
+    let Through {
+        submitted,
+        committed,
+        ..
+    } = through;
     assert_eq!(committed.len(), 1, "the retry found the stored event");
     assert_eq!(submitted.seq, 1);
     assert_eq!(
@@ -659,13 +692,364 @@ fn a_lost_answer_is_retried_under_the_same_id_and_commits_once() {
     );
 }
 
+/// The #397 review, minor 4; DEC-290 item 6: the pause before each retry grows, so a writer that
+/// keeps meeting another backs off instead of fencing it again at once; and the pauses stay
+/// bounded, none above 4 s and all seven a command can take together within 30 s, so the owner is
+/// answered. The append loop pauses exactly `backoff`'s answer before each retry, and never before
+/// the first attempt.
+#[test]
+#[ignore = "pending E8-3"]
+fn retries_back_off_between_attempts() {
+    let through = approve_through(|j| j.fence_next = 4);
+    one_id_for_every_attempt(&through);
+    let id = through.submitted.event_id.clone();
+    let schedule: Vec<Duration> = (1..=7)
+        .map(|retry| answer("backoff", backoff(retry, &id)))
+        .collect();
+    for pair in schedule.windows(2).take(4) {
+        assert!(pair[1] > pair[0], "each pause is longer: {schedule:?}");
+    }
+    assert!(
+        schedule
+            .iter()
+            .all(|w| *w > Duration::ZERO && *w <= Duration::from_secs(4)),
+        "{schedule:?}"
+    );
+    assert!(
+        schedule.iter().sum::<Duration>() <= Duration::from_secs(30),
+        "{schedule:?}"
+    );
+    assert_eq!(
+        through.waits,
+        schedule[..4].to_vec(),
+        "four fences, four pauses, each the schedule's"
+    );
+}
+
+/// DEC-290 item 6: two commands racing for the stream pause for different times, so they stop
+/// meeting: the grant and the skip of one request, each fenced once in its own journal, are given
+/// different first pauses, and each journal saw its own.
+#[test]
+#[ignore = "pending E8-3"]
+fn two_racing_commands_back_off_differently() {
+    let first_pause = |grant: bool| {
+        let mut fx = Fixture::new();
+        let asked = fx.ask(AGENT, "10", ASKED_AT);
+        let mut ids = FixedIds::default();
+        fx.journal.fence_next = 1;
+        let now = at(ASKED_AT + 30);
+        let result = if grant {
+            approve(
+                &mut fx.journal,
+                &mut ids,
+                &owner(),
+                AGENT,
+                &asked.approval,
+                &code_of(&asked.content),
+                now,
+            )
+        } else {
+            skip(
+                &mut fx.journal,
+                &mut ids,
+                &owner(),
+                AGENT,
+                &asked.approval,
+                now,
+            )
+        };
+        let submitted = answer("answer", result);
+        let scheduled = answer("backoff", backoff(1, &submitted.event_id));
+        assert_eq!(fx.journal.waits, vec![scheduled]);
+        scheduled
+    };
+    assert_ne!(first_pause(true), first_pause(false));
+}
+
+/// DEC-290, the #397 review, minor 4: an answer whose append committed but whose every answer was
+/// lost gives up after a bounded number of attempts, naming the event it may have committed; a
+/// re-run, with a new process's ids and a later clock, finds that event, commits nothing twice, and
+/// spends no new step-up.
+#[test]
+#[ignore = "pending E8-3"]
+fn an_exhausted_answer_names_its_event_and_a_re_run_finds_it() {
+    let mut fx = Fixture::new();
+    let asked = fx.ask(AGENT, "10", ASKED_AT);
+    let code = code_of(&asked.content);
+    fx.journal.lost_for_good = true;
+    let first = approve(
+        &mut fx.journal,
+        &mut FixedIds::default(),
+        &owner(),
+        AGENT,
+        &asked.approval,
+        &code,
+        at(ASKED_AT + 30),
+    );
+    let committed = control(&fx);
+    assert_eq!(committed.len(), 1, "the first run did commit");
+    let stored = member_text(&committed[0], "event_id")
+        .unwrap_or_default()
+        .to_owned();
+    match &first {
+        Err(ControlError::Journal(why)) => assert!(
+            why.contains(&stored) && why.contains("if nothing else has been committed since"),
+            "{why}"
+        ),
+        other => panic!("the first run gives up, not: {other:?}"),
+    }
+    assert!(fx.journal.attempts.len() >= 2, "it retried");
+    fx.journal.recover();
+    let mut ids = FixedIds::default();
+    let again = approve(
+        &mut fx.journal,
+        &mut ids,
+        &owner(),
+        AGENT,
+        &asked.approval,
+        &code,
+        at(ASKED_AT + 35),
+    );
+    assert_eq!(
+        again,
+        Ok(Submitted {
+            event_id: stored,
+            seq: 1
+        })
+    );
+    assert_eq!(control(&fx).len(), 1, "committed once");
+    assert_eq!(ids.assertions, 0, "the re-run spent no step-up");
+}
+
+/// The #409 review, minor 1; DEC-290 item 5: a fence, then another writer's event landing between
+/// the command's read of the head and its append, then an append that commits but whose every
+/// answer is lost. The report names the event and says a re-run finds it only if nothing else has
+/// been committed since; nothing has, so the re-run finds it, though the other event moved the head
+/// the command was decided at, and commits nothing twice.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_re_run_finds_its_event_after_another_writer_moved_the_head() {
+    let mut fx = Fixture::new();
+    let asked = fx.ask(AGENT, "10", ASKED_AT);
+    let code = code_of(&asked.content);
+    fx.journal.fence_next = 1;
+    fx.journal.behind_next = 1;
+    fx.journal.lost_for_good = true;
+    let first = approve(
+        &mut fx.journal,
+        &mut FixedIds::default(),
+        &owner(),
+        AGENT,
+        &asked.approval,
+        &code,
+        at(ASKED_AT + 30),
+    );
+    let committed = control(&fx);
+    assert_eq!(
+        committed.len(),
+        2,
+        "the other writer's event, then this one"
+    );
+    let stored = member_text(&committed[1], "event_id")
+        .unwrap_or_default()
+        .to_owned();
+    match &first {
+        Err(ControlError::Journal(why)) => assert!(
+            why.contains(&stored) && why.contains("if nothing else has been committed since"),
+            "{why}"
+        ),
+        other => panic!("the first run gives up, not: {other:?}"),
+    }
+    fx.journal.recover();
+    let mut ids = FixedIds::default();
+    let again = approve(
+        &mut fx.journal,
+        &mut ids,
+        &owner(),
+        AGENT,
+        &asked.approval,
+        &code,
+        at(ASKED_AT + 35),
+    );
+    assert_eq!(
+        again,
+        Ok(Submitted {
+            event_id: stored,
+            seq: 2
+        })
+    );
+    assert_eq!(control(&fx).len(), 2, "committed once");
+    assert_eq!(ids.assertions, 0, "the re-run spent no step-up");
+}
+
+/// DEC-290, the M7 brief's lifecycle: until the runtime records an answer, the same grant again is
+/// that answer and commits nothing. Once the runtime has refused it (here for a stale step-up), the
+/// request is still pending and the owner may answer again before the deadline; that answer is a
+/// new event with fresh evidence, never taken for the refused one.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_re_answer_after_the_runtime_refused_is_committed_anew() {
+    let mut fx = Fixture::new();
+    let asked = fx.ask(AGENT, "10", ASKED_AT);
+    let mut ids = FixedIds::default();
+    let code = code_of(&asked.content);
+    let mut grant = |fx: &mut Fixture, second: i64| {
+        answer(
+            "approve",
+            approve(
+                &mut fx.journal,
+                &mut ids,
+                &owner(),
+                AGENT,
+                &asked.approval,
+                &code,
+                at(second),
+            ),
+        )
+    };
+    let first = grant(&mut fx, ASKED_AT + 30);
+    assert_eq!(grant(&mut fx, ASKED_AT + 31), first, "not yet recorded");
+    assert_eq!(control(&fx).len(), 1);
+    fx.responded(
+        &asked,
+        &first.event_id,
+        "approved",
+        "refused",
+        Some("step_up_stale"),
+    );
+    let second = grant(&mut fx, ASKED_AT + 40);
+    assert_ne!(second.event_id, first.event_id);
+    assert_eq!(second.seq, 2);
+    let committed = control(&fx);
+    assert_eq!(committed.len(), 2);
+    assert_eq!(
+        member_text(&committed[1], "payload.step_up.assertion_id"),
+        Some("cli-assertion-2"),
+        "fresh evidence"
+    );
+}
+
+/// The #397 review, minor 5: a refusal's message says whether the deadline has passed. Before it,
+/// the owner is told they may answer again; at or after it, that the deadline has passed and the
+/// action is skipped, and never offered another answer. Both name the reason and that nothing was
+/// sent.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_refusal_says_whether_the_deadline_has_passed() {
+    let mut fx = Fixture::new();
+    let asked = fx.ask(AGENT, "10", ASKED_AT);
+    let submitted = answer(
+        "approve",
+        approve(
+            &mut fx.journal,
+            &mut FixedIds::default(),
+            &owner(),
+            AGENT,
+            &asked.approval,
+            &code_of(&asked.content),
+            at(ASKED_AT + 30),
+        ),
+    );
+    fx.responded(
+        &asked,
+        &submitted.event_id,
+        "approved",
+        "refused",
+        Some("step_up_stale"),
+    );
+    let refused = answer("outcome", outcome(&fx.journal, &owner(), AGENT, &submitted));
+    let before = answer("message", message(&refused, at(asked.deadline - 1))).to_lowercase();
+    let after = answer("message", message(&refused, at(asked.deadline))).to_lowercase();
+    for said in [&before, &after] {
+        assert!(
+            said.contains("step_up_stale") && said.contains("nothing was sent"),
+            "{said}"
+        );
+    }
+    assert!(before.contains("answer again"), "{before}");
+    assert!(!before.contains("has passed"), "{before}");
+    assert!(
+        after.contains("deadline has passed") && after.contains("skipped"),
+        "{after}"
+    );
+    assert!(!after.contains("answer again"), "{after}");
+}
+
+/// `ApprovalResponseSubmitted`'s members (journal spec §9), as DEC-290 closes them until the
+/// catalogue does.
+const RESPONSE: [&str; 8] = [
+    "agent",
+    "approval",
+    "content_hash",
+    "responder",
+    "role",
+    "step_up",
+    "submitted_at",
+    "verdict",
+];
+
+fn members(event: &Value, path: &str) -> BTreeSet<String> {
+    member(event, path)
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("{path} is an object in {event:?}"))
+        .keys()
+        .map(|k| k.as_str().to_owned())
+        .collect()
+}
+
+/// The #397 review, minor 1; DEC-290: a grant and a skip each commit exactly the response's
+/// members, and the grant's evidence exactly its three, so a member nobody named (the code the
+/// owner typed, the content itself) fails here.
+#[test]
+fn every_response_payload_has_exactly_its_members() {
+    let mut fx = Fixture::new();
+    let granted = fx.ask(AGENT, "10", ASKED_AT);
+    let skipped = fx.ask(AGENT, "4", ASKED_AT);
+    let mut ids = FixedIds::default();
+    answer(
+        "approve",
+        approve(
+            &mut fx.journal,
+            &mut ids,
+            &owner(),
+            AGENT,
+            &granted.approval,
+            &code_of(&granted.content),
+            at(ASKED_AT + 30),
+        ),
+    );
+    answer(
+        "skip",
+        skip(
+            &mut fx.journal,
+            &mut ids,
+            &owner(),
+            AGENT,
+            &skipped.approval,
+            at(ASKED_AT + 31),
+        ),
+    );
+    let committed = control(&fx);
+    assert_eq!(committed.len(), 2);
+    let expected: BTreeSet<String> = RESPONSE.iter().map(|m| (*m).to_owned()).collect();
+    for event in &committed {
+        assert_eq!(members(event, "payload"), expected, "{event:?}");
+    }
+    let evidence: BTreeSet<String> = ["assertion_id", "authenticated_at", "method"]
+        .iter()
+        .map(|m| (*m).to_owned())
+        .collect();
+    assert_eq!(members(&committed[0], "payload.step_up"), evidence);
+    assert_eq!(member(&committed[1], "payload.step_up"), Some(&Value::Null));
+}
+
 /// Rule 3, FR-6.6, mandate spec §6.4: a counted grant (short of the quorum) and an admitted grant
 /// not yet re-validated have both sent nothing. Their messages say so and never call the action
 /// approved.
 #[test]
 fn the_outcomes_that_sent_nothing_say_so() {
     for outcome in [Outcome::Counted, Outcome::Admitted { revalidation: None }] {
-        let said = answer("message", message(&outcome)).to_lowercase();
+        let said = answer("message", message(&outcome, at(ASKED_AT))).to_lowercase();
         assert!(said.contains("nothing was sent"), "{outcome:?}: {said}");
         assert!(!said.contains("approved"), "{outcome:?}: {said}");
     }
