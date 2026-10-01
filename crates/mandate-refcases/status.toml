@@ -68,6 +68,7 @@
 'RC-03::gate_rejects_zero_crossing_order' = { status = "passing", story = "E6-3" }
 'RC-08' = { status = "passing", story = "E6-3" }
 'RC-18::generic_cash_account' = { status = "passing", story = "E6-3" }
+'RC-09B' = { status = "passing", story = "E6-6" }
 
 # Family N (stream J, DEC-77 item 3, DEC-154). MC-N01, MC-N14 and MC-N26 decide their
 # first_order_autonomy through E6-2's classify (DEC-179).
