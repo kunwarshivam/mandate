@@ -196,9 +196,11 @@ trailing LF (row 2).
 
 ## Not done
 
-- The implementation PR (DEC-77 stage 2): the manifest, the walk, the imprint containment, the
-  proof walk, and the digest — the throwaway this PR's bugs were tried against is ready to
-  become it once this merges.
+- The implementation PR (DEC-77 stage 2) **is open on `agent/e5-6-cold-store-impl`**: the
+  manifest, the walk, the imprint containment, the proof walk, and the digest — the throwaway
+  this PR's bugs were tried against became it, and `verifier_digest` is fallible in it
+  (`PartUnrepresentable`, the coordinator's ruling: computed or refused, never an invented
+  digest).
 - Full RFC 3161 signature verification, the certificate chain, and revocation: Proposed in
   DEC-265 item 1, with the dependency row that PR will need; until it lands, `verify_tsa`
   fails closed with `TsaVerificationIncomplete` and the structural check lives under its own
@@ -209,4 +211,6 @@ trailing LF (row 2).
   crate exposes the checks and the CLI calls them when its story says).
 - The examination bundle (§12's second bullet): a later story; this one ships the canonical
   export's parts and digest.
-- The property suite (proptest) lands with the implementation PR.
+- The property suite (proptest) is a follow-up slice of its own: the implementation PR is
+  bound by DEC-77 stage 2 to turning the 30 tests live (under `tests/` it deletes only
+  `#[ignore]` lines), so the fuzz suite lands next, over the now-live implementation.
