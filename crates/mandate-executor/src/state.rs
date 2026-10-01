@@ -53,6 +53,9 @@ pub struct ExecutorState {
     pub(crate) copied: BTreeMap<EventId, EventId>,
     /// Each instrument's running exit sequence, `unprotected_start` to `unprotected_end` (§5.4).
     pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
+    /// Each instrument's exit laddered outside a sequence (§5.6: extended hours, the closing
+    /// auction window, a presumed halt), folded from its rungs' `OrderSubmitted`.
+    pub(crate) ladders: BTreeMap<InstrumentId, LoneLadder>,
     /// The latest quote per instrument: process-local, an input never journaled (like the tick).
     pub(crate) quotes: BTreeMap<InstrumentId, MarketObservation>,
     /// The latest-observed sane quote with a bid per instrument, kept past newer quotes that are
@@ -89,6 +92,8 @@ pub struct ExecutorState {
     pub(crate) last_submission: Option<Seq>,
     pub(crate) bodies: BTreeMap<IntentId, IntentBody>,
     pub(crate) held: BTreeSet<IntentId>,
+    /// Held exits whose hold past `max_intent_age_s` was journaled and alerted, once (D2).
+    pub(crate) held_long: BTreeSet<IntentId>,
     pub(crate) details: BTreeMap<ClientOrderId, OrderDetail>,
     pub(crate) restrictions: BTreeMap<(AgentId, String), Mode>,
     pub(crate) uncompensated: BTreeMap<EventId, Adoption>,
@@ -193,6 +198,7 @@ impl ExecutorState {
             unprotected: Vec::new(),
             copied: BTreeMap::new(),
             exiting: BTreeMap::new(),
+            ladders: BTreeMap::new(),
             quotes: BTreeMap::new(),
             sane_bids: BTreeMap::new(),
             trades: BTreeMap::new(),
@@ -216,6 +222,7 @@ impl ExecutorState {
             last_submission: None,
             bodies: BTreeMap::new(),
             held: BTreeSet::new(),
+            held_long: BTreeSet::new(),
             details: BTreeMap::new(),
             restrictions: BTreeMap::new(),
             uncompensated: BTreeMap::new(),
@@ -483,6 +490,14 @@ pub(crate) struct ExitSequence {
     pub(crate) ladder: Ladder,
 }
 
+/// An exit §5.6 ladders with no protection to cancel first: its intent, agent and progress.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoneLadder {
+    pub(crate) intent: IntentId,
+    pub(crate) agent: AgentId,
+    pub(crate) ladder: Ladder,
+}
+
 /// The exit price ladder's progress (§5.6), folded from each rung's `OrderSubmitted` and its
 /// stepping cancel, so a restart resumes it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -495,6 +510,9 @@ pub(crate) struct Ladder {
     pub(crate) floored: bool,
     /// The current rung's cancel was a step's, so its confirmation submits the next rung.
     pub(crate) stepping: bool,
+    /// The step's confirmation came while no session was open: the next rung waits for the next
+    /// open, priced fresh then, and the hold was journaled (DEC-260 (18)).
+    pub(crate) parked: bool,
 }
 
 /// The restriction a reconciliation places for one subject — an instrument, or external activity

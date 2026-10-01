@@ -1190,28 +1190,63 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   risk-reducing order at `paused` or stricter. Add a pending test: while the agent is paused, a
   flatten's ladder steps, its step cancel does not end the sequence, and `mode_failure` lets that
   flatten through. Slice 6 narrows `climbs` and the gate together to make it pass.
-- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1
-  (minor 1):** wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
+- **E7-4 slice 6 (stream K; moved from slice 5 by the coordinator's ruling D3 on #174), from
+  [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1 (minor 1):** wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
   `exit_limit` and `next_rung`, which pass none today, so §5.6's "never below an owner exit's
   floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
   `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
   resubmitted at the same price every `exit_step_s`.
 - **E7-4 slice 5 (stream K), from slice 4b ([DEC-260](04-decision-log.md#decisions) (12)):**
-  the triggered-stop watchdog fires only in a session where the stop can trigger (§5.4: stops do
-  not trigger in extended hours), once slice 5 folds the session; and a crypto stop-limit is
-  watchdogged as soon as a sane mark is below its limit price, once slice 5 places stop-limits.
-  Until then the watchdog fires on any breach that lasts `stop_watchdog_s`.
+  a crypto stop-limit is watchdogged as soon as a sane mark is below its limit price, once slice 5
+  places stop-limits. The session condition landed with slice 5's session part (DEC-260 (15)).
 - **E7-4 slice 6's tests PR (stream K), from slice 4b (DEC-160 (11), (24)):** add pending tests
   that every kill switch whose scope covers an instrument cancels a working `*` watchdog exit
   there by its own `client_order_id` (`md-w-<record>`), an agent-scoped one included when it
   closes that instrument (§5.5's table), and that an agent-scoped kill switch never treats it as
   that agent's own: it is never counted in the agent's sub-ledger sell and never reached by
   cancel-all.
-- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 2
-  (minor A):** apply §8.2's in-session test to the exit ladder's last-trade arm once slice 5 folds
-  the session. Slice 4a takes a trade only from a sane quote within five minutes
-  ([DEC-260](04-decision-log.md#decisions) (5)); a print from outside the session the exit is in
-  must not price a rung either.
+- **E7-4 slice 5's session part, left open (stream K, DEC-260 (13), (14)):** the closing auction
+  window is §4.3's 10-minute default as a constant in `mandate-executor`'s `session`; read it from
+  the gate's effective-dated configuration (`close_window_minutes`) once the executor holds it. A
+  presumed halt is read from the latest quote only (older than `exit_step_s`, or not sane); add
+  the trading-status and LULD feed §4.4 names once the shell subscribes to it.
+- **The US-equities calendar's end (stream K, DEC-260 (13); the coordinator's ruling on #174,
+  5926945398):** alert the owner and the operator well ahead of `crates/mandate-time/data/
+  us-equities.calendar`'s last valid date (2028-12-31), for example 90 days before it, so the file
+  is extended before every equity exit starts being held `session_unknown`.
+- **`mandate-executor`'s clock-0 tests onto the calendar (stream K, DEC-260 (13)):** the hand,
+  coverage, fault and properties suites run at risk-clock seconds near 0 (1970), before the
+  calendar's first date, which `session` reads as the regular session. Move them onto calendar
+  dates in their own DEC-77 tests PR; after it, an instant before the calendar's range is held
+  `session_unknown` like one after it. Among them `hand::a_risk_exit_submits_inside_the_close_window` runs at
+  clock 25, so its venue is the regular session: it proves the conduct exemption, not the close
+  window its name claims (#400 round 1, minor 4).
+- **E7-4 slice 5's trading-day part (stream K), from the session part ([DEC-260](04-decision-log.md#decisions)
+  (13)):** fold `TradingDayStarted` together with what the reference-case harness then reaches:
+  §5.4's GTC re-placement at the buffer day (`hand::protection_is_re_placed_at_the_buffer_day`,
+  `protection_is_not_re_placed_early`, `a_protective_order_submits_with_no_buying_power`), the
+  harness's startup reconciliation, which today holds its openings
+  `startup_reconciliation_pending` (RC-14 `add_via_bracket`, RC-15
+  `restriction_from_a_closing_only_reject`, RC-21, RC-22), RC-14's journal order
+  (`unprotected_window_start` expected after the gate), and the cases the fold alone lets pass
+  (RC-07 `unposted_crypto_fees_reconcile`, RC-14 `passive_exit_becomes_oco_take_profit`, RC-15
+  `status_not_active`, `external_order_detected`, `unexplained_403s`). RC-24 ×2 go live with it:
+  the session part already prices them (both pass with the fold, shown in its PR). Restore
+  `TradingDayStarted` to `properties::every_catalogue_event_is_interpreted_or_named`'s
+  `INTERPRETED` in the same change (#400 round 1, major 3).
+- **E7-4 slice 6 (stream K), moved from slice 5 by the coordinator's ruling D3 on
+  [#174](https://github.com/kunwarshivam/mandate/pull/174) (5926142854):** the four kill-switch
+  session tests (`hand::an_automated_flatten_defers_equity_sells_to_the_session`,
+  `an_automated_flatten_sells_crypto_at_once`,
+  `an_owner_exit_outside_the_session_prices_from_the_confirmed_bid`,
+  `an_unconfirmed_owner_exit_waits_for_the_session`) and the owner-confirmed extended-hours path:
+  outside the regular session an owner exit sells equities through the ladder only on the
+  confirmed bid, bid size and floor, and waits for the session otherwise (§5.5).
+- **E7-4 (stream K), from [#385](https://github.com/kunwarshivam/mandate/pull/385)'s review (minor
+  4):** the rule-13 oracle's waiting-exit `limit` branch
+  (`protection::sequence_tests::rule_13_script`) is dormant: no script holds an exit unexcused long
+  enough to reach it. The follow-up either makes the branch bite, with a script that holds an exit
+  unexcused and a plant it catches, or deletes it along with `quiet_since`.
 - **E7-4 (stream K), found by slice 4a's rule-13 oracle (`protection::sequence_tests::rule_13_holds_over_random_scripts`):**
   (1) a passive exit waits on its OCO's cancel confirmation with no bound and no alert: a broker
   that never confirms holds the exit for good, with the protection still resting (rule 13's broker
