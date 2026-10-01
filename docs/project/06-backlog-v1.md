@@ -1707,23 +1707,38 @@ From E6-4's slice R4 (stream H2; DEC-167 item 8):
   rung can lift while the 4% rung stays active. §5.8 says highest `at` first, and the fold lifts the
   highest active rung next (DEC-167 item 8 (b)). Re-insert a re-triggered rung in its place, or lift
   only the highest active rung while stepping, and regenerate with `reference/mandate/generate.py`,
-  which must leave `fixtures/refcases/mandate.json` unchanged.
+  which must leave `fixtures/refcases/mandate.json` unchanged. In `agent/h2-dec-270-reference` (DEC-275).
 - **`ref.py` journals `hold_protected` for a completed `profit_stop` goal (reference fix).** A
   `goal_complete` input on a `profit_stop` goal (its end date) writes
   `{"type": "GoalCompleted", "on_complete": "hold_protected"}`; the fold writes its one §3.1
   outcome, `then: discretionary_exit_all_then_retire` (DEC-167 item 8 (f)). No reference case has
-  one.
+  one. In `agent/h2-dec-270-reference` (DEC-275).
 - **`release` journals the loss carry: the reference side (DEC-270; stream H2, first).** One
   reference and reference-case PR, kept apart from crates (ES-22): `reference/mandate/ref.py`'s
   `goal_complete` arm journals `AgentStopped` with `loss_carry_usd` = max(0, N − E) after
   `PositionReleased` when `on_complete` is `release`; MC-R17's expected journal gains it; any §3.1 or
   §5.7 wording the spec needs under DEC-270; `generate.py`, `check_cases.py`, and the fuzz rerun, and
-  `cargo xtask refcases --write`. Only MC-R17 moves.
+  `cargo xtask refcases --write`. Only MC-R17 moves. In `agent/h2-dec-270-reference` (DEC-274), with MC-R25, MC-R26, and
+  MC-V68 for the carry and the redeploy; it waits on the harness PR (DEC-276).
 - **`release` journals the loss carry: the `mandate-spec` side (DEC-270; stream H2, after the
   reference PR).** `Fold::complete_goal`'s `Release` arm journals `AgentStopped` (reason
   `goal_complete`) with the loss carry, as `retire` does, and a test shows that releasing and
   redeploying on the same connection opens the new agent at the carried L (through
   `ValidationContext::from_journal` and V-032).
+- **MC-R17 back to passing (DEC-277; E6-4, stream H2).** The DEC-270 reference PR changes MC-R17's
+  expected journal and marks it `pending`, the one flip DEC-277 allows. The `mandate-spec` side above
+  must bring it back: the status PR that follows it marks MC-R17 `passing` again, with MC-R25,
+  MC-R26, and MC-V68.
+- **DEC-277's exception for the `journal` and `trading_domain` suites (the #381 review, round 2,
+  minor 1).** `fixture_entry_changed` in `xtask/src/main.rs` finds a case by an object whose `id` is
+  its `status.toml` key, which matches the `mandate` suite but no `journal` key and not
+  `trading_domain`'s compound `RC-NN::sub_case` or version rows, so a flip there always reads
+  "unchanged" and is refused. Extend the lookup to those key shapes, with fixture-repository tests in
+  each suite.
+- **Narrow DEC-277's exception to the case's expectation (the #381 review, round 2, minor 2).** The
+  guard allows a `passing` → `pending` flip when any part of the case's fixture entry changes; allow
+  it only when the entry's expectation members change (`expect`, or a risk-state step's `expect`), a
+  tightening, so a title or note edit cannot take a case back to pending.
 - **R4's status PR: the last nine MC-R cases pass.** MC-R09 to MC-R12, MC-R14, MC-R16, MC-R17,
   MC-R21, and MC-R23 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` on R4 (DEC-167 item 8 (i)); marking them in `status.toml` follows under DEC-77

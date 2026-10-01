@@ -9,6 +9,17 @@ MUTANTS = {
     "additive capital base": ("self.C, self.L = H1, E01, C1, L1", "self.C, self.L = H1, E01, self.C + d, L1"),
     "hard trigger latches on one quote": ("        if quote and (t - self.hard_first[key]).total_seconds() >= self.hard_wait():", "        if True:"),
     "loss carry ignores withdrawals": ("        self.net_contributed += d\n", ""),
+    "release retires without a loss carry": ('                self._retire("goal_complete", ev)\n',
+                                             '                self.restrictions["retired"] = "stopped"\n'),
+    "release carries no loss": ('                self._retire("goal_complete", ev)\n',
+                                '                self._retire("goal_complete", ev)\n                ev[-1]["loss_carry_usd"] = "0"\n'),
+    "a re-triggered scale rung is held back during the stepped lift": (
+        '                        if self.reset_queue:\n'
+        '                            self.reset_queue = sorted(self.reset_queue + [i], key=lambda j: D(self.lad[j]["at"]), reverse=True)\n',
+        '                        if i in self.reset_queue:\n                            self.reset_queue.remove(i)\n'),
+    "a profit_stop goal completes as hold_protected": (
+        '            ev.append({"type": "GoalCompleted", "then": "discretionary_exit_all_then_retire"})',
+        '            ev.append({"type": "GoalCompleted", "on_complete": "hold_protected"})'),
     "allocation increase allowed while latched": ("        if d > 0 and (self.latched or self.daily is not None):", "        if False:"),
     "daily lift ignores the minimum delay": ('(t - self.daily["at"]).total_seconds() >= self.daily_min', "True"),
     "flatten acknowledged while not flat": ('            if "drawdown_flatten" in self.restrictions and self.qty > 0:\n'
@@ -184,7 +195,7 @@ MUTANTS = {
     "a bound field does not move the content hash": ('content_hash({k: req[k] for k in sorted(req)})', 'content_hash({k: req[k] for k in sorted(req) if k != "limit_price"})'),
 }
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
-         "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
+         "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
          "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_client_ceiling(300); "
          "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
