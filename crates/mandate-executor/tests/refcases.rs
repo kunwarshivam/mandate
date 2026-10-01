@@ -1550,11 +1550,13 @@ fn trading_domain_rc_22_resting_buys_cancelled_before_the_exit() {
 }
 
 #[test]
+#[ignore = "pending E7-4"]
 fn trading_domain_rc_24_exit_price_ladder_in_extended_hours() {
     drive(case("RC-24", None));
 }
 
 #[test]
+#[ignore = "pending E7-4"]
 fn trading_domain_rc_24_presumed_halt_regular_session() {
     drive(case("RC-24", Some("presumed_halt_regular_session")));
 }

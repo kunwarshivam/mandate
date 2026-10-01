@@ -7352,6 +7352,21 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// D1 holds only an exit the gate allows: one that would sell more than the position is still
+    /// denied `sell_exceeds_available` in a closed market (§5.3 rule 4), never held for the open.
+    #[test]
+    fn a_closed_market_never_holds_an_exit_the_gate_denies() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(OVERNIGHT)), &ports)?;
+        executor.run(observation(Some(150), None, true, OVERNIGHT)?, &ports)?;
+        let ran = executor.run(sell(EXIT, "20", "150", Purpose::RiskExit)?, &ports)?;
+        assert!(submissions(&ran).is_empty());
+        assert_eq!(gate_reasons(&ran), vec!["sell_exceeds_available"]);
+        Ok(())
+    }
+
     /// D1: the protection resting when a closed market holds the exit stays untouched through the
     /// hold; the sequence starts, cancelling it, only at the release.
     #[test]

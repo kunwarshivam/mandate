@@ -68,7 +68,7 @@ fn after_range(at: RiskClock) -> bool {
         .ok()
         .and_then(|now| new_york_date_and_hour(now).ok())
         .zip(calendar)
-        .is_some_and(|((date, _), calendar)| date > calendar.valid_to())
+        .is_some_and(|((date, _), calendar)| date.cmp(&calendar.valid_to()).is_gt())
 }
 
 /// The venue for `instrument` at `at`.
@@ -88,10 +88,10 @@ pub(crate) fn venue(ports: &Ports<'_>, instrument: &InstrumentId, at: RiskClock)
     }
 }
 
-/// Why an equity exit at `at` waits for the next session (DEC-260 (13), the coordinator's ruling
-/// D1): `session_closed` while no v1 session is open and the calendar names the next pre-market
-/// open, where the hold ends; `session_unknown` when the calendar cannot name one, so the exit
-/// stays held, never sent overnight or queued blind. `None` while a session is open.
+/// Why an equity order at `at` waits for the next session (DEC-260 (13), the coordinator's ruling
+/// D1): `session_closed` while no v1 session is open and the calendar names a trading day ahead,
+/// whose pre-market open ends the hold; `session_unknown` when it cannot, so the order stays
+/// held, never sent overnight or queued blind. `None` while a session is open.
 pub(crate) fn closed_hold(
     ports: &Ports<'_>,
     instrument: &InstrumentId,
@@ -100,30 +100,37 @@ pub(crate) fn closed_hold(
     if venue(ports, instrument, at) != Venue::Closed {
         return None;
     }
-    Some(if next_open(at).is_some() {
+    Some(if reopens(at) {
         SESSION_CLOSED
     } else {
         SESSION_UNKNOWN
     })
 }
 
-/// The start of the first pre-market session after `at`, looking a fortnight ahead, the longest
-/// a calendar closes for; `None` when the calendar ends first.
-fn next_open(at: RiskClock) -> Option<i64> {
-    let calendar = ExchangeCalendar::us_equities().ok()?;
-    let now = UtcNanos::from_parts(at.secs(), 0).ok()?;
-    let (mut date, _) = new_york_date_and_hour(now).ok()?;
+/// Whether the calendar names a trading day within the next fortnight, the longest it closes for:
+/// that day's pre-market open, or an earlier one, ends a closed market's hold.
+fn reopens(at: RiskClock) -> bool {
+    let Some(calendar) = ExchangeCalendar::us_equities().ok() else {
+        return false;
+    };
+    let Some((mut date, _)) = UtcNanos::from_parts(at.secs(), 0)
+        .ok()
+        .and_then(|now| new_york_date_and_hour(now).ok())
+    else {
+        return false;
+    };
     for _ in 0..14 {
-        let found =
-            calendar.sessions(date).ok()?.into_iter().find(|span| {
-                span.session() == Session::PreMarket && span.start().secs() > at.secs()
-            });
-        if let Some(open) = found {
-            return Some(open.start().secs());
+        let Ok(next) = date.next() else {
+            return false;
+        };
+        date = next;
+        match calendar.is_trading_day(date) {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(_) => return false,
         }
-        date = date.next().ok()?;
     }
-    None
+    false
 }
 
 /// Whether an order of `purpose` goes as an extended-hours limit: an exit in pre-market or

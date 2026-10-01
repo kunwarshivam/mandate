@@ -26,14 +26,9 @@ use crate::types::{
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
 /// `causation_id` naming its origin, unless the executor originated it itself and says so with
-/// `originated`. `OwnerAcknowledged` joins them with the slice that interprets it, and until then
-/// answers that slice's stub like every other event not reached.
-const COPIED: [&str; 4] = [
-    "AgentModeApplied",
-    "ClockAdvanced",
-    "TradingDayStarted",
-    "UniverseChanged",
-];
+/// `originated`. `OwnerAcknowledged` and `TradingDayStarted` join them with the slices that
+/// interpret them, and until then answer those slices' stubs like every other event not reached.
+const COPIED: [&str; 3] = ["AgentModeApplied", "ClockAdvanced", "UniverseChanged"];
 
 /// Replays one journaled event into the state.
 ///
@@ -136,7 +131,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         }
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
-        "ClockAdvanced" | "MarkUpdated" | "TradingDayStarted" | "ConductBreachDetected" => Ok(()),
+        "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
         "FeesCharged" => fees_charged(state, payload),
         "ExternalActivityIngested" => Ok(()),
@@ -169,12 +164,12 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
 }
 
 /// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the owner
-/// acknowledgment, the risk day, and the kill switch (trading-domain spec §5.5 to §5.7, §6, §10,
-/// §11): the later slices of this stack. An `ExternalActivityIngested` and a
-/// `ConductBreachDetected` fold as records only: the restriction either causes is its own
-/// `AgentModeApplied`, and a conduct control never holds an exit (`AGENTS.md` rule 13). A copied
-/// `TradingDayStarted` folds as a record too: the session an order goes in is derived from the
-/// committed calendar at the step's clock ([`crate::session`]), never from a label.
+/// acknowledgment, the trading and risk days, and the kill switch (trading-domain spec §5.5 to §5.7,
+/// §6, §10, §11): the later slices of this stack; the trading day is slice 5's trading-day part,
+/// which owes what a new day starts (GTC re-placement, the copy, the harness's start) together.
+/// An `ExternalActivityIngested` and a `ConductBreachDetected` fold as records only: the
+/// restriction either causes is its own `AgentModeApplied`, and a conduct control never holds an
+/// exit (`AGENTS.md` rule 13).
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }
