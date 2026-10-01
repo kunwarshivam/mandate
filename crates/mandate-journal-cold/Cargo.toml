@@ -1,0 +1,18 @@
+[package]
+name = "mandate-journal-cold"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The journal's cold store as code: segment manifests, the segment_* and tsa_token_invalid per-range checks, and the canonical export of journal spec sections 6.2, 11 and 12"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-journal.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+mandate-time.workspace = true

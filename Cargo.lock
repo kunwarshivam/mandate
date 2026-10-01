@@ -1419,6 +1419,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-journal-cold"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-time",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-journal-pg"
 version = "0.0.0"
 dependencies = [
