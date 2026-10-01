@@ -726,8 +726,15 @@ proves each pending test fails on them (DEC-110).
   step-up is refused yet still routed, pause, resume and the owner's kill switch) and
   `crates/mandate-runtime/tests/approval_properties.rs` (the transition-table and causation-walker
   oracles over random scripts), pending E8-3 but for one live case, with fixtures in
-  `crates/mandate-runtime/tests/common/escalation.rs`.
-- **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime`; `cargo xtask ci pending`.
+  `crates/mandate-runtime/tests/common/escalation.rs`. The CLI's owner control (M7 tests PR 4 of 4,
+  DEC-257 items 13 to 17): `crates/mandate-cli/src/control.rs` (`ControlJournal`, `Owner`, `Ids`,
+  `ControlError`), `crates/mandate-cli/src/approvals.rs` (`list`, `show`, `approve`, `skip`,
+  `outcome`, `message`) and `crates/mandate-cli/src/agent.rs` (`code`, `kill_code`, `command`,
+  `kill`, `status`), stubbed; `crates/mandate-cli/tests/approvals.rs` and
+  `crates/mandate-cli/tests/agent.rs`, pending E8-3 but for one live fixture check, with an
+  in-memory journal in `crates/mandate-cli/tests/common/mod.rs`.
+- **Run:** `cargo nextest run -p mandate-approval -p mandate-runtime -p mandate-cli`;
+  `cargo xtask ci pending`.
 
 ## Reference-case harness
 
