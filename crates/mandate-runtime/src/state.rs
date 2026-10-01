@@ -1,8 +1,15 @@
 //! The folded state and the replay that builds it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU8;
 
 use mandate_accounting::InstrumentId;
+use mandate_approval::{
+    ApprovalRef, AskablePurpose, AssertionId, BoundAction, OpaqueUser, ReferenceMark, Request,
+    RequestContent,
+};
+use mandate_canon::Value;
+use mandate_num::Signed;
 
 use crate::error::RuntimeError;
 use crate::payload;
@@ -42,6 +49,31 @@ pub struct RuntimeState {
     bodies: BTreeMap<EventId, IntentBody>,
     acknowledged: BTreeMap<EventId, Seq>,
     outputs: BTreeMap<String, BTreeMap<InstrumentId, ModelOutput>>,
+    /// The `ModelOutputRecorded` each held output came from, which a request cites as evidence.
+    output_events: BTreeMap<String, BTreeMap<InstrumentId, EventId>>,
+    /// The last folded `MarkUpdated` of each instrument and its account-stream `seq`: the reference
+    /// a request records and the mark re-validation compares with it (DEC-156 item 3).
+    marks: BTreeMap<InstrumentId, ReferenceMark>,
+    /// The control-stream events this runtime has already copied: the `causation_id` of every
+    /// `ApprovalResponded`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`. The
+    /// control stream's `event_id` is the idempotency key (DEC-155 item 2), so one re-tailed, or
+    /// re-tailed after a restart, is copied and acted on once (EI-3).
+    copied: BTreeSet<EventId>,
+    /// Every step-up assertion a control-stream event has carried, with the first event that
+    /// carried it. Evidence is usable once per workspace (EI-11), so any other event that repeats
+    /// an assertion is reusing it, and a re-tail of the first is not.
+    assertions: BTreeMap<AssertionId, EventId>,
+    /// The owner's exits of one instrument, by the `OwnerExitRequested` that records each, so that a
+    /// restart can hand one the executor has not taken again (`AGENTS.md` rule 13, DEC-257 item 7).
+    owner_exits: BTreeMap<EventId, OwnerExit>,
+}
+
+/// An owner's exit of one instrument as the fold holds it: what the planner is asked for again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OwnerExit {
+    pub(crate) instrument: InstrumentId,
+    pub(crate) confirmation: Option<OwnerConfirmation>,
+    pub(crate) handoff: Handoff,
 }
 
 /// The kill switch the fold remembers. The `event` is the `KillSwitchActivated` that identifies the
@@ -81,6 +113,11 @@ pub struct PendingApproval {
     pub mandate_version: String,
     pub deadline: RiskClock,
     pub adds_risk: bool,
+    /// What admission and re-validation read: the bound action, the deadline, the content hash the
+    /// request stated, whether `cli_inbox` delivered it, and the approvers whose grants were
+    /// `counted` so far. The evidence and risk figures stay in the committed content object, whose
+    /// hash is what a response must repeat (EI-14), so the fold does not hold them again.
+    pub request: Request,
 }
 
 impl RuntimeState {
@@ -110,6 +147,11 @@ impl RuntimeState {
             bodies: BTreeMap::new(),
             acknowledged: BTreeMap::new(),
             outputs: BTreeMap::new(),
+            output_events: BTreeMap::new(),
+            marks: BTreeMap::new(),
+            copied: BTreeSet::new(),
+            assertions: BTreeMap::new(),
+            owner_exits: BTreeMap::new(),
         }
     }
 
@@ -331,6 +373,62 @@ impl RuntimeState {
         self.switch.as_ref()
     }
 
+    /// The last folded mark of one instrument.
+    pub(crate) fn mark(&self, instrument: &InstrumentId) -> Option<ReferenceMark> {
+        self.marks.get(instrument).copied()
+    }
+
+    /// The `ModelOutputRecorded` events behind every output for `instrument` still unexpired at
+    /// `now`: the evidence a request cites (mandate spec §6.4).
+    pub(crate) fn evidence_for(&self, instrument: &InstrumentId, now: RiskClock) -> Vec<EventId> {
+        self.outputs
+            .iter()
+            .filter_map(|(model, by_instrument)| {
+                by_instrument
+                    .get(instrument)
+                    .filter(|output| output.expires_at >= now)
+                    .and_then(|_| self.output_events.get(model)?.get(instrument).cloned())
+            })
+            .collect()
+    }
+
+    /// Whether this runtime has already copied a control-stream event (DEC-155 item 2).
+    pub(crate) fn has_copied(&self, control: &EventId) -> bool {
+        self.copied.contains(control)
+    }
+
+    /// The assertions some other control-stream event than `event` carried first: what check 6
+    /// reads as already used (EI-11).
+    pub(crate) fn used_assertions(&self, event: &EventId) -> BTreeSet<AssertionId> {
+        self.assertions
+            .iter()
+            .filter(|(_, first)| *first != event)
+            .map(|(assertion, _)| assertion.clone())
+            .collect()
+    }
+
+    /// The owner exits the executor has not been seen to take, which a restart hands again.
+    pub(crate) fn untaken_owner_exits(&self) -> impl Iterator<Item = (&EventId, &OwnerExit)> {
+        self.owner_exits
+            .iter()
+            .filter(|(_, exit)| matches!(exit.handoff, Handoff::Pending))
+    }
+
+    /// The client order ids of the intents still live in one instrument: all an owner's exit of
+    /// that instrument may cancel (mandate spec §6.1, trading-domain spec §5.5).
+    pub(crate) fn working_orders_in(&self, instrument: &InstrumentId) -> Vec<String> {
+        self.outstanding
+            .keys()
+            .filter(|id| {
+                matches!(
+                    self.bodies.get(*id),
+                    Some(IntentBody::Order { instrument: held, .. }) if held == instrument
+                )
+            })
+            .map(|id| id.0.clone())
+            .collect()
+    }
+
     pub(crate) fn body_of(&self, intent: &EventId) -> Option<IntentBody> {
         self.bodies.get(intent).cloned()
     }
@@ -398,12 +496,14 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
     }
     match event.event_type.as_str() {
         "AgentModeChanged" => {
+            copy_of(state, event);
             state.journaled_mode = mode_field(event)?;
             state.lifecycle = payload::str_of(&event.payload, "lifecycle")
                 .and_then(payload::mode_from)
                 .ok_or_else(|| payload::non_canonical("lifecycle"))?;
         }
         "KillSwitchActivated" => {
+            copy_of(state, event);
             let initiator = payload::str_of(&event.payload, "initiator")
                 .and_then(payload::initiator_from)
                 .ok_or_else(|| payload::non_canonical("initiator"))?;
@@ -416,7 +516,24 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 confirmed_at: None,
             });
         }
-        "OwnerExitRequested" => state.shown = payload::owner_confirmation_of(&event.payload)?,
+        "OwnerExitRequested" => {
+            copy_of(state, event);
+            let confirmation = payload::honoured_confirmation(&event.payload)?;
+            if payload::str_of(&event.payload, "scope") == Some("instrument") {
+                let subject = payload::str_of(&event.payload, "subject")
+                    .ok_or_else(|| payload::non_canonical("subject"))?;
+                state.owner_exits.insert(
+                    event.event_id.clone(),
+                    OwnerExit {
+                        instrument: payload::instrument_of(subject)?,
+                        confirmation,
+                        handoff: Handoff::Pending,
+                    },
+                );
+            } else {
+                state.shown = confirmation;
+            }
+        }
         "IntentProposed" => {
             let purpose = payload::str_of(&event.payload, "purpose")
                 .and_then(payload::purpose_from)
@@ -434,23 +551,61 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
             );
         }
         "ApprovalRequested" => {
-            state
-                .pending_approvals
-                .insert(event.event_id.clone(), requested(&event.payload)?);
+            state.pending_approvals.insert(
+                event.event_id.clone(),
+                requested(&event.event_id, &event.payload)?,
+            );
         }
-        "ApprovalResponded" | "ApprovalTimedOut" | "ApprovalCanceled" => {
-            if let Some(approval) = payload::str_of(&event.payload, "approval") {
-                let approval = EventId(approval.to_owned());
+        "ApprovalDelivered" => {
+            if payload::str_of(&event.payload, "status") == Some("delivered")
+                && let Some(pending) = approval_of(&event.payload)
+                    .and_then(|approval| state.pending_approvals.get_mut(&approval))
+            {
+                pending.request.delivered = true;
+            }
+        }
+        "ApprovalResponded" => {
+            copy_of(state, event);
+            responded(state, &event.payload);
+        }
+        "ApprovalRevalidated" | "ApprovalTimedOut" | "ApprovalCanceled" => {
+            if let Some(approval) = approval_of(&event.payload) {
                 state.pending_approvals.remove(&approval);
+            }
+        }
+        "ApprovalResponseSubmitted" | "OwnerCommandIssued" => {
+            if let Some(evidence) = payload::step_up_of(&event.payload) {
+                state
+                    .assertions
+                    .entry(evidence.assertion)
+                    .or_insert_with(|| event.event_id.clone());
             }
         }
         "ModelOutputRecorded" => {
             let output = payload::model_output_of(&event.payload)?;
             state
+                .output_events
+                .entry(output.model.clone())
+                .or_default()
+                .insert(output.instrument.clone(), event.event_id.clone());
+            state
                 .outputs
                 .entry(output.model.clone())
                 .or_default()
                 .insert(output.instrument.clone(), output);
+        }
+        "MarkUpdated" => {
+            let instrument = payload::str_of(&event.payload, "instrument")
+                .ok_or_else(|| payload::non_canonical("instrument"))?;
+            let price = payload::str_of(&event.payload, "price")
+                .ok_or_else(|| payload::non_canonical("price"))?;
+            state.marks.insert(
+                payload::instrument_of(instrument)?,
+                ReferenceMark {
+                    price: payload::price_of(price)?,
+                    seq: event.seq.0,
+                },
+            );
         }
         "AgentModeApplied" => {
             if addressed_here(state, &event.payload) {
@@ -475,10 +630,10 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 if let Some(live) = state.outstanding.get_mut(&intent) {
                     live.handoff = Handoff::Taken;
                 }
+                if let Some(exit) = state.owner_exits.get_mut(&intent) {
+                    exit.handoff = Handoff::Taken;
+                }
             }
-        }
-        "ApprovalResponseSubmitted" | "OwnerCommandIssued" | "ApprovalRevalidated" => {
-            return Err(RuntimeError::Unimplemented { story: "E8-3" });
         }
         "StreamOpened"
         | "GateDecided"
@@ -486,7 +641,6 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "ObservationRecorded"
         | "ModelInvocationRecorded"
         | "DecisionMade"
-        | "ApprovalDelivered"
         | "ThesisProposed"
         | "ThesisRevised"
         | "OrderStateChanged"
@@ -494,7 +648,6 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "FillApplied"
         | "LateFillApplied"
         | "FeesCharged"
-        | "MarkUpdated"
         | "SettlementPosted"
         | "DividendPaid"
         | "CashInLieuPosted"
@@ -604,22 +757,120 @@ fn mode_field(event: &FoldedEvent) -> Result<Mode, RuntimeError> {
         .ok_or_else(|| payload::non_canonical("to"))
 }
 
-/// What an `ApprovalRequested` binds: the quantity, the limit price, and the mandate version the
-/// proposal was made under, plus the deadline the `skip` timeout fires on (mandate spec §6.4).
-fn requested(payload: &mandate_canon::Value) -> Result<PendingApproval, RuntimeError> {
-    let instrument = payload::str_of(payload, "instrument")
-        .ok_or_else(|| payload::non_canonical("instrument"))?;
-    let version = payload::str_of(payload, "mandate_version")
-        .ok_or_else(|| payload::non_canonical("mandate_version"))?;
+/// Records that an agent-stream event copies the control-stream event its `causation_id` names, so
+/// the runtime never copies that event again (DEC-155 item 2, EI-3). Only the four copy types call
+/// it, and a `causation_id` that names anything else is never looked up as a control event.
+fn copy_of(state: &mut RuntimeState, event: &FoldedEvent) {
+    if let Some(cause) = &event.causation_id {
+        state.copied.insert(cause.clone());
+    }
+}
+
+fn approval_of(payload: &Value) -> Option<EventId> {
+    payload::str_of(payload, "approval").map(|approval| EventId(approval.to_owned()))
+}
+
+/// What an `ApprovalResponded` does to its approval: a `refused` answer leaves it pending (EI-6), a
+/// `counted` grant joins the grant set check 7 counts, and anything else ends it, a legacy record
+/// with no `result` included (journal spec §9).
+fn responded(state: &mut RuntimeState, payload: &Value) {
+    let Some(approval) = approval_of(payload) else {
+        return;
+    };
+    match payload::str_of(payload, "result") {
+        Some("refused") => {}
+        Some("counted") => {
+            if let (Some(pending), Some(responder)) = (
+                state.pending_approvals.get_mut(&approval),
+                payload::str_of(payload, "responder"),
+            ) {
+                pending
+                    .request
+                    .grants
+                    .insert(OpaqueUser(responder.to_owned()));
+            }
+        }
+        _ => {
+            state.pending_approvals.remove(&approval);
+        }
+    }
+}
+
+/// What an `ApprovalRequested` binds: the action, the trigger, the reference mark, the approver
+/// requirement, the deadline, and the content hash the request stated (mandate spec §6.4). An exit
+/// is never asked (`AGENTS.md` rule 2), so a purpose that is not `open` or `increase` is refused.
+fn requested(id: &EventId, payload: &Value) -> Result<PendingApproval, RuntimeError> {
+    let text = |field: &'static str| {
+        payload::str_of(payload, field).ok_or_else(|| payload::non_canonical(field))
+    };
+    let instrument = payload::instrument_of(text("instrument")?)?;
+    let purpose = match text("purpose")? {
+        "open" => AskablePurpose::Open,
+        "increase" => AskablePurpose::Increase,
+        _ => return Err(payload::non_canonical("purpose")),
+    };
+    let asset_class = match text("asset_class")? {
+        "us_equity" => mandate_approval::AssetClass::UsEquity,
+        "crypto" => mandate_approval::AssetClass::Crypto,
+        _ => return Err(payload::non_canonical("asset_class")),
+    };
     let deadline =
         payload::clock_of(payload, "deadline").ok_or_else(|| payload::non_canonical("deadline"))?;
-    let purpose = payload::str_of(payload, "purpose")
-        .and_then(payload::purpose_from)
-        .ok_or_else(|| payload::non_canonical("purpose"))?;
+    let reference_mark = match payload.get("reference_mark") {
+        Some(Value::Null) => None,
+        Some(mark) => Some(ReferenceMark {
+            price: payload::price_of(
+                payload::str_of(mark, "price").ok_or_else(|| payload::non_canonical("price"))?,
+            )?,
+            seq: mark
+                .get("seq")
+                .and_then(Value::as_int)
+                .ok_or_else(|| payload::non_canonical("seq"))?,
+        }),
+        None => return Err(payload::non_canonical("reference_mark")),
+    };
+    let approvers_required = payload
+        .get("approvers_required")
+        .and_then(Value::as_int)
+        .and_then(|n| u8::try_from(n).ok())
+        .and_then(NonZeroU8::new)
+        .ok_or_else(|| payload::non_canonical("approvers_required"))?;
+    let independent_required = match payload.get("independent_required") {
+        Some(Value::Bool(required)) => *required,
+        _ => return Err(payload::non_canonical("independent_required")),
+    };
+    let content_hash = payload::hash_from(text("content_hash")?)
+        .ok_or_else(|| payload::non_canonical("content_hash"))?;
+    let version = text("mandate_version")?;
+    let bound = BoundAction {
+        instrument: instrument.as_str().to_owned(),
+        asset_class,
+        qty: payload::qty_of(text("qty")?)?,
+        limit: payload::price_of(text("limit")?)?,
+        purpose,
+        mandate_version: version.to_owned(),
+        decided_by: text("decided_by")?.to_owned(),
+        combined_score: Signed::parse(text("combined_score")?)?,
+        reference_mark,
+        approvers_required,
+        independent_required,
+    };
     Ok(PendingApproval {
-        instrument: payload::instrument_of(instrument)?,
+        instrument,
         mandate_version: version.to_owned(),
         deadline,
-        adds_risk: purpose.adds_risk(),
+        adds_risk: true,
+        request: Request {
+            id: ApprovalRef::of_requested_event(&id.0)?,
+            content: RequestContent {
+                bound,
+                evidence: Vec::new(),
+                risk_impact: Vec::new(),
+                deadline: mandate_approval::RiskClock(deadline.secs()),
+            },
+            content_hash,
+            delivered: false,
+            grants: BTreeSet::new(),
+        },
     })
 }
