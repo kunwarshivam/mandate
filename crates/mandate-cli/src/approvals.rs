@@ -12,8 +12,8 @@
 use mandate_canon::{Digest, Value, to_canonical};
 
 use crate::control::{
-    Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Submitted, agent_stream,
-    code_of, commit, decide, envelopes, text,
+    Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Repeat, Submitted,
+    agent_stream, code_of, commit, decide, envelopes, text,
 };
 
 /// One approval as `list` shows it: opaque ids and times, never the content.
@@ -241,6 +241,7 @@ fn answering(
         "ApprovalResponseSubmitted",
         response(owner, agent, &shown, verdict),
         Confirmation::Fixed(stepped_up),
+        Repeat::FindsEarlier,
     )?;
     if let Decision::Fresh(decided) = &decision {
         if now.secs >= shown.deadline_s {
@@ -396,7 +397,7 @@ pub fn outcome(
 /// the owner is offered another answer only while one can still count (the #397 review, minor 5).
 ///
 /// # Errors
-/// [`ControlError::Unimplemented`] for a refusal in the tests PR (DEC-77).
+/// None: every outcome has a line. The `Result` is the stub API's shape.
 pub fn message(outcome: &Outcome, now: Now) -> Result<String, ControlError> {
     Ok(match outcome {
         Outcome::NotRecorded => "Not recorded yet. If the runtime does not record it before the \
@@ -414,10 +415,13 @@ pub fn message(outcome: &Outcome, now: Now) -> Result<String, ControlError> {
         Outcome::Counted => {
             "Counted, short of the approvers required; nothing was sent.".to_owned()
         }
-        Outcome::Refused { .. } => {
-            let _ = now;
-            return Err(ControlError::Unimplemented { story: "E8-3" });
-        }
+        Outcome::Refused { reason, deadline_s } if now.secs < *deadline_s => format!(
+            "Refused ({reason}); nothing was sent. You may answer again before the deadline."
+        ),
+        Outcome::Refused { reason, .. } => format!(
+            "Refused ({reason}); nothing was sent. The deadline has passed, so the action is \
+             skipped."
+        ),
     })
 }
 

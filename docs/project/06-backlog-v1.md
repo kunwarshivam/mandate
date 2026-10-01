@@ -407,6 +407,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   approval flow, step-up and the owner commands (`AGENTS.md`'s safety-critical list), so set
   `safety_critical = true` for it in `xtask/layers.toml`, add its CODEOWNERS line and the lint
   header `cargo xtask layers` checks, and let the mutation gate judge its diff.
+  *Done (the M7 CLI follow-up implementation, DEC-290):* the 13 tests pass. A Stop with release
+  records `release: true` and the warning's content reference, and its code binds the choice;
+  `status` folds the account stream's restrictions; a re-run of the control stream's last,
+  unrecorded command reports it, whatever head it was decided at, while a kill switch skips that
+  search and is always committed; retries back off from 100 ms, doubling to 2 s, with a jitter
+  drawn from the event id; and a refusal's message says whether the deadline has passed.
+  `mandate-cli` is safety-critical (`xtask/layers.toml`, CODEOWNERS, the lint header). Still open:
+  the `clap` wiring and a `mandate-journal-pg` `ControlJournal` (DEC-279 item 10).
   *Follow-up (#343 review, minor 1; a tests correction):* a new family that reuses an owned family's
   kind (for example an `MC-E01` of kind `semantic`) now moves no count in `mandate_harness.rs` and
   runs through that family's arm, where on `main` before #343 it failed two counts. `unread_keys`
