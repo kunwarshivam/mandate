@@ -11,10 +11,22 @@
 //!   `trading_blocked`, `account_blocked` and `trade_suspended_by_user`, is `blocked`. A detected
 //!   restriction is stored "until the owner acknowledges and the account is refreshed", so a later
 //!   `ACTIVE` never lifts it here; lifting it needs `owner_ack` (E7-5).
-//! - **Each proposal is decided alone**, against the account the case's other steps build. An
-//!   allowed proposal places no working order, reserves nothing and counts toward no conduct
-//!   figure: that is its submission, which `actions` (E7-4) and the account ledger (E7-5) own.
-//!   RC-25 is written this way — its steps 3 and 4 both sell the whole position.
+//! - **A later proposal waits for the earlier one's fills** (DEC-199 item 3 as narrowed by DEC-259
+//!   item 7). A proposal is decided only once every earlier allowed proposal in the case was filled
+//!   in full, on its instrument and side, by the case's `fill` steps before it; otherwise it is
+//!   refused as [`super::LATER_PROPOSAL_WAITS`]. A refused proposal leaves no trace. A filled one
+//!   is carried into the conduct figures from its `fill` steps, never from the proposal: one order
+//!   submitted and one filled in the instrument, the filled quantity in today's participation, the
+//!   last fill's instant as the latest fill on its side, and one order today if it opened or
+//!   increased. Its working order, reservation and partial fills stay `actions`' (E7-4) and the
+//!   account ledger's (E7-5), and this reading lapses when their order path drives these cases.
+//! - **The day-trade regime** (§9.2, DEC-284) is `initial.account.regime`, which the alpaca
+//!   profile defaults to `intraday_margin` and a generic margin account must state; a cash account
+//!   states none and is handed `legacy_pdt`, which check 8 never reads for one. `last_equity` is
+//!   the prior-close equity check 8 compares with the threshold (the account's equity when the
+//!   case states none), `prior_day_trades` are the broker's day trades before today, and
+//!   `multiplier` must be 1 (§7.2's 1× requirement). A `legacy_pdt` margin account's ledger is
+//!   `mandate_risk::fold_day_trades` over the case's `fill` steps, as is every `day_trade_count`.
 //! - **One agent holds the whole account** (header: "one agent `agent_a` whose universe is every
 //!   instrument"), in mode `normal`. The case's `purpose` picks the proposer's [`Origin`] as
 //!   DEC-178 does, the step's `side` is the order's side, and the gate assigns the purpose itself.
@@ -49,15 +61,19 @@ use mandate_accounting::{
 use mandate_num::{Fraction, Price, Qty, Ratio, Rounding, ShareIncrement, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits};
 use mandate_risk::{
-    AccountSnapshot, AccountState, AgentId, AgentMode, AgentSnapshot, AssetId, ClientOrderId,
-    ConductState, DayTradeLedger, DayTradeRegime, Decision, EtpClass, Exchange, GateConfig,
-    GateError, GateInput, GatePass, InstrumentSnapshot, MarketSnapshot, Origin, ProposedKind,
-    ProposedOrder, QuoteCurrency, ReasonCode, RiskSnapshot, SaneQuote, TimeInForce,
-    ValidatedMandate, Verdict, WorkingUniverse, evaluate,
+    AccountFill, AccountSnapshot, AccountState, AgentId, AgentMode, AgentSnapshot, AssetId,
+    ClientOrderId, ConductState, DayTrade, DayTradeFold, DayTradeInput, DayTradeLedger,
+    DayTradeRegime, Decision, EtpClass, Exchange, GateConfig, GateError, GateInput, GatePass,
+    InstrumentSnapshot, MarketSnapshot, Origin, ProposedKind, ProposedOrder, Purpose,
+    QuoteCurrency, ReasonCode, RestingSide, RiskSnapshot, SaneQuote, TimeInForce, ValidatedMandate,
+    Verdict, WorkingUniverse, evaluate, fold_day_trades,
 };
-use mandate_time::UtcNanos;
+use mandate_time::{Date, TradingCalendar, UtcNanos, new_york_date_and_hour};
 
-use super::{Instruments, acct, dec_at, fields, instrument, num, resolved_config};
+use super::{
+    BrokerProfile, Instruments, LATER_PROPOSAL_WAITS, account_type, acct, date, dec_at, fields,
+    instrument, num, resolved_config,
+};
 use crate::{Json, at, ensure, list_at, str_at, u64_at};
 
 /// §7.3's account fields, read from `initial.account` and from `broker_account_update` data.
@@ -69,6 +85,10 @@ pub(super) const STATUS_FIELDS: &[&str] = &[
     "account_blocked",
     "trade_suspended_by_user",
 ];
+
+/// `initial.account`'s §9.2 members: the regime and the figures its `legacy_pdt` budget reads.
+pub(super) const DAY_TRADE_FIELDS: &[&str] =
+    &["regime", "prior_day_trades", "last_equity", "multiplier"];
 
 /// The `propose_order` members this driver reads; the rest are owned by later stories.
 const PROPOSAL_KEYS: &[&str] = &[
@@ -110,12 +130,47 @@ const THE_AGENT: AgentId = AgentId(1);
 const OUT_OF_REACH_USD: &str = "1000000000000000";
 
 /// The gate's inputs that last across steps: the organisation's settings, the registered reason
-/// codes, each instrument's listing, and the account's state.
+/// codes, each instrument's listing, the account's state and day-trade figures, the case's fills,
+/// and the orders its allowed proposals placed.
 pub(super) struct Gate {
     config: GateConfig,
     registered: BTreeSet<String>,
     exchanges: BTreeMap<String, Exchange>,
     state: AccountState,
+    day_trades: DayTradeFigures,
+    fills: Vec<AccountFill>,
+    working: Option<Order>,
+    filled: Vec<Order>,
+}
+
+/// §9.2's regime as `initial.account` states it, or as the alpaca profile defaults it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Regime {
+    IntradayMargin,
+    LegacyPdt,
+}
+
+/// The day-trade regime and the figures check 8 reads, from `initial.account` (DEC-284).
+struct DayTradeFigures {
+    /// `None` for a cash account, and for a generic margin account that states none, which a
+    /// proposal then refuses.
+    regime: Option<Regime>,
+    last_equity: Option<Usd>,
+    earlier: Vec<DayTrade>,
+}
+
+/// The order an allowed proposal placed, as the case's `fill` steps fill it (DEC-259 item 7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Order {
+    pub(super) instrument: AssetId,
+    pub(super) side: Side,
+    pub(super) qty: Qty,
+    pub(super) opening: bool,
+    pub(super) submitted_at: UtcNanos,
+    /// Each fill on the order's side, at its instant: never the proposal's figures.
+    pub(super) fills: Vec<(UtcNanos, Qty)>,
+    /// A fill larger than what was left, which no full fill can follow.
+    pub(super) overfilled: bool,
 }
 
 impl Gate {
@@ -145,6 +200,10 @@ impl Gate {
             registered,
             exchanges,
             state: AccountState::Active,
+            day_trades: day_trade_figures(case)?,
+            fills: Vec::new(),
+            working: None,
+            filled: Vec::new(),
         };
         let account = at(case, "initial.account")?
             .as_object()
@@ -182,10 +241,156 @@ impl Gate {
         Ok(())
     }
 
-    /// One `propose_order` step, decided by `mandate_risk::evaluate` in the scene the module doc
-    /// describes.
-    pub(super) fn decide(
+    /// A `fill` step: one fill on the account for the day-trade fold, and on the working order's
+    /// instrument and side, one toward filling that order in full.
+    pub(super) fn fill(&mut self, fill: AccountFill) -> Result<(), String> {
+        if let Some(order) = self
+            .working
+            .as_mut()
+            .filter(|o| o.instrument == fill.instrument && o.side == fill.side)
+        {
+            let filled = order.filled()?;
+            let left = num(
+                order.qty.checked_sub(filled),
+                "the working order's quantity",
+            )?;
+            if fill.qty > left {
+                order.overfilled = true;
+            } else if !order.overfilled {
+                order.fills.push((fill.at, fill.qty));
+                if fill.qty == left {
+                    self.filled.extend(self.working.take());
+                }
+            }
+        }
+        self.fills.push(fill);
+        Ok(())
+    }
+
+    /// The `day_trade_count` a step expects: the fold's window count at the step's instant.
+    pub(super) fn check_day_trade_count(
         &self,
+        account: &Account,
+        accounting: &Config,
+        instruments: &Instruments,
+        now: UtcNanos,
+        expected: &Json,
+    ) -> Result<(), String> {
+        let wanted = expected
+            .as_u64()
+            .ok_or("`day_trade_count` is not a whole number")?;
+        let actual = self
+            .fold(account, &accounting.calendar, instruments, now)?
+            .ledger
+            .window_count;
+        ensure(u64::from(actual) == wanted, || {
+            format!("day_trade_count: expected {wanted}, got {actual}")
+        })
+    }
+
+    /// §9.2's fold over the account's fills, as `mandate_risk::fold_day_trades` computes it: the
+    /// shares held at the start of today are each equity position less today's fills in it. An
+    /// equity fill on an earlier trading day is refused, since its day trades would need that
+    /// day's fold, which the harness does not run (DEC-284).
+    fn fold(
+        &self,
+        account: &Account,
+        calendar: &TradingCalendar,
+        instruments: &Instruments,
+        now: UtcNanos,
+    ) -> Result<DayTradeFold, String> {
+        let trade_date = |at: UtcNanos| calendar.equity_trade_date(at).map_err(|e| e.to_string());
+        let today = trade_date(now)?;
+        let mut held: BTreeMap<AssetId, Qty> = BTreeMap::new();
+        for (id, position) in account.positions() {
+            let (name, _, class, _) = instrument(instruments, id.as_str())?;
+            if *class == AssetClass::UsEquity {
+                held.insert(asset(name)?, position.qty().abs());
+            }
+        }
+        for fill in &self.fills {
+            if fill.asset_class == AssetClass::UsEquity {
+                ensure(trade_date(fill.at)? == today, || {
+                    format!(
+                        "`{}` was filled on a trading day before today's, whose day trades would need that day's fold (DEC-284)",
+                        fill.instrument.as_str()
+                    )
+                })?;
+            }
+        }
+        let equities = || {
+            self.fills
+                .iter()
+                .filter(|f| f.asset_class == AssetClass::UsEquity)
+        };
+        for sold in equities().filter(|f| f.side == Side::Sell) {
+            let shares = held.entry(sold.instrument.clone()).or_insert(Qty::ZERO);
+            *shares = num(shares.checked_add(sold.qty), "a position held overnight")?;
+        }
+        for bought in equities().filter(|f| f.side == Side::Buy) {
+            let shares = held.entry(bought.instrument.clone()).or_insert(Qty::ZERO);
+            *shares = num(shares.checked_sub(bought.qty), "a position held overnight")?;
+        }
+        let fills_today = self.fills.clone();
+        fold_day_trades(&DayTradeInput {
+            now,
+            earlier: &self.day_trades.earlier,
+            held_overnight: &held,
+            fills_today: &fills_today,
+            flagged_pattern_day_trader: false,
+        })
+        .map_err(|e| gate_error(&e))
+    }
+
+    /// The conduct figures and the agent's opening orders today, from the orders the case filled
+    /// in full: each order's own fills, never its proposal (DEC-259 item 7).
+    pub(super) fn conduct(&self, now: UtcNanos) -> Result<(ConductState, u32), String> {
+        let day = |at: UtcNanos| -> Result<Date, String> {
+            Ok(new_york_date_and_hour(at).map_err(|e| e.to_string())?.0)
+        };
+        let today = day(now)?;
+        let mut conduct = ConductState::default();
+        let mut orders_today = 0_u32;
+        for order in &self.filled {
+            let instrument = &order.instrument;
+            if day(order.submitted_at)? == today {
+                let orders = conduct
+                    .orders_today_per_instrument
+                    .entry(instrument.clone())
+                    .or_insert(0);
+                *orders = orders.saturating_add(1);
+                if order.opening {
+                    orders_today = orders_today.saturating_add(1);
+                }
+            }
+            let mut filled_today = false;
+            for (at, qty) in &order.fills {
+                if day(*at)? == today {
+                    filled_today = true;
+                    let total = conduct
+                        .participation_today
+                        .entry(instrument.clone())
+                        .or_insert(Qty::ZERO);
+                    *total = num(total.checked_add(*qty), "participation")?;
+                }
+                let latest = conduct
+                    .last_opposite_fill_at
+                    .entry((instrument.clone(), RestingSide::from(order.side)))
+                    .or_insert(*at);
+                *latest = (*latest).max(*at);
+            }
+            if filled_today {
+                let filled = conduct.filled_today.entry(instrument.clone()).or_insert(0);
+                *filled = filled.saturating_add(1);
+            }
+        }
+        Ok((conduct, orders_today))
+    }
+
+    /// One `propose_order` step, decided by `mandate_risk::evaluate` in the scene the module doc
+    /// describes, or refused while an earlier allowed proposal is not filled in full.
+    pub(super) fn decide(
+        &mut self,
         account: &Account,
         accounting: &Config,
         instruments: &Instruments,
@@ -193,6 +398,9 @@ impl Gate {
         step: usize,
         now: UtcNanos,
     ) -> Result<Decision, String> {
+        if self.working.is_some() {
+            return Err(LATER_PROPOSAL_WAITS.to_owned());
+        }
         let d = fields(data, "propose_order data", PROPOSAL_KEYS)?;
         if let Some(name) = d.get("name") {
             name.as_str().ok_or("`name` is not a string")?;
@@ -319,19 +527,34 @@ impl Gate {
             size_factor: num(Ratio::parse("1"), "size_factor")?,
             agent_mode: AgentMode::Normal,
         };
-        let regime = match account.account_type() {
-            AccountType::Margin => DayTradeRegime::IntradayMargin {
-                maintenance_excess: equity,
-            },
-            AccountType::Cash => DayTradeRegime::LegacyPdt,
+        let (regime, day_trades) = match (account.account_type(), self.day_trades.regime) {
+            (AccountType::Cash, _) => (DayTradeRegime::LegacyPdt, DayTradeLedger::default()),
+            (AccountType::Margin, Some(Regime::IntradayMargin)) => (
+                DayTradeRegime::IntradayMargin {
+                    maintenance_excess: equity,
+                },
+                DayTradeLedger::default(),
+            ),
+            (AccountType::Margin, Some(Regime::LegacyPdt)) => (
+                DayTradeRegime::LegacyPdt,
+                self.fold(account, &accounting.calendar, instruments, now)?
+                    .ledger,
+            ),
+            (AccountType::Margin, None) => {
+                return Err(
+                    "a generic margin account states no `regime`, which check 8 reads (§9.2)"
+                        .to_owned(),
+                );
+            }
         };
+        let (conduct, orders_today) = self.conduct(now)?;
         let account_snapshot = AccountSnapshot {
             account_type: account.account_type(),
             state: self.state,
             crypto_active: true,
             regime,
             equity,
-            prior_close_equity: equity,
+            prior_close_equity: self.day_trades.last_equity.unwrap_or(equity),
             model_buying_power: buying_power,
             broker_buying_power: buying_power,
             broker_non_marginable_buying_power: buying_power,
@@ -350,8 +573,8 @@ impl Gate {
             working_orders: BTreeSet::new(),
             instrument_groups: BTreeMap::new(),
             last_exit_fill_at: BTreeMap::new(),
-            orders_today: 0,
-            day_trades: DayTradeLedger::default(),
+            orders_today,
+            day_trades,
         };
         let listing = listing(
             proposed.clone(),
@@ -391,7 +614,7 @@ impl Gate {
             client_order_id: ClientOrderId(u64::try_from(step).map_err(|e| e.to_string())?),
             fee_reservation,
         };
-        evaluate(&GateInput {
+        let decision = evaluate(&GateInput {
             now,
             pass: GatePass::First,
             config: &self.config,
@@ -401,11 +624,23 @@ impl Gate {
             agent: &agent,
             instrument: &listing,
             market: &market,
-            conduct: &ConductState::default(),
+            conduct: &conduct,
             universe: &universe,
             proposed: &order,
         })
-        .map_err(|e| gate_error(&e))
+        .map_err(|e| gate_error(&e))?;
+        if decision.verdict == Verdict::Allow {
+            self.working = Some(Order {
+                instrument: order.instrument,
+                side,
+                qty,
+                opening: matches!(decision.purpose, Purpose::Open | Purpose::Increase),
+                submitted_at: now,
+                fills: Vec::new(),
+                overfilled: false,
+            });
+        }
+        Ok(decision)
     }
 
     /// The step's `decision` against the gate's: the verdict, and the reason code when the case
@@ -444,6 +679,73 @@ impl Gate {
     pub(super) fn restrict(&mut self, state: AccountState) {
         self.state = state;
     }
+}
+
+impl Order {
+    fn filled(&self) -> Result<Qty, String> {
+        self.fills.iter().try_fold(Qty::ZERO, |sum, (_, qty)| {
+            num(sum.checked_add(*qty), "the working order's fills")
+        })
+    }
+}
+
+/// `initial.account`'s regime and figures (DEC-284): a stated regime, else `intraday_margin` for
+/// the alpaca profile's margin account and none for a generic one; a cash account states none. A
+/// `multiplier` other than 1 is refused, since §7.2 pauses the agents then.
+fn day_trade_figures(case: &Json) -> Result<DayTradeFigures, String> {
+    let account = at(case, "initial.account")?;
+    let profile = BrokerProfile::parse(str_at(case, "broker_profile")?)?;
+    let margin = account_type(account, profile)? == AccountType::Margin;
+    let stated = match account.get("regime") {
+        None => None,
+        Some(regime) => match regime.as_str() {
+            Some("intraday_margin") => Some(Regime::IntradayMargin),
+            Some("legacy_pdt") => Some(Regime::LegacyPdt),
+            _ => return Err(format!("unknown day-trade regime {regime}")),
+        },
+    };
+    let regime = match (margin, stated, profile) {
+        (false, None, _) => None,
+        (false, Some(_), _) => {
+            return Err("a cash account has no day-trade regime (§9.2)".to_owned());
+        }
+        (true, Some(regime), _) => Some(regime),
+        (true, None, BrokerProfile::Alpaca) => Some(Regime::IntradayMargin),
+        (true, None, BrokerProfile::Generic) => None,
+    };
+    if let Some(multiplier) = account.get("multiplier") {
+        ensure(multiplier.as_u64() == Some(1), || {
+            format!(
+                "`multiplier` {multiplier} is not 1, which pauses the agents (§7.2's 1× requirement)"
+            )
+        })?;
+    }
+    let last_equity = match account.get("last_equity") {
+        None => None,
+        Some(_) => Some(num(
+            Usd::parse(dec_at(account, "last_equity")?.as_str()),
+            "last_equity",
+        )?),
+    };
+    let mut earlier = Vec::new();
+    for listed in account
+        .get("prior_day_trades")
+        .map(|l| l.as_array().ok_or("`prior_day_trades` is not a list"))
+        .transpose()?
+        .into_iter()
+        .flatten()
+    {
+        fields(listed, "prior day trade", &["date", "instrument"])?;
+        earlier.push(DayTrade {
+            date: date(at(listed, "date")?, "date")?,
+            instrument: asset(str_at(listed, "instrument")?)?,
+        });
+    }
+    Ok(DayTradeFigures {
+        regime,
+        last_equity,
+        earlier,
+    })
 }
 
 /// DEC-199 item 6's listing: active, tradable and unhalted on `exchange` with a current status

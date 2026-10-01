@@ -1576,8 +1576,9 @@ mod tests {
     /// §3.2's last paragraph and `AGENTS.md` rule 13, probed for every origin a sell within the
     /// position can come from, each typed by the brief's purpose table rather than by
     /// `assign_purpose`: no breach of the universe or the floor denies an exit, and check 2 is
-    /// listed `Passed` for it, a crypto pair's as an equity's. Each breach first denies an opening with its own code at check 2, so an exit's allow is never an
-    /// instrument that happens to pass the floor.
+    /// listed `Passed` for it, a crypto pair's as an equity's. Each breach first denies an opening
+    /// with its own code at check 2, so an exit's allow is never an instrument that happens to pass
+    /// the floor.
     #[test]
     fn no_floor_breach_denies_an_exit_from_any_origin() -> Result<(), GateError> {
         let exits = [
