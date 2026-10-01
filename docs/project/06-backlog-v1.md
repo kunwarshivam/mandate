@@ -1139,6 +1139,11 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
   `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
   resubmitted at the same price every `exit_step_s`.
+- **`xtask` gates (the coordinator), from [#385](https://github.com/kunwarshivam/mandate/pull/385)
+  round 1 (minor 3):** `cargo xtask ci mutants`, `ci lint` and `ci test` exit 0 when
+  `cargo-mutants`, `cargo-nextest` or `typos` is missing, so a local gate can pass vacuously. Make
+  each fail, naming the missing tool and `.cursor/install.sh` (trust ladder rung 2), with a test.
+  CI installs the tools, so only local runs are exposed.
 - **E7-4 slice 5 (stream K), from slice 4b ([DEC-260](04-decision-log.md#decisions) (12)):**
   the triggered-stop watchdog fires only in a session where the stop can trigger (§5.4: stops do
   not trigger in extended hours), once slice 5 folds the session; and a crypto stop-limit is
