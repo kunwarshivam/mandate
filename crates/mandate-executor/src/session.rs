@@ -23,15 +23,16 @@ pub(crate) enum Venue {
     Closing,
     /// Pre-market or after-hours: an exit goes as a limit with `extended_hours = true`.
     Extended,
-    /// The overnight session or a closed market, where v1 trades nothing: an order goes as a
-    /// regular-session limit, which the broker queues to its next eligible session (§5.2).
+    /// The overnight session or a closed market, where v1 trades nothing (DEC-30): an equity
+    /// exit is held for the next pre-market open ([`closed_hold`]).
     Closed,
 }
 
 /// The US-equities session span `instrument` is in at `at`, or `None` for crypto, for an instant
-/// the calendar does not cover, and for a closed market. An instant outside the calendar is no
-/// session v1 names, so it changes nothing: an order goes as a regular-session limit, which the
-/// broker queues to its next eligible session (§5.2), and nothing is held (DEC-260 (13)).
+/// the calendar does not cover, and for a closed market. An instant before or after the
+/// calendar's whole range is read as the regular session, as before this slice (DEC-260 (13)):
+/// production clocks are always inside it, and a closed market inside it is told apart by
+/// [`covered`].
 fn span(ports: &Ports<'_>, instrument: &InstrumentId, at: RiskClock) -> Option<SessionSpan> {
     if ports.instruments.asset_class(instrument) != Some(AssetClass::UsEquity) {
         return None;
@@ -116,7 +117,8 @@ fn next_open(at: RiskClock) -> Option<i64> {
 /// Whether an order of `purpose` goes as an extended-hours limit: an exit in pre-market or
 /// after-hours that may trade there (§4.3) — a risk exit, a protective order or a flatten. An
 /// opening never does (§3.1), and a discretionary or an unconfirmed owner exit waits for the
-/// regular session (§5.5, §9.6), as the broker queues a regular-session limit.
+/// regular session (§5.5, §9.6): it goes as a regular-session limit, which the broker queues to
+/// that session (§5.2), rule 13's broker hold.
 pub(crate) fn extended_hours(
     ports: &Ports<'_>,
     instrument: &InstrumentId,

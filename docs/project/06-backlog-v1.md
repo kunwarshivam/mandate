@@ -1153,8 +1153,8 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   risk-reducing order at `paused` or stricter. Add a pending test: while the agent is paused, a
   flatten's ladder steps, its step cancel does not end the sequence, and `mode_failure` lets that
   flatten through. Slice 6 narrows `climbs` and the gate together to make it pass.
-- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1
-  (minor 1):** wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
+- **E7-4 slice 6 (stream K; moved from slice 5 by the coordinator's ruling D3 on #174), from
+  [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1 (minor 1):** wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
   `exit_limit` and `next_rung`, which pass none today, so §5.6's "never below an owner exit's
   floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
   `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
@@ -1172,10 +1172,15 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   window is §4.3's 10-minute default as a constant in `mandate-executor`'s `session`; read it from
   the gate's effective-dated configuration (`close_window_minutes`) once the executor holds it. A
   presumed halt is read from the latest quote only (older than `exit_step_s`, or not sane); add
-  the trading-status and LULD feed §4.4 names once the shell subscribes to it. The coordinator's
-  ruling on D1 to D3 ([#174](https://github.com/kunwarshivam/mandate/pull/174), comment
-  5926134821) decides whether a closed-market exit is held for pre-market rather than queued by
-  the broker, and whether a held exit is ever abandoned for age.
+  the trading-status and LULD feed §4.4 names once the shell subscribes to it.
+- **E7-4 slice 6 (stream K), moved from slice 5 by the coordinator's ruling D3 on
+  [#174](https://github.com/kunwarshivam/mandate/pull/174) (5926142854):** the four kill-switch
+  session tests (`hand::an_automated_flatten_defers_equity_sells_to_the_session`,
+  `an_automated_flatten_sells_crypto_at_once`,
+  `an_owner_exit_outside_the_session_prices_from_the_confirmed_bid`,
+  `an_unconfirmed_owner_exit_waits_for_the_session`) and the owner-confirmed extended-hours path:
+  outside the regular session an owner exit sells equities through the ladder only on the
+  confirmed bid, bid size and floor, and waits for the session otherwise (§5.5).
 - **E7-4 (stream K), from [#385](https://github.com/kunwarshivam/mandate/pull/385)'s review (minor
   4):** the rule-13 oracle's waiting-exit `limit` branch
   (`protection::sequence_tests::rule_13_script`) is dormant: no script holds an exit unexcused long
