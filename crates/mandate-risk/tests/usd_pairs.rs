@@ -40,9 +40,10 @@ const EXITS: [(Origin, Purpose); 10] = [
     (Origin::ProtectiveLeg, Purpose::Protective),
 ];
 
-/// §3.2 item 7's pair rule is reported under `not_in_working_universe` until the founder registers
-/// a code of its own (DEC-254 item 3).
-const PAIR_CODE: ReasonCode = ReasonCode::NotInWorkingUniverse;
+/// §3.2 item 7's pair rule reports `crypto_pair_not_usd`, the code DEC-255 registered for it, and
+/// not `not_in_working_universe`: a pair the research agent admitted is in the working universe, so
+/// that code would journal a false reason.
+const PAIR_CODE: ReasonCode = ReasonCode::CryptoPairNotUsd;
 
 /// A crypto pair that every other check passes: tradable, in the universe, 90 M of 30-day median
 /// dollar volume against the 1 M floor, an active crypto account, and a continuous session.
@@ -312,8 +313,13 @@ proptest! {
         intent in intent(),
         units in 1_u32..5,
     ) {
-        let mut s = if is_crypto { crypto(quote) } else { Scenario::allowing() };
-        s.instrument.quote_currency = quote;
+        let s = if is_crypto {
+            crypto(quote)
+        } else {
+            let mut s = Scenario::allowing();
+            s.instrument.quote_currency = quote;
+            s
+        };
         let buy = |s: Scenario| {
             let mut s = s;
             s.proposed = proposal(
