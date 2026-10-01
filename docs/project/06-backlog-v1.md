@@ -371,6 +371,24 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   those kinds would change their counts. The same PR corrects mandate spec §11's and §1's sentences
   that MC-U "lands in its own tests-first change, because the shared harness pins the case count":
   since #343 it no longer does (#343 review, minor 4).
+  *Done (the M7 spec PR, DEC-280):* MC-E01 to MC-E32 are generated from the reference model as
+  `kind: escalation` cases, checked by `check_cases.py`, exported to `fixtures/refcases`, with no
+  `status.toml` row; §11 lists the family and no longer says the harness pins the count.
+  *Follow-up (DEC-280):* a harness arm for `kind: escalation` in `mandate-refcases`, tests first,
+  driving `mandate-approval` (and the runtime for `op: lifecycle`), then the status PR that flips
+  the rows it passes.
+  *Follow-up (DEC-280 item 7):* `mandate-journal`'s catalogue gains `OwnerCommandRefused` (agent and
+  account streams), and the runtime journals it for a refused resume or Stop, tests first, with a
+  test that a refused Stop leaves exactly that event (the #395 review, major 1; DEC-278 item 12).
+  *Follow-up (the #397 review, minors 1 to 5; one M7 tests PR before the `clap` wiring makes the
+  commands reachable):* pin the closed key set of every control payload the CLI commits
+  (`OwnerCommandIssued`, `ApprovalResponseSubmitted`, `OwnerAcknowledged`) in `tests/agent.rs` and
+  `tests/approvals.rs`, so a `typed_code` member fails; give `Command::Stop` the `--release` choice
+  and the warning-shown record (DEC-136) and `status` the agent's restrictions, tests first; make
+  `commit`'s idempotency hold across invocations by deriving the event id from the command's
+  content and the head (or record why it cannot), add backoff between attempts, and word the
+  exhausted report to match; and make `message(Outcome::Refused)` say whether the deadline has
+  passed.
   *Follow-up (#343 review, minor 1; a tests correction):* a new family that reuses an owned family's
   kind (for example an `MC-E01` of kind `semantic`) now moves no count in `mandate_harness.rs` and
   runs through that family's arm, where on `main` before #343 it failed two counts. `unread_keys`
