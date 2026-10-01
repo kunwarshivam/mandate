@@ -115,6 +115,19 @@ const REGISTERED: &[&str] = &[
     "MarkUpdated",
 ];
 
+/// Payload schemas journal spec v0.6 §9.1 closes on the agent stream (E7-9). On an agent stream a
+/// `StreamOpened` or `KillSwitchActivated` takes the agent stream's schema, not the account's.
+const CLOSED_ON_AGENT: &[&str] = &[
+    "StreamOpened",
+    "ObservationRecorded",
+    "ModelOutputRecorded",
+    "DecisionMade",
+    "IntentProposed",
+    "AgentModeChanged",
+    "KillSwitchActivated",
+    "OwnerExitRequested",
+];
+
 fn stream_of(kind: &str) -> &'static str {
     match kind {
         ACCT => STREAM,
@@ -166,7 +179,9 @@ fn stream_types_and_required_config_refs_match_the_spec() {
             } else {
                 InvalidReason::UnknownSchema
             };
-            assert_eq!(with_all.reason, expected, "{event_type} in {kind}");
+            if !(kind == AGENT && CLOSED_ON_AGENT.contains(event_type)) {
+                assert_eq!(with_all.reason, expected, "{event_type} in {kind}");
+            }
             for missing in required.iter() {
                 let rest: Vec<&str> = required.iter().copied().filter(|r| r != missing).collect();
                 let e = reason(&rest);
@@ -341,6 +356,26 @@ fn every_registered_risk_input_requires_risk_clock() {
             (e.reason, e.path.as_str()),
             (InvalidReason::Schema, "payload.risk_clock"),
             "{event_type} requires risk_clock (DEC-81)"
+        );
+    }
+}
+
+/// Each schema §9.1 closes is a record with exactly its listed members, so a payload with an
+/// unlisted member is refused at that member, before anything else in it is read (§9.1's order).
+#[test]
+#[ignore = "pending E7-9"]
+fn a_closed_agent_stream_schema_refuses_an_unlisted_member() {
+    for (event_type, _, required) in SPEC
+        .iter()
+        .filter(|(event_type, _, _)| CLOSED_ON_AGENT.contains(event_type))
+    {
+        let refused = Draft::parse(&draft(event_type, AGENT, required))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(
+            (refused.reason, refused.path.as_str()),
+            (InvalidReason::Schema, "payload.unregistered"),
+            "{event_type}"
         );
     }
 }
