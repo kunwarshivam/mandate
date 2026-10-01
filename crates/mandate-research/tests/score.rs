@@ -5,10 +5,11 @@
 //! every instrument closing `100` at its entry edge, so the net returns are
 //! `[0.25, 0.15, 0.05, 0.05, 0.0]`: the mean is `0.1`, the sample variance
 //! `(5 × 0.09 − 0.25) ÷ 20 = 0.01`, so σ is exactly `0.1`, and with the registered `z = 1.645`
-//! the margin is `root_ceiling(0.1645² ÷ 5) = root_ceiling(0.00541205) = 0.073567` (the
-//! smallest 12-digit value whose square reaches it: `0.073566² = 0.005411956356` does not), so
-//! the bound is `0.1 − 0.073567 = 0.026433`. A floored root would report `0.073566` and a
-//! division by anything but the count moves every figure.
+//! the margin is `root_ceiling(0.1645² ÷ 5) = root_ceiling(0.00541205) = 0.07356663646` (the
+//! smallest 12-digit value whose square reaches it: `0.073566636459² = 0.005412049999890668…`
+//! does not), so the bound is `0.1 − 0.07356663646 = 0.02643336354`. A floored root at either
+//! place — the outer root here, σ's root in the non-square-variance case below — moves a figure
+//! the tests pin exactly, and a division by anything but the count moves every figure.
 //!
 //! Every test is pending until its story lands (DEC-77), and every one fails on the stubs
 //! because the stubs return an error where the case expects a figure or a refusal it does not
@@ -16,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use mandate_num::{Price, Ratio};
+use mandate_num::{Price, Ratio, Rounding, SignedQty};
 use mandate_research::score::{
     CloseSeries, ClosedThesis, EvaluationDecision, EvaluationInput, EvaluationWindow,
     ObservedClose, UnscoreableReason, basket_return, buy_and_hold, entry_close, evaluate,
@@ -407,7 +408,7 @@ fn a_thesis_with_no_close_on_an_edge_is_unscoreable_and_never_counts() {
     let registered = decision(1);
     let card = evaluate(&input(
         &registered,
-        &[scored, no_entry, no_exit],
+        &[no_exit, no_entry, scored],
         &instruments,
         &basket,
         &index,
@@ -421,7 +422,7 @@ fn a_thesis_with_no_close_on_an_edge_is_unscoreable_and_never_counts() {
             &ThesisId::new("th-2").expect("a fixture id"),
             &ThesisId::new("th-3").expect("a fixture id")
         ],
-        "both edge failures are named, in thesis order"
+        "both edge failures are named, in thesis order even though the input supplied them reversed — the report never depends on input order"
     );
     assert!(
         card.unscoreable
@@ -513,15 +514,15 @@ fn the_lower_bound_is_the_mean_less_the_ceilinged_margin() {
     );
     assert_eq!(
         card.margin_basket,
-        r("0.073567"),
-        "root_ceiling(0.1645² ÷ 5) = root_ceiling(0.00541205): the smallest 12-digit value whose square reaches it — a floored root would read 0.073566"
+        r("0.07356663646"),
+        "root_ceiling(0.1645² ÷ 5) = root_ceiling(0.00541205): the smallest 12-digit value whose square reaches it — 0.073566636459² = 0.005412049999890668… does not, so a floored root reads 0.073566636459"
     );
-    assert_eq!(card.lower_bound_basket, r("0.026433"));
+    assert_eq!(card.lower_bound_basket, r("0.02643336354"));
     assert_eq!(card.excess_sum_index, r("0.5"));
     assert_eq!(card.mean_excess_index, r("0.1"));
     assert_eq!(card.sample_variance_index, Some(r("0.01")));
-    assert_eq!(card.margin_index, r("0.073567"));
-    assert_eq!(card.lower_bound_index, r("0.026433"));
+    assert_eq!(card.margin_index, r("0.07356663646"));
+    assert_eq!(card.lower_bound_index, r("0.02643336354"));
     assert!(card.passed, "both bounds are above zero");
     let first = card.theses.first().expect("the first thesis was scored");
     assert_eq!(first.net_return, r("0.25"));
@@ -564,11 +565,15 @@ fn pass_requires_the_bound_above_zero_against_both_baselines() {
         "the index returned 0.05 over the window: [0.2, 0.1, 0, 0, −0.05] averages 0.05"
     );
     assert_eq!(card.sample_variance_index, Some(r("0.01")));
-    assert_eq!(card.margin_index, r("0.073567"));
-    assert_eq!(card.lower_bound_index, r("-0.023567"), "0.05 − 0.073567");
+    assert_eq!(card.margin_index, r("0.07356663646"));
+    assert_eq!(
+        card.lower_bound_index,
+        r("-0.02356663646"),
+        "0.05 − 0.07356663646"
+    );
     assert_eq!(
         card.lower_bound_basket,
-        r("0.026433"),
+        r("0.02643336354"),
         "the basket bound still passes"
     );
     assert!(
@@ -612,7 +617,11 @@ fn every_scored_thesis_shows_its_lineage_s_revision_count() {
 #[test]
 #[ignore = "pending E17-8"]
 fn the_scorecard_is_independent_of_the_input_order() {
-    let (theses, instruments, basket, index) = five_theses("400");
+    let (theses, instruments, _flat_basket, index) = five_theses("400");
+    let basket = vec![
+        series("basket-1", &[(101, "100"), (999, "110")]),
+        series("basket-2", &[(101, "200"), (999, "196")]),
+    ];
     let registered = decision(2);
     let sorted = evaluate(&input(&registered, &theses, &instruments, &basket, &index))
         .expect("five scoreable theses meet the minimum");
@@ -630,7 +639,7 @@ fn the_scorecard_is_independent_of_the_input_order() {
     .expect("the same theses meet the minimum");
     assert_eq!(
         sorted, other,
-        "the report is keyed by thesis, not by input order (ES-21's replay equality)"
+        "the report is keyed by thesis, not by input order (ES-21's replay equality), and the equal-weighted basket mean does not care which member came first"
     );
     let ids: Vec<&str> = sorted
         .theses
@@ -638,4 +647,298 @@ fn the_scorecard_is_independent_of_the_input_order() {
         .map(|row| row.thesis.as_str())
         .collect();
     assert_eq!(ids, ["th-1", "th-2", "th-3", "th-4", "th-5"]);
+}
+
+#[test]
+#[ignore = "pending E17-8"]
+fn the_sigma_root_is_ceilinged_so_the_margin_is_never_understated() {
+    let rising = thesis("th-1", "asset-a", 100, 1_000, "0");
+    let milder = thesis("th-2", "asset-b", 100, 1_000, "0");
+    let instruments = BTreeMap::from([
+        (
+            asset("asset-a"),
+            series("asset-a", &[(101, "100"), (999, "120")]),
+        ),
+        (
+            asset("asset-b"),
+            series("asset-b", &[(101, "100"), (999, "110")]),
+        ),
+    ]);
+    let basket = vec![series("basket-1", &[(101, "100"), (999, "100")])];
+    let index = series("index", &[(101, "400"), (999, "400")]);
+    let registered = EvaluationDecision {
+        window: EvaluationWindow {
+            from: t(0),
+            to: t(10_000),
+        },
+        minimum_scoreable: 1,
+        z: r("10"),
+    };
+    let card = evaluate(&input(
+        &registered,
+        &[rising, milder],
+        &instruments,
+        &basket,
+        &index,
+    ))
+    .expect("two scoreable theses meet the minimum");
+    assert_eq!(card.scoreable_count, 2);
+    assert_eq!(card.mean_excess_basket, r("0.15"));
+    assert_eq!(
+        card.sample_variance_basket,
+        Some(r("0.005")),
+        "(2 × 0.05 − 0.09) ÷ 2, not a perfect square: √0.005 = 0.0707106781186547…"
+    );
+    assert_eq!(
+        card.margin_basket,
+        r("0.500000000002"),
+        "σ is the 12-place ceiling root 0.070710678119 (the floor is 0.070710678118); with z = 10 the step survives every rounding, and a floored σ lands the margin on 0.499999999995 instead"
+    );
+    assert_eq!(
+        card.lower_bound_basket,
+        r("-0.350000000002"),
+        "0.15 − 0.500000000002"
+    );
+    assert_eq!(card.margin_index, r("0.500000000002"));
+    assert_eq!(card.lower_bound_index, r("-0.350000000002"));
+    assert!(!card.passed);
+}
+
+#[test]
+#[ignore = "pending E17-8"]
+fn the_window_edges_are_inclusive() {
+    let at_from = thesis("th-1", "asset-a", 100, 1_000, "0");
+    let at_to = thesis("th-2", "asset-b", 100, 2_000, "0");
+    let before_from = thesis("th-3", "asset-c", 100, 999, "0");
+    let after_to = thesis("th-4", "asset-d", 100, 2_001, "0");
+    let instruments = BTreeMap::from([
+        (
+            asset("asset-a"),
+            series("asset-a", &[(101, "100"), (1_000, "110")]),
+        ),
+        (
+            asset("asset-b"),
+            series("asset-b", &[(101, "100"), (2_000, "120")]),
+        ),
+        (
+            asset("asset-c"),
+            series("asset-c", &[(101, "100"), (999, "100")]),
+        ),
+        (
+            asset("asset-d"),
+            series("asset-d", &[(101, "100"), (2_100, "100")]),
+        ),
+    ]);
+    let basket = vec![series("basket-1", &[(101, "100"), (999, "100")])];
+    let index = series("index", &[(101, "400"), (999, "400")]);
+    let registered = EvaluationDecision {
+        window: EvaluationWindow {
+            from: t(1_000),
+            to: t(2_000),
+        },
+        minimum_scoreable: 1,
+        z: r("1.645"),
+    };
+    let from_card = evaluate(&input(
+        &registered,
+        std::slice::from_ref(&at_from),
+        &instruments,
+        &basket,
+        &index,
+    ))
+    .expect("a horizon closing exactly at `from` is the first scored instant");
+    assert_eq!(from_card.scoreable_count, 1);
+    assert_eq!(
+        from_card
+            .theses
+            .first()
+            .expect("the thesis was scored")
+            .net_return,
+        r("0.1")
+    );
+    let to_card = evaluate(&input(&registered, &[at_to], &instruments, &basket, &index))
+        .expect("a horizon closing exactly at `to` is inside the window: `to` is inclusive");
+    assert_eq!(to_card.scoreable_count, 1);
+    assert_eq!(
+        to_card
+            .theses
+            .first()
+            .expect("the thesis was scored")
+            .net_return,
+        r("0.2")
+    );
+    assert!(
+        matches!(
+            evaluate(&input(
+                &registered,
+                &[at_from.clone(), before_from],
+                &instruments,
+                &basket,
+                &index,
+            )),
+            Err(ResearchError::ThesisOutsideWindow)
+        ),
+        "a horizon closing at t(999) is before `from` t(1000): refused, not silently scored"
+    );
+    assert!(
+        matches!(
+            evaluate(&input(
+                &registered,
+                &[at_from.clone(), after_to],
+                &instruments,
+                &basket,
+                &index,
+            )),
+            Err(ResearchError::ThesisOutsideWindow)
+        ),
+        "a horizon closing at t(2001) is past `to` t(2000): refused, not silently scored"
+    );
+}
+
+#[test]
+#[ignore = "pending E17-8"]
+fn each_row_excess_uses_its_own_window() {
+    let earlier = thesis("th-1", "asset-a", 100, 1_000, "0");
+    let later = thesis("th-2", "asset-b", 2_000, 3_000, "0");
+    let instruments = BTreeMap::from([
+        (
+            asset("asset-a"),
+            series("asset-a", &[(101, "100"), (999, "110")]),
+        ),
+        (
+            asset("asset-b"),
+            series("asset-b", &[(2_001, "100"), (2_999, "100")]),
+        ),
+    ]);
+    let basket = vec![series(
+        "basket-1",
+        &[(101, "100"), (999, "100"), (2_001, "100"), (2_999, "102")],
+    )];
+    let index = series(
+        "index",
+        &[(101, "400"), (999, "408"), (2_001, "500"), (2_999, "505")],
+    );
+    let registered = decision(1);
+    let card = evaluate(&input(
+        &registered,
+        &[earlier, later],
+        &instruments,
+        &basket,
+        &index,
+    ))
+    .expect("two scoreable theses meet the minimum");
+    assert_eq!(card.scoreable_count, 2);
+    let earlier_row = card.theses.first().expect("the earlier thesis was scored");
+    assert_eq!(earlier_row.excess_over_basket, r("0.1"), "0.1 − 0");
+    assert_eq!(earlier_row.excess_over_index, r("0.08"), "0.1 − 0.02");
+    let later_row = card.theses.last().expect("the later thesis was scored");
+    assert_eq!(
+        later_row.excess_over_basket,
+        r("-0.02"),
+        "the basket returned 0.02 over the later thesis's own window [t(2000), t(3000)], not over the first thesis's: 0 − 0.02"
+    );
+    assert_eq!(
+        later_row.excess_over_index,
+        r("-0.01"),
+        "the index returned 0.01 over the later thesis's own window: 0 − 0.01"
+    );
+    assert_eq!(card.mean_excess_basket, r("0.04"));
+    assert_eq!(card.mean_excess_index, r("0.035"));
+}
+
+#[test]
+#[ignore = "pending E17-8"]
+fn the_report_recomputes_from_its_own_fields() {
+    let (theses, instruments, basket, index) = five_theses("400");
+    let registered = decision(2);
+    let card = evaluate(&input(&registered, &theses, &instruments, &basket, &index))
+        .expect("five scoreable theses meet the minimum");
+    assert_eq!(
+        card.z,
+        r("1.645"),
+        "the report echoes the decision's z, so the bound recomputes from the report alone"
+    );
+    let one = SignedQty::parse("1").expect("a unit quantity parses");
+    for row in &card.theses {
+        let entry_usd = one.value_at(row.entry).expect("an entry price values");
+        let exit_usd = one.value_at(row.exit).expect("an exit price values");
+        let gross = exit_usd
+            .checked_sub(entry_usd)
+            .expect("the prices subtract")
+            .ratio_to(
+                entry_usd,
+                mandate_research::score::REPORT_SCALE,
+                Rounding::HalfEven,
+            )
+            .expect("the window return rounds");
+        assert_eq!(
+            row.net_return,
+            gross
+                .checked_sub(row.round_trip_cost)
+                .expect("the cost subtracts"),
+            "each row's net return recomputes from its own entry, exit, and echoed round-trip cost"
+        );
+    }
+    let excesses_basket: Vec<Ratio> = card
+        .theses
+        .iter()
+        .map(|row| row.excess_over_basket)
+        .collect();
+    let excesses_index: Vec<Ratio> = card
+        .theses
+        .iter()
+        .map(|row| row.excess_over_index)
+        .collect();
+    assert_eq!(
+        card.excess_sum_basket,
+        Ratio::sum(&excesses_basket).expect("the excesses add")
+    );
+    assert_eq!(
+        card.mean_excess_basket,
+        Ratio::mean(&excesses_basket).expect("the mean divides")
+    );
+    assert_eq!(
+        card.mean_excess_index,
+        Ratio::mean(&excesses_index).expect("the mean divides")
+    );
+    let sigma = card
+        .sample_variance_basket
+        .expect("five theses have dispersion")
+        .root_ceiling()
+        .expect("the sigma root ceils");
+    let count = Ratio::parse("5").expect("the count parses");
+    let margin = Ratio::squared_quotient(
+        card.z.checked_mul(sigma).expect("the product is exact"),
+        count,
+    )
+    .expect("the quotient rounds")
+    .root_ceiling()
+    .expect("the margin root ceils");
+    assert_eq!(
+        card.margin_basket, margin,
+        "the margin recomputes from the report's own z, variance, and count"
+    );
+    assert_eq!(
+        card.lower_bound_basket,
+        card.mean_excess_basket
+            .checked_sub(card.margin_basket)
+            .expect("the bound subtracts")
+    );
+    assert_eq!(
+        card.lower_bound_index,
+        card.mean_excess_index
+            .checked_sub(card.margin_index)
+            .expect("the bound subtracts")
+    );
+}
+
+#[test]
+#[ignore = "pending E17-8"]
+fn an_empty_basket_is_an_error() {
+    let refusal = basket_return(&[], t(100), t(1_000))
+        .expect_err("an empty basket refuses, never a quiet zero");
+    assert!(
+        matches!(refusal, ResearchError::Num(_)),
+        "an empty basket's equal-weighted mean is undefined: the Num error {refusal:?}"
+    );
 }

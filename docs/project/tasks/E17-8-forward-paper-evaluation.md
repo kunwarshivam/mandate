@@ -68,7 +68,11 @@ the mechanics open. DEC-281 pins them:
    an early run — fewer scoreable closed theses than the minimum — with `WindowNotClosed`, and a
    thesis whose horizon closes outside the registered window is refused outright
    (`ThesisOutsideWindow`): the caller selects, the evaluator re-checks, and nothing is silently
-   included or dropped.
+   included or dropped. The window's edges are inclusive: a horizon closing exactly at `from` or
+   at `to` is inside. The registered figures themselves — DEC-122's three months and 100 closed
+   theses — are the **shell's** to confirm when the decision is recorded: the evaluator applies
+   whatever minimum was registered, so a registered minimum of one reports on one thesis, and
+   guarding DEC-122's own figures happens at registration, not in the scoring.
 3. **The boundary rule is no-lookahead at both edges.** The entry price is the first close
    *strictly after* the thesis's `as_of` — the first price the thesis could have acted on; a
    close at the same instant is not it, because the model's output is dated `as_of`. The exit
@@ -95,10 +99,13 @@ the mechanics open. DEC-281 pins them:
    above zero against **both** baselines, DEC-122's "against each". With fewer than two theses
    the sample variance is absent and the margin is zero: the bound is the mean itself, the
    tightest honest statement a single outcome supports.
-7. **The scorecard is the report, and it recomputes from its own fields** (the E4-2 discipline):
-   the mean from the excess sum and the scoreable count, the bound from the mean, the variance,
-   `z`, and the count, pass from both bounds. Pure inputs give an identical scorecard every run,
-   and the rows are ordered by thesis id, so the report is reproducible from the journal alone.
+7. **The scorecard is the report, and it recomputes from its own fields** (the E4-2 discipline,
+   DEC-127 item 5's precedent that the report carries what a reader needs to recompute it): the
+   report echoes the decision's `z` and each row's round-trip cost, the mean recomputes from the
+   excess sum and the scoreable count, the margin from `z`, the variance, and the count, the
+   bound from the mean less the margin, and pass from both bounds. Pure inputs give an identical
+   scorecard every run, and the rows are ordered by thesis id, so the report is reproducible
+   from the journal alone.
 
 ## Commands
 
@@ -134,18 +141,20 @@ cargo xtask ci pending
    registers the confidence level's `z` (DEC-122's 95% is 1.645) with the window and the minimum,
    and the evaluator applies what was registered.
 
-## Planted bugs (each tried against a throwaway implementation; a named test must catch each)
+## Planted bugs (the seeds run against the implementation PR's real code, each caught by a named
+test; round 1's review additionally ran the original 18 against a throwaway implementation,
+18/18 caught)
 
 | # | Bug | Caught by |
 |---|---|---|
 | 1 | The entry boundary reads at-or-before `as_of` (lookahead: the model's own close) | `the_entry_close_is_the_first_strictly_after_as_of` |
 | 2 | The exit boundary reads past the horizon | `the_exit_close_is_the_last_at_or_before_the_horizon` |
 | 3 | An unscoreable thesis counts toward the minimum | `unscoreable_theses_never_count_toward_the_minimum` |
-| 4 | An unscoreable thesis reads as a quiet zero in the mean | `a_thesis_without_a_close_on_an_edge_is_unscoreable_and_never_counts` |
+| 4 | An unscoreable thesis reads as a quiet zero in the mean | `a_thesis_with_no_close_on_an_edge_is_unscoreable_and_never_counts` |
 | 5 | The cost is added to the return | `a_long_thesis_scores_its_window_net_of_the_round_trip_cost` |
 | 6 | Excess is baseline minus thesis | `excess_subtracts_each_baseline_over_the_same_window` |
 | 7 | The basket baseline is its first member alone | `the_basket_is_the_equal_weighted_mean_of_its_members` |
-| 8 | The mean is over all closed theses, not the scoreable ones | `the_mean_is_over_the_scoreable_closed_theses` |
+| 8 | The mean is over all closed theses, not the scoreable ones | `a_thesis_without_a_series_is_unscoreable_and_never_counts` |
 | 9 | The window reports with too few theses | `the_window_refuses_an_early_run` |
 | 10 | A thesis outside the registered window is silently scored | `a_thesis_outside_the_registered_window_is_refused` |
 | 11 | The margin's root is floored (understated) | `the_lower_bound_is_the_mean_less_the_ceilinged_margin` |
@@ -156,6 +165,11 @@ cargo xtask ci pending
 | 16 | The window return rounds at the wrong scale or mode | `buy_and_hold_rounds_once_at_twelve_places` |
 | 17 | The series accepts unordered closes, so the boundary rules read noise | `a_series_refuses_unordered_or_empty_closes` |
 | 18 | A non-Long thesis is scored as Long | `a_non_long_thesis_is_unscoreable_and_never_counts` |
+| 19 | σ's root is floored, so the margin is understated | `the_sigma_root_is_ceilinged_so_the_margin_is_never_understated` |
+| 20 | A horizon before `from` is silently scored | `the_window_edges_are_inclusive` |
+| 21 | `to` is treated as exclusive | `the_window_edges_are_inclusive` |
+| 22 | The unscoreable rows keep the input's order | `a_thesis_with_no_close_on_an_edge_is_unscoreable_and_never_counts` |
+| 23 | Every row's baselines are taken over the first thesis's window | `each_row_excess_uses_its_own_window` |
 
 ## Not done
 

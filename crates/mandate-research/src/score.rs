@@ -169,7 +169,9 @@ pub struct Unscoreable {
 }
 
 /// One scored thesis's row: what it scored from and what it scored, every figure exact or one
-/// named rounding (DEC-281 items 4 and 5).
+/// named rounding (DEC-281 items 4 and 5). The row carries its own round-trip cost, so its net
+/// return recomputes from the row alone (DEC-127 item 5's precedent: the report shows what a
+/// reader needs to recompute it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScoredThesis {
     /// The thesis's own id.
@@ -184,6 +186,8 @@ pub struct ScoredThesis {
     pub entry: Price,
     /// The exit price the score used: the last close at or before the horizon end.
     pub exit: Price,
+    /// The modeled round-trip cost the score subtracted, echoed so the net return recomputes.
+    pub round_trip_cost: Ratio,
     /// The direction's window return net of the round-trip cost.
     pub net_return: Ratio,
     /// The net return less the basket baseline's return over the same window.
@@ -193,8 +197,10 @@ pub struct ScoredThesis {
 }
 
 /// The evaluation's report: every figure recomputes from the fields above it (the E4-2
-/// discipline) — the mean from the excess sum and the scoreable count, the bound from the mean,
-/// the variance, `z`, and the count, and pass from both bounds (DEC-281 items 6 and 7).
+/// discipline) — the mean from the excess sum and the scoreable count, the margin from the
+/// echoed `z`, the variance, and the count, the bound from the mean less the margin, and pass
+/// from both bounds (DEC-281 item 7, DEC-127 item 5's precedent that the report carries what a
+/// reader needs to recompute it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scorecard {
     /// The scored rows, ordered by thesis id.
@@ -204,6 +210,8 @@ pub struct Scorecard {
     pub unscoreable: Vec<Unscoreable>,
     /// How many theses were scored; the mean and the minimum read this count alone.
     pub scoreable_count: u32,
+    /// The decision's `z`, echoed so the bound recomputes from the report alone.
+    pub z: Ratio,
     /// The sum of the scored excesses over the basket baseline.
     pub excess_sum_basket: Ratio,
     /// The sum of the scored excesses over the index baseline.
