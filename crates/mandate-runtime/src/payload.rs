@@ -8,7 +8,8 @@
 use std::collections::BTreeMap;
 
 use mandate_accounting::{InstrumentId, Side};
-use mandate_canon::{Int, Key, Value};
+use mandate_approval::{AssertionId, ContentHash, StepUp, StepUpMethod};
+use mandate_canon::{Digest, Int, Key, Value};
 use mandate_num::{Price, Qty};
 
 use crate::error::RuntimeError;
@@ -39,6 +40,13 @@ pub(crate) fn text(value: &str) -> Value {
 pub(crate) fn seconds(at: RiskClock, field: &'static str) -> Result<Value, RuntimeError> {
     let secs = u64::try_from(at.secs()).map_err(|_| non_canonical(field))?;
     Int::new(secs)
+        .map(Value::Int)
+        .ok_or_else(|| non_canonical(field))
+}
+
+/// A count or a `seq` as the canonical integer (journal spec §4.4), refusing one beyond its bound.
+pub(crate) fn count(n: u64, field: &'static str) -> Result<Value, RuntimeError> {
+    Int::new(n)
         .map(Value::Int)
         .ok_or_else(|| non_canonical(field))
 }
@@ -216,8 +224,69 @@ pub(crate) const REASON_OWNER_RESUME: &str = "owner_resume";
 pub(crate) const REASON_OWNER_STOP: &str = "owner_stop";
 pub(crate) const REASON_KILL_SWITCH: &str = "kill_switch";
 
+/// Why an approval was cancelled without an owner command: the brief's `Superseded` reasons for a
+/// version applied and for a mode at exits-only or stricter, whatever caused it.
+pub(crate) const REASON_VERSION_APPLIED: &str = "version_applied";
+pub(crate) const REASON_MODE_TIGHTENED: &str = "mode_tightened";
+
+/// The one step-up method v0 has, as the control stream spells it (DEC-155 item 4).
+const CLI_CONFIRM: &str = "cli_confirm";
+
+/// The step-up evidence a control-stream event carries (DEC-257 item 5): `{assertion_id,
+/// authenticated_at, method}` with the instant in whole risk-clock seconds. Anything else, a method
+/// v0 does not know included, is no evidence, which every check that needs it refuses and no check
+/// that does not needs (`AGENTS.md` rule 3).
+pub(crate) fn step_up_of(payload: &Value) -> Option<StepUp> {
+    let evidence = payload.get("step_up")?;
+    let assertion = str_of(evidence, "assertion_id")?;
+    let authenticated_at = clock_of(evidence, "authenticated_at")?;
+    let method = match str_of(evidence, "method")? {
+        CLI_CONFIRM => StepUpMethod::CliConfirm,
+        _ => return None,
+    };
+    Some(StepUp {
+        assertion: AssertionId(assertion.to_owned()),
+        authenticated_at: mandate_approval::RiskClock(authenticated_at.secs()),
+        method,
+    })
+}
+
+/// The counterpart of [`step_up_of`], for the copy that records valid evidence.
+pub(crate) fn step_up_value(evidence: &StepUp) -> Result<Value, RuntimeError> {
+    let method = match evidence.method {
+        StepUpMethod::CliConfirm => CLI_CONFIRM,
+    };
+    object(vec![
+        ("assertion_id", text(&evidence.assertion.0)),
+        (
+            "authenticated_at",
+            seconds(
+                RiskClock::from_secs(evidence.authenticated_at.0),
+                "authenticated_at",
+            )?,
+        ),
+        ("method", text(method)),
+    ])
+}
+
+/// The prefix a content hash is written with (journal spec §4, `ref`).
+const SHA256: &str = "sha256:";
+
+/// `sha256:` and the hex digest, as the request states its content hash and a response repeats it.
+pub(crate) fn hash_text(hash: &ContentHash) -> String {
+    format!("{SHA256}{}", hash.0)
+}
+
+/// A content hash read back from its text, or `None` for text that is not one.
+pub(crate) fn hash_from(text: &str) -> Option<ContentHash> {
+    text.strip_prefix(SHA256)
+        .and_then(Digest::from_hex)
+        .map(ContentHash)
+}
+
 /// The owner's confirmation an `OwnerExitRequested` recorded, or `None` when the owner confirmed
-/// nothing. A replay needs it so that a flatten handed again after a restart carries the same
+/// nothing. Its step-up is the assertion id, written as text by an `Input::Command` switch and as
+/// the evidence object's `assertion_id` by a copy of an `OwnerCommandIssued` (DEC-257 item 5). A replay needs it so that a flatten handed again after a restart carries the same
 /// confirmed bid, bid size, and floor price the executor priced the first one from (trading-domain
 /// spec §5.5, §5.6).
 pub(crate) fn owner_confirmation_of(
@@ -230,7 +299,13 @@ pub(crate) fn owner_confirmation_of(
     let bid_size = str_of(payload, "bid_size").ok_or_else(|| non_canonical("bid_size"))?;
     let floor = str_of(payload, "floor").ok_or_else(|| non_canonical("floor"))?;
     let user = str_of(payload, "user").ok_or_else(|| non_canonical("user"))?;
-    let step_up = str_of(payload, "step_up").ok_or_else(|| non_canonical("step_up"))?;
+    let step_up = str_of(payload, "step_up")
+        .or_else(|| {
+            payload
+                .get("step_up")
+                .and_then(|e| str_of(e, "assertion_id"))
+        })
+        .ok_or_else(|| non_canonical("step_up"))?;
     Ok(Some(OwnerConfirmation {
         bid: price_of(bid)?,
         bid_size: qty_of(bid_size)?,
@@ -238,4 +313,17 @@ pub(crate) fn owner_confirmation_of(
         user: user.to_owned(),
         step_up: step_up.to_owned(),
     }))
+}
+
+/// The owner's confirmation an `OwnerExitRequested` lets the executor act on: the confirmed bid only
+/// when the step-up was valid as the owner committed it. A `stale` or `absent` status records a
+/// confirmed bid as given and unlocks nothing (journal spec §9.1, DEC-158 option (c)); a record
+/// with no status predates the control stream and carries its confirmation as it always did.
+pub(crate) fn honoured_confirmation(
+    payload: &Value,
+) -> Result<Option<OwnerConfirmation>, RuntimeError> {
+    match str_of(payload, "step_up_status") {
+        None | Some("valid") => owner_confirmation_of(payload),
+        Some(_) => Ok(None),
+    }
 }

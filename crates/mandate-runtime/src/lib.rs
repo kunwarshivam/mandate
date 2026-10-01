@@ -45,6 +45,7 @@
 //! start, so inserting ticks cannot change a journaled draft (mandate spec §5.2, MI-13).
 
 mod error;
+mod escalation;
 mod payload;
 mod ports;
 mod state;
