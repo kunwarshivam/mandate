@@ -20,6 +20,14 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-173](../project/04-decision-log.md#decisions) item 1, [DEC-280](../project/04-decision-log.md#decisions)):**
+  the MC-E reference cases for approval escalation v0, generated from the reference model of §6.1
+  and §6.4 under their own `kind: escalation` (§11): admission and its refusals, re-validation and
+  drift, the ask budget and its suppressions, quiet hours, and a grant batched with a cancellation.
+  No rule changes, so no existing case changes; §11 no longer says the shared harness pins the case
+  count, which it has not since the families it owns are counted by prefix. §6.1 names the record of
+  a refused resume, Stop, or acknowledgment, `OwnerCommandRefused` (journal spec §9), which "a
+  refusal is journaled" already required and no event carried (the #395 review, major 1).
 - **v0.6, amended ([DEC-188](../project/04-decision-log.md#decisions), read by
   [DEC-271](../project/04-decision-log.md#decisions) to [DEC-273](../project/04-decision-log.md#decisions)):**
   the review date. `autonomy.review_by` is the last risk day on which any `auto` or delegation
@@ -664,7 +672,12 @@ stream with `causation_id` and judges it there; nothing the owner's client check
   `OwnerCommandIssued`, or `OwnerAcknowledged` in the workspace's control stream, whatever that
   event's outcome; and its method is allowed for the environment. Missing or malformed evidence
   counts as missing. A refusal is journaled with `step_up_missing`, `step_up_stale`,
-  `step_up_reused`, or `step_up_method`.
+  `step_up_reused`, or `step_up_method`: a refused approval as its `ApprovalResponded`, and a
+  refused resume, Stop, or acknowledgment as `OwnerCommandRefused` on the stream of whichever owner
+  judged it (the agent runtime for resume and Stop, the executor for an acknowledgment), naming the
+  control-stream event as `causation_id` (journal spec §9, [DEC-280](../project/04-decision-log.md#decisions)).
+  An owner exit and a kill switch are never refused as commands, so they have no such record: their
+  step-up outcome is `OwnerExitRequested.step_up_status`.
 - **Methods.** v0's only method is `cli_confirm`: the owner re-types a confirmation code the CLI
   derives locally, with no network, runtime, or model state. It is allowed only in a `paper`
   environment (DEC-155 item 4); live step-up waits for E9-4's signed assertions.
@@ -1385,14 +1398,14 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 328 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 360 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
 `fuzz.py` asserts the invariants of §1.1 against independent oracles, and `mutants.py` confirms
 the fuzz catches seeded bugs. Delegations (§6.5) are in the reference model and its fuzz (MI-26 to
-MI-29) already; their family, **MC-U**, lands in its own tests-first change, because the shared
-harness pins the case count.
+MI-29) already; their family, **MC-U**, is still to come. A new family needs no change to the
+shared harness, which counts only the families it owns, by case-ID prefix.
 
 | Family | IDs | Covers |
 |---|---|---|
@@ -1411,6 +1424,7 @@ harness pins the case count.
 | Thesis expiry | MC-N20 to MC-N22 | The horizon, invalidation before it, a retired lineage |
 | Stagger | MC-N23 | The deterministic per-workspace offset inside the window |
 | Review date | MC-D01 to MC-D27 | V-046's bounds and its carried and removed dates, the platform default, re-confirming with a delegation (V-042), the §9.2 row, and, as `kind: review` cases at a stated risk clock, §6.2 step 5b either side of 00:00 New York after the date: rules, default, admission, a delegation, a deny, an ask's own source, exits, and no date ([DEC-188](../project/04-decision-log.md#decisions)) |
+| Escalation | MC-E01 to MC-E32 | As `kind: escalation` cases (§6.1, §6.4, MI-21 to MI-25): a timely grant acts with the bound order; a skip, the timeout, lateness at the deadline and by the folded clock; a response copied once; the content hash; every non-`user` actor and an unlisted user; step-up missing, 301 s stale, reused, and `cli_confirm` on `live`; re-validation's version, mode, `deny`, and another trigger; drift at and beyond the band, with no mark, and crypto's 200 bp; the ask budget across the DST change, a skip's and a timeout's suppression; quiet hours for `cli_inbox`, for a push in both DST states, and read as New York wall time rather than UTC; and a grant batched with a cancellation ([DEC-173](../project/04-decision-log.md#decisions), [DEC-280](../project/04-decision-log.md#decisions)) |
 | Change | MC-C01 to MC-C48 | Every classification row, including rule addition, removal, and reordering, the pinning switch, pinning a mandate that had no research agent, the research fields, and the admission ceiling |
 
 ## 12. Open questions

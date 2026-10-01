@@ -7,11 +7,10 @@
 //! fields from the rows themselves, the file's SHA-256 by its own digest, the canonical bytes
 //! from the test's own object, the sibling roots by [`mandate_journal::merkle_root`].
 //!
-//! Every test is pending until its story lands (DEC-77), and every one fails on the stubs: the
-//! Ok-expecting cases meet `Unimplemented` errors, and every error-expecting case states its
-//! positive first, so a vacuous refusal passes nothing. The token's entry point is pinned the
-//! other way round: it refuses even a token whose imprint matches, because the crypto half is
-//! Proposed (DEC-265 item 1), and the refusal is named, so a vacuous `Ok` passes nothing either.
+//! Every error-expecting case states its positive first, so a vacuous refusal passes nothing.
+//! The token's entry point is pinned the other way round: it refuses even a token whose imprint
+//! matches, because the crypto half is Proposed (DEC-265 item 1), and the refusal is named, so
+//! a vacuous `Ok` passes nothing either.
 
 mod common;
 
@@ -91,7 +90,6 @@ fn no_artifacts() -> BTreeMap<Digest, Vec<u8>> {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_manifest_of_one_contiguous_run_names_its_edges() {
     let all = rows();
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
@@ -112,7 +110,6 @@ fn a_manifest_of_one_contiguous_run_names_its_edges() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn an_empty_segment_is_refused_after_one_row_manifests() {
     let all = rows();
     let one_row = SegmentManifest::of(&all[0..1]);
@@ -128,7 +125,6 @@ fn an_empty_segment_is_refused_after_one_row_manifests() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn rows_not_in_one_ascending_run_are_refused() {
     let all = rows();
     let contiguous = SegmentManifest::of(&all[0..4]);
@@ -145,7 +141,6 @@ fn rows_not_in_one_ascending_run_are_refused() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn rows_of_two_streams_are_refused() {
     let all = rows();
     let one_stream = SegmentManifest::of(&all[0..4]);
@@ -163,7 +158,6 @@ fn rows_of_two_streams_are_refused() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn the_manifest_s_bytes_are_the_six_fields_in_canonical_form() {
     let all = rows();
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
@@ -178,7 +172,6 @@ fn the_manifest_s_bytes_are_the_six_fields_in_canonical_form() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_manifest_round_trips_through_its_canonical_bytes() {
     let all = rows();
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
@@ -238,7 +231,6 @@ fn a_manifest_round_trips_through_its_canonical_bytes() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_manifest_s_hash_is_the_digest_of_its_canonical_bytes() {
     let all = rows();
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
@@ -262,7 +254,6 @@ fn a_manifest_s_hash_is_the_digest_of_its_canonical_bytes() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_manifest_whose_seq_is_above_the_canonical_bound_is_refused_its_bytes_and_hash() {
     let all = rows();
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
@@ -299,7 +290,6 @@ fn a_manifest_whose_seq_is_above_the_canonical_bound_is_refused_its_bytes_and_ha
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_manifest_in_the_wrong_member_order_is_refused() {
     let all = rows();
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
@@ -337,7 +327,6 @@ fn a_manifest_in_the_wrong_member_order_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn an_edited_manifest_parses_to_a_different_hash() {
     let all = rows();
     let manifest = SegmentManifest::of(&all[0..3]).expect("a contiguous run manifests");
@@ -371,7 +360,6 @@ fn an_edited_manifest_parses_to_a_different_hash() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_line_imports_to_its_event() {
     let all = rows();
     let line = export_line(&all[2]);
@@ -383,7 +371,6 @@ fn a_line_imports_to_its_event() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_line_without_its_two_members_is_refused() {
     let all = rows();
     let well_formed = import_line(&export_line(&all[2]));
@@ -406,7 +393,6 @@ fn a_line_without_its_two_members_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_line_in_the_wrong_member_order_is_refused() {
     let all = rows();
     let canonical_line = import_line(&export_line(&all[2]));
@@ -427,7 +413,6 @@ fn a_line_in_the_wrong_member_order_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_wrong_hash_imports_and_the_event_check_catches_it() {
     let all = rows();
     let mut lied = all[2].clone();
@@ -457,7 +442,6 @@ fn a_wrong_hash_imports_and_the_event_check_catches_it() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_range_of_two_segments_verifies() {
     let all = rows();
     let first = segment(&all[0..4]);
@@ -473,7 +457,6 @@ fn a_range_of_two_segments_verifies() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_manifest_that_does_not_match_its_file_fails_the_mismatch_check() {
     let all = rows();
     let (manifest, mut file) = segment(&all[0..4]);
@@ -490,7 +473,6 @@ fn a_manifest_that_does_not_match_its_file_fails_the_mismatch_check() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_manifest_whose_edges_disagree_with_its_file_fails_the_mismatch_check() {
     let all = rows();
     let (_, file) = segment(&all[4..8]);
@@ -514,7 +496,6 @@ fn a_manifest_whose_edges_disagree_with_its_file_fails_the_mismatch_check() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_gap_between_segments_fails_segment_gap_at_the_expected_seq() {
     let all = rows();
     let first = segment(&all[0..4]);
@@ -531,7 +512,6 @@ fn a_gap_between_segments_fails_segment_gap_at_the_expected_seq() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_later_segment_that_begins_before_the_expected_seq_fails_segment_gap() {
     let all = rows();
     let first = segment(&all[0..4]);
@@ -562,7 +542,6 @@ fn a_later_segment_that_begins_before_the_expected_seq_fails_segment_gap() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_first_segment_that_does_not_carry_the_trusted_start_fails_segment_gap() {
     let all = rows();
     let start = TrustedStart {
@@ -582,7 +561,6 @@ fn a_first_segment_that_does_not_carry_the_trusted_start_fails_segment_gap() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_range_may_enter_mid_segment() {
     let all = rows();
     let start = TrustedStart {
@@ -602,7 +580,6 @@ fn a_range_may_enter_mid_segment() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn an_event_before_the_trusted_start_is_not_checked() {
     let all = rows();
     let start = TrustedStart {
@@ -636,7 +613,6 @@ fn an_event_before_the_trusted_start_is_not_checked() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn an_unparsable_manifest_fails_the_mismatch_check_at_the_expected_seq() {
     let all = rows();
     let first = segment(&all[0..4]);
@@ -652,7 +628,6 @@ fn an_unparsable_manifest_fails_the_mismatch_check_at_the_expected_seq() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_per_event_failure_inside_a_segment_surfaces_as_the_event_check() {
     let all = rows();
     let mut lied = all[4].clone();
@@ -681,7 +656,6 @@ fn a_per_event_failure_inside_a_segment_surfaces_as_the_event_check() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn an_empty_range_returns_the_trusted_start() {
     let start = TrustedStart {
         from_seq: 5,
@@ -698,7 +672,6 @@ fn an_empty_range_returns_the_trusted_start() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn a_token_passes_the_structural_check_only_with_the_anchor_s_imprint() {
     let (anchor, token) = anchored_token();
     assert!(
@@ -720,7 +693,6 @@ fn a_token_passes_the_structural_check_only_with_the_anchor_s_imprint() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn the_tsa_entry_point_refuses_until_the_crypto_half_lands() {
     let (anchor, token) = anchored_token();
     assert_eq!(
@@ -743,7 +715,6 @@ fn the_tsa_entry_point_refuses_until_the_crypto_half_lands() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn an_inclusion_proof_lists_the_sibling_roots_and_rebuilds_the_root() {
     let leaves: Vec<AnchorLeaf> = ["a:ws:1", "b:ws:1", "c:ws:1"]
         .iter()
@@ -790,7 +761,6 @@ fn an_inclusion_proof_lists_the_sibling_roots_and_rebuilds_the_root() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn an_anchor_whose_leaves_do_not_produce_its_root_is_refused_a_proof() {
     let leaves: Vec<AnchorLeaf> = ["a:ws:1", "b:ws:1", "c:ws:1"]
         .iter()
@@ -819,7 +789,6 @@ fn an_anchor_whose_leaves_do_not_produce_its_root_is_refused_a_proof() {
 }
 
 #[test]
-#[ignore = "pending E5-6"]
 fn the_export_digest_follows_the_parts_and_changes_with_them() {
     let all = rows();
     let first = segment(&all[0..4]);
@@ -865,7 +834,7 @@ fn the_export_digest_follows_the_parts_and_changes_with_them() {
     };
     assert_eq!(
         bundle.verifier_digest(),
-        oracle(&bundle),
+        Ok(oracle(&bundle)),
         "the verifier's digest is the test's own length-prefixed digest over the parts, in order"
     );
     let mut changed_file = parts[1].1.clone();

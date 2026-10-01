@@ -12,6 +12,13 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.6, amended ([DEC-280](../project/04-decision-log.md#decisions)):** the agent stream gains
+  `OwnerCommandRefused`, the record of a resume or Stop the runtime refused for its step-up, and the
+  account stream the same for an acknowledgment the executor refused ([mandate spec §6.1](mandate.md#61-purposes),
+  which already said such a refusal is journaled). §9 lists it on both streams, §2's copy paragraphs
+  name it, and copy rule 16 counts it. Its payload schema is **not closed yet** (§9.1), and neither
+  are the approval events v0.5 added; the catalogue entry, the closed schema, and the runtime's
+  write of it land together in their own change. The test vectors are unchanged.
 - **v0.6, amended ([DEC-188](../project/04-decision-log.md#decisions), [DEC-271](../project/04-decision-log.md#decisions)):**
   `DecisionMade`'s `decided_by` may be `review_ceiling`, the review date of
   [mandate spec §6.2 step 5b](mandate.md#62-evaluation), the same label the approval content's
@@ -118,14 +125,18 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `OwnerAcknowledged`) carries a required `risk_clock` payload field (whole-second timestamp, the
   latest tick the executor had seen); `append` rejects a `risk_clock` lower than the stream's last
   one. Owner acknowledgments are recorded in the control stream and copied by the executor into the
-  account stream as `OwnerAcknowledged`, with `causation_id` pointing to the original. A mode change that **originates** on the account stream (account restrictions,
+  account stream as `OwnerAcknowledged`, with `causation_id` pointing to the original; one whose
+  step-up does not count is recorded there as `OwnerCommandRefused` instead, with the same
+  `causation_id`, so the account stream records every acknowledgment the executor read
+  ([mandate spec §6.1](mandate.md#61-purposes)). A mode change that **originates** on the account stream (account restrictions,
   mandate risk limits) is journaled there first as `AgentModeApplied`, and the agent runtime
   copies it into the agent stream as `AgentModeChanged`; the `causation_id` always points to the
   originating event. **Owner input is journaled on the control stream first**: an answer to an
   approval as `ApprovalResponseSubmitted`, and a pause, resume, Stop, owner exit, or kill switch as
   `OwnerCommandIssued` ([mandate spec §6.1](mandate.md#61-purposes)). The agent runtime copies each
   event addressed to its agent at most once, with `causation_id` pointing to it (`ApprovalResponded`,
-  `AgentModeChanged`, `OwnerExitRequested`, `KillSwitchActivated`); the control stream's `event_id`
+  `AgentModeChanged`, `OwnerExitRequested`, `KillSwitchActivated`, or, for a resume or Stop its
+step-up does not count, `OwnerCommandRefused`); the control stream's `event_id`
   is the idempotency key. A user's kill switch is therefore a **command**
   to the stream owners, which journal `KillSwitchActivated` in their own streams.
 - A stream begins with `StreamOpened` (seq 1), which records the stream type, subject, and
@@ -346,6 +357,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
 | `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | gating facts, copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
 | `OwnerAcknowledged` | — | copied from the control stream (with `causation_id`); a risk input |
+| `OwnerCommandRefused` | — | An acknowledgment the executor refused for its step-up ([mandate spec §6.1](mandate.md#61-purposes)): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
 | `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N; reset evidence; released positions; stale-mark and removed-instrument changes with the reason; goal completion |
 | `UniverseChanged` | man | The working universe changed ([mandate spec §2.3, §8.5](mandate.md#23-the-working-universe-at-runtime-dec-97)); a risk input, so it carries `risk_clock`: agent, instrument, change (`admitted`, `removed`), reason (`thesis_admitted`, `thesis_expired`, `thesis_invalidated`, `lineage_retired`, `eligibility_lost`, `operator_halt`, `version_applied`), thesis and lineage ids, working-universe size after |
 
@@ -367,6 +379,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ApprovalTimedOut`, `ApprovalCanceled` | man | approval, `on_timeout: skip`; approval, cancel reason (`version_applied`, `mode_tightened`, `owner_pause`, `owner_stop`, `kill_switch`; a legacy `rebound` is a cancellation for either of the first two) |
 | `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator |
 | `OwnerExitRequested` | man | instrument or scope, bid shown and confirmed, user (opaque), step-up evidence |
+| `OwnerCommandRefused` | — | A resume or Stop the runtime refused for its step-up ([mandate spec §6.1](mandate.md#61-purposes)): the command (`resume`, `stop`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`), and the effective time it was judged at; `causation_id` is the `OwnerCommandIssued`, copied at most once. The executor records a refused acknowledgment the same way on the account stream |
 
 **Workspace control stream** (owner: workspace services)
 
@@ -399,8 +412,9 @@ column of §9, and the required `config_refs` stay as §9 lists them. Each schem
 a record with exactly the listed members, every one present (§4.2). The test vectors' `agent_stream`
 section holds at least one chain event per schema, an invalid draft for every rule below, and valid
 drafts for the cases a rule might be misread to refuse. The other agent-stream events are not
-closed yet: the approval events that v0.5 added (§9, mandate spec §6.4) close in their own change,
-`ModelInvocationRecorded`, `ThesisProposed`, and `ThesisRevised` with their own stories.
+closed yet: the approval events that v0.5 added and `OwnerCommandRefused` (§9, mandate spec §6.1,
+§6.4) close in their own change, `ModelInvocationRecorded`, `ThesisProposed`, and `ThesisRevised`
+with their own stories.
 
 **Types.**
 
@@ -607,13 +621,15 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
 
 16. The agent runtime's copies of an owner command (§2) have a non-null `causation_id` —
     `causation_id`. The copies are every `OwnerExitRequested`, a `KillSwitchActivated` whose
-    `initiator` is `owner`, and an `AgentModeChanged` whose `reason` is `owner_pause`,
-    `owner_resume`, or `owner_stop`. `causation_id` is the `event_id` of the control stream's
+    `initiator` is `owner`, an `AgentModeChanged` whose `reason` is `owner_pause`, `owner_resume`,
+    or `owner_stop`, and every `OwnerCommandRefused`. `causation_id` is the `event_id` of the control stream's
     `OwnerCommandIssued` the copy was made from. That ID is from another stream, which §2 allows and
     which neither `append` nor §11's per-range checks resolve, since both read only this stream. On
     one agent stream a command is copied at most once into each of these event types: an owner's
     kill switch is copied as its `OwnerExitRequested` and its `KillSwitchActivated`, both naming the
-    one command, and every other command has one copy. The copy always has its command in hand, so the rule
+    one command, and every other command has one copy: for a resume or a Stop, its
+    `AgentModeChanged` or its `OwnerCommandRefused`, never both ([mandate spec §6.1](mandate.md#61-purposes)).
+    The copy always has its command in hand, so the rule
     never holds a pause, a Stop, an owner exit, or a kill switch (`AGENTS.md` rule 13). A mode
     change that originates on the account stream, and the `AgentModeChanged` a kill switch writes,
     are not owner copies and are not covered here.
