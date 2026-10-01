@@ -20,6 +20,11 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-261](../project/04-decision-log.md#decisions)):** §10 says where
+  [journal spec §9.2](journal.md#92-control-stream-payload-schemas-dec-261) puts each record's
+  contents. The version, provenance per path, and confirmed paths are event members. The rest of each
+  row is a stored record named by its hash, which this section still defines. §5.10's `AgentStopped`
+  row names the connection and the retirement date, which §9.2 carries as members. No rule changes.
 - **v0.6, amended ([DEC-173](../project/04-decision-log.md#decisions) item 1, [DEC-280](../project/04-decision-log.md#decisions)):**
   the MC-E reference cases for approval escalation v0, generated from the reference model of §6.1
   and §6.4 under their own `kind: escalation` (§11): admission and its refusals, re-validation and
@@ -628,7 +633,7 @@ is admitted again.
 | `UniverseChanged` | account | An instrument is admitted to or removed from the working universe (§2.3); a risk input with `risk_clock` | agent, instrument, change (`admitted`, `removed`), reason (`thesis_admitted`, `thesis_expired`, `thesis_invalidated`, `lineage_retired`, `eligibility_lost`, `operator_halt`, `version_applied`), thesis and lineage ids, working-universe size after |
 | `InstrumentRestrictionChanged` | account | `stale_mark` or `removed_instrument` is set or cleared. **One event per restriction that changed**, never one event standing for another | agent, instrument, restriction, reason (`no_sane_mark`, `sane_mark`, or the `UniverseChanged` reason that removed or re-admitted the instrument), active |
 | `GoalCompleted` | account | A goal completes (§3.1) | agent, reason (`profit_stop_reached`, `target_qty`, `max_spend`, `end_date`), `on_complete` applied |
-| `AgentStopped` | workspace control | The agent retires | agent, reason, net dollar loss added to the connection's loss carry |
+| `AgentStopped` | workspace control | The agent retires | agent, connection, reason, retirement date (the America/New_York date §5.7's 90 days count from), net dollar loss added to the connection's loss carry ([journal spec §9.2](journal.md#92-control-stream-payload-schemas-dec-261)) |
 | `OwnerExitRequested` | agent | The owner closes a position or triggers a kill switch | instrument or scope, bid shown and confirmed, user (opaque), step-up evidence |
 | `PositionReleased` | account | Release (§3.1) | agent, instrument, quantity, protective orders canceled, warning shown (artifact), user (opaque), step-up evidence |
 
@@ -1391,6 +1396,12 @@ delegation changes against random actions, times, usage, and suspension states.
 | `ThesisProposed`, `ThesisRevised` | agent | Research agent id, version, and content hash; thesis id, lineage id, revision, and (for a revision) the predecessor and what it changed; instrument, direction, horizon, evidence and sources, corroboration, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); the admission decision and its reason (§8.5) |
 | `OwnerExitRequested`, `ApprovalRequested` … `ApprovalCanceled` | agent | §5.10, §6.4; the content object inline (large parts by artifact reference) and its hash, the bound fields, approvers, admission and re-validation results, step-up evidence; the delegation shapes offered appear in the content object's `choices`, and `ApprovalResponded` records the shape chosen and, if one, the new mandate version and delegation id |
 | `DecisionMade` | agent | Journal spec §9; its autonomy classification names the source (`rule:<id>`, `default`, built-in, the admission ceiling, the client ceiling, or the review ceiling) and `requested_by` and, when §6.2 step 4a lifted the decision, `delegation_id`. Delegation usage (§6.5) is counted from these events |
+
+[Journal spec §9.2](journal.md#92-control-stream-payload-schemas-dec-261) carries the version, the
+provenance per path, and the confirmed paths as members of `MandateVersionCreated` and
+`MandateConfirmed`, and the agent and version as members of `AgentDeployed`. It stores the rest of
+each row above as a record named by its hash, whose contents this section defines
+([DEC-261](../project/04-decision-log.md#decisions)).
 
 A mandate version and its records are retained at least 6 years after the later of its
 supersession and the closing (or release) of every position opened under it (trading spec §13).
