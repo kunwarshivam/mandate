@@ -477,3 +477,41 @@ fn status_reads_the_mode_the_hold_and_the_pending_count() {
     assert!(!seen.startup_hold);
     assert!(control(&fx).is_empty());
 }
+
+/// Mandate spec §6.1: step-up evidence is single-use, so each gesture draws a fresh assertion id.
+/// A resume and a Stop committed one after the other carry two different ids, the ones the
+/// injected `Ids` minted, and nothing else.
+#[test]
+#[ignore = "pending E8-3"]
+fn each_gesture_draws_a_fresh_assertion() {
+    let mut fx = Fixture::new();
+    let mut ids = FixedIds::default();
+    for (n, cmd) in [Command::Resume, Command::Stop].into_iter().enumerate() {
+        let right = answer("code", code(&fx.journal, &owner(), AGENT, &cmd))
+            .unwrap_or_else(|| panic!("{cmd:?} has a code"));
+        answer(
+            "command",
+            command(
+                &mut fx.journal,
+                &mut ids,
+                &owner(),
+                AGENT,
+                &cmd,
+                Some(&right),
+                at(ASKED_AT + i64::try_from(n).unwrap()),
+            ),
+        );
+    }
+    let events = control(&fx);
+    assert_eq!(events.len(), 2);
+    let assertions: Vec<Option<&str>> = events
+        .iter()
+        .map(|e| member_text(e, "payload.step_up.assertion_id"))
+        .collect();
+    assert_eq!(
+        assertions,
+        vec![Some("cli-assertion-1"), Some("cli-assertion-2")],
+        "two gestures, two fresh assertions, both from the injected ids"
+    );
+    assert_eq!(ids.assertions, 2);
+}

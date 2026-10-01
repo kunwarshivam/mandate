@@ -20,7 +20,8 @@ use mandate_canon::Value;
 use mandate_cli::approvals::{
     Ended, Outcome, Revalidated, State, approve, list, message, outcome, show, skip,
 };
-use mandate_cli::control::{ControlError, Submitted};
+use mandate_cli::control::{ControlError, ControlJournal, Submitted};
+use mandate_journal::AppendOutcome;
 
 fn answer<T>(what: &str, result: Result<T, ControlError>) -> T {
     result.unwrap_or_else(|e| panic!("{what} answers, not: {e}"))
@@ -29,6 +30,54 @@ fn answer<T>(what: &str, result: Result<T, ControlError>) -> T {
 /// The control stream's events, as stored.
 fn control(fx: &Fixture) -> Vec<Value> {
     fx.rows(CONTROL).iter().map(body).collect()
+}
+
+/// Live: journal spec §5.1, as the fixture journal runs it. A retry of the same event id with the
+/// same bytes is `AlreadyCommitted` and stores nothing; with different bytes it is refused as
+/// `IdempotencyConflict` naming the stored `seq`, and stores nothing either. The CLI never sends
+/// such a retry (it mints its draft once), so this pins the fixture rather than the CLI.
+#[test]
+fn the_fixture_journal_refuses_a_changed_retry_of_a_stored_id() {
+    let mut journal = common::Journal::default();
+    let control = common::stream(CONTROL);
+    let draft = |command: &str| {
+        mandate_canon::to_canonical(&common::object(&[
+            ("event_id", common::text("20000000000000000000000001")),
+            ("event_type", common::text("OwnerCommandIssued")),
+            (
+                "payload",
+                common::object(&[("command", common::text(command))]),
+            ),
+        ]))
+    };
+    let first = draft("pause");
+    let epoch = journal.take_ownership(&control).unwrap();
+    let committed = journal
+        .append(&control, 0, epoch, at(ASKED_AT).at, &[&first])
+        .unwrap();
+    assert!(
+        matches!(committed, AppendOutcome::Committed(_)),
+        "{committed:?}"
+    );
+    let same = journal
+        .append(&control, 0, epoch, at(ASKED_AT).at, &[&first])
+        .unwrap();
+    assert!(
+        matches!(&same, AppendOutcome::AlreadyCommitted(rows) if rows.len() == 1 && rows[0].seq == 1),
+        "{same:?}"
+    );
+    let changed = journal
+        .append(&control, 1, epoch, at(ASKED_AT).at, &[&draft("resume")])
+        .unwrap();
+    assert_eq!(
+        changed,
+        AppendOutcome::IdempotencyConflict { stored_seq: 1 }
+    );
+    assert_eq!(
+        journal.rows(&control).unwrap().len(),
+        1,
+        "nothing stored twice"
+    );
 }
 
 /// Live: the fixture's journal holds what the runtime would have written, and its oracle computes
@@ -140,6 +189,14 @@ fn list_reads_how_a_grant_ended() {
         "refused",
         Some("step_up_stale"),
     );
+    let counted = fx.ask(AGENT, "3", ASKED_AT);
+    fx.responded(
+        &counted,
+        &common::runtime_id(904),
+        "approved",
+        "counted",
+        None,
+    );
 
     let listed = answer(
         "list",
@@ -152,6 +209,11 @@ fn list_reads_how_a_grant_ended() {
         Some(State::Skipped(Ended::OnRevalidation))
     );
     assert_eq!(state(&refused.approval), Some(State::Pending));
+    assert_eq!(
+        state(&counted.approval),
+        Some(State::Pending),
+        "a grant counted short of the quorum leaves the approval pending (mandate spec §6.4)"
+    );
 }
 
 /// D6, P8: `show` renders the content object exactly as committed and the code for its hash,
@@ -489,6 +551,26 @@ fn a_refusal_or_a_skip_reports_its_reason() {
         "{said}"
     );
     let _ = TIMEOUT_S;
+
+    let other = fx.ask(AGENT, "4", ASKED_AT);
+    let second = answer(
+        "approve",
+        approve(
+            &mut fx.journal,
+            &mut ids,
+            &owner(),
+            AGENT,
+            &other.approval,
+            &code_of(&other.content),
+            at(ASKED_AT + 50),
+        ),
+    );
+    fx.responded(&other, &second.event_id, "approved", "counted", None);
+    assert_eq!(
+        answer("outcome", outcome(&fx.journal, &owner(), AGENT, &second)),
+        Outcome::Counted,
+        "a grant counted short of the quorum is its own outcome, not a refusal"
+    );
 }
 
 /// Approves the fixture's request through a journal set up to fail once, and returns what was
