@@ -268,6 +268,8 @@ pub(crate) struct Decided {
     /// Whether the command carries step-up evidence: the owner typed the code it needs at `head`.
     pub(crate) stepped_up: bool,
     event_id: String,
+    /// Whether a re-run finds this command or commits another, which the exhausted report says.
+    repeat: Repeat,
 }
 
 /// What [`decide`] found: a command to commit, or the same command already committed as the
@@ -281,7 +283,7 @@ pub(crate) enum Decision {
 
 /// Whether a re-run of a command may be reported as the same command already committed, or is
 /// always committed (DEC-290 item 5).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Repeat {
     FindsEarlier,
     /// A kill switch: never reported as an earlier one (rule 13).
@@ -337,6 +339,7 @@ pub(crate) fn decide(
         key,
         stepped_up,
         event_id,
+        repeat,
     }))
 }
 
@@ -394,7 +397,10 @@ fn recorded(
     else {
         return Ok(false);
     };
-    let workspace = stream.as_str().trim_start_matches("ctl:");
+    let workspace = stream
+        .as_str()
+        .strip_prefix("ctl:")
+        .ok_or_else(|| ControlError::Journal("not a control stream".to_owned()))?;
     let agent_stream = StreamId::parse(&format!("agent:{workspace}:{agent}"))
         .ok_or_else(|| ControlError::Journal("not an agent id".to_owned()))?;
     Ok(envelopes(journal, &agent_stream)?
@@ -426,7 +432,10 @@ fn derive(
     Ok(ulid(u128::from_be_bytes(high)))
 }
 
-/// `n` in ULID's 26 Crockford base-32 digits, most significant first.
+/// `n` in ULID's 26 Crockford base-32 digits, most significant first. The fallbacks are dead: a
+/// digit's shift is at most 125 bits, which neither overflows `checked_mul` nor reaches 128 for
+/// `checked_shr`, and a five-bit index always names one of the 32 letters; they stand in for the
+/// panics the lint header forbids.
 fn ulid(n: u128) -> String {
     const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     (0..ULID_LEN)
@@ -532,6 +541,7 @@ pub(crate) fn commit(
         mut key,
         stepped_up,
         event_id,
+        repeat,
     } = decided;
     for name in timed {
         key.push((name, seconds(now.secs)?));
@@ -557,10 +567,16 @@ pub(crate) fn commit(
         };
         journal.wait(backoff(retry, &event_id)?);
     }
+    let again = match repeat {
+        Repeat::FindsEarlier => {
+            "if nothing else has been committed since, running it again finds it rather than \
+             committing it twice"
+        }
+        Repeat::AlwaysCommits => "running it again commits another",
+    };
     Err(ControlError::Journal(format!(
         "the control stream did not settle after {ATTEMPTS} attempts; the command may have been \
-         committed once, as event {event_id}; if nothing else has been committed since, running \
-         it again finds it rather than committing it twice"
+         committed once, as event {event_id}; {again}"
     )))
 }
 

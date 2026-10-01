@@ -377,6 +377,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Follow-up (DEC-280):* a harness arm for `kind: escalation` in `mandate-refcases`, tests first,
   driving `mandate-approval` (and the runtime for `op: lifecycle`), then the status PR that flips
   the rows it passes.
+  *Part done (DEC-292):* the arm interprets `ask_permit` and `deliver_now` through
+  `mandate-approval`, and MC-E25 to MC-E28, MC-E30 and MC-E32 pass; their `status.toml` rows are the
+  status PR's. Still open: the `lifecycle` op's runtime driver for the other 26 cases, which fail
+  naming the op until it lands.
+  *Follow-up (the #416 review, minor 3):* every `ask_permit` case asks for one instrument, so
+  family E cannot see the budget counted per instrument rather than per agent (`mandate-approval`'s
+  own suite does). A future MC-E case should spread its ten asks across instruments. It changes
+  `mandate.yaml`, so it goes to the founder under DEC-176 unless it only tightens a rule.
   *Follow-up (DEC-280 item 7):* `mandate-journal`'s catalogue gains `OwnerCommandRefused` (agent and
   account streams), and the runtime journals it for a refused resume or Stop, tests first, with a
   test that a refused Stop leaves exactly that event (the #395 review, major 1; DEC-278 item 12).
@@ -423,6 +431,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   drawn from the event id; and a refusal's message says whether the deadline has passed.
   `mandate-cli` is safety-critical (`xtask/layers.toml`, CODEOWNERS, the lint header). Still open:
   the `clap` wiring and a `mandate-journal-pg` `ControlJournal` (DEC-279 item 10).
+  *Done (the #414 review, minor 1 and nits 1 and 4):* an exhausted kill switch's report says
+  running it again commits another, which a test pins against a pause's; `recorded` reads the
+  workspace with `strip_prefix`; `ulid`'s dead fallbacks are documented.
+  *Follow-up (the #414 review, nit 2):* cap `earlier`'s scan of heads before the last event, which
+  today runs one derivation per earlier event of the control stream.
+  *Follow-up (the #414 review, nit 3):* `backoff`'s doc says the jitter makes two racing
+  invocations stop fencing each other; it differs between two different commands only, since the
+  same command derives the same id and so the same jitter.
   *Follow-up (#343 review, minor 1; a tests correction):* a new family that reuses an owned family's
   kind (for example an `MC-E01` of kind `semantic`) now moves no count in `mandate_harness.rs` and
   runs through that family's arm, where on `main` before #343 it failed two counts. `unread_keys`
@@ -1725,6 +1741,12 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   still route exits and protective orders when `fold_day_trades` fails (`AGENTS.md` rule 13), and
   E7-3's tests PR carries the pending test
   `a_failed_day_trade_fold_refuses_openings_and_still_routes_exits` for it.
+- **Refuse a short position in the trading-domain day-trade fold structurally** (#412 review,
+  nit 3). `trading_domain::gate::Gate::fold` reads each equity position as `position.qty().abs()`,
+  so a short would fold as if held long and understate the day-trade count. No v1 case holds one
+  (`AGENTS.md` rule 12) and `Gate::decide` refuses a short, but a `day_trade_count` expectation
+  reaches the fold without that refusal. Refuse a negative `SignedQty` there instead of taking
+  its magnitude.
 - **Drive the trading-domain gate cases through the real order path once E7-4 and E7-5 do**
   (the coordinator's ruling on #370, item 2). DEC-259 item 7 is a reading of the reference harness
   only: it decides a later proposal once the earlier allowed ones were filled in full by `fill`

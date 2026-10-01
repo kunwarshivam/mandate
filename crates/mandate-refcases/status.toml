@@ -68,6 +68,7 @@
 'RC-03::gate_rejects_zero_crossing_order' = { status = "passing", story = "E6-3" }
 'RC-08' = { status = "passing", story = "E6-3" }
 'RC-18::generic_cash_account' = { status = "passing", story = "E6-3" }
+'RC-09B' = { status = "passing", story = "E6-6" }
 
 # Family N (stream J, DEC-77 item 3, DEC-154). MC-N01, MC-N14 and MC-N26 decide their
 # first_order_autonomy through E6-2's classify (DEC-179).
@@ -415,3 +416,11 @@
 'MC-D25' = { status = "passing", story = "E6-14" }
 'MC-D26' = { status = "passing", story = "E6-14" }
 'MC-D27' = { status = "passing", story = "E6-14" }
+# Family E, escalation (stream M7, E8-3; DEC-77 item 3, DEC-292). The ask_permit and deliver_now
+# cases, through mandate-approval (#416). The 26 lifecycle cases wait on the runtime driver.
+'MC-E25' = { status = "passing", story = "E8-3" }
+'MC-E26' = { status = "passing", story = "E8-3" }
+'MC-E27' = { status = "passing", story = "E8-3" }
+'MC-E28' = { status = "passing", story = "E8-3" }
+'MC-E30' = { status = "passing", story = "E8-3" }
+'MC-E32' = { status = "passing", story = "E8-3" }
