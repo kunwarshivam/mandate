@@ -30,6 +30,7 @@ struct Book {
     overnight: Qty,
     same_day: Qty,
     bought_since_last_day_trade: bool,
+    sold_overnight_since_last_repurchase: bool,
     sold_today: bool,
 }
 
@@ -38,6 +39,7 @@ impl Book {
         overnight: Qty::ZERO,
         same_day: Qty::ZERO,
         bought_since_last_day_trade: false,
+        sold_overnight_since_last_repurchase: false,
         sold_today: false,
     };
 }
@@ -114,22 +116,30 @@ pub(crate) fn fold(input: &DayTradeInput<'_>) -> Result<DayTradeFold, GateError>
 }
 
 /// One equity fill against its instrument's book; `true` when it completes a day trade. A sell
-/// takes shares held overnight first, and only a sell that closes shares bought today, after a
-/// purchase not yet matched by a counted day trade, counts: so buy, buy, sell is one day trade
-/// and buy, sell, buy, sell is two. A sell of more than the account holds would be a short sale,
-/// which v1 never makes (`AGENTS.md` rule 12), so the fills are inconsistent and nothing is
+/// takes shares held overnight first, and a sell that closes shares bought today, after a purchase
+/// not yet matched by a counted day trade, counts: so buy, buy, sell is one day trade and buy,
+/// sell, buy, sell is two. §9.2's "selling and purchasing" is read literally until the founder
+/// rules on DEC-269: a purchase after a sale of shares held overnight, not yet matched by a
+/// counted repurchase, counts too, and still opens a run a later sell can close, so the count is
+/// never lower than either reading's. A sell of more than the account holds would be a short
+/// sale, which v1 never makes (`AGENTS.md` rule 12), so the fills are inconsistent and nothing is
 /// guessed.
 fn apply(book: &mut Book, fill: &AccountFill) -> Result<bool, GateError> {
     match fill.side {
         Side::Buy => {
             book.same_day = book.same_day.checked_add(fill.qty)?;
             book.bought_since_last_day_trade = true;
-            Ok(false)
+            let counts = book.sold_overnight_since_last_repurchase;
+            book.sold_overnight_since_last_repurchase = false;
+            Ok(counts)
         }
         Side::Sell => {
             book.sold_today = true;
             let from_overnight = fill.qty.min(book.overnight);
             book.overnight = book.overnight.checked_sub(from_overnight)?;
+            if !from_overnight.is_zero() {
+                book.sold_overnight_since_last_repurchase = true;
+            }
             let from_today = fill.qty.checked_sub(from_overnight)?;
             if from_today.is_zero() {
                 return Ok(false);
@@ -192,6 +202,7 @@ fn outside(e: TimeError) -> GateError {
 
 #[cfg(test)]
 mod tests {
+    use mandate_time::TradingCalendar;
     use proptest::prelude::*;
 
     use super::*;
@@ -380,6 +391,109 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-269's interim reading, §9.2 taken literally until the founder rules: a sale of shares
+    /// held overnight followed by a same-day purchase of the same security is one day trade, and
+    /// that purchase still opens a run a later sell closes. DEC-269 may flip the first figure to 0
+    /// and the second to 1.
+    #[test]
+    fn a_purchase_after_an_overnight_sale_counts_until_dec_269_rules() -> Result<(), GateError> {
+        let mut s = Scene::at("2026-09-21T15:00:00-04:00")?;
+        s.held_overnight.insert(id("AAPL")?, qty("10")?);
+        s.fills_today = vec![
+            fill(TEN_AM, "AAPL", Side::Sell, "10")?,
+            fill("2026-09-21T10:01:00-04:00", "AAPL", Side::Buy, "4")?,
+            fill("2026-09-21T10:02:00-04:00", "AAPL", Side::Buy, "6")?,
+        ];
+        let repurchase = s.fold()?;
+        assert_eq!(repurchase.ledger.window_count, 1, "sell, buy, buy is one");
+        assert_eq!(repurchase.today, earlier(&[("2026-09-21", "AAPL")])?);
+        assert_eq!(repurchase.ledger.open_same_day_positions, set(&["AAPL"])?);
+        s.fills_today
+            .push(fill("2026-09-21T10:03:00-04:00", "AAPL", Side::Sell, "10")?);
+        assert_eq!(s.fold()?.ledger.window_count, 2, "sell, buy, sell is two");
+        s.fills_today = vec![
+            fill(TEN_AM, "AAPL", Side::Buy, "1")?,
+            fill("2026-09-21T10:01:00-04:00", "AAPL", Side::Sell, "1")?,
+            fill("2026-09-21T10:02:00-04:00", "AAPL", Side::Buy, "1")?,
+        ];
+        assert_eq!(
+            s.fold()?.ledger.window_count,
+            1,
+            "a sale of overnight shares is the trigger: here the sale took one overnight share, so the repurchase counts, and buy, sell took no share bought today"
+        );
+        Ok(())
+    }
+
+    /// Minor 1 of #370's review: the fold's trade date agrees with `mandate-time`'s
+    /// `TradingCalendar::equity_trade_date` hour by hour across both 2026 daylight-saving changes,
+    /// Independence Day, Thanksgiving and Christmas, and at the 20:00 ET cutoff to the nanosecond.
+    /// The holidays are typed here from the NYSE's 2026 schedule, not read from the committed file.
+    #[test]
+    fn the_trade_date_agrees_with_the_accounting_calendar() -> Result<(), GateError> {
+        let date = |text: &str| Date::parse(text);
+        let holidays = [
+            "2026-01-01",
+            "2026-01-19",
+            "2026-02-16",
+            "2026-04-03",
+            "2026-05-25",
+            "2026-06-19",
+            "2026-07-03",
+            "2026-09-07",
+            "2026-11-26",
+            "2026-12-25",
+        ]
+        .map(date)
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+        let accounting =
+            TradingCalendar::new(date("2026-01-01")?, date("2026-12-31")?, holidays, [])?;
+        let calendar = ExchangeCalendar::us_equities().map_err(|_| GateError::ConfigOutOfRange)?;
+        let mut instants = Vec::new();
+        for start in [
+            "2026-03-05T00:00:00Z",
+            "2026-06-30T00:00:00Z",
+            "2026-10-29T00:00:00Z",
+            "2026-11-23T00:00:00Z",
+            "2026-12-22T00:00:00Z",
+        ] {
+            let first = at(start)?.secs();
+            for hour in 0_i64..168 {
+                let secs = hour
+                    .checked_mul(3600)
+                    .and_then(|offset| first.checked_add(offset))
+                    .ok_or(GateError::ConfigOutOfRange)?;
+                instants.push(UtcNanos::from_parts(secs, 0)?);
+            }
+        }
+        for cutoff in [
+            "2026-03-06T20:00:00-05:00",
+            "2026-03-09T20:00:00-04:00",
+            "2026-07-02T20:00:00-04:00",
+            "2026-11-25T20:00:00-05:00",
+            "2026-12-24T20:00:00-05:00",
+        ] {
+            let at_cutoff = at(cutoff)?;
+            let before = UtcNanos::from_parts(
+                at_cutoff
+                    .secs()
+                    .checked_sub(1)
+                    .ok_or(GateError::ConfigOutOfRange)?,
+                999_999_999,
+            )?;
+            instants.extend([before, at_cutoff]);
+        }
+        assert_eq!(instants.len(), 850);
+        for instant in instants {
+            assert_eq!(
+                trading_day(&calendar, instant)?,
+                accounting.equity_trade_date(instant)?,
+                "{instant:?}"
+            );
+        }
+        Ok(())
+    }
+
     /// Crypto never counts, in the count or in either set; a fractional equity day trade does.
     #[test]
     fn crypto_never_counts_and_a_fractional_day_trade_does() -> Result<(), GateError> {
@@ -523,7 +637,9 @@ mod tests {
         /// Against an oracle in whole half-share units that never touches the crate's ledger: a
         /// sell's same-day part is what the running total sold exceeds the overnight holding by,
         /// less what earlier sells already took, and it counts when a buy came after the last
-        /// counted one. Sells the account cannot cover are dropped from the generated day.
+        /// counted one. Under DEC-269's interim literal reading a buy also counts when the running
+        /// total sold first reached into the overnight holding after the last such buy. Sells the
+        /// account cannot cover are dropped from the generated day.
         #[test]
         fn the_count_matches_a_running_total_oracle((overnight, ops) in day_of_fills()) {
             let half = |units: u64| {
@@ -533,18 +649,27 @@ mod tests {
             let mut s = Scene::at("2026-09-21T15:00:00-04:00")?;
             s.held_overnight.insert(id("AAPL")?, half(overnight)?);
             let (mut bought, mut sold, mut want, mut buy_since) = (0_u64, 0_u64, 0_u32, false);
+            let mut overnight_sale_since = false;
             let mut sold_any = false;
             for (minute, (is_buy, units)) in (1_u32..).zip(ops) {
                 let side = if is_buy {
                     bought = bought.saturating_add(units);
                     buy_since = true;
+                    if overnight_sale_since {
+                        want = want.saturating_add(1);
+                        overnight_sale_since = false;
+                    }
                     Side::Buy
                 } else {
                     if sold.saturating_add(units) > overnight.saturating_add(bought) {
                         continue;
                     }
                     let beyond_before = sold.saturating_sub(overnight);
+                    let overnight_before = sold.min(overnight);
                     sold = sold.saturating_add(units);
+                    if sold.min(overnight) > overnight_before {
+                        overnight_sale_since = true;
+                    }
                     sold_any = true;
                     if sold.saturating_sub(overnight) > beyond_before && buy_since {
                         want = want.saturating_add(1);

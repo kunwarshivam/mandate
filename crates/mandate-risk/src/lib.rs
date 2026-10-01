@@ -812,7 +812,8 @@ pub struct DayTradeFold {
 
 /// §9.2's `legacy_pdt` ledger, folded account-wide: the window is today plus the four prior trading
 /// days of the committed calendar, a sell takes shares held overnight first, each same-day
-/// open-then-close counts once, fractional day trades count, and crypto never does (DEC-129
+/// open-then-close counts once, a purchase after a same-day sale of overnight shares counts too
+/// until the founder rules on DEC-269, fractional day trades count, and crypto never does (DEC-129
 /// item 6, DEC-259).
 ///
 /// # Errors
@@ -820,7 +821,9 @@ pub struct DayTradeFold {
 /// (for an equity) outside today's trading day, and for an earlier day trade dated today or
 /// later; [`GateError::DayTradeLedgerInconsistent`] for a sell of more than the account held;
 /// [`GateError::ConfigOutOfRange`] for a date outside the committed calendar. Every error is a
-/// refusal to decide an opening, never a smaller count.
+/// refusal to decide an opening, never a smaller count, and **never more than that**: the caller
+/// (E7-3's executor) must treat a fold error as refusing openings only, and still route exits and
+/// protective orders, which check 8 never reads (`AGENTS.md` rule 13).
 pub fn fold_day_trades(input: &DayTradeInput<'_>) -> Result<DayTradeFold, GateError> {
     daytrades::fold(input)
 }

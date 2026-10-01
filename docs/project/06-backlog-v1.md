@@ -1493,7 +1493,16 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   step, which DEC-199 item 3 refuses until E7-4 and E7-5 unless a narrower reading lets a later
   proposal be decided once every earlier allowed one has filled in full; and RC-09's third step is
   a crypto proposal, which waits for E6-10. The executor (E7-3) calls the fold account-wide and
-  journals `DayTradeFold::today`.
+  journals `DayTradeFold::today`. **A fold error refuses openings only** (#370 review, major 1):
+  E7-3 must still route exits and protective orders when `fold_day_trades` fails (`AGENTS.md`
+  rule 13), and E7-3's tests PR carries the pending test
+  `a_failed_day_trade_fold_refuses_openings_and_still_routes_exits` for it.
+- **Lift §2.2's trade date onto `ExchangeCalendar`** (#370 review, minor 1). `mandate-risk`'s
+  `daytrades::trading_day` re-states `TradingCalendar::equity_trade_date`'s 20:00 ET cutoff over
+  the committed exchange calendar, and `the_trade_date_agrees_with_the_accounting_calendar` pins
+  the two together across 2026's holidays, both daylight-saving changes and the cutoff. Give
+  `mandate-time`'s `ExchangeCalendar` an `equity_trade_date` of its own and call it from both, so
+  the rule lives once.
 
 From the independent review of E6-2's autonomy slice ([#216](https://github.com/kunwarshivam/mandate/pull/216)
 round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
