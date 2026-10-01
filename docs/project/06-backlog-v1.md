@@ -370,10 +370,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `approvers_required` and `independent_required`. It must judge check 7 against the stricter of
   those and the workspace policy overlay current at the effective time: independence if either
   requires it, the larger approver count, and an author's earlier `counted` grant not counting once
-  independence is required. `AdmissionContext.policy` now carries the overlay and
-  `mandate_approval::quorum` names the requirement; `quorum` is a stub, and `admit` fails closed
-  with its `Unimplemented` for a grant that reaches check 7 under any overlay but
-  `PolicyOverlay::NONE`. `tests/quorum.rs` holds eight tests pending E8-3 against
+  independence is required. The tests correction gave `AdmissionContext.policy` the overlay and
+  stubbed `mandate_approval::quorum`, which `admit` failed closed on under any overlay but
+  `PolicyOverlay::NONE`, with eight tests in `tests/quorum.rs` pending E8-3 against
   `reference/mandate/ref.py`'s `approval_quorum`. The implementation PR implemented `quorum`,
   calls it for every overlay, leaves the author out of the grants that count while independence
   is required, and deleted the eight `#[ignore]` lines.
@@ -1621,8 +1620,9 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   done in E8-3's `quorum` PR, DEC-257 item 4): `crates/mandate-approval/tests/quorum.rs` draws a
   `two_approver_above_usd` of `"0"`, which `schemas/policy.schema.json` excludes
   (`positive_decimal`); draw only ceilings a workspace can hold, as DEC-173 item 15 already does
-  for grant sets. A tests correction, since DEC-77 keeps `tests/` edits out of an implementation
-  PR.
+  for grant sets. And (#368 review, minor 3) `tests/quorum.rs`'s module doc still says its tests
+  are pending and fail on `quorum`'s `ApprovalError::Unimplemented`, which E8-3's `quorum` made
+  false. A tests correction, since DEC-77 keeps `tests/` edits out of an implementation PR.
 - **Family A's harness after its tightening** (#360 review, nits), one tests change to
   `crates/mandate-refcases/src/mandate/autonomy.rs` plus DEC-162's wording: (1) DEC-162 item 4 says
   the property test runs "over generated well-typed policies and facts", but `action_context()` pins

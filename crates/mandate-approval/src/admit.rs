@@ -241,3 +241,58 @@ fn check_7(
         },
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use mandate_num::{NumError, Price, Qty, Signed};
+
+    use super::*;
+    use crate::content::{AskablePurpose, AssetClass};
+
+    /// An order whose value the exact arithmetic cannot hold.
+    fn unrepresentable_order() -> Result<BoundAction, NumError> {
+        Ok(BoundAction {
+            instrument: "AAPL".to_owned(),
+            asset_class: AssetClass::UsEquity,
+            qty: Qty::parse("79228162514264337593543950")?,
+            limit: Price::parse("79228162514264337593543950")?,
+            purpose: AskablePurpose::Open,
+            mandate_version: "v1".to_owned(),
+            decided_by: "default".to_owned(),
+            combined_score: Signed::parse("0.5")?,
+            reference_mark: None,
+            approvers_required: NonZeroU8::MIN,
+            independent_required: true,
+        })
+    }
+
+    /// DEC-257 item 1: the order value is computed only while a ceiling is set, so without one the
+    /// answer is total and is the bound requirement with the overlay's independence; with one, an
+    /// order value that overflows is `Unrepresentable`, never a quorum.
+    #[test]
+    fn the_order_value_is_read_only_against_a_ceiling() -> Result<(), NumError> {
+        let bound = unrepresentable_order()?;
+        let no_ceiling = PolicyOverlay {
+            independent_approval_required: false,
+            two_approver_above_usd: None,
+        };
+        assert_eq!(
+            quorum(&bound, &no_ceiling),
+            Ok(Quorum {
+                approvers_required: NonZeroU8::MIN,
+                independent_required: true,
+            })
+        );
+        let ceiling = PolicyOverlay {
+            two_approver_above_usd: Some(Usd::parse("1000")?),
+            ..no_ceiling
+        };
+        assert_eq!(
+            quorum(&bound, &ceiling),
+            Err(ApprovalError::Unrepresentable {
+                what: "order value"
+            })
+        );
+        Ok(())
+    }
+}

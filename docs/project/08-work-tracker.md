@@ -333,8 +333,9 @@ Lessons from this wave:
 
 ## Next, in order
 
-1. **E8-3's `quorum`** against the policy overlay (`agent/m7-impl-quorum`, DEC-257), then the M7 spec PR (mandate §6.1 and §6.4, journal §9, the MC-E cases,
-   PX-4's web kill-switch line) and the runtime's and CLI's tests PRs.
+1. **E8-3's `quorum`** against the policy overlay (`agent/m7-impl-quorum`, DEC-257), then the M7
+   spec PR (mandate §6.1 and §6.4, journal §9, the MC-E cases, PX-4's web kill-switch line) and
+   the runtime's and CLI's tests PRs.
 2. **E6-4 slice R4** (acknowledgments, allocation, floor loosening, goal completion, retirement)
    and the last nine MC-R status rows; MC-B31 once the trim proposals land.
 3. **E6-3's remaining stacked PRs** (the §5.3 mandate limits, then the agent flatten) and **E6-6's
