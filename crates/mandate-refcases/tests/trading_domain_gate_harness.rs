@@ -519,26 +519,16 @@ fn the_filled_minimum_order_is_one_share_to_the_last_place() {
     );
 }
 
-/// Each proposal is decided alone, with no trace of an earlier one (DEC-199 item 3), so a case
-/// with a second `propose_order` step waits for the stories that give a submission its effects.
-/// RC-08 passes with its one proposal and fails, naming them, with that proposal listed twice.
+/// A later proposal waits for the stories that give a submission its effects (E7-4, E7-5) while an
+/// earlier allowed proposal has not been filled in full on its side (DEC-199 item 3, as narrowed by
+/// the coordinator's ruling on #370, item 2). Here an allowed buy with no fill is followed by a
+/// second proposal. A denied earlier proposal leaves no trace, so this test no longer pins RC-08
+/// with its denied proposal listed twice.
 #[test]
 fn a_second_proposal_in_one_case_waits_for_e7_4_and_e7_5() {
     let waits =
         err("a second `propose_order` step in one case not interpreted until E7-4 and E7-5");
     assert_eq!(run(fixture(), "RC-08"), Ok(()));
-    assert_eq!(
-        run(
-            edited("RC-08", |c| {
-                let steps = c["steps"].as_array_mut().unwrap();
-                let proposal = steps[2].clone();
-                assert_eq!(proposal["event"], "propose_order");
-                steps.insert(3, proposal);
-            }),
-            "RC-08",
-        ),
-        waits
-    );
     assert_eq!(
         scene(
             json!([
