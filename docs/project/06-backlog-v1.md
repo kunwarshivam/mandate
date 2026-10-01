@@ -791,6 +791,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   workspace's own limits deny; openings on a new thesis wait for the workspace's deterministic
   stagger offset within the conduct controls; bring-your-own-strategy agents keep per-account
   controls only.
+  *Follow-up (#415 review, blocker 2; DEC-293 item 8):* the gate-level two-workspace run —
+  acceptance sentence 1, no workspace's gate reading another workspace's state — is stream G's
+  under claim [#123](https://github.com/kunwarshivam/mandate/issues/123), not this story's;
+  E17-6 covers the research-plane seam, where the monitor is the only cross-workspace view and a
+  halt reaches a workspace only through its own resolved halt set.
 - **E17-7 (Must)** As an owner, I want the research agent to read only vetted sources and to admit an
   instrument only on corroborated evidence, so that one planted source cannot admit an instrument
   ([DEC-101](04-decision-log.md#decisions)).

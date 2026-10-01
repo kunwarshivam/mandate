@@ -488,10 +488,10 @@ fn a_negative_exposure_is_refused() {
 }
 
 /// The report is ordered by instrument id, whatever order the agents' maps or the rows' sizes
-/// would give.
-/// The report is ordered by instrument id, whatever order the agents' maps or the rows' sizes
 /// would give: instrument 2 holds the largest exposure and instrument 1 the smallest, so an
-/// exposure-ordered report would read `[2, 3, 1]` against the id order's `[1, 2, 3]`.
+/// exposure-ordered report would read `[2, 3, 1]` against the id order's `[1, 2, 3]` — and the
+/// rows carry their own exposures in that order, so a report of correctly ordered but zeroed
+/// rows cannot pass either.
 #[test]
 #[ignore = "pending E17-6"]
 fn the_report_is_ordered_by_instrument_id() {
@@ -526,6 +526,12 @@ fn the_report_is_ordered_by_instrument_id() {
             &asset(INSTRUMENT_3)
         ],
         "the rows are ordered by instrument id, not by exposure (instrument 2's is the largest and instrument 1's the smallest)"
+    );
+    let exposures: Vec<_> = report.rows.iter().map(|row| row.exposure_usd).collect();
+    assert_eq!(
+        exposures,
+        vec![usd("1"), usd("3000000"), usd("2")],
+        "the rows carry their own exposures in id order, so a zeroed row cannot pass by order alone"
     );
 }
 
@@ -754,26 +760,38 @@ fn an_unread_universe_is_never_halted_silently() {
     );
 }
 
-/// A halt naming an instrument the universe does not hold removes nothing and journals nothing —
-/// the halt holds that instrument's admissions through check 9, which needs no removal — while
-/// the instrument it does hold is removed beside it.
+/// A halt naming an instrument the universe does not hold removes nothing and journals nothing
+/// for it — the halt holds that instrument's admissions through check 9, which needs no removal —
+/// while the instrument it does hold is removed beside it. The entries name both instruments,
+/// each with its own thesis, so only the universe holds instrument 2 back: an implementation
+/// that removes on the halted entries alone, never checking what the universe holds, would
+/// remove and journal instrument 2 too.
 #[test]
 #[ignore = "pending E17-6"]
 fn a_halt_removes_the_held_instrument_and_leaves_one_the_universe_does_not_hold() {
     let universe = universe_of(&[INSTRUMENT_1]);
-    let entries = [entry(
-        INSTRUMENT_1,
-        "th-1",
-        "th-1",
-        "2026-09-23T14:00:00.000000000Z",
-        false,
-    )];
+    let entries = [
+        entry(
+            INSTRUMENT_1,
+            "th-1",
+            "th-1",
+            "2026-09-23T14:00:00.000000000Z",
+            false,
+        ),
+        entry(
+            INSTRUMENT_2,
+            "th-2",
+            "th-2",
+            "2026-09-23T14:00:00.000000000Z",
+            false,
+        ),
+    ];
     let outcome = apply_operator_halts(&halted(&[INSTRUMENT_1, INSTRUMENT_2]), &entries, &universe)
         .expect("a read dynamic universe is halted");
     assert_eq!(
         outcome.removed,
         vec![asset(INSTRUMENT_1)],
-        "only the instrument the universe holds is removed"
+        "only the instrument the universe holds is removed, though both halted instruments have entries"
     );
     assert_eq!(
         outcome.journal,

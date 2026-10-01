@@ -231,4 +231,7 @@ representational, pinned behaviourally by the two isolation tests rather than by
   live trading"), and a code constant is the conservative start; moving them is a founder
   question, recorded, not taken.
 - The property suite (proptest) lands with the implementation PR, where real behaviour exists to
-  fuzz; the tests PR's invariants are plain pending functions, per DEC-110's no-macro rule.
+  fuzz; the tests PR carries the one oracle the #415 review asked for — the cross-workspace sum
+  and its contributing-workspace set, a plain pending function driving a `TestRunner` over
+  generated deployments — because DEC-110's no-macro rule bars a pending test a macro generates,
+  not an oracle a plain function computes.
