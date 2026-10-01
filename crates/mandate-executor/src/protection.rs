@@ -6716,6 +6716,7 @@ mod sequence_tests {
         let price = || prop::option::of(135_u32..=160);
         prop_oneof![
             4 => (1_i64..=20).prop_map(Move::Tick),
+            1 => prop::sample::select(vec![1_800_i64, 3_600, 7_200]).prop_map(Move::Tick),
             3 => (price(), price(), any::<bool>()).prop_map(|(bid, trade, sane)| Move::Quote(bid, trade, sane)),
             2 => (0_usize..4, 1_u32..=4, 141_u32..=165).prop_map(|(purpose, qty, limit)| Move::Exit(purpose, qty, limit)),
             2 => Just(Move::Ack),
@@ -6760,39 +6761,112 @@ mod sequence_tests {
         fills: u32,
         paused: bool,
         quiet_since: i64,
+        /// Whether the script starts inside the calendar's range: before it (the 1970 base, the
+        /// eve of 2018) every instant reads as the regular session (DEC-260 (13)).
+        calendar: bool,
     }
 
+    /// §4.3 written out for the oracle, never read from the calendar file: the New York midnight
+    /// of each trading day its scripts can reach (2026-09-01 to 10-16 without Labor Day, and the
+    /// calendar's last week, 2028-12-26 to 29), from which each day's overnight (20:00 the day
+    /// before to 04:00), pre-market, regular (09:30 to 16:00) and after-hours (to 20:00) follow.
+    const TRADING_DAYS: [i64; 37] = [
+        1_788_235_200,
+        1_788_321_600,
+        1_788_408_000,
+        1_788_494_400,
+        1_788_840_000,
+        1_788_926_400,
+        1_789_012_800,
+        1_789_099_200,
+        1_789_358_400,
+        1_789_444_800,
+        1_789_531_200,
+        1_789_617_600,
+        1_789_704_000,
+        1_789_963_200,
+        1_790_049_600,
+        1_790_136_000,
+        1_790_222_400,
+        1_790_308_800,
+        1_790_568_000,
+        1_790_654_400,
+        1_790_740_800,
+        1_790_827_200,
+        1_790_913_600,
+        1_791_172_800,
+        1_791_259_200,
+        1_791_345_600,
+        1_791_432_000,
+        1_791_518_400,
+        1_791_777_600,
+        1_791_864_000,
+        1_791_950_400,
+        1_792_036_800,
+        1_792_123_200,
+        1_861_419_600,
+        1_861_506_000,
+        1_861_592_400,
+        1_861_678_800,
+    ];
+
     impl Desk {
-        /// §5.6 by the oracle's own reading: there is something to price from when some sane
-        /// quote with a bid, or with a trade printed in the session it is now (§8.2), was seen
-        /// within five minutes (DEC-260 (5), (16)). The sessions are 2026-09-22's, written out
-        /// from §4.3 rather than read from the calendar: a print and now are in one session when
-        /// no boundary falls after the one and at or before the other.
-        fn priceable(&self) -> bool {
-            const BOUNDARIES: [i64; 5] = [
-                1_790_035_200,
-                1_790_064_000,
-                OPEN,
-                1_790_107_200,
-                1_790_121_600,
-            ];
-            let in_session = |at: i64| {
-                !BOUNDARIES
-                    .iter()
-                    .any(|boundary| at < *boundary && *boundary <= self.now)
-            };
-            self.quotes.iter().any(|(at, bid, trade, sane)| {
-                *sane
-                    && (bid.is_some() || trade.is_some() && in_session(*at))
-                    && self.now.saturating_sub(*at) <= 300
+        /// The session `at` falls in by the oracle's own reading: its trading day and 0 overnight,
+        /// 1 pre-market, 2 regular, 3 after-hours; `None` while the market is closed.
+        fn segment(at: i64) -> Option<(i64, u8)> {
+            const HOUR: i64 = 3_600;
+            TRADING_DAYS.iter().find_map(|day| {
+                [
+                    (day - 4 * HOUR, day + 4 * HOUR, 0),
+                    (day + 4 * HOUR, day + 9 * HOUR + HOUR / 2, 1),
+                    (day + 9 * HOUR + HOUR / 2, day + 16 * HOUR, 2),
+                    (day + 16 * HOUR, day + 20 * HOUR, 3),
+                ]
+                .into_iter()
+                .find(|(from, to, _)| (*from..*to).contains(&at))
+                .map(|(_, _, segment)| (*day, segment))
             })
         }
 
-        /// Whether no v1 session is open now, by the oracle's own reading of §4.3 and DEC-30 for
-        /// 2026-09-21 to 22, written out rather than read from the calendar: from 20:00 ET to
-        /// 04:00 ET. An instant the calendar does not cover (the 1970 start) is never closed.
+        /// Whether `then` and now are one session (§8.2's in-session trade).
+        fn same_session(&self, then: i64) -> bool {
+            !self.calendar || Self::segment(then) == Self::segment(self.now)
+        }
+
+        /// Whether no v1 session is open now (DEC-30: the overnight session is none).
         fn closed(&self) -> bool {
-            (1_790_035_200..1_790_064_000).contains(&self.now) || self.now >= 1_790_121_600
+            self.calendar && !matches!(Self::segment(self.now), Some((_, 1..=3)))
+        }
+
+        /// Whether now is the regular session, where nothing goes extended-hours.
+        fn regular(&self) -> bool {
+            !self.calendar || matches!(Self::segment(self.now), Some((_, 2)))
+        }
+
+        /// Rule 13's session duties on every order the executor sends or journals: no exit goes
+        /// while no session is open, and `extended_hours` only in pre-market or after-hours.
+        fn sent(&self, id: &str, purpose: Purpose, extended: bool) -> Result<(), String> {
+            if self.closed() && purpose != Purpose::Protective {
+                return Err(format!(
+                    "{id} ({purpose:?}) sent at {} with no session open",
+                    self.now
+                ));
+            }
+            if extended && (self.closed() || self.regular()) {
+                return Err(format!("{id} sent extended-hours at {}", self.now));
+            }
+            Ok(())
+        }
+
+        /// §5.6 by the oracle's own reading: there is something to price from when some sane
+        /// quote with a bid, or with a trade printed in the session it is now (§8.2), was seen
+        /// within five minutes (DEC-260 (5), (16)).
+        fn priceable(&self) -> bool {
+            self.quotes.iter().any(|(at, bid, trade, sane)| {
+                *sane
+                    && (bid.is_some() || trade.is_some() && self.same_session(*at))
+                    && self.now.saturating_sub(*at) <= 300
+            })
         }
 
         /// Whether `qty` more on top of what every other exit may still sell exceeds the
@@ -6865,7 +6939,8 @@ mod sequence_tests {
                         "hold"
                             if !RULE_13_HOLDS.contains(&reason)
                                 && !unpriced
-                                && !(reason == "session_closed" && closed) =>
+                                && !(matches!(reason, "session_closed" | "session_unknown")
+                                    && closed) =>
                         {
                             return Err(format!("{intent} held for {reason}"));
                         }
@@ -6880,6 +6955,13 @@ mod sequence_tests {
                     return Err(format!("{intent} fell back with something to price from"));
                 }
                 ("OrderSubmitted", _) => {
+                    let purpose = match field("purpose") {
+                        Some("protective") => Purpose::Protective,
+                        _ => Purpose::RiskExit,
+                    };
+                    let extended = draft.payload.get("extended_hours") == Some(&Value::Bool(true));
+                    let id = field("client_order_id").unwrap_or_default();
+                    self.sent(id, purpose, extended)?;
                     if let Some(exit) = self.exits.get_mut(&intent) {
                         exit.done = true;
                     }
@@ -6969,6 +7051,11 @@ mod sequence_tests {
                             self.asked.push(client_order_id.as_str().to_owned());
                         }
                         Effect::Broker(BrokerRequest::Submit(order)) => {
+                            self.sent(
+                                order.client_order_id.as_str(),
+                                order.purpose,
+                                order.extended_hours,
+                            )?;
                             let qty = order
                                 .qty
                                 .to_string()
@@ -7054,6 +7141,7 @@ mod sequence_tests {
             fills: 0,
             paused: false,
             quiet_since: 0,
+            calendar: start >= 1_514_782_800,
         };
         let agent = AgentId("agent-a".to_owned());
         desk.deliver(
@@ -7224,6 +7312,12 @@ mod sequence_tests {
             MORNING,
             OVERNIGHT,
             OPEN.saturating_sub(30),
+            1_790_121_590,
+            SATURDAY,
+            1_788_789_600,
+            1_514_739_600,
+            1_861_754_400,
+            1_862_150_400,
         ]);
         TestRunner::new(config)
             .run(
