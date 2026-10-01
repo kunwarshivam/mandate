@@ -36,6 +36,7 @@
 /crates/mandate-backtest/   @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam
 /crates/mandate-journal-pg/ @kunwarshivam
+/crates/mandate-journal-cold/ @kunwarshivam
 /crates/mandate-runtime/    @kunwarshivam
 /crates/mandate-research/   @kunwarshivam
 /crates/mandate-builder/   @kunwarshivam
