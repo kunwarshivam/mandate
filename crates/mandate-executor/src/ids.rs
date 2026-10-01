@@ -71,6 +71,17 @@ impl ClientOrderId {
         Self::parse(&format!("{}-p{raw}", entry.as_str()))
     }
 
+    /// Rung `step` of the exit price ladder for the exit this id names: the id itself for the
+    /// first rung, `…-l{step}` for every later one, each a new order (trading-domain spec §2.3,
+    /// §5.6, DEC-160 (10)). The step comes from the journaled rung count, so a restart derives the
+    /// same id.
+    pub fn rung(&self, step: u32) -> Result<Self, ExecutorError> {
+        match step {
+            0 => Ok(self.clone()),
+            step => Self::parse(&format!("{}-l{step}", self.0)),
+        }
+    }
+
     /// A protective parent's leg: `…-tp` for the take-profit, `…-sl` for the stop (§2.3).
     pub fn leg(&self, leg: Leg) -> Result<Self, ExecutorError> {
         let suffix = match leg {

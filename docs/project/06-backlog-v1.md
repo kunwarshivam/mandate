@@ -1111,12 +1111,37 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the coordinator moved from 3a to slice 2 (#267, comment 5862923162): under rule 13 no exit waits
   for the startup reconciliation, so the plant gets weight only with the first opening through
   `fault::protected` (slice 2's add). Slice 2's PR shows each of the three red.
-- **E7-4 slice 4 (stream K), from #264's review (comment 5862761692):** (a) name the do-nothing
-  finding in slice 4's PR: a permissive `ladder_price` turns `fault::crash_at_confirmation_before_exit_submit`
-  green, and only `protection::sequence_tests::an_unprotected_exit_never_reaches_the_ladder_stub`
-  catches it; (b) pin the fault fixture's exact recovered cash rather than §11's ±15.40 band;
-  (c) make the fault fixture's `equity` and `buying_power` consistent with its cash before any
-  slice reads buying power from it.
+- **E7-4 slice 6's tests PR (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373)
+  round 1 (major 1):** §5.5 exempts kill-switch and mandate-limit flatten exits from the agent's
+  mode, but slice 4a's ladder stops stepping while the agent is `paused` or `stopped`
+  ([DEC-260](04-decision-log.md#decisions) (3)), and the gate's `mode_failure` holds every
+  risk-reducing order at `paused` or stricter. Add a pending test: while the agent is paused, a
+  flatten's ladder steps, its step cancel does not end the sequence, and `mode_failure` lets that
+  flatten through. Slice 6 narrows `climbs` and the gate together to make it pass.
+- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1
+  (minor 1):** wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
+  `exit_limit` and `next_rung`, which pass none today, so §5.6's "never below an owner exit's
+  floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
+  `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
+  resubmitted at the same price every `exit_step_s`.
+- **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 2
+  (minor A):** apply §8.2's in-session test to the exit ladder's last-trade arm once slice 5 folds
+  the session. Slice 4a takes a trade only from a sane quote within five minutes
+  ([DEC-260](04-decision-log.md#decisions) (5)); a print from outside the session the exit is in
+  must not price a rung either.
+- **E7-4 (stream K), found by slice 4a's rule-13 oracle (`protection::sequence_tests::rule_13_holds_over_random_scripts`):**
+  (1) a passive exit waits on its OCO's cancel confirmation with no bound and no alert: a broker
+  that never confirms holds the exit for good, with the protection still resting (rule 13's broker
+  hold, so no risk is added, but rule 3 wants the wait bounded). Bound it as rule 5's wait is
+  (`unknown_absent_window_s`, then query the order and alert), with a test. (2) `release_held`
+  journals only an allow, so when a held exit's cause changes (paused, then nothing to price; or
+  an allow that would now over-sell beside other exits) the journal's last verdict names a cause
+  that has gone; journal a changed hold reason once. (3) A later rung is sized from the fold's
+  filled quantity when the step's cancel is confirmed; a fill the broker reports after that
+  confirmation (`LateFillApplied`) is not netted, so the rung could sell more than the position
+  by that fill (rule 12). The same lag sizes §5.4's re-placement. Size from the broker's own
+  report of the cancelled order, or hold the rung for it, before slice 2 lets protected
+  positions exist outside the tests (DEC-160 (4)).
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
