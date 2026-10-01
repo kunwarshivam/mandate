@@ -211,6 +211,8 @@ trailing LF (row 2).
   crate exposes the checks and the CLI calls them when its story says).
 - The examination bundle (§12's second bullet): a later story; this one ships the canonical
   export's parts and digest.
-- The property suite (proptest) is a follow-up slice of its own: the implementation PR is
+- The property suite (proptest) is owed as **backlog row E5-6a**: the implementation PR is
   bound by DEC-77 stage 2 to turning the 30 tests live (under `tests/` it deletes only
-  `#[ignore]` lines), so the fuzz suite lands next, over the now-live implementation.
+  `#[ignore]` lines), so the fuzz suite lands as its own tests PR over the now-live
+  implementation — random segment sequences against an independent oracle that checks the
+  range-walk invariants.

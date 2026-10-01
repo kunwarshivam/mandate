@@ -142,6 +142,18 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Accepted when:* for each [tamper case](../specs/reference-cases/journal.yaml) its input can
   express, the command reports the expected first failure; a deleted or altered artifact reports
   `artifact_missing` or `artifact_mismatch` ([journal spec](../specs/journal.md) §11).
+- **E5-6a (Should)** As an auditor, I want the cold store's checks held to their invariants over
+  random segment sequences, not only the hand-calculated cases, so that the walk cannot drift
+  between the cases (E5-6's follow-up, owed by AGENTS.md's "property-based tests for invariants"
+  and deferred by #404's review; a DEC-77 tests PR on claim
+  [#374](https://github.com/kunwarshivam/mandate/issues/374)).
+  *Accepted when:* proptest drives `mandate-journal-cold` over random segment sequences —
+  contiguous runs split at random boundaries, tampered files, lying manifests, gaps and
+  overlapping copies, mid-segment entries — and an independent oracle (its own accumulator,
+  never the implementation's walk) checks the invariants: a verified range's state is the
+  trusted start advanced by exactly the events inside it; every tamper is refused by the check
+  that owns it, at the `seq` the range expected; nothing before the trusted start is checked;
+  and the token entry point never answers `Ok` (DEC-263 to DEC-265).
 
 ### E6 Agent runtime and risk
 

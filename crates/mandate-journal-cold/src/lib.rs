@@ -537,7 +537,9 @@ impl ExportBundle<'_> {
     ///
     /// # Errors
     /// Returns [`ColdError::PartUnrepresentable`] when a part's byte length cannot be written
-    /// as the `u64` length prefix.
+    /// as the `u64` length prefix — unreachable on a 64-bit target, where
+    /// `u64::try_from(usize)` cannot fail; the arm is the refusal the fallible signature
+    /// exists for, so the digest is computed from the parts or refused, never invented.
     pub fn verifier_digest(&self) -> Result<Digest, ColdError> {
         let mut parts: Vec<Vec<u8>> = Vec::new();
         for segment in self.segments {
@@ -587,6 +589,9 @@ pub enum ColdError {
     #[error("a seq above the canonical integer bound has no canonical bytes")]
     SeqUnrepresentable,
     /// A part of the export whose byte length cannot be written as the `u64` length prefix.
+    /// Unreachable on a 64-bit target, where `u64::try_from(usize)` cannot fail; the arm
+    /// exists so the fallible `verifier_digest` has a refusal to return rather than a
+    /// made-up digest.
     #[error("a part's byte length cannot be a u64 length prefix")]
     PartUnrepresentable,
     /// The anchor holds no leaf for the stream a proof was asked for.
