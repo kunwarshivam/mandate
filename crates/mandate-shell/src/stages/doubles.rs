@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use mandate_accounting::{InstrumentId, Side};
+use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_backtest::Signal;
 use mandate_canon::{Digest, Key, Object, Value};
 use mandate_executor::{
@@ -25,8 +25,8 @@ use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_num::{Price, Qty};
 use mandate_risk::{Check, CheckOutcome, Computed, Decision, Purpose as GatePurpose, Verdict};
 use mandate_runtime::{
-    AgentId, Autonomy, ConnectionId, Deployment, FlattenPlan, FlattenRequest, IntentBody,
-    IntentHandoff, MandateView, Proposal, Purpose, SignalInputs, WorkspaceId,
+    AgentId, ApprovalSettings, Autonomy, ConnectionId, Deployment, FlattenPlan, FlattenRequest,
+    IntentBody, IntentHandoff, MandateView, Proposal, Purpose, SignalInputs, WorkspaceId,
 };
 use mandate_time::UtcNanos;
 
@@ -315,6 +315,12 @@ impl MandateSource for FixtureMandate {
                 version: "1".to_owned(),
                 working_universe: BTreeSet::from([instrument()?]),
                 restricted_instruments: BTreeSet::new(),
+                approval: ApprovalSettings {
+                    approvers: BTreeSet::new(),
+                    author: "user-author".to_owned(),
+                    timeout_s: 300,
+                    environment: self.environment,
+                },
             },
             environment: self.environment,
             model: ModelRef {
@@ -392,6 +398,7 @@ impl Sizing for OneShare {
         }
         Ok(Some(Proposal {
             instrument: instrument()?,
+            asset_class: AssetClass::UsEquity,
             side: Side::Buy,
             qty: Qty::parse(self.qty).map_err(|_| Cause::Absent { what: "a qty" })?,
             limit: Price::parse("255.2").map_err(|_| Cause::Absent { what: "a limit" })?,

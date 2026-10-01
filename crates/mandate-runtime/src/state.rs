@@ -477,6 +477,9 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 }
             }
         }
+        "ApprovalResponseSubmitted" | "OwnerCommandIssued" | "ApprovalRevalidated" => {
+            return Err(RuntimeError::Unimplemented { story: "E8-3" });
+        }
         "StreamOpened"
         | "GateDecided"
         | "OrderAbandoned"
