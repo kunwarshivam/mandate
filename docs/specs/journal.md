@@ -12,6 +12,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.6, amended ([DEC-280](../project/04-decision-log.md#decisions)):** the agent stream gains
+  `OwnerCommandRefused`, the record of a resume or Stop the runtime refused for its step-up, and the
+  account stream the same for an acknowledgment the executor refused ([mandate spec §6.1](mandate.md#61-purposes),
+  which already said such a refusal is journaled). Its payload schema is closed with the other
+  owner-input events, and the test vectors are unchanged.
 - **v0.6, amended ([DEC-188](../project/04-decision-log.md#decisions), [DEC-271](../project/04-decision-log.md#decisions)):**
   `DecisionMade`'s `decided_by` may be `review_ceiling`, the review date of
   [mandate spec §6.2 step 5b](mandate.md#62-evaluation), the same label the approval content's
@@ -125,7 +130,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   approval as `ApprovalResponseSubmitted`, and a pause, resume, Stop, owner exit, or kill switch as
   `OwnerCommandIssued` ([mandate spec §6.1](mandate.md#61-purposes)). The agent runtime copies each
   event addressed to its agent at most once, with `causation_id` pointing to it (`ApprovalResponded`,
-  `AgentModeChanged`, `OwnerExitRequested`, `KillSwitchActivated`); the control stream's `event_id`
+  `AgentModeChanged`, `OwnerExitRequested`, `KillSwitchActivated`, or, for a resume or Stop its
+step-up does not admit, `OwnerCommandRefused`); the control stream's `event_id`
   is the idempotency key. A user's kill switch is therefore a **command**
   to the stream owners, which journal `KillSwitchActivated` in their own streams.
 - A stream begins with `StreamOpened` (seq 1), which records the stream type, subject, and
@@ -367,6 +373,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ApprovalTimedOut`, `ApprovalCanceled` | man | approval, `on_timeout: skip`; approval, cancel reason (`version_applied`, `mode_tightened`, `owner_pause`, `owner_stop`, `kill_switch`; a legacy `rebound` is a cancellation for either of the first two) |
 | `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator |
 | `OwnerExitRequested` | man | instrument or scope, bid shown and confirmed, user (opaque), step-up evidence |
+| `OwnerCommandRefused` | — | A resume or Stop the runtime refused for its step-up ([mandate spec §6.1](mandate.md#61-purposes)): the command (`resume`, `stop`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`), and the effective time it was judged at; `causation_id` is the `OwnerCommandIssued`, copied at most once. The executor records a refused acknowledgment the same way on the account stream, with command `acknowledge` and `causation_id` the control stream's `OwnerAcknowledged` |
 
 **Workspace control stream** (owner: workspace services)
 

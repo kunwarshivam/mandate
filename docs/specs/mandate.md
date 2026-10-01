@@ -25,7 +25,9 @@ builder, versioning, change classification, and the records kept.
   and §6.4 under their own `kind: escalation` (§11): admission and its refusals, re-validation and
   drift, the ask budget and its suppressions, quiet hours, and a grant batched with a cancellation.
   No rule changes, so no existing case changes; §11 no longer says the shared harness pins the case
-  count, which it has not since the families it owns are counted by prefix.
+  count, which it has not since the families it owns are counted by prefix. §6.1 names the record of
+  a refused resume, Stop, or acknowledgment, `OwnerCommandRefused` (journal spec §9), which "a
+  refusal is journaled" already required and no event carried (the #395 review, major 1).
 - **v0.6, amended ([DEC-188](../project/04-decision-log.md#decisions), read by
   [DEC-271](../project/04-decision-log.md#decisions) to [DEC-273](../project/04-decision-log.md#decisions)):**
   the review date. `autonomy.review_by` is the last risk day on which any `auto` or delegation
@@ -670,7 +672,12 @@ stream with `causation_id` and judges it there; nothing the owner's client check
   `OwnerCommandIssued`, or `OwnerAcknowledged` in the workspace's control stream, whatever that
   event's outcome; and its method is allowed for the environment. Missing or malformed evidence
   counts as missing. A refusal is journaled with `step_up_missing`, `step_up_stale`,
-  `step_up_reused`, or `step_up_method`.
+  `step_up_reused`, or `step_up_method`: a refused approval as its `ApprovalResponded`, and a
+  refused resume, Stop, or acknowledgment as `OwnerCommandRefused` on the stream of whichever owner
+  judged it (the agent runtime for resume and Stop, the executor for an acknowledgment), naming the
+  control-stream event as `causation_id` (journal spec §9, [DEC-280](../project/04-decision-log.md#decisions)).
+  An owner exit and a kill switch are never refused as commands, so they have no such record: their
+  step-up outcome is `OwnerExitRequested.step_up_status`.
 - **Methods.** v0's only method is `cli_confirm`: the owner re-types a confirmation code the CLI
   derives locally, with no network, runtime, or model state. It is allowed only in a `paper`
   environment (DEC-155 item 4); live step-up waits for E9-4's signed assertions.

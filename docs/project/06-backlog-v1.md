@@ -365,6 +365,18 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Follow-up (DEC-280):* a harness arm for `kind: escalation` in `mandate-refcases`, tests first,
   driving `mandate-approval` (and the runtime for `op: lifecycle`), then the status PR that flips
   the rows it passes.
+  *Follow-up (DEC-280 item 7):* `mandate-journal`'s catalogue gains `OwnerCommandRefused` (agent and
+  account streams), and the runtime journals it for a refused resume or Stop, tests first, with a
+  test that a refused Stop leaves exactly that event (the #395 review, major 1; DEC-278 item 12).
+  *Follow-up (the #397 review, minors 1 to 5; one M7 tests PR before the `clap` wiring makes the
+  commands reachable):* pin the closed key set of every control payload the CLI commits
+  (`OwnerCommandIssued`, `ApprovalResponseSubmitted`, `OwnerAcknowledged`) in `tests/agent.rs` and
+  `tests/approvals.rs`, so a `typed_code` member fails; give `Command::Stop` the `--release` choice
+  and the warning-shown record (DEC-136) and `status` the agent's restrictions, tests first; make
+  `commit`'s idempotency hold across invocations by deriving the event id from the command's
+  content and the head (or record why it cannot), add backoff between attempts, and word the
+  exhausted report to match; and make `message(Outcome::Refused)` say whether the deadline has
+  passed.
   *Follow-up (#343 review, minor 1; a tests correction):* a new family that reuses an owned family's
   kind (for example an `MC-E01` of kind `semantic`) now moves no count in `mandate_harness.rs` and
   runs through that family's arm, where on `main` before #343 it failed two counts. `unread_keys`
