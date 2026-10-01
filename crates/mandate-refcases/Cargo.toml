@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 libtest-mimic.workspace = true
 mandate-accounting.workspace = true
+mandate-approval.workspace = true
 mandate-builder.workspace = true
 mandate-canon.workspace = true
 mandate-domain.workspace = true
