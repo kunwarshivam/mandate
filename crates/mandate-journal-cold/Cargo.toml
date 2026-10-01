@@ -16,3 +16,4 @@ thiserror.workspace = true
 
 [dev-dependencies]
 mandate-time.workspace = true
+proptest.workspace = true
