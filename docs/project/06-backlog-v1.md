@@ -1173,6 +1173,15 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the gate's effective-dated configuration (`close_window_minutes`) once the executor holds it. A
   presumed halt is read from the latest quote only (older than `exit_step_s`, or not sane); add
   the trading-status and LULD feed §4.4 names once the shell subscribes to it.
+- **The US-equities calendar's end (stream K, DEC-260 (13); the coordinator's ruling on #174,
+  5926945398):** alert the owner and the operator well ahead of `crates/mandate-time/data/
+  us-equities.calendar`'s last valid date (2028-12-31), for example 90 days before it, so the file
+  is extended before every equity exit starts being held `session_unknown`.
+- **`mandate-executor`'s clock-0 tests onto the calendar (stream K, DEC-260 (13)):** the hand,
+  coverage, fault and properties suites run at risk-clock seconds near 0 (1970), before the
+  calendar's first date, which `session` reads as the regular session. Move them onto calendar
+  dates in their own DEC-77 tests PR; after it, an instant before the calendar's range is held
+  `session_unknown` like one after it.
 - **E7-4 slice 6 (stream K), moved from slice 5 by the coordinator's ruling D3 on
   [#174](https://github.com/kunwarshivam/mandate/pull/174) (5926142854):** the four kill-switch
   session tests (`hand::an_automated_flatten_defers_equity_sells_to_the_session`,
