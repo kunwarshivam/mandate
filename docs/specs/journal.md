@@ -2,15 +2,31 @@
 
 | | |
 |---|---|
-| **Status** | v0.6 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.7 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1 and `control_stream` section of §9.2; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
+
+- **v0.7 ([DEC-261](../project/04-decision-log.md#decisions)):** §9.2 closes the payload schemas of
+  the records `ValidationContext::from_journal` reads ([DEC-169](../project/04-decision-log.md#decisions)).
+  These are the control stream's `StreamOpened`, `ConnectionEstablished`, `ConnectionRevoked`,
+  `DisclosureAccepted`, `ConfigSnapshotRegistered`, `MandateVersionCreated`, `MandateConfirmed`,
+  `AgentDeployed`, and `AgentStopped`, and the account stream's `AccountSnapshotRecorded`. §9.2 also
+  closes `OwnerCommandRefused` on both streams that write it, with DEC-291's members. Every member
+  comes from a writer that exists or from a clause that names it.
+  - `MandateVersionCreated`, `MandateConfirmed`, and `AgentDeployed` carry what `JournaledFact` reads
+    as members, and the rest of their mandate spec §10 row as a stored record named by its hash.
+  - No payload carries a credential or personal data.
+  - The new types are `pointer` and `date`, and the new rules are 17 to 27.
+  - §9.2 maps each record to its `JournaledFact`.
+  - `PlatformOperatorAction` stays open, with a Proposed note, because no clause names the members of
+    three of its five actions.
+  - The test vectors gain a generated `control_stream` section and stay version 3.
 
 - **v0.6, amended ([DEC-280](../project/04-decision-log.md#decisions)):** the agent stream gains
   `OwnerCommandRefused`, the record of a resume or Stop the runtime refused for its step-up, and the
@@ -412,9 +428,9 @@ column of §9, and the required `config_refs` stay as §9 lists them. Each schem
 a record with exactly the listed members, every one present (§4.2). The test vectors' `agent_stream`
 section holds at least one chain event per schema, an invalid draft for every rule below, and valid
 drafts for the cases a rule might be misread to refuse. The other agent-stream events are not
-closed yet: the approval events that v0.5 added and `OwnerCommandRefused` (§9, mandate spec §6.1,
-§6.4) close in their own change, `ModelInvocationRecorded`, `ThesisProposed`, and `ThesisRevised`
-with their own stories.
+closed yet: the approval events that v0.5 added (§9, mandate spec §6.4) close in their own change,
+`ModelInvocationRecorded`, `ThesisProposed`, and `ThesisRevised` with their own stories.
+`OwnerCommandRefused` is closed in §9.2, on both streams that write it.
 
 **Types.**
 
@@ -639,6 +655,202 @@ checks when both are in one batch (rule 10), and `mode_event` names this stream'
 `AgentModeChanged` with reason `kill_switch`. Across batches `append` cannot see the other event,
 so §11's per-range checks `intent_action_mismatch` and `mode_event_mismatch` verify both on the
 stored chain, and `mandate journal verify` reports them.
+
+### 9.2 Control-stream payload schemas ([DEC-261](../project/04-decision-log.md#decisions))
+
+This subsection closes the payload schemas of the records `ValidationContext::from_journal` reads
+([DEC-169](../project/04-decision-log.md#decisions)): the control stream's `StreamOpened`,
+`ConnectionEstablished`, `ConnectionRevoked`, `DisclosureAccepted`, `ConfigSnapshotRegistered`,
+`MandateVersionCreated`, `MandateConfirmed`, `AgentDeployed`, and `AgentStopped`, and the account
+stream's `AccountSnapshotRecorded`. It also closes `OwnerCommandRefused` on both streams that write
+it ([DEC-291](../project/04-decision-log.md#decisions)). For these events it replaces the "Key payload
+fields" column of §9, and the required `config_refs` stay as §9 lists them. §9.1's types, its
+absent-member rule, and its report order apply unchanged, with the rules below numbered on from
+§9.1's. Each schema is `schema_version` 1.
+
+Every member comes from a writer that exists or from a clause that names it, and DEC-261 traces
+each one. No member is inferred where neither exists. The test vectors' `control_stream` section
+holds a hash-chained control stream from `StreamOpened`, with its artifacts; base drafts on the
+account and agent streams; the `JournaledFact` each record maps to; an invalid draft for every rule;
+and valid drafts for the cases a rule might be misread to refuse.
+
+**No payload carries a credential or personal data** (`AGENTS.md` rules 6 and 7, §6.4). A connection
+is named by its opaque ID and scopes, never a key, token, or account number, and a user by an opaque
+ID. Every schema is closed, so a draft with any other member is refused as `schema` at that member.
+
+**Not closed here.** `PlatformOperatorAction` stays open (**Proposed**, DEC-261 item 9). Its §9 row
+lists five actions. Clauses name the members of only two of them: `model_withdrawn` names the model
+and a reason (mandate spec §8.1), and `research_thesis_halt` an instrument and, optionally, the
+research agent's pinned content hash ([DEC-100](../project/04-decision-log.md#decisions)). No clause
+and no writer names the subject of an operator stop, the scope of the global kill switch, what an
+acceptable-use action records, or what the row's "approval" is. So the schema closes when the
+operator service is specified, not with a guess. Until then `append` refuses it as `unknown_schema`,
+as it does today. This holds no risk reduction: an operator's stop or kill switch is applied by the
+stream owners' own `KillSwitchActivated` and mode records (§2), not by this audit record. The other
+control-stream events close with their own stories.
+
+**Types**, beyond §9.1's:
+
+| Type | Values | Refused as |
+|---|---|---|
+| `pointer` | A JSON Pointer (RFC 6901) into the mandate document: one or more `/`-prefixed reference tokens, with `~` only in `~0` or `~1`. It is never the empty pointer: a record names each path it means | Not a string: `schema`; otherwise `non_canonical` |
+| `date` | `YYYY-MM-DD` (§4.7), a calendar date in years 1970 to 9999 | As `pointer` |
+
+**`StreamOpened`** on the control stream.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `stream_type` | `control` | |
+| `workspace_id` | `id` | The subject: rule 25 |
+
+**`ConnectionEstablished`**: the owner connected a broker account. FR-2.2 rejects a connection whose
+permission check fails, so the record exists only once the check has passed and needs no result
+member.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `connection_id` | `id` | The connection, by the opaque ID mandates name it by ([mandate spec §3](mandate.md#3-structure)) |
+| `broker` | `text` | The broker or venue |
+| `environment` | `paper` \| `live` | The account the connection is, which V-001 matches against a mandate's `environment` |
+| `scopes` | `[text]` | The scopes granted: rule 19 |
+
+**`ConnectionRevoked`**
+
+| Member | Type | Meaning |
+|---|---|---|
+| `connection_id` | `id` | |
+
+**`DisclosureAccepted`** ([mandate spec §10](mandate.md#10-records-dec-51-dec-97), V-005)
+
+| Member | Type | Meaning |
+|---|---|---|
+| `document` | `id` | Which disclosure, for example `leveraged_etp` |
+| `version` | `ref` | The disclosure version's hash, the value a mandate's `leveraged_etp_disclosure_version` names. The document is stored, so the hash proves which text was accepted |
+| `user` | `text` | The owner who accepted (opaque) |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}` | Never `null`: V-005 counts only an acceptance with step-up |
+
+**`ConfigSnapshotRegistered`**: a configuration snapshot registered under its content hash. A
+`config_refs` value names one of these.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `kind` | `fee_config` \| `trading_calendar` \| `settlement_calendar` \| `instrument_snapshot` \| `rule_set` \| `mandate_version` \| `model_version` | §9's `config_refs` kinds. A signal model is `model_version` |
+| `content_hash` | `ref` | The snapshot. For a model, its content hash (mandate spec §8.1) |
+| `model_id`, `model_version` | `text?` | A model's id and version, registered together with its hash (V-007): rule 21 |
+| `params` | `[text]` | A model's declared parameters (V-007), empty for any other kind: rules 20 and 21 |
+| `admits_instruments` | `boolean?` | Whether the model may admit instruments (mandate spec §8.4): rule 21 |
+
+**`MandateVersionCreated`** and **`MandateConfirmed`** carry, as members, the parts `JournaledFact`
+reads: the version, the provenance per path, and the confirmed paths. The rest of each
+[mandate spec §10](mandate.md#10-records-dec-51-dec-97) row is a record stored as an artifact and
+named by its hash (`record_ref`). Mandate spec §10 stays the one source of what that record holds.
+The document is stored too, under its own version (`mandate_version`, mandate spec §9.1). Both are
+`ref`s, so each must be stored and must re-hash (§11 check 6). Replay can therefore prove which
+document was confirmed and which record was shown. A bare ID or a path is refused as
+`non_canonical`.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `mandate_version` | `ref` | `MandateVersionCreated`, `MandateConfirmed`: the version, the hash of the stored canonical mandate document |
+| `provenance` | `[{path: pointer, source: user_stated \| user_entered \| template_structure \| platform_proposed \| platform_default}]` | `MandateVersionCreated`: each path's source (mandate spec §2.1): rule 17. Quoted spans and what was proposed are in the record |
+| `confirmed_paths` | `[pointer]` | `MandateConfirmed`: the paths the owner confirmed; a path confirms itself and every path under it: rule 18 |
+| `record_ref` | `ref` | Both: the rest of the event's mandate spec §10 row, as a stored record |
+
+**`AgentDeployed`** ([mandate spec §10](mandate.md#10-records-dec-51-dec-97)). The connection,
+environment, allocation, and pinned instruments the deployment runs under are the document's. They
+are read from the stored document that `mandate_version` names, never restated here.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `agent_id` | `id` | |
+| `mandate_version` | `ref` | The version deployed: rule 22 |
+| `record_ref` | `ref` | The rest of the row: the go-live screen and UI build, the backtest and paper-run IDs and the legend and disclosure versions shown, the approving users, and the step-up evidence |
+
+**`AgentStopped`** ([mandate spec §5.7, §5.10](mandate.md#57-lifetime-loss-floor-dec-44-dec-55))
+
+| Member | Type | Meaning |
+|---|---|---|
+| `agent_id` | `id` | |
+| `connection_id` | `id` | The connection whose loss carry the loss joins |
+| `reason` | `goal_complete` \| `profit_stop_reached` \| `end_date` \| `owner_stop` | §9's reasons |
+| `retired_on` | `date` | The America/New_York date the agent retired. §5.7's 90-day carry counts from it |
+| `loss_added` | `decimal` | The net dollar loss max(0, N − E) at retirement added to the carry: rule 23 |
+
+**`AccountSnapshotRecorded`** on the account stream: the broker's account as reconciliation reads it
+([trading spec §11](trading-domain.md#11-reconciliation)). The members are the executor's. The last three record the
+cash comparison, which only a reconciliation that had a base to compare against makes, and are
+otherwise `null`.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `status`, `crypto_status` | `text` | As the broker reports them |
+| `trading_blocked`, `account_blocked`, `trade_suspended_by_user` | `boolean` | |
+| `multiplier` | `integer` | |
+| `equity`, `cash`, `buying_power`, `non_marginable_buying_power`, `accrued_fees` | `decimal` | |
+| `model_cash` | `decimal?` | The cash the executor's model expected |
+| `cash_band` | `decimal?` | The tolerance |
+| `cash_in_band` | `boolean?` | Whether the broker's cash fell inside it: rule 24 |
+
+**`OwnerCommandRefused`** on the agent and account streams ([mandate spec §6.1](mandate.md#61-purposes),
+DEC-291). The owner input it refused is its `causation_id`: rule 27.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `command` | `resume` \| `stop` \| `acknowledge` | Rule 26 |
+| `reason` | `step_up_missing` \| `step_up_stale` \| `step_up_reused` \| `step_up_method` | |
+| `effective_at` | `timestamp` | The effective time the command was judged at |
+
+**Consistency rules** (reason `schema` unless stated; the path is the member named):
+
+17. `MandateVersionCreated`: `provenance` strictly ascending by `path` bytes, so no path is listed twice
+    (`non_canonical` at `payload.provenance`).
+18. `MandateConfirmed`: `confirmed_paths` strictly ascending by bytes (`non_canonical` at
+    `payload.confirmed_paths`).
+19. `ConnectionEstablished`: `scopes` strictly ascending by bytes (`non_canonical` at `payload.scopes`).
+20. `ConfigSnapshotRegistered`: `params` strictly ascending by bytes (`non_canonical` at
+    `payload.params`).
+21. `ConfigSnapshotRegistered`: `model_id`, `model_version`, and `admits_instruments` are non-null
+    exactly when `kind` is `model_version`, and `params` is empty when it is not. Reported at the first
+    offending member, in that order.
+22. `AgentDeployed`: `mandate_version` equals `config_refs.mandate_version` (`payload.mandate_version`).
+    A missing ref is already `missing_config_ref`.
+23. `AgentStopped`: `loss_added` ≥ 0 (`payload.loss_added`). The loss carried is never negative
+    (mandate spec §5.7).
+24. `AccountSnapshotRecorded`: `cash_band` and `cash_in_band` are `null` exactly when `model_cash` is.
+    Reported at the first that disagrees. When all three are present, `cash_band` ≥ 0
+    (`payload.cash_band`), and `cash_in_band` is `true` exactly when |`cash` − `model_cash`| ≤
+    `cash_band` (`payload.cash_in_band`). A snapshot's flag can never contradict its own numbers.
+
+**Subject rules** (reason `stream_mismatch`):
+
+25. Control-stream `StreamOpened`: `stream_id` equals `ctl:{workspace_id}` (`stream_id`).
+26. `OwnerCommandRefused`: `command` is `acknowledge` on the account stream, and `resume` or `stop` on
+    the agent stream (`payload.command`). The executor refuses acknowledgments, and the runtime
+    refuses resumes and Stops (§2).
+
+**Copy rule** (reason `schema`):
+
+27. `OwnerCommandRefused`, on either stream, has a non-null `causation_id` (`causation_id`). On the
+    agent stream that is the `OwnerCommandIssued` (rule 16 already requires it there), and on the
+    account stream the control stream's `OwnerAcknowledged` (§2). The refusal is written from the
+    input it refuses, so the rule never holds one.
+
+**The mapping to `JournaledFact`** ([DEC-169](../project/04-decision-log.md#decisions)). Each record
+maps to one fact, and the test vectors list them. `AccountSnapshotRecorded` does not name its
+connection. Which connection an account stream belongs to is journaled nowhere yet (**Proposed**,
+DEC-261 item 10), so the mapping takes it as an argument from its owner. `ValidationContext` takes
+what no event carries the same way.
+
+| Record | Fact | From |
+|---|---|---|
+| `ConnectionEstablished`, `ConnectionRevoked` | `ConnectionEstablished`, `ConnectionRevoked` | `connection_id`, and for the first `environment` |
+| `DisclosureAccepted` | `DisclosureAccepted` | `version` |
+| `ConfigSnapshotRegistered` of kind `model_version` | `ModelRegistered` | `model_id`, `model_version`, `content_hash`, `params`, `admits_instruments`; other kinds map to none |
+| `MandateVersionCreated` | `MandateVersionCreated` | `mandate_version`, `provenance` |
+| `MandateConfirmed` | `MandateConfirmed` | `mandate_version`, `confirmed_paths` |
+| `AgentDeployed` | `AgentVersionActive` | `agent_id`; `connection_id`, `environment`, `capital.allocation_usd`, and `universe.pinned_instruments[].asset_id` of the stored document `mandate_version` names. A document that is not stored maps to none, and the mapping refuses it |
+| `AgentStopped` | `AgentStopped` | `agent_id`, `connection_id`, `retired_on`, `loss_added` |
+| `AccountSnapshotRecorded` | `AccountSnapshot` | `equity`, with the account stream's connection given |
 
 ## 10. Anchoring
 

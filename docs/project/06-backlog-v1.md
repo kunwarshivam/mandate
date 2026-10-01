@@ -351,6 +351,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `AgentDeployed`, `AgentStopped`, `ConnectionEstablished`, `DisclosureAccepted`,
   `MandateVersionCreated`, `MandateConfirmed`, `ConfigSnapshotRegistered` and
   `PlatformOperatorAction` have registered schemas, and each maps to its `JournaledFact`, tests first.
+  *Unblocked except `PlatformOperatorAction`* ([DEC-261](04-decision-log.md#decisions)): journal
+  spec v0.7 §9.2 closes the other eight, with `ConnectionRevoked` and `OwnerCommandRefused` (#411,
+  #413). It maps each record to its fact, and the vectors are in `journal.yaml`'s `control_stream`
+  section. `PlatformOperatorAction` stays open (DEC-261 item 9, Proposed), so its schema and the
+  `ModelWithdrawn` mapping wait for the operator service's specification.
 
 ### E8 Escalation and approvals
 
@@ -1066,6 +1071,16 @@ From E10-1's slice-V implementation (DEC-161):
   `MandateConfirmed`. `AgentFlat` needs a source there too (the account ledger's flat-in-every-instrument
   signal). A record left unmapped is a fact the fold never sees, so the mapper's completeness is what
   covers the facts that only add (DEC-169 item 2).
+- **Journal spec v0.7 §9.2's follow-ups ([DEC-261](04-decision-log.md#decisions)).**
+  - **Stream K:** the executor's fee-step `AccountSnapshotRecorded` writes `model_cash`, `cash_band`,
+    and `cash_in_band` as `null`, not absent (§4.2).
+  - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
+    (HLD §8), as a new `schema_version` with its own vectors.
+  - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,
+    which must name each action's members: the operator stop's subject, the global kill switch's
+    scope, the acceptable-use action, and the row's "approval".
+  - **Proposed, item 10:** a clause binds an account stream to its connection, so that
+    `AccountSnapshotRecorded`'s fact needs no argument.
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).

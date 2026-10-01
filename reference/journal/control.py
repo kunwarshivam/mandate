@@ -1,0 +1,1805 @@
+"""The control-stream vectors of journal.yaml (journal spec §9.2, DEC-261).
+
+Journal spec §9.2 closes the control stream's payload schemas that `ValidationContext::from_journal`
+reads (DEC-169), the account stream's `AccountSnapshotRecorded`, and `OwnerCommandRefused` on both
+streams that write it. This module is their reference implementation, called by `generate.py`. It:
+
+1. builds the artifacts, including the mandate document of the mandate reference cases' base
+   `btc_accumulator` (its version recomputed from that file's own canonical text first), and the
+   control-stream chain, hashing each body onto the previous one;
+2. validates every draft against the closed schemas and the §9.2 rules: each chain event and base
+   draft passes every rule, and each invalid draft breaks exactly the one rule it names;
+3. recomputes, by its own path, the `JournaledFact` each record maps to, the version each record
+   binds, and the cross-record facts (V-001, V-007) the chain must show;
+4. seeds bugs into the validator and into the vectors, and requires every one to be caught by the
+   one check it is registered against.
+"""
+
+import copy
+import functools
+from decimal import Decimal
+from pathlib import Path
+
+import yaml
+from common import (
+    BOOL,
+    DEC,
+    ENVELOPE,
+    INT,
+    REF,
+    STEP_UP,
+    STR,
+    TS,
+    T,
+    Violation,
+    apply_change,
+    artifact_ref,
+    ascending,
+    canon,
+    change,
+    delete,
+    digest_strings,
+    draft_of,
+    hash_chain,
+    is_ulid,
+    list_of,
+    normalize_decimal,
+    one_of,
+    opt,
+    rec,
+    rechain,
+    sha256_hex,
+    type_violations,
+)
+from common import (
+    CONFIG_REF_KINDS as CONFIG_KINDS,
+)
+from common import (
+    DIGEST as DIGEST_REF,
+)
+from common import (
+    ID as IDENT_T,
+)
+from common import (
+    IDENT as IDENT_RE,
+)
+
+ROOT = Path(__file__).resolve().parents[2]
+MANDATE_CASES = ROOT / "docs/specs/reference-cases/mandate.yaml"
+SPEC = "docs/specs/journal.md v0.7 §9.2 (DEC-261)"
+
+# --------------------------------------------------------------------------- closed schemas (§9.2)
+
+DATE = T("date")
+POINTER = T("pointer")
+SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
+STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
+REFUSED_COMMANDS = {"agent": ("resume", "stop"), "acct": ("acknowledge",)}
+REFUSAL_REASONS = ("step_up_missing", "step_up_stale", "step_up_reused", "step_up_method")
+MODEL_KIND = "model_version"
+MODEL_MEMBERS = ("model_id", "model_version", "admits_instruments")
+CASH_MEMBERS = ("cash_band", "cash_in_band")
+
+SCHEMAS: dict[tuple[str, str], T] = {
+    ("ctl", "StreamOpened"): rec(("stream_type", one_of("control")), ("workspace_id", IDENT_T)),
+    ("ctl", "ConnectionEstablished"): rec(
+        ("connection_id", IDENT_T),
+        ("broker", STR),
+        ("environment", one_of("paper", "live")),
+        ("scopes", list_of(STR)),
+    ),
+    ("ctl", "ConnectionRevoked"): rec(("connection_id", IDENT_T)),
+    ("ctl", "DisclosureAccepted"): rec(
+        ("document", IDENT_T), ("version", REF), ("user", STR), ("step_up", STEP_UP)
+    ),
+    ("ctl", "ConfigSnapshotRegistered"): rec(
+        ("kind", one_of(*CONFIG_KINDS)),
+        ("content_hash", REF),
+        ("model_id", opt(STR)),
+        ("model_version", opt(STR)),
+        ("params", list_of(STR)),
+        ("admits_instruments", opt(BOOL)),
+    ),
+    ("ctl", "MandateVersionCreated"): rec(
+        ("mandate_version", REF),
+        ("provenance", list_of(rec(("path", POINTER), ("source", one_of(*SOURCES))))),
+        ("record_ref", REF),
+    ),
+    ("ctl", "MandateConfirmed"): rec(
+        ("mandate_version", REF), ("confirmed_paths", list_of(POINTER)), ("record_ref", REF)
+    ),
+    ("ctl", "AgentDeployed"): rec(("agent_id", IDENT_T), ("mandate_version", REF), ("record_ref", REF)),
+    ("ctl", "AgentStopped"): rec(
+        ("agent_id", IDENT_T),
+        ("connection_id", IDENT_T),
+        ("reason", one_of(*STOP_REASONS)),
+        ("retired_on", DATE),
+        ("loss_added", DEC),
+    ),
+    ("acct", "AccountSnapshotRecorded"): rec(
+        ("status", STR),
+        ("crypto_status", STR),
+        ("trading_blocked", BOOL),
+        ("account_blocked", BOOL),
+        ("trade_suspended_by_user", BOOL),
+        ("multiplier", INT),
+        ("equity", DEC),
+        ("cash", DEC),
+        ("buying_power", DEC),
+        ("non_marginable_buying_power", DEC),
+        ("accrued_fees", DEC),
+        ("model_cash", opt(DEC)),
+        ("cash_band", opt(DEC)),
+        ("cash_in_band", opt(BOOL)),
+    ),
+}
+REFUSAL = rec(
+    ("command", one_of("resume", "stop", "acknowledge")),
+    ("reason", one_of(*REFUSAL_REASONS)),
+    ("effective_at", TS),
+)
+SCHEMAS[("acct", "OwnerCommandRefused")] = REFUSAL
+SCHEMAS[("agent", "OwnerCommandRefused")] = REFUSAL
+
+REQUIRED_REFS = {"AgentDeployed": ("mandate_version",), "AgentStopped": ("mandate_version",)}
+
+
+def is_pointer(text: str) -> bool:
+    """A non-empty RFC 6901 pointer: `/`-prefixed tokens, `~` only as `~0` or `~1`."""
+    if not text.startswith("/"):
+        return False
+    for token in text[1:].split("/"):
+        rest = token.replace("~0", "").replace("~1", "")
+        if "~" in rest:
+            return False
+    return True
+
+
+def is_date(text: str) -> bool:
+    if len(text) != 10 or text[4] != "-" or text[7] != "-":
+        return False
+    year, month, day = text[:4], text[5:7], text[8:]
+    if not (year + month + day).isdigit() or not 1970 <= int(year) <= 9999:
+        return False
+    days = (
+        31,
+        29 if int(year) % 4 == 0 and (int(year) % 100 != 0 or int(year) % 400 == 0) else 28,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    )
+    return 1 <= int(month) <= 12 and 1 <= int(day) <= days[int(month) - 1]
+
+
+def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> list[Violation]:
+    """`type_violations` with §9.2's two new types: `pointer` and `date` (refused as `id` is)."""
+    if ty.kind in ("pointer", "date"):
+        if not isinstance(value, str):
+            return [Violation("types", "schema", path)]
+        ok = is_pointer(value) if ty.kind == "pointer" else is_date(value)
+        if not ok and f"types.{ty.kind}" not in skip:
+            return [Violation("types", "non_canonical", path)]
+        return []
+    if ty.kind == "record" and isinstance(value, dict):
+        names = [name for name, _ in ty.fields]
+        out = []
+        if "record.extra" not in skip:
+            out += [
+                Violation("record.extra", "schema", f"{path}.{k}".lstrip("."))
+                for k in sorted(value)
+                if k not in names
+            ]
+        for name, inner in ty.fields:
+            member = f"{path}.{name}".lstrip(".")
+            if name not in value:
+                if "record.missing" not in skip:
+                    out.append(Violation("record.missing", "schema", member))
+            else:
+                out += payload_type_violations(inner, value[name], member, skip)
+        return out
+    if ty.kind == "list" and isinstance(value, list):
+        return [
+            v
+            for i, item in enumerate(value)
+            for v in payload_type_violations(ty.inner, item, f"{path}[{i}]", skip)
+        ]
+    if ty.kind == "nullable":
+        return [] if value is None else payload_type_violations(ty.inner, value, path, skip)
+    return type_violations(ty, value, path, skip)
+
+
+def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """The §9.2 consistency rules 17 to 24, on a well-typed payload, each reported once."""
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, reason: str, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", reason, path))
+
+    if event_type == "MandateVersionCreated":
+        paths = [entry["path"].encode() for entry in p["provenance"]]
+        rule("17", ascending(paths), "non_canonical", "payload.provenance")
+    if event_type == "MandateConfirmed":
+        paths = [path.encode() for path in p["confirmed_paths"]]
+        rule("18", ascending(paths), "non_canonical", "payload.confirmed_paths")
+    if event_type == "ConnectionEstablished":
+        rule("19", ascending([s.encode() for s in p["scopes"]]), "non_canonical", "payload.scopes")
+    if event_type == "ConfigSnapshotRegistered":
+        rule("20", ascending([s.encode() for s in p["params"]]), "non_canonical", "payload.params")
+        model = p["kind"] == MODEL_KIND
+        wrong = [m for m in MODEL_MEMBERS if (p[m] is not None) != model]
+        if not model and p["params"] and "rule.21.params" not in skip:
+            wrong.append("params")
+        rule("21", not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
+    if event_type == "AgentDeployed" and "mandate_version" in draft["config_refs"]:
+        bound = p["mandate_version"] == draft["config_refs"]["mandate_version"]
+        rule("22", bound, "schema", "payload.mandate_version")
+    if event_type == "AgentStopped":
+        floor = (
+            Decimal(p["loss_added"]) > 0
+            if "boundary.rule_23_strict" in skip
+            else Decimal(p["loss_added"]) >= 0
+        )
+        rule("23", floor, "schema", "payload.loss_added")
+    if event_type == "AccountSnapshotRecorded":
+        compared = p["model_cash"] is not None
+        wrong = [m for m in CASH_MEMBERS if (p[m] is not None) != compared]
+        rule("24", not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
+        if compared and not wrong:
+            band = Decimal(p["cash_band"])
+            rule("24.band", band >= 0, "schema", "payload.cash_band")
+            drift = abs(Decimal(p["cash"]) - Decimal(p["model_cash"]))
+            inside = drift < band if "boundary.rule_24_strict" in skip else drift <= band
+            rule("24.in_band", p["cash_in_band"] == inside, "schema", "payload.cash_in_band")
+    return out
+
+
+def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """Rules 25 and 26 (reason `stream_mismatch`)."""
+    p = draft["payload"]
+    kind = draft["stream_id"].split(":")[0]
+    out = []
+    if (
+        event_type == "StreamOpened"
+        and draft["stream_id"] != f"ctl:{p['workspace_id']}"
+        and "rule.25" not in skip
+    ):
+        out.append(Violation("rule.25", "stream_mismatch", "stream_id"))
+    refused = event_type == "OwnerCommandRefused" and p["command"] not in REFUSED_COMMANDS[kind]
+    if refused and f"rule.26.{kind}" not in skip:
+        out.append(Violation(f"rule.26.{kind}", "stream_mismatch", "payload.command"))
+    return out
+
+
+def copy_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """Rule 27: an `OwnerCommandRefused` names the owner input it refused (reason `schema`)."""
+    kind = draft["stream_id"].split(":")[0]
+    if (
+        event_type == "OwnerCommandRefused"
+        and draft["causation_id"] is None
+        and f"rule.27.{kind}" not in skip
+    ):
+        return [Violation(f"rule.27.{kind}", "schema", "causation_id")]
+    return []
+
+
+def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violation]:
+    """Every rule a §9.2 draft breaks, in the journal's check order (spec §9.1, §9.2)."""
+    out = type_violations(ENVELOPE, draft, "", skip)
+    if out:
+        return out
+    if draft["envelope_version"] != 1:
+        return [Violation("envelope", "schema", "envelope_version")]
+    event_type = draft["event_type"]
+    stream = draft["stream_id"].split(":")
+    kinds = {k for k, e in SCHEMAS if e == event_type}
+    if not kinds:
+        return [Violation("catalogue", "unknown_event_type", "event_type")]
+    shape = {"acct": 3, "agent": 3, "ctl": 2}.get(stream[0])
+    if shape != len(stream) or not all(IDENT_RE.match(s) for s in stream[1:]):
+        return [Violation("stream", "non_canonical", "stream_id")]
+    if stream[0] not in kinds:
+        return [Violation("stream", "wrong_stream", "event_type")]
+    if draft["actor"]["kind"] in ("system", "agent") and draft["actor"]["build"] is None:
+        out.append(Violation("actor", "schema", "actor.build"))
+    refs = draft["config_refs"]
+    for kind in sorted(refs):
+        if kind not in CONFIG_KINDS:
+            out.append(Violation("config_refs", "schema", f"config_refs.{kind}"))
+        elif not (isinstance(refs[kind], str) and DIGEST_REF.match(refs[kind])):
+            out.append(Violation("config_refs", "non_canonical", f"config_refs.{kind}"))
+    if "config_refs.required" not in skip:
+        missing = [k for k in REQUIRED_REFS.get(event_type, ()) if k not in refs]
+        out += [
+            Violation("config_refs.required", "missing_config_ref", f"config_refs.{k}") for k in missing[:1]
+        ]
+    if draft["schema_version"] != 1:
+        return [*out, Violation("catalogue", "unknown_schema", "payload")]
+    schema = SCHEMAS[(stream[0], event_type)]
+    payload_types = payload_type_violations(schema, draft["payload"], "payload", skip)
+    out += payload_types
+    if not payload_types:
+        out += consistency_violations(event_type, draft, skip)
+    if "artifact_refs" not in skip and draft["artifact_refs"] != sorted(digest_strings(draft["payload"])):
+        out.append(Violation("artifact_refs", "artifact_refs", "artifact_refs"))
+    if not ascending(draft["pii_refs"]):
+        out.append(Violation("pii_refs", "pii_refs", "pii_refs"))
+    if not payload_types:
+        out += subject_violations(event_type, draft, skip)
+        out += copy_violations(event_type, draft, skip)
+    return out
+
+
+# --------------------------------------------------------------------------- the control stream
+
+WORKSPACE = "ws_01J8Z2"
+AGENT = "agent_a"
+STREAM = f"ctl:{WORKSPACE}"
+AGENT_STREAM = f"agent:{WORKSPACE}:{AGENT}"
+OWNER = "user_owner_01"
+SERVICES = {"kind": "system", "id": "control_services", "version": "0.1.0", "build": "sha256:" + "d" * 64}
+USER = {"kind": "user", "id": OWNER, "version": "1", "build": None}
+EXECUTOR = {"kind": "system", "id": "executor", "version": "0.1.0", "build": "sha256:" + "3" * 64}
+RUNTIME = {"kind": "agent", "id": AGENT, "version": "0.1.0", "build": "sha256:" + "c" * 64}
+CHAIN = (
+    ("opened", "01J8Y0A0A000000000000000S1"),
+    ("connection", "01J8Y0A1A000000000000000S2"),
+    ("model_registered", "01J8Y0A2A000000000000000S3"),
+    ("fee_registered", "01J8Y0A2B000000000000000S4"),
+    ("disclosure", "01J8Y0A3A000000000000000S5"),
+    ("version_created", "01J8Y0A4A000000000000000S6"),
+    ("confirmed", "01J8Y0A5A000000000000000S7"),
+    ("deployed", "01J8Y0A6A000000000000000S8"),
+    ("stopped", "01J8ZQA0A000000000000000S9"),
+    ("revoked", "01J8ZQA1A000000000000000SA"),
+)
+SEQ = {name: seq for seq, (name, _) in enumerate(CHAIN, start=1)}
+ID = dict(CHAIN)
+BASE_IDS = {
+    "snapshot_reconciled": "01J8Z3N0A000000000000000R1",
+    "snapshot_fees": "01J8Z3N0B000000000000000R2",
+    "refused_stop": "01J8ZNB0T000000000000000R3",
+    "refused_acknowledgment": "01J8ZPA0A000000000000000R4",
+}
+OWNER_INPUT = {
+    "stop": "01J8ZNB00000000000000000C6",
+    "acknowledge": "01J8ZPA00000000000000000C7",
+}
+assert all(is_ulid(i) for i in (*ID.values(), *BASE_IDS.values(), *OWNER_INPUT.values())), "event IDs (§3)"
+assert len({*ID.values(), *BASE_IDS.values(), *OWNER_INPUT.values()}) == len(ID) + len(BASE_IDS) + len(
+    OWNER_INPUT
+)
+
+
+def base_mandate() -> tuple[dict, str]:
+    """The mandate reference cases' `btc_accumulator` and its version, after reproducing that file's
+    own canonical text and hash, so the canonicalizer is proven on a mandate before it is trusted."""
+    mandate, name = proven_base_mandate()
+    return copy.deepcopy(mandate), name
+
+
+@functools.cache
+def proven_base_mandate() -> tuple[dict, str]:
+    cases = yaml.safe_load(MANDATE_CASES.read_text(encoding="utf-8"))
+    vector = cases["version_vector"]
+    base = cases["bases"][vector["base"]]
+    mandate = base["mandate"]
+    assert artifact_ref(mandate) == vector["mandate_version"] == base["canonical_sha256"], "mandate version"
+    assert canon(mandate) == vector["canonical"], "the base mandate's canonical text differs"
+    return mandate, vector["base"]
+
+
+MODEL_CONTENT = {
+    "kind": "signal_model",
+    "model_id": "quant.mean_reversion",
+    "model_version": "1.0.0",
+    "authorship": "platform",
+    "code": "reference fixture: stands for the model code, prompt, and parameter schema (mandate spec §8.1)",
+    "parameter_schema": {"lookback_bars": "integer", "z_entry": "decimal"},
+}
+FEE_CONFIG = {
+    "kind": "fee_config",
+    "note": "reference fixture: stands for a fee configuration snapshot (trading spec §6)",
+}
+DISCLOSURE = {
+    "kind": "disclosure",
+    "document": "leveraged_etp",
+    "note": "reference fixture: stands for the disclosure text the owner accepted (mandate spec V-005)",
+}
+
+
+def mandate_document() -> dict:
+    """The base mandate, pinning the registered model's real content hash (V-007): the base's
+    placeholder hash names no stored object, and a `ref` must re-hash (§11 check 6)."""
+    mandate, _ = base_mandate()
+    document = copy.deepcopy(mandate)
+    (model,) = document["behavior"]["signal_models"]
+    assert (model["id"], model["version"]) == (MODEL_CONTENT["model_id"], MODEL_CONTENT["model_version"])
+    model["content_hash"] = artifact_ref(MODEL_CONTENT)
+    return document
+
+
+def records(version: str) -> dict:
+    note = "reference fixture: stands for mandate spec §10's {} contents, which mandate spec §10 defines: {}"
+    return {
+        "version_record": {
+            "kind": "mandate_version_record",
+            "mandate_version": version,
+            "note": note.format(
+                "MandateVersionCreated",
+                "source text, compiled fields, provenance with quoted spans, template, policy-set hashes, "
+                "validation results, warnings and worst-case figures, classification, and diff",
+            ),
+        },
+        "confirmation_record": {
+            "kind": "mandate_confirmation_record",
+            "mandate_version": version,
+            "note": note.format(
+                "MandateConfirmed",
+                "the rendered confirmation screen and UI build, warnings acknowledged, step-up evidence, "
+                "and the confirming user",
+            ),
+        },
+        "deployment_record": {
+            "kind": "deployment_record",
+            "mandate_version": version,
+            "note": note.format(
+                "AgentDeployed",
+                "the rendered go-live screen and UI build, the backtest and paper-run IDs shown, the "
+                "performance legend and disclosure versions shown, the approving users, and step-up evidence",
+            ),
+        },
+    }
+
+
+def artifacts() -> dict[str, dict]:
+    document = mandate_document()
+    return {
+        "mandate_document": document,
+        "model_content": MODEL_CONTENT,
+        "fee_config": FEE_CONFIG,
+        "disclosure": DISCLOSURE,
+        **records(artifact_ref(document)),
+    }
+
+
+TOP_LEVEL_SOURCES = {
+    "/autonomy": "user_entered",
+    "/behavior": "user_entered",
+    "/capital": "user_entered",
+    "/connection_id": "user_entered",
+    "/environment": "user_entered",
+    "/goal": "user_stated",
+    "/name": "user_entered",
+    "/notifications": "user_entered",
+    "/protection": "user_entered",
+    "/risk": "user_entered",
+    "/universe": "user_entered",
+}
+
+
+def step_up(at: str) -> dict:
+    return {"assertion_id": "assert_owner_01", "authenticated_at": at, "method": "webauthn"}
+
+
+def event(
+    name: str, event_type: str, at: str, payload: dict, actor: dict, version: str | None = None, **envelope
+) -> dict:
+    return {
+        "envelope_version": 1,
+        "environment": "paper",
+        "event_id": ID[name],
+        "stream_id": STREAM,
+        "seq": SEQ[name],
+        "event_type": event_type,
+        "schema_version": 1,
+        "event_time": at,
+        "recorded_at": at[:-4] + "400Z",
+        "clock_source": "local",
+        "causation_id": envelope.get("causation_id"),
+        "correlation_id": None,
+        "actor": dict(actor),
+        "config_refs": {"mandate_version": version} if event_type in REQUIRED_REFS else {},
+        "payload": payload,
+        "artifact_refs": sorted(digest_strings(payload)),
+        "pii_refs": [],
+        "prev_hash": None,
+    }
+
+
+def chain_bodies(arts: dict[str, dict]) -> list[dict]:
+    ref = {name: artifact_ref(obj) for name, obj in arts.items()}
+    document = arts["mandate_document"]
+    version = ref["mandate_document"]
+    (model,) = document["behavior"]["signal_models"]
+    return [
+        event(
+            "opened",
+            "StreamOpened",
+            "2026-09-20T13:00:00.000000000Z",
+            {"stream_type": "control", "workspace_id": WORKSPACE},
+            SERVICES,
+        ),
+        event(
+            "connection",
+            "ConnectionEstablished",
+            "2026-09-20T13:05:00.000000000Z",
+            {
+                "connection_id": document["connection_id"],
+                "broker": "alpaca",
+                "environment": document["environment"],
+                "scopes": ["account:write", "trading"],
+            },
+            USER,
+        ),
+        event(
+            "model_registered",
+            "ConfigSnapshotRegistered",
+            "2026-09-20T13:06:00.000000000Z",
+            {
+                "kind": MODEL_KIND,
+                "content_hash": ref["model_content"],
+                "model_id": MODEL_CONTENT["model_id"],
+                "model_version": MODEL_CONTENT["model_version"],
+                "params": sorted(MODEL_CONTENT["parameter_schema"]),
+                "admits_instruments": model["admits_instruments"],
+            },
+            SERVICES,
+        ),
+        event(
+            "fee_registered",
+            "ConfigSnapshotRegistered",
+            "2026-09-20T13:06:30.000000000Z",
+            {
+                "kind": "fee_config",
+                "content_hash": ref["fee_config"],
+                "model_id": None,
+                "model_version": None,
+                "params": [],
+                "admits_instruments": None,
+            },
+            SERVICES,
+        ),
+        event(
+            "disclosure",
+            "DisclosureAccepted",
+            "2026-09-20T13:07:00.000000000Z",
+            {
+                "document": DISCLOSURE["document"],
+                "version": ref["disclosure"],
+                "user": OWNER,
+                "step_up": step_up("2026-09-20T13:06:50.000000000Z"),
+            },
+            USER,
+        ),
+        event(
+            "version_created",
+            "MandateVersionCreated",
+            "2026-09-20T13:10:00.000000000Z",
+            {
+                "mandate_version": version,
+                "provenance": [
+                    {"path": path, "source": source} for path, source in sorted(TOP_LEVEL_SOURCES.items())
+                ],
+                "record_ref": ref["version_record"],
+            },
+            SERVICES,
+        ),
+        event(
+            "confirmed",
+            "MandateConfirmed",
+            "2026-09-20T13:12:00.000000000Z",
+            {
+                "mandate_version": version,
+                "confirmed_paths": sorted(TOP_LEVEL_SOURCES),
+                "record_ref": ref["confirmation_record"],
+            },
+            USER,
+        ),
+        event(
+            "deployed",
+            "AgentDeployed",
+            "2026-09-20T13:20:00.000000000Z",
+            {
+                "agent_id": AGENT,
+                "mandate_version": version,
+                "record_ref": ref["deployment_record"],
+            },
+            USER,
+            version,
+        ),
+        event(
+            "stopped",
+            "AgentStopped",
+            "2026-09-25T18:00:00.000000000Z",
+            {
+                "agent_id": AGENT,
+                "connection_id": document["connection_id"],
+                "reason": "owner_stop",
+                "retired_on": "2026-09-25",
+                "loss_added": "125.5",
+            },
+            SERVICES,
+            version,
+        ),
+        event(
+            "revoked",
+            "ConnectionRevoked",
+            "2026-09-25T18:30:00.000000000Z",
+            {"connection_id": document["connection_id"]},
+            USER,
+        ),
+    ]
+
+
+ACCOUNT_STREAM_REF = "01J8Z2ACCT00000000000000A1"
+
+
+def base_drafts(v3: dict) -> dict[str, dict]:
+    """Drafts on the account and agent streams, which have no chain here; each must be valid."""
+    account = v3["chain"][0]["body"]["stream_id"]
+    assert account == f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}", "the version-3 account stream"
+
+    def draft(name, stream, event_type, at, payload, actor, causation=None):
+        return {
+            "envelope_version": 1,
+            "environment": "paper",
+            "event_id": BASE_IDS[name],
+            "stream_id": stream,
+            "event_type": event_type,
+            "schema_version": 1,
+            "event_time": at,
+            "clock_source": "broker" if event_type == "AccountSnapshotRecorded" else "local",
+            "causation_id": causation,
+            "correlation_id": None,
+            "actor": dict(actor),
+            "config_refs": {},
+            "payload": payload,
+            "artifact_refs": [],
+            "pii_refs": [],
+        }
+
+    account_values = {
+        "status": "ACTIVE",
+        "crypto_status": "ACTIVE",
+        "trading_blocked": False,
+        "account_blocked": False,
+        "trade_suspended_by_user": False,
+        "multiplier": 1,
+        "equity": "25000",
+        "cash": "10000",
+        "buying_power": "20000",
+        "non_marginable_buying_power": "10000",
+        "accrued_fees": "0",
+    }
+    return {
+        "snapshot_reconciled": draft(
+            "snapshot_reconciled",
+            account,
+            "AccountSnapshotRecorded",
+            "2026-09-21T14:05:00.000000000Z",
+            {**account_values, "model_cash": "10000.5", "cash_band": "1.25", "cash_in_band": True},
+            EXECUTOR,
+        ),
+        "snapshot_fees": draft(
+            "snapshot_fees",
+            account,
+            "AccountSnapshotRecorded",
+            "2026-09-21T21:00:00.000000000Z",
+            {**account_values, "model_cash": None, "cash_band": None, "cash_in_band": None},
+            EXECUTOR,
+        ),
+        "refused_stop": draft(
+            "refused_stop",
+            AGENT_STREAM,
+            "OwnerCommandRefused",
+            "2026-09-21T20:30:00.000000000Z",
+            {"command": "stop", "reason": "step_up_stale", "effective_at": "2026-09-21T20:30:00.000000000Z"},
+            RUNTIME,
+            OWNER_INPUT["stop"],
+        ),
+        "refused_acknowledgment": draft(
+            "refused_acknowledgment",
+            account,
+            "OwnerCommandRefused",
+            "2026-09-22T13:00:00.000000000Z",
+            {
+                "command": "acknowledge",
+                "reason": "step_up_missing",
+                "effective_at": "2026-09-22T13:00:00.000000000Z",
+            },
+            EXECUTOR,
+            OWNER_INPUT["acknowledge"],
+        ),
+    }
+
+
+DERIVATION = {
+    "note": (
+        "The control stream from a connection to a retirement, for the mandate reference cases' base "
+        "btc_accumulator (its signal model's content hash replaced by the stored model content's, V-007). "
+        "The account stream is the version-3 vectors'; which connection it belongs to is journaled "
+        "nowhere yet (DEC-261), so the mapping to JournaledFact takes it as an argument, given here. "
+        "The facts are what each record maps to (DEC-169): a record that maps to none is not listed."
+    ),
+    "mandate_base": "btc_accumulator",
+    "account_connection": {"stream_id": f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}", "connection_id": None},
+}
+
+
+def derivation(document: dict) -> dict:
+    d = copy.deepcopy(DERIVATION)
+    d["account_connection"]["connection_id"] = document["connection_id"]
+    return d
+
+
+def expected_facts(arts: dict[str, dict]) -> list[dict]:
+    """What each record maps to, written from the constants the chain was built from."""
+    document = arts["mandate_document"]
+    version = artifact_ref(document)
+    connection = document["connection_id"]
+    return [
+        {
+            "seq": SEQ["connection"],
+            "fact": {"kind": "ConnectionEstablished", "connection_id": connection, "environment": "paper"},
+        },
+        {
+            "seq": SEQ["model_registered"],
+            "fact": {
+                "kind": "ModelRegistered",
+                "id": "quant.mean_reversion",
+                "version": "1.0.0",
+                "content_hash": artifact_ref(MODEL_CONTENT),
+                "params": ["lookback_bars", "z_entry"],
+                "admits_instruments": False,
+            },
+        },
+        {
+            "seq": SEQ["disclosure"],
+            "fact": {"kind": "DisclosureAccepted", "version": artifact_ref(DISCLOSURE)},
+        },
+        {
+            "seq": SEQ["version_created"],
+            "fact": {
+                "kind": "MandateVersionCreated",
+                "version": version,
+                "sources": [{"path": p, "source": s} for p, s in sorted(TOP_LEVEL_SOURCES.items())],
+            },
+        },
+        {
+            "seq": SEQ["confirmed"],
+            "fact": {
+                "kind": "MandateConfirmed",
+                "version": version,
+                "confirmed_paths": sorted(TOP_LEVEL_SOURCES),
+            },
+        },
+        {
+            "seq": SEQ["deployed"],
+            "fact": {
+                "kind": "AgentVersionActive",
+                "agent": AGENT,
+                "connection_id": connection,
+                "environment": "paper",
+                "allocation_usd": "10000",
+                "pinned": ["7b4a1c2e-1111-4a2b-9c3d-000000000001"],
+            },
+        },
+        {
+            "seq": SEQ["stopped"],
+            "fact": {
+                "kind": "AgentStopped",
+                "agent": AGENT,
+                "connection_id": connection,
+                "retired_on": "2026-09-25",
+                "loss_added_usd": "125.5",
+            },
+        },
+        {"seq": SEQ["revoked"], "fact": {"kind": "ConnectionRevoked", "connection_id": connection}},
+        {
+            "draft": "snapshot_reconciled",
+            "fact": {"kind": "AccountSnapshot", "connection_id": connection, "equity_usd": "25000"},
+        },
+        {
+            "draft": "snapshot_fees",
+            "fact": {"kind": "AccountSnapshot", "connection_id": connection, "equity_usd": "25000"},
+        },
+    ]
+
+
+# --------------------------------------------------------------------------- drafts
+
+
+def invalid(name, clause, base, changes, reason, path):
+    where = {"base_seq": SEQ[base]} if base in SEQ else {"base_draft": base}
+    return {
+        "name": name,
+        "clause": clause,
+        **where,
+        "changes": changes,
+        "expect": {"outcome": "Invalid", "reason": reason, "path": path},
+    }
+
+
+def valid(name, clause, base, changes):
+    where = {"base_seq": SEQ[base]} if base in SEQ else {"base_draft": base}
+    return {"name": name, "clause": clause, **where, "changes": changes, "expect": {"outcome": "Valid"}}
+
+
+def provenance(*paths: str) -> list[dict]:
+    return [{"path": p, "source": TOP_LEVEL_SOURCES.get(p, "user_entered")} for p in paths]
+
+
+def refs(*names: str) -> dict:
+    """`artifact_refs` once a change leaves only the named artifacts in the payload (§3)."""
+    arts = artifacts()
+    return change("artifact_refs", sorted(artifact_ref(arts[name]) for name in names))
+
+
+def invalid_drafts() -> list[dict]:
+    """Each draft breaks exactly one rule; together they cover every §9.2 member type and rule."""
+    return [
+        invalid(
+            "connection_carries_a_key",
+            "§9.2 no credential member (AGENTS.md rules 6 and 7)",
+            "connection",
+            [change("payload.api_key", "reference-fixture-not-a-key")],
+            "schema",
+            "payload.api_key",
+        ),
+        invalid(
+            "connection_live_scope_unsorted",
+            "rule 19",
+            "connection",
+            [change("payload.scopes", ["trading", "account:write"])],
+            "non_canonical",
+            "payload.scopes",
+        ),
+        invalid(
+            "connection_scope_repeated",
+            "rule 19",
+            "connection",
+            [change("payload.scopes", ["trading", "trading"])],
+            "non_canonical",
+            "payload.scopes",
+        ),
+        invalid(
+            "connection_environment_backtest",
+            "§9.2 ConnectionEstablished.environment",
+            "connection",
+            [change("payload.environment", "backtest")],
+            "non_canonical",
+            "payload.environment",
+        ),
+        invalid(
+            "connection_scope_empty_string",
+            "§9.1 text",
+            "connection",
+            [change("payload.scopes", ["", "trading"])],
+            "non_canonical",
+            "payload.scopes[0]",
+        ),
+        invalid(
+            "revoked_connection_not_an_id",
+            "§9.1 id",
+            "revoked",
+            [change("payload.connection_id", "conn alpaca")],
+            "non_canonical",
+            "payload.connection_id",
+        ),
+        invalid(
+            "disclosure_without_step_up",
+            "§9.2 DisclosureAccepted.step_up (V-005)",
+            "disclosure",
+            [change("payload.step_up", None)],
+            "schema",
+            "payload.step_up",
+        ),
+        invalid(
+            "disclosure_version_bare_id",
+            "§9.2 ref",
+            "disclosure",
+            [change("payload.version", "leveraged_etp_v3"), change("artifact_refs", [])],
+            "non_canonical",
+            "payload.version",
+        ),
+        invalid(
+            "model_kind_unknown",
+            "§9.2 ConfigSnapshotRegistered.kind",
+            "fee_registered",
+            [change("payload.kind", "calendar")],
+            "non_canonical",
+            "payload.kind",
+        ),
+        invalid(
+            "model_without_id",
+            "rule 21",
+            "model_registered",
+            [change("payload.model_id", None)],
+            "schema",
+            "payload.model_id",
+        ),
+        invalid(
+            "model_without_admits",
+            "rule 21",
+            "model_registered",
+            [change("payload.admits_instruments", None)],
+            "schema",
+            "payload.admits_instruments",
+        ),
+        invalid(
+            "fee_with_model_version",
+            "rule 21",
+            "fee_registered",
+            [change("payload.model_version", "1.0.0")],
+            "schema",
+            "payload.model_version",
+        ),
+        invalid(
+            "fee_with_params",
+            "rule 21",
+            "fee_registered",
+            [change("payload.params", ["lookback_bars"])],
+            "schema",
+            "payload.params",
+        ),
+        invalid(
+            "model_params_unsorted",
+            "rule 20",
+            "model_registered",
+            [change("payload.params", ["z_entry", "lookback_bars"])],
+            "non_canonical",
+            "payload.params",
+        ),
+        invalid(
+            "version_created_bare_version",
+            "§9.2 MandateVersionCreated.mandate_version: a bare id is not a version",
+            "version_created",
+            [change("payload.mandate_version", "btc-accumulator-v1"), refs("version_record")],
+            "non_canonical",
+            "payload.mandate_version",
+        ),
+        invalid(
+            "version_created_record_by_path",
+            "§9.2 record_ref: a path is not a content address",
+            "version_created",
+            [change("payload.record_ref", "records/btc-accumulator/v1.json"), refs("mandate_document")],
+            "non_canonical",
+            "payload.record_ref",
+        ),
+        invalid(
+            "version_created_record_absent",
+            "§9.1 absent member",
+            "version_created",
+            [delete("payload.record_ref"), refs("mandate_document")],
+            "schema",
+            "payload.record_ref",
+        ),
+        invalid(
+            "provenance_dotted_path",
+            "§9.2 pointer",
+            "version_created",
+            [change("payload.provenance", [{"path": "autonomy", "source": "user_entered"}])],
+            "non_canonical",
+            "payload.provenance[0].path",
+        ),
+        invalid(
+            "provenance_bad_escape",
+            "§9.2 pointer",
+            "version_created",
+            [change("payload.provenance", [{"path": "/risk/a~2b", "source": "user_entered"}])],
+            "non_canonical",
+            "payload.provenance[0].path",
+        ),
+        invalid(
+            "provenance_whole_document",
+            "§9.2 pointer: never the empty pointer",
+            "version_created",
+            [change("payload.provenance", [{"path": "", "source": "user_entered"}])],
+            "non_canonical",
+            "payload.provenance[0].path",
+        ),
+        invalid(
+            "provenance_unknown_source",
+            "§9.2 MandateVersionCreated.provenance[].source",
+            "version_created",
+            [change("payload.provenance", [{"path": "/autonomy", "source": "compiler"}])],
+            "non_canonical",
+            "payload.provenance[0].source",
+        ),
+        invalid(
+            "provenance_unsorted",
+            "rule 17",
+            "version_created",
+            [change("payload.provenance", provenance("/risk", "/autonomy"))],
+            "non_canonical",
+            "payload.provenance",
+        ),
+        invalid(
+            "provenance_repeated_path",
+            "rule 17",
+            "version_created",
+            [change("payload.provenance", provenance("/risk", "/risk"))],
+            "non_canonical",
+            "payload.provenance",
+        ),
+        invalid(
+            "confirmed_bare_version",
+            "§9.2 MandateConfirmed.mandate_version",
+            "confirmed",
+            [change("payload.mandate_version", "v1"), refs("confirmation_record")],
+            "non_canonical",
+            "payload.mandate_version",
+        ),
+        invalid(
+            "confirmed_paths_unsorted",
+            "rule 18",
+            "confirmed",
+            [change("payload.confirmed_paths", ["/risk", "/autonomy"])],
+            "non_canonical",
+            "payload.confirmed_paths",
+        ),
+        invalid(
+            "confirmed_path_not_a_pointer",
+            "§9.2 pointer",
+            "confirmed",
+            [change("payload.confirmed_paths", ["risk"])],
+            "non_canonical",
+            "payload.confirmed_paths[0]",
+        ),
+        invalid(
+            "confirmed_record_unlisted",
+            "§3 artifact_refs",
+            "confirmed",
+            [change("artifact_refs", [])],
+            "artifact_refs",
+            "artifact_refs",
+        ),
+        invalid(
+            "deployed_version_not_its_config_ref",
+            "rule 22",
+            "deployed",
+            [change("config_refs.mandate_version", "sha256:" + "5" * 64)],
+            "schema",
+            "payload.mandate_version",
+        ),
+        invalid(
+            "deployed_without_mandate_ref",
+            "§9 required config_refs",
+            "deployed",
+            [change("config_refs", {})],
+            "missing_config_ref",
+            "config_refs.mandate_version",
+        ),
+        invalid(
+            "deployed_on_the_agent_stream",
+            "§9 catalogue",
+            "deployed",
+            [change("stream_id", AGENT_STREAM)],
+            "wrong_stream",
+            "event_type",
+        ),
+        invalid(
+            "stopped_loss_negative",
+            "rule 23",
+            "stopped",
+            [change("payload.loss_added", "-0.01")],
+            "schema",
+            "payload.loss_added",
+        ),
+        invalid(
+            "stopped_reason_risk_limit",
+            "§9.2 AgentStopped.reason",
+            "stopped",
+            [change("payload.reason", "risk_limit")],
+            "non_canonical",
+            "payload.reason",
+        ),
+        invalid(
+            "stopped_retired_on_timestamp",
+            "§9.2 date",
+            "stopped",
+            [change("payload.retired_on", "2026-09-25T18:00:00.000000000Z")],
+            "non_canonical",
+            "payload.retired_on",
+        ),
+        invalid(
+            "stopped_retired_on_impossible",
+            "§9.2 date",
+            "stopped",
+            [change("payload.retired_on", "2026-02-29")],
+            "non_canonical",
+            "payload.retired_on",
+        ),
+        invalid(
+            "opened_for_another_workspace",
+            "rule 25",
+            "opened",
+            [change("payload.workspace_id", "ws_other")],
+            "stream_mismatch",
+            "stream_id",
+        ),
+        invalid(
+            "snapshot_carries_account_number",
+            "§9.2 no personal data (§6.4)",
+            "snapshot_reconciled",
+            [change("payload.account_number", "reference-fixture")],
+            "schema",
+            "payload.account_number",
+        ),
+        invalid(
+            "snapshot_multiplier_text",
+            "§9.1 integer",
+            "snapshot_reconciled",
+            [change("payload.multiplier", "1")],
+            "schema",
+            "payload.multiplier",
+        ),
+        invalid(
+            "snapshot_band_without_model_cash",
+            "rule 24",
+            "snapshot_fees",
+            [change("payload.cash_band", "1.25")],
+            "schema",
+            "payload.cash_band",
+        ),
+        invalid(
+            "snapshot_comparison_without_flag",
+            "rule 24",
+            "snapshot_reconciled",
+            [change("payload.cash_in_band", None)],
+            "schema",
+            "payload.cash_in_band",
+        ),
+        invalid(
+            "snapshot_band_negative",
+            "rule 24",
+            "snapshot_reconciled",
+            [change("payload.cash_band", "-1.25"), change("payload.cash_in_band", False)],
+            "schema",
+            "payload.cash_band",
+        ),
+        invalid(
+            "snapshot_outside_band_flagged_inside",
+            "rule 24",
+            "snapshot_reconciled",
+            [change("payload.model_cash", "10001.26")],
+            "schema",
+            "payload.cash_in_band",
+        ),
+        invalid(
+            "snapshot_inside_band_flagged_outside",
+            "rule 24",
+            "snapshot_reconciled",
+            [change("payload.cash_in_band", False)],
+            "schema",
+            "payload.cash_in_band",
+        ),
+        invalid(
+            "refused_acknowledgment_on_the_agent_stream",
+            "rule 26",
+            "refused_stop",
+            [change("payload.command", "acknowledge")],
+            "stream_mismatch",
+            "payload.command",
+        ),
+        invalid(
+            "refused_stop_on_the_account_stream",
+            "rule 26",
+            "refused_acknowledgment",
+            [change("payload.command", "stop")],
+            "stream_mismatch",
+            "payload.command",
+        ),
+        invalid(
+            "refused_stop_without_cause",
+            "rule 27 (rule 16 on the agent stream)",
+            "refused_stop",
+            [change("causation_id", None)],
+            "schema",
+            "causation_id",
+        ),
+        invalid(
+            "refused_acknowledgment_without_cause",
+            "rule 27",
+            "refused_acknowledgment",
+            [change("causation_id", None)],
+            "schema",
+            "causation_id",
+        ),
+        invalid(
+            "refused_pause",
+            "§9.2 OwnerCommandRefused.command",
+            "refused_stop",
+            [change("payload.command", "pause")],
+            "non_canonical",
+            "payload.command",
+        ),
+        invalid(
+            "refused_reason_unknown",
+            "§9.2 OwnerCommandRefused.reason",
+            "refused_stop",
+            [change("payload.reason", "step_up_expired")],
+            "non_canonical",
+            "payload.reason",
+        ),
+        invalid(
+            "refused_at_risk_clock_seconds",
+            "§9.1 timestamp",
+            "refused_stop",
+            [change("payload.effective_at", 1790022600)],
+            "schema",
+            "payload.effective_at",
+        ),
+    ]
+
+
+def valid_drafts() -> list[dict]:
+    """Cases a rule might be misread to refuse; each must be accepted."""
+    return [
+        valid(
+            "snapshot_drift_equal_to_band",
+            "rule 24: inside includes the band itself",
+            "snapshot_reconciled",
+            [change("payload.model_cash", "10001.25")],
+        ),
+        valid(
+            "snapshot_outside_band",
+            "rule 24",
+            "snapshot_reconciled",
+            [change("payload.model_cash", "10001.26"), change("payload.cash_in_band", False)],
+        ),
+        valid(
+            "stopped_with_no_loss",
+            "rule 23: max(0, N - E) may be 0",
+            "stopped",
+            [change("payload.loss_added", "0")],
+        ),
+        valid(
+            "model_without_params",
+            "rule 21: a model may declare no parameters",
+            "model_registered",
+            [change("payload.params", [])],
+        ),
+        valid("refused_resume", "rule 26", "refused_stop", [change("payload.command", "resume")]),
+        valid(
+            "refused_acknowledgment_for_its_method",
+            "rule 26",
+            "refused_acknowledgment",
+            [change("payload.reason", "step_up_method")],
+        ),
+        valid(
+            "provenance_escaped_token",
+            "§9.2 pointer: ~0 and ~1",
+            "version_created",
+            [change("payload.provenance", [{"path": "/risk/a~0b~1c", "source": "user_entered"}])],
+        ),
+        valid(
+            "live_connection",
+            "§9.2 ConnectionEstablished.environment",
+            "connection",
+            [change("payload.environment", "live")],
+        ),
+    ]
+
+
+def draft_for(section: dict, case: dict) -> dict:
+    if "base_seq" in case:
+        draft = draft_of(section["chain"][case["base_seq"] - 1]["body"])
+    else:
+        draft = copy.deepcopy(section["drafts"][case["base_draft"]])
+    for item in case["changes"]:
+        apply_change(draft, item)
+    return draft
+
+
+# --------------------------------------------------------------------------- independent oracles
+
+ORACLE_CHECKS = (
+    *(f"chain.{c}" for c in ("seq", "prev_hash", "canonical", "hash", "stream", "opened", "valid")),
+    "drafts.valid",
+    "artifacts.rehash",
+    "artifacts.missing",
+    "document.base",
+    *(f"version.{c}" for c in ("binds", "record")),
+    *(f"order.{c}" for c in ("confirmed", "deployed", "stopped", "revoked")),
+    "confirm.covers",
+    "deploy.connection",
+    "model.pinned",
+    "facts.recompute",
+    "invalid_drafts",
+    "valid_drafts",
+)
+
+
+def found(check: str, message: str) -> str:
+    if check not in ORACLE_CHECKS:
+        raise ValueError(f"unregistered check {check}")
+    return f"{check}: {message}"
+
+
+def check_of(problem: str) -> str:
+    return problem.partition(": ")[0]
+
+
+def covers(prefix: str, path: str) -> bool:
+    return path == prefix or path.startswith(prefix + "/")
+
+
+def recompute_facts(section: dict) -> list[dict]:
+    """The `JournaledFact` each record maps to (DEC-169), from the chain's payloads and the stored
+    artifacts alone: a deployment's connection, environment, allocation, and pinned instruments are
+    read from the mandate document its version names."""
+    stored = {a["ref"]: a["object"] for a in section["artifacts"]}
+    binding = section["derivation"]["account_connection"]
+    out = []
+    for entry in section["chain"]:
+        body, p = entry["body"], entry["body"]["payload"]
+        fact = None
+        match body["event_type"]:
+            case "ConnectionEstablished":
+                fact = {
+                    "kind": "ConnectionEstablished",
+                    "connection_id": p["connection_id"],
+                    "environment": p["environment"],
+                }
+            case "ConnectionRevoked":
+                fact = {"kind": "ConnectionRevoked", "connection_id": p["connection_id"]}
+            case "DisclosureAccepted":
+                fact = {"kind": "DisclosureAccepted", "version": p["version"]}
+            case "ConfigSnapshotRegistered" if p["kind"] == MODEL_KIND:
+                fact = {
+                    "kind": "ModelRegistered",
+                    "id": p["model_id"],
+                    "version": p["model_version"],
+                    "content_hash": p["content_hash"],
+                    "params": p["params"],
+                    "admits_instruments": p["admits_instruments"],
+                }
+            case "MandateVersionCreated":
+                fact = {
+                    "kind": "MandateVersionCreated",
+                    "version": p["mandate_version"],
+                    "sources": p["provenance"],
+                }
+            case "MandateConfirmed":
+                fact = {
+                    "kind": "MandateConfirmed",
+                    "version": p["mandate_version"],
+                    "confirmed_paths": p["confirmed_paths"],
+                }
+            case "AgentDeployed" if p["mandate_version"] not in stored:
+                fact = {"kind": "unresolved", "mandate_version": p["mandate_version"]}
+            case "AgentDeployed":
+                document = stored[p["mandate_version"]]
+                fact = {
+                    "kind": "AgentVersionActive",
+                    "agent": p["agent_id"],
+                    "connection_id": document["connection_id"],
+                    "environment": document["environment"],
+                    "allocation_usd": normalize_decimal(document["capital"]["allocation_usd"]),
+                    "pinned": sorted(i["asset_id"] for i in document["universe"]["pinned_instruments"]),
+                }
+            case "AgentStopped":
+                fact = {
+                    "kind": "AgentStopped",
+                    "agent": p["agent_id"],
+                    "connection_id": p["connection_id"],
+                    "retired_on": p["retired_on"],
+                    "loss_added_usd": p["loss_added"],
+                }
+        if fact is not None:
+            out.append({"seq": entry["seq"], "fact": fact})
+    for name, draft in section["drafts"].items():
+        if draft["event_type"] == "AccountSnapshotRecorded" and draft["stream_id"] == binding["stream_id"]:
+            fact = {
+                "kind": "AccountSnapshot",
+                "connection_id": binding["connection_id"],
+                "equity_usd": draft["payload"]["equity"],
+            }
+            out.append({"draft": name, "fact": fact})
+    return out
+
+
+def check_section(section: dict) -> list[str]:
+    """Every failure, so seeded bugs can be shown caught."""
+    problems = []
+    chain = section["chain"]
+    prev = section["genesis_prev_hash"]
+    for i, entry in enumerate(chain, start=1):
+        body = entry["body"]
+        if body["seq"] != i or entry["seq"] != i:
+            problems.append(found("chain.seq", f"seq {i}: gap"))
+        if body["prev_hash"] != prev:
+            problems.append(found("chain.prev_hash", f"seq {i}: prev_hash does not chain"))
+        if canonical_of(body) != entry["canonical"]:
+            problems.append(found("chain.canonical", f"seq {i}: canonical differs"))
+        if sha(entry["canonical"]) != entry["hash"]:
+            problems.append(found("chain.hash", f"seq {i}: hash differs"))
+        prev = entry["hash"]
+        if body["stream_id"] != STREAM or body["event_type"] != entry["event_type"]:
+            problems.append(found("chain.stream", f"seq {i}: stream or type differs"))
+    if chain[0]["event_type"] != "StreamOpened":
+        problems.append(found("chain.opened", "seq 1 is not StreamOpened"))
+    stored = {a["ref"]: a for a in section["artifacts"]}
+    for a in section["artifacts"]:
+        if canonical_of(a["object"]) != a["canonical"] or "sha256:" + sha(a["canonical"]) != a["ref"]:
+            problems.append(found("artifacts.rehash", f"artifact {a['name']}: does not re-hash"))
+    for entry in chain:
+        for ref in entry["body"]["artifact_refs"]:
+            if ref not in stored:
+                problems.append(found("artifacts.missing", f"seq {entry['seq']}: artifact {ref} missing"))
+    named = named_records(chain)
+    problems += check_versions(section, named)
+    problems += check_order(named)
+    created, confirmed = named["version_created"]["payload"], named["confirmed"]["payload"]
+    for path in confirmed["confirmed_paths"]:
+        if not any(covers(path, entry["path"]) for entry in created["provenance"]):
+            problems.append(found("confirm.covers", f"confirmed path {path} covers no recorded path"))
+    by_ref = {a["ref"]: a["object"] for a in section["artifacts"]}
+    document = by_ref.get(named["deployed"]["payload"]["mandate_version"], {})
+    connection = named["connection"]["payload"]
+    if (document.get("connection_id"), document.get("environment")) != (
+        connection["connection_id"],
+        connection["environment"],
+    ):
+        problems.append(
+            found(
+                "deploy.connection",
+                "the deployed mandate's connection and environment are not the connection's (V-001)",
+            )
+        )
+    registered = named["model_registered"]["payload"]
+    pinned = [
+        (m["id"], m["version"], m["content_hash"])
+        for m in document.get("behavior", {}).get("signal_models", [])
+    ]
+    if pinned != [(registered["model_id"], registered["model_version"], registered["content_hash"])]:
+        problems.append(
+            found(
+                "model.pinned",
+                "the mandate does not pin the registered model's id, version, and hash (V-007)",
+            )
+        )
+    if recompute_facts(section) != section["journaled_facts"]:
+        problems.append(found("facts.recompute", "the listed facts are not what the records map to"))
+    for name, draft in section["drafts"].items():
+        got = violations(draft)
+        if got:
+            problems.append(found("drafts.valid", f"base draft {name}: {got}"))
+    for case in section["invalid_drafts"]:
+        got = violations(draft_for(section, case))
+        want = case["expect"]
+        if len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"]):
+            problems.append(
+                found(
+                    "invalid_drafts",
+                    f"{case['name']}: expected exactly {want['reason']} at {want['path']}, got {got}",
+                )
+            )
+    for case in section["valid_drafts"]:
+        got = violations(draft_for(section, case))
+        if got:
+            problems.append(found("valid_drafts", f"{case['name']}: expected Valid, got {got}"))
+    for entry in chain:
+        got = violations(draft_of(entry["body"]))
+        if got:
+            problems.append(found("chain.valid", f"seq {entry['seq']}: valid event breaks {got}"))
+    return problems
+
+
+NAMED_TYPES = {
+    "connection": "ConnectionEstablished",
+    "disclosure": "DisclosureAccepted",
+    "version_created": "MandateVersionCreated",
+    "confirmed": "MandateConfirmed",
+    "deployed": "AgentDeployed",
+    "stopped": "AgentStopped",
+    "revoked": "ConnectionRevoked",
+}
+
+
+def named_records(chain: list[dict]) -> dict[str, dict]:
+    """Each lifecycle record, found by what it is rather than where the chain was built to put it,
+    so the order checks see a record journaled out of place."""
+    named = {}
+    for entry in chain:
+        body = entry["body"]
+        for name, event_type in NAMED_TYPES.items():
+            if body["event_type"] == event_type and name not in named:
+                named[name] = body
+        if body["event_type"] == "ConfigSnapshotRegistered" and body["payload"]["kind"] == MODEL_KIND:
+            named.setdefault("model_registered", body)
+    return named
+
+
+def check_versions(section: dict, named: dict) -> list[str]:
+    """Each record binds the version its mandate document hashes to, and each §10 record names it."""
+    problems = []
+    by_name = {a["name"]: a for a in section["artifacts"]}
+    mandate, _ = base_mandate()
+    document = by_name["mandate_document"]["object"]
+    expected = copy.deepcopy(mandate)
+    expected["behavior"]["signal_models"][0]["content_hash"] = by_name["model_content"]["ref"]
+    if document != expected:
+        problems.append(
+            found("document.base", "the stored mandate is not the base with the registered model's hash")
+        )
+    version = by_name["mandate_document"]["ref"]
+    bound = [
+        named["version_created"]["payload"]["mandate_version"],
+        named["confirmed"]["payload"]["mandate_version"],
+        named["deployed"]["payload"]["mandate_version"],
+        named["deployed"]["config_refs"].get("mandate_version"),
+        named["stopped"]["config_refs"].get("mandate_version"),
+    ]
+    if any(v != version for v in bound):
+        problems.append(found("version.binds", f"a record binds another version than {version}: {bound}"))
+    by_ref = {a["ref"]: a["object"] for a in section["artifacts"]}
+    for name in ("version_created", "confirmed", "deployed"):
+        record = by_ref.get(named[name]["payload"]["record_ref"], {})
+        if record.get("mandate_version") != version:
+            problems.append(found("version.record", f"{name}'s §10 record names another version"))
+    return problems
+
+
+def check_order(named: dict) -> list[str]:
+    """The lifecycle (mandate spec §2): created, confirmed, deployed, stopped, then the connection revoked."""
+    problems = []
+    seq = {name: body["seq"] for name, body in named.items()}
+    for later, earlier, check in (
+        ("confirmed", "version_created", "order.confirmed"),
+        ("deployed", "confirmed", "order.deployed"),
+        ("stopped", "deployed", "order.stopped"),
+        ("revoked", "stopped", "order.revoked"),
+    ):
+        if not seq[earlier] < seq[later]:
+            problems.append(found(check, f"{later} is journaled before {earlier}"))
+    if named["deployed"]["payload"]["agent_id"] != named["stopped"]["payload"]["agent_id"]:
+        problems.append(found("order.stopped", "the stopped agent is not the deployed one"))
+    if named["revoked"]["payload"]["connection_id"] != named["stopped"]["payload"]["connection_id"]:
+        problems.append(found("order.revoked", "the revoked connection is not the stopped agent's"))
+    return problems
+
+
+def canonical_of(value) -> str:
+    return canon(value)
+
+
+def sha(text: str) -> str:
+    return sha256_hex(text.encode())
+
+
+# --------------------------------------------------------------------------- seeded bugs
+
+VALIDATOR_MUTANTS = (
+    "record.extra",
+    "record.missing",
+    "types.str_nonempty",
+    "types.pointer",
+    "types.date",
+    "artifact_refs",
+    "config_refs.required",
+    *(f"rule.{n}" for n in range(17, 25)),
+    "rule.21.params",
+    "rule.24.band",
+    "rule.24.in_band",
+    "boundary.rule_23_strict",
+    "boundary.rule_24_strict",
+    "rule.25",
+    "rule.26.agent",
+    "rule.26.acct",
+    "rule.27.agent",
+    "rule.27.acct",
+)
+
+
+def body_named(section: dict, name: str) -> dict:
+    return section["chain"][SEQ[name] - 1]["body"]
+
+
+def payload_named(section: dict, name: str) -> dict:
+    return body_named(section, name)["payload"]
+
+
+def artifact_named(section: dict, name: str) -> dict:
+    return next(a for a in section["artifacts"] if a["name"] == name)
+
+
+def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
+    """Seeded bugs in the vectors, each registered against the one check that must reject it."""
+    unhashed = {"prev_hash not chained", "mandate document edited after it was stored"}
+
+    def mutated(name: str, fn) -> dict:
+        copy_ = copy.deepcopy(section)
+        fn(copy_)
+        if name not in unhashed:
+            for entry in copy_["chain"]:
+                entry["body"]["artifact_refs"] = sorted(digest_strings(entry["body"]["payload"]))
+            rechain(copy_["chain"])
+        return copy_
+
+    def unchain(s: dict) -> None:
+        entry = s["chain"][SEQ["disclosure"] - 1]
+        entry["body"]["prev_hash"] = "0" * 64
+        entry["canonical"] = canonical_of(entry["body"])
+        entry["hash"] = sha(entry["canonical"])
+
+    def restore_placeholder_hash(s: dict) -> None:
+        """The base's placeholder model hash, stored honestly under its own new ref: the document is
+        no longer the one the model registration pins."""
+        art = artifact_named(s, "mandate_document")
+        art["object"]["behavior"]["signal_models"][0]["content_hash"] = "sha256:" + "1" * 64
+        art["canonical"] = canonical_of(art["object"])
+        art["ref"] = "sha256:" + sha(art["canonical"])
+
+    def record_for_another_version(s: dict) -> None:
+        """The §10 record re-stored, honestly hashed, naming another version."""
+        art = artifact_named(s, "version_record")
+        art["object"]["mandate_version"] = "sha256:" + "5" * 64
+        art["canonical"] = canonical_of(art["object"])
+        art["ref"] = "sha256:" + sha(art["canonical"])
+        payload_named(s, "version_created")["record_ref"] = art["ref"]
+
+    def swap(first: str, second: str):
+        def fn(s: dict) -> None:
+            a, b = SEQ[first] - 1, SEQ[second] - 1
+            s["chain"][a]["body"], s["chain"][b]["body"] = s["chain"][b]["body"], s["chain"][a]["body"]
+            for i in (a, b):
+                s["chain"][i]["body"]["seq"] = i + 1
+                s["chain"][i]["event_type"] = s["chain"][i]["body"]["event_type"]
+
+        return fn
+
+    def fact(s: dict, kind: str) -> dict:
+        return next(f["fact"] for f in s["journaled_facts"] if f["fact"]["kind"] == kind)
+
+    out = []
+    for name, check, fn in [
+        ("prev_hash not chained", "chain.prev_hash", unchain),
+        (
+            "mandate document edited after it was stored",
+            "artifacts.rehash",
+            lambda s: artifact_named(s, "mandate_document")["object"].update(name="edited"),
+        ),
+        ("mandate stored with the base's placeholder model hash", "document.base", restore_placeholder_hash),
+        (
+            "confirmation of another version",
+            "version.binds",
+            lambda s: payload_named(s, "confirmed").update(
+                mandate_version=artifact_named(s, "fee_config")["ref"]
+            ),
+        ),
+        ("version record for another version", "version.record", record_for_another_version),
+        ("confirmed before the version is created", "order.confirmed", swap("version_created", "confirmed")),
+        (
+            "stopped agent is another agent",
+            "order.stopped",
+            lambda s: payload_named(s, "stopped").update(agent_id="agent_b"),
+        ),
+        ("connection revoked while its agent runs", "order.revoked", swap("stopped", "revoked")),
+        (
+            "confirmation of a path nothing records",
+            "confirm.covers",
+            lambda s: payload_named(s, "confirmed").update(
+                confirmed_paths=[*sorted(TOP_LEVEL_SOURCES), "/zz"]
+            ),
+        ),
+        (
+            "connection established as live",
+            "deploy.connection",
+            lambda s: payload_named(s, "connection").update(environment="live"),
+        ),
+        (
+            "model registered at another version",
+            "model.pinned",
+            lambda s: payload_named(s, "model_registered").update(model_version="1.0.1"),
+        ),
+        (
+            "deployment fact reads the allocation from nowhere",
+            "facts.recompute",
+            lambda s: fact(s, "AgentVersionActive").update(allocation_usd="9000"),
+        ),
+        (
+            "stop fact drops the loss",
+            "facts.recompute",
+            lambda s: fact(s, "AgentStopped").update(loss_added_usd="0"),
+        ),
+        (
+            "snapshot fact on another connection",
+            "facts.recompute",
+            lambda s: s["derivation"]["account_connection"].update(connection_id="conn_other"),
+        ),
+        (
+            "fee registration mapped to a model",
+            "facts.recompute",
+            lambda s: s["journaled_facts"].insert(
+                2, {"seq": SEQ["fee_registered"], "fact": fact(s, "ModelRegistered")}
+            ),
+        ),
+        (
+            "base snapshot inconsistent",
+            "drafts.valid",
+            lambda s: s["drafts"]["snapshot_fees"]["payload"].update(cash_band="1"),
+        ),
+        (
+            "invalid draft expects the wrong reason",
+            "invalid_drafts",
+            lambda s: s["invalid_drafts"][0]["expect"].update(reason="non_canonical"),
+        ),
+        (
+            "valid draft that a rule refuses",
+            "valid_drafts",
+            lambda s: s["valid_drafts"][0]["changes"].append(change("payload.cash_in_band", False)),
+        ),
+        (
+            "chain event breaks a rule",
+            "chain.valid",
+            lambda s: payload_named(s, "stopped").update(loss_added="-1"),
+        ),
+    ]:
+        out.append((name, check, mutated(name, fn)))
+    return out
+
+
+def run_mutants(section: dict) -> list[str]:
+    """Every seeded bug caught; a vector mutant only by the check it is registered against, with no
+    other check of that check's family also catching it."""
+    escaped = []
+    cases = [(draft_of(e["body"]), None) for e in section["chain"]]
+    cases += [(copy.deepcopy(d), None) for d in section["drafts"].values()]
+    cases += [(draft_for(section, c), None) for c in section["valid_drafts"]]
+    cases += [(draft_for(section, c), c["expect"]) for c in section["invalid_drafts"]]
+    for mutant in VALIDATOR_MUTANTS:
+        skip = frozenset([mutant])
+        caught = False
+        for draft, want in cases:
+            got = violations(draft, skip)
+            if want is None:
+                caught |= bool(got)
+            else:
+                caught |= len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"])
+        if not caught:
+            escaped.append(f"control validator mutant {mutant}")
+    for name, check, mutated in vector_mutants(section):
+        caught_by = {check_of(problem) for problem in check_section(mutated)}
+        family = check.partition(".")[0]
+        masked = sorted(c for c in caught_by if c != check and c.partition(".")[0] == family)
+        if check not in caught_by:
+            escaped.append(
+                f"control vector mutant: {name} (not caught by {check}; caught by {sorted(caught_by)})"
+            )
+        elif masked:
+            escaped.append(f"control vector mutant: {name} (caught by {check} and also by {masked})")
+    return escaped
+
+
+# --------------------------------------------------------------------------- output
+
+
+def build_section(v3: dict) -> dict:
+    arts = artifacts()
+    chain = hash_chain(chain_bodies(arts), v3["genesis_prev_hash"])
+    return {
+        "spec": SPEC,
+        "stream_id": STREAM,
+        "genesis_prev_hash": v3["genesis_prev_hash"],
+        "artifacts": [
+            {"name": name, "ref": artifact_ref(obj), "object": obj, "canonical": canonical_of(obj)}
+            for name, obj in arts.items()
+        ],
+        "chain": chain,
+        "drafts": base_drafts(v3),
+        "derivation": derivation(arts["mandate_document"]),
+        "journaled_facts": expected_facts(arts),
+        "invalid_drafts": invalid_drafts(),
+        "valid_drafts": valid_drafts(),
+    }

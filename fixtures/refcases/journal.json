@@ -3187,5 +3187,1978 @@
     }
    }
   ]
+ },
+ "control_stream": {
+  "spec": "docs/specs/journal.md v0.7 §9.2 (DEC-261)",
+  "stream_id": "ctl:ws_01J8Z2",
+  "genesis_prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "artifacts": [
+   {
+    "name": "mandate_document",
+    "ref": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+    "object": {
+     "mandate_schema_version": 1,
+     "name": "btc-accumulator",
+     "source_text_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "environment": "paper",
+     "connection_id": "conn_alpaca_paper_01",
+     "capital": {
+      "allocation_usd": "10000",
+      "max_loss_from_allocation": "0.1"
+     },
+     "goal": {
+      "type": "accumulate",
+      "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+      "target_qty": "0.15",
+      "max_avg_price": "58000",
+      "max_spend_usd": "9000",
+      "end_date": "2026-12-31",
+      "on_complete": "hold_protected"
+     },
+     "universe": {
+      "pinned": true,
+      "pinned_instruments": [
+       {
+        "asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+        "symbol": "BTC/USD",
+        "asset_class": "crypto"
+       }
+      ],
+      "max_instruments": 1,
+      "asset_classes": [
+       "crypto"
+      ],
+      "leveraged_etps_enabled": false,
+      "leveraged_etp_disclosure_version": null
+     },
+     "behavior": {
+      "description": "Buy dips; avoid trading 30 minutes around major macro releases.",
+      "signal_models": [
+       {
+        "id": "quant.mean_reversion",
+        "version": "1.0.0",
+        "content_hash": "sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0",
+        "params": [
+         {
+          "key": "lookback_bars",
+          "value": "20"
+         },
+         {
+          "key": "z_entry",
+          "value": "1.5"
+         }
+        ],
+        "weight": "1",
+        "max_output_age_s": 1800,
+        "admits_instruments": false
+       }
+      ],
+      "research": null,
+      "cadence": {
+       "interval_s": 900,
+       "event_sources": [
+        "news",
+        "price"
+       ]
+      },
+      "sizing": {
+       "method": "conviction_linear",
+       "entry_threshold": "0.3",
+       "exit_threshold": "0.3",
+       "rebalance_band": "0.05"
+      }
+     },
+     "protection": {
+      "enabled": true,
+      "stop_distance": "0.08",
+      "take_profit_distance": null,
+      "crypto_stop_limit_offset": "0.005"
+     },
+     "risk": {
+      "max_position_usd": "10000",
+      "max_position_fraction": "1",
+      "max_gross_exposure_usd": "10000",
+      "max_order_usd": "1000",
+      "max_orders_per_day": 50,
+      "max_daily_loss": "0.02",
+      "daily_loss_action": "exits_only",
+      "max_drawdown": "0.08",
+      "drawdown_ladder": [
+       {
+        "at": "0.03",
+        "action": "scale_sizes",
+        "factor": "0.5"
+       },
+       {
+        "at": "0.06",
+        "action": "exits_only",
+        "factor": null
+       },
+       {
+        "at": "0.08",
+        "action": "flatten_and_pause",
+        "factor": null
+       }
+      ],
+      "hysteresis": "0.01",
+      "scale_action": "limit_buys",
+      "breach_confirm_s": 60,
+      "daily_breach_min_s": 3600,
+      "scale_lift_after_s": 600,
+      "reentry_cooldown_s": 3600
+     },
+     "autonomy": {
+      "rules": [
+       {
+        "id": "large_orders",
+        "when": {
+         "field": "order_usd",
+         "op": "gt",
+         "value": "900"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "low_score",
+        "when": {
+         "field": "combined_score",
+         "op": "lt",
+         "value": "0.65"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "routine",
+        "when": {
+         "field": "purpose",
+         "op": "in",
+         "value": [
+          "increase",
+          "open"
+         ]
+        },
+        "then": "auto"
+       }
+      ],
+      "default": "ask",
+      "admission": "ask",
+      "approval": {
+       "timeout_s": 600,
+       "on_timeout": "skip",
+       "approvers": [
+        "role:approver"
+       ],
+       "two_approver_above_usd": null
+      }
+     },
+     "notifications": {
+      "channels": [
+       "email",
+       "web_push"
+      ],
+      "quiet_hours": {
+       "start": "23:00",
+       "end": "07:00",
+       "timezone": "America/New_York"
+      }
+     }
+    },
+    "canonical": "{\"autonomy\":{\"admission\":\"ask\",\"approval\":{\"approvers\":[\"role:approver\"],\"on_timeout\":\"skip\",\"timeout_s\":600,\"two_approver_above_usd\":null},\"default\":\"ask\",\"rules\":[{\"id\":\"large_orders\",\"then\":\"ask\",\"when\":{\"field\":\"order_usd\",\"op\":\"gt\",\"value\":\"900\"}},{\"id\":\"low_score\",\"then\":\"ask\",\"when\":{\"field\":\"combined_score\",\"op\":\"lt\",\"value\":\"0.65\"}},{\"id\":\"routine\",\"then\":\"auto\",\"when\":{\"field\":\"purpose\",\"op\":\"in\",\"value\":[\"increase\",\"open\"]}}]},\"behavior\":{\"cadence\":{\"event_sources\":[\"news\",\"price\"],\"interval_s\":900},\"description\":\"Buy dips; avoid trading 30 minutes around major macro releases.\",\"research\":null,\"signal_models\":[{\"admits_instruments\":false,\"content_hash\":\"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0\",\"id\":\"quant.mean_reversion\",\"max_output_age_s\":1800,\"params\":[{\"key\":\"lookback_bars\",\"value\":\"20\"},{\"key\":\"z_entry\",\"value\":\"1.5\"}],\"version\":\"1.0.0\",\"weight\":\"1\"}],\"sizing\":{\"entry_threshold\":\"0.3\",\"exit_threshold\":\"0.3\",\"method\":\"conviction_linear\",\"rebalance_band\":\"0.05\"}},\"capital\":{\"allocation_usd\":\"10000\",\"max_loss_from_allocation\":\"0.1\"},\"connection_id\":\"conn_alpaca_paper_01\",\"environment\":\"paper\",\"goal\":{\"end_date\":\"2026-12-31\",\"instrument\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"max_avg_price\":\"58000\",\"max_spend_usd\":\"9000\",\"on_complete\":\"hold_protected\",\"target_qty\":\"0.15\",\"type\":\"accumulate\"},\"mandate_schema_version\":1,\"name\":\"btc-accumulator\",\"notifications\":{\"channels\":[\"email\",\"web_push\"],\"quiet_hours\":{\"end\":\"07:00\",\"start\":\"23:00\",\"timezone\":\"America/New_York\"}},\"protection\":{\"crypto_stop_limit_offset\":\"0.005\",\"enabled\":true,\"stop_distance\":\"0.08\",\"take_profit_distance\":null},\"risk\":{\"breach_confirm_s\":60,\"daily_breach_min_s\":3600,\"daily_loss_action\":\"exits_only\",\"drawdown_ladder\":[{\"action\":\"scale_sizes\",\"at\":\"0.03\",\"factor\":\"0.5\"},{\"action\":\"exits_only\",\"at\":\"0.06\",\"factor\":null},{\"action\":\"flatten_and_pause\",\"at\":\"0.08\",\"factor\":null}],\"hysteresis\":\"0.01\",\"max_daily_loss\":\"0.02\",\"max_drawdown\":\"0.08\",\"max_gross_exposure_usd\":\"10000\",\"max_order_usd\":\"1000\",\"max_orders_per_day\":50,\"max_position_fraction\":\"1\",\"max_position_usd\":\"10000\",\"reentry_cooldown_s\":3600,\"scale_action\":\"limit_buys\",\"scale_lift_after_s\":600},\"source_text_ref\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"universe\":{\"asset_classes\":[\"crypto\"],\"leveraged_etp_disclosure_version\":null,\"leveraged_etps_enabled\":false,\"max_instruments\":1,\"pinned\":true,\"pinned_instruments\":[{\"asset_class\":\"crypto\",\"asset_id\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"symbol\":\"BTC/USD\"}]}}"
+   },
+   {
+    "name": "model_content",
+    "ref": "sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0",
+    "object": {
+     "kind": "signal_model",
+     "model_id": "quant.mean_reversion",
+     "model_version": "1.0.0",
+     "authorship": "platform",
+     "code": "reference fixture: stands for the model code, prompt, and parameter schema (mandate spec §8.1)",
+     "parameter_schema": {
+      "lookback_bars": "integer",
+      "z_entry": "decimal"
+     }
+    },
+    "canonical": "{\"authorship\":\"platform\",\"code\":\"reference fixture: stands for the model code, prompt, and parameter schema (mandate spec §8.1)\",\"kind\":\"signal_model\",\"model_id\":\"quant.mean_reversion\",\"model_version\":\"1.0.0\",\"parameter_schema\":{\"lookback_bars\":\"integer\",\"z_entry\":\"decimal\"}}"
+   },
+   {
+    "name": "fee_config",
+    "ref": "sha256:e7af5583a41593946fdaa12d2d7032e945262121d22eee9277534d9eeeeb8476",
+    "object": {
+     "kind": "fee_config",
+     "note": "reference fixture: stands for a fee configuration snapshot (trading spec §6)"
+    },
+    "canonical": "{\"kind\":\"fee_config\",\"note\":\"reference fixture: stands for a fee configuration snapshot (trading spec §6)\"}"
+   },
+   {
+    "name": "disclosure",
+    "ref": "sha256:0bccba8659b6b9eb2d95ce8d6ae07bab41ca811e46e3a71862d55b7ad365dfd7",
+    "object": {
+     "kind": "disclosure",
+     "document": "leveraged_etp",
+     "note": "reference fixture: stands for the disclosure text the owner accepted (mandate spec V-005)"
+    },
+    "canonical": "{\"document\":\"leveraged_etp\",\"kind\":\"disclosure\",\"note\":\"reference fixture: stands for the disclosure text the owner accepted (mandate spec V-005)\"}"
+   },
+   {
+    "name": "version_record",
+    "ref": "sha256:f7319b24f9d2bd6e9e7c97814dcc7636bf019a43f87235fd4d50fc40c198d6f2",
+    "object": {
+     "kind": "mandate_version_record",
+     "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+     "note": "reference fixture: stands for mandate spec §10's MandateVersionCreated contents, which mandate spec §10 defines: source text, compiled fields, provenance with quoted spans, template, policy-set hashes, validation results, warnings and worst-case figures, classification, and diff"
+    },
+    "canonical": "{\"kind\":\"mandate_version_record\",\"mandate_version\":\"sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43\",\"note\":\"reference fixture: stands for mandate spec §10's MandateVersionCreated contents, which mandate spec §10 defines: source text, compiled fields, provenance with quoted spans, template, policy-set hashes, validation results, warnings and worst-case figures, classification, and diff\"}"
+   },
+   {
+    "name": "confirmation_record",
+    "ref": "sha256:c42bc4b3b720d156b0dac304fbc6b934dc4a8160938847dbfc6de7877d5d0637",
+    "object": {
+     "kind": "mandate_confirmation_record",
+     "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+     "note": "reference fixture: stands for mandate spec §10's MandateConfirmed contents, which mandate spec §10 defines: the rendered confirmation screen and UI build, warnings acknowledged, step-up evidence, and the confirming user"
+    },
+    "canonical": "{\"kind\":\"mandate_confirmation_record\",\"mandate_version\":\"sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43\",\"note\":\"reference fixture: stands for mandate spec §10's MandateConfirmed contents, which mandate spec §10 defines: the rendered confirmation screen and UI build, warnings acknowledged, step-up evidence, and the confirming user\"}"
+   },
+   {
+    "name": "deployment_record",
+    "ref": "sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe",
+    "object": {
+     "kind": "deployment_record",
+     "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+     "note": "reference fixture: stands for mandate spec §10's AgentDeployed contents, which mandate spec §10 defines: the rendered go-live screen and UI build, the backtest and paper-run IDs shown, the performance legend and disclosure versions shown, the approving users, and step-up evidence"
+    },
+    "canonical": "{\"kind\":\"deployment_record\",\"mandate_version\":\"sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43\",\"note\":\"reference fixture: stands for mandate spec §10's AgentDeployed contents, which mandate spec §10 defines: the rendered go-live screen and UI build, the backtest and paper-run IDs shown, the performance legend and disclosure versions shown, the approving users, and step-up evidence\"}"
+   }
+  ],
+  "chain": [
+   {
+    "seq": 1,
+    "event_type": "StreamOpened",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Y0A0A000000000000000S1",
+     "stream_id": "ctl:ws_01J8Z2",
+     "seq": 1,
+     "event_type": "StreamOpened",
+     "schema_version": 1,
+     "event_time": "2026-09-20T13:00:00.000000000Z",
+     "recorded_at": "2026-09-20T13:00:00.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "control_services",
+      "version": "0.1.0",
+      "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+     },
+     "config_refs": {},
+     "payload": {
+      "stream_type": "control",
+      "workspace_id": "ws_01J8Z2"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"id\":\"control_services\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Y0A0A000000000000000S1\",\"event_time\":\"2026-09-20T13:00:00.000000000Z\",\"event_type\":\"StreamOpened\",\"payload\":{\"stream_type\":\"control\",\"workspace_id\":\"ws_01J8Z2\"},\"pii_refs\":[],\"prev_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorded_at\":\"2026-09-20T13:00:00.000000400Z\",\"schema_version\":1,\"seq\":1,\"stream_id\":\"ctl:ws_01J8Z2\"}",
+    "hash": "280231000548e232c92d5a3789442d04d77bce1e20a155d878dd46a7061e8007"
+   },
+   {
+    "seq": 2,
+    "event_type": "ConnectionEstablished",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Y0A1A000000000000000S2",
+     "stream_id": "ctl:ws_01J8Z2",
+     "seq": 2,
+     "event_type": "ConnectionEstablished",
+     "schema_version": 1,
+     "event_time": "2026-09-20T13:05:00.000000000Z",
+     "recorded_at": "2026-09-20T13:05:00.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "user",
+      "id": "user_owner_01",
+      "version": "1",
+      "build": null
+     },
+     "config_refs": {},
+     "payload": {
+      "connection_id": "conn_alpaca_paper_01",
+      "broker": "alpaca",
+      "environment": "paper",
+      "scopes": [
+       "account:write",
+       "trading"
+      ]
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "280231000548e232c92d5a3789442d04d77bce1e20a155d878dd46a7061e8007"
+    },
+    "canonical": "{\"actor\":{\"build\":null,\"id\":\"user_owner_01\",\"kind\":\"user\",\"version\":\"1\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Y0A1A000000000000000S2\",\"event_time\":\"2026-09-20T13:05:00.000000000Z\",\"event_type\":\"ConnectionEstablished\",\"payload\":{\"broker\":\"alpaca\",\"connection_id\":\"conn_alpaca_paper_01\",\"environment\":\"paper\",\"scopes\":[\"account:write\",\"trading\"]},\"pii_refs\":[],\"prev_hash\":\"280231000548e232c92d5a3789442d04d77bce1e20a155d878dd46a7061e8007\",\"recorded_at\":\"2026-09-20T13:05:00.000000400Z\",\"schema_version\":1,\"seq\":2,\"stream_id\":\"ctl:ws_01J8Z2\"}",
+    "hash": "2c223c8e0bd3d1d2c1ac61e241449ed3f318f8c2ef7b86b4053f08096ea9cae3"
+   },
+   {
+    "seq": 3,
+    "event_type": "ConfigSnapshotRegistered",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Y0A2A000000000000000S3",
+     "stream_id": "ctl:ws_01J8Z2",
+     "seq": 3,
+     "event_type": "ConfigSnapshotRegistered",
+     "schema_version": 1,
+     "event_time": "2026-09-20T13:06:00.000000000Z",
+     "recorded_at": "2026-09-20T13:06:00.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "control_services",
+      "version": "0.1.0",
+      "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+     },
+     "config_refs": {},
+     "payload": {
+      "kind": "model_version",
+      "content_hash": "sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0",
+      "model_id": "quant.mean_reversion",
+      "model_version": "1.0.0",
+      "params": [
+       "lookback_bars",
+       "z_entry"
+      ],
+      "admits_instruments": false
+     },
+     "artifact_refs": [
+      "sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0"
+     ],
+     "pii_refs": [],
+     "prev_hash": "2c223c8e0bd3d1d2c1ac61e241449ed3f318f8c2ef7b86b4053f08096ea9cae3"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"id\":\"control_services\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[\"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0\"],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Y0A2A000000000000000S3\",\"event_time\":\"2026-09-20T13:06:00.000000000Z\",\"event_type\":\"ConfigSnapshotRegistered\",\"payload\":{\"admits_instruments\":false,\"content_hash\":\"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0\",\"kind\":\"model_version\",\"model_id\":\"quant.mean_reversion\",\"model_version\":\"1.0.0\",\"params\":[\"lookback_bars\",\"z_entry\"]},\"pii_refs\":[],\"prev_hash\":\"2c223c8e0bd3d1d2c1ac61e241449ed3f318f8c2ef7b86b4053f08096ea9cae3\",\"recorded_at\":\"2026-09-20T13:06:00.000000400Z\",\"schema_version\":1,\"seq\":3,\"stream_id\":\"ctl:ws_01J8Z2\"}",
+    "hash": "8ae9c8aef563ad10391790ca726171526ba17978bb8da22b7c6e647aa0afc835"
+   },
+   {
+    "seq": 4,
+    "event_type": "ConfigSnapshotRegistered",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Y0A2B000000000000000S4",
+     "stream_id": "ctl:ws_01J8Z2",
+     "seq": 4,
+     "event_type": "ConfigSnapshotRegistered",
+     "schema_version": 1,
+     "event_time": "2026-09-20T13:06:30.000000000Z",
+     "recorded_at": "2026-09-20T13:06:30.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "control_services",
+      "version": "0.1.0",
+      "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+     },
+     "config_refs": {},
+     "payload": {
+      "kind": "fee_config",
+      "content_hash": "sha256:e7af5583a41593946fdaa12d2d7032e945262121d22eee9277534d9eeeeb8476",
+      "model_id": null,
+      "model_version": null,
+      "params": [],
+      "admits_instruments": null
+     },
+     "artifact_refs": [
+      "sha256:e7af5583a41593946fdaa12d2d7032e945262121d22eee9277534d9eeeeb8476"
+     ],
+     "pii_refs": [],
+     "prev_hash": "8ae9c8aef563ad10391790ca726171526ba17978bb8da22b7c6e647aa0afc835"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"id\":\"control_services\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[\"sha256:e7af5583a41593946fdaa12d2d7032e945262121d22eee9277534d9eeeeb8476\"],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Y0A2B000000000000000S4\",\"event_time\":\"2026-09-20T13:06:30.000000000Z\",\"event_type\":\"ConfigSnapshotRegistered\",\"payload\":{\"admits_instruments\":null,\"content_hash\":\"sha256:e7af5583a41593946fdaa12d2d7032e945262121d22eee9277534d9eeeeb8476\",\"kind\":\"fee_config\",\"model_id\":null,\"model_version\":null,\"params\":[]},\"pii_refs\":[],\"prev_hash\":\"8ae9c8aef563ad10391790ca726171526ba17978bb8da22b7c6e647aa0afc835\",\"recorded_at\":\"2026-09-20T13:06:30.000000400Z\",\"schema_version\":1,\"seq\":4,\"stream_id\":\"ctl:ws_01J8Z2\"}",
+    "hash": "5fb0db47ed28b1bcdbf75af9628ba0f33148f9472e5283dac38d285bc8188427"
+   },
+   {
+    "seq": 5,
+    "event_type": "DisclosureAccepted",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Y0A3A000000000000000S5",
+     "stream_id": "ctl:ws_01J8Z2",
+     "seq": 5,
+     "event_type": "DisclosureAccepted",
+     "schema_version": 1,
+     "event_time": "2026-09-20T13:07:00.000000000Z",
+     "recorded_at": "2026-09-20T13:07:00.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "user",
+      "id": "user_owner_01",
+      "version": "1",
+      "build": null
+     },
+     "config_refs": {},
+     "payload": {
+      "document": "leveraged_etp",
+      "version": "sha256:0bccba8659b6b9eb2d95ce8d6ae07bab41ca811e46e3a71862d55b7ad365dfd7",
+      "user": "user_owner_01",
+      "step_up": {
+       "assertion_id": "assert_owner_01",
+       "authenticated_at": "2026-09-20T13:06:50.000000000Z",
+       "method": "webauthn"
+      }
+     },
+     "artifact_refs": [
+      "sha256:0bccba8659b6b9eb2d95ce8d6ae07bab41ca811e46e3a71862d55b7ad365dfd7"
+     ],
+     "pii_refs": [],
+     "prev_hash": "5fb0db47ed28b1bcdbf75af9628ba0f33148f9472e5283dac38d285bc8188427"
+    },
+    "canonical": "{\"actor\":{\"build\":null,\"id\":\"user_owner_01\",\"kind\":\"user\",\"version\":\"1\"},\"artifact_refs\":[\"sha256:0bccba8659b6b9eb2d95ce8d6ae07bab41ca811e46e3a71862d55b7ad365dfd7\"],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Y0A3A000000000000000S5\",\"event_time\":\"2026-09-20T13:07:00.000000000Z\",\"event_type\":\"DisclosureAccepted\",\"payload\":{\"document\":\"leveraged_etp\",\"step_up\":{\"assertion_id\":\"assert_owner_01\",\"authenticated_at\":\"2026-09-20T13:06:50.000000000Z\",\"method\":\"webauthn\"},\"user\":\"user_owner_01\",\"version\":\"sha256:0bccba8659b6b9eb2d95ce8d6ae07bab41ca811e46e3a71862d55b7ad365dfd7\"},\"pii_refs\":[],\"prev_hash\":\"5fb0db47ed28b1bcdbf75af9628ba0f33148f9472e5283dac38d285bc8188427\",\"recorded_at\":\"2026-09-20T13:07:00.000000400Z\",\"schema_version\":1,\"seq\":5,\"stream_id\":\"ctl:ws_01J8Z2\"}",
+    "hash": "e677ac8b7dabdeb72ac5cde38fa1918a85833a765acf0ef7ddedd006559e054b"
+   },
+   {
+    "seq": 6,
+    "event_type": "MandateVersionCreated",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Y0A4A000000000000000S6",
+     "stream_id": "ctl:ws_01J8Z2",
+     "seq": 6,
+     "event_type": "MandateVersionCreated",
+     "schema_version": 1,
+     "event_time": "2026-09-20T13:10:00.000000000Z",
+     "recorded_at": "2026-09-20T13:10:00.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "control_services",
+      "version": "0.1.0",
+      "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+     },
+     "config_refs": {},
+     "payload": {
+      "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+      "provenance": [
+       {
+        "path": "/autonomy",
+        "source": "user_entered"
+       },
+       {
+        "path": "/behavior",
+        "source": "user_entered"
+       },
+       {
+        "path": "/capital",
+        "source": "user_entered"
+       },
+       {
+        "path": "/connection_id",
+        "source": "user_entered"
+       },
+       {
+        "path": "/environment",
+        "source": "user_entered"
+       },
+       {
+        "path": "/goal",
+        "source": "user_stated"
+       },
+       {
+        "path": "/name",
+        "source": "user_entered"
+       },
+       {
+        "path": "/notifications",
+        "source": "user_entered"
+       },
+       {
+        "path": "/protection",
+        "source": "user_entered"
+       },
+       {
+        "path": "/risk",
+        "source": "user_entered"
+       },
+       {
+        "path": "/universe",
+        "source": "user_entered"
+       }
+      ],
+      "record_ref": "sha256:f7319b24f9d2bd6e9e7c97814dcc7636bf019a43f87235fd4d50fc40c198d6f2"
+     },
+     "artifact_refs": [
+      "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+      "sha256:f7319b24f9d2bd6e9e7c97814dcc7636bf019a43f87235fd4d50fc40c198d6f2"
+     ],
+     "pii_refs": [],
+     "prev_hash": "e677ac8b7dabdeb72ac5cde38fa1918a85833a765acf0ef7ddedd006559e054b"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"id\":\"control_services\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[\"sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43\",\"sha256:f7319b24f9d2bd6e9e7c97814dcc7636bf019a43f87235fd4d50fc40c198d6f2\"],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Y0A4A000000000000000S6\",\"event_time\":\"2026-09-20T13:10:00.000000000Z\",\"event_type\":\"MandateVersionCreated\",\"payload\":{\"mandate_version\":\"sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43\",\"provenance\":[{\"path\":\"/autonomy\",\"source\":\"user_entered\"},{\"path\":\"/behavior\",\"source\":\"user_entered\"},{\"path\":\"/capital\",\"source\":\"user_entered\"},{\"path\":\"/connection_id\",\"source\":\"user_entered\"},{\"path\":\"/environment\",\"source\":\"user_entered\"},{\"path\":\"/goal\",\"source\":\"user_stated\"},{\"path\":\"/name\",\"source\":\"user_entered\"},{\"path\":\"/notifications\",\"source\":\"user_entered\"},{\"path\":\"/protection\",\"source\":\"user_entered\"},{\"path\":\"/risk\",\"source\":\"user_entered\"},{\"path\":\"/universe\",\"source\":\"user_entered\"}],\"record_ref\":\"sha256:f7319b24f9d2bd6e9e7c97814dcc7636bf019a43f87235fd4d50fc40c198d6f2\"},\"pii_refs\":[],\"prev_hash\":\"e677ac8b7dabdeb72ac5cde38fa1918a85833a765acf0ef7ddedd006559e054b\",\"recorded_at\":\"2026-09-20T13:10:00.000000400Z\",\"schema_version\":1,\"seq\":6,\"stream_id\":\"ctl:ws_01J8Z2\"}",
+    "hash": "4750f83c819068309a4254ddeedfe321a30d313b34c668103aded2fc826f9b61"
+   },
+   {
+    "seq": 7,
+    "event_type": "MandateConfirmed",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Y0A5A000000000000000S7",
+     "stream_id": "ctl:ws_01J8Z2",
+     "seq": 7,
+     "event_type": "MandateConfirmed",
+     "schema_version": 1,
+     "event_time": "2026-09-20T13:12:00.000000000Z",
+     "recorded_at": "2026-09-20T13:12:00.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "user",
+      "id": "user_owner_01",
+      "version": "1",
+      "build": null
+     },
+     "config_refs": {},
+     "payload": {
+      "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+      "confirmed_paths": [
+       "/autonomy",
+       "/behavior",
+       "/capital",
+       "/connection_id",
+       "/environment",
+       "/goal",
+       "/name",
+       "/notifications",
+       "/protection",
+       "/risk",
+       "/universe"
+      ],
+      "record_ref": "sha256:c42bc4b3b720d156b0dac304fbc6b934dc4a8160938847dbfc6de7877d5d0637"
+     },
+     "artifact_refs": [
+      "sha256:c42bc4b3b720d156b0dac304fbc6b934dc4a8160938847dbfc6de7877d5d0637",
+      "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+     ],
+     "pii_refs": [],
+     "prev_hash": "4750f83c819068309a4254ddeedfe321a30d313b34c668103aded2fc826f9b61"
+    },
+    "canonical": "{\"actor\":{\"build\":null,\"id\":\"user_owner_01\",\"kind\":\"user\",\"version\":\"1\"},\"artifact_refs\":[\"sha256:c42bc4b3b720d156b0dac304fbc6b934dc4a8160938847dbfc6de7877d5d0637\",\"sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43\"],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Y0A5A000000000000000S7\",\"event_time\":\"2026-09-20T13:12:00.000000000Z\",\"event_type\":\"MandateConfirmed\",\"payload\":{\"confirmed_paths\":[\"/autonomy\",\"/behavior\",\"/capital\",\"/connection_id\",\"/environment\",\"/goal\",\"/name\",\"/notifications\",\"/protection\",\"/risk\",\"/universe\"],\"mandate_version\":\"sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43\",\"record_ref\":\"sha256:c42bc4b3b720d156b0dac304fbc6b934dc4a8160938847dbfc6de7877d5d0637\"},\"pii_refs\":[],\"prev_hash\":\"4750f83c819068309a4254ddeedfe321a30d313b34c668103aded2fc826f9b61\",\"recorded_at\":\"2026-09-20T13:12:00.000000400Z\",\"schema_version\":1,\"seq\":7,\"stream_id\":\"ctl:ws_01J8Z2\"}",
+    "hash": "1fe5cabc4d99b8adf6bc99cc68e3d14073a826019e8dc0bda271d7370387c616"
+   },
+   {
+    "seq": 8,
+    "event_type": "AgentDeployed",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Y0A6A000000000000000S8",
+     "stream_id": "ctl:ws_01J8Z2",
+     "seq": 8,
+     "event_type": "AgentDeployed",
+     "schema_version": 1,
+     "event_time": "2026-09-20T13:20:00.000000000Z",
+     "recorded_at": "2026-09-20T13:20:00.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "user",
+      "id": "user_owner_01",
+      "version": "1",
+      "build": null
+     },
+     "config_refs": {
+      "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+     },
+     "payload": {
+      "agent_id": "agent_a",
+      "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+      "record_ref": "sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe"
+     },
+     "artifact_refs": [
+      "sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe",
+      "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+     ],
+     "pii_refs": [],
+     "prev_hash": "1fe5cabc4d99b8adf6bc99cc68e3d14073a826019e8dc0bda271d7370387c616"
+    },
+    "canonical": "{\"actor\":{\"build\":null,\"id\":\"user_owner_01\",\"kind\":\"user\",\"version\":\"1\"},\"artifact_refs\":[\"sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe\",\"sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43\"],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{\"mandate_version\":\"sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8Y0A6A000000000000000S8\",\"event_time\":\"2026-09-20T13:20:00.000000000Z\",\"event_type\":\"AgentDeployed\",\"payload\":{\"agent_id\":\"agent_a\",\"mandate_version\":\"sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43\",\"record_ref\":\"sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe\"},\"pii_refs\":[],\"prev_hash\":\"1fe5cabc4d99b8adf6bc99cc68e3d14073a826019e8dc0bda271d7370387c616\",\"recorded_at\":\"2026-09-20T13:20:00.000000400Z\",\"schema_version\":1,\"seq\":8,\"stream_id\":\"ctl:ws_01J8Z2\"}",
+    "hash": "eec0a0e2b81c8577d2ac650d5edbb0622bb9d8d3cdc051467fb98c60106372f8"
+   },
+   {
+    "seq": 9,
+    "event_type": "AgentStopped",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZQA0A000000000000000S9",
+     "stream_id": "ctl:ws_01J8Z2",
+     "seq": 9,
+     "event_type": "AgentStopped",
+     "schema_version": 1,
+     "event_time": "2026-09-25T18:00:00.000000000Z",
+     "recorded_at": "2026-09-25T18:00:00.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "control_services",
+      "version": "0.1.0",
+      "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+     },
+     "payload": {
+      "agent_id": "agent_a",
+      "connection_id": "conn_alpaca_paper_01",
+      "reason": "owner_stop",
+      "retired_on": "2026-09-25",
+      "loss_added": "125.5"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "eec0a0e2b81c8577d2ac650d5edbb0622bb9d8d3cdc051467fb98c60106372f8"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"id\":\"control_services\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{\"mandate_version\":\"sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZQA0A000000000000000S9\",\"event_time\":\"2026-09-25T18:00:00.000000000Z\",\"event_type\":\"AgentStopped\",\"payload\":{\"agent_id\":\"agent_a\",\"connection_id\":\"conn_alpaca_paper_01\",\"loss_added\":\"125.5\",\"reason\":\"owner_stop\",\"retired_on\":\"2026-09-25\"},\"pii_refs\":[],\"prev_hash\":\"eec0a0e2b81c8577d2ac650d5edbb0622bb9d8d3cdc051467fb98c60106372f8\",\"recorded_at\":\"2026-09-25T18:00:00.000000400Z\",\"schema_version\":1,\"seq\":9,\"stream_id\":\"ctl:ws_01J8Z2\"}",
+    "hash": "7fd665e4fe963ea67f70586059e40fda0077d923a33ce73814ccf6a69e85cd4b"
+   },
+   {
+    "seq": 10,
+    "event_type": "ConnectionRevoked",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZQA1A000000000000000SA",
+     "stream_id": "ctl:ws_01J8Z2",
+     "seq": 10,
+     "event_type": "ConnectionRevoked",
+     "schema_version": 1,
+     "event_time": "2026-09-25T18:30:00.000000000Z",
+     "recorded_at": "2026-09-25T18:30:00.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "user",
+      "id": "user_owner_01",
+      "version": "1",
+      "build": null
+     },
+     "config_refs": {},
+     "payload": {
+      "connection_id": "conn_alpaca_paper_01"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "7fd665e4fe963ea67f70586059e40fda0077d923a33ce73814ccf6a69e85cd4b"
+    },
+    "canonical": "{\"actor\":{\"build\":null,\"id\":\"user_owner_01\",\"kind\":\"user\",\"version\":\"1\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZQA1A000000000000000SA\",\"event_time\":\"2026-09-25T18:30:00.000000000Z\",\"event_type\":\"ConnectionRevoked\",\"payload\":{\"connection_id\":\"conn_alpaca_paper_01\"},\"pii_refs\":[],\"prev_hash\":\"7fd665e4fe963ea67f70586059e40fda0077d923a33ce73814ccf6a69e85cd4b\",\"recorded_at\":\"2026-09-25T18:30:00.000000400Z\",\"schema_version\":1,\"seq\":10,\"stream_id\":\"ctl:ws_01J8Z2\"}",
+    "hash": "c3dbdce47c812a5e6242b69be56bd24a4612dbd08805f443fd61f94c1befef7c"
+   }
+  ],
+  "drafts": {
+   "snapshot_reconciled": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3N0A000000000000000R1",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "AccountSnapshotRecorded",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:05:00.000000000Z",
+    "clock_source": "broker",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "status": "ACTIVE",
+     "crypto_status": "ACTIVE",
+     "trading_blocked": false,
+     "account_blocked": false,
+     "trade_suspended_by_user": false,
+     "multiplier": 1,
+     "equity": "25000",
+     "cash": "10000",
+     "buying_power": "20000",
+     "non_marginable_buying_power": "10000",
+     "accrued_fees": "0",
+     "model_cash": "10000.5",
+     "cash_band": "1.25",
+     "cash_in_band": true
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "snapshot_fees": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3N0B000000000000000R2",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "AccountSnapshotRecorded",
+    "schema_version": 1,
+    "event_time": "2026-09-21T21:00:00.000000000Z",
+    "clock_source": "broker",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "status": "ACTIVE",
+     "crypto_status": "ACTIVE",
+     "trading_blocked": false,
+     "account_blocked": false,
+     "trade_suspended_by_user": false,
+     "multiplier": 1,
+     "equity": "25000",
+     "cash": "10000",
+     "buying_power": "20000",
+     "non_marginable_buying_power": "10000",
+     "accrued_fees": "0",
+     "model_cash": null,
+     "cash_band": null,
+     "cash_in_band": null
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "refused_stop": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZNB0T000000000000000R3",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "OwnerCommandRefused",
+    "schema_version": 1,
+    "event_time": "2026-09-21T20:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8ZNB00000000000000000C6",
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {},
+    "payload": {
+     "command": "stop",
+     "reason": "step_up_stale",
+     "effective_at": "2026-09-21T20:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "refused_acknowledgment": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZPA0A000000000000000R4",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "OwnerCommandRefused",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8ZPA00000000000000000C7",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "command": "acknowledge",
+     "reason": "step_up_missing",
+     "effective_at": "2026-09-22T13:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "derivation": {
+   "note": "The control stream from a connection to a retirement, for the mandate reference cases' base btc_accumulator (its signal model's content hash replaced by the stored model content's, V-007). The account stream is the version-3 vectors'; which connection it belongs to is journaled nowhere yet (DEC-261), so the mapping to JournaledFact takes it as an argument, given here. The facts are what each record maps to (DEC-169): a record that maps to none is not listed.",
+   "mandate_base": "btc_accumulator",
+   "account_connection": {
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "connection_id": "conn_alpaca_paper_01"
+   }
+  },
+  "journaled_facts": [
+   {
+    "seq": 2,
+    "fact": {
+     "kind": "ConnectionEstablished",
+     "connection_id": "conn_alpaca_paper_01",
+     "environment": "paper"
+    }
+   },
+   {
+    "seq": 3,
+    "fact": {
+     "kind": "ModelRegistered",
+     "id": "quant.mean_reversion",
+     "version": "1.0.0",
+     "content_hash": "sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0",
+     "params": [
+      "lookback_bars",
+      "z_entry"
+     ],
+     "admits_instruments": false
+    }
+   },
+   {
+    "seq": 5,
+    "fact": {
+     "kind": "DisclosureAccepted",
+     "version": "sha256:0bccba8659b6b9eb2d95ce8d6ae07bab41ca811e46e3a71862d55b7ad365dfd7"
+    }
+   },
+   {
+    "seq": 6,
+    "fact": {
+     "kind": "MandateVersionCreated",
+     "version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+     "sources": [
+      {
+       "path": "/autonomy",
+       "source": "user_entered"
+      },
+      {
+       "path": "/behavior",
+       "source": "user_entered"
+      },
+      {
+       "path": "/capital",
+       "source": "user_entered"
+      },
+      {
+       "path": "/connection_id",
+       "source": "user_entered"
+      },
+      {
+       "path": "/environment",
+       "source": "user_entered"
+      },
+      {
+       "path": "/goal",
+       "source": "user_stated"
+      },
+      {
+       "path": "/name",
+       "source": "user_entered"
+      },
+      {
+       "path": "/notifications",
+       "source": "user_entered"
+      },
+      {
+       "path": "/protection",
+       "source": "user_entered"
+      },
+      {
+       "path": "/risk",
+       "source": "user_entered"
+      },
+      {
+       "path": "/universe",
+       "source": "user_entered"
+      }
+     ]
+    }
+   },
+   {
+    "seq": 7,
+    "fact": {
+     "kind": "MandateConfirmed",
+     "version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+     "confirmed_paths": [
+      "/autonomy",
+      "/behavior",
+      "/capital",
+      "/connection_id",
+      "/environment",
+      "/goal",
+      "/name",
+      "/notifications",
+      "/protection",
+      "/risk",
+      "/universe"
+     ]
+    }
+   },
+   {
+    "seq": 8,
+    "fact": {
+     "kind": "AgentVersionActive",
+     "agent": "agent_a",
+     "connection_id": "conn_alpaca_paper_01",
+     "environment": "paper",
+     "allocation_usd": "10000",
+     "pinned": [
+      "7b4a1c2e-1111-4a2b-9c3d-000000000001"
+     ]
+    }
+   },
+   {
+    "seq": 9,
+    "fact": {
+     "kind": "AgentStopped",
+     "agent": "agent_a",
+     "connection_id": "conn_alpaca_paper_01",
+     "retired_on": "2026-09-25",
+     "loss_added_usd": "125.5"
+    }
+   },
+   {
+    "seq": 10,
+    "fact": {
+     "kind": "ConnectionRevoked",
+     "connection_id": "conn_alpaca_paper_01"
+    }
+   },
+   {
+    "draft": "snapshot_reconciled",
+    "fact": {
+     "kind": "AccountSnapshot",
+     "connection_id": "conn_alpaca_paper_01",
+     "equity_usd": "25000"
+    }
+   },
+   {
+    "draft": "snapshot_fees",
+    "fact": {
+     "kind": "AccountSnapshot",
+     "connection_id": "conn_alpaca_paper_01",
+     "equity_usd": "25000"
+    }
+   }
+  ],
+  "invalid_drafts": [
+   {
+    "name": "connection_carries_a_key",
+    "clause": "§9.2 no credential member (AGENTS.md rules 6 and 7)",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.api_key",
+      "value": "reference-fixture-not-a-key"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.api_key"
+    }
+   },
+   {
+    "name": "connection_live_scope_unsorted",
+    "clause": "rule 19",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.scopes",
+      "value": [
+       "trading",
+       "account:write"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.scopes"
+    }
+   },
+   {
+    "name": "connection_scope_repeated",
+    "clause": "rule 19",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.scopes",
+      "value": [
+       "trading",
+       "trading"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.scopes"
+    }
+   },
+   {
+    "name": "connection_environment_backtest",
+    "clause": "§9.2 ConnectionEstablished.environment",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.environment",
+      "value": "backtest"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.environment"
+    }
+   },
+   {
+    "name": "connection_scope_empty_string",
+    "clause": "§9.1 text",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.scopes",
+      "value": [
+       "",
+       "trading"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.scopes[0]"
+    }
+   },
+   {
+    "name": "revoked_connection_not_an_id",
+    "clause": "§9.1 id",
+    "base_seq": 10,
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": "conn alpaca"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "disclosure_without_step_up",
+    "clause": "§9.2 DisclosureAccepted.step_up (V-005)",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "disclosure_version_bare_id",
+    "clause": "§9.2 ref",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.version",
+      "value": "leveraged_etp_v3"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.version"
+    }
+   },
+   {
+    "name": "model_kind_unknown",
+    "clause": "§9.2 ConfigSnapshotRegistered.kind",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.kind",
+      "value": "calendar"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.kind"
+    }
+   },
+   {
+    "name": "model_without_id",
+    "clause": "rule 21",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.model_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.model_id"
+    }
+   },
+   {
+    "name": "model_without_admits",
+    "clause": "rule 21",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.admits_instruments",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.admits_instruments"
+    }
+   },
+   {
+    "name": "fee_with_model_version",
+    "clause": "rule 21",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.model_version",
+      "value": "1.0.0"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.model_version"
+    }
+   },
+   {
+    "name": "fee_with_params",
+    "clause": "rule 21",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.params",
+      "value": [
+       "lookback_bars"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.params"
+    }
+   },
+   {
+    "name": "model_params_unsorted",
+    "clause": "rule 20",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.params",
+      "value": [
+       "z_entry",
+       "lookback_bars"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.params"
+    }
+   },
+   {
+    "name": "version_created_bare_version",
+    "clause": "§9.2 MandateVersionCreated.mandate_version: a bare id is not a version",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.mandate_version",
+      "value": "btc-accumulator-v1"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:f7319b24f9d2bd6e9e7c97814dcc7636bf019a43f87235fd4d50fc40c198d6f2"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.mandate_version"
+    }
+   },
+   {
+    "name": "version_created_record_by_path",
+    "clause": "§9.2 record_ref: a path is not a content address",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.record_ref",
+      "value": "records/btc-accumulator/v1.json"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.record_ref"
+    }
+   },
+   {
+    "name": "version_created_record_absent",
+    "clause": "§9.1 absent member",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.record_ref",
+      "delete": true
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.record_ref"
+    }
+   },
+   {
+    "name": "provenance_dotted_path",
+    "clause": "§9.2 pointer",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.provenance",
+      "value": [
+       {
+        "path": "autonomy",
+        "source": "user_entered"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.provenance[0].path"
+    }
+   },
+   {
+    "name": "provenance_bad_escape",
+    "clause": "§9.2 pointer",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.provenance",
+      "value": [
+       {
+        "path": "/risk/a~2b",
+        "source": "user_entered"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.provenance[0].path"
+    }
+   },
+   {
+    "name": "provenance_whole_document",
+    "clause": "§9.2 pointer: never the empty pointer",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.provenance",
+      "value": [
+       {
+        "path": "",
+        "source": "user_entered"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.provenance[0].path"
+    }
+   },
+   {
+    "name": "provenance_unknown_source",
+    "clause": "§9.2 MandateVersionCreated.provenance[].source",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.provenance",
+      "value": [
+       {
+        "path": "/autonomy",
+        "source": "compiler"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.provenance[0].source"
+    }
+   },
+   {
+    "name": "provenance_unsorted",
+    "clause": "rule 17",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.provenance",
+      "value": [
+       {
+        "path": "/risk",
+        "source": "user_entered"
+       },
+       {
+        "path": "/autonomy",
+        "source": "user_entered"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.provenance"
+    }
+   },
+   {
+    "name": "provenance_repeated_path",
+    "clause": "rule 17",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.provenance",
+      "value": [
+       {
+        "path": "/risk",
+        "source": "user_entered"
+       },
+       {
+        "path": "/risk",
+        "source": "user_entered"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.provenance"
+    }
+   },
+   {
+    "name": "confirmed_bare_version",
+    "clause": "§9.2 MandateConfirmed.mandate_version",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.mandate_version",
+      "value": "v1"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:c42bc4b3b720d156b0dac304fbc6b934dc4a8160938847dbfc6de7877d5d0637"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.mandate_version"
+    }
+   },
+   {
+    "name": "confirmed_paths_unsorted",
+    "clause": "rule 18",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.confirmed_paths",
+      "value": [
+       "/risk",
+       "/autonomy"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.confirmed_paths"
+    }
+   },
+   {
+    "name": "confirmed_path_not_a_pointer",
+    "clause": "§9.2 pointer",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.confirmed_paths",
+      "value": [
+       "risk"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.confirmed_paths[0]"
+    }
+   },
+   {
+    "name": "confirmed_record_unlisted",
+    "clause": "§3 artifact_refs",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "artifact_refs",
+     "path": "artifact_refs"
+    }
+   },
+   {
+    "name": "deployed_version_not_its_config_ref",
+    "clause": "rule 22",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "config_refs.mandate_version",
+      "value": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.mandate_version"
+    }
+   },
+   {
+    "name": "deployed_without_mandate_ref",
+    "clause": "§9 required config_refs",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "deployed_on_the_agent_stream",
+    "clause": "§9 catalogue",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "stopped_loss_negative",
+    "clause": "rule 23",
+    "base_seq": 9,
+    "changes": [
+     {
+      "path": "payload.loss_added",
+      "value": "-0.01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.loss_added"
+    }
+   },
+   {
+    "name": "stopped_reason_risk_limit",
+    "clause": "§9.2 AgentStopped.reason",
+    "base_seq": 9,
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "risk_limit"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "stopped_retired_on_timestamp",
+    "clause": "§9.2 date",
+    "base_seq": 9,
+    "changes": [
+     {
+      "path": "payload.retired_on",
+      "value": "2026-09-25T18:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.retired_on"
+    }
+   },
+   {
+    "name": "stopped_retired_on_impossible",
+    "clause": "§9.2 date",
+    "base_seq": 9,
+    "changes": [
+     {
+      "path": "payload.retired_on",
+      "value": "2026-02-29"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.retired_on"
+    }
+   },
+   {
+    "name": "opened_for_another_workspace",
+    "clause": "rule 25",
+    "base_seq": 1,
+    "changes": [
+     {
+      "path": "payload.workspace_id",
+      "value": "ws_other"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "stream_mismatch",
+     "path": "stream_id"
+    }
+   },
+   {
+    "name": "snapshot_carries_account_number",
+    "clause": "§9.2 no personal data (§6.4)",
+    "base_draft": "snapshot_reconciled",
+    "changes": [
+     {
+      "path": "payload.account_number",
+      "value": "reference-fixture"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.account_number"
+    }
+   },
+   {
+    "name": "snapshot_multiplier_text",
+    "clause": "§9.1 integer",
+    "base_draft": "snapshot_reconciled",
+    "changes": [
+     {
+      "path": "payload.multiplier",
+      "value": "1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.multiplier"
+    }
+   },
+   {
+    "name": "snapshot_band_without_model_cash",
+    "clause": "rule 24",
+    "base_draft": "snapshot_fees",
+    "changes": [
+     {
+      "path": "payload.cash_band",
+      "value": "1.25"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cash_band"
+    }
+   },
+   {
+    "name": "snapshot_comparison_without_flag",
+    "clause": "rule 24",
+    "base_draft": "snapshot_reconciled",
+    "changes": [
+     {
+      "path": "payload.cash_in_band",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cash_in_band"
+    }
+   },
+   {
+    "name": "snapshot_band_negative",
+    "clause": "rule 24",
+    "base_draft": "snapshot_reconciled",
+    "changes": [
+     {
+      "path": "payload.cash_band",
+      "value": "-1.25"
+     },
+     {
+      "path": "payload.cash_in_band",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cash_band"
+    }
+   },
+   {
+    "name": "snapshot_outside_band_flagged_inside",
+    "clause": "rule 24",
+    "base_draft": "snapshot_reconciled",
+    "changes": [
+     {
+      "path": "payload.model_cash",
+      "value": "10001.26"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cash_in_band"
+    }
+   },
+   {
+    "name": "snapshot_inside_band_flagged_outside",
+    "clause": "rule 24",
+    "base_draft": "snapshot_reconciled",
+    "changes": [
+     {
+      "path": "payload.cash_in_band",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cash_in_band"
+    }
+   },
+   {
+    "name": "refused_acknowledgment_on_the_agent_stream",
+    "clause": "rule 26",
+    "base_draft": "refused_stop",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": "acknowledge"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "stream_mismatch",
+     "path": "payload.command"
+    }
+   },
+   {
+    "name": "refused_stop_on_the_account_stream",
+    "clause": "rule 26",
+    "base_draft": "refused_acknowledgment",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": "stop"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "stream_mismatch",
+     "path": "payload.command"
+    }
+   },
+   {
+    "name": "refused_stop_without_cause",
+    "clause": "rule 27 (rule 16 on the agent stream)",
+    "base_draft": "refused_stop",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "refused_acknowledgment_without_cause",
+    "clause": "rule 27",
+    "base_draft": "refused_acknowledgment",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "refused_pause",
+    "clause": "§9.2 OwnerCommandRefused.command",
+    "base_draft": "refused_stop",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": "pause"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.command"
+    }
+   },
+   {
+    "name": "refused_reason_unknown",
+    "clause": "§9.2 OwnerCommandRefused.reason",
+    "base_draft": "refused_stop",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "step_up_expired"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "refused_at_risk_clock_seconds",
+    "clause": "§9.1 timestamp",
+    "base_draft": "refused_stop",
+    "changes": [
+     {
+      "path": "payload.effective_at",
+      "value": 1790022600
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.effective_at"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "snapshot_drift_equal_to_band",
+    "clause": "rule 24: inside includes the band itself",
+    "base_draft": "snapshot_reconciled",
+    "changes": [
+     {
+      "path": "payload.model_cash",
+      "value": "10001.25"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "snapshot_outside_band",
+    "clause": "rule 24",
+    "base_draft": "snapshot_reconciled",
+    "changes": [
+     {
+      "path": "payload.model_cash",
+      "value": "10001.26"
+     },
+     {
+      "path": "payload.cash_in_band",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "stopped_with_no_loss",
+    "clause": "rule 23: max(0, N - E) may be 0",
+    "base_seq": 9,
+    "changes": [
+     {
+      "path": "payload.loss_added",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "model_without_params",
+    "clause": "rule 21: a model may declare no parameters",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.params",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "refused_resume",
+    "clause": "rule 26",
+    "base_draft": "refused_stop",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": "resume"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "refused_acknowledgment_for_its_method",
+    "clause": "rule 26",
+    "base_draft": "refused_acknowledgment",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "step_up_method"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "provenance_escaped_token",
+    "clause": "§9.2 pointer: ~0 and ~1",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.provenance",
+      "value": [
+       {
+        "path": "/risk/a~0b~1c",
+        "source": "user_entered"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "live_connection",
+    "clause": "§9.2 ConnectionEstablished.environment",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.environment",
+      "value": "live"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
  }
 }
