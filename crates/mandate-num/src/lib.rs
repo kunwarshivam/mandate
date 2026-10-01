@@ -780,6 +780,16 @@ impl Ratio {
             .map(Self)
     }
 
+    /// `self × other`, exact, or `too_precise` when the product needs more than `Ratio`'s 24
+    /// fractional digits: the forward-paper bound's `z × σ` (DEC-281 item 6), whose operands sit
+    /// on 3 and 12 digits, so the product always fits.
+    pub fn checked_mul(self, other: Self) -> Result<Self, NumError> {
+        self.exact()
+            .mul(other.exact())?
+            .to_decimal(RATIO_SCALE)
+            .map(Self)
+    }
+
     /// `self × factor`, exact: annualizing a variance or a squared Sharpe by the period count
     /// (DEC-127 items 6 and 7), which is exact because the factor is an integer.
     pub fn times_int(self, factor: u32) -> Result<Self, NumError> {
