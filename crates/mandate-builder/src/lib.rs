@@ -83,8 +83,8 @@ use mandate_time::TimeError;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BuilderError {
     /// A stub of a DEC-77 tests PR returns this, so every pending test fails on it (DEC-77, DEC-83,
-    /// DEC-110): today the §6.2 step 5a client ceiling's (E6-12). `tests/vocabulary.rs` pins its
-    /// stable code.
+    /// DEC-110). Nothing returns it since E6-12's implementation; it stays because
+    /// `tests/vocabulary.rs` pins every stable code, and removing it is a tests change of its own.
     #[error("the order builder is not implemented yet")]
     Unimplemented,
     /// v1 has one sizing method and no calibration (DEC-47), so any other is refused rather than
