@@ -5,9 +5,14 @@
 //! walk with a clock tick in place of the change and recomputes §5.1's scaling and conditions on
 //! `i128` counts of 10⁻¹² dollars, and the second rebuilds the latched rungs from the journal.
 
+use mandate_domain::Environment;
+use mandate_time::Date;
+
 use super::*;
-use crate::document::OnComplete;
+use crate::context::{AgentId, ContextArgs, JournaledFact};
+use crate::document::{ConnectionId, OnComplete};
 use crate::risk::{ApplyResult, Rejection};
+use crate::validate::{ValidationContext, Violation, validate};
 
 fn acknowledge(offset_s: i64, restriction: Latch) -> Result<Step, String> {
     Ok(Step {
@@ -473,6 +478,111 @@ fn a_profit_stop_completes_to_its_one_outcome_and_retirement_ends_its_confirmati
         above.journal.is_empty() && above.pending.is_empty(),
         "{:?}",
         above.journal
+    );
+    Ok(())
+}
+
+/// `release` retires the agent as any retirement does (DEC-270): `AgentStopped` follows
+/// `PositionReleased` with the net dollar loss, valued at the last mark, so
+/// `ValidationContext::from_journal` carries it to the connection. A redeploy there opens at that L,
+/// its floor 150 above C × (1 − f), and one whose floor budget the carry uses is refused by V-032, so
+/// releasing and redeploying cannot reset the floor (§5.7, MI-14).
+#[test]
+fn a_release_retires_with_its_loss_carry_and_a_redeploy_opens_at_it() -> Result<(), String> {
+    let released = ladder_only(&[
+        ("/goal/on_complete", "\"release\""),
+        ("/risk/breach_confirm_s", "0"),
+    ])?;
+    let mut state = open(&released, &equity()?, &Every)?;
+    one(&mut state, mark(1, "98.5"))?;
+    let done = one(&mut state, goal_complete(2))?;
+    assert_eq!(
+        done.journal,
+        [
+            RiskEvent::GoalCompleted {
+                reason: None,
+                then: None,
+                on_complete: Some(OnComplete::Release),
+            },
+            RiskEvent::PositionReleased { qty: qty("100")? },
+            RiskEvent::AgentStopped {
+                reason: StopReason::GoalComplete,
+                loss_carry_usd: usd("150")?,
+            },
+            moved(AgentMode::Normal, AgentMode::Stopped),
+        ],
+        "E = 9,850 against N = 10,000"
+    );
+    let carried = done
+        .journal
+        .iter()
+        .find_map(|event| match event {
+            RiskEvent::AgentStopped { loss_carry_usd, .. } => Some(*loss_carry_usd),
+            _ => None,
+        })
+        .ok_or("the release journals AgentStopped")?;
+
+    let connection = ConnectionId::parse("conn_alpaca_paper_01").map_err(|e| e.to_string())?;
+    let date = Date::parse("2026-09-23").map_err(|e| e.to_string())?;
+    let facts = [
+        JournaledFact::AgentVersionActive {
+            agent: AgentId::new("released"),
+            connection_id: connection.clone(),
+            environment: Environment::Paper,
+            allocation_usd: usd("10000")?,
+            pinned: BTreeSet::new(),
+        },
+        JournaledFact::AgentStopped {
+            agent: AgentId::new("released"),
+            connection_id: connection.clone(),
+            retired_on: date,
+            loss_added_usd: carried,
+        },
+    ];
+    let args = ContextArgs {
+        agent: AgentId::new("redeployed"),
+        connection_id: connection,
+        validation_date: date,
+        membership: None,
+        instrument_groups: BTreeMap::new(),
+        eligibility_failures: BTreeSet::new(),
+    };
+    let read =
+        ValidationContext::from_journal(&mandate(&[])?, args, &facts).map_err(|e| e.to_string())?;
+    assert_eq!(read.connection_loss_carry_usd, usd("150")?);
+
+    let redeployed = ladder_only(&[("/risk/breach_confirm_s", "0")])?;
+    for (inherited, floors) in [(read.connection_loss_carry_usd, true), (Usd::ZERO, false)] {
+        let opening = Opening {
+            inherited_loss_usd: inherited,
+            ..equity()?
+        };
+        let mut state = open(&redeployed, &opening, &Every)?;
+        assert_eq!(state.snapshot().inherited_loss, inherited);
+        let at_floor = one(&mut state, mark(1, "91.5"))?;
+        assert_eq!(
+            at_floor
+                .snapshot
+                .restrictions
+                .contains(&Restriction::LifetimeFloor),
+            floors,
+            "E = 9,150 is the floor 9,000 + L only with the carry: {:?}",
+            at_floor.journal
+        );
+    }
+
+    let mut with_carry = context()?;
+    with_carry.connection_loss_carry_usd = read.connection_loss_carry_usd;
+    let small = mandate(&[
+        ("/capital/allocation_usd", "\"1500\""),
+        ("/risk/max_gross_exposure_usd", "\"1500\""),
+    ])?;
+    assert_eq!(
+        validate(&small, &with_carry)
+            .map_err(|e| e.to_string())?
+            .violations,
+        BTreeSet::from([Violation::V032]),
+        "a 1,500 allocation's floor budget is 150, which the carry uses"
     );
     Ok(())
 }
