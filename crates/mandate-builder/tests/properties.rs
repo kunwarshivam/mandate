@@ -2887,7 +2887,6 @@ fn requested_actions() -> impl Strategy<Value = (Autonomy, ActionContext, Reques
 /// "Never AUTO" is asserted directly as well as through the oracle, so a mistake shared by the
 /// oracle and the crate still fails the first assertion.
 #[test]
-#[ignore = "pending E6-12"]
 fn a_client_opening_is_never_auto_and_every_other_request_decides_as_before() {
     check(requested_actions(), |(policy, action, requester)| {
         let action = ActionContext {
@@ -2944,7 +2943,6 @@ fn a_client_opening_is_never_auto_and_every_other_request_decides_as_before() {
 /// §6.2 steps 2 and 5a through `decide`: whatever the requester, a denied buy is skipped and a
 /// deferred one deferred, and an allowed client buy is never AUTO.
 #[test]
-#[ignore = "pending E6-12"]
 fn no_client_buy_reaches_auto_through_decide() {
     check(requested_actions(), |(policy, action, requester)| {
         let proposal = proposal_for(&ActionContext {
@@ -3047,7 +3045,6 @@ fn swept_rules() -> Vec<SweptRules> {
 /// are not in the sweep because `Autonomy` cannot hold one until E8-8 (DEC-262); the client ceiling
 /// is the last step, so whatever step 4a adds is decided before it.
 #[test]
-#[ignore = "pending E6-12"]
 fn every_rule_default_admission_and_requester_obeys_the_client_ceiling() {
     let decisions = [
         AutonomyDecision::Auto,
