@@ -125,16 +125,16 @@ pub(crate) fn subject_and_copy(
 
 /// Rule 10's second clause over one `append` batch whose drafts each passed [`Draft::parse`]: an
 /// `IntentProposed` whose `DecisionMade` is in the batch repeats its action members, decimals
-/// compared by value. Reported at the first such intent, at its first differing member.
+/// compared by value. Reported at the first such intent, at its first differing member. Both event
+/// types exist only on an agent stream (§9), so a batch of any other stream passes.
 pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     let decisions: BTreeMap<&str, &Draft> = drafts
         .iter()
-        .filter(|d| governs(d.stream_id(), d.event_type()) && d.event_type() == "DecisionMade")
+        .filter(|d| d.event_type() == "DecisionMade")
         .map(|d| (d.event_id(), d))
         .collect();
     for (i, draft) in drafts.iter().enumerate() {
-        if !governs(draft.stream_id(), draft.event_type()) || draft.event_type() != "IntentProposed"
-        {
+        if draft.event_type() != "IntentProposed" {
             continue;
         }
         let fields = draft.fields();
