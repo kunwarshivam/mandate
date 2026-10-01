@@ -336,6 +336,9 @@ fn gate_decided(
             }
         }
         "hold" | "defer" => {
+            if flag(payload, "held_long") {
+                state.held_long.insert(id.clone());
+            }
             state.held.insert(id);
             return Ok(());
         }

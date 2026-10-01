@@ -7,6 +7,7 @@
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_time::{ExchangeCalendar, Session, SessionSpan, UtcNanos, new_york_date_and_hour};
 
+use crate::gate::{SESSION_CLOSED, SESSION_UNKNOWN};
 use crate::ports::Ports;
 use crate::types::{Purpose, RiskClock};
 
@@ -72,6 +73,44 @@ pub(crate) fn venue(ports: &Ports<'_>, instrument: &InstrumentId, at: RiskClock)
         None if equity && covered(at) => Venue::Closed,
         None => Venue::Regular,
     }
+}
+
+/// Why an equity exit at `at` waits for the next session (DEC-260 (13), the coordinator's ruling
+/// D1): `session_closed` while no v1 session is open and the calendar names the next pre-market
+/// open, where the hold ends; `session_unknown` when the calendar cannot name one, so the exit
+/// stays held, never sent overnight or queued blind. `None` while a session is open.
+pub(crate) fn closed_hold(
+    ports: &Ports<'_>,
+    instrument: &InstrumentId,
+    at: RiskClock,
+) -> Option<&'static str> {
+    if venue(ports, instrument, at) != Venue::Closed {
+        return None;
+    }
+    Some(if next_open(at).is_some() {
+        SESSION_CLOSED
+    } else {
+        SESSION_UNKNOWN
+    })
+}
+
+/// The start of the first pre-market session after `at`, looking a fortnight ahead, the longest
+/// a calendar closes for; `None` when the calendar ends first.
+fn next_open(at: RiskClock) -> Option<i64> {
+    let calendar = ExchangeCalendar::us_equities().ok()?;
+    let now = UtcNanos::from_parts(at.secs(), 0).ok()?;
+    let (mut date, _) = new_york_date_and_hour(now).ok()?;
+    for _ in 0..14 {
+        let found =
+            calendar.sessions(date).ok()?.into_iter().find(|span| {
+                span.session() == Session::PreMarket && span.start().secs() > at.secs()
+            });
+        if let Some(open) = found {
+            return Some(open.start().secs());
+        }
+        date = date.next().ok()?;
+    }
+    None
 }
 
 /// Whether an order of `purpose` goes as an extended-hours limit: an exit in pre-market or
@@ -181,7 +220,10 @@ mod venue_tests {
             assert_eq!(venue(&ports, &aapl, at(secs)), expected, "at {secs}");
         }
         assert_eq!(stops_trigger_since(&ports, &aapl, at(OPEN + 5)), Some(OPEN));
-        assert_eq!(stops_trigger_since(&ports, &aapl, at(CLOSE - 1)), Some(OPEN));
+        assert_eq!(
+            stops_trigger_since(&ports, &aapl, at(CLOSE - 1)),
+            Some(OPEN)
+        );
         assert_eq!(stops_trigger_since(&ports, &aapl, at(OPEN - 1)), None);
         assert_eq!(stops_trigger_since(&ports, &aapl, at(SATURDAY)), None);
         assert_eq!(stops_trigger_since(&ports, &aapl, at(0)), Some(i64::MIN));
@@ -202,7 +244,10 @@ mod venue_tests {
                 expected,
                 "{purpose:?} in after-hours"
             );
-            assert!(!extended_hours(&ports, &aapl, at(OPEN), purpose), "{purpose:?}");
+            assert!(
+                !extended_hours(&ports, &aapl, at(OPEN), purpose),
+                "{purpose:?}"
+            );
         }
         Ok(())
     }

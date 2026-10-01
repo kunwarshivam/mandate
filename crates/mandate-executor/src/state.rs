@@ -92,6 +92,8 @@ pub struct ExecutorState {
     pub(crate) last_submission: Option<Seq>,
     pub(crate) bodies: BTreeMap<IntentId, IntentBody>,
     pub(crate) held: BTreeSet<IntentId>,
+    /// Held exits whose hold past `max_intent_age_s` was journaled and alerted, once (D2).
+    pub(crate) held_long: BTreeSet<IntentId>,
     pub(crate) details: BTreeMap<ClientOrderId, OrderDetail>,
     pub(crate) restrictions: BTreeMap<(AgentId, String), Mode>,
     pub(crate) uncompensated: BTreeMap<EventId, Adoption>,
@@ -220,6 +222,7 @@ impl ExecutorState {
             last_submission: None,
             bodies: BTreeMap::new(),
             held: BTreeSet::new(),
+            held_long: BTreeSet::new(),
             details: BTreeMap::new(),
             restrictions: BTreeMap::new(),
             uncompensated: BTreeMap::new(),
