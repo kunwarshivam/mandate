@@ -138,7 +138,7 @@ fn the_listing_and_market_are_dec_199_item_6s() -> Result<(), String> {
         min_order_size,
         halted,
         status_feed_current,
-    } = listing(msft.clone(), Exchange::Nyse, true, limit, at)?;
+    } = listing(msft.clone(), (Some(Exchange::Nyse), None), true, limit, at)?;
     expect_eq("instrument", instrument, msft)?;
     expect_eq("asset_class", asset_class, AssetClass::UsEquity)?;
     expect_eq("exchange", exchange, Some(Exchange::Nyse))?;
@@ -211,9 +211,10 @@ fn case_named(id: &str) -> Result<(Json, Json), String> {
 /// What a test does to a case before it runs.
 type Edit = Box<dyn FnOnce(&mut Json) -> Result<(), String>>;
 
-/// Case `id` with `edit` applied, run as `tests/refcases.rs` runs it.
+/// Case `id`, without its variants, with `edit` applied, run as `tests/refcases.rs` runs it.
 fn run_edited(id: &str, edit: Edit) -> Result<(), String> {
     let (fixture, mut case) = case_named(id)?;
+    object_at(&mut case, &[])?.remove("variants");
     edit(&mut case)?;
     run_case(&fixture, &case)
 }
@@ -782,4 +783,181 @@ fn rc_09b_holding_aapl_then_rc_09b(edit: Edit) -> Edit {
         )?;
         edit(c)
     })
+}
+
+/// RC-09 as the founder wrote it: the AAPL opening denied with no day trade left, then the crypto
+/// risk exit allowed, the day-trade count unchanged by crypto (§9.2), and the denied opening
+/// holding nothing back (DEC-259 item 7).
+#[test]
+fn rc_09_passes_as_written() -> Result<(), String> {
+    run_edited("RC-09", Box::new(|_| Ok(())))
+}
+
+/// RC-09 with BTCUSD's `symbol` as `symbol` (or none when `None`), and its step 3 replaced by a
+/// crypto opening of `qty` expecting `decision`.
+fn rc_09_crypto_opening(symbol: Option<&'static str>, qty: &'static str, decision: Json) -> Edit {
+    Box::new(move |c| {
+        let listed = object_at(c, &["instruments", "BTCUSD"])?;
+        match symbol {
+            Some(symbol) => listed.insert("symbol".to_owned(), json!(symbol)),
+            None => listed.remove("symbol"),
+        };
+        *step_of(c, 2)? = json!({
+            "at": "2026-09-21T14:05:00-04:00",
+            "event": "propose_order",
+            "data": {
+                "instrument": "BTCUSD", "side": "buy", "type": "limit",
+                "qty": qty, "limit_price": "60000.00", "purpose": "open"
+            },
+            "expect": { "decision": decision }
+        });
+        Ok(())
+    })
+}
+
+/// A crypto opening is judged by the quote currency its `symbol` names (§3.2 item 7, DEC-285): a
+/// `BTC/USD` opening is allowed, with no `tif` read as `gtc`, and one in a pair quoted in a
+/// stablecoin, or in a symbol that names no quote, is denied `crypto_pair_not_usd`. A crypto exit
+/// is never judged by its pair (`AGENTS.md` rule 13): RC-09's own risk exit is allowed in either.
+#[test]
+fn a_crypto_proposal_is_judged_by_its_symbol_s_quote() -> Result<(), String> {
+    let not_usd = || json!({ "verdict": "deny", "reason_code": "crypto_pair_not_usd" });
+    expect_eq(
+        "BTC/USD",
+        run_edited(
+            "RC-09",
+            rc_09_crypto_opening(Some("BTC/USD"), "0.001", json!({ "verdict": "allow" })),
+        ),
+        Ok(()),
+    )?;
+    for symbol in [Some("BTC/USDT"), None] {
+        expect_eq(
+            &format!("{symbol:?}"),
+            run_edited("RC-09", rc_09_crypto_opening(symbol, "0.001", not_usd())),
+            Ok(()),
+        )?;
+        expect_eq(
+            &format!("RC-09's exit in {symbol:?}"),
+            run_edited(
+                "RC-09",
+                Box::new(move |c| {
+                    let listed = object_at(c, &["instruments", "BTCUSD"])?;
+                    match symbol {
+                        Some(symbol) => listed.insert("symbol".to_owned(), json!(symbol)),
+                        None => listed.remove("symbol"),
+                    };
+                    Ok(())
+                }),
+            ),
+            Ok(()),
+        )?;
+    }
+    Ok(())
+}
+
+/// A crypto pair's minimum order is its `min_trade_increment` (DEC-285): an opening below it stops
+/// at §5.3 rule 2's unregistered code, and one at it is decided.
+#[test]
+fn a_crypto_pair_s_minimum_order_is_its_increment() -> Result<(), String> {
+    let with_increment = |qty: &'static str, decision: Json| -> Edit {
+        Box::new(move |c| {
+            put(
+                c,
+                &["instruments", "BTCUSD"],
+                "min_trade_increment",
+                json!("0.01"),
+            )?;
+            rc_09_crypto_opening(Some("BTC/USD"), qty, decision)(c)
+        })
+    };
+    expect_eq(
+        "below the increment",
+        run_edited("RC-09", with_increment("0.001", json!({ "verdict": "allow" }))),
+        Err(
+            "step 3: `mandate_risk::evaluate`: the reason code of §5.3 rule 2's minimum size is not implemented yet (pending DEC-129 item 27) (unimplemented)"
+                .to_owned(),
+        ),
+    )?;
+    expect_eq(
+        "at the increment",
+        run_edited(
+            "RC-09",
+            with_increment("0.01", json!({ "verdict": "allow" })),
+        ),
+        Ok(()),
+    )
+}
+
+/// An instrument states only its own class's members (DEC-85, DEC-285): an equity's `symbol` or
+/// `min_trade_increment`, or a pair's `exchange` or `fractionable`, fails the case naming it.
+#[test]
+fn an_instrument_states_only_its_class_s_members() -> Result<(), String> {
+    let stating = |instrument: &'static str, key: &'static str, value: Json| -> Edit {
+        Box::new(move |c| put(c, &["instruments", instrument], key, value))
+    };
+    let rows: [(&str, &str, &str, Json); 4] = [
+        ("RC-09B", "AAPL", "symbol", json!("AAPL/USD")),
+        ("RC-09B", "AAPL", "min_trade_increment", json!("0.01")),
+        ("RC-09", "BTCUSD", "exchange", json!("NASDAQ")),
+        ("RC-09", "BTCUSD", "fractionable", json!(true)),
+    ];
+    for (case, instrument, key, value) in rows {
+        expect_eq(
+            &format!("{case}: `{instrument}` stating `{key}`"),
+            run_edited(case, stating(instrument, key, value)),
+            Err(format!("instrument `{instrument}`: unknown key `{key}`")),
+        )?;
+    }
+    Ok(())
+}
+
+/// RC-09's crypto fill reaches the accounting as crypto, as it reaches the gate's day-trade fold
+/// (§6.4, typed by hand): 0.01 BTC bought at 60,000.00 as a taker pays 25 bps, 0.000025 BTC, from
+/// the asset received, so 0.009975 BTC is held, $600.00 leaves settled cash at once, and no cash
+/// fee accrues. The fill the fold reads is crypto too, so it never counts as a day trade.
+#[test]
+fn rc_09_s_crypto_fill_is_crypto_to_the_accounting_and_the_gate() -> Result<(), String> {
+    let (fixture, mut case) = case_named("RC-09")?;
+    object_at(&mut case, &[])?.remove("variants");
+    let config = config(&fixture, &case)?;
+    let instruments = instruments(&case)?;
+    let mut account = initial(
+        &case,
+        BrokerProfile::parse(str_at(&case, "broker_profile")?)?,
+        &instruments,
+    )?;
+    let mut gate = Gate::read(&fixture, &case)?;
+    let steps = list_at(&case, "steps")?;
+    for n in 0..2 {
+        let step = steps.get(n).ok_or("RC-09 has three steps")?;
+        run_step(&mut account, &mut gate, step, n, &instruments, &config)?;
+    }
+    let (_, btc, _, _) = instruments
+        .iter()
+        .find(|(name, _, _, _)| name == "BTCUSD")
+        .ok_or("RC-09 lists BTCUSD")?;
+    let num = |text: &str| Qty::parse(text).map_err(|e| e.to_string());
+    expect_eq(
+        "BTCUSD held, net of the fee in kind",
+        account.position(btc).qty().abs(),
+        num("0.009975")?,
+    )?;
+    expect_eq(
+        "settled cash",
+        account.settled(),
+        Usd::parse("9400").map_err(|e| e.to_string())?,
+    )?;
+    expect_eq(
+        "cash fees accrued",
+        account.fees_accrued().map_err(|e| e.to_string())?,
+        Usd::ZERO,
+    )?;
+    expect_eq(
+        "the fold's view of the fill",
+        gate.fills
+            .iter()
+            .map(|f| (f.instrument.as_str().to_owned(), f.asset_class, f.qty))
+            .collect::<Vec<_>>(),
+        vec![("BTCUSD".to_owned(), AssetClass::Crypto, num("0.01")?)],
+    )
 }
