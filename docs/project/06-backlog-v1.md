@@ -1725,6 +1725,12 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   still route exits and protective orders when `fold_day_trades` fails (`AGENTS.md` rule 13), and
   E7-3's tests PR carries the pending test
   `a_failed_day_trade_fold_refuses_openings_and_still_routes_exits` for it.
+- **Refuse a short position in the trading-domain day-trade fold structurally** (#412 review,
+  nit 3). `trading_domain::gate::Gate::fold` reads each equity position as `position.qty().abs()`,
+  so a short would fold as if held long and understate the day-trade count. No v1 case holds one
+  (`AGENTS.md` rule 12) and `Gate::decide` refuses a short, but a `day_trade_count` expectation
+  reaches the fold without that refusal. Refuse a negative `SignedQty` there instead of taking
+  its magnitude.
 - **Drive the trading-domain gate cases through the real order path once E7-4 and E7-5 do**
   (the coordinator's ruling on #370, item 2). DEC-259 item 7 is a reading of the reference harness
   only: it decides a later proposal once the earlier allowed ones were filled in full by `fill`
