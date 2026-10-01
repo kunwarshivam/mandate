@@ -142,11 +142,25 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Accepted when:* for each [tamper case](../specs/reference-cases/journal.yaml) its input can
   express, the command reports the expected first failure; a deleted or altered artifact reports
   `artifact_missing` or `artifact_mismatch` ([journal spec](../specs/journal.md) §11).
+- **E5-6 (Must)** As an auditor, I want closed journal ranges held as cold-store segments with
+  manifests, and the per-range verify checks, so that records can be checked years later without
+  the hot store ([journal spec](../specs/journal.md) §6.2, §11, §12). The pure half is complete:
+  `mandate-journal-cold` — tests [#391](https://github.com/kunwarshivam/mandate/pull/391),
+  implementation [#404](https://github.com/kunwarshivam/mandate/pull/404), the E5-6a property
+  suite [#407](https://github.com/kunwarshivam/mandate/pull/407); DEC-263 to DEC-265 and DEC-287.
+  The operational halves are E5-7, the CLI wiring E5-8, the examination bundle E5-9, and RFC 3161
+  signature verification stays Proposed in DEC-265 item 1 (a crypto dependency; the founder's
+  call).
+  *Accepted when:* the manifest's canonical form and hash, the segment walk's checks in DEC-264's
+  order, the timestamp token's structural check, and the canonical export's digest are pure
+  functions over `mandate-journal`'s own walks, fail closed, and pass their hand and property
+  suites.
 - **E5-6a (Should)** As an auditor, I want the cold store's checks held to their invariants over
   random segment sequences, not only the hand-calculated cases, so that the walk cannot drift
   between the cases (E5-6's follow-up, owed by AGENTS.md's "property-based tests for invariants"
   and deferred by #404's review; a DEC-77 tests PR on claim
-  [#374](https://github.com/kunwarshivam/mandate/issues/374)).
+  [#374](https://github.com/kunwarshivam/mandate/issues/374), merged as
+  [#407](https://github.com/kunwarshivam/mandate/pull/407)).
   *Accepted when:* proptest drives `mandate-journal-cold` over random segment sequences —
   contiguous runs split at random boundaries, tampered files, lying manifests, gaps and
   overlapping copies, mid-segment entries — and an independent oracle (its own accumulator,
@@ -154,6 +168,41 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   trusted start advanced by exactly the events inside it; every tamper is refused by the check
   that owns it, at the `seq` the range expected; nothing before the trusted start is checked;
   and the token entry point never answers `Ok` (DEC-263 to DEC-265).
+- **E5-7 (Must)** As an operator, I want closed segments shipped to object storage with their
+  manifests and retention enforced, so that trading records survive the hot store and meet the
+  6-year write-once requirement (FR-7.6; [journal spec](../specs/journal.md) §6.2; E5-6's
+  operational follow-up). Phase 0 ships the export job: a segment closes (daily is acceptable in
+  Phase 0; within 1 minute of closing before live capital), its file and manifest are written to
+  object storage, and `SegmentExported` carries the manifest hash (DEC-263 item 3). Before live
+  capital: object lock in compliance mode with a 6-year retain-until, the `RetentionExtended` job
+  while a supported position, lot, or account remains open, `LegalHoldChanged`, a second-region
+  replica, and a quarterly restore-and-verify drill, each journaled; a later evictor may delete
+  only hot rows with `seq ≤` the last verified cold segment, journaling `SegmentEvicted` (§6.1).
+  Safety-critical (the journal write path); an object-storage dependency row is owed (none by
+  default — the founder's call), DEC-77 sequence.
+  *Accepted when:* a closed range exports, re-imports, and verifies through E5-6's checks end to
+  end; retention extends and a legal hold blocks deletion, both journaled; the drill verifies a
+  replica; and no hot row above the last verified cold segment is ever deleted.
+- **E5-8 (Should)** As an auditor, I want `mandate journal verify` to check a cold-store export —
+  a directory of segment files and manifests against an anchor and a trusted start — so that I
+  can verify long-lived records without writing code (FR-7.5; E5-4's command over one exported
+  stream is the hot-store half; E5-6's checks through the CLI, which the E5-6 brief left to "the
+  CLI calls them when its story says"). `mandate-cli` is safety-critical, DEC-77 sequence.
+  *Accepted when:* the command runs §11's per-range checks through `mandate-journal-cold` over a
+  cold export, reports the first failure with its code and a non-zero exit, never vouches for an
+  export it cannot cover, and never answers `Ok` for a timestamp token until DEC-265 item 1's
+  crypto half lands.
+- **E5-9 (Should)** As an auditor, I want an examination bundle scoped by account, agent, and
+  period — every related stream (account, agent, control, scheduler), the referenced
+  configuration objects and artifacts, schemas and upcasters, the verifier release and format
+  specification, an index, and, for authorized requests, resolved identities — with a
+  deterministic human-readable report of its own hash, so that an examination can be answered
+  from the bundle alone ([journal spec](../specs/journal.md) §12's second bullet; E5-6's
+  canonical export is the bundle's per-stream part). Resolved identities need E9's identity
+  records, and the production deadline and retention values are journal spec §13's open
+  question 4.
+  *Accepted when:* a bundle is produced within the configured deadline, its report reproduces
+  byte for byte from the same inputs, and every part verifies through the cold checks.
 
 ### E6 Agent runtime and risk
 
