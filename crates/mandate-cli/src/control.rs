@@ -293,3 +293,22 @@ pub(crate) fn commit(
         "the control stream did not settle; the command was committed at most once".to_owned(),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The actor's build is a content reference: `sha256:` and 64 lowercase hex digits, which the
+    /// envelope's `build` member admits (journal spec §3).
+    #[test]
+    fn the_build_is_a_digest_reference() {
+        let build = build_ref();
+        let hex = build.strip_prefix("sha256:").unwrap_or_default();
+        assert_eq!(hex.len(), 64, "{build}");
+        assert!(
+            hex.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "{build}"
+        );
+    }
+}

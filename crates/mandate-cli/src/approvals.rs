@@ -408,3 +408,90 @@ pub fn message(outcome: &Outcome) -> Result<String, ControlError> {
         ),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use mandate_canon::{Int, to_canonical};
+    use mandate_journal::{Environment, Head, StoredEvent, StreamId};
+    use mandate_time::UtcNanos;
+
+    use super::*;
+
+    /// One agent stream's stored events and nothing else: all `pending_count` reads.
+    struct Stream(Vec<StoredEvent>);
+
+    impl ControlJournal for Stream {
+        fn rows(&self, _stream: &StreamId) -> Result<Vec<StoredEvent>, ControlError> {
+            Ok(self.0.clone())
+        }
+        fn head(&self, _stream: &StreamId) -> Result<Head, ControlError> {
+            Err(ControlError::Journal("unused".into()))
+        }
+        fn take_ownership(&mut self, _stream: &StreamId) -> Result<u64, ControlError> {
+            Err(ControlError::Journal("unused".into()))
+        }
+        fn append(
+            &mut self,
+            _stream: &StreamId,
+            _expected_head: u64,
+            _writer_epoch: u64,
+            _recorded_at: UtcNanos,
+            _drafts: &[&[u8]],
+        ) -> Result<mandate_journal::AppendOutcome, ControlError> {
+            Err(ControlError::Journal("unused".into()))
+        }
+    }
+
+    fn stored(seq: u64, event_type: &str, payload: Value) -> Result<StoredEvent, ControlError> {
+        let body = object(vec![
+            ("event_id", text(&format!("0{seq:025}"))),
+            ("event_type", text(event_type)),
+            ("payload", payload),
+        ])?;
+        let bytes = to_canonical(&body);
+        Ok(StoredEvent {
+            stream_id: "agent:w:a".to_owned(),
+            seq,
+            event_id: format!("0{seq:025}"),
+            event_type: event_type.to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: String::new(),
+            prev_hash: Digest::ZERO,
+            hash: Digest::of(&bytes),
+            body: bytes,
+        })
+    }
+
+    fn requested(seq: u64) -> Result<StoredEvent, ControlError> {
+        let deadline = Int::new(1_000).map(Value::Int).unwrap_or(Value::Null);
+        stored(
+            seq,
+            "ApprovalRequested",
+            object(vec![("deadline", deadline)])?,
+        )
+    }
+
+    /// `status` counts exactly the requests still pending: none on an empty stream, both of two
+    /// pending ones, and one once the other is cancelled.
+    #[test]
+    fn the_pending_count_is_the_pending_requests() -> Result<(), ControlError> {
+        let owner = Owner {
+            workspace: "w".to_owned(),
+            user: "u".to_owned(),
+            environment: Environment::Paper,
+        };
+        let mut stream = Stream(Vec::new());
+        assert_eq!(pending_count(&stream, &owner, "a")?, 0);
+        stream.0.push(requested(1)?);
+        stream.0.push(requested(2)?);
+        assert_eq!(pending_count(&stream, &owner, "a")?, 2);
+        stream.0.push(stored(
+            3,
+            "ApprovalCanceled",
+            object(vec![("approval", text(&format!("0{:025}", 1)))])?,
+        )?);
+        assert_eq!(pending_count(&stream, &owner, "a")?, 1);
+        Ok(())
+    }
+}
