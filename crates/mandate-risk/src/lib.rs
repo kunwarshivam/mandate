@@ -86,7 +86,9 @@ pub use spec_types::{
 /// Every variant is a code that file's `reason_codes` list registers. §5.3 rule 2's minimum size
 /// and increment have no registered code, which is why no variant names them: DEC-129 item 27
 /// proposes `below_min_order_size` and `quantity_off_increment` to the founder, and until they are
-/// registered the gate denies without minting one.
+/// registered the gate denies without minting one. `CryptoPairNotUsd` is §3.2 item 7's "USD pairs
+/// only" (DEC-255); the gate reports it from E6-10's implementation on, and until then refuses a
+/// crypto opening as owed rather than deciding it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ReasonCode {
     AccountTradingBlocked,
@@ -101,6 +103,7 @@ pub enum ReasonCode {
     BelowPriceFloor,
     BelowLiquidityFloor,
     LeveragedEtpNotEnabled,
+    CryptoPairNotUsd,
     ConcentrationLimit,
     MaxOrderSize,
     ReentryCooldown,
@@ -136,7 +139,7 @@ impl ReasonCode {
     /// variants the enum declares by reading this file rather than by reading this array: an array
     /// compared against itself can catch a duplicate but never an omission. `as_str`'s exhaustive
     /// match forces a new variant to be named; only that count forces it in here.
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 39] = [
         Self::AccountTradingBlocked,
         Self::AccountRestricted,
         Self::CryptoAccountInactive,
@@ -149,6 +152,7 @@ impl ReasonCode {
         Self::BelowPriceFloor,
         Self::BelowLiquidityFloor,
         Self::LeveragedEtpNotEnabled,
+        Self::CryptoPairNotUsd,
         Self::ConcentrationLimit,
         Self::MaxOrderSize,
         Self::ReentryCooldown,
@@ -193,6 +197,7 @@ impl ReasonCode {
             Self::BelowPriceFloor => "below_price_floor",
             Self::BelowLiquidityFloor => "below_liquidity_floor",
             Self::LeveragedEtpNotEnabled => "leveraged_etp_not_enabled",
+            Self::CryptoPairNotUsd => "crypto_pair_not_usd",
             Self::ConcentrationLimit => "concentration_limit",
             Self::MaxOrderSize => "max_order_size",
             Self::ReentryCooldown => "reentry_cooldown",
