@@ -28,7 +28,10 @@ for c in d["cases"]:
         t = c["title"].lower()
         passes = any(w in t for w in ("passes", "exactly equal", "with the accepted", "is fine", "platform defaults on listed",
                                       "user-entered and confirmed", "with two approvers", "equal to the validation",
-                                      "below the floor budget", "is a warning", "shadowed", "(warning w-003)"))
+                                      "below the floor budget", "is a warning", "shadowed", "(warning w-003)",
+                                      "review date at the platform default is valid", "review date on the validation date is valid",
+                                      "180 days after validation is valid", "lapsed review date carried unchanged stays valid",
+                                      "moves the review date and carries the delegation over"))
         req(cid, (e["violations"] == []) == passes, f"violations {e['violations']} vs title")
     if k == "policy":
         t = c["title"].lower()
@@ -319,6 +322,47 @@ S23 = C["MC-N23"]["expect"]
 req("MC-N23", all(0 <= o < S23["window_s"] for o in S23["offsets"]), "offsets inside the window")
 req("MC-N23", S23["offsets"][0] != S23["offsets"][1] and S23["offsets"][0] != S23["offsets"][2],
     "different workspaces and theses stagger differently")
+
+# the review date (§6.2 step 5b, MI-32, V-046; DEC-188)
+for cid, code in {"MC-D02": "V-020", "MC-D05": "V-046", "MC-D06": "V-046", "MC-D07": "V-015", "MC-D09": "V-046",
+                  "MC-D10": "V-046", "MC-D12": "V-042"}.items():
+    req(cid, C[cid]["expect"]["violations"] == [code], f"expected exactly {code}")
+req("MC-D01", C["MC-D01"]["context"]["provenance"]["/autonomy/review_by"]["source"] == "platform_default"
+    and C["MC-D01"]["patch"][0]["value"] == "2026-12-23" and d["validation_context_defaults"]["validation_date"] == "2026-09-24",
+    "the platform default is the validation date + 90 days")
+req("MC-D08", C["MC-D08"]["patch"][0]["value"] == C["MC-D08"]["context"]["previous_version"]["autonomy"]["review_by"]
+    < d["validation_context_defaults"]["validation_date"], "a lapsed date, carried unchanged")
+req("MC-D09", C["MC-D09"]["patch"] == [] and "review_by" in C["MC-D09"]["context"]["previous_version"]["autonomy"], "removed")
+req("MC-D11", C["MC-D11"]["context"]["previous_version"]["autonomy"]["delegations"][0]["id"]
+    == next(p["value"][0]["id"] for p in C["MC-D11"]["patch"] if p["path"] == "/autonomy/delegations"), "the same delegation id")
+for cid, cls in {"MC-D13": "risk_reducing", "MC-D14": "risk_reducing", "MC-D15": "risk_increasing", "MC-D16": "risk_increasing"}.items():
+    req(cid, C[cid]["expect"]["classification"] == cls and C[cid]["expect"]["changed_paths"] == ["/autonomy/review_by"], cls)
+req("MC-D15", C["MC-D15"]["expect"]["step_up_required"], "re-confirming needs step-up")
+NYT = ZoneInfo("America/New_York")
+def review_local(cid):
+    return datetime.strptime(C[cid]["now"][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).astimezone(NYT)
+REVIEW = d["bases"]["btc_accumulator_reviewed"]["mandate"]["autonomy"]["review_by"]
+req("MC-D17", review_local("MC-D17").date().isoformat() == REVIEW and review_local("MC-D17").time() == time(23, 59, 59),
+    "the last second of the review date in New York")
+for cid in ("MC-D18", "MC-D19", "MC-D20", "MC-D21", "MC-D22", "MC-D24", "MC-D25", "MC-D26"):
+    req(cid, review_local(cid).date().isoformat() > REVIEW and review_local(cid).time() == time(0, 0), "00:00 New York after it")
+for cid, (dec, by) in {"MC-D17": ("auto", "rule:routine"), "MC-D18": ("ask", "review_ceiling"), "MC-D19": ("ask", "rule:large_orders"),
+                       "MC-D20": ("deny", "rule:deny_big"), "MC-D21": ("ask", "review_ceiling"), "MC-D22": ("ask", "review_ceiling"),
+                       "MC-D23": ("auto", "delegation:d1"), "MC-D24": ("ask", "review_ceiling"),
+                       "MC-D25": ("auto", "builtin_risk_reducing"), "MC-D26": ("auto", "builtin_risk_reducing"),
+                       "MC-D27": ("auto", "rule:routine")}.items():
+    req(cid, (C[cid]["expect"]["decision"], C[cid]["expect"]["by"]) == (dec, by), f"{dec} by {by}")
+req("MC-D21", C["MC-D21"]["patch"][1]["value"] == "auto", "an auto default")
+req("MC-D22", C["MC-D22"]["action"]["new_instrument"] and C["MC-D22"]["patch"][0]["value"] == "auto", "an auto admission")
+for cid in ("MC-D18", "MC-D19", "MC-D21", "MC-D22", "MC-D24"):
+    tr = C[cid]["expect"]["trigger"]
+    req(cid, tr["decided_by"] == C[cid]["expect"]["by"] and tr["requested_by"] == "agent" and tr["client"] is None, "the trigger names what asked")
+    req(cid, (tr["rule"] is None) == (C[cid]["expect"]["by"] == "review_ceiling"), "a review-ceiling ask shows no rule; a rule's ask shows it")
+req("MC-D19", C["MC-D19"]["expect"]["trigger"]["rule"]["id"] == "large_orders", "the owner's rule verbatim")
+req("MC-D23", C["MC-D23"]["now"] == C["MC-D17"]["now"] and C["MC-D24"]["now"] == C["MC-D18"]["now"]
+    and C["MC-D23"]["patch"] == C["MC-D24"]["patch"] and C["MC-D23"]["action"] == C["MC-D24"]["action"], "the same delegation either side")
+req("MC-D27", "review_by" not in d["bases"]["btc_accumulator"]["mandate"]["autonomy"] and C["MC-D27"]["now"] > C["MC-D18"]["now"],
+    "no review date, long after")
 
 # change
 inc = {"MC-C01", "MC-C02", "MC-C04", "MC-C08", "MC-C10", "MC-C12", "MC-C14", "MC-C15", "MC-C17", "MC-C18", "MC-C19", "MC-C20",
