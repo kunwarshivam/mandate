@@ -55,6 +55,7 @@ use mandate_canon::Digest;
 use mandate_num::Usd;
 use mandate_time::UtcNanos;
 
+pub mod drift;
 pub mod spec_types;
 
 pub use spec_types::{
@@ -1178,6 +1179,8 @@ pub enum ResearchError {
     EmptyId,
     #[error("a thesis states what would invalidate it")]
     EmptyInvalidation,
+    #[error("an observation's timestamp precedes the last one already folded for its source")]
+    ObservationOutOfOrder,
     /// Returned by no entry point since the implementation landed; kept for the tests PR's pinned
     /// code only (DEC-77).
     #[error("{0} is not implemented yet (pending {1})")]
@@ -1205,6 +1208,7 @@ impl ResearchError {
             Self::OutOfRange => "out_of_range",
             Self::EmptyId => "empty_id",
             Self::EmptyInvalidation => "empty_invalidation",
+            Self::ObservationOutOfOrder => "observation_out_of_order",
             Self::Unimplemented(_, _) => "unimplemented",
             Self::SpecType(_) => "spec_type",
             Self::Num(e) => e.code(),
