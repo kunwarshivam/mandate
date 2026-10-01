@@ -164,9 +164,10 @@ fn skipped_on_revalidation(ran: &Ran, asked: &Asked, source: &EventId, reason: &
     assert!(ran.handed.is_empty(), "{:?}", ran.handed);
 }
 
-/// E8-1, E8-3, EI-4, EI-14, EI-16: the request commits its content object and the hash of it, is
-/// delivered to `cli_inbox` and notified in its own batch, and a timely, stepped-up grant from a
-/// listed approver acts with exactly the bound order.
+/// E8-1, E8-3, EI-4, EI-10, EI-14, EI-16: the request commits its content object and the hash of
+/// it, is delivered to `cli_inbox` and notified in its own batch, and a timely, stepped-up grant
+/// from a listed approver acts with exactly the bound order; the same grant from the author, who is
+/// not listed, is refused first and acts on nothing.
 #[test]
 #[ignore = "pending E8-3"]
 fn a_timely_grant_acts_with_the_bound_order() {
@@ -178,6 +179,17 @@ fn a_timely_grant_acts_with_the_bound_order() {
     );
     let ports = ports(&ids, &gate, &plan, &view);
     let (mut shell, asked) = asking_shell(&ports, Some(BOUND_LIMIT));
+    let by_author = Answer {
+        responder: AUTHOR.to_owned(),
+        ..Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 20)
+    }
+    .event();
+    refused_with(
+        &tail(&mut shell, &by_author, &ports),
+        &asked,
+        &by_author.event_id,
+        "not_an_approver",
+    );
     let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 30).event();
     let ran = tail(&mut shell, &grant, &ports);
     acted(&ran, &asked, &grant.event_id);
@@ -336,7 +348,8 @@ fn lateness_is_judged_at_the_later_of_submission_and_the_folded_clock() {
 
 /// PB-4, EI-3, DEC-173 item 10: a control-stream response tailed twice is copied once and acts
 /// once, and so is one re-tailed after a restart; the restart re-hands the one intent it recorded
-/// and proposes no second.
+/// and proposes no second. A second, distinct grant for the same approval is copied and refused as
+/// `not_pending`, since the first one ended it.
 #[test]
 #[ignore = "pending E8-3"]
 fn a_re_tailed_response_is_copied_once_and_acts_once() {
@@ -379,6 +392,13 @@ fn a_re_tailed_response_is_copied_once_and_acts_once() {
             && replayed.handed.is_empty(),
         "a re-tailed response after a restart is not copied or acted on again: {:?}",
         replayed.draft_types()
+    );
+    let second = Answer::grant(next_control_seq(&restarted), &asked, ASKED_AT + 40).event();
+    refused_with(
+        &tail(&mut restarted, &second, &ports),
+        &asked,
+        &second.event_id,
+        "not_pending",
     );
     let intents = restarted
         .agent_journal
