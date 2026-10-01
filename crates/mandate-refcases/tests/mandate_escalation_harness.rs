@@ -240,3 +240,77 @@ fn an_unknown_op_fails_naming_it() {
     let failure = run(fixture, "MC-E25").expect_err("an unknown op must fail");
     assert!(failure.contains("ask_later"), "{failure}");
 }
+
+/// The ledger of MC-E27 with a `version_applied` added at `at` and placed `after_skip` or before
+/// the owner's skip, and its first query's expectation set to `suppressed`.
+fn with_version_applied(fixture: &Json, after_skip: bool, suppressed: Json) -> Json {
+    let mut doctored = fixture.clone();
+    let case = case_mut(&mut doctored, "MC-E27");
+    let applied = json!({"event": "version_applied", "at": "2026-09-22T14:00:05.000000000Z"});
+    let ledger = case["ledger"].as_array_mut().expect("a ledger");
+    let skip = ledger
+        .iter()
+        .position(|e| e["event"] == "owner_skipped")
+        .expect("MC-E27 records an owner skip");
+    ledger.insert(if after_skip { skip + 1 } else { skip }, applied);
+    case["expect"][0]["suppressed"] = suppressed;
+    doctored
+}
+
+/// The #416 review, minor 1; DEC-292 item 1: the ledger folds in its order. A `version_applied`
+/// after the owner's skip lifts it, so the query asks; the same entry before the skip lifts nothing,
+/// so the query stays `skipped_today`. A fold in any other order answers one of the two wrongly.
+#[test]
+fn the_ledger_folds_in_its_order() {
+    let fixture = fixture();
+    run(with_version_applied(&fixture, true, Json::Null), "MC-E27")
+        .unwrap_or_else(|e| panic!("a version after the skip lifts it: {e}"));
+    run(
+        with_version_applied(&fixture, false, json!("skipped_today")),
+        "MC-E27",
+    )
+    .unwrap_or_else(|e| panic!("a version before the skip lifts nothing: {e}"));
+    let failure = run(
+        with_version_applied(&fixture, true, json!("skipped_today")),
+        "MC-E27",
+    )
+    .expect_err("the lifted skip is not suppressed");
+    assert!(failure.contains("query 1"), "{failure}");
+}
+
+/// The #416 review, minor 2: an expectation without its `suppressed` member fails loudly rather
+/// than leaving its query unjudged.
+#[test]
+fn an_expectation_without_its_member_fails() {
+    let fixture = fixture();
+    for (id, member) in [("MC-E25", "suppressed"), ("MC-E30", "status")] {
+        let mut doctored = fixture.clone();
+        case_mut(&mut doctored, id)["expect"][0]
+            .as_object_mut()
+            .expect("an expectation")
+            .remove(member);
+        let failure = run(doctored, id).expect_err("an expectation without its member must fail");
+        assert!(failure.contains(member), "{id}: {failure}");
+    }
+}
+
+/// The #416 review, minor 2: an ask-ledger `event` the arm does not know fails, naming it, rather
+/// than being read as another event.
+#[test]
+fn an_unknown_ledger_event_fails_naming_it() {
+    let mut fixture = fixture();
+    case_mut(&mut fixture, "MC-E25")["ledger"][0] =
+        json!({"event": "ask_withdrawn", "at": "2026-09-22T14:00:00.000000000Z"});
+    let failure = run(fixture, "MC-E25").expect_err("an unknown event must fail");
+    assert!(failure.contains("ask_withdrawn"), "{failure}");
+}
+
+/// The #416 review, minor 2: a `channel` the arm does not know fails, naming it, rather than being
+/// read as a push.
+#[test]
+fn an_unknown_channel_fails_naming_it() {
+    let mut fixture = fixture();
+    case_mut(&mut fixture, "MC-E30")["queries"][0]["channel"] = json!("pager");
+    let failure = run(fixture, "MC-E30").expect_err("an unknown channel must fail");
+    assert!(failure.contains("pager"), "{failure}");
+}

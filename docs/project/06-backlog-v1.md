@@ -381,6 +381,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `mandate-approval`, and MC-E25 to MC-E28, MC-E30 and MC-E32 pass; their `status.toml` rows are the
   status PR's. Still open: the `lifecycle` op's runtime driver for the other 26 cases, which fail
   naming the op until it lands.
+  *Follow-up (the #416 review, minor 3):* every `ask_permit` case asks for one instrument, so
+  family E cannot see the budget counted per instrument rather than per agent (`mandate-approval`'s
+  own suite does). A future MC-E case should spread its ten asks across instruments. It changes
+  `mandate.yaml`, so it goes to the founder under DEC-176 unless it only tightens a rule.
   *Follow-up (DEC-280 item 7):* `mandate-journal`'s catalogue gains `OwnerCommandRefused` (agent and
   account streams), and the runtime journals it for a refused resume or Stop, tests first, with a
   test that a refused Stop leaves exactly that event (the #395 review, major 1; DEC-278 item 12).
