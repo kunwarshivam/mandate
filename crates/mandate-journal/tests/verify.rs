@@ -7,8 +7,9 @@ use std::collections::BTreeMap;
 use common::{STREAM, edit, journal_with, mark_draft, now, stream};
 use mandate_canon::Digest;
 use mandate_journal::{
-    Anchor, AnchorLeaf, AppendOutcome, EventCheck, EventFailure, RangeCheck, TrustedStart,
-    Verified, export_line, export_segment, merkle_root, tsa_imprint, verify_anchor, verify_events,
+    AgentStreamCheck, Anchor, AnchorLeaf, AppendOutcome, EventCheck, EventFailure, RangeCheck,
+    TrustedStart, Verified, export_line, export_segment, merkle_root, tsa_imprint, verify_anchor,
+    verify_events,
 };
 
 #[test]
@@ -276,4 +277,16 @@ fn export_lines_embed_the_exact_body() {
         );
     }
     assert_eq!(export_segment(&[]), Vec::<u8>::new());
+}
+
+/// The agent stream's per-range codes as journal spec §11 writes them.
+#[test]
+fn agent_stream_range_checks_report_the_spec_codes() {
+    assert_eq!(
+        [
+            AgentStreamCheck::IntentActionMismatch.code(),
+            AgentStreamCheck::ModeEventMismatch.code(),
+        ],
+        ["intent_action_mismatch", "mode_event_mismatch"]
+    );
 }

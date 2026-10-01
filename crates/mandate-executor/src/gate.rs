@@ -52,6 +52,23 @@ impl PartialGateDecision {
         }
     }
 
+    /// DEC-160 (12): an allowed discretionary exit with nothing to price from is **held**
+    /// `exit_unpriced`, protection resting, and re-evaluated at every tick. A discretionary exit
+    /// may be paced, never denied (rule 13); no other exit is held for a price.
+    pub(crate) fn unpriced(mut self) -> Self {
+        self.checks.push(GateCheck {
+            id: "exit_priceable",
+            passed: false,
+            inputs: Value::Null,
+            computed: Value::Null,
+        });
+        self.verdict = GateVerdict::Deny {
+            reason_code: UNPRICED.to_owned(),
+        };
+        self.held = true;
+        self
+    }
+
     /// The `checks` list as the journal carries it: each check's id and whether it passed.
     pub(crate) fn checks_value(&self) -> Result<Value, ExecutorError> {
         let checks = self
@@ -67,6 +84,9 @@ impl PartialGateDecision {
         Ok(Value::Array(checks))
     }
 }
+
+/// The hold reason of an exit with nothing to price from (DEC-160 (12)).
+pub(crate) const UNPRICED: &str = "exit_unpriced";
 
 /// One order a gate run is asked about.
 pub(crate) struct Proposal<'s> {
@@ -216,7 +236,9 @@ fn mode_failure(
 
 /// §5.3 rules 3 and 4: a sell may take at most the position less the open non-protective sells,
 /// so no order crosses zero. Protective legs are left out because the executor cancels them
-/// before a risk-reducing sell (§5.3's note on the first gate decision, §5.4).
+/// before a risk-reducing sell (§5.3's note on the first gate decision, §5.4). An open sell counts
+/// what it may still sell, its unfilled quantity: its fills have already left the position
+/// (DEC-160 (20), DEC-260), so counting them again would deny an exit that crosses nothing.
 fn available(state: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
     let held = state
         .positions
@@ -238,7 +260,9 @@ fn available(state: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Ex
                 && !order.state.is_terminal()
                 && order.state != OrderState::Intent
         })
-        .try_fold(Qty::ZERO, |total, order| total.checked_add(order.qty))?;
+        .try_fold(Qty::ZERO, |total, order| {
+            total.checked_add(order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO))
+        })?;
     Ok(long.checked_sub(selling).unwrap_or(Qty::ZERO))
 }
 

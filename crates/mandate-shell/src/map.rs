@@ -357,6 +357,7 @@ mod tests {
     fn proposal(qty: &str) -> Result<Proposal, String> {
         Ok(Proposal {
             instrument: mandate_accounting::InstrumentId::new("AAPL").map_err(|e| e.to_string())?,
+            asset_class: mandate_accounting::AssetClass::UsEquity,
             side: mandate_accounting::Side::Buy,
             qty: Qty::parse(qty).map_err(|e| e.to_string())?,
             limit: Price::parse("255.2").map_err(|e| e.to_string())?,
