@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::{
     AppendOutcome, Draft, Environment, EventCheck, EventFailure, Head, Invalid, InvalidReason,
-    StoredEvent, StreamId, TrustedStart, seal, verify_events,
+    StoredEvent, StreamId, StreamType, TrustedStart, check_batch, seal, verify_events,
 };
 use mandate_time::UtcNanos;
 use sqlx::migrate::{Migration, MigrationType, Migrator};
@@ -412,6 +412,9 @@ fn validate(stream: &StreamId, drafts: &[&[u8]]) -> Result<Vec<Draft>, AppendOut
             return Err(invalid(i, InvalidReason::DuplicateEventId, "event_id"));
         }
         batch.push(draft);
+    }
+    if stream.stream_type() == StreamType::Agent && batch.len() > 1 {
+        check_batch(&batch).map_err(|(draft, error)| AppendOutcome::Invalid { draft, error })?;
     }
     Ok(batch)
 }

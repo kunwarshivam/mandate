@@ -28,7 +28,7 @@ mod merkle;
 mod schema;
 mod verify;
 
-pub use agent::{AgentStreamCheck, AgentStreamFailure, verify_agent_stream};
+pub use agent::{AgentStreamCheck, AgentStreamFailure, check_batch, verify_agent_stream};
 pub use artifact::{
     ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, check_artifact, get_artifact,
 };
@@ -168,9 +168,8 @@ pub enum InvalidReason {
     PiiRefs,
     #[error("risk_clock is earlier than the stream's last risk_clock")]
     RiskClockRegressed,
-    /// The stub's answer for a journal spec §9.1 draft until E7-9's implementation lands. Seven of
-    /// the eight types were refused as `unknown_schema` before, and an agent stream's
-    /// `StreamOpened` as `stream_mismatch` or `schema`, so it refuses nothing that was accepted.
+    /// The stub's answer for an agent-stream batch of more than one draft until rule 10's batch
+    /// clause lands (E7-9). Nothing writes such a batch yet, so it refuses nothing that was accepted.
     #[error("the agent stream's payload checks (§9.1) are not implemented yet")]
     Unimplemented,
 }
@@ -422,6 +421,12 @@ impl MemoryJournal {
                 return invalid(i, InvalidReason::DuplicateEventId, "event_id");
             }
             batch.push(draft);
+        }
+        if stream.stream_type() == StreamType::Agent
+            && batch.len() > 1
+            && let Err((draft, error)) = check_batch(&batch)
+        {
+            return AppendOutcome::Invalid { draft, error };
         }
 
         let stored: Vec<Option<&StoredEvent>> =

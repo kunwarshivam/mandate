@@ -363,7 +363,6 @@ fn every_registered_risk_input_requires_risk_clock() {
 /// Each schema §9.1 closes is a record with exactly its listed members, so a payload with an
 /// unlisted member is refused at that member, before anything else in it is read (§9.1's order).
 #[test]
-#[ignore = "pending E7-9"]
 fn a_closed_agent_stream_schema_refuses_an_unlisted_member() {
     for (event_type, _, required) in SPEC
         .iter()

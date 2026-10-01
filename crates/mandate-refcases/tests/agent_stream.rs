@@ -43,49 +43,41 @@ fn assert_family(family: &str, accepting: &str, refusing: &str) {
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn the_agent_stream_opens_with_its_own_subject() {
     assert_family("StreamOpened", "::chain::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn an_observation_references_its_data_and_never_carries_it() {
     assert_family("ObservationRecorded", "::chain::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn a_model_output_is_recorded_as_given() {
     assert_family("ModelOutputRecorded", "::chain::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn a_decision_records_its_evaluation_its_gate_and_who_decided() {
     assert_family("DecisionMade", "::valid::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn an_intent_is_long_only_and_names_its_cause() {
     assert_family("IntentProposed", "::chain::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn a_mode_change_is_never_looser_than_the_owner_set() {
     assert_family("AgentModeChanged", "::valid::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn a_kill_switch_names_its_own_subject_and_an_owner_switch_its_command() {
     assert_family("KillSwitchActivated", "::valid::", "::invalid::");
 }
 
 #[test]
-#[ignore = "pending E7-9"]
 fn an_owner_exit_records_the_owner_and_step_up_whatever_the_bid() {
     assert_family("OwnerExitRequested", "::valid::", "::invalid::");
 }
@@ -696,7 +688,6 @@ fn sweep() -> Vec<Sweep> {
 /// member table is §9.1's, written out here, and must name exactly the members of the chain event
 /// each sweep starts from.
 #[test]
-#[ignore = "pending E7-9"]
 fn every_member_is_required_and_typed() {
     let mut fixture = fixture();
     for (event_type, base, members) in SCHEMAS {
