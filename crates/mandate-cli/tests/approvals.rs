@@ -27,7 +27,7 @@ use mandate_canon::Value;
 use mandate_cli::approvals::{
     Ended, Outcome, Revalidated, State, approve, list, message, outcome, show, skip,
 };
-use mandate_cli::control::{ControlError, ControlJournal, Submitted};
+use mandate_cli::control::{ControlError, ControlJournal, Submitted, backoff};
 use mandate_journal::AppendOutcome;
 
 fn answer<T>(what: &str, result: Result<T, ControlError>) -> T {
@@ -605,13 +605,11 @@ fn approve_through(fault: fn(&mut common::Journal)) -> Through {
 }
 
 /// DEC-155 item 2: the control-stream event id is the idempotency key, so every append attempt
-/// carries the one id the command derived; and every attempt after the first follows a pause
-/// (DEC-290).
+/// carries the one id the command derived. The pauses between attempts are the backoff tests'.
 fn one_id_for_every_attempt(through: &Through) {
     let Through {
         submitted,
         attempts,
-        waits,
         ..
     } = through;
     assert!(
@@ -625,19 +623,12 @@ fn one_id_for_every_attempt(through: &Through) {
             "a retry carries the same event id"
         );
     }
-    assert_eq!(
-        waits.len(),
-        attempts.len() - 1,
-        "one pause before each retry"
-    );
-    assert!(waits.iter().all(|w| *w > Duration::ZERO), "{waits:?}");
 }
 
 /// DEC-155 item 5, DEC-257 item 16: the CLI takes a new writer epoch per invocation, and when
 /// another writer fences it, retries with a fresh read rather than interleaving, so exactly one
 /// event is committed, under the one event id.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_fenced_append_is_retried_and_commits_once() {
     let through = approve_through(|j| j.fence_next = 1);
     one_id_for_every_attempt(&through);
@@ -657,7 +648,6 @@ fn a_fenced_append_is_retried_and_commits_once() {
 /// DEC-257 item 16: an append behind the head (another event landed after the CLI read it) is
 /// retried at the new head, so the command commits once, after the other event.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_command_behind_the_head_retries_and_commits_once() {
     let through = approve_through(|j| j.behind_next = 1);
     one_id_for_every_attempt(&through);
@@ -686,7 +676,6 @@ fn a_command_behind_the_head_retries_and_commits_once() {
 /// a retry of the same draft is `AlreadyCommitted`, so the command reports the stored event and
 /// commits nothing twice. A fresh id per attempt would commit the answer twice.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_lost_answer_is_retried_under_the_same_id_and_commits_once() {
     let through = approve_through(|j| j.ambiguous_next = 1);
     one_id_for_every_attempt(&through);
@@ -703,31 +692,43 @@ fn a_lost_answer_is_retried_under_the_same_id_and_commits_once() {
     );
 }
 
-/// The #397 review, minor 4; DEC-290: the pause before each retry grows, so a writer that keeps
-/// meeting another backs off instead of fencing it again at once; and the pauses stay bounded,
-/// none above 4 s and all of them together within 30 s, so the owner is answered.
+/// The #397 review, minor 4; DEC-290 item 6: the pause before each retry grows, so a writer that
+/// keeps meeting another backs off instead of fencing it again at once; and the pauses stay
+/// bounded, none above 4 s and all seven a command can take together within 30 s, so the owner is
+/// answered. The append loop pauses exactly `backoff`'s answer before each retry, and never before
+/// the first attempt.
 #[test]
 #[ignore = "pending E8-3"]
 fn retries_back_off_between_attempts() {
     let through = approve_through(|j| j.fence_next = 4);
     one_id_for_every_attempt(&through);
-    let waits = &through.waits;
-    assert_eq!(waits.len(), 4, "four fences, four pauses: {waits:?}");
-    for pair in waits.windows(2) {
-        assert!(pair[1] > pair[0], "each pause is longer: {waits:?}");
+    let id = through.submitted.event_id.clone();
+    let schedule: Vec<Duration> = (1..=7)
+        .map(|retry| answer("backoff", backoff(retry, &id)))
+        .collect();
+    for pair in schedule.windows(2).take(4) {
+        assert!(pair[1] > pair[0], "each pause is longer: {schedule:?}");
     }
     assert!(
-        waits.iter().all(|w| *w <= Duration::from_secs(4)),
-        "{waits:?}"
+        schedule
+            .iter()
+            .all(|w| *w > Duration::ZERO && *w <= Duration::from_secs(4)),
+        "{schedule:?}"
     );
     assert!(
-        waits.iter().sum::<Duration>() <= Duration::from_secs(30),
-        "{waits:?}"
+        schedule.iter().sum::<Duration>() <= Duration::from_secs(30),
+        "{schedule:?}"
+    );
+    assert_eq!(
+        through.waits,
+        schedule[..4].to_vec(),
+        "four fences, four pauses, each the schedule's"
     );
 }
 
-/// DEC-290: two commands racing for the stream pause for different times, so they stop meeting:
-/// the grant and the skip of one request, each fenced once in its own journal, pause differently.
+/// DEC-290 item 6: two commands racing for the stream pause for different times, so they stop
+/// meeting: the grant and the skip of one request, each fenced once in its own journal, are given
+/// different first pauses, and each journal saw its own.
 #[test]
 #[ignore = "pending E8-3"]
 fn two_racing_commands_back_off_differently() {
@@ -757,12 +758,12 @@ fn two_racing_commands_back_off_differently() {
                 now,
             )
         };
-        answer("answer", result);
-        fx.journal.waits.first().copied()
+        let submitted = answer("answer", result);
+        let scheduled = answer("backoff", backoff(1, &submitted.event_id));
+        assert_eq!(fx.journal.waits, vec![scheduled]);
+        scheduled
     };
-    let (grant, skip) = (first_pause(true), first_pause(false));
-    assert!(grant.is_some() && skip.is_some(), "{grant:?} {skip:?}");
-    assert_ne!(grant, skip);
+    assert_ne!(first_pause(true), first_pause(false));
 }
 
 /// DEC-290, the #397 review, minor 4: an answer whose append committed but whose every answer was
@@ -791,16 +792,13 @@ fn an_exhausted_answer_names_its_event_and_a_re_run_finds_it() {
         .unwrap_or_default()
         .to_owned();
     match &first {
-        Err(ControlError::Journal(why)) => assert!(why.contains(&stored), "{why}"),
+        Err(ControlError::Journal(why)) => assert!(
+            why.contains(&stored) && why.contains("if nothing else has been committed since"),
+            "{why}"
+        ),
         other => panic!("the first run gives up, not: {other:?}"),
     }
-    let attempts = fx.journal.attempts.len();
-    assert!(attempts >= 2, "it retried");
-    assert_eq!(fx.journal.waits.len(), attempts - 1);
-    assert!(
-        fx.journal.waits.iter().sum::<Duration>() <= Duration::from_secs(30),
-        "bounded"
-    );
+    assert!(fx.journal.attempts.len() >= 2, "it retried");
     fx.journal.recover();
     let mut ids = FixedIds::default();
     let again = approve(
@@ -820,6 +818,67 @@ fn an_exhausted_answer_names_its_event_and_a_re_run_finds_it() {
         })
     );
     assert_eq!(control(&fx).len(), 1, "committed once");
+    assert_eq!(ids.assertions, 0, "the re-run spent no step-up");
+}
+
+/// The #409 review, minor 1; DEC-290 item 5: a fence, then another writer's event landing between
+/// the command's read of the head and its append, then an append that commits but whose every
+/// answer is lost. The report names the event and says a re-run finds it only if nothing else has
+/// been committed since; nothing has, so the re-run finds it, though the other event moved the head
+/// the command was decided at, and commits nothing twice.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_re_run_finds_its_event_after_another_writer_moved_the_head() {
+    let mut fx = Fixture::new();
+    let asked = fx.ask(AGENT, "10", ASKED_AT);
+    let code = code_of(&asked.content);
+    fx.journal.fence_next = 1;
+    fx.journal.behind_next = 1;
+    fx.journal.lost_for_good = true;
+    let first = approve(
+        &mut fx.journal,
+        &mut FixedIds::default(),
+        &owner(),
+        AGENT,
+        &asked.approval,
+        &code,
+        at(ASKED_AT + 30),
+    );
+    let committed = control(&fx);
+    assert_eq!(
+        committed.len(),
+        2,
+        "the other writer's event, then this one"
+    );
+    let stored = member_text(&committed[1], "event_id")
+        .unwrap_or_default()
+        .to_owned();
+    match &first {
+        Err(ControlError::Journal(why)) => assert!(
+            why.contains(&stored) && why.contains("if nothing else has been committed since"),
+            "{why}"
+        ),
+        other => panic!("the first run gives up, not: {other:?}"),
+    }
+    fx.journal.recover();
+    let mut ids = FixedIds::default();
+    let again = approve(
+        &mut fx.journal,
+        &mut ids,
+        &owner(),
+        AGENT,
+        &asked.approval,
+        &code,
+        at(ASKED_AT + 35),
+    );
+    assert_eq!(
+        again,
+        Ok(Submitted {
+            event_id: stored,
+            seq: 2
+        })
+    );
+    assert_eq!(control(&fx).len(), 2, "committed once");
     assert_eq!(ids.assertions, 0, "the re-run spent no step-up");
 }
 

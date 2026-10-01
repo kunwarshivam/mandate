@@ -328,11 +328,13 @@ pub(crate) fn decide(
     }))
 }
 
-/// The same command, committed as the control stream's last event when it was decided one event
-/// earlier, and not yet recorded by the runtime that copies it. Only the last event is read, so a
-/// command repeated after any other command is committed again; and a code that confirms at the
-/// head now is a new gesture, never a re-run, whose code could confirm only at the head before its
-/// own event (DEC-290).
+/// The same command, committed as the control stream's last event when it was decided at any
+/// head before that event, and not yet recorded by the runtime that copies it. Any earlier head
+/// counts, because an event that landed between the command's read of the head and its append
+/// leaves the command last but decided further back. Only the last event is read, so a command
+/// repeated after any other command is committed again; and a code that confirms at the head now
+/// is a new gesture, never a re-run, whose code could confirm only at a head before its own event
+/// (DEC-290 item 5).
 ///
 /// # Errors
 /// [`ControlError::Journal`] when the journal cannot be read; [`ControlError::Unimplemented`] in
@@ -345,16 +347,16 @@ fn earlier(
     confirmed: Confirmation<'_>,
     head: u64,
 ) -> Result<Option<Submitted>, ControlError> {
-    let Some(before) = head.checked_sub(1) else {
-        return Ok(None);
-    };
     if matches!(confirmed, Confirmation::AtHead(_)) && confirmed.at(head)? {
         return Ok(None);
     }
-    let previous = derive(stream, event_type, chosen, confirmed.at(before)?, before)?;
-    let last = journal.rows(stream)?.pop();
-    if last.is_some_and(|row| row.event_id == previous) {
-        return Err(ControlError::Unimplemented { story: "E8-3" });
+    let Some(last) = journal.rows(stream)?.pop() else {
+        return Ok(None);
+    };
+    for before in (0..last.seq).rev() {
+        if derive(stream, event_type, chosen, confirmed.at(before)?, before)? == last.event_id {
+            return Err(ControlError::Unimplemented { story: "E8-3" });
+        }
     }
     Ok(None)
 }
@@ -400,11 +402,12 @@ const ULID_LEN: u32 = 26;
 /// The pause before retry `retry` (1 for the first retry) of the command whose id is `event_id`:
 /// doubling from [`FIRST_BACKOFF`] to at most [`LAST_BACKOFF`], plus a jitter below that base drawn
 /// from the id, so two invocations racing for the stream stop fencing each other (DEC-290; the
-/// #397 review, minor 4).
+/// #397 review, minor 4). Public so its tests can judge it directly; until it is implemented the
+/// append loop pauses [`FIRST_BACKOFF`] before every retry.
 ///
 /// # Errors
 /// [`ControlError::Unimplemented`] in the tests PR (DEC-77).
-fn backoff(retry: u32, event_id: &str) -> Result<Duration, ControlError> {
+pub fn backoff(retry: u32, event_id: &str) -> Result<Duration, ControlError> {
     let _ = (retry, event_id, FIRST_BACKOFF, LAST_BACKOFF);
     Err(ControlError::Unimplemented { story: "E8-3" })
 }
@@ -452,7 +455,10 @@ const LAST_BACKOFF: Duration = Duration::from_secs(2);
 ///
 /// # Errors
 /// [`ControlError::Journal`] when the journal refuses the draft, reports a conflicting event under
-/// the id, or keeps answering with a retry after [`ATTEMPTS`], naming the event id a re-run finds.
+/// the id, or keeps answering with a retry after [`ATTEMPTS`], naming the event id, which a re-run
+/// finds only if nothing else has been committed since: the id is derived at the head the command
+/// was decided at, and an event that landed between that read and the append moves the head a
+/// re-run decides at (DEC-290 item 5).
 pub(crate) fn commit(
     journal: &mut dyn ControlJournal,
     ids: &mut dyn Ids,
@@ -490,12 +496,13 @@ pub(crate) fn commit(
         let Some(retry) = retries.next() else {
             break;
         };
-        journal.wait(backoff(retry, &event_id)?);
+        let _ = retry;
+        journal.wait(FIRST_BACKOFF);
     }
     Err(ControlError::Journal(format!(
         "the control stream did not settle after {ATTEMPTS} attempts; the command may have been \
-         committed once, as event {event_id}, and running it again finds it rather than \
-         committing it twice"
+         committed once, as event {event_id}; if nothing else has been committed since, running \
+         it again finds it rather than committing it twice"
     )))
 }
 

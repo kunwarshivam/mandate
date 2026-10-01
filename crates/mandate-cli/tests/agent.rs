@@ -25,10 +25,11 @@ use common::{
     ACCOUNT, AGENT, ASKED_AT, CONTROL, FixedIds, Fixture, OTHER_AGENT, OWNER, at, body, member,
     member_text, owner,
 };
-use mandate_canon::{Digest, Value};
+use mandate_canon::{Digest, Value, to_canonical};
 use mandate_cli::agent::{
     Command, Confirmed, RELEASE_WARNING, Restriction, Scope, code, command, kill, kill_code, status,
 };
+use mandate_cli::approvals::approve;
 use mandate_cli::control::{ControlError, Submitted};
 
 fn answer<T>(what: &str, result: Result<T, ControlError>) -> T {
@@ -929,12 +930,13 @@ fn a_command_repeated_after_another_commits_anew() {
     assert_eq!(member_text(&events[2], "payload.command"), Some("pause"));
 }
 
-/// One of the commands a re-run is checked for.
+/// One of the commands a re-run is checked for. A kill switch is not one: it is always committed
+/// (DEC-290 item 5), which `a_kill_switch_is_always_committed_never_reported_as_an_earlier_one`
+/// pins.
 enum Run {
     Pause,
     /// A resume, with the code printed before the first run.
     Resume(String),
-    Kill,
     Exit,
 }
 
@@ -959,21 +961,14 @@ fn run(
         Run::Pause => one(fx, ids, &Command::Pause, None),
         Run::Resume(typed) => one(fx, ids, &Command::Resume, Some(typed)),
         Run::Exit => one(fx, ids, &exit_aapl(true), None),
-        Run::Kill => kill(
-            &mut fx.journal,
-            ids,
-            &owner(),
-            &Scope::Agent(AGENT.to_owned()),
-            None,
-            at(second),
-        ),
     }
 }
 
 /// DEC-290, the #397 review, minor 4: a command whose append committed but whose every answer was
 /// lost gives up, naming the event it may have committed; a re-run, with a new process's ids and a
 /// later clock, finds that event and commits nothing twice, spending no new step-up. A resume's
-/// re-run types the code printed before the first run, at the head before its own event.
+/// re-run types the code printed before the first run, at the head before its own event. The kill
+/// switch is the exception, always committed (DEC-290 item 5).
 #[test]
 #[ignore = "pending E8-3"]
 fn a_re_run_of_a_command_that_did_commit_commits_nothing_twice() {
@@ -981,7 +976,6 @@ fn a_re_run_of_a_command_that_did_commit_commits_nothing_twice() {
     for (label, which) in [
         ("pause", Run::Pause),
         ("resume", Run::Resume(resume)),
-        ("kill switch", Run::Kill),
         ("owner exit", Run::Exit),
     ] {
         let mut fx = Fixture::new();
@@ -1048,5 +1042,230 @@ fn a_command_its_runtime_recorded_is_committed_anew() {
     assert_eq!(
         member_text(&events[1], "event_id"),
         Some(second.event_id.as_str())
+    );
+}
+
+/// DEC-290 item 5, rule 13, rule 3 (the #409 review, minor 5): a kill switch of any scope is always
+/// committed and never reported as an earlier one. The same kill switch twice in a row, for each
+/// scope, commits twice under two ids; and a kill switch whose every answer was lost is committed
+/// again by its re-run, never taken for the first. A pause repeated the same way is reported as the
+/// first, so the difference is the kill switch's own.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_kill_switch_is_always_committed_never_reported_as_an_earlier_one() {
+    let mut fx = Fixture::new();
+    let pause = |fx: &mut Fixture, second: i64| {
+        answer(
+            "pause",
+            command(
+                &mut fx.journal,
+                &mut FixedIds::default(),
+                &owner(),
+                AGENT,
+                &Command::Pause,
+                None,
+                at(second),
+            ),
+        )
+    };
+    let first = pause(&mut fx, ASKED_AT);
+    assert_eq!(pause(&mut fx, ASKED_AT + 1), first, "a pause is found");
+    assert_eq!(control(&fx).len(), 1);
+
+    for scope in [
+        Scope::Agent(AGENT.to_owned()),
+        Scope::Connection("conn-1".to_owned()),
+        Scope::Workspace,
+    ] {
+        let mut fx = Fixture::new();
+        let switch = |fx: &mut Fixture, second: i64| {
+            kill(
+                &mut fx.journal,
+                &mut FixedIds::default(),
+                &owner(),
+                &scope,
+                None,
+                at(second),
+            )
+        };
+        let first = answer("kill", switch(&mut fx, ASKED_AT));
+        let second = answer("kill", switch(&mut fx, ASKED_AT + 1));
+        assert_ne!(second.event_id, first.event_id, "{scope:?}");
+        assert_eq!(second.seq, 2, "{scope:?}");
+        assert_eq!(control(&fx).len(), 2, "{scope:?}: committed twice");
+
+        let mut fx = Fixture::new();
+        fx.journal.lost_for_good = true;
+        let lost = switch(&mut fx, ASKED_AT);
+        assert!(
+            matches!(lost, Err(ControlError::Journal(_))),
+            "{scope:?}: {lost:?}"
+        );
+        fx.journal.recover();
+        let again = answer("kill", switch(&mut fx, ASKED_AT + 5));
+        assert_eq!(again.seq, 2, "{scope:?}: the re-run is committed");
+        assert_eq!(control(&fx).len(), 2, "{scope:?}");
+    }
+}
+
+/// DEC-290 item 5: an acknowledgment has no agent-stream record the CLI can read, so the same
+/// acknowledgment again right after it, with the code printed before the first, reports the first
+/// and commits nothing, spending no new step-up.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_repeated_acknowledgment_reports_the_first() {
+    let mut fx = Fixture::new();
+    let ack = Command::Acknowledge {
+        event: common::runtime_id(42),
+    };
+    let typed = code_for(&fx, AGENT, &ack);
+    let acknowledge = |fx: &mut Fixture, ids: &mut FixedIds, second: i64| {
+        command(
+            &mut fx.journal,
+            ids,
+            &owner(),
+            AGENT,
+            &ack,
+            Some(&typed),
+            at(second),
+        )
+    };
+    let first = answer(
+        "acknowledge",
+        acknowledge(&mut fx, &mut FixedIds::default(), ASKED_AT),
+    );
+    let mut ids = FixedIds::default();
+    let again = answer("acknowledge", acknowledge(&mut fx, &mut ids, ASKED_AT + 3));
+    assert_eq!(again, first);
+    assert_eq!(control(&fx).len(), 1);
+    assert_eq!(ids.assertions, 0, "no new step-up");
+}
+
+/// ULID's 26 Crockford base-32 digits of a 128-bit value, written out bit by bit: two zero bits
+/// pad the 128 to 130, and each five give one digit, most significant first.
+fn crockford(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let bits: String = std::iter::once("00".to_owned())
+        .chain(bytes.iter().map(|b| format!("{b:08b}")))
+        .collect();
+    bits.as_bytes()
+        .chunks(5)
+        .map(|chunk| {
+            let digit = chunk
+                .iter()
+                .fold(0, |n, bit| n * 2 + usize::from(*bit == b'1'));
+            char::from(ALPHABET[digit])
+        })
+        .collect()
+}
+
+/// The event id DEC-290 item 4 defines, computed here from `mandate_canon` alone: the canonical
+/// object naming the control head as decimal text, the event type, the owner's choice, whether it
+/// is stepped up, and the stream, hashed, its first 128 bits written as a ULID.
+fn oracle_id(event_type: &str, choice: Value, stepped_up: bool, head: u64) -> String {
+    let bound = common::object(&[
+        ("control_head", common::text(&head.to_string())),
+        ("event_type", common::text(event_type)),
+        ("key", choice),
+        ("stepped_up", Value::Bool(stepped_up)),
+        ("stream", common::text(CONTROL)),
+    ]);
+    crockford(&Digest::of(&to_canonical(&bound)).as_bytes()[..16])
+}
+
+/// The owner's choice in an `OwnerCommandIssued` for `agent`: every member but `submitted_at` and
+/// `step_up` (DEC-290 item 4).
+fn issued_choice(command: &str, agent: &str) -> Value {
+    common::object(&[
+        ("agent", common::text(agent)),
+        ("bid", Value::Null),
+        ("bid_size", Value::Null),
+        ("command", common::text(command)),
+        ("floor", Value::Null),
+        ("release", Value::Null),
+        ("scope", common::text("agent")),
+        ("subject", common::text(agent)),
+        ("user", common::text(OWNER)),
+        ("warning_shown", Value::Null),
+    ])
+}
+
+/// The #409 review, minor 2: the derived id has an oracle of its own. A pause at head 0, a resume
+/// with its code at head 1, and a grant at head 2 each commit exactly the id this test computes
+/// from the definition, so reshaping the hashed object or truncating the digest fails here.
+#[test]
+fn the_event_id_matches_its_definition() {
+    let mut fx = Fixture::new();
+    let asked = fx.ask(AGENT, "10", ASKED_AT);
+    let mut ids = FixedIds::default();
+    let pause = answer(
+        "pause",
+        command(
+            &mut fx.journal,
+            &mut ids,
+            &owner(),
+            AGENT,
+            &Command::Pause,
+            None,
+            at(ASKED_AT),
+        ),
+    );
+    assert_eq!(
+        pause.event_id,
+        oracle_id(
+            "OwnerCommandIssued",
+            issued_choice("pause", AGENT),
+            false,
+            0
+        )
+    );
+    let typed = code_for(&fx, AGENT, &Command::Resume);
+    let resume = answer(
+        "resume",
+        command(
+            &mut fx.journal,
+            &mut ids,
+            &owner(),
+            AGENT,
+            &Command::Resume,
+            Some(&typed),
+            at(ASKED_AT + 1),
+        ),
+    );
+    assert_eq!(
+        resume.event_id,
+        oracle_id(
+            "OwnerCommandIssued",
+            issued_choice("resume", AGENT),
+            true,
+            1
+        )
+    );
+    let grant = answer(
+        "approve",
+        approve(
+            &mut fx.journal,
+            &mut ids,
+            &owner(),
+            AGENT,
+            &asked.approval,
+            &common::code_of(&asked.content),
+            at(ASKED_AT + 2),
+        ),
+    );
+    let choice = common::object(&[
+        ("agent", common::text(AGENT)),
+        ("approval", common::text(&asked.approval)),
+        (
+            "content_hash",
+            common::text(&common::hash_of(&asked.content)),
+        ),
+        ("responder", common::text(OWNER)),
+        ("role", common::text("approver")),
+        ("verdict", common::text("approved")),
+    ]);
+    assert_eq!(
+        grant.event_id,
+        oracle_id("ApprovalResponseSubmitted", choice, true, 2)
     );
 }
