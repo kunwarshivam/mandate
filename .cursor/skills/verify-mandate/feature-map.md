@@ -544,11 +544,12 @@ crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by re
   the range walk's reachability and its overlapping-segment refusal, the token's imprint
   containment and the entry point's refusal, the proof's sibling roots, the lying anchor, the
   export digest), live since the implementation PR, and
-  `crates/mandate-journal-cold/tests/properties.rs` (E5-6a, DEC-287: the range walk's four
+  `crates/mandate-journal-cold/tests/properties.rs` (E5-6a, DEC-287: the range walk's
   invariants over random segment sequences against an oracle that computes the expected outcome
-  from the scenario it built — the verified state, the failing check and its seq, the
-  reachability rule, and the token's two answers — plus the manifest round trip and the export
-  digest, 256 cases each).
+  from the scenario it built — the verified state, the failing check and its seq by DEC-264's
+  order including the per-event arm and the canonical-form rule, the reachability rule, and the
+  token's two answers — plus the manifest round trip, the inclusion proof's root rebuilt by the
+  oracle's own §10 fold, and the export digest, 256 cases each).
 - **Run:** `cargo nextest run -p mandate-journal-cold`.
 
 ## Content-addressed artifacts

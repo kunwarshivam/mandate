@@ -10,16 +10,21 @@
 //!    exactly the events the range walks: `next_seq` one past the last walked event's `seq`,
 //!    `last_hash` the last walked event's hash.
 //! 2. **The failing check and its seq.** For every tamper, the oracle names the check that owns
-//!    it and the `seq` the range expected, by DEC-264's order — a manifest that does not parse
+//!    it and the `seq` the range expected, by DEC-264's order — a manifest that does not parse,
+//!    or that is not in canonical form (DEC-263 item 5: `parse` accepts only canonical bytes),
 //!    fails `segment_manifest_mismatch` at the expected seq; a file or edge that disagrees with
 //!    its manifest fails it at the manifest's own claimed `first_seq`; a segment that begins
-//!    before or after the expected seq fails `segment_gap` at the expected seq.
+//!    before or after the expected seq fails `segment_gap` at the expected seq; and an event
+//!    that does not re-hash inside an otherwise valid segment fails the per-event check 4,
+//!    surfacing as the `Event` arm unchanged.
 //! 3. **The reachability rule.** Events before the trusted start are never checked: a scenario
 //!    may swap the first two rows' hashes and the range still verifies, because the walk starts
 //!    at `from_seq`.
 //! 4. **The token's two answers.** `verify_tsa` never answers `Ok`: it is
 //!    `TsaVerificationIncomplete` exactly when the token contains the anchor's imprint — by this
 //!    suite's own containment search — and `TsaTokenInvalid` otherwise.
+//! 5. **The proof's root.** An anchor's inclusion proof, folded with the oracle's own §10 walk
+//!    from the leaf and the siblings upward, rebuilds the anchor's root.
 //!
 //! Every part the crate reads is built by the oracle (`to_canonical` of its own six-field
 //! object, `export_segment` of the rows), so the crate is exercised only as the verifier. The
@@ -37,7 +42,7 @@ use mandate_journal::{
     Anchor, AnchorLeaf, StoredEvent, TrustedStart, Verified, export_segment, tsa_imprint,
 };
 use mandate_journal_cold::{
-    ColdCheck, ColdError, ColdFailure, ExportBundle, SegmentFile, SegmentManifest,
+    ColdCheck, ColdError, ColdFailure, ExportBundle, SegmentFile, SegmentManifest, inclusion_proof,
     tsa_imprint_matches, verify_range, verify_tsa,
 };
 use proptest::collection::vec;
@@ -144,6 +149,12 @@ enum Tamper {
     LieField(usize, Field),
     /// Segment `i`'s manifest bytes are not a manifest at all.
     Unparsable(usize),
+    /// Segment `i`'s manifest bytes are the six fields in a non-canonical member order, so
+    /// only `parse`'s canonical-bytes guard (DEC-263 item 5) can refuse them.
+    NonCanonical(usize),
+    /// Row `i`'s hash is a lie, the parts rebuilt from the lied row so every segment check
+    /// passes and only the per-event walk (DEC-264's check 4) can catch it.
+    CorruptEvent(usize),
     /// Segment `i` (never the last, never the only one) is missing.
     Drop(usize),
     /// A stale copy of the first `width` rows stands after segment `at` (never first).
@@ -190,6 +201,24 @@ impl Field {
     }
 }
 
+/// The manifest bytes with the six fields serialized in descending member order — canonical
+/// order is ascending — so they parse as JSON and yield the true manifest, and only `parse`'s
+/// canonical-bytes guard (DEC-263 item 5) can refuse them.
+fn non_canonical_manifest_bytes(rows: &[StoredEvent]) -> Vec<u8> {
+    let first = rows.first().expect("a segment holds a row");
+    let last = rows.last().expect("a segment holds a row");
+    format!(
+        "{{\"stream\":\"{STREAM}\",\"last_seq\":{},\"last_hash\":\"{}\",\
+         \"first_seq\":{},\"first_prev_hash\":\"{}\",\"file_sha256\":\"{}\"}}",
+        last.seq,
+        last.hash.to_hex(),
+        first.seq,
+        first.prev_hash.to_hex(),
+        Digest::of(&export_segment(rows)).to_hex(),
+    )
+    .into_bytes()
+}
+
 /// The scenario's parts as the range reads them, the tamper applied.
 fn tampered_parts(s: &Scenario, tamper: Tamper) -> Vec<(Vec<u8>, Vec<u8>)> {
     let mut parts: Vec<(Vec<u8>, Vec<u8>)> =
@@ -205,6 +234,12 @@ fn tampered_parts(s: &Scenario, tamper: Tamper) -> Vec<(Vec<u8>, Vec<u8>)> {
             parts[at].0 = lied_manifest_bytes(&parts[at].0, field, rows);
         }
         Tamper::Unparsable(at) => parts[at].0 = b"not a manifest".to_vec(),
+        Tamper::NonCanonical(at) => parts[at].0 = non_canonical_manifest_bytes(s.slice(at)),
+        Tamper::CorruptEvent(row) => {
+            let mut lied = s.rows.clone();
+            lied[row].hash = Digest::of(b"the lie");
+            return parts_from_rows(s, &lied);
+        }
         Tamper::Drop(at) => {
             parts.remove(at);
         }
@@ -214,6 +249,19 @@ fn tampered_parts(s: &Scenario, tamper: Tamper) -> Vec<(Vec<u8>, Vec<u8>)> {
         }
     }
     parts
+}
+
+/// The scenario's parts rebuilt from `rows` — every manifest and file derived from the same
+/// rows, so the export is self-consistent and only the walk's own rules can refuse it.
+fn parts_from_rows(s: &Scenario, rows: &[StoredEvent]) -> Vec<(Vec<u8>, Vec<u8>)> {
+    (0..s.segment_count())
+        .map(|i| {
+            let begin = s.firsts[i];
+            let end = s.firsts.get(i + 1).copied().unwrap_or(rows.len());
+            let slice = &rows[begin..end];
+            (oracle_manifest_bytes(slice), export_segment(slice))
+        })
+        .collect()
 }
 
 /// The parts as `SegmentFile`s over the built byte vectors.
@@ -236,6 +284,8 @@ fn tampered_scenario() -> BoxedStrategy<(Scenario, Tamper)> {
         .prop_flat_map(|s| {
             let segments = s.segment_count();
             let rows = s.rows.len();
+            let first_walked = (s.start.from_seq as usize) - 1;
+            let walked = rows - first_walked;
             (Just(s), 0usize..segments, 1usize..=rows, any::<u8>()).prop_map(
                 move |(s, at, width, pick)| {
                     let field = match pick % 6 {
@@ -246,12 +296,13 @@ fn tampered_scenario() -> BoxedStrategy<(Scenario, Tamper)> {
                         4 => Field::LastHash,
                         _ => Field::FileSha256,
                     };
-                    let tamper = match pick % 5 {
+                    let tamper = match pick % 7 {
                         0 => Tamper::FlipFileByte(at),
                         1 => Tamper::LieField(at, field),
                         2 => Tamper::Unparsable(at),
                         3 if segments >= 2 => Tamper::Drop(at.min(segments - 2)),
-                        3 => Tamper::FlipFileByte(at),
+                        4 => Tamper::NonCanonical(at),
+                        5 => Tamper::CorruptEvent(first_walked + (width - 1) % walked),
                         _ => Tamper::StaleCopy {
                             at: (at % segments) + 1,
                             width,
@@ -270,9 +321,22 @@ enum Modeled {
     Stale { width: usize },
 }
 
-/// The oracle's own walk: the failing check and the seq the range expected, for a tamper the
-/// generator proves fails — computed from the scenario, never from the crate.
-fn oracle_failure(s: &Scenario, tamper: Tamper) -> Option<(ColdCheck, u64)> {
+/// DEC-264 item 3, from its own words: "each begins where the previous ended, exactly, in both
+/// directions" — so a later segment chains only by beginning at the previous end — "and the
+/// first carries the trusted start", which §11's reachability clause reads as the start's
+/// `from_seq` not sitting outside the first segment's span: a range may enter mid-segment, and
+/// a segment that ends before the start or begins after it carries nothing.
+fn chains_from_the_words(first_segment: bool, first: u64, last: u64, start: u64) -> bool {
+    if first_segment {
+        !(start < first || last < start)
+    } else {
+        first == start
+    }
+}
+
+/// The oracle's own walk: the failure the range must report, for a tamper the generator proves
+/// fails — computed from the scenario, never from the crate.
+fn oracle_failure(s: &Scenario, tamper: Tamper) -> Option<ColdFailure> {
     let mut modeled: Vec<Modeled> = (0..s.segment_count())
         .map(|rows_at| Modeled::Real { rows_at })
         .collect();
@@ -307,28 +371,100 @@ fn oracle_failure(s: &Scenario, tamper: Tamper) -> Option<(ColdCheck, u64)> {
             }
         };
         if rows_at != usize::MAX {
-            if matches!(tamper, Tamper::Unparsable(at) if at == rows_at) {
-                return Some((ColdCheck::SegmentManifestMismatch, expected));
+            if matches!(tamper, Tamper::Unparsable(at) if at == rows_at)
+                || matches!(tamper, Tamper::NonCanonical(at) if at == rows_at)
+            {
+                return Some(ColdFailure::Segment {
+                    at_seq: expected,
+                    check: ColdCheck::SegmentManifestMismatch,
+                });
             }
             if matches!(tamper, Tamper::LieField(at, _) if at == rows_at)
                 || matches!(tamper, Tamper::FlipFileByte(at) if at == rows_at)
             {
-                return Some((ColdCheck::SegmentManifestMismatch, claimed_first));
+                return Some(ColdFailure::Segment {
+                    at_seq: claimed_first,
+                    check: ColdCheck::SegmentManifestMismatch,
+                });
             }
         }
-        let carries = claimed_first <= expected && expected <= claimed_last;
-        let chains = if first_segment {
-            carries
-        } else {
-            claimed_first == expected
-        };
-        if !chains {
-            return Some((ColdCheck::SegmentGap, expected));
+        if !chains_from_the_words(first_segment, claimed_first, claimed_last, expected) {
+            return Some(ColdFailure::Segment {
+                at_seq: expected,
+                check: ColdCheck::SegmentGap,
+            });
+        }
+        if let Tamper::CorruptEvent(row) = tamper {
+            let begin = s.firsts[rows_at];
+            let end = s.firsts.get(rows_at + 1).copied().unwrap_or(s.rows.len());
+            if begin <= row && row < end {
+                return Some(ColdFailure::Event(mandate_journal::EventFailure {
+                    seq: s.rows[row].seq,
+                    check: mandate_journal::EventCheck::RehashMismatch,
+                }));
+            }
         }
         expected = walked_last_seq + 1;
         first_segment = false;
     }
     None
+}
+
+/// A random anchor over distinct stream heads, and the index of the leaf whose proof is asked
+/// for: 1 to 8 leaves, each with its own seq and a hash drawn from its own seed, sorted by
+/// `Anchor::compute` as §10 pins.
+fn anchored_leaves() -> BoxedStrategy<(Anchor, usize)> {
+    (1usize..=8, vec(any::<u64>(), 8))
+        .prop_flat_map(|(count, seeds)| {
+            let leaves: Vec<AnchorLeaf> = (0..count)
+                .map(|i| AnchorLeaf {
+                    stream_id: format!("acct:ws_1:ACCT{}", i + 1),
+                    seq: seeds[i] % 100 + 1,
+                    hash: Digest::of_parts(&[&(i as u64).to_le_bytes(), &seeds[i].to_le_bytes()]),
+                })
+                .collect();
+            let anchor = Anchor::compute(leaves).expect("distinct heads anchor");
+            (Just(anchor), 0usize..count)
+        })
+        .boxed()
+}
+
+/// The oracle's own §10 fold: the leaf's side at each level, read from the split rule root to
+/// leaf — the largest power of two below each level's width — then the audit path's siblings
+/// folded leaf-upward, the sibling on the far side of the leaf at every step. `None` when the
+/// path's length is not the tree's depth.
+fn oracle_rebuild_root(
+    leaf: &Digest,
+    index: usize,
+    width: usize,
+    path: &[Digest],
+) -> Option<Digest> {
+    let mut sides = Vec::new();
+    let (mut lo, mut hi) = (0usize, width);
+    while hi - lo > 1 {
+        let mut split = 1usize;
+        while split * 2 < hi - lo {
+            split *= 2;
+        }
+        sides.push(index < lo + split);
+        if index < lo + split {
+            hi = lo + split;
+        } else {
+            lo += split;
+        }
+    }
+    if path.len() != sides.len() {
+        return None;
+    }
+    let mut node = *leaf;
+    for (sibling, leaf_on_the_left) in path.iter().zip(sides.iter().rev()) {
+        node = if *leaf_on_the_left {
+            Digest::of_parts(&[&[0x01], node.as_bytes(), sibling.as_bytes()])
+        } else {
+            Digest::of_parts(&[&[0x01], sibling.as_bytes(), node.as_bytes()])
+        };
+    }
+    Some(node)
 }
 
 proptest! {
@@ -357,7 +493,9 @@ proptest! {
         );
     }
 
-    /// Oracle 2: every tamper fails the check that owns it, at the seq the range expected.
+    /// Oracle 2: every tamper fails the check that owns it, at the seq the range expected —
+    /// the segment checks by DEC-264's order, and the per-event check 4 for a lie inside an
+    /// otherwise valid segment.
     #[test]
     fn a_tampered_range_fails_the_check_that_owns_it_at_the_expected_seq(
         (s, tamper) in tampered_scenario(),
@@ -367,10 +505,7 @@ proptest! {
             .expect("every generated tamper fails the oracle's walk");
         prop_assert_eq!(
             verify_range(s.start, &files(&parts), &no_artifacts()),
-            Err(ColdFailure::Segment {
-                at_seq: expected.1,
-                check: expected.0,
-            }),
+            Err(expected),
             "the oracle names the check that owns {:?}",
             tamper
         );
@@ -389,14 +524,7 @@ proptest! {
         let (row_one_hash, row_two_hash) = (swapped[0].hash, swapped[1].hash);
         swapped[0].hash = row_two_hash;
         swapped[1].hash = row_one_hash;
-        let parts: Vec<(Vec<u8>, Vec<u8>)> = (0..s.segment_count())
-            .map(|i| {
-                let begin = s.firsts[i];
-                let end = s.firsts.get(i + 1).copied().unwrap_or(s.rows.len());
-                let rows = &swapped[begin..end];
-                (oracle_manifest_bytes(rows), export_segment(rows))
-            })
-            .collect();
+        let parts = parts_from_rows(&s, &swapped);
         let walked: Vec<&StoredEvent> = s
             .rows
             .iter()
@@ -447,6 +575,23 @@ proptest! {
         prop_assert_eq!(
             out_of_range.manifest_hash(),
             Err(ColdError::SeqUnrepresentable)
+        );
+    }
+
+    /// Oracle 5, §12's inclusion proof over random anchors: the proof's siblings, folded with
+    /// the oracle's own §10 walk from the leaf upward, rebuild the anchor's root.
+    #[test]
+    fn an_inclusion_proof_rebuilds_the_anchor_s_root((anchor, index) in anchored_leaves()) {
+        let stream_id = anchor.leaves[index].stream_id.clone();
+        let proof = inclusion_proof(&anchor, &stream_id).expect("a covered stream has a proof");
+        let leaf = anchor.leaves[index]
+            .leaf_hash()
+            .expect("the fixture seqs sit far below the bound");
+        let rebuilt = oracle_rebuild_root(&leaf, index, anchor.leaves.len(), &proof)
+            .expect("the proof's length is the tree's depth");
+        prop_assert_eq!(
+            rebuilt, anchor.root,
+            "the oracle's own fold over the leaf and the proof rebuilds the root"
         );
     }
 

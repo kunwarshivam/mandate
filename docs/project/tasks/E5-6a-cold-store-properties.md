@@ -49,19 +49,31 @@ story. Fill every section; write "none" rather than deleting one.
    `MemoryJournal`), **cut at random boundaries**, entered at the genesis or inside the first
    segment — the only entries a range can verify — with `prev_hash` the hash of the event
    before `from_seq`.
-3. **Every tamper names its owner** (DEC-264): a flipped file byte or a lying manifest field
-   fails `segment_manifest_mismatch` at the manifest's own claimed `first_seq`; bytes that are
-   not a manifest fail it at the seq the range expected; a dropped segment or a stale
-   overlapping copy fails `segment_gap` at the expected seq. The tamper's indices are drawn
-   against the very scenario they corrupt.
+3. **Every tamper names its owner** (DEC-264, and DEC-263 item 5 for the canonical form): a
+   flipped file byte or a lying manifest field fails `segment_manifest_mismatch` at the
+   manifest's own claimed `first_seq`; bytes that are not a manifest — or the six fields in a
+   non-canonical member order, which only `parse`'s canonical-bytes guard can refuse — fail it
+   at the seq the range expected; a dropped segment or a stale overlapping copy fails
+   `segment_gap` at the expected seq; and a row whose hash is a lie, with the parts rebuilt
+   from the lied row so every segment check passes, fails the per-event check 4 and surfaces
+   as the `Event` arm unchanged. The tamper's indices are drawn against the very scenario
+   they corrupt.
 4. **Reachability**: swapping the first two rows' hashes leaves a range entered at 3 or later
    verifying, because the walk starts at `from_seq` — the parts are rebuilt from the swapped
    rows so the export stays self-consistent and only the rule can save it.
 5. **The token's two answers** are pinned as a property: `verify_tsa` is never `Ok`; it is
    `TsaVerificationIncomplete` exactly when the token contains the imprint, by the suite's own
    containment search, and `TsaTokenInvalid` otherwise.
-6. **The do-nothing check still applies**: with every entry point's body replaced by a
-   refusal or a constant — the codes and the accessor included — no test of the 38 passes, for
+6. **The proof's root** is pinned as a property: an anchor's inclusion proof, folded with the
+   oracle's own §10 walk (the leaf's side at each level from the split rule, then the siblings
+   combined leaf-upward on the far side), rebuilds the anchor's root — so swapped or wrong-length
+   siblings fail it.
+7. **The oracle's chain rule is derived from DEC-264's wording**, not from the
+   implementation's expression: "each begins where the previous ended, exactly, in both
+   directions", and the first "carries the trusted start" — read as the start's `from_seq` not
+   sitting outside the first segment's span.
+8. **The do-nothing check still applies**: with every entry point's body replaced by a
+   refusal or a constant — the codes and the accessor included — no test of the 39 passes, for
    every one of the 37 flavours.
 
 ## Commands
