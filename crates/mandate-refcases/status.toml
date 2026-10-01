@@ -321,7 +321,7 @@
 'MC-R14' = { status = "passing", story = "E6-4" }
 'MC-R15' = { status = "passing", story = "E6-4" }
 'MC-R16' = { status = "passing", story = "E6-4" }
-'MC-R17' = { status = "passing", story = "E6-4" }
+'MC-R17' = { status = "pending", story = "E6-4" }
 'MC-R18' = { status = "passing", story = "E6-4" }
 'MC-R19' = { status = "passing", story = "E6-4" }
 'MC-R20' = { status = "passing", story = "E6-4" }

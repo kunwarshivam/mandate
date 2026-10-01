@@ -1655,18 +1655,19 @@ From E6-4's slice R4 (stream H2; DEC-167 item 8):
   rung can lift while the 4% rung stays active. §5.8 says highest `at` first, and the fold lifts the
   highest active rung next (DEC-167 item 8 (b)). Re-insert a re-triggered rung in its place, or lift
   only the highest active rung while stepping, and regenerate with `reference/mandate/generate.py`,
-  which must leave `fixtures/refcases/mandate.json` unchanged.
+  which must leave `fixtures/refcases/mandate.json` unchanged. In `agent/h2-dec-270-reference` (DEC-275).
 - **`ref.py` journals `hold_protected` for a completed `profit_stop` goal (reference fix).** A
   `goal_complete` input on a `profit_stop` goal (its end date) writes
   `{"type": "GoalCompleted", "on_complete": "hold_protected"}`; the fold writes its one §3.1
   outcome, `then: discretionary_exit_all_then_retire` (DEC-167 item 8 (f)). No reference case has
-  one.
+  one. In `agent/h2-dec-270-reference` (DEC-275).
 - **`release` journals the loss carry: the reference side (DEC-270; stream H2, first).** One
   reference and reference-case PR, kept apart from crates (ES-22): `reference/mandate/ref.py`'s
   `goal_complete` arm journals `AgentStopped` with `loss_carry_usd` = max(0, N − E) after
   `PositionReleased` when `on_complete` is `release`; MC-R17's expected journal gains it; any §3.1 or
   §5.7 wording the spec needs under DEC-270; `generate.py`, `check_cases.py`, and the fuzz rerun, and
-  `cargo xtask refcases --write`. Only MC-R17 moves.
+  `cargo xtask refcases --write`. Only MC-R17 moves. In `agent/h2-dec-270-reference` (DEC-274), with MC-R25, MC-R26, and
+  MC-V68 for the carry and the redeploy; it waits on the harness PR (DEC-276).
 - **`release` journals the loss carry: the `mandate-spec` side (DEC-270; stream H2, after the
   reference PR).** `Fold::complete_goal`'s `Release` arm journals `AgentStopped` (reason
   `goal_complete`) with the loss carry, as `retire` does, and a test shows that releasing and

@@ -2405,6 +2405,20 @@ cases:
     warnings: []
     worst_case: {one_position_at_stop_usd: '75', daily_loss_budget_usd: '200', flatten_trigger_loss_usd: '800',
       lifetime_floor_loss_usd: '1000'}
+- id: MC-V68
+  kind: semantic
+  title: A released agent's loss carry counts against a redeploy on the same connection
+  base: btc_accumulator
+  patch:
+  - {op: replace, path: /capital/allocation_usd, value: '1500'}
+  - {op: replace, path: /risk/max_position_usd, value: '1500'}
+  - {op: replace, path: /risk/max_gross_exposure_usd, value: '1500'}
+  context: {connection_loss_carry_usd: '150'}
+  expect:
+    violations: [V-032]
+    warnings: [W-002]
+    worst_case: {one_position_at_stop_usd: '127.5', daily_loss_budget_usd: '30', flatten_trigger_loss_usd: '120',
+      lifetime_floor_loss_usd: '150'}
 - id: MC-P01
   kind: policy
   title: Mandate looser than workspace, tighter than org
@@ -4742,6 +4756,7 @@ cases:
       journal:
       - {type: GoalCompleted, on_complete: release}
       - {type: PositionReleased, qty: '0.15'}
+      - {type: AgentStopped, reason: goal_complete, loss_carry_usd: '0'}
       - {type: AgentModeApplied, from: normal, to: stopped}
 - id: MC-R18
   kind: risk_state
@@ -5356,6 +5371,114 @@ cases:
       - {type: AgentModeApplied, from: paused, to: stopped}
   note: 'Reviewer probe: the agent loses about 850, is flat, withdraws 9000, and retires. The carry is the net dollar
     loss.'
+- id: MC-R25
+  kind: risk_state
+  title: 'on_complete release with a loss: the connection carries max(0, N - E)'
+  base: btc_accumulator_release
+  patch: []
+  initial: {position_qty: '0.15', avg_cost: '55000', asset_class: crypto, at: '2026-09-21T14:00:00.000000000Z',
+    inherited_loss_usd: '0'}
+  steps:
+  - event: mark
+    at: '2026-09-21T14:01:00.000000000Z'
+    bid: '54000'
+    session: crypto
+    sane: true
+    expect:
+      agent_equity: '9850'
+      high_water_mark: '10000'
+      drawdown: '0.015'
+      day_start_equity: '10000'
+      daily_pnl: '-150'
+      daily_pnl_fraction: '-0.015'
+      capital_base: '10000'
+      size_factor: '1'
+      restrictions: []
+      agent_mode: normal
+      instrument_restrictions: []
+      pending: []
+      net_contributed: '10000'
+      journal: []
+  - event: goal_complete
+    at: '2026-09-21T14:02:00.000000000Z'
+    session: crypto
+    expect:
+      agent_equity: '9850'
+      high_water_mark: '10000'
+      drawdown: '0.015'
+      day_start_equity: '10000'
+      daily_pnl: '-150'
+      daily_pnl_fraction: '-0.015'
+      capital_base: '10000'
+      size_factor: '1'
+      restrictions: [retired]
+      agent_mode: stopped
+      instrument_restrictions: []
+      pending: []
+      net_contributed: '10000'
+      journal:
+      - {type: GoalCompleted, on_complete: release}
+      - {type: PositionReleased, qty: '0.15'}
+      - {type: AgentStopped, reason: goal_complete, loss_carry_usd: '150'}
+      - {type: AgentModeApplied, from: normal, to: stopped}
+  note: |-
+    E = 10000 + 0.15 x (54000 - 55000) = 9850 and N = 10000, so the release retires the agent with a carry of 150, as agent_stopped would (DEC-270, MI-14).
+- id: MC-R26
+  kind: risk_state
+  title: A redeploy after a release opens at the carried L
+  base: btc_accumulator
+  patch:
+  - {op: replace, path: /risk/max_daily_loss, value: '0.5'}
+  - {op: replace, path: /risk/breach_confirm_s, value: 0}
+  - {op: replace, path: /capital/max_loss_from_allocation, value: '0.05'}
+  initial: {position_qty: '0.1', avg_cost: '60000', asset_class: crypto, at: '2026-09-21T14:00:00.000000000Z', inherited_loss_usd: '150'}
+  steps:
+  - event: mark
+    at: '2026-09-21T14:01:00.000000000Z'
+    bid: '56600'
+    session: crypto
+    sane: true
+    expect:
+      agent_equity: '9660'
+      high_water_mark: '10000'
+      drawdown: '0.034'
+      day_start_equity: '10000'
+      daily_pnl: '-340'
+      daily_pnl_fraction: '-0.034'
+      capital_base: '10000'
+      size_factor: '0.5'
+      restrictions: []
+      agent_mode: normal
+      instrument_restrictions: []
+      pending: []
+      net_contributed: '10000'
+      journal:
+      - {type: RiskLimitTriggered, limit: 'drawdown_ladder[0]', action: scale_sizes}
+  - event: mark
+    at: '2026-09-21T14:02:00.000000000Z'
+    bid: '56500'
+    session: crypto
+    sane: true
+    expect:
+      agent_equity: '9650'
+      high_water_mark: '10000'
+      drawdown: '0.035'
+      day_start_equity: '10000'
+      daily_pnl: '-350'
+      daily_pnl_fraction: '-0.035'
+      capital_base: '10000'
+      size_factor: '0.5'
+      restrictions: [lifetime_floor]
+      agent_mode: paused
+      instrument_restrictions: []
+      pending: []
+      net_contributed: '10000'
+      journal:
+      - {type: RiskLimitTriggered, limit: lifetime_floor, action: flatten_and_pause}
+      - {type: KillSwitchActivated, scope: agent, initiator: lifetime_floor}
+      - {type: AgentModeApplied, from: normal, to: paused}
+  note: |-
+    L is MC-R25's carry, 150. Floor: E <= C x (1 - 0.05) + L = 9500 + 150 = 9650. E = 9660 at 56600 stays above it; E = 9650 at 56500 latches it, 150 above the floor a fresh connection would have (§5.7, V-032).
 - id: MC-R24
   kind: risk_state
   title: A removed instrument is exits-only in that instrument; re-admission clears it
