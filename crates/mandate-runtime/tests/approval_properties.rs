@@ -26,7 +26,8 @@ use common::{
 };
 use mandate_canon::Value;
 use mandate_runtime::{
-    ActorKind, Autonomy, EventId, FoldedEvent, Input, Ports, RuntimeState, fold,
+    ActorKind, Autonomy, Command, EventId, FoldedEvent, Initiator, Input, KillScope, Ports,
+    RuntimeState, fold,
 };
 use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
@@ -49,6 +50,9 @@ enum Step {
     /// PB-21).
     AnswerAfterTightening(Answering),
     Version,
+    /// A risk-limit kill switch, or the owner's Stop: each cancels every pending approval.
+    KillSwitch,
+    Stop,
     Restart,
 }
 
@@ -120,6 +124,8 @@ fn step() -> impl Strategy<Value = Step> {
         1 => prop::sample::select(vec!["exits_only", "normal"]).prop_map(Step::Mode),
         1 => answering().prop_map(Step::AnswerAfterTightening),
         1 => Just(Step::Version),
+        1 => Just(Step::KillSwitch),
+        1 => Just(Step::Stop),
         1 => Just(Step::Restart),
     ]
 }
@@ -155,6 +161,8 @@ struct Record {
     /// tightening to exits-only or a version applied after them has cancelled (mandate spec §5.9 and
     /// §2.2, EI-7), and those an answer it judged admissible has already ended (quorum 1).
     closed: BTreeSet<EventId>,
+    /// Approvals a kill switch or a Stop left open past its own step.
+    late_cancels: Vec<String>,
     last_answer: Option<FoldedEvent>,
     assertions: u64,
 }
@@ -231,6 +239,18 @@ impl Run<'_> {
                     .map_err(|e| TestCaseError::fail(format!("{}: {e}", event.event_type)))?;
                 self.answer(a)
             }
+            Step::KillSwitch => {
+                self.close_every_request();
+                self.cancelling(Input::Command(Command::KillSwitch {
+                    scope: KillScope::Agent(common::deployment().agent),
+                    initiator: Initiator::RiskLimit,
+                    confirmation: None,
+                }))
+            }
+            Step::Stop => {
+                self.close_every_request();
+                self.cancelling(Input::Command(Command::Stop))
+            }
             Step::Version => {
                 self.close_every_request();
                 let event = version_applied(next_account_seq(&self.shell), "v1", self.record.clock);
@@ -254,6 +274,27 @@ impl Run<'_> {
                 self.step(Input::Started(epoch))
             }
         }
+    }
+
+    /// A kill switch or a Stop, after which every approval the journal still holds open must have
+    /// its `ApprovalCanceled` in that same step's batch (DEC-131 items 11 and 23): an approval that
+    /// outlives the switch by even one step is an order the switch did not stop.
+    fn cancelling(&mut self, input: Input) -> Result<(), TestCaseError> {
+        let before = self.shell.agent_journal.len();
+        let open = open_approvals(&self.shell.agent_journal);
+        self.step(input)?;
+        let canceled: BTreeSet<String> = self.shell.agent_journal[before..]
+            .iter()
+            .filter(|e| e.event_type == "ApprovalCanceled")
+            .filter_map(|e| e.payload.get("approval").and_then(Value::as_str))
+            .map(str::to_owned)
+            .collect();
+        for approval in open {
+            if !canceled.contains(&approval) {
+                self.record.late_cancels.push(approval);
+            }
+        }
+        Ok(())
     }
 
     fn close_every_request(&mut self) {
@@ -399,6 +440,7 @@ fn played(script: &[Step]) -> Result<(Vec<Read>, Record, Shell), TestCaseError> 
             answers: BTreeMap::new(),
             used: BTreeSet::new(),
             closed: BTreeSet::new(),
+            late_cancels: Vec::new(),
             last_answer: None,
             assertions: 0,
         },
@@ -414,6 +456,85 @@ fn played(script: &[Step]) -> Result<(Vec<Read>, Record, Shell), TestCaseError> 
     run.step(Input::Tick(clock(end)))?;
     let journal = read(&run.shell.agent_journal)?;
     Ok((journal, run.record, run.shell))
+}
+
+/// Every answer is judged and copied once, and admitted exactly when the oracle's own record
+/// judges it admissible: a request it saw, its hash, a listed `user`, before the deadline by its
+/// own clock, fresh and unused step-up for a grant, and not cancelled by an exits-only, a version,
+/// a kill switch, or a Stop applied after it, nor ended by an earlier admitted answer (EI-7,
+/// EI-10, EI-14, EI-15).
+fn admitted_exactly_the_admissible(journal: &[Read], record: &Record) -> Result<(), TestCaseError> {
+    let copied = journal
+        .iter()
+        .filter(|e| e.event_type == "ApprovalResponded")
+        .count();
+    prop_assert_eq!(
+        copied,
+        record.answers.len(),
+        "every answer is judged and copied once"
+    );
+    for event in journal
+        .iter()
+        .filter(|e| e.event_type == "ApprovalResponded")
+    {
+        let source = event.causation.clone().unwrap_or(EventId(String::new()));
+        let generated = record.answers.get(&source).ok_or_else(|| {
+            TestCaseError::fail(format!(
+                "ApprovalResponded copies no generated answer: {source:?}"
+            ))
+        })?;
+        prop_assert_eq!(event.text("approval"), Some(generated.approval.0.as_str()));
+        prop_assert_eq!(
+            event.text("result") == Some("admitted"),
+            generated.admissible,
+            "admitted exactly the answers the oracle judges admissible: {:?}",
+            generated
+        );
+        if event.text("result") == Some("admitted") {
+            prop_assert_eq!(
+                event.text("verdict"),
+                Some(if generated.approve {
+                    "approved"
+                } else {
+                    "skipped"
+                })
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The approvals a journal holds open: requested, and with no terminal event yet, read from the
+/// journaled events alone.
+fn open_approvals(journal: &[FoldedEvent]) -> BTreeSet<String> {
+    let mut open = BTreeSet::new();
+    for e in journal {
+        let approval = e
+            .payload
+            .get("approval")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let text = |k: &str| e.payload.get(k).and_then(Value::as_str);
+        match e.event_type.as_str() {
+            "ApprovalRequested" => {
+                open.insert(e.event_id.0.clone());
+            }
+            "ApprovalTimedOut" | "ApprovalCanceled" | "ApprovalRevalidated" => {
+                if let Some(a) = approval {
+                    open.remove(&a);
+                }
+            }
+            "ApprovalResponded"
+                if text("verdict") == Some("skipped") && text("result") == Some("admitted") =>
+            {
+                if let Some(a) = approval {
+                    open.remove(&a);
+                }
+            }
+            _ => {}
+        }
+    }
+    open
 }
 
 /// The lifecycle's states, from the brief's diagram, and the moves the table allows.
@@ -473,10 +594,12 @@ fn check(body: impl Fn(Vec<Step>) -> Result<(), TestCaseError>) {
     }
 }
 
-/// EI-6, DEC-173 item 10, the transition-table oracle: every approval event follows a
+/// EI-6, EI-7, DEC-173 item 10, the transition-table oracle: every approval event follows a
 /// move the brief's lifecycle allows, every approval ends in exactly one terminal event once
 /// every deadline has passed, every control-stream answer is copied exactly once however often
-/// it is tailed, and replaying the journal folds to the live pending set (EI-12).
+/// it is tailed and admitted exactly when the oracle's record allows (so no answer to an approval
+/// an exits-only, a version, a kill switch, or a Stop cancelled is ever admitted), and replaying
+/// the journal folds to the live pending set (EI-12).
 #[test]
 #[ignore = "pending E8-3"]
 fn every_approval_moves_by_the_table_and_ends_once() {
@@ -524,6 +647,12 @@ fn every_approval_moves_by_the_table_and_ends_once() {
             prop_assert_eq!(terminals.get(approval).copied(), Some(1), "{}", approval);
         }
         prop_assert!(!record.answers.is_empty());
+        admitted_exactly_the_admissible(&journal, &record)?;
+        prop_assert!(
+            record.late_cancels.is_empty(),
+            "a kill switch or Stop leaves no approval open past its own step: {:?}",
+            record.late_cancels
+        );
         for source in record.answers.keys() {
             prop_assert_eq!(
                 copies.get(source).copied(),
@@ -558,43 +687,7 @@ fn every_opening_walks_back_to_one_timely_admitted_grant() {
         let (journal, record, _) = played(&script)?;
         let by_id: BTreeMap<EventId, &Read> =
             journal.iter().map(|e| (e.event_id.clone(), e)).collect();
-        let copied = journal
-            .iter()
-            .filter(|e| e.event_type == "ApprovalResponded")
-            .count();
-        prop_assert_eq!(
-            copied,
-            record.answers.len(),
-            "every answer is judged and copied once"
-        );
-        for event in journal
-            .iter()
-            .filter(|e| e.event_type == "ApprovalResponded")
-        {
-            let source = event.causation.clone().unwrap_or(EventId(String::new()));
-            let generated = record.answers.get(&source).ok_or_else(|| {
-                TestCaseError::fail(format!(
-                    "ApprovalResponded copies no generated answer: {source:?}"
-                ))
-            })?;
-            prop_assert_eq!(event.text("approval"), Some(generated.approval.0.as_str()));
-            prop_assert_eq!(
-                event.text("result") == Some("admitted"),
-                generated.admissible,
-                "admitted exactly the answers the oracle judges admissible: {:?}",
-                generated
-            );
-            if event.text("result") == Some("admitted") {
-                prop_assert_eq!(
-                    event.text("verdict"),
-                    Some(if generated.approve {
-                        "approved"
-                    } else {
-                        "skipped"
-                    })
-                );
-            }
-        }
+        admitted_exactly_the_admissible(&journal, &record)?;
         let mut intents_per_approval: BTreeMap<String, u32> = BTreeMap::new();
         for intent in journal.iter().filter(|e| e.event_type == "IntentProposed") {
             prop_assert_eq!(intent.text("purpose"), Some("open"));
