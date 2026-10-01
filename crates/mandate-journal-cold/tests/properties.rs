@@ -1,5 +1,5 @@
 //! The cold store's property suite: the range walk's invariants over random segment sequences,
-//! each checked by an oracle that computes the answer its own way (E5-6a, DEC-280).
+//! each checked by an oracle that computes the answer its own way (E5-6a, DEC-287).
 //!
 //! The oracle (AGENTS.md, "Independent oracles") builds every scenario itself — a random run of
 //! one stream's events, split into segments at random boundaries, entered at the genesis or

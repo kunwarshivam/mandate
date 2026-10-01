@@ -19,7 +19,7 @@ story. Fill every section; write "none" rather than deleting one.
   ([#391](https://github.com/kunwarshivam/mandate/pull/391),
   [#404](https://github.com/kunwarshivam/mandate/pull/404)).
 - **Decisions that apply (DEC-NN):** DEC-263 to DEC-265 (the cold store's design, unchanged),
-  DEC-280 (this suite's oracle and generators), DEC-72 (proptest, 256 cases per PR), DEC-77
+  DEC-287 (this suite's oracle and generators), DEC-72 (proptest, 256 cases per PR), DEC-77
   (this PR changes tests only; the implementation is #404's, merged).
 
 ## Scope
@@ -39,7 +39,7 @@ story. Fill every section; write "none" rather than deleting one.
   because the implementation it exercises is merged.
 - **Size budget:** one test file, 6 properties at 256 cases (ES-11).
 
-## The design (DEC-280)
+## The design (DEC-287)
 
 1. **The oracle builds everything the crate reads** (`to_canonical` of its own six-field
    object, `export_segment` of the rows) and computes every expectation from the scenario it
