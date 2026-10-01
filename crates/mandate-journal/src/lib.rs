@@ -20,6 +20,7 @@ use std::fmt;
 use mandate_canon::{Digest, Int, Key, ParseErrorKind, Value, parse, to_canonical};
 use mandate_time::UtcNanos;
 
+mod agent;
 mod artifact;
 mod catalogue;
 mod draft;
@@ -27,6 +28,7 @@ mod merkle;
 mod schema;
 mod verify;
 
+pub use agent::{AgentStreamCheck, AgentStreamFailure, verify_agent_stream};
 pub use artifact::{
     ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, check_artifact, get_artifact,
 };
@@ -166,6 +168,11 @@ pub enum InvalidReason {
     PiiRefs,
     #[error("risk_clock is earlier than the stream's last risk_clock")]
     RiskClockRegressed,
+    /// The stub's answer for a journal spec §9.1 draft until E7-9's implementation lands. Seven of
+    /// the eight types were refused as `unknown_schema` before, and an agent stream's
+    /// `StreamOpened` as `stream_mismatch` or `schema`, so it refuses nothing that was accepted.
+    #[error("the agent stream's payload checks (§9.1) are not implemented yet")]
+    Unimplemented,
 }
 
 impl InvalidReason {
@@ -188,6 +195,7 @@ impl InvalidReason {
             Self::ArtifactRefs => "artifact_refs",
             Self::PiiRefs => "pii_refs",
             Self::RiskClockRegressed => "risk_clock_regressed",
+            Self::Unimplemented => "unimplemented",
         }
     }
 }

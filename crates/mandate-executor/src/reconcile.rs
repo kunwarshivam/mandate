@@ -628,7 +628,7 @@ pub(crate) mod tests {
     /// folded back, in order, as the shell does (journal spec §5.2).
     pub(crate) struct Executor {
         pub(crate) state: ExecutorState,
-        journal: Vec<FoldedEvent>,
+        pub(crate) journal: Vec<FoldedEvent>,
         epoch: u64,
     }
 
