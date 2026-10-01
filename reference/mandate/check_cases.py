@@ -452,7 +452,24 @@ req("MC-E30", [q["status"] for q in C["MC-E30"]["expect"]] ==
 offsets = {datetime.fromisoformat(q["at"][:19] + "+00:00").astimezone(ZoneInfo("America/New_York")).utcoffset() for q in C["MC-E30"]["queries"]}
 req("MC-E30", len(offsets) == 2, "both DST states")
 req("MC-E31", esc_last("MC-E31") == [("ApprovalCanceled", None, "mode_tightened")] + refused("not_pending"), "cancelled first, in one step")
-req("MC-E", sum(c.startswith("MC-E") for c in C) == 31, "31 escalation cases")
+# MC-E32: each query is inside quiet hours by one zone and outside by the other, so the expected
+# statuses are the New York reading and the negation of the UTC one. A UTC implementation fails it
+# whatever the DST state (the #401 review, minor).
+def qh_inside(hour, minute):
+    start, end = 23 * 60, 7 * 60
+    return ((hour * 60 + minute) - start) % 1440 < (end - start) % 1440
+
+ny = ZoneInfo("America/New_York")
+for q, e in zip(C["MC-E32"]["queries"], C["MC-E32"]["expect"]):
+    utc = datetime.fromisoformat(q["at"][:19] + "+00:00")
+    local = utc.astimezone(ny)
+    by_ny, by_utc = qh_inside(local.hour, local.minute), qh_inside(utc.hour, utc.minute)
+    req("MC-E32", by_ny != by_utc, f"{q['at']} reads the same in both zones")
+    req("MC-E32", e["status"] == ("suppressed_quiet_hours" if by_ny else "delivered"), "the New York reading")
+req("MC-E32", len({datetime.fromisoformat(q["at"][:19] + "+00:00").astimezone(ny).utcoffset()
+                   for q in C["MC-E32"]["queries"]}) == 2, "both DST states")
+req("MC-E32", {e["status"] for e in C["MC-E32"]["expect"]} == {"delivered", "suppressed_quiet_hours"}, "both answers")
+req("MC-E", sum(c.startswith("MC-E") for c in C) == 32, "32 escalation cases")
 
 print("cases", len(C), "title assertion failures", len(bad))
 for b in bad:

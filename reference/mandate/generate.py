@@ -1109,6 +1109,13 @@ cases.append({"id": "MC-E30", "kind": "escalation", "op": "deliver_now",
               "title": "A push is suppressed at 23:00 and sent at 07:00 New York in both DST states; cli_inbox always delivers",
               "quiet_hours": QH, "queries": E30Q,
               "expect": [{"status": deliver_now(q["channel"], QH, q["at"])} for q in E30Q]})
+E32Q = [{"channel": "push", "at": a} for a in [
+    "2026-07-16T23:30:00.000000000Z", "2026-12-16T23:30:00.000000000Z",
+    "2026-07-16T10:30:00.000000000Z", "2026-12-16T11:30:00.000000000Z"]]
+cases.append({"id": "MC-E32", "kind": "escalation", "op": "deliver_now",
+              "title": "Quiet hours are New York wall time, not UTC: 23:30 UTC sends and 06:30 New York suppresses, in both DST states",
+              "quiet_hours": QH, "queries": E32Q,
+              "expect": [{"status": deliver_now(q["channel"], QH, q["at"])} for q in E32Q]})
 e_case("MC-E31", "A grant batched with a cancelling exits-only restriction is not pending and never acts (DEC-131 item 25(j))",
        [ASK1, {"kind": "batch", "reason": "mode_tightened", "responses": [e_resp("ctl1", 30, H1)], "now": E_NOW}])
 

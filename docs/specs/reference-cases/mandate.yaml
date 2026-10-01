@@ -12688,6 +12688,22 @@ cases:
   - {status: suppressed_quiet_hours}
   - {status: delivered}
   - {status: delivered}
+- id: MC-E32
+  kind: escalation
+  op: deliver_now
+  title: 'Quiet hours are New York wall time, not UTC: 23:30 UTC sends and 06:30 New York suppresses, in both DST
+    states'
+  quiet_hours: {start: '23:00', end: '07:00'}
+  queries:
+  - {channel: push, at: '2026-07-16T23:30:00.000000000Z'}
+  - {channel: push, at: '2026-12-16T23:30:00.000000000Z'}
+  - {channel: push, at: '2026-07-16T10:30:00.000000000Z'}
+  - {channel: push, at: '2026-12-16T11:30:00.000000000Z'}
+  expect:
+  - {status: delivered}
+  - {status: delivered}
+  - {status: suppressed_quiet_hours}
+  - {status: suppressed_quiet_hours}
 - id: MC-E31
   kind: escalation
   op: lifecycle

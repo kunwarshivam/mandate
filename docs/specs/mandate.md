@@ -1398,7 +1398,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 359 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 360 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1424,7 +1424,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Thesis expiry | MC-N20 to MC-N22 | The horizon, invalidation before it, a retired lineage |
 | Stagger | MC-N23 | The deterministic per-workspace offset inside the window |
 | Review date | MC-D01 to MC-D27 | V-046's bounds and its carried and removed dates, the platform default, re-confirming with a delegation (V-042), the §9.2 row, and, as `kind: review` cases at a stated risk clock, §6.2 step 5b either side of 00:00 New York after the date: rules, default, admission, a delegation, a deny, an ask's own source, exits, and no date ([DEC-188](../project/04-decision-log.md#decisions)) |
-| Escalation | MC-E01 to MC-E31 | As `kind: escalation` cases (§6.1, §6.4, MI-21 to MI-25): a timely grant acts with the bound order; a skip, the timeout, lateness at the deadline and by the folded clock; a response copied once; the content hash; every non-`user` actor and an unlisted user; step-up missing, 301 s stale, reused, and `cli_confirm` on `live`; re-validation's version, mode, `deny`, and another trigger; drift at and beyond the band, with no mark, and crypto's 200 bp; the ask budget across the DST change, a skip's and a timeout's suppression; quiet hours for `cli_inbox` and for a push in both DST states; and a grant batched with a cancellation ([DEC-173](../project/04-decision-log.md#decisions), [DEC-280](../project/04-decision-log.md#decisions)) |
+| Escalation | MC-E01 to MC-E32 | As `kind: escalation` cases (§6.1, §6.4, MI-21 to MI-25): a timely grant acts with the bound order; a skip, the timeout, lateness at the deadline and by the folded clock; a response copied once; the content hash; every non-`user` actor and an unlisted user; step-up missing, 301 s stale, reused, and `cli_confirm` on `live`; re-validation's version, mode, `deny`, and another trigger; drift at and beyond the band, with no mark, and crypto's 200 bp; the ask budget across the DST change, a skip's and a timeout's suppression; quiet hours for `cli_inbox`, for a push in both DST states, and read as New York wall time rather than UTC; and a grant batched with a cancellation ([DEC-173](../project/04-decision-log.md#decisions), [DEC-280](../project/04-decision-log.md#decisions)) |
 | Change | MC-C01 to MC-C48 | Every classification row, including rule addition, removal, and reordering, the pinning switch, pinning a mandate that had no research agent, the research fields, and the admission ceiling |
 
 ## 12. Open questions
