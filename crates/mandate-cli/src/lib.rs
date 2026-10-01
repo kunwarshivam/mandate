@@ -3,8 +3,9 @@
 //! it (E2-2); `journal verify` runs journal spec §11 over an exported journal and its artifact
 //! store, and `artifact put` and `get` supply and fetch those artifacts (E5-4). `approvals` and
 //! `agent` are M7's owner control: the inbox, the owner's answers, and the owner's commands, each
-//! committed to the workspace control stream (E8-1 to E8-3; their commands land with the
-//! implementation PR).
+//! committed to the workspace control stream (E8-1 to E8-3). Their `clap` commands land once
+//! `mandate-journal` registers the control stream's schemas, without which a real journal refuses
+//! every event they commit (DEC-257 item 17, DEC-279 item 10).
 
 use clap::{Parser, Subcommand};
 

@@ -406,6 +406,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `resume`, `stop`, `kill`, `exit` and `acknowledge`, over the `ControlJournal` stubs in
   `crates/mandate-cli/src/control.rs`. The implementation PR also wires the commands into `clap`
   and `main.rs`, and gives `ControlJournal` a `mandate-journal-pg` adapter.
+  *Done (E8-3's CLI implementation, DEC-279):* the 20 tests pass; `mandate-cli` lists and shows
+  the inbox from the agent streams, commits `approve`, `skip` and every `agent` command as exactly
+  one control-stream event under one minted id, binds each code to what it confirms and the
+  control stream's head, and never refuses a kill switch or an owner exit.
+  *Follow-up (DEC-279 item 10):* wire `approvals` and `agent` into `clap` and `main.rs` with a
+  `mandate-journal-pg` `ControlJournal`, once the prerequisite below registers these events'
+  schemas; until then a real journal refuses every command they would send. Add Stop's
+  `--release` choice and the warning shown to `Command::Stop` and the payload (journal spec §9).
   *Prerequisite (DEC-257 item 17):* `mandate-journal` registers no payload schema for any agent- or
   control-stream event (`ApprovalRequested`, `ApprovalResponseSubmitted`, `OwnerCommandIssued`,
   `OwnerAcknowledged`, and the rest), so a real journal refuses each one as `UnknownSchema` and
