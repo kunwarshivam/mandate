@@ -1124,6 +1124,17 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
   `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
   resubmitted at the same price every `exit_step_s`.
+- **E7-4 slice 5 (stream K), from slice 4b ([DEC-260](04-decision-log.md#decisions) (12)):**
+  the triggered-stop watchdog fires only in a session where the stop can trigger (§5.4: stops do
+  not trigger in extended hours), once slice 5 folds the session; and a crypto stop-limit is
+  watchdogged as soon as a sane mark is below its limit price, once slice 5 places stop-limits.
+  Until then the watchdog fires on any breach that lasts `stop_watchdog_s`.
+- **E7-4 slice 6's tests PR (stream K), from slice 4b (DEC-160 (11), (24)):** add pending tests
+  that every kill switch whose scope covers an instrument cancels a working `*` watchdog exit
+  there by its own `client_order_id` (`md-w-<record>`), an agent-scoped one included when it
+  closes that instrument (§5.5's table), and that an agent-scoped kill switch never treats it as
+  that agent's own: it is never counted in the agent's sub-ledger sell and never reached by
+  cancel-all.
 - **E7-4 slice 5 (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373) round 2
   (minor A):** apply §8.2's in-session test to the exit ladder's last-trade arm once slice 5 folds
   the session. Slice 4a takes a trade only from a sane quote within five minutes
