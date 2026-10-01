@@ -395,6 +395,18 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   content and the head (or record why it cannot), add backoff between attempts, and word the
   exhausted report to match; and make `message(Outcome::Refused)` say whether the deadline has
   passed.
+  *Tests done (the M7 CLI follow-up tests PR, DEC-290); the implementation follows:* the closed
+  member sets, the derived event id and its independent oracle, and the three retry arms are live
+  tests; 13 tests pending E8-3 in `tests/agent.rs` and `tests/approvals.rs` cover Stop's release
+  and its warning, `status`'s restrictions, the re-run that finds its committed event (with another
+  writer's event interleaved too), the kill switch always committed, the repeated acknowledgment,
+  the runtime-recorded command committed anew, the backoff, and the refusal's deadline wording. `Command::Stop` gains `release`, `status` takes the account,
+  `message` takes the owner's clock, `Ids` no longer mints the event id, and `ControlJournal` gains
+  `wait`; the `clap` wiring still waits for the implementation.
+  *Follow-up (the #409 review, minor 4; in the implementation PR):* `mandate-cli` carries the
+  approval flow, step-up and the owner commands (`AGENTS.md`'s safety-critical list), so set
+  `safety_critical = true` for it in `xtask/layers.toml`, add its CODEOWNERS line and the lint
+  header `cargo xtask layers` checks, and let the mutation gate judge its diff.
   *Follow-up (#343 review, minor 1; a tests correction):* a new family that reuses an owned family's
   kind (for example an `MC-E01` of kind `semantic`) now moves no count in `mandate_harness.rs` and
   runs through that family's arm, where on `main` before #343 it failed two counts. `unread_keys`

@@ -12,8 +12,8 @@
 use mandate_canon::{Digest, Value, to_canonical};
 
 use crate::control::{
-    ControlError, ControlJournal, Ids, Now, Owner, Submitted, agent_stream, code_of, commit,
-    envelopes, object, seconds, step_up, text,
+    Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Submitted, agent_stream,
+    code_of, commit, decide, envelopes, text,
 };
 
 /// One approval as `list` shows it: opaque ids and times, never the content.
@@ -220,45 +220,63 @@ pub fn show(
     })
 }
 
-/// The request an answer may still be committed for: pending, and with its deadline ahead of the
-/// owner's clock. Both are conveniences; the runtime judges both again (DEC-155 item 5).
-fn answerable(
+/// The answer to commit, or the same answer already the control stream's last event and not yet
+/// recorded (DEC-290). A fresh answer needs the approval pending and its deadline ahead of the
+/// owner's clock; a grant also needs `code` to be the one for its content hash. Each check is a
+/// convenience; the runtime judges all of them again (DEC-155 item 5).
+fn answering(
     journal: &dyn ControlJournal,
     owner: &Owner,
     agent: &str,
     approval: &str,
+    verdict: &'static str,
+    code: Option<&str>,
     now: Now,
-) -> Result<Shown, ControlError> {
+) -> Result<Decision, ControlError> {
     let shown = show(journal, owner, agent, approval)?;
-    if now.secs >= shown.deadline_s {
-        return Err(ControlError::Refused { reason: "late" });
+    let stepped_up = code.is_some_and(|code| code == shown.code);
+    let decision = decide(
+        journal,
+        owner,
+        "ApprovalResponseSubmitted",
+        response(owner, agent, &shown, verdict),
+        Confirmation::Fixed(stepped_up),
+    )?;
+    if let Decision::Fresh(decided) = &decision {
+        if now.secs >= shown.deadline_s {
+            return Err(ControlError::Refused { reason: "late" });
+        }
+        if code.is_some() && !decided.stepped_up {
+            return Err(ControlError::Refused {
+                reason: "content_mismatch",
+            });
+        }
     }
-    Ok(shown)
+    Ok(decision)
 }
 
+/// What the owner chose in an answer: everything `ApprovalResponseSubmitted` carries but
+/// `submitted_at` and the step-up evidence, which [`commit`] adds.
 fn response(
     owner: &Owner,
     agent: &str,
     shown: &Shown,
-    verdict: &str,
-    evidence: Value,
-    now: Now,
-) -> Result<Value, ControlError> {
-    object(vec![
+    verdict: &'static str,
+) -> Vec<(&'static str, Value)> {
+    vec![
         ("agent", text(agent)),
         ("approval", text(&shown.approval)),
         ("verdict", text(verdict)),
         ("content_hash", text(&shown.content_hash)),
-        ("submitted_at", seconds(now.secs)?),
-        ("step_up", evidence),
         ("responder", text(&owner.user)),
         ("role", text("approver")),
-    ])
+    ]
 }
 
 /// Commits the owner's grant. Refused locally, committing nothing, when the approval is not
 /// pending (`not_pending`), its deadline has passed at `now` (`late`), or `code` is not the one for
-/// its content hash (`content_mismatch`).
+/// its content hash (`content_mismatch`). A re-run of a grant already committed and not yet
+/// recorded reports that event (DEC-290).
 ///
 /// # Errors
 /// [`ControlError::Refused`] as above; [`ControlError::Journal`] when the append fails.
@@ -271,22 +289,10 @@ pub fn approve(
     code: &str,
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    let shown = answerable(journal, owner, agent, approval, now)?;
-    if code != shown.code {
-        return Err(ControlError::Refused {
-            reason: "content_mismatch",
-        });
+    match answering(journal, owner, agent, approval, "approved", Some(code), now)? {
+        Decision::Committed(submitted) => Ok(submitted),
+        Decision::Fresh(decided) => commit(journal, ids, owner, decided, &["submitted_at"], now),
     }
-    let evidence = step_up(ids, now)?;
-    let payload = response(owner, agent, &shown, "approved", evidence, now)?;
-    commit(
-        journal,
-        ids,
-        owner,
-        "ApprovalResponseSubmitted",
-        payload,
-        now,
-    )
 }
 
 /// Commits the owner's skip. Refused locally, committing nothing, when the approval is not pending
@@ -302,16 +308,10 @@ pub fn skip(
     approval: &str,
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    let shown = answerable(journal, owner, agent, approval, now)?;
-    let payload = response(owner, agent, &shown, "skipped", Value::Null, now)?;
-    commit(
-        journal,
-        ids,
-        owner,
-        "ApprovalResponseSubmitted",
-        payload,
-        now,
-    )
+    match answering(journal, owner, agent, approval, "skipped", None, now)? {
+        Decision::Committed(submitted) => Ok(submitted),
+        Decision::Fresh(decided) => commit(journal, ids, owner, decided, &["submitted_at"], now),
+    }
 }
 
 /// What the runtime recorded for a submitted answer: the `ApprovalResponded` whose `causation_id`
@@ -326,6 +326,8 @@ pub enum Outcome {
     Counted,
     Refused {
         reason: String,
+        /// The request's deadline, as its risk-clock second, which the message is worded against.
+        deadline_s: i64,
     },
 }
 
@@ -336,7 +338,8 @@ pub enum Revalidated {
 }
 
 /// # Errors
-/// [`ControlError::Journal`] when the journal cannot be read.
+/// [`ControlError::Journal`] when the journal cannot be read, or holds no request for the answer
+/// it recorded.
 pub fn outcome(
     journal: &dyn ControlJournal,
     owner: &Owner,
@@ -376,17 +379,25 @@ pub fn outcome(
             Outcome::Admitted { revalidation }
         }
         Some("counted") => Outcome::Counted,
-        _ => Outcome::Refused { reason: reason() },
+        _ => Outcome::Refused {
+            reason: reason(),
+            deadline_s: requests(journal, owner, agent)?
+                .iter()
+                .find(|r| Some(r.approval.as_str()) == member_text(copy, "payload.approval"))
+                .map(|r| r.deadline_s)
+                .ok_or_else(|| ControlError::Journal("an answer to no request".into()))?,
+        },
     })
 }
 
-/// The line `approve` prints for an outcome. Only an admitted grant whose re-validation acted says
-/// it was sent, and nothing the runtime has not recorded is ever called approved (rule 3, the M7
-/// brief's "What `approve` prints").
+/// The line `approve` prints for an outcome at `now`. Only an admitted grant whose re-validation
+/// acted says it was sent, nothing the runtime has not recorded is ever called approved (rule 3,
+/// the M7 brief's "What `approve` prints"), and a refusal says whether the deadline has passed, so
+/// the owner is offered another answer only while one can still count (the #397 review, minor 5).
 ///
 /// # Errors
-/// None: every outcome has a line. The `Result` is the stub API's shape.
-pub fn message(outcome: &Outcome) -> Result<String, ControlError> {
+/// [`ControlError::Unimplemented`] for a refusal in the tests PR (DEC-77).
+pub fn message(outcome: &Outcome, now: Now) -> Result<String, ControlError> {
     Ok(match outcome {
         Outcome::NotRecorded => "Not recorded yet. If the runtime does not record it before the \
                                  deadline, the action is skipped."
@@ -403,9 +414,10 @@ pub fn message(outcome: &Outcome) -> Result<String, ControlError> {
         Outcome::Counted => {
             "Counted, short of the approvers required; nothing was sent.".to_owned()
         }
-        Outcome::Refused { reason } => format!(
-            "Refused ({reason}); nothing was sent. You may answer again before the deadline."
-        ),
+        Outcome::Refused { .. } => {
+            let _ = now;
+            return Err(ControlError::Unimplemented { story: "E8-3" });
+        }
     })
 }
 
@@ -415,7 +427,10 @@ mod tests {
     use mandate_journal::{Environment, Head, StoredEvent, StreamId};
     use mandate_time::UtcNanos;
 
+    use std::time::Duration;
+
     use super::*;
+    use crate::control::object;
 
     /// One agent stream's stored events and nothing else: all `pending_count` reads.
     struct Stream(Vec<StoredEvent>);
@@ -440,6 +455,7 @@ mod tests {
         ) -> Result<mandate_journal::AppendOutcome, ControlError> {
             Err(ControlError::Journal("unused".into()))
         }
+        fn wait(&mut self, _delay: Duration) {}
     }
 
     fn stored(seq: u64, event_type: &str, payload: Value) -> Result<StoredEvent, ControlError> {
