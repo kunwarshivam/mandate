@@ -4102,8 +4102,9 @@ fn an_owner_exit_outside_the_session_prices_from_the_confirmed_bid() {
     let limit = sell.limit_price.expect("priced through the ladder");
     assert_eq!(
         limit,
-        price("154.225"),
-        "155 x (1 - 0.005) from the confirmed bid, not from a quote nobody saw (§5.5, §5.6)"
+        price("154.23"),
+        "155 x (1 - 0.005) = 154.225 from the confirmed bid, not from a quote nobody saw, rounded \
+         up to the equity tick (§2.1, §5.5, §5.6; DEC-260 (6))"
     );
     assert!(
         limit >= price("150.35"),
