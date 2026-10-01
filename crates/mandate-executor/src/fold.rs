@@ -869,7 +869,7 @@ fn protection_changed(
                 let prices = prices_of(payload)?;
                 let intent = IntentId(EventId(intent.to_owned()));
                 let ladder = match state.ladders.get(&instrument) {
-                    Some(lone) if lone.intent == intent && !passive => {
+                    Some(lone) if lone.intent == intent => {
                         let resumed = lone.ladder;
                         state.ladders.remove(&instrument);
                         resumed
@@ -903,17 +903,16 @@ fn protection_changed(
         "exit_unpriced" | "ladder_floor" => {}
         "interval_limit" | "unprotected_end" => {
             let ends = action == "unprotected_end";
-            if ends {
-                if let Some(sequence) = state.exiting.remove(&instrument) {
-                    if sequence.ladder.parked {
-                        let lone = LoneLadder {
-                            intent: sequence.intent,
-                            agent: sequence.agent,
-                            ladder: sequence.ladder,
-                        };
-                        state.ladders.insert(instrument.clone(), lone);
-                    }
-                }
+            if ends
+                && let Some(sequence) = state.exiting.remove(&instrument)
+                && sequence.ladder.parked
+            {
+                let lone = LoneLadder {
+                    intent: sequence.intent,
+                    agent: sequence.agent,
+                    ladder: sequence.ladder,
+                };
+                state.ladders.insert(instrument.clone(), lone);
             }
             if let Some(open) = state
                 .unprotected

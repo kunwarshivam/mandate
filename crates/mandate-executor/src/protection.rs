@@ -942,19 +942,16 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         let finished = match batch.view.orders.get(&exit) {
             Some(order) if order.state == OrderState::Canceled && steps(&batch.view, &sequence) => {
                 let left = order.qty.checked_sub(order.filled_qty)?;
-                let closed = closed_hold(batch.ports, &instrument, batch.at());
-                match closed {
-                    Some(reason) if left > Qty::ZERO => {
-                        park(batch, &sequence.intent, reason, sequence.ladder.parked)?;
-                    }
-                    None if left > Qty::ZERO => {
-                        let at = (&sequence.intent, sequence.ladder.rung);
-                        next_rung(batch, &instrument, at, left, false)?;
-                        continue;
-                    }
-                    _ => {}
+                if left == Qty::ZERO {
+                    true
+                } else if let Some(reason) = closed_hold(batch.ports, &instrument, batch.at()) {
+                    park(batch, &sequence.intent, reason, sequence.ladder.parked)?;
+                    true
+                } else {
+                    let at = (&sequence.intent, sequence.ladder.rung);
+                    next_rung(batch, &instrument, at, left, false)?;
+                    continue;
                 }
-                true
             }
             Some(order) => handed(&batch.view, &sequence) || order.state.is_terminal(),
             None => batch
@@ -6816,11 +6813,15 @@ mod sequence_tests {
         fn segment(at: i64) -> Option<(i64, u8)> {
             const HOUR: i64 = 3_600;
             TRADING_DAYS.iter().find_map(|day| {
+                let at_hour = |hours: i64, halves: i64| {
+                    day.saturating_add(hours.saturating_mul(HOUR))
+                        .saturating_add(halves.saturating_mul(HOUR / 2))
+                };
                 [
-                    (day - 4 * HOUR, day + 4 * HOUR, 0),
-                    (day + 4 * HOUR, day + 9 * HOUR + HOUR / 2, 1),
-                    (day + 9 * HOUR + HOUR / 2, day + 16 * HOUR, 2),
-                    (day + 16 * HOUR, day + 20 * HOUR, 3),
+                    (at_hour(-4, 0), at_hour(4, 0), 0),
+                    (at_hour(4, 0), at_hour(9, 1), 1),
+                    (at_hour(9, 1), at_hour(16, 0), 2),
+                    (at_hour(16, 0), at_hour(20, 0), 3),
                 ]
                 .into_iter()
                 .find(|(from, to, _)| (*from..*to).contains(&at))
@@ -7582,6 +7583,11 @@ mod sequence_tests {
         let night = executor.run(cancel_accepted(&exit), &ports)?;
         assert!(submissions(&night).is_empty(), "{:?}", drafted(&night));
         assert_eq!(gate_reasons(&night), vec!["session_closed"]);
+        assert!(
+            !alerts(&night).contains(&"session_unknown"),
+            "{:?}",
+            alerts(&night)
+        );
         for at in [1_790_121_700, 1_790_140_000, 1_790_150_399] {
             let quiet = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
             assert!(submissions(&quiet).is_empty(), "at {at}");
@@ -7654,6 +7660,59 @@ mod sequence_tests {
         assert_eq!(rung.client_order_id.as_str(), format!("{exit}-l1"));
         assert_eq!(rung.limit_price, Some(Price::parse("149.49")?));
         assert!(rung.extended_hours);
+        assert!(
+            executor.state.ladders.is_empty() && executor.state.exiting.contains_key(&aapl()?),
+            "the parked ladder resumes inside the new sequence, not beside it"
+        );
+        Ok(())
+    }
+
+    /// DEC-260 (18): a sequence that starts in an instrument takes a parked ladder only if it is
+    /// that ladder's own exit; another exit's sequence starts its own ladder, and the parked one
+    /// stays for its exit.
+    #[test]
+    fn a_parked_ladder_resumes_only_in_its_own_exits_sequence() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let parked = crate::state::Ladder {
+            rung: 2,
+            since: None,
+            floored: false,
+            stepping: true,
+            parked: true,
+        };
+        for (intent, takes) in [(SECOND, false), (EXIT, true)] {
+            let mut executor = held(&ports)?;
+            executor.state.ladders.insert(
+                aapl()?,
+                crate::state::LoneLadder {
+                    intent: IntentId(EventId(EXIT.to_owned())),
+                    agent: AgentId("agent-a".to_owned()),
+                    ladder: parked,
+                },
+            );
+            committed(
+                &mut executor,
+                "ProtectionChanged",
+                vec![
+                    ("instrument", text("AAPL")),
+                    ("action", text("unprotected_start")),
+                    ("orders", text(OCO)),
+                    ("intent_id", text(intent)),
+                    ("entry", text("md-held-1")),
+                    ("agent", text("agent-a")),
+                    ("stop", text("140")),
+                ],
+            )?;
+            let started = executor
+                .state
+                .exiting
+                .get(&aapl()?)
+                .map(|sequence| sequence.ladder)
+                .ok_or_else(|| missing("the sequence"))?;
+            assert_eq!(started == parked, takes, "{intent}");
+            assert_eq!(executor.state.ladders.is_empty(), takes, "{intent}");
+        }
         Ok(())
     }
 
