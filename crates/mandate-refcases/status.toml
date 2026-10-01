@@ -69,6 +69,7 @@
 'RC-08' = { status = "passing", story = "E6-3" }
 'RC-18::generic_cash_account' = { status = "passing", story = "E6-3" }
 'RC-09B' = { status = "passing", story = "E6-6" }
+'RC-09' = { status = "passing", story = "E6-10" }
 
 # Family N (stream J, DEC-77 item 3, DEC-154). MC-N01, MC-N14 and MC-N26 decide their
 # first_order_autonomy through E6-2's classify (DEC-179).
@@ -113,6 +114,9 @@
 'MC-B23' = { status = "passing", story = "E6-2" }
 'MC-B24' = { status = "passing", story = "E6-2" }
 'MC-B25' = { status = "passing", story = "E6-2" }
+'MC-B26' = { status = "passing", story = "E6-10" }
+'MC-B27' = { status = "passing", story = "E6-10" }
+'MC-B28' = { status = "passing", story = "E6-10" }
 'MC-B29' = { status = "passing", story = "E6-2" }
 'MC-N01' = { status = "passing", story = "E6-2" }
 'MC-N02' = { status = "passing", story = "E17-3" }
