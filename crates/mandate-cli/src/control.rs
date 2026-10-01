@@ -279,6 +279,15 @@ pub(crate) enum Decision {
     Committed(Submitted),
 }
 
+/// Whether a re-run of a command may be reported as the same command already committed, or is
+/// always committed (DEC-290 item 5).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Repeat {
+    FindsEarlier,
+    /// A kill switch: never reported as an earlier one (rule 13).
+    AlwaysCommits,
+}
+
 /// Whether a command carries step-up evidence.
 #[derive(Clone, Copy)]
 pub(crate) enum Confirmation<'a> {
@@ -310,11 +319,14 @@ pub(crate) fn decide(
     event_type: &'static str,
     key: Vec<(&'static str, Value)>,
     confirmed: Confirmation<'_>,
+    repeat: Repeat,
 ) -> Result<Decision, ControlError> {
     let stream = control_stream(owner)?;
     let head = journal.head(&stream)?.seq;
     let chosen = object(key.clone())?;
-    if let Some(earlier) = earlier(journal, &stream, event_type, &chosen, confirmed, head)? {
+    if repeat == Repeat::FindsEarlier
+        && let Some(earlier) = earlier(journal, &stream, event_type, &chosen, confirmed, head)?
+    {
         return Ok(Decision::Committed(earlier));
     }
     let stepped_up = confirmed.at(head)?;
@@ -337,8 +349,7 @@ pub(crate) fn decide(
 /// (DEC-290 item 5).
 ///
 /// # Errors
-/// [`ControlError::Journal`] when the journal cannot be read; [`ControlError::Unimplemented`] in
-/// the tests PR when the last event is the same command (DEC-77).
+/// [`ControlError::Journal`] when the journal cannot be read.
 fn earlier(
     journal: &dyn ControlJournal,
     stream: &StreamId,
@@ -355,10 +366,40 @@ fn earlier(
     };
     for before in (0..last.seq).rev() {
         if derive(stream, event_type, chosen, confirmed.at(before)?, before)? == last.event_id {
-            return Err(ControlError::Unimplemented { story: "E8-3" });
+            if recorded(journal, stream, &last)? {
+                return Ok(None);
+            }
+            return Ok(Some(Submitted {
+                event_id: last.event_id,
+                seq: last.seq,
+            }));
         }
     }
     Ok(None)
+}
+
+/// Whether the runtime of the agent `row` addresses has recorded it: an event on that agent's
+/// stream whose `causation_id` is `row`'s id, as every copy the runtime makes is (journal spec §2).
+/// A command addressed to no agent has no agent stream to read, and reads as not recorded.
+fn recorded(
+    journal: &dyn ControlJournal,
+    stream: &StreamId,
+    row: &StoredEvent,
+) -> Result<bool, ControlError> {
+    let Some(agent) = envelope(row)?
+        .get("payload")
+        .and_then(|p| p.get("agent"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    else {
+        return Ok(false);
+    };
+    let workspace = stream.as_str().trim_start_matches("ctl:");
+    let agent_stream = StreamId::parse(&format!("agent:{workspace}:{agent}"))
+        .ok_or_else(|| ControlError::Journal("not an agent id".to_owned()))?;
+    Ok(envelopes(journal, &agent_stream)?
+        .iter()
+        .any(|e| e.get("causation_id").and_then(Value::as_str) == Some(row.event_id.as_str())))
 }
 
 /// The ULID-shaped event id of `chosen` decided at `head`: the first 128 bits of the SHA-256 of a
@@ -391,8 +432,12 @@ fn ulid(n: u128) -> String {
     (0..ULID_LEN)
         .rev()
         .map(|digit| {
-            let index = (n >> (digit * 5)) & 0x1f;
-            char::from(ALPHABET[usize::try_from(index).unwrap_or_default()])
+            let shifted = digit
+                .checked_mul(5)
+                .and_then(|bits| n.checked_shr(bits))
+                .unwrap_or_default();
+            let index = usize::try_from(shifted & 0x1f).unwrap_or_default();
+            ALPHABET.get(index).copied().map_or('0', char::from)
         })
         .collect()
 }
@@ -402,15 +447,29 @@ const ULID_LEN: u32 = 26;
 /// The pause before retry `retry` (1 for the first retry) of the command whose id is `event_id`:
 /// doubling from [`FIRST_BACKOFF`] to at most [`LAST_BACKOFF`], plus a jitter below that base drawn
 /// from the id, so two invocations racing for the stream stop fencing each other (DEC-290; the
-/// #397 review, minor 4). Public so its tests can judge it directly; until it is implemented the
-/// append loop pauses [`FIRST_BACKOFF`] before every retry.
+/// #397 review, minor 4). Public so its tests can judge it directly.
 ///
 /// # Errors
-/// [`ControlError::Unimplemented`] in the tests PR (DEC-77).
+/// None: every retry has a pause. The `Result` is the stub API's shape.
 pub fn backoff(retry: u32, event_id: &str) -> Result<Duration, ControlError> {
-    let _ = (retry, event_id, FIRST_BACKOFF, LAST_BACKOFF);
-    Err(ControlError::Unimplemented { story: "E8-3" })
+    let doubled =
+        FIRST_BACKOFF.saturating_mul(1_u32 << retry.saturating_sub(1).min(BACKOFF_DOUBLINGS));
+    let base = doubled.min(LAST_BACKOFF);
+    let drawn = Digest::of_parts(&[event_id.as_bytes(), &retry.to_be_bytes()]);
+    let mut high = [0_u8; 8];
+    high.copy_from_slice(&drawn.as_bytes()[..8]);
+    let base_nanos = u64::try_from(base.as_nanos()).unwrap_or(u64::MAX).max(1);
+    let jitter = Duration::from_nanos(
+        u64::from_be_bytes(high)
+            .checked_rem(base_nanos)
+            .unwrap_or_default(),
+    );
+    Ok(base.saturating_add(jitter))
 }
+
+/// The doublings after which the base would pass [`LAST_BACKOFF`] anyway, so the shift never
+/// overflows.
+const BACKOFF_DOUBLINGS: u32 = 16;
 
 /// One attempt at appending `bytes`, the draft of `event_id`: its stored `seq` once the journal
 /// holds it, or `None` for an answer that is retried.
@@ -496,8 +555,7 @@ pub(crate) fn commit(
         let Some(retry) = retries.next() else {
             break;
         };
-        let _ = retry;
-        journal.wait(FIRST_BACKOFF);
+        journal.wait(backoff(retry, &event_id)?);
     }
     Err(ControlError::Journal(format!(
         "the control stream did not settle after {ATTEMPTS} attempts; the command may have been \

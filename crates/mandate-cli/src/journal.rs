@@ -361,7 +361,7 @@ fn open_source(dir: Option<&Path>) -> anyhow::Result<Box<dyn ArtifactSource>> {
     match dir {
         None => Ok(Box::new(NoArtifacts)),
         Some(dir) if dir.is_dir() => FsArtifactStore::open(dir)
-            .map(|store| Box::new(store) as Box<dyn ArtifactSource>)
+            .map(|store| -> Box<dyn ArtifactSource> { Box::new(store) })
             .map_err(|e| {
                 refuse(
                     Refusal::ArtifactStore,
