@@ -860,7 +860,6 @@ fn an_owner_pause_needs_no_step_up_and_cancels_the_approval() {
 /// refused and leaves the pause in force, and its one copy is the `OwnerCommandRefused` (journal
 /// spec §9, rule 16; DEC-280 item 7); fresh evidence resumes, and the copy names its command.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_resume_needs_step_up_fresh_when_processed() {
     let (ids, gate, plan, view) = (TestIds, AllowGate, FixedPlan::silent(), universe(&["AAPL"]));
     let ports = ports(&ids, &gate, &plan, &view);
@@ -931,7 +930,6 @@ fn refused_only(ran: &Ran, source: &EventId, command: &str, reason: &str, judged
 /// (`step_up_reused`). The agent keeps running after each. A Stop with fresh, unused evidence then
 /// stops it, with an `AgentModeChanged` and no refusal.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_refused_stop_leaves_exactly_its_owner_command_refused() {
     let (ids, gate, plan, view) = (TestIds, AllowGate, FixedPlan::silent(), universe(&["AAPL"]));
     let ports = ports(&ids, &gate, &plan, &view);
@@ -1003,7 +1001,6 @@ fn a_refused_stop_leaves_exactly_its_owner_command_refused() {
 /// Stop whose evidence is fresh and unused is refused for its method, and leaves exactly its
 /// `OwnerCommandRefused` with `step_up_method` (the #411 review, minor 1).
 #[test]
-#[ignore = "pending E8-3"]
 fn a_stop_with_cli_confirm_off_paper_is_refused_for_its_method() {
     let (ids, gate, plan) = (TestIds, AllowGate, FixedPlan::silent());
     let mut view = universe(&["AAPL"]);
@@ -1027,7 +1024,6 @@ fn a_stop_with_cli_confirm_off_paper_is_refused_for_its_method() {
 /// the journal, the same `OwnerCommandIssued` re-tailed writes nothing, neither a second refusal nor
 /// a mode change.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_refused_command_is_recorded_once_across_a_restart() {
     let (ids, gate, plan, view) = (TestIds, AllowGate, FixedPlan::silent(), universe(&["AAPL"]));
     let ports = ports(&ids, &gate, &plan, &view);

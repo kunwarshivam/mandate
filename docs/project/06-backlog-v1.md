@@ -386,6 +386,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `OwnerCommandRefused` for each of missing, stale and reused evidence, a stale resume does the
   same, and a refused command re-tailed after a restart writes nothing. The executor's half (a
   refused acknowledgment) rides with E7-4 slice 5's copy of `OwnerAcknowledged` (DEC-291 item 4).
+  *Done (the runtime's half, DEC-291):* the five tests pass. A resume or Stop whose step-up does
+  not count writes exactly its `OwnerCommandRefused` (`command`, `effective_at`, `reason`, with the
+  `OwnerCommandIssued` as `causation_id`), and the fold reads it as a copy, so a re-tailed command
+  writes nothing.
+  *Follow-up (the #413 review, minor 3):* give `mandate-approval` one `From<StepUpRefusal> for
+  Refusal` mapping and one reason-code table, retiring the three tables kept by hand today
+  (`mandate-runtime`'s `refusal_code`, its `OwnerCommandRefused` reasons, and `step_up_status`'s
+  input), so a new refusal cannot be coded differently in two places.
   *Follow-up (the #397 review, minors 1 to 5; one M7 tests PR before the `clap` wiring makes the
   commands reachable):* pin the closed key set of every control payload the CLI commits
   (`OwnerCommandIssued`, `ApprovalResponseSubmitted`, `OwnerAcknowledged`) in `tests/agent.rs` and
