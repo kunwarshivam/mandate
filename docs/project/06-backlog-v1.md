@@ -1348,14 +1348,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the coordinator moved from 3a to slice 2 (#267, comment 5862923162): under rule 13 no exit waits
   for the startup reconciliation, so the plant gets weight only with the first opening through
   `fault::protected` (slice 2's add). Slice 2's PR shows each of the three red.
-- **E7-4 slice 6's tests PR (stream K), from [#373](https://github.com/kunwarshivam/mandate/pull/373)
+- **E7-4 slice 7's tests PR (stream K; moved from slice 6 when slice 6 took #400 round 2's two items), from [#373](https://github.com/kunwarshivam/mandate/pull/373)
   round 1 (major 1):** §5.5 exempts kill-switch and mandate-limit flatten exits from the agent's
   mode, but slice 4a's ladder stops stepping while the agent is `paused` or `stopped`
   ([DEC-260](04-decision-log.md#decisions) (3)), and the gate's `mode_failure` holds every
   risk-reducing order at `paused` or stricter. Add a pending test: while the agent is paused, a
   flatten's ladder steps, its step cancel does not end the sequence, and `mode_failure` lets that
-  flatten through. Slice 6 narrows `climbs` and the gate together to make it pass.
-- **E7-4 slice 6 (stream K; moved from slice 5 by the coordinator's ruling D3 on #174), from
+  flatten through. Slice 7 narrows `climbs` and the gate together to make it pass.
+- **E7-4 slice 7 (stream K; moved from slice 5 by the coordinator's ruling D3 on #174, then from slice 6), from
   [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1 (minor 1):** wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
   `exit_limit` and `next_rung`, which pass none today, so §5.6's "never below an owner exit's
   floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
@@ -1364,7 +1364,7 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 slice 5 (stream K), from slice 4b ([DEC-260](04-decision-log.md#decisions) (12)):**
   a crypto stop-limit is watchdogged as soon as a sane mark is below its limit price, once slice 5
   places stop-limits. The session condition landed with slice 5's session part (DEC-260 (15)).
-- **E7-4 slice 6's tests PR (stream K), from slice 4b (DEC-160 (11), (24)):** add pending tests
+- **E7-4 slice 7's tests PR (stream K, moved from slice 6), from slice 4b (DEC-160 (11), (24)):** add pending tests
   that every kill switch whose scope covers an instrument cancels a working `*` watchdog exit
   there by its own `client_order_id` (`md-w-<record>`), an agent-scoped one included when it
   closes that instrument (§5.5's table), and that an agent-scoped kill switch never treats it as
@@ -1406,11 +1406,10 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   (`AGENTS.md` rule 6), and the park also counts in what `exit_held_long` reports. Today a
   `session_closed` park journals its hold and raises nothing, so an exit can wait 8 hours
   overnight unannounced. Add a test asserting exactly one notification across a parked night.
-- **E7-4 slice 6 (stream K), from #400 round 2 (nit):** the rule-13 oracle
-  (`protection::sequence_tests::rule_13_holds_over_random_scripts`) reached the composed plant (the
-  `extended_hours` widening with the old step path) 7 of 9 times. Raise the 19:59:50 start's weight,
-  or add a fixed script, so it catches that plant on every run.
-- **E7-4 slice 6 (stream K), moved from slice 5 by the coordinator's ruling D3 on
+  Slice 6's tests PR adds the three pending tests ([DEC-260](04-decision-log.md#decisions) (19));
+  its implementation PR deletes this row. The oracle's nit from the same round is done there
+  (DEC-260 (20)).
+- **E7-4 slice 7 (stream K), moved from slice 5 by the coordinator's ruling D3 on
   [#174](https://github.com/kunwarshivam/mandate/pull/174) (5926142854):** the four kill-switch
   session tests (`hand::an_automated_flatten_defers_equity_sells_to_the_session`,
   `an_automated_flatten_sells_crypto_at_once`,
