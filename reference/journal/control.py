@@ -178,12 +178,26 @@ def is_date(text: str) -> bool:
     return 1 <= int(month) <= 12 and 1 <= int(day) <= days[int(month) - 1]
 
 
+def loose_date(text: str) -> bool:
+    """The seeded bug `types.date_length`: a date gate that checks the separators and the calendar
+    but not the 10-character form, so `2026-09-0005` reads as 5 September."""
+    parts = text.split("-")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        return False
+    return is_date(f"{int(parts[0]):04d}-{int(parts[1]):02d}-{int(parts[2]):02d}")
+
+
 def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> list[Violation]:
     """`type_violations` with §9.2's two new types: `pointer` and `date` (refused as `id` is)."""
     if ty.kind in ("pointer", "date"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
-        ok = is_pointer(value) if ty.kind == "pointer" else is_date(value)
+        if ty.kind == "pointer":
+            ok = is_pointer(value)
+        elif "types.date_length" in skip:
+            ok = loose_date(value)
+        else:
+            ok = is_date(value)
         if not ok and f"types.{ty.kind}" not in skip:
             return [Violation("types", "non_canonical", path)]
         return []
@@ -199,7 +213,8 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
         for name, inner in ty.fields:
             member = f"{path}.{name}".lstrip(".")
             if name not in value:
-                if "record.missing" not in skip:
+                read_as_null = inner.kind == "nullable" and "record.missing.nullable" in skip
+                if "record.missing" not in skip and not read_as_null:
                     out.append(Violation("record.missing", "schema", member))
             else:
                 out += payload_type_violations(inner, value[name], member, skip)
@@ -240,7 +255,11 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             wrong.append("params")
         rule("21", not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
     if event_type == "AgentDeployed" and "mandate_version" in draft["config_refs"]:
-        bound = p["mandate_version"] == draft["config_refs"]["mandate_version"]
+        theirs = draft["config_refs"]["mandate_version"]
+        if "rule.22.prefix" in skip:
+            bound = p["mandate_version"][:8] == theirs[:8]
+        else:
+            bound = p["mandate_version"] == theirs
         rule("22", bound, "schema", "payload.mandate_version")
     if event_type == "AgentStopped":
         floor = (
@@ -326,15 +345,17 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     schema = SCHEMAS[(stream[0], event_type)]
     payload_types = payload_type_violations(schema, draft["payload"], "payload", skip)
     out += payload_types
+    schema_names = [name for name, _ in schema.fields]
+    as_read = {**draft, "payload": {name: draft["payload"].get(name) for name in schema_names}}
     if not payload_types:
-        out += consistency_violations(event_type, draft, skip)
+        out += consistency_violations(event_type, as_read, skip)
     if "artifact_refs" not in skip and draft["artifact_refs"] != sorted(digest_strings(draft["payload"])):
         out.append(Violation("artifact_refs", "artifact_refs", "artifact_refs"))
     if not ascending(draft["pii_refs"]):
         out.append(Violation("pii_refs", "pii_refs", "pii_refs"))
     if not payload_types:
-        out += subject_violations(event_type, draft, skip)
-        out += copy_violations(event_type, draft, skip)
+        out += subject_violations(event_type, as_read, skip)
+        out += copy_violations(event_type, as_read, skip)
     return out
 
 
@@ -844,8 +865,14 @@ def refs(*names: str) -> dict:
     return change("artifact_refs", sorted(artifact_ref(arts[name]) for name in names))
 
 
+def last_byte_flipped(ref: str) -> str:
+    """The same hash but for its last hex digit: a near-collision a prefix comparison accepts."""
+    return ref[:-1] + ("0" if ref[-1] != "0" else "1")
+
+
 def invalid_drafts() -> list[dict]:
     """Each draft breaks exactly one rule; together they cover every §9.2 member type and rule."""
+    version = artifact_ref(artifacts()["mandate_document"])
     return [
         invalid(
             "connection_carries_a_key",
@@ -1112,6 +1139,22 @@ def invalid_drafts() -> list[dict]:
             "payload.retired_on",
         ),
         invalid(
+            "deployed_version_differs_in_its_last_byte",
+            "rule 22: the whole hash is compared",
+            "deployed",
+            [change("config_refs.mandate_version", last_byte_flipped(version))],
+            "schema",
+            "payload.mandate_version",
+        ),
+        invalid(
+            "stopped_retired_on_long_day",
+            "§9.2 date: exactly YYYY-MM-DD",
+            "stopped",
+            [change("payload.retired_on", "2026-09-0005")],
+            "non_canonical",
+            "payload.retired_on",
+        ),
+        invalid(
             "stopped_retired_on_impossible",
             "§9.2 date",
             "stopped",
@@ -1134,6 +1177,14 @@ def invalid_drafts() -> list[dict]:
             [change("payload.account_number", "reference-fixture")],
             "schema",
             "payload.account_number",
+        ),
+        invalid(
+            "snapshot_model_cash_absent",
+            "§9.1 absent member: never read as null, even where null is valid (§4.2)",
+            "snapshot_reconciled",
+            [delete("payload.model_cash")],
+            "schema",
+            "payload.model_cash",
         ),
         invalid(
             "snapshot_multiplier_text",
@@ -1583,13 +1634,16 @@ def sha(text: str) -> str:
 VALIDATOR_MUTANTS = (
     "record.extra",
     "record.missing",
+    "record.missing.nullable",
     "types.str_nonempty",
     "types.pointer",
     "types.date",
+    "types.date_length",
     "artifact_refs",
     "config_refs.required",
     *(f"rule.{n}" for n in range(17, 25)),
     "rule.21.params",
+    "rule.22.prefix",
     "rule.24.band",
     "rule.24.in_band",
     "boundary.rule_23_strict",

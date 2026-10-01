@@ -1071,9 +1071,17 @@ From E10-1's slice-V implementation (DEC-161):
   `MandateConfirmed`. `AgentFlat` needs a source there too (the account ledger's flat-in-every-instrument
   signal). A record left unmapped is a fact the fold never sees, so the mapper's completeness is what
   covers the facts that only add (DEC-169 item 2).
-- **Journal spec v0.7 §9.2's follow-ups ([DEC-261](04-decision-log.md#decisions)).**
+- **Journal spec v0.7 §9.2's follow-ups ([DEC-261](04-decision-log.md#decisions)).** Until each
+  lands, the drafts it names stay refused at `append`, which adds no risk (rule 3).
   - **Stream K:** the executor's fee-step `AccountSnapshotRecorded` writes `model_cash`, `cash_band`,
-    and `cash_in_band` as `null`, not absent (§4.2).
+    and `cash_in_band` as `null`, not absent (§4.2). **E7-10's implementation must not register
+    `AccountSnapshotRecorded` until this lands.** The fee step pauses every agent and alerts the owner,
+    and refusing its snapshot at `append` must never stop it (rules 3 and 13, DEC-261 item 7). E7-10's
+    tests PR pins that ordering with a pending test.
+  - **Stream I / M7:** the runtime's `OwnerCommandRefused` writes `effective_at` as a §4.7 timestamp
+    rather than risk-clock seconds (`escalation.rs`, `payload::seconds`). §9.2 supersedes DEC-291
+    item 1's "same second" for this member. `crates/mandate-runtime/src/escalation/tests.rs`'s assertion
+    that `effective_at` is an integer changes with this writer.
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
     (HLD §8), as a new `schema_version` with its own vectors.
   - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,

@@ -13,7 +13,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 ## Change history
 
 - **v0.7 ([DEC-261](../project/04-decision-log.md#decisions)):** §9.2 closes the payload schemas of
-  the records `ValidationContext::from_journal` reads ([DEC-169](../project/04-decision-log.md#decisions)).
+  the control-stream and account-stream records among those `ValidationContext::from_journal` reads
+  ([DEC-169](../project/04-decision-log.md#decisions)).
   These are the control stream's `StreamOpened`, `ConnectionEstablished`, `ConnectionRevoked`,
   `DisclosureAccepted`, `ConfigSnapshotRegistered`, `MandateVersionCreated`, `MandateConfirmed`,
   `AgentDeployed`, and `AgentStopped`, and the account stream's `AccountSnapshotRecorded`. §9.2 also
@@ -658,12 +659,15 @@ stored chain, and `mandate journal verify` reports them.
 
 ### 9.2 Control-stream payload schemas ([DEC-261](../project/04-decision-log.md#decisions))
 
-This subsection closes the payload schemas of the records `ValidationContext::from_journal` reads
-([DEC-169](../project/04-decision-log.md#decisions)): the control stream's `StreamOpened`,
+This subsection closes the payload schemas of the control-stream and account-stream records among
+those `ValidationContext::from_journal` reads ([DEC-169](../project/04-decision-log.md#decisions)):
+the control stream's `StreamOpened`,
 `ConnectionEstablished`, `ConnectionRevoked`, `DisclosureAccepted`, `ConfigSnapshotRegistered`,
 `MandateVersionCreated`, `MandateConfirmed`, `AgentDeployed`, and `AgentStopped`, and the account
 stream's `AccountSnapshotRecorded`. It also closes `OwnerCommandRefused` on both streams that write
-it ([DEC-291](../project/04-decision-log.md#decisions)). For these events it replaces the "Key payload
+it ([DEC-291](../project/04-decision-log.md#decisions)). The fold also reads `UniverseChanged` and
+`MandateVersionApplied` (account stream), which close with their own stories, and
+`PlatformOperatorAction`, which stays open (below). For these events it replaces the "Key payload
 fields" column of §9, and the required `config_refs` stay as §9 lists them. §9.1's types, its
 absent-member rule, and its report order apply unchanged, with the rules below numbered on from
 §9.1's. Each schema is `schema_version` 1.
@@ -798,7 +802,7 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 |---|---|---|
 | `command` | `resume` \| `stop` \| `acknowledge` | Rule 26 |
 | `reason` | `step_up_missing` \| `step_up_stale` \| `step_up_reused` \| `step_up_method` | |
-| `effective_at` | `timestamp` | The effective time the command was judged at |
+| `effective_at` | `timestamp` | The effective time the command was judged at. A §4.7 timestamp, never risk-clock seconds (§9.1's types). This supersedes DEC-291 item 1's whole second for this member (DEC-261 item 7) |
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
 

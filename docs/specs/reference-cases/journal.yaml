@@ -3296,6 +3296,26 @@ control_stream:
       outcome: Invalid
       reason: non_canonical
       path: payload.retired_on
+  - name: deployed_version_differs_in_its_last_byte
+    clause: 'rule 22: the whole hash is compared'
+    base_seq: 8
+    changes:
+    - path: config_refs.mandate_version
+      value: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d40
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.mandate_version
+  - name: stopped_retired_on_long_day
+    clause: '§9.2 date: exactly YYYY-MM-DD'
+    base_seq: 9
+    changes:
+    - path: payload.retired_on
+      value: 2026-09-0005
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.retired_on
   - name: stopped_retired_on_impossible
     clause: §9.2 date
     base_seq: 9
@@ -3326,6 +3346,16 @@ control_stream:
       outcome: Invalid
       reason: schema
       path: payload.account_number
+  - name: snapshot_model_cash_absent
+    clause: '§9.1 absent member: never read as null, even where null is valid (§4.2)'
+    base_draft: snapshot_reconciled
+    changes:
+    - path: payload.model_cash
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model_cash
   - name: snapshot_multiplier_text
     clause: §9.1 integer
     base_draft: snapshot_reconciled
