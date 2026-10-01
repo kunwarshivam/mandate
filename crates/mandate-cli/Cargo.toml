@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "The `mandate` command line: `download` fetches Alpaca historical data into Parquet (backlog E2-1); `inspect` reports coverage, gaps, duplicates, and statistics (E2-2); `journal verify` and `artifact put`/`get` check an exported journal and its artifact store (E5-4); `approvals` and `agent` are M7's owner control (E8-1 to E8-3), stubbed until their implementation"
+description = "The `mandate` command line: `download` fetches Alpaca historical data into Parquet (backlog E2-1); `inspect` reports coverage, gaps, duplicates, and statistics (E2-2); `journal verify` and `artifact put`/`get` check an exported journal and its artifact store (E5-4); `approvals` and `agent` are M7's owner control (E8-1 to E8-3)"
 
 [lints]
 workspace = true
@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+mandate-approval.workspace = true
 mandate-artifacts-fs.workspace = true
 mandate-canon.workspace = true
 mandate-journal.workspace = true
@@ -26,6 +27,5 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 toml.workspace = true
 
 [dev-dependencies]
-mandate-approval.workspace = true
 mandate-num.workspace = true
 serde_json.workspace = true
