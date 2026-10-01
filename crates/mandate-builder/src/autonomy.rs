@@ -254,7 +254,7 @@ pub fn classify(policy: &Autonomy, action: &ActionContext) -> Result<Classificat
     };
     let (decision, by) = match action.requested_by {
         RequestedBy::Agent | RequestedBy::Owner => (decision, by),
-        RequestedBy::Client => client_ceiling(decision, by)?,
+        RequestedBy::Client => client_ceiling(decision, by),
     };
     let approval = match decision {
         AutonomyDecision::Ask => Some(ApprovalRequest {
@@ -272,12 +272,17 @@ pub fn classify(policy: &Autonomy, action: &ActionContext) -> Result<Classificat
 
 /// §6.2 step 5a, MI-30: the stricter of the decision so far and ASK, labelled
 /// [`DecidedBy::ClientCeiling`] only when that changed the decision.
-fn client_ceiling(
-    decision: AutonomyDecision,
-    by: DecidedBy,
-) -> Result<(AutonomyDecision, DecidedBy), BuilderError> {
-    let _ = (decision, by);
-    Err(BuilderError::Unimplemented)
+///
+/// [`AutonomyDecision::stricter`] is the same maximum the admission ceiling takes, so a `deny` from
+/// the rules or the admission ceiling stays `deny` and keeps its source, and an `ask` keeps the
+/// rule, the default or the ceiling that reached it (DEC-262 item 3).
+fn client_ceiling(decision: AutonomyDecision, by: DecidedBy) -> (AutonomyDecision, DecidedBy) {
+    let ceiled = decision.stricter(AutonomyDecision::Ask);
+    if ceiled == decision {
+        (decision, by)
+    } else {
+        (ceiled, DecidedBy::ClientCeiling)
+    }
 }
 
 /// §6.2 step 2 and then steps 3 to 6: the gate's verdict in, an outcome out.

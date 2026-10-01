@@ -7,7 +7,7 @@ use mandate_canon::{Object, Value, parse, to_canonical};
 use mandate_time::UtcNanos;
 
 use crate::schema::{Ty, normalize, normalize_record, parse_digest_ref, payload_schema};
-use crate::{Environment, Invalid, InvalidReason, StreamId, StreamType, catalogue};
+use crate::{Environment, Invalid, InvalidReason, StreamId, StreamType, agent, catalogue};
 
 static ENVELOPE: &[(&str, Ty)] = &[
     ("envelope_version", Ty::Int),
@@ -89,13 +89,16 @@ impl Draft {
 
         check_config_refs(fields.get("config_refs"), entry.required_refs)?;
 
-        let schema = payload_schema(event_type, int("schema_version"))
-            .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
-        let payload = normalize(
-            schema,
-            fields.get("payload").unwrap_or(&Value::Null),
-            "payload",
-        )?;
+        let written = fields.get("payload").unwrap_or(&Value::Null);
+        let causation_id = fields.get("causation_id");
+        let closed = agent::governs(&stream_id, event_type);
+        let payload = if closed {
+            agent::payload(event_type, int("schema_version"), written, causation_id)?
+        } else {
+            let schema = payload_schema(event_type, int("schema_version"))
+                .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
+            normalize(schema, written, "payload")?
+        };
 
         let mut referenced = BTreeSet::new();
         collect_digest_refs(&payload, &mut referenced);
@@ -112,7 +115,8 @@ impl Draft {
             return Err(Invalid::new(InvalidReason::PiiRefs, "pii_refs"));
         }
 
-        if event_type == "StreamOpened"
+        if !closed
+            && event_type == "StreamOpened"
             && subject(&stream_id, &payload).as_deref() != Some(stream_id.as_str())
         {
             return Err(Invalid::new(InvalidReason::StreamMismatch, "stream_id"));

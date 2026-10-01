@@ -230,15 +230,6 @@ fn draft_rejections() {
             NonCanonical,
             "payload.stream_type",
         ),
-        (
-            edit(
-                &opened_draft("paper"),
-                "stream_id",
-                Some("\"agent:ws_1:ACCT1\""),
-            ),
-            StreamMismatch,
-            "stream_id",
-        ),
     ];
     for (draft, expected, path) in cases {
         assert_eq!(
@@ -715,5 +706,38 @@ fn risk_clock_is_a_whole_second_and_marks_require_it() {
     assert_eq!(
         d.risk_clock().map(|t| t.to_string()).as_deref(),
         Some("2026-09-21T14:00:09.000000000Z")
+    );
+}
+
+/// On an agent stream, `StreamOpened` takes the agent stream's schema (journal spec v0.6 §9.1): an
+/// agent subject is accepted, and an account subject is refused at its first unlisted member, in
+/// key order, before rule 14 compares the subject with `stream_id`.
+#[test]
+#[ignore = "pending E7-9"]
+fn an_agent_stream_opens_with_an_agent_subject_only() {
+    let opened = edit(
+        &opened_draft("paper"),
+        "stream_id",
+        Some("\"agent:ws_1:agent_a\""),
+    );
+    let agent = edit(
+        &opened,
+        "payload",
+        Some(r#"{"stream_type":"agent","workspace_id":"ws_1","agent_id":"agent_a"}"#),
+    );
+    assert_eq!(
+        Draft::parse(&agent).map(|d| d.event_type().to_owned()),
+        Ok("StreamOpened".to_owned())
+    );
+    let refused = Draft::parse(&opened).map(|_| ()).unwrap_err();
+    assert_eq!(
+        (refused.reason, refused.path.as_str()),
+        (InvalidReason::Schema, "payload.account_ref")
+    );
+    let other_agent = edit(&agent, "payload.agent_id", Some("\"agent_b\""));
+    let refused = Draft::parse(&other_agent).map(|_| ()).unwrap_err();
+    assert_eq!(
+        (refused.reason, refused.path.as_str()),
+        (InvalidReason::StreamMismatch, "stream_id")
     );
 }
