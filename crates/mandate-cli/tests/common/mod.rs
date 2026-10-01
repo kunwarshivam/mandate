@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU8;
+use std::time::Duration;
 
 use mandate_approval::{
     AskablePurpose, AssetClass, BoundAction, ReferenceMark, RequestContent, RiskClock,
@@ -22,6 +23,9 @@ pub const AGENT: &str = "agent-a";
 pub const OTHER_AGENT: &str = "agent-b";
 pub const OWNER: &str = "user-owner";
 pub const CONTROL: &str = "ctl:ws1";
+/// The agents' account, and its stream, which `status` reads for restrictions.
+pub const ACCOUNT: &str = "01J0ACC0VNT000000000000000";
+pub const ACCOUNT_STREAM: &str = "acct:ws1:01J0ACC0VNT000000000000000";
 /// The risk-clock second the fixture asks at, and the instant it is.
 pub const ASKED_AT: i64 = 1_790_000_000;
 pub const TIMEOUT_S: i64 = 300;
@@ -49,20 +53,14 @@ pub fn agent_stream(agent: &str) -> String {
     format!("agent:{WORKSPACE}:{agent}")
 }
 
-/// Fixed ids: ULID-shaped event ids starting `2`, and numbered assertion ids. The counters are how
-/// many of each a command minted.
+/// Fixed, numbered assertion ids. The counter is how many a command minted; a command's event id is
+/// derived, not minted (DEC-290).
 #[derive(Debug, Default)]
 pub struct FixedIds {
-    pub events: u64,
     pub assertions: u64,
 }
 
 impl Ids for FixedIds {
-    fn event_id(&mut self) -> String {
-        self.events += 1;
-        format!("2{:025}", self.events)
-    }
-
     fn assertion_id(&mut self) -> String {
         self.assertions += 1;
         format!("cli-assertion-{}", self.assertions)
@@ -180,7 +178,10 @@ pub fn code_of(content: &Value) -> String {
 /// Three faults are injected on the next appends, each to drive one of the CLI's retry arms:
 /// another writer taking the stream (`Fenced`), another write landing between the CLI's read of the
 /// head and its append (`HeadMismatch`), and an append that commits but whose answer is lost
-/// (`Ambiguous`), after which a retry of the same draft is `AlreadyCommitted`.
+/// (`Ambiguous`), after which a retry of the same draft is `AlreadyCommitted`. A fourth,
+/// `lost_for_good`, commits the next control-stream append, answers it `Ambiguous`, and answers
+/// every later one `Unavailable` until cleared, so a command gives up having committed. Every pause
+/// the CLI asks for between attempts is recorded, never slept.
 #[derive(Debug, Default)]
 pub struct Journal {
     streams: BTreeMap<String, (u64, Vec<StoredEvent>)>,
@@ -190,9 +191,15 @@ pub struct Journal {
     pub behind_next: u32,
     /// Appends to commit and then answer `Ambiguous`.
     pub ambiguous_next: u32,
+    /// Commit the next control-stream append, answer it `Ambiguous`, and answer every later one
+    /// `Unavailable`, until cleared.
+    pub lost_for_good: bool,
+    lost: bool,
     /// Every append to the control stream the journal was asked for, with the event ids it carried
     /// (the fixture's own agent-stream appends are not the CLI's).
     pub attempts: Vec<Vec<String>>,
+    /// Every pause the CLI asked for between attempts, in order.
+    pub waits: Vec<Duration>,
     foreign: u64,
 }
 
@@ -293,6 +300,9 @@ impl ControlJournal for Journal {
             .collect();
         if stream.as_str() == CONTROL {
             self.attempts.push(ids.clone());
+            if self.lost_for_good && self.lost {
+                return Ok(AppendOutcome::Unavailable);
+            }
         }
         let already: Vec<Option<StoredEvent>> =
             ids.iter().map(|id| self.stored(id).cloned()).collect();
@@ -343,11 +353,27 @@ impl ControlJournal for Journal {
             });
         }
         let stored = self.store(stream, recorded_at, drafts)?;
+        if self.lost_for_good && stream.as_str() == CONTROL {
+            self.lost = true;
+            return Ok(AppendOutcome::Ambiguous);
+        }
         if self.ambiguous_next > 0 {
             self.ambiguous_next -= 1;
             return Ok(AppendOutcome::Ambiguous);
         }
         Ok(AppendOutcome::Committed(stored))
+    }
+
+    fn wait(&mut self, delay: Duration) {
+        self.waits.push(delay);
+    }
+}
+
+impl Journal {
+    /// Clears `lost_for_good`: the journal answers again.
+    pub fn recover(&mut self) {
+        self.lost_for_good = false;
+        self.lost = false;
     }
 }
 
@@ -508,6 +534,54 @@ impl Fixture {
                 ("to", text(to)),
                 ("reason", text(reason)),
                 ("lifecycle", text("normal")),
+            ]),
+        );
+    }
+
+    /// The runtime's record of a control-stream event addressed to `agent`: an event on the agent's
+    /// stream whose `causation_id` is `source`, as the runtime writes for every command it copies.
+    pub fn copied(&mut self, agent: &str, event_type: &str, source: &str) {
+        self.append(
+            &agent_stream(agent),
+            event_type,
+            Some(source),
+            object(&[
+                ("from", text("normal")),
+                ("to", text("paused")),
+                ("reason", text("owner_pause")),
+                ("lifecycle", text("paused")),
+            ]),
+        );
+    }
+
+    /// The executor's `AgentModeApplied` for `agent` on the account stream: `restriction` now holds
+    /// mode `to` (`normal` lifts it).
+    pub fn applied(&mut self, agent: &str, restriction: &str, to: &str) {
+        self.append(
+            ACCOUNT_STREAM,
+            "AgentModeApplied",
+            None,
+            object(&[
+                ("agent", text(agent)),
+                ("to", text(to)),
+                ("restriction", text(restriction)),
+                ("originated", Value::Bool(true)),
+            ]),
+        );
+    }
+
+    /// The executor's `InstrumentRestrictionChanged` for `agent` on the account stream.
+    pub fn instrument(&mut self, agent: &str, instrument: &str, restriction: &str, active: bool) {
+        self.append(
+            ACCOUNT_STREAM,
+            "InstrumentRestrictionChanged",
+            None,
+            object(&[
+                ("agent", text(agent)),
+                ("instrument", text(instrument)),
+                ("restriction", text(restriction)),
+                ("reason", text("no_sane_mark")),
+                ("active", Value::Bool(active)),
             ]),
         );
     }
