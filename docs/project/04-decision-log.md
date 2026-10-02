@@ -8,6 +8,11 @@
 Status values: **Accepted**, **Proposed** (recommended, awaiting confirmation), **Open**
 (not yet decided), **Superseded** (replaced by a later decision). Changing an accepted decision requires a new entry that supersedes it.
 
+**This table takes no new rows.** From [DEC-344](decisions/DEC-344.md) on, each decision is its own
+file under [decisions/](decisions/README.md), so that two open PRs no longer conflict here. DEC-01 to
+DEC-302 stay below and stay binding. A number is reserved by adding its file, not by a row in the
+Reserved identifiers table.
+
 ## Decisions
 
 | ID | Decision | Status | Rationale | Alternatives considered |
@@ -288,6 +293,10 @@ Status values: **Accepted**, **Proposed** (recommended, awaiting confirmation), 
 | OD-12 | Robinhood Agentic Trading: whether one platform may act for many customers, rate limits, and the MCP tool contract. **Resolved in part (2026-09-26, from Robinhood's support article):** access is self-serve, with no waitlist or developer registration; a customer with a primary individual investing account in good standing connects any MCP client to `https://agent.robinhood.com/mcp/trading` on a desktop, authenticates with their Robinhood login, and is prompted to open the agentic account (one of at most 10 individual accounts). The agent then reads **every** Robinhood account of the customer, including account numbers, positions, balances, transactions, and watchlists, and trades stocks in the agentic account and crypto through a matching Robinhood Crypto account (not in New York; no transfer, staking, or lending). Robinhood states the customer is responsible for the agent's trades. Open: rate limits, the tool contract, and platform-scale terms. Also open: whether the MCP tools accept a client order ID, whether retries with the same ID are idempotent, and whether an order can be queried by that ID; these decide whether journal-before-acting and crash reconciliation (E7-2, E7-3) are possible over MCP. Robinhood has no paper environment, so the go-live path for Robinhood users (E10-4 requires a paper run) needs a founder decision: the paper stage on the simulated broker with Robinhood's rules, on Alpaca paper, or both ([design questions](09-mandate-rewrite-questions.md) 8) | Before the Robinhood connector story (M8) | Robinhood support article "Agentic Trading overview"; compliance question 32 |
 
 ## Reserved identifiers
+
+**No new `DEC-` rows** ([DEC-344](decisions/DEC-344.md)): a decision number is reserved by adding
+`decisions/DEC-<n>.md`. The table stays the registry for `OD-`, ADR, epic and story identifiers,
+and the record of the `DEC-` reservations made before DEC-344.
 
 The single registry for identifiers minted in unmerged work
 ([coordination playbook](../../.cursor/skills/mandate-mode/playbooks/coordination.md) §3). Take the
