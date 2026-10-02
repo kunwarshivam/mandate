@@ -24,7 +24,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value};
-use mandate_domain::{AssetId, Environment};
+use mandate_domain::{AssetClass, AssetId, AutonomyDecision, Environment};
 use mandate_num::Usd;
 use mandate_time::Date;
 
@@ -310,14 +310,114 @@ impl JournaledFact {
 /// the version it is stored under; naming `admitted` when the record admits past a check the
 /// mandate fails; and naming `reason` when the record is refused at a check later than the first
 /// one the mandate fails, or at check 5, 6, or 10 when the mandate passes it.
+///
+/// Check 4 asks for a research envelope on a mandate whose model admits instruments as one
+/// expression, as `mandate-research` does: V-036 makes "no admitting model" and "no research
+/// envelope" the same condition for a validated mandate, so two disjuncts would differ only on
+/// documents validation rejects.
 pub fn check_thesis_record(
     payload: &Value,
     mandate_version: &Digest,
     documents: &dyn Fn(&Digest) -> Option<Value>,
 ) -> Result<(), SpecError> {
-    let _ = (payload, mandate_version, documents);
-    Err(SpecError::Unimplemented)
+    let stored = documents(mandate_version).ok_or(malformed("mandate_version"))?;
+    let mandate = Mandate::parse(&stored).map_err(|_| malformed("mandate_version"))?;
+    if mandate.version()?.digest() != *mandate_version {
+        return Err(malformed("mandate_version"));
+    }
+    let record = Record(payload);
+    let asset_class =
+        AssetClass::parse(record.text("asset_class")?).map_err(|_| malformed("asset_class"))?;
+    let revision = payload
+        .get("revision")
+        .and_then(Value::as_int)
+        .ok_or(malformed("revision"))?;
+    let admits_instruments = mandate
+        .behavior
+        .signal_models
+        .iter()
+        .any(|model| model.admits_instruments);
+    let fails = |check: u8| match check {
+        4 => mandate
+            .behavior
+            .research
+            .as_ref()
+            .filter(|_| admits_instruments)
+            .is_none(),
+        5 => mandate.universe.pinned,
+        6 => mandate.autonomy.admission == AutonomyDecision::Deny,
+        10 => !mandate.universe.asset_classes.contains(&asset_class),
+        16 => {
+            revision
+                > mandate
+                    .behavior
+                    .research
+                    .as_ref()
+                    .map_or(0, |research| u64::from(research.max_revisions_per_lineage))
+        }
+        _ => false,
+    };
+    let first = THESIS_MANDATE_CHECKS
+        .into_iter()
+        .find(|check| fails(*check));
+    match payload.get("admitted") {
+        Some(Value::Bool(true)) => match first {
+            Some(_) => Err(malformed("admitted")),
+            None => Ok(()),
+        },
+        Some(Value::Bool(false)) => {
+            let reason = record.text("reason")?;
+            let check = THESIS_REFUSALS
+                .iter()
+                .position(|known| *known == reason)
+                .and_then(|index| u8::try_from(index).ok())
+                .and_then(|index| index.checked_add(1))
+                .ok_or(malformed("reason"))?;
+            let later_than_first = first.is_some_and(|first| check > first);
+            let unfailed_by_the_mandate = MANDATE_ALONE_CHECKS.contains(&check) && !fails(check);
+            if later_than_first || unfailed_by_the_mandate {
+                Err(malformed("reason"))
+            } else {
+                Ok(())
+            }
+        }
+        _ => Err(malformed("admitted")),
+    }
 }
+
+/// Mandate spec §8.5's refusal reasons in check order: a reason's check number is its position, from
+/// 1 (journal spec §9.4).
+const THESIS_REFUSALS: [&str; 17] = [
+    "direction_not_allowed",
+    "horizon_mismatch",
+    "revision_without_predecessor",
+    "research_disabled",
+    "universe_pinned",
+    "admission_denied",
+    "cost_cap_reached",
+    "not_in_data_universe",
+    "operator_halt",
+    "not_allowed_asset_class",
+    "leveraged_etp_not_enabled",
+    "eligibility_floor",
+    "instrument_group_claimed",
+    "source_not_allowlisted",
+    "no_corroboration",
+    "lineage_retired",
+    "universe_full",
+];
+
+/// The §8.5 checks the stored mandate decides, in check order (DEC-413 item 5): a research agent
+/// that admits instruments (4), an unpinned universe (5), admission not `deny` (6), the instrument's
+/// asset class (10), and the revision cap (16). The policy overlay only tightens, so a check the
+/// mandate fails always fails.
+const THESIS_MANDATE_CHECKS: [u8; 5] = [4, 5, 6, 10, 16];
+
+/// The checks that read the mandate alone, so a refusal at one of them must also fail by the
+/// document. Checks 4 and 16 are not among them: the overlay can fail 4, and 16 also reads the folded
+/// `retired` flag. Check 6 stays only while the overlay raises `auto` to `ask` and never to `deny`
+/// (DEC-413 item 4, DEC-414 item 4).
+const MANDATE_ALONE_CHECKS: [u8; 3] = [5, 6, 10];
 
 /// `ConfigSnapshotRegistered`'s kind for a signal model (journal spec §9.2).
 const MODEL_KIND: &str = "model_version";
@@ -1683,7 +1783,6 @@ mod thesis_tests {
     /// mandate reference cases' shapes: pinned (MI-20, MC-N08), admission `deny` (MC-N15), and a
     /// revision past the cap (MC-N24).
     #[test]
-    #[ignore = "pending E17-2"]
     fn a_thesis_whose_verdict_its_mandate_allows_is_accepted() -> Result<(), String> {
         let open = research(&[])?;
         let pinned = research(&[("/universe/pinned", "true")])?;
@@ -1753,7 +1852,6 @@ mod thesis_tests {
     /// (check 5, MI-20), admission `deny` (6), an asset class outside `universe.asset_classes` (10),
     /// a revision past the cap (16), and no research agent at all (4).
     #[test]
-    #[ignore = "pending E17-2"]
     fn a_thesis_admitted_past_a_check_its_mandate_fails_is_refused() -> Result<(), String> {
         let open = research(&[])?;
         let pinned = research(&[("/universe/pinned", "true")])?;
@@ -1786,7 +1884,6 @@ mod thesis_tests {
     /// first failure decides (§8.5), and the mandate's checks come before eligibility, sources, the
     /// cap and a full universe.
     #[test]
-    #[ignore = "pending E17-2"]
     fn a_thesis_refused_after_its_mandate_fails_an_earlier_check_is_refused() -> Result<(), String>
     {
         let open = research(&[])?;
@@ -1850,7 +1947,6 @@ mod thesis_tests {
     /// the mandate alone (check 6 while the overlay raises `auto` only to `ask`), so the record
     /// names a failure its own mandate does not show.
     #[test]
-    #[ignore = "pending E17-2"]
     fn a_thesis_refused_at_a_mandate_check_its_mandate_passes_is_refused() -> Result<(), String> {
         let open = research(&[])?;
         let (store, v) = Store::of([&open])?;
@@ -1877,7 +1973,6 @@ mod thesis_tests {
     /// the thesis was judged: one admission is accepted under the research mandate and refused under
     /// a pinned one, both stored, so the check reads the named document and no other.
     #[test]
-    #[ignore = "pending E17-2"]
     fn a_thesis_is_judged_under_the_mandate_it_names() -> Result<(), String> {
         let open = research(&[])?;
         let pinned = research(&[("/universe/pinned", "true")])?;
@@ -1891,7 +1986,6 @@ mod thesis_tests {
     /// A mandate that is not stored, or is stored under another document's digest, is refused at
     /// `mandate_version`, never judged from whatever is stored.
     #[test]
-    #[ignore = "pending E17-2"]
     fn a_thesis_mandate_that_is_absent_or_an_impostor_is_refused() -> Result<(), String> {
         let open = research(&[])?;
         let pinned = research(&[("/universe/pinned", "true")])?;

@@ -12,13 +12,15 @@
 //! The account stream's `MandateVersionApplied` and `UniverseChanged` are journal spec v0.8 §9.3's,
 //! with rules 29 to 33, routed here beside §9.2's (DEC-403, DEC-404).
 //!
-//! **The agent stream's `ThesisProposed` and `ThesisRevised` are routed here, to a stub** (journal
-//! spec v0.9 §9.4, DEC-413, DEC-414). The registration's tests PR refuses both as `unimplemented`,
-//! as they were refused as `unknown_event_type` before; the implementation PR registers their
-//! shared schema and rules 34 to 38.
+//! The agent stream's `ThesisProposed` and `ThesisRevised` are journal spec §9.4's, one shared
+//! schema with rules 34 to 38, routed here beside §9.2's and §9.3's (DEC-413, DEC-414). The checks
+//! that read the mandate the record names (§8.5 checks 4, 5, 6, 10 and 16's cap) are not schema
+//! rules: `append` holds no document store, so every reader of a thesis record runs
+//! `mandate_spec::context::check_thesis_record` before acting on it (DEC-414 item 3).
 
 use mandate_canon::Value;
 use mandate_num::Usd;
+use mandate_time::UtcNanos;
 
 use crate::schema::Ty;
 use crate::{Invalid, InvalidReason, StreamId, StreamType};
@@ -68,9 +70,6 @@ pub(crate) fn payload(
     payload: &Value,
     config_refs: Option<&Value>,
 ) -> Result<Value, Invalid> {
-    if THESIS.contains(&event_type) {
-        return thesis_payload();
-    }
     let schema = schema(event_type, schema_version)
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
     let payload = crate::schema::normalize(schema, payload, "payload")?;
@@ -197,6 +196,7 @@ pub(crate) fn payload(
                 "payload.thesis_id",
             )?;
         }
+        "ThesisProposed" | "ThesisRevised" => thesis_rules(event_type, p, config_refs)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
             for member in ["cash_band", "cash_in_band"] {
@@ -311,10 +311,119 @@ fn ascending(items: &[&str], path: &str) -> Result<(), Invalid> {
     )
 }
 
-/// The stub of the thesis registration's tests PR (DEC-77, DEC-414): journal spec §9.4's schema and
-/// rules 34 to 38 land with its implementation.
-fn thesis_payload() -> Result<Value, Invalid> {
-    Err(Invalid::new(InvalidReason::Unimplemented, "payload"))
+/// Mandate spec §8.5's refusal reasons in check order: a reason's check number is its position, from
+/// 1 (journal spec §9.4).
+const THESIS_REFUSALS: [&str; 17] = [
+    "direction_not_allowed",
+    "horizon_mismatch",
+    "revision_without_predecessor",
+    "research_disabled",
+    "universe_pinned",
+    "admission_denied",
+    "cost_cap_reached",
+    "not_in_data_universe",
+    "operator_halt",
+    "not_allowed_asset_class",
+    "leveraged_etp_not_enabled",
+    "eligibility_floor",
+    "instrument_group_claimed",
+    "source_not_allowlisted",
+    "no_corroboration",
+    "lineage_retired",
+    "universe_full",
+];
+
+/// Check 15, corroboration (mandate spec §8.5), which rule 37 recomputes.
+const CORROBORATION_CHECK: usize = 15;
+
+/// Journal spec §9.4's rules 34 to 38 on a well-typed `ThesisProposed` or `ThesisRevised`, the first
+/// that fails reported, in number order (DEC-413, DEC-414). Rules 35 to 37 all report at
+/// `payload.reason`. Rule 36 recomputes checks 1 to 3 from the record's own members, with check 2
+/// compared to the nanosecond; rule 38 reads the envelope's `config_refs.model_version`, as rule 22
+/// reads `AgentDeployed`'s mandate version.
+fn thesis_rules(
+    event_type: &str,
+    p: Payload<'_>,
+    config_refs: Option<&Value>,
+) -> Result<(), Invalid> {
+    let first_thesis = event_type == "ThesisProposed";
+    let revised =
+        p.0.get("revision")
+            .and_then(Value::as_int)
+            .is_some_and(|n| n > 0);
+    ensure(
+        first_thesis != revised,
+        InvalidReason::Schema,
+        "payload.revision",
+    )?;
+    ensure(
+        !first_thesis || p.is_null("autopsy_ref"),
+        InvalidReason::Schema,
+        "payload.autopsy_ref",
+    )?;
+    let admitted = p.0.get("admitted") == Some(&Value::Bool(true));
+    ensure(
+        p.is_null("reason") == admitted,
+        InvalidReason::Schema,
+        "payload.reason",
+    )?;
+    let reason = p.text("reason");
+    let failing = [
+        p.text("direction") != "long",
+        !horizon_agrees(p),
+        !p.is_null("predecessor_thesis_id") != revised,
+    ];
+    let first_failing = failing.iter().position(|fails| *fails);
+    let decided = match first_failing.and_then(|check| THESIS_REFUSALS.get(check)) {
+        Some(first) => reason == *first,
+        None => !THESIS_REFUSALS
+            .iter()
+            .take(failing.len())
+            .any(|check| *check == reason),
+    };
+    ensure(decided, InvalidReason::Schema, "payload.reason")?;
+    let corroborated = if p.is_null("corroboration") {
+        THESIS_REFUSALS
+            .iter()
+            .position(|known| *known == reason)
+            .is_some_and(|index| index < CORROBORATION_CHECK)
+    } else {
+        reason != "no_corroboration"
+    };
+    ensure(corroborated, InvalidReason::Schema, "payload.reason")?;
+    let model = config_refs
+        .and_then(|refs| refs.get("model_version"))
+        .and_then(Value::as_str);
+    ensure(
+        model.is_none_or(|model| model == p.text("content_hash")),
+        InvalidReason::Schema,
+        "payload.content_hash",
+    )
+}
+
+const NANOS_PER_SECOND: i128 = 1_000_000_000;
+
+/// Check 2 (mandate spec §8.2, §8.5): `expires_at` is exactly `as_of` plus `horizon_s` seconds, to
+/// the nanosecond. An instant past the type's range never agrees, so it fails check 2 rather than
+/// being skipped.
+fn horizon_agrees(p: Payload<'_>) -> bool {
+    let nanos = |member: &str| {
+        UtcNanos::parse(p.text(member)).ok().and_then(|t| {
+            i128::from(t.secs())
+                .checked_mul(NANOS_PER_SECOND)
+                .and_then(|whole| whole.checked_add(i128::from(t.nanos())))
+        })
+    };
+    let horizon = p.0.get("horizon_s").and_then(Value::as_int).map(i128::from);
+    match (nanos("as_of"), nanos("expires_at"), horizon) {
+        (Some(as_of), Some(expires_at), Some(horizon)) => {
+            horizon
+                .checked_mul(NANOS_PER_SECOND)
+                .and_then(|span| as_of.checked_add(span))
+                == Some(expires_at)
+        }
+        _ => false,
+    }
 }
 
 /// Rule 24 on a compared snapshot: `cash_band` ≥ 0, and `cash_in_band` is `true` exactly when
@@ -364,6 +473,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         SNAPSHOT => &ACCOUNT_SNAPSHOT_RECORDED,
         "MandateVersionApplied" => &MANDATE_VERSION_APPLIED,
         "UniverseChanged" => &UNIVERSE_CHANGED,
+        "ThesisProposed" | "ThesisRevised" => &THESIS_RECORD,
         _ => return None,
     })
 }
@@ -421,6 +531,39 @@ static UNIVERSE_CHANGED: Ty = Ty::Record(&[
     ("lineage_id", Ty::Nullable(&Ty::Ident)),
     ("universe_size_after", Ty::Int),
     ("risk_clock", Ty::RiskClock),
+]);
+
+/// Journal spec §9.4's one schema for both thesis records, in the spec's member order (DEC-413).
+/// `instrument_id` is an asset ID (v0.11, DEC-413 item 7).
+static THESIS_RECORD: Ty = Ty::Record(&[
+    ("model_id", Ty::Str),
+    ("model_version", Ty::Str),
+    ("content_hash", Ty::DigestRef),
+    ("thesis_id", Ty::Ident),
+    ("lineage_id", Ty::Ident),
+    ("revision", Ty::Int),
+    ("predecessor_thesis_id", Ty::Nullable(&Ty::Ident)),
+    ("autopsy_ref", Ty::Nullable(&Ty::DigestRef)),
+    ("instrument_id", Ty::AssetId),
+    ("asset_class", Ty::OneOf(&["us_equity", "crypto"])),
+    ("direction", Ty::Str),
+    ("as_of", Ty::Timestamp),
+    ("expires_at", Ty::Timestamp),
+    ("horizon_s", Ty::Int),
+    ("conviction", Ty::Decimal),
+    ("confidence", Ty::Decimal),
+    ("evidence_ref", Ty::Nullable(&Ty::DigestRef)),
+    ("evidence_sources", Ty::List(&Ty::Str)),
+    (
+        "corroboration",
+        Ty::Nullable(&Ty::OneOf(&["independent_source", "market_data"])),
+    ),
+    ("invalidation", Ty::Str),
+    ("allowlist_version", Ty::Int),
+    ("prompt_ref", Ty::DigestRef),
+    ("response_ref", Ty::DigestRef),
+    ("admitted", Ty::Bool),
+    ("reason", Ty::Nullable(&Ty::OneOf(&THESIS_REFUSALS))),
 ]);
 
 static ACCOUNT_SNAPSHOT_RECORDED: Ty = Ty::Record(&[
@@ -1493,7 +1636,6 @@ mod tests {
     /// and every invalid one is refused with the first reason and path it expects (DEC-413,
     /// DEC-414). The order drafts pin which of two broken rules is reported first.
     #[test]
-    #[ignore = "pending E17-2"]
     fn every_thesis_draft_is_judged_as_its_vectors_say() -> Result<(), String> {
         let section = named_section("research")?;
         let mut failures = Vec::new();
@@ -1546,7 +1688,6 @@ mod tests {
     /// (DEC-413, DEC-414). The vectors pin each member's type but not its nullability, so this is
     /// what keeps a member loosened to nullable from passing.
     #[test]
-    #[ignore = "pending E17-2"]
     fn a_required_thesis_member_is_never_null() -> Result<(), String> {
         const THESIS_REQUIRED: [&str; 22] = [
             "model_id",
@@ -1602,7 +1743,6 @@ mod tests {
     /// Either thesis record at any `schema_version` but 1 is refused as `unknown_schema`: each
     /// reaches its schema through `schema`'s version gate, never around it (DEC-414).
     #[test]
-    #[ignore = "pending E17-2"]
     fn a_thesis_record_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
         let section = named_section("research")?;
         let two = Int::new(2).ok_or("an integer")?;

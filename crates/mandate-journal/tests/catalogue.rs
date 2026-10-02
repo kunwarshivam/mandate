@@ -580,7 +580,6 @@ fn thesis_records_are_routed_to_section_9_4() {
 /// §9.4 closes the shared schema, so a member it does not list is refused as `schema` at that
 /// member.
 #[test]
-#[ignore = "pending E17-2"]
 fn thesis_records_refuse_an_unlisted_member() {
     for (event_type, kind) in THESIS_ON_AGENT {
         let refused = Draft::parse(&draft(event_type, kind, &[MAN, MOD])).map(|_| ());
