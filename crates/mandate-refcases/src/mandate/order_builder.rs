@@ -340,6 +340,8 @@ fn trim_guards(
 /// MC-B17's members for a trim: the cap and market value the builder reads, then the risk exit
 /// itself, a sell at the bid by the risk engine, AUTO as every risk-reducing purpose is (§6.2 step
 /// 3). The trim reaches no dry run and no builder figure, so the case states none (DEC-400 item 3).
+/// §6.2 step 3 reads only the purpose; the other facts are the case's, and a trim sells a held
+/// position, so it is never a first trade.
 fn compare_trim(
     document: &Mandate,
     stated: &Inputs,
@@ -380,7 +382,7 @@ fn compare_trim(
             instrument: stated.instrument.clone(),
             asset_class: stated.asset_class,
             session: market_session(clock.session),
-            first_trade_in_instrument: !stated.risk.has_prior_fill,
+            first_trade_in_instrument: false,
             new_instrument: stated.risk.new_instrument,
             thesis_confidence: stated.risk.thesis_confidence,
             drawdown: stated.risk.drawdown,
@@ -1575,10 +1577,11 @@ mod tests {
             .collect())
     }
 
-    /// The gate and the case's own guards must agree: MC-B17 with a minimum order of 1000 dollars
-    /// has its 299.7-dollar trim withheld `below_minimum_order` by `ref.py`'s guards, while the gate,
-    /// whose minimum is the instrument's one-share `min_order_size`, still trims, so the case fails
-    /// naming both answers; and MC-B30 confirmed for 60 seconds is due and unguarded, so the gate's
+    /// The gate and the case's own guards must agree. MC-B17 with a minimum order of 1000 dollars,
+    /// or of 299.71, a cent above its trim, has its 299.7-dollar trim withheld
+    /// `below_minimum_order` by `ref.py`'s guards, while the gate, whose minimum is the
+    /// instrument's one-share `min_order_size`, still trims, so the case fails naming both answers;
+    /// at 299.7 exactly it still passes; and MC-B30 confirmed for 60 seconds is due and unguarded, so the gate's
     /// trim is the case's action, and the builder's figures the case states are refused.
     #[test]
     fn a_trim_the_gate_and_the_guards_disagree_on_fails_naming_both() -> Result<(), String> {
@@ -1590,6 +1593,19 @@ mod tests {
             run(minimum, "MC-B17"),
             "below_minimum_order",
             "MC-B17 at a 1000-dollar minimum",
+        )?;
+        let at_the_trim = doctored(&fixture, "MC-B17", "/input/min_order_usd", |v| {
+            *v = json!("299.7");
+        })?;
+        run(at_the_trim, "MC-B17")
+            .map_err(|e| format!("MC-B17 at a minimum of its own 299.7: {e}"))?;
+        let a_cent_above = doctored(&fixture, "MC-B17", "/input/min_order_usd", |v| {
+            *v = json!("299.71");
+        })?;
+        fails_naming(
+            run(a_cent_above, "MC-B17"),
+            "below_minimum_order",
+            "MC-B17 at a minimum a cent above its trim",
         )?;
         let confirmed = doctored(&fixture, "MC-B30", "/input/scale_active_s", |v| {
             *v = json!(60);
