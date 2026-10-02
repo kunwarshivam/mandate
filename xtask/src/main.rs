@@ -1968,11 +1968,11 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
-/// The ten `protection` rows are #485's (DEC-408): an exit ladder between rungs over-sells beside
-/// a new exit, which is a wrong answer from code that runs, with no stub to stop at. Each fails on
-/// the rule-13 oracle's count; the fix (DEC-409, DEC-410) deletes the rows with the `#[ignore]`
-/// lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 14] = [
+/// The thirteen `protection` rows are #485's (DEC-408): an exit ladder between rungs over-sells
+/// beside a new exit, which is a wrong answer from code that runs, with no stub to stop at. Each
+/// fails on the rule-13 oracle's count or its own assertion; the fix (DEC-409, DEC-410) deletes
+/// the rows with the `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 17] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1999,7 +1999,7 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 14] = [
     ),
     (
         "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_risk_exit_held_overnight_beside_a_parked_ladder_goes_whole_and_trims_it",
+        "sequence_tests::a_risk_exit_held_overnight_beside_a_parked_ladder_goes_whole_and_the_ladder_sends_what_is_left",
     ),
     (
         "crates/mandate-executor/src/protection.rs",
@@ -2028,6 +2028,18 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 14] = [
     (
         "crates/mandate-executor/src/protection.rs",
         "sequence_tests::rule_13_holds_over_random_scripts_from_between_rungs",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_discretionary_exit_beside_a_parked_remainder_is_sized_to_what_is_left",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_discretionary_exit_with_nothing_left_is_held_overnight_then_refused_at_the_open",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_rung_sent_short_beside_a_sell_the_broker_then_refuses_is_journaled_short",
     ),
 ];
 

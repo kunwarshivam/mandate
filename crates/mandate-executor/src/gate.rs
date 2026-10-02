@@ -555,4 +555,24 @@ mod remainder_tests {
         );
         Ok(())
     }
+
+    /// DEC-410 item 3, the remainder gone: beside the same stopped or paused agent's parked
+    /// ladder, which nothing will send, a discretionary exit for the whole position counts no
+    /// plan and goes whole. Today's gate counts no remainder, so this holds now and must keep
+    /// holding with the fix.
+    #[test]
+    fn a_stopped_agents_parked_ladder_leaves_a_discretionary_exit_whole()
+    -> Result<(), ExecutorError> {
+        for mode in [Mode::Stopped, Mode::Paused] {
+            let mut state = parked(None)?;
+            state.modes.insert(AgentId("agent-b".to_owned()), mode);
+            let whole = ask(&state, Side::Sell, "10", Purpose::DiscretionaryExit)?;
+            assert_eq!(
+                (whole.verdict_name(), whole.reason_code()),
+                ("allow", ""),
+                "{mode:?}"
+            );
+        }
+        Ok(())
+    }
 }
