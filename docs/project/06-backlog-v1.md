@@ -58,6 +58,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   than waiting for a reviewer (the #316 reviews).
   *Accepted when:* both run in `ci lint`, pinned in `.github/workflows/ci.yml` and `install.sh`,
   and a planted `SC2086` or an unknown workflow key fails the job.
+  *Follow-up (#450 review, minor 1; DEC-381):* the lint job's fixture test (the one #434 added
+  for shellcheck and actionlint) also fails when `workspace_lint` discards `proptest_seeds()`'s
+  result, or when that check's git call's error is swallowed. Today `let _ = proptest_seeds();`
+  passes every xtask test, as `let _ = markers();` and `let _ = feature_map();` do.
 - **E1-5 (Should)** As an engineer, I want the merge script's remaining gaps from #316's
   round-3 review closed, so that the only path from approval to `main` (DEC-175) is tested as
   GitHub actually answers it. The items:
@@ -896,7 +900,10 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   *Follow-up (#435 review, minor 3):* `score::basket_return` over an empty `members` slice refuses
   with the nameless `Num(DivisionByZero)`, pinned live by `an_empty_basket_is_an_error`: loud, so no
   figure escapes, but a code that tells a caller nothing. A tests PR names it the way DEC-335 named
-  the empty scoreable set (an add-only `ResearchError` arm and code).
+  the empty scoreable set (an add-only `ResearchError` arm and code). Tests PR open on
+  `agent/j-e17-8-empty-basket-tests` (DEC-380): `ResearchError::EmptyBasket`, code
+  `empty_basket`. The live pin `an_empty_basket_is_an_error` held only `Num(_)`, so it becomes a
+  stricter pending test.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
