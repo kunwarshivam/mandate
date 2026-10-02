@@ -2,7 +2,8 @@
 
 Agent task brief ([ADR-0001](../../adr/0001-engineering-setup.md) ES-15). One task implements one
 story. **This is a spike**, timeboxed to two to three weeks of paper trading; its exit is a
-decision-log entry that records what the report showed and what E17 does with it.
+decision (a file under `docs/project/decisions/`, DEC-344) that records what the report showed
+and what E17 does with it.
 
 ## Story
 
@@ -103,4 +104,4 @@ Stop and write a DEC proposal instead of continuing if any of these happen:
 - [ ] `cargo xtask check` is green (paste the summary in the PR).
 - [ ] The PR description is complete (see the PR template).
 - [ ] Exit: after two to three weeks of paper trading, `python -m research_spike score` and a
-      decision-log entry with the hit rate, expectancy versus SPY, and cost per thesis.
+      decision file with the hit rate, expectancy versus SPY, and cost per thesis.
