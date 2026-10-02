@@ -335,7 +335,7 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
 /// orders only); its stop-limit is slice 5's. An equity entry with a stop and no take-profit has no
 /// bracket to go as, and answers slice 5's stub rather than going unprotected: an opening may
 /// always be refused (`AGENTS.md` rule 2; DEC-346 item 2).
-fn bracket_of(
+pub(crate) fn bracket_of(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
     purpose: Purpose,
@@ -546,20 +546,104 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
 
 #[cfg(test)]
 mod bracket_call_tests {
-    use mandate_accounting::{InstrumentId, Side};
+    use mandate_accounting::{AssetClass, InstrumentId, Side};
     use mandate_canon::Value;
-    use mandate_num::{Price, Qty};
+    use mandate_num::{Price, Qty, ShareIncrement};
 
+    use super::bracket_of;
+    use crate::batch::Batch;
     use crate::error::ExecutorError;
     use crate::ids::IntentId;
-    use crate::ports::Ports;
+    use crate::ports::{InstrumentSnapshot, Ports};
     use crate::reconcile::tests::{
-        Everything, Ids, executor_config, fees, protected_by_an_oco, submitted,
+        Everything, Executor, Ids, executor_config, fees, protected_by_an_oco, submitted,
     };
     use crate::types::{
-        AgentId, BracketLegs, BrokerRequest, Effect, EventId, Input, IntentBody, IntentHandoff,
-        ProtectionPrices, Purpose, SubmitOrder, TimeInForce,
+        AgentId, BracketLegs, BrokerRequest, Effect, EventId, ExitTier, Input, IntentBody,
+        IntentHandoff, ProtectionPrices, Purpose, SubmitOrder, TimeInForce,
     };
+
+    /// §5.4: only a risk-adding equity order carrying both prices is a bracket. An exit or a
+    /// protective order never is, nor is a crypto entry (simple orders only); an equity entry with
+    /// a stop and no take-profit answers the stub rather than going bare (DEC-346 items 1, 2).
+    #[test]
+    fn only_a_risk_adding_equity_entry_with_both_prices_is_a_bracket() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let both = ProtectionPrices {
+            stop: Price::parse("140")?,
+            take_profit: Some(Price::parse("170")?),
+        };
+        let stop_only = ProtectionPrices {
+            take_profit: None,
+            ..both
+        };
+        let legs = BracketLegs {
+            take_profit: Price::parse("170")?,
+            stop: Price::parse("140")?,
+        };
+        let aapl = InstrumentId::new("AAPL")?;
+        let snapshots: [(&dyn InstrumentSnapshot, bool); 2] = [(&Everything, false), (&Coin, true)];
+        for (instruments, crypto) in snapshots {
+            let ports = Ports {
+                ids: &Ids,
+                mandates: &Everything,
+                instruments,
+                config: &config,
+                fees: &fees,
+            };
+            let executor = Executor::opened(&ports)?;
+            let batch = Batch::new(&executor.state, &ports)?;
+            for purpose in PURPOSES {
+                let case = format!("{purpose:?} crypto {crypto}");
+                let bracket = purpose.adds_risk() && !crypto;
+                assert_eq!(
+                    bracket_of(&batch, &aapl, purpose, Some(both)),
+                    Ok(bracket.then(|| legs.clone())),
+                    "{case}"
+                );
+                assert_eq!(bracket_of(&batch, &aapl, purpose, None), Ok(None), "{case}");
+                let expected = if bracket {
+                    Err(ExecutorError::Unimplemented { story: "E7-4" })
+                } else {
+                    Ok(None)
+                };
+                assert_eq!(
+                    bracket_of(&batch, &aapl, purpose, Some(stop_only)),
+                    expected,
+                    "{case}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    const PURPOSES: [Purpose; 7] = [
+        Purpose::Open,
+        Purpose::Increase,
+        Purpose::RiskExit,
+        Purpose::OwnerExit,
+        Purpose::DiscretionaryExit,
+        Purpose::Protective,
+        Purpose::Flatten,
+    ];
+
+    /// A snapshot that classifies every instrument as crypto.
+    struct Coin;
+
+    impl InstrumentSnapshot for Coin {
+        fn asset_class(&self, _instrument: &InstrumentId) -> Option<AssetClass> {
+            Some(AssetClass::Crypto)
+        }
+
+        fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Some(ShareIncrement::Fractional)
+        }
+
+        fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+            None
+        }
+    }
 
     fn add(intent: &str, protection: Option<ProtectionPrices>) -> Result<Input, ExecutorError> {
         Ok(Input::Intent(IntentHandoff {

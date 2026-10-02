@@ -8276,3 +8276,212 @@ mod ladder_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod bracket_tests {
+    use mandate_accounting::Side;
+    use mandate_canon::Value;
+    use mandate_num::{Price, Qty};
+
+    use crate::error::ExecutorError;
+    use crate::ids::IntentId;
+    use crate::payload::{clock, object};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{
+        Everything, Executor, Ids, aapl, drafted, executor_config, fees, missing, reporting,
+        submitted,
+    };
+    use crate::types::{
+        AgentId, BrokerOrder, BrokerRequest, BrokerUpdate, Effect, EventId, Input, IntentBody,
+        IntentHandoff, ProtectionPrices, Purpose, RiskClock,
+    };
+
+    const ENTRY: &str = "01JABCDEFGHJKMNPQRSTVWXYZ1";
+
+    fn text(raw: &str) -> Value {
+        Value::Str(raw.to_owned())
+    }
+
+    fn entry_id() -> String {
+        format!("md-{ENTRY}")
+    }
+
+    /// The broker's report of the bracket entry: `status`, with `filled` of its 10 filled.
+    fn report(status: &str, filled: &str) -> Result<Input, ExecutorError> {
+        Ok(Input::BrokerUpdate(BrokerUpdate::Order(BrokerOrder {
+            broker_order_id: "b-1".to_owned(),
+            client_order_id: Some(entry_id()),
+            instrument: aapl()?,
+            side: Side::Buy,
+            qty: Qty::parse("10")?,
+            filled_qty: Qty::parse(filled)?,
+            limit_price: Some(Price::parse("150")?),
+            stop_price: None,
+            status: status.to_owned(),
+            reject_code: None,
+            replaced_by_broker_order_id: None,
+            legs: Vec::new(),
+            created_on: None,
+        })))
+    }
+
+    fn cancels(effects: &[Effect]) -> usize {
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, Effect::Broker(BrokerRequest::Cancel { .. })))
+            .count()
+    }
+
+    /// A ready executor that has sent one bracket entry of 10 `AAPL` at 150, stop 140, take-profit
+    /// 170, at risk-clock second 10.
+    fn bracketed(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = reporting(ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(10)), ports)?;
+        let sent = executor.run(
+            Input::Intent(IntentHandoff {
+                intent_id: IntentId(EventId(ENTRY.to_owned())),
+                agent: AgentId("agent-a".to_owned()),
+                body: IntentBody::Order {
+                    instrument: aapl()?,
+                    side: Side::Buy,
+                    qty: Qty::parse("10")?,
+                    limit: Price::parse("150")?,
+                    purpose: Purpose::Open,
+                    protection: Some(ProtectionPrices {
+                        stop: Price::parse("140")?,
+                        take_profit: Some(Price::parse("170")?),
+                    }),
+                },
+            }),
+            ports,
+        )?;
+        let bracket = sent.iter().find_map(|effect| match effect {
+            Effect::Broker(BrokerRequest::Submit(order)) => order.bracket.clone(),
+            _ => None,
+        });
+        if bracket.is_none() {
+            return Err(missing("the entry sent as a bracket"));
+        }
+        Ok(executor)
+    }
+
+    /// §5.4: the first partial fill opens the interval and cancels nothing; the remainder is
+    /// cancelled at `bracket_partial_fill_timeout_s` from it, not a second before, and once.
+    #[test]
+    fn a_partly_filled_entry_is_cancelled_at_the_timeout_and_not_before()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = bracketed(&ports)?;
+        let partial = executor.run(report("partially_filled", "4")?, &ports)?;
+        assert!(
+            drafted(&partial).contains(&"ProtectionChanged"),
+            "{partial:?}"
+        );
+        assert_eq!(
+            cancels(&partial),
+            0,
+            "the first partial fill cancels nothing"
+        );
+        let early = executor.run(Input::Tick(RiskClock::from_secs(69)), &ports)?;
+        assert_eq!(cancels(&early), 0, "59 s in, the legs are still held");
+        let due = executor.run(Input::Tick(RiskClock::from_secs(70)), &ports)?;
+        assert_eq!(cancels(&due), 1, "60 s in, the remainder is cancelled");
+        let again = executor.run(Input::Tick(RiskClock::from_secs(71)), &ports)?;
+        assert_eq!(cancels(&again), 0, "once");
+        Ok(())
+    }
+
+    /// Rule 12: the OCO for a partly filled entry never covers more than the position leaves once
+    /// every exit still selling has sold; with nothing left it places nothing, and the interval
+    /// still ends.
+    #[test]
+    fn nothing_left_to_cover_places_no_oco_and_ends_the_interval() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = bracketed(&ports)?;
+        let at = || clock(RiskClock::from_secs(10));
+        executor.commit_one(
+            "FillApplied",
+            object(vec![
+                ("fill_id", text("f-1")),
+                ("client_order_id", text(&entry_id())),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty_gross", text("4")),
+                ("price", text("150")),
+                ("risk_clock", at()?),
+            ])?,
+        )?;
+        executor.commit_one(
+            "OrderSubmitted",
+            object(vec![
+                ("client_order_id", text("md-sell-b")),
+                ("agent", text("agent-b")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("4")),
+                ("limit", text("150")),
+                ("purpose", text("risk_exit")),
+                ("risk_clock", at()?),
+            ])?,
+        )?;
+        let ended = executor.run(report("canceled", "4")?, &ports)?;
+        assert_eq!(submitted(&ended), 0, "nothing to cover: {ended:?}");
+        let actions: Vec<&str> = ended
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "ProtectionChanged" => {
+                    draft.payload.get("action").and_then(Value::as_str)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(actions.contains(&"unprotected_end"), "{actions:?}");
+        assert!(!actions.contains(&"placed"), "{actions:?}");
+        Ok(())
+    }
+
+    /// A bracket's `OrderSubmitted` that names its class without both prices is refused on the
+    /// fold, never read back as a plain order that a resubmission would send unprotected.
+    #[test]
+    fn a_bracket_submission_without_its_prices_is_refused() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = reporting(&ports)?;
+        let refused = executor.commit_one(
+            "OrderSubmitted",
+            object(vec![
+                ("client_order_id", text("md-buy-x")),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("10")),
+                ("limit", text("150")),
+                ("order_class", text("bracket")),
+                ("stop", text("140")),
+                ("risk_clock", clock(RiskClock::from_secs(0))?),
+            ])?,
+        );
+        assert!(refused.is_err(), "{refused:?}");
+        Ok(())
+    }
+}
