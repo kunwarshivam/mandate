@@ -6759,16 +6759,23 @@ mod sequence_tests {
         fills: u32,
         paused: bool,
         quiet_since: i64,
-        /// Whether the script starts inside the calendar's range: before it (the 1970 base, the
-        /// eve of 2018) every instant reads as the regular session (DEC-260 (13)).
-        calendar: bool,
     }
 
+    /// 2018-01-01 00:00 ET, the calendar's first date: before it (the 1970 base, the eve of 2018)
+    /// every instant reads as the regular session (DEC-260 (13)); from it on, the calendar names
+    /// the session, even in a script that started before it (DEC-392).
+    const CALENDAR_FROM: i64 = 1_514_782_800;
+
     /// §4.3 written out for the oracle, never read from the calendar file: the New York midnight
-    /// of each trading day its scripts can reach (2026-09-01 to 10-16 without Labor Day, and the
-    /// calendar's last week, 2028-12-26 to 29), from which each day's overnight (20:00 the day
-    /// before to 04:00), pre-market, regular (09:30 to 16:00) and after-hours (to 20:00) follow.
-    const TRADING_DAYS: [i64; 37] = [
+    /// of each trading day its scripts can reach (the calendar's first week, 2018-01-02 to 05
+    /// after the New Year holiday, 2026-09-01 to 10-16 without Labor Day, and the calendar's last
+    /// week, 2028-12-26 to 29), from which each day's overnight (20:00 the day before to 04:00),
+    /// pre-market, regular (09:30 to 16:00) and after-hours (to 20:00) follow.
+    const TRADING_DAYS: [i64; 41] = [
+        1_514_869_200,
+        1_514_955_600,
+        1_515_042_000,
+        1_515_128_400,
         1_788_235_200,
         1_788_321_600,
         1_788_408_000,
@@ -6830,19 +6837,24 @@ mod sequence_tests {
             })
         }
 
+        /// Whether the calendar covers `at`.
+        fn covered(at: i64) -> bool {
+            at >= CALENDAR_FROM
+        }
+
         /// Whether `then` and now are one session (§8.2's in-session trade).
         fn same_session(&self, then: i64) -> bool {
-            !self.calendar || Self::segment(then) == Self::segment(self.now)
+            !Self::covered(self.now) || Self::segment(then) == Self::segment(self.now)
         }
 
         /// Whether no v1 session is open now (DEC-30: the overnight session is none).
         fn closed(&self) -> bool {
-            self.calendar && !matches!(Self::segment(self.now), Some((_, 1..=3)))
+            Self::covered(self.now) && !matches!(Self::segment(self.now), Some((_, 1..=3)))
         }
 
         /// Whether now is the regular session, where nothing goes extended-hours.
         fn regular(&self) -> bool {
-            !self.calendar || matches!(Self::segment(self.now), Some((_, 2)))
+            !Self::covered(self.now) || matches!(Self::segment(self.now), Some((_, 2)))
         }
 
         /// Rule 13's session duties on every order the executor sends or journals: no exit goes
@@ -7143,7 +7155,6 @@ mod sequence_tests {
             fills: 0,
             paused: false,
             quiet_since: 0,
-            calendar: start >= 1_514_782_800,
         };
         let agent = AgentId("agent-a".to_owned());
         desk.deliver(

@@ -1465,6 +1465,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   (`protection::sequence_tests::rule_13_script`) is dormant: no script holds an exit unexcused long
   enough to reach it. The follow-up either makes the branch bite, with a script that holds an exit
   unexcused and a plant it catches, or deletes it along with `quiet_since`.
+- ~~**E7-4 (stream K), CI's `fast` red at random on `main`** (reported on
+  [#445](https://github.com/kunwarshivam/mandate/pull/445), 2026-10-02):
+  `rule_13_holds_over_random_scripts` refused a risk exit held `session_closed` at 2018-01-01
+  00:00 ET (the New Year holiday's overnight) in a script from the eve of 2018.~~ **Fixed on
+  `agent/k-rule13-holiday-risk-exit` ([DEC-392](decisions/DEC-392.md)).** The executor's hold is
+  DEC-260 (13)'s. The oracle fixed the calendar's coverage at the script's start, so it now reads
+  coverage at each instant, and it knows the trading days of 2018-01-02 to 05. CI's minimal input
+  is the named test `rule_13_holds_for_a_risk_exit_on_the_new_year_holiday_overnight`.
 - **E7-4 (stream K), found by slice 4a's rule-13 oracle (`protection::sequence_tests::rule_13_holds_over_random_scripts`):**
   (1) a passive exit waits on its OCO's cancel confirmation with no bound and no alert: a broker
   that never confirms holds the exit for good, with the protection still resting (rule 13's broker
