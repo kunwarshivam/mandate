@@ -536,6 +536,7 @@ mod tests {
                     .transpose()?,
             },
             review_by: None,
+            delegations: Vec::new(),
         })
     }
 
