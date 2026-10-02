@@ -265,11 +265,10 @@ fn trim_first(
         exact(expect, "current_mv")?,
     )?;
     let guards = trim_guards(document, stated, &clock, expect, active_s, holding)?;
-    let judged = match (trims.as_slice(), guards) {
-        ([trim], Some(guards)) if guards.is_empty() => {
-            compare_trim(document, stated, &clock, &proposal, trim, expect)
-        }
-        ([], guards) if guards.as_ref().is_none_or(|guards| !guards.is_empty()) => {
+    let unguarded = guards.as_ref().is_some_and(Vec::is_empty);
+    let judged = match (trims.as_slice(), unguarded) {
+        ([trim], true) => compare_trim(document, stated, &clock, &proposal, trim, expect),
+        ([], false) => {
             let stated_guards = match expect.get("trim_withheld") {
                 None => None,
                 Some(_) => Some(
@@ -285,7 +284,7 @@ fn trim_first(
             })?;
             judge(fixture, document, stated, config, &proposal, expect)
         }
-        (trims, guards) => Err(format!(
+        (trims, _) => Err(format!(
             "`trim_proposals` answered {trims:?} where §5.5's guards give {guards:?}"
         )),
     };
@@ -1625,16 +1624,28 @@ mod tests {
             "MC-B30 confirmed at 60 s",
         )?;
         let holding_alone = doctored(&fixture, "MC-B30", "", |case| {
-            case["input"]["scale_active_s"] = json!(60);
-            case["input"]["holding"] = json!(true);
-            case["expect"]["trim_withheld"] = json!(["holding"]);
+            put(case, "input", "scale_active_s", json!(60));
+            put(case, "input", "holding", json!(true));
+            put(case, "expect", "trim_withheld", json!(["holding"]));
         })?;
         run(holding_alone, "MC-B30").map_err(|e| format!("MC-B30 confirmed and Holding: {e}"))?;
         let session_alone = doctored(&fixture, "MC-B31", "", |case| {
-            case["input"]["holding"] = json!(false);
-            case["expect"]["trim_withheld"] = json!(["regular_session_only"]);
+            put(case, "input", "holding", json!(false));
+            put(
+                case,
+                "expect",
+                "trim_withheld",
+                json!(["regular_session_only"]),
+            );
         })?;
         run(session_alone, "MC-B31").map_err(|e| format!("MC-B31 not Holding: {e}"))
+    }
+
+    /// Sets `key` in the case's `object` member, adding it if the case does not state it.
+    fn put(case: &mut Json, object: &str, key: &str, value: Json) {
+        case.get_mut(object)
+            .and_then(Json::as_object_mut)
+            .map(|members| members.insert(key.to_owned(), value));
     }
 
     /// Whether the case's base trims (`scale_action: trim_to_target`), where the trim guards are
