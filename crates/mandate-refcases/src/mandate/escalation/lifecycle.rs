@@ -887,8 +887,9 @@ impl Shell {
         Ok(event)
     }
 
-    /// `now`: the view, the classification and the dry run as stated, then the mark and the mode
-    /// folded where they differ from the runtime's, which must then read as stated.
+    /// `now`: the view, the classification and the dry run as stated, the mark folded as the
+    /// account stream's latest `MarkUpdated`, and the mode folded where it differs from the
+    /// runtime's, which must then read as stated.
     fn apply_now(&mut self, now: &Json) -> Result<(), String> {
         unknown_members(now, NOW_KEYS)
             .map_err(|unknown| format!("`now` members not interpreted: {unknown}"))?;
@@ -938,12 +939,11 @@ impl Shell {
             }
         };
         let clock = self.clock()?;
-        match (optional_text(now, "mark")?, self.marks.get(&instrument)) {
-            (None, held) => ensure(held.is_none(), || {
+        match optional_text(now, "mark")? {
+            None => ensure(!self.marks.contains_key(&instrument), || {
                 "`now` has no mark, after a mark was folded".to_owned()
             })?,
-            (Some(price), held) if held != Some(&price) => self.mark(&instrument, &price, clock)?,
-            (Some(_), _) => {}
+            Some(price) => self.mark(&instrument, &price, clock)?,
         }
         let mode = str_at(now, "mode")?;
         let wanted = match mode {
