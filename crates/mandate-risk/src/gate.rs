@@ -32,13 +32,9 @@ pub(crate) type Stop = (Verdict, ReasonCode);
 
 /// DEC-401: a proposal of zero quantity is refused by name, before any check, for every origin
 /// and side. It is no order, so refusing it adds no risk (`AGENTS.md` rule 3) and denies no
-/// reduction (rule 13), and an allow would hand the broker an order it refuses. Pending E6-6:
-/// the refusal is unnamed until the implementation returns [`GateError::ZeroQuantity`].
+/// reduction (rule 13), and an allow would hand the broker an order it refuses.
 fn refuse_nothing() -> Result<Decision, GateError> {
-    Err(GateError::Unimplemented(
-        "the zero-quantity refusal",
-        "E6-6",
-    ))
+    Err(GateError::ZeroQuantity)
 }
 
 /// §9.1: the first failing check decides, and every check after it is listed as not reached. An
@@ -2905,12 +2901,12 @@ mod tests {
         /// A proposal of zero reduces nothing, so an uncomputable collar does not route it: the
         /// gate refuses it before the collar is reached rather than allow an order of nothing.
         /// DEC-401 replaces DEC-383 item 3's "keeps the collar's error" with one refusal by name,
-        /// which `tests/hand.rs`'s grid pins as pending E6-6. Here, over the three quotes whose
-        /// collar cannot be computed (the passive end overflowing at the decimal's maximum,
-        /// truncating to zero on the Reg NMS grid at `0.0000833`, and a configured `x` of one
-        /// putting the aggressive end at zero), the refusal is the stub's own, so a collar error
-        /// cannot satisfy it; E6-6's implementation sharpens it to `GateError::ZeroQuantity`
-        /// (DEC-401 item 4). Moved here from `tests/properties.rs` by the #452 ruling.
+        /// which `tests/hand.rs`'s grid pins too. Here, over the three quotes whose collar
+        /// cannot be computed (the passive end overflowing at the decimal's maximum, truncating to
+        /// zero on the Reg NMS grid at `0.0000833`, and a configured `x` of one putting the
+        /// aggressive end at zero), the refusal is `GateError::ZeroQuantity` itself, so a collar
+        /// error cannot satisfy it (DEC-401 item 4). Moved here from `tests/properties.rs` by the
+        /// #452 ruling.
         #[test]
         fn a_zero_quantity_exit_over_an_uncomputable_collar_is_not_routed(
             origin in prop::sample::select(vec![
@@ -2930,10 +2926,7 @@ mod tests {
 
             let d = o.decide();
             prop_assert!(
-                matches!(
-                    &d,
-                    Err(GateError::Unimplemented("the zero-quantity refusal", "E6-6"))
-                ),
+                matches!(&d, Err(GateError::ZeroQuantity)),
                 "a zero exit is refused before its collar is reached: {:?}",
                 d
             );
