@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use mandate_num::{Qty, UsdExact};
 use mandate_time::UtcNanos;
 
+use crate::limits::position_cap;
 use crate::spec_types::{GoalState, RiskLimits, ScaleAction};
 use crate::{
     AgentSnapshot, AssetClass, AssetId, GateConfig, GateError, InstrumentSnapshot, Purpose,
@@ -32,10 +33,7 @@ pub(crate) fn proposals(
     if mandate.goal_state() == GoalState::Holding || !a_trimming_rung_is_confirmed(limits, risk) {
         return Ok(Vec::new());
     }
-    let cap = limits.max_position_usd.min(
-        risk.agent_equity
-            .times_fraction(limits.max_position_fraction)?,
-    );
+    let cap = position_cap(limits, risk)?;
     let target = UsdExact::of(cap).checked_mul(UsdExact::of_ratio(risk.size_factor))?;
     let band = UsdExact::of(cap.times_fraction(limits.rebalance_band)?);
     let mut trims = Vec::new();
