@@ -435,6 +435,20 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `mandate-approval`, and MC-E25 to MC-E28, MC-E30 and MC-E32 pass; their `status.toml` rows are the
   status PR's. Still open: the `lifecycle` op's runtime driver for the other 26 cases, which fail
   naming the op until it lands.
+  *Part done (DEC-317):* the `lifecycle` op drives `mandate-runtime`'s `handle` and `fold` under one
+  published map, and fifteen cases pass (MC-E02 to MC-E05, MC-E07 to MC-E16, MC-E31); their
+  `status.toml` rows are the status PR's.
+  *Follow-up (DEC-317 item 7, E8-3):* the runtime's `ApprovalResponded` records no `quorum`, the
+  approver count and independence check 7 applied, which journal spec §9 requires for a grant that
+  reaches check 7 (`mandate_approval::quorum` already computes it). Tests first in
+  `mandate-runtime`, then the implementation; MC-E01, MC-E06, MC-E17, MC-E19 to MC-E24 and MC-E29
+  fail on that member alone and flip in the status PR that follows.
+  *Decision needed (DEC-318, Proposed, the founder's under DEC-176):* MC-E18 re-validates a grant while
+  the mode is exits-only and expects `skip` for `mode`, but §6.4 "Cancellation" cancels every pending
+  approval in a step whose effective mode is exits-only or stricter before the step judges a
+  response, so the runtime refuses the grant as `not_pending` (both skip). Either the case is
+  restated as a cancellation (a `mandate.yaml` change) or check 9's `mode` is said to be reachable
+  only by a path the spec names; MC-E18 stays pending until then.
   *Follow-up (the #416 review, minor 3):* every `ask_permit` case asks for one instrument, so
   family E cannot see the budget counted per instrument rather than per agent (`mandate-approval`'s
   own suite does). A future MC-E case should spread its ten asks across instruments. It changes

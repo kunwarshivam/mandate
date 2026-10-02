@@ -20,6 +20,7 @@ mandate-journal.workspace = true
 mandate-num.workspace = true
 mandate-research.workspace = true
 mandate-risk.workspace = true
+mandate-runtime.workspace = true
 mandate-spec.workspace = true
 mandate-sim.workspace = true
 mandate-time.workspace = true
