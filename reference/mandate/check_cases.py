@@ -219,6 +219,11 @@ req("MC-B17", B["MC-B17"]["purpose"] == "risk_exit" and B["MC-B17"]["reason"] ==
 req("MC-B30", B["MC-B30"].get("trim_withheld") == ["rung_not_confirmed"], "trim waits")
 req("MC-B31", set(B["MC-B31"].get("trim_withheld", [])) == {"holding", "regular_session_only"}, "trim guards")
 req("MC-B32", "trim_withheld" not in B["MC-B32"] and B["MC-B32"].get("purpose") != "risk_exit", "below band, no trim")
+BIN = {cid: C[cid]["input"] for cid in C if cid.startswith("MC-B")}
+req("MC-B33", B["MC-B33"].get("purpose") == "risk_exit" and Decimal(B["MC-B33"]["qty"]) >= Decimal(BIN["MC-B33"]["min_order_size"])
+    and Decimal(B["MC-B33"]["order_usd"]) < Decimal(BIN["MC-B33"]["min_order_usd"]), "a trim at least the minimum size goes under a larger dollar minimum")
+req("MC-B34", B["MC-B34"].get("trim_withheld") == ["below_minimum_order"]
+    and Decimal(B["MC-B17"]["qty"]) < Decimal(BIN["MC-B34"]["min_order_size"]), "the same trim below the minimum size is withheld")
 req("MC-B18", B["MC-B18"]["reason"] == "within_rebalance_band", "band")
 req("MC-B19", B["MC-B19"]["reason"] == "below_band_after_clipping", "band after clipping")
 req("MC-B20", B["MC-B20"]["reason"] == "no_fresh_outputs", "none")
