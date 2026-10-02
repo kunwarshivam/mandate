@@ -48,11 +48,8 @@
 //! risk (MI-19), and it is the only path by which anything here shrinks the universe: a lowered
 //! `max_instruments` refuses further admissions and never removes (DEC-132 item 14).
 //!
-//! Every entry point has its implementation and returns its own typed errors (DEC-77): the
-//! one exception, staged by the empty-set follow-up's tests PR, is `evaluate`'s empty
-//! scoreable set, whose named arm [`ResearchError::EmptyScoreableSet`] the implementation PR
-//! lands — until then that one path returns [`ResearchError::Unimplemented`], which stays
-//! otherwise only as a pinned ES-09 code.
+//! Every entry point has its implementation and returns its own typed errors (DEC-77);
+//! [`ResearchError::Unimplemented`] stays only as a pinned ES-09 code.
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -991,7 +991,6 @@ impl BranchCounts {
 /// one generated scenario, so none of them reads as coverage it does not give. A plain function
 /// over a `TestRunner`, because a pending test must not be one a macro generates.
 #[test]
-#[ignore = "pending E17-8"]
 fn no_scoreable_set_reaches_division_by_zero() {
     let counts = BranchCounts::default();
     let mut runner = TestRunner::new(ProptestConfig::with_cases(256));
@@ -1112,7 +1111,6 @@ fn no_scoreable_set_reaches_division_by_zero() {
 /// minimum the count refusal keeps the empty set, as #410's round-1 pins freeze it; a thesis
 /// outside the registered window is refused before any of that (DEC-282 item 3).
 #[test]
-#[ignore = "pending E17-8"]
 fn an_empty_scoreable_set_refuses_with_its_own_code_at_a_minimum_of_zero() {
     let instruments = BTreeMap::from([(
         asset("asset-a"),
@@ -1173,7 +1171,6 @@ fn an_empty_scoreable_set_refuses_with_its_own_code_at_a_minimum_of_zero() {
 /// with its own arm instead, which is the boundary between the two refusals pinned from both
 /// sides (DEC-336).
 #[test]
-#[ignore = "pending E17-8"]
 fn a_non_empty_scoreable_set_is_unchanged_and_an_empty_one_never_reaches_the_aggregate() {
     let scored = thesis("th-1", "asset-a", 100, 1_000, "0");
     let instruments = BTreeMap::from([(
