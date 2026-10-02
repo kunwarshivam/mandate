@@ -122,9 +122,14 @@ pub(crate) fn optional_usd(payload: &Value, field: &str) -> Result<Option<Usd>, 
 mod stamp_tests {
     use serde_json::Value as Json;
 
-    use super::risk_clock_stamp;
+    use mandate_canon::Value;
+
+    use super::{int, object, risk_clock_stamp, text};
     use crate::error::ExecutorError;
-    use crate::types::RiskClock;
+    use crate::state::{ExecutorState, fold};
+    use crate::types::{
+        AccountRef, AccountScope, EventId, FoldedEvent, RiskClock, Seq, WorkspaceId,
+    };
 
     /// The journal vectors (`fixtures/refcases/journal.json`, generated from
     /// `docs/specs/reference-cases/journal.yaml`): the fee-step snapshot's whole-second
@@ -176,6 +181,77 @@ mod stamp_tests {
             "the account stream's risk_clock is the whole-second timestamp {stamp}, never the \
              integer seconds the vectors refuse (journal spec §9.2, DEC-302)"
         );
+        Ok(())
+    }
+
+    /// A `risk_clock` the fold cannot read as a whole second is no clock: an off-second
+    /// timestamp, a non-canonical one, text that is no timestamp, and a boolean are each refused
+    /// with `risk_clock_missing`, never rounded and never folded as second 0, while the stamp's
+    /// own form and the older integer seconds fold to the same second (DEC-390 items 1 and 2).
+    #[test]
+    fn an_unreadable_risk_clock_is_refused_never_rounded_or_zeroed() -> Result<(), ExecutorError> {
+        let scope = AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        };
+        let opened = |state: &mut ExecutorState| -> Result<(), ExecutorError> {
+            let event = FoldedEvent {
+                stream: state.account_stream(),
+                seq: Seq(1),
+                event_id: EventId("e-1".to_owned()),
+                event_type: "StreamOpened".to_owned(),
+                causation_id: None,
+                payload: object(vec![("environment", text("paper"))])?,
+            };
+            fold(state, &event)
+        };
+        let mark =
+            |state: &ExecutorState, risk_clock: Value| -> Result<FoldedEvent, ExecutorError> {
+                Ok(FoldedEvent {
+                    stream: state.account_stream(),
+                    seq: Seq(2),
+                    event_id: EventId("e-2".to_owned()),
+                    event_type: "MarkUpdated".to_owned(),
+                    causation_id: None,
+                    payload: object(vec![
+                        ("instrument", text("AAPL")),
+                        ("price", text("150")),
+                        ("risk_clock", risk_clock),
+                    ])?,
+                })
+            };
+        for unreadable in [
+            text("2026-09-21T21:00:00.000000001Z"),
+            text("2026-09-21T21:00:00Z"),
+            text("not a time"),
+            Value::Bool(true),
+        ] {
+            let mut state = ExecutorState::new(scope.clone());
+            opened(&mut state)?;
+            let event = mark(&state, unreadable.clone())?;
+            let answer = fold(&mut state, &event);
+            assert_eq!(
+                answer.as_ref().err().map(ExecutorError::code),
+                Some("risk_clock_missing"),
+                "{unreadable:?} is no clock: {answer:?}"
+            );
+            assert_eq!(
+                state.risk_clock(),
+                None,
+                "and nothing was folded for {unreadable:?}"
+            );
+        }
+        for readable in [text("2026-09-21T21:00:00.000000000Z"), int(1_790_024_400)?] {
+            let mut state = ExecutorState::new(scope.clone());
+            opened(&mut state)?;
+            let event = mark(&state, readable.clone())?;
+            fold(&mut state, &event)?;
+            assert_eq!(
+                state.risk_clock(),
+                Some(RiskClock::from_secs(1_790_024_400)),
+                "{readable:?} is the same second"
+            );
+        }
         Ok(())
     }
 }

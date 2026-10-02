@@ -467,7 +467,9 @@ pub(crate) fn fee_step_snapshot_fields(
 /// opaque id and the key (`AGENTS.md` rules 5 and 6, DEC-305 items 3 and 4). It runs whatever the
 /// snapshot's own validation did: a snapshot that cannot be recorded is left out of the batch,
 /// never a reason to skip the pause, because a pause is risk reduction no validation may deny
-/// (`AGENTS.md` rules 3 and 13, DEC-261 item 7).
+/// (`AGENTS.md` rules 3 and 13, DEC-261 item 7). The one exception is a batch that can journal
+/// nothing at all, a risk clock outside §4.7's range: the pause's own draft fails the same way, so
+/// the whole input fails and nothing is sent.
 pub(crate) fn fee_step_pause_and_alert(
     batch: &mut Batch<'_, '_>,
     recorded: Option<EventId>,
@@ -2500,6 +2502,60 @@ pub(crate) mod tests {
             subjects,
             vec![(Some("AgentModeApplied".to_owned()), "reconciliation_fees")],
             "and the owner is still alerted once, about the pause it journaled: {:?}",
+            answer.alerts
+        );
+        Ok(())
+    }
+
+    /// `fees` runs its pause and alert at the call site too, not only in the tail: a fee difference
+    /// at a fee posting with no earlier account to compare cash against (step 4 recorded nothing)
+    /// pauses every agent under the fees restriction and alerts the owner once, under the generic
+    /// `reconciliation_fees` key, naming the fee step's own snapshot, journaled before the alert
+    /// (`AGENTS.md` rules 3, 5, 6 and 13; DEC-305 items 3 and 4, DEC-389 item 1). A `fees` that
+    /// runs the tail only when step 4 had a base, or never, fails here.
+    #[test]
+    fn a_fee_difference_with_no_cash_base_still_pauses_and_alerts() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(1));
+        state.started = true;
+        assert_eq!(state.observed, None, "step 4 has no base to record against");
+        let mut differing = snapshot(ReconcileReason::FeePosting)?;
+        differing.account.accrued_fees = Usd::parse("3")?;
+        let run = reconcile(&state, &differing, &ports)?;
+        let answer = answer_of(&run.effects);
+        assert_eq!(
+            answer.paused,
+            vec![(
+                Some("*".to_owned()),
+                Some("paused".to_owned()),
+                Some("reconciliation:fees".to_owned()),
+            )],
+            "a fee difference pauses every agent under the fees restriction"
+        );
+        let fee_alerts: Vec<(Option<String>, &str)> = answer
+            .alerts
+            .iter()
+            .filter(|(_, _, key)| key.starts_with("reconciliation_fee"))
+            .map(|(at, subject, key)| (journaled_before(&answer, subject, *at), *key))
+            .collect();
+        assert_eq!(
+            fee_alerts,
+            vec![(
+                Some("AccountSnapshotRecorded".to_owned()),
+                "reconciliation_fees"
+            )],
+            "and alerts the owner once, about the fee step's own snapshot: {:?}",
             answer.alerts
         );
         Ok(())
