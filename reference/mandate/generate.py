@@ -1120,8 +1120,9 @@ e_case("MC-E31", "A grant batched with a cancelling exits-only restriction is no
        [ASK1, {"kind": "batch", "reason": "mode_tightened", "responses": [e_resp("ctl1", 30, H1)], "now": E_NOW}])
 
 # =========================================================== P. delegation routing (§9.2, MI-11, MI-29; #444, DEC-353)
-# A rule change the autonomy row would call reducing is increasing when it can send an order to a rule or default a
-# delegation of the new version lifts (MI-29 as written). Each delegated case has a control without the delegation.
+# A rule change the autonomy row would call reducing is increasing when it sends an order that reached an undelegated
+# ask to an ask a delegation of the new version lifts (MI-29). An order that was auto stays auto, so removing or
+# narrowing an auto rule ahead of a delegated ask stays reducing. Each delegated case has a control without the delegation.
 J_DELEG = lambda lifts: {"op": "add", "path": "/autonomy/delegations", "value": [dict(REVIEW_DELEGATION, lifts=lifts)]}
 J_TWO_ASKS = [rep("/autonomy/rules", [{"id": "large_orders", "when": {"field": "order_usd", "op": "gt", "value": "900"}, "then": "ask"},
                                      {"id": "low_score", "when": {"field": "combined_score", "op": "lt", "value": "0.65"}, "then": "ask"}])]
@@ -1149,13 +1150,13 @@ CH_J = [
      [{"op": "remove", "path": "/autonomy/rules/0"}]),
     ("MC-J05", "Removing an ask rule ahead of an ask default a delegation lifts is risk-increasing", "btc_accumulator_one_ask_delegated_default",
      [{"op": "remove", "path": "/autonomy/rules/0"}]),
-    ("MC-J06", "Removing an auto rule ahead of an ask rule a delegation lifts is risk-increasing: a delegation would decide what the rule did",
+    ("MC-J06", "Removing an auto rule ahead of an ask rule a delegation lifts stays risk-reducing: its orders stay auto",
      "btc_accumulator_two_asks_delegated_small", [{"op": "remove", "path": "/autonomy/rules/0"}]),
     ("MC-J07", "Removing the same auto rule with no delegation is risk-reducing", "btc_accumulator_two_asks_small",
      [{"op": "remove", "path": "/autonomy/rules/0"}]),
     ("MC-J08", "Removing the same ask rule ahead of the ask default with no delegation is risk-reducing", "btc_accumulator_one_ask",
      [{"op": "remove", "path": "/autonomy/rules/0"}]),
-    ("MC-J09", "Narrowing an auto rule ahead of an ask rule a delegation lifts is risk-increasing", "btc_accumulator_two_asks_delegated_small",
+    ("MC-J09", "Narrowing an auto rule ahead of an ask rule a delegation lifts stays risk-reducing: its orders stay auto", "btc_accumulator_two_asks_delegated_small",
      [rep("/autonomy/rules/0/when/value", "50")]),
     ("MC-J10", "Narrowing the same auto rule with no delegation is risk-reducing", "btc_accumulator_two_asks_small",
      [rep("/autonomy/rules/0/when/value", "50")]),

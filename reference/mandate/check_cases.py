@@ -582,7 +582,7 @@ req("MC-W57", C["MC-W57"]["kind"] == "risk_state" and C["MC-W57"]["steps"][1]["e
 req("MC-W", sum(c.startswith("MC-W") for c in C) == 57, "57 tripwire cases")
 
 # delegation routing (§9.2, MI-29; #444, DEC-353)
-J_INC = {"MC-J01", "MC-J03", "MC-J05", "MC-J06", "MC-J09"}
+J_INC = {"MC-J01", "MC-J03", "MC-J05"}
 for k in range(1, 11):
     cid = f"MC-J{k:02}"
     cls = "risk_increasing" if cid in J_INC else "risk_reducing"

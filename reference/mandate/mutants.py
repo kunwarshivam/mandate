@@ -81,15 +81,7 @@ MUTANTS = {
     "a widened ask rule a delegation lifts is reducing": (
         '        if rb["then"] == "ask" and d > 0 and f"rule:{rb[\'id\']}" in lifted:\n            return "increasing"\n', ''),
     "removing a rule before a delegated ask is reducing": (
-        '            if later_sources & lifted:\n                return "increasing"\n', ''),
-    "removing an auto rule before a delegated ask is reducing": (
-        '            if later_sources & lifted:', '            if ra["then"] != "auto" and later_sources & lifted:'),
-    "narrowing an auto rule before a delegated ask is reducing": (
-        '        if t == 0 and ({f"rule:{x[\'id\']}" for x in n["rules"][i + 1:]} | {"default"}) & lifted:', '        if False:'),
-    "a rule made an ask a delegation lifts is reducing": (
-        '            if rb["then"] == "ask" and f"rule:{rb[\'id\']}" in lifted:', '            if False:'),
-    "the default made an ask a delegation lifts is reducing": (
-        '    if n["default"] != o["default"] and n["default"] == "ask" and "default" in lifted:', '    if False:'),
+        '            if ra["then"] != "auto" and later_sources & lifted:\n                return "increasing"\n', ''),
     "a delegation bypasses the admission ceiling": (
         '    if a.get("new_instrument", False) and STRICT[au["admission"]] > STRICT[res["decision"]]:',
         '    if a.get("new_instrument", False) and lifted_by is None and STRICT[au["admission"]] > STRICT[res["decision"]]:'),

@@ -1660,9 +1660,10 @@ def classify_delegations(od, nd):
     return "reducing"
 
 def classify_autonomy(o, n, lifted=frozenset()):
-    """§9.2's autonomy row. `lifted` is the rules and default the new version's delegations name: a change that sends
-    an order to one of them, from wherever it went before, may let a delegation lift what no delegation lifted
-    before, so it is increasing, whatever the order's old decision was (MI-29 as written, DEC-353)."""
+    """§9.2's autonomy row. `lifted` is the asks the new version's delegations name: a change that sends an order
+    which used to reach an undelegated ask to one of them would let a delegation decide it less strictly, so it is
+    increasing (MI-29, DEC-353). An order that was `auto` and lands on one stays `auto`, so removing or narrowing an
+    `auto` rule stays reducing."""
     o, n = ({k: v for k, v in x.items() if k != "tripwires"} for x in (o, n))
     od, nd = o.get("delegations", []), n.get("delegations", [])
     if od or nd:
@@ -1678,8 +1679,6 @@ def classify_autonomy(o, n, lifted=frozenset()):
         return "increasing"
     if STRICT[n["default"]] < STRICT[o["default"]] or STRICT[n["admission"]] < STRICT[o["admission"]]:
         return "increasing"
-    if n["default"] != o["default"] and n["default"] == "ask" and "default" in lifted:
-        return "increasing"
     oids, nids = [r["id"] for r in o["rules"]], [r["id"] for r in n["rules"]]
     common_o = [x for x in oids if x in nids]
     common_n = [x for x in nids if x in oids]
@@ -1691,7 +1690,7 @@ def classify_autonomy(o, n, lifted=frozenset()):
             if any(x < STRICT[ra["then"]] for x in later):
                 return "increasing"
             later_sources = {f"rule:{x['id']}" for x in o["rules"][i + 1:]} | {"default"}
-            if later_sources & lifted:
+            if ra["then"] != "auto" and later_sources & lifted:
                 return "increasing"
     orules = {r["id"]: r for r in o["rules"]}
     for i, rb in enumerate(n["rules"]):
@@ -1706,8 +1705,6 @@ def classify_autonomy(o, n, lifted=frozenset()):
         if ra["when"] == rb["when"]:
             if STRICT[rb["then"]] < STRICT[ra["then"]]:
                 return "increasing"
-            if rb["then"] == "ask" and f"rule:{rb['id']}" in lifted:
-                return "increasing"
             continue
         if ra["then"] != rb["then"]:
             return "increasing"
@@ -1716,8 +1713,6 @@ def classify_autonomy(o, n, lifted=frozenset()):
             return "increasing"
         t = STRICT[ra["then"]]
         if t == 0 and d > 0:
-            return "increasing"
-        if t == 0 and ({f"rule:{x['id']}" for x in n["rules"][i + 1:]} | {"default"}) & lifted:
             return "increasing"
         if t > 0 and (d < 0 or any(x > t for x in later)):
             return "increasing"

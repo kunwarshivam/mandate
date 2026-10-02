@@ -13535,17 +13535,16 @@ cases:
     step_up_required: true
 - id: MC-J06
   kind: change
-  title: |-
-    Removing an auto rule ahead of an ask rule a delegation lifts is risk-increasing: a delegation would decide what the rule did
+  title: 'Removing an auto rule ahead of an ask rule a delegation lifts stays risk-reducing: its orders stay auto'
   base: btc_accumulator_two_asks_delegated_small
   patch:
   - {op: remove, path: /autonomy/rules/0}
   expect:
-    classification: risk_increasing
+    classification: risk_reducing
     changed_paths: [/autonomy/rules]
     old_version: sha256:1294080b3c4a968a365c4018bbb6ea5c8154b88f5c951c899a6d9faacdaf816c
     new_version: sha256:d3fecaefed31fcfeff23d049a2859e08518d4898c37771d8c06607987bd65860
-    step_up_required: true
+    step_up_required: false
 - id: MC-J07
   kind: change
   title: Removing the same auto rule with no delegation is risk-reducing
@@ -13572,16 +13571,16 @@ cases:
     step_up_required: false
 - id: MC-J09
   kind: change
-  title: Narrowing an auto rule ahead of an ask rule a delegation lifts is risk-increasing
+  title: 'Narrowing an auto rule ahead of an ask rule a delegation lifts stays risk-reducing: its orders stay auto'
   base: btc_accumulator_two_asks_delegated_small
   patch:
   - {op: replace, path: /autonomy/rules/0/when/value, value: '50'}
   expect:
-    classification: risk_increasing
+    classification: risk_reducing
     changed_paths: [/autonomy/rules]
     old_version: sha256:1294080b3c4a968a365c4018bbb6ea5c8154b88f5c951c899a6d9faacdaf816c
     new_version: sha256:e70fa57d547c1239feec8b09ab566db9d2ac1474597c97a1ec569819e99f3c8a
-    step_up_required: true
+    step_up_required: false
 - id: MC-J10
   kind: change
   title: Narrowing the same auto rule with no delegation is risk-reducing
