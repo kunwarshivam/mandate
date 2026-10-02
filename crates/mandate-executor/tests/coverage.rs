@@ -162,7 +162,14 @@ fn a_split_multiplies_the_position_and_ends_the_pending_action() {
             prepared,
         ))
         .expect("the prepared split folds");
-    let applied = with_clock(&[("instrument", text(AAPL)), ("ratio", text("4"))], 6);
+    let applied = with_clock(
+        &[
+            ("instrument", text(AAPL)),
+            ("action", text("split")),
+            ("ratio", text("4")),
+        ],
+        6,
+    );
     shell
         .fold_one(&event(
             ACCOUNT_STREAM,

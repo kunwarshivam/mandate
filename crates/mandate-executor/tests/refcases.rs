@@ -828,7 +828,7 @@ impl<'p> Drive<'p> {
                 self.corporate_action(&kind, name, &data, at, &mut seen);
             }
             "reconciliation" | "broker_position_update" => {
-                let taken = self.snapshot(&data);
+                let taken = self.snapshot(&data, step);
                 self.run(
                     Input::BrokerSnapshot(taken),
                     &mut seen,
@@ -1080,8 +1080,9 @@ impl<'p> Drive<'p> {
 
     /// The broker's side for a reconciliation step: the positions it names, and the orders the
     /// harness knows are still working.
-    fn snapshot(&self, data: &Json) -> mandate_executor::BrokerSnapshot {
+    fn snapshot(&self, data: &Json, step: &Json) -> mandate_executor::BrokerSnapshot {
         let mut taken = common::snapshot(self.shell.head().0, ReconcileReason::Scheduled);
+        taken.account = self.account_after(step);
         if let Some(Json::Object(positions)) = data.get("broker_positions") {
             for (fixture, held) in positions {
                 let held = held.as_str().unwrap_or("0");
@@ -1418,7 +1419,7 @@ impl Drive<'_> {
                 taken.account = self.account_after(step);
                 (&self.shell.state, taken)
             }
-            None => (before, self.snapshot(&data)),
+            None => (before, self.snapshot(&data, step)),
         };
         let run = mandate_executor::reconcile(state, &taken, self.ports).unwrap_or_else(|e| {
             panic!(
@@ -2012,6 +2013,29 @@ fn a_reconciliation_check_reports_the_steps_own_cash() {
         drive.assert_reconciliation(0, &first, &before),
         "RC-07 step 0's reconciliation runs live, past the trading day's start, and its \
          unposted-fee check passes only with the step's cash in both snapshots (#447 round 2, M1)"
+    );
+    let equities = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let equity_ports = common::ports(&ids, &equities, &instruments, &configuration);
+    let rc_04 = case("RC-04", None);
+    let reconciliation = rc_04
+        .steps
+        .iter()
+        .find(|step| text_of(step, "event") == Some("reconciliation"))
+        .cloned()
+        .unwrap_or(Json::Null);
+    let data = reconciliation.get("data").cloned().unwrap_or(Json::Null);
+    let drive = Drive::new(rc_04, &equity_ports);
+    let taken = drive.snapshot(&data, &reconciliation);
+    assert_eq!(
+        taken.account,
+        drive.initial_account(),
+        "RC-04's reconciliation step reports the case's own account, settled cash 0.00 (DEC-369 \
+         item 3, #457 round 1, m2)"
+    );
+    assert_ne!(
+        taken.account.cash,
+        common::broker_account().cash,
+        "never the shared default account's cash"
     );
 }
 
