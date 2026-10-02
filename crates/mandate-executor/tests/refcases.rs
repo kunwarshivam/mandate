@@ -86,6 +86,12 @@ fn holding(
     }
 }
 
+/// The journal action that opens an unprotected interval. The executor journals it when it asks
+/// the cancel, the earlier and tighter instant, so a case matches it anywhere before the
+/// confirmation and the gate's re-run that the fixture lists after it, and never later (the
+/// coordinator's ruling on #174, DEC-348 item 1). Every other action keeps the fixture's order.
+const INTERVAL_START: &str = "unprotected_window_start";
+
 /// One case as the fixture carries it, with a variant's overrides already applied.
 struct Case {
     id: String,
@@ -1174,6 +1180,8 @@ impl Drive<'_> {
         ];
         let mut from = 0usize;
         let mut last_cancel: Option<usize> = None;
+        let mut confirmed: Option<usize> = None;
+        let mut opened: Option<usize> = None;
         for (kind, argument) in &expected {
             assert!(
                 known.contains(&kind.as_str()),
@@ -1181,7 +1189,8 @@ impl Drive<'_> {
                 self.case.id
             );
             let unordered = kind == "alert_owner" || kind == "refresh_account";
-            let start = if unordered { 0 } else { from };
+            let opens = kind == "journal" && argument.as_str() == Some(INTERVAL_START);
+            let start = if unordered || opens { 0 } else { from };
             let found = (start..seen.len()).find(|&at| {
                 seen.get(at)
                     .is_some_and(|s| self.matches(kind, argument, s, index))
@@ -1193,6 +1202,29 @@ impl Drive<'_> {
                     self.case.id
                 )
             });
+            if opens {
+                assert!(
+                    confirmed.is_none_or(|confirmation| at < confirmation),
+                    "{} step {index}: the interval starts when the cancel is asked, never after \
+                     its confirmation (DEC-348 item 1): {seen:?}",
+                    self.case.id
+                );
+                opened = Some(at);
+                continue;
+            }
+            if kind == "rerun_gate"
+                && let Some(started) = opened.take()
+            {
+                assert!(
+                    started < at,
+                    "{} step {index}: the interval starts before the gate re-runs (DEC-348 item \
+                     1): {seen:?}",
+                    self.case.id
+                );
+            }
+            if kind == "await_cancel_confirmed" {
+                confirmed = Some(at);
+            }
             if kind.starts_with("cancel") {
                 last_cancel = Some(at);
             }
@@ -1665,4 +1697,78 @@ fn trading_domain_rc_15_external_order_detected() {
 #[ignore = "pending E7-3"]
 fn trading_domain_rc_15_unexplained_403s() {
     drive(case("RC-15", Some("unexplained_403s")));
+}
+
+/// The RC-14 base case's first step as the fixture orders it: the cancel, its confirmation, the
+/// interval's start, then the gate's re-run.
+fn rc_14_exit_step() -> Json {
+    serde_json::json!({
+        "expect": {
+            "actions": [
+                { "cancel": "oco_1" },
+                { "await_cancel_confirmed": "oco_1" },
+                { "journal": INTERVAL_START },
+                { "rerun_gate": "exit_1" },
+            ]
+        }
+    })
+}
+
+/// Matches `seen` against [`rc_14_exit_step`] on a freshly seeded RC-14.
+fn rc_14_exit_matches(seen: impl Fn(&str) -> Vec<Seen>) {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let instruments = FixedInstruments;
+    let configuration = config();
+    let ports = ports(&ids, &mandates, &instruments, &configuration);
+    let mut drive = Drive::new(case("RC-14", None), &ports);
+    let oco = drive.id_of("oco_1", 0);
+    let step = rc_14_exit_step();
+    let seen = seen(&oco);
+    assert!(drive.assert_actions(0, &step, &seen));
+}
+
+/// DEC-348 item 1: the start journaled when the cancel is asked, before the confirmation, as the
+/// executor journals it, matches the fixture's later position.
+#[test]
+fn an_interval_start_journaled_with_the_cancel_matches() {
+    rc_14_exit_matches(|oco| {
+        vec![
+            Seen::Journal(INTERVAL_START.to_owned()),
+            Seen::Cancel(oco.to_owned()),
+            Seen::Gate,
+            Seen::Confirmed(oco.to_owned()),
+            Seen::Gate,
+        ]
+    });
+}
+
+/// DEC-348 item 1: a start journaled after the cancel's confirmation, the fixture's literal order,
+/// is the looser bound, and fails the case.
+#[test]
+#[should_panic(expected = "never after its confirmation")]
+fn an_interval_start_journaled_after_the_confirmation_fails() {
+    rc_14_exit_matches(|oco| {
+        vec![
+            Seen::Cancel(oco.to_owned()),
+            Seen::Gate,
+            Seen::Confirmed(oco.to_owned()),
+            Seen::Journal(INTERVAL_START.to_owned()),
+            Seen::Gate,
+        ]
+    });
+}
+
+/// DEC-348 item 1: a step with no start before the gate's re-run fails the case.
+#[test]
+#[should_panic(expected = "expected `journal`")]
+fn an_interval_that_never_starts_fails() {
+    rc_14_exit_matches(|oco| {
+        vec![
+            Seen::Cancel(oco.to_owned()),
+            Seen::Gate,
+            Seen::Confirmed(oco.to_owned()),
+            Seen::Gate,
+        ]
+    });
 }
