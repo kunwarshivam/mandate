@@ -780,24 +780,51 @@ fn a_rung_trims_only_after_breach_confirm_s() {
 /// The close window is the last ten minutes of the session the calendar gives, not of 16:00.
 #[test]
 fn the_close_window_follows_the_early_close_calendar() {
-    let full = mandate_risk::session_at(
-        at("2026-09-22T19:50:00Z"),
-        &common::test_default_config(),
-        AssetClass::UsEquity,
-    )
-    .expect("a covered date has a session");
-    let early = mandate_risk::session_at(
-        at("2026-11-27T17:50:00Z"),
-        &common::test_default_config(),
-        AssetClass::UsEquity,
-    )
-    .expect("an early-close date has a session");
+    let at_instant = |instant: &str| {
+        let session = mandate_risk::session_at(
+            at(instant),
+            &common::test_default_config(),
+            AssetClass::UsEquity,
+        )
+        .expect("a covered date has a session");
+        (session.session, session.close_window)
+    };
+    let (regular, after) = (Session::Regular, Session::AfterHours);
 
-    assert_eq!(
-        (full.close_window, early.close_window),
-        (true, true),
-        "15:50 ET on a full day and 12:50 ET on an early-close day are both in the window"
-    );
+    for (day, before, first, last, close) in [
+        (
+            "a full day",
+            "2026-09-22T19:49:59.999999999Z",
+            "2026-09-22T19:50:00Z",
+            "2026-09-22T19:59:59.999999999Z",
+            "2026-09-22T20:00:00Z",
+        ),
+        (
+            "an early-close day",
+            "2026-11-27T17:49:59.999999999Z",
+            "2026-11-27T17:50:00Z",
+            "2026-11-27T17:59:59.999999999Z",
+            "2026-11-27T18:00:00Z",
+        ),
+    ] {
+        assert_eq!(
+            [
+                at_instant(before),
+                at_instant(first),
+                at_instant(last),
+                at_instant(close)
+            ],
+            [
+                (regular, false),
+                (regular, true),
+                (regular, true),
+                (after, false)
+            ],
+            "on {day} the window is the last ten minutes before the calendar's close: a \
+             nanosecond before them is outside it, their first and last instants inside it, and \
+             the close itself ends the session and the window"
+        );
+    }
 }
 
 /// `RC-25` step 2: an increase at 15:50 is `close_window`, not `auction_window` (DEC-129 item 18).
@@ -848,11 +875,20 @@ fn an_auction_window_denies_a_market_opening_and_reprices_a_market_exit() {
         (
             d.verdict,
             d.reason,
-            d.pacing.map(|p| (p.qty, p.marketable_limit_required))
+            d.pacing
+                .as_ref()
+                .map(|p| (p.qty, p.marketable_limit_required))
         ),
         (Verdict::Allow, None, Some((qty("10"), true))),
         "a market-order risk exit in the opening auction is sent as a marketable limit, never \
          denied (spec 4.3, MI-1)"
+    );
+    assert_eq!(
+        d.pacing.map(|p| (p.limit_price, p.applied)),
+        Some((price("120"), BTreeSet::new())),
+        "the re-priced exit keeps the proposal's limit, and no §9.6 control is applied to it: a \
+         risk exit is exempt from §9.6 entirely, so the marketable price is the exit ladder's to \
+         set, not a collar's"
     );
 
     let mut pre_market = Scenario::allowing();
