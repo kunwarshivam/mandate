@@ -292,6 +292,31 @@ impl JournaledFact {
     }
 }
 
+/// The registration's re-derivation of a research-agent thesis record's verdict (journal spec
+/// v0.9 §9.4; DEC-413 item 5, DEC-414; #490 round 1, M2, as #470 round 2 minor 5 ruled for §9.3):
+/// mandate spec §8.5 checks 4, 5, 6, 10, and 16's revision cap, re-derived from the stored mandate
+/// document `mandate_version` names, which is the record's `config_refs.mandate_version`, the
+/// mandate in force when the thesis was judged.
+///
+/// `payload` is a `ThesisProposed` or `ThesisRevised` payload in §9.4's form. `Ok(())` when the
+/// record's verdict passes over no check that mandate fails, and a refusal at check 5, 6, or 10 is
+/// one the mandate fails too. The policy overlay only tightens, so a check the mandate fails always
+/// fails; checks 4 and 16 the overlay or the folded lineage can also fail, so a refusal there need
+/// not fail by the mandate.
+///
+/// `Err(InvalidInput)` naming `mandate_version` when the document is not stored or does not hash to
+/// the version it is stored under; naming `admitted` when the record admits past a check the
+/// mandate fails; and naming `reason` when the record is refused at a check later than the first
+/// one the mandate fails, or at check 5, 6, or 10 when the mandate passes it.
+pub fn check_thesis_record(
+    payload: &Value,
+    mandate_version: &Digest,
+    documents: &dyn Fn(&Digest) -> Option<Value>,
+) -> Result<(), SpecError> {
+    let _ = (payload, mandate_version, documents);
+    Err(SpecError::Unimplemented)
+}
+
 /// `ConfigSnapshotRegistered`'s kind for a signal model (journal spec §9.2).
 const MODEL_KIND: &str = "model_version";
 
@@ -1504,6 +1529,340 @@ mod record_tests {
         ];
         for (event_type, payload, member) in cases {
             assert_eq!(refused(event_type, &payload), Some(member), "{event_type}");
+        }
+        Ok(())
+    }
+}
+
+/// The thesis registration's re-derivation (DEC-414): pending until its implementation PR.
+#[cfg(test)]
+mod thesis_tests {
+    use std::collections::BTreeMap;
+
+    use mandate_canon::{Digest, Int, Key, Value};
+
+    use super::check_thesis_record;
+    use crate::validate::tests::mandate;
+    use crate::{Mandate, SpecError};
+
+    const RESEARCH: &str =
+        r#"{"interval_s": 3600, "cost_cap_usd_per_day": "5", "max_revisions_per_lineage": 3}"#;
+
+    /// The test base made a research agent's mandate: unpinned, `behavior.research` set, and its one
+    /// signal model admitting instruments (§8.5 checks 4 and 5 pass), `us_equity` only, admission
+    /// `ask`, a revision cap of 3.
+    const RESEARCH_PATCHES: [(&str, &str); 3] = [
+        ("/universe/pinned", "false"),
+        ("/behavior/research", RESEARCH),
+        ("/behavior/signal_models/0/admits_instruments", "true"),
+    ];
+
+    fn research(extra: &[(&str, &str)]) -> Result<Mandate, String> {
+        let mut patches = RESEARCH_PATCHES.to_vec();
+        patches.extend_from_slice(extra);
+        mandate(&patches)
+    }
+
+    /// A §9.4 payload with every member, admitted unless `reason` is given.
+    fn thesis(reason: Option<&str>, revision: u64, asset_class: &str) -> Result<Value, String> {
+        let text = |v: &str| Value::Str(v.to_owned());
+        let int = |n: u64| Int::new(n).map(Value::Int).ok_or("an integer");
+        let digest = |c: char| text(&format!("sha256:{}", c.to_string().repeat(64)));
+        let predecessor = if revision > 0 {
+            text("th_0")
+        } else {
+            Value::Null
+        };
+        let members = [
+            ("model_id", text("quant.momentum")),
+            ("model_version", text("1.0.0")),
+            ("content_hash", digest('2')),
+            ("thesis_id", text("th_1")),
+            ("lineage_id", text("th_0")),
+            ("revision", int(revision)?),
+            ("predecessor_thesis_id", predecessor),
+            ("autopsy_ref", Value::Null),
+            (
+                "instrument_id",
+                text("7b4a1c2e-5555-4a2b-9c3d-000000000005"),
+            ),
+            ("asset_class", text(asset_class)),
+            ("direction", text("long")),
+            ("as_of", text("2026-09-22T14:00:00.000000000Z")),
+            ("expires_at", text("2026-09-23T14:00:00.000000000Z")),
+            ("horizon_s", int(86_400)?),
+            ("conviction", text("0.7")),
+            ("confidence", text("0.8")),
+            ("evidence_ref", Value::Null),
+            ("evidence_sources", Value::Array(vec![text("src.filings")])),
+            ("corroboration", text("market_data")),
+            ("invalidation", text("Guidance is cut.")),
+            ("allowlist_version", int(1)?),
+            ("prompt_ref", digest('a')),
+            ("response_ref", digest('b')),
+            ("admitted", Value::Bool(reason.is_none())),
+            ("reason", reason.map_or(Value::Null, text)),
+        ];
+        let mut out = mandate_canon::Object::new();
+        for (name, value) in members {
+            out.insert(Key::new(name).map_err(|_| "key")?, value);
+        }
+        Ok(Value::Object(out))
+    }
+
+    /// The stored documents, each under its own version's digest.
+    struct Store(BTreeMap<Digest, Value>);
+
+    impl Store {
+        fn of(mandates: &[&Mandate]) -> Result<(Self, Vec<Digest>), String> {
+            let mut stored = BTreeMap::new();
+            let mut digests = Vec::new();
+            for m in mandates {
+                let digest = m.version().map_err(|e| e.to_string())?.digest();
+                stored.insert(digest.clone(), m.canonical().map_err(|e| e.to_string())?);
+                digests.push(digest);
+            }
+            Ok((Self(stored), digests))
+        }
+
+        fn judge(&self, payload: &Value, version: &Digest) -> Result<(), SpecError> {
+            check_thesis_record(payload, version, &|d: &Digest| self.0.get(d).cloned())
+        }
+    }
+
+    fn refused(what: &'static str) -> Result<(), SpecError> {
+        Err(SpecError::InvalidInput { what })
+    }
+
+    /// Every verdict the mandate allows is accepted: an admission under the research mandate, a
+    /// refusal at a check the mandate fails, a refusal earlier than it, and a refusal at a check only
+    /// the overlay or the folded lineage decides (4, and 16 under the cap). The mandates are the
+    /// mandate reference cases' shapes: pinned (MI-20, MC-N08), admission `deny` (MC-N15), and a
+    /// revision past the cap (MC-N24).
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn a_thesis_whose_verdict_its_mandate_allows_is_accepted() -> Result<(), String> {
+        let open = research(&[])?;
+        let pinned = research(&[("/universe/pinned", "true")])?;
+        let denied = research(&[("/autonomy/admission", r#""deny""#)])?;
+        let (store, v) = Store::of(&[&open, &pinned, &denied])?;
+        let cases = [
+            ("admitted", thesis(None, 0, "us_equity")?, &v[0]),
+            (
+                "refused later, mandate passes",
+                thesis(Some("eligibility_floor"), 0, "us_equity")?,
+                &v[0],
+            ),
+            (
+                "refused at check 4 the overlay decides",
+                thesis(Some("research_disabled"), 0, "us_equity")?,
+                &v[0],
+            ),
+            ("admitted at the cap", thesis(None, 3, "us_equity")?, &v[0]),
+            (
+                "retired under the cap",
+                thesis(Some("lineage_retired"), 1, "us_equity")?,
+                &v[0],
+            ),
+            (
+                "retired past the cap",
+                thesis(Some("lineage_retired"), 4, "us_equity")?,
+                &v[0],
+            ),
+            (
+                "refused at check 10",
+                thesis(Some("not_allowed_asset_class"), 0, "crypto")?,
+                &v[0],
+            ),
+            (
+                "pinned, refused at check 5",
+                thesis(Some("universe_pinned"), 0, "us_equity")?,
+                &v[1],
+            ),
+            (
+                "pinned, ignored at check 1",
+                thesis(Some("direction_not_allowed"), 0, "us_equity")?,
+                &v[1],
+            ),
+            (
+                "denied, refused at check 6",
+                thesis(Some("admission_denied"), 0, "us_equity")?,
+                &v[2],
+            ),
+            (
+                "denied, refused at check 4 before it",
+                thesis(Some("research_disabled"), 0, "us_equity")?,
+                &v[2],
+            ),
+        ];
+        assert_eq!(
+            store.judge(&thesis(None, 0, "us_equity")?, &v[1]),
+            Err(SpecError::InvalidInput { what: "admitted" }),
+            "the paired control: an admission under a pinned universe is refused"
+        );
+        for (name, payload, version) in cases {
+            assert_eq!(store.judge(&payload, version), Ok(()), "{name}");
+        }
+        Ok(())
+    }
+
+    /// An admission past any check the mandate fails is refused at `admitted`: a pinned universe
+    /// (check 5, MI-20), admission `deny` (6), an asset class outside `universe.asset_classes` (10),
+    /// a revision past the cap (16), and no research agent at all (4).
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn a_thesis_admitted_past_a_check_its_mandate_fails_is_refused() -> Result<(), String> {
+        let open = research(&[])?;
+        let pinned = research(&[("/universe/pinned", "true")])?;
+        let denied = research(&[("/autonomy/admission", r#""deny""#)])?;
+        let unresearched = mandate(&[("/universe/pinned", "false")])?;
+        let (store, v) = Store::of(&[&open, &pinned, &denied, &unresearched])?;
+        let cases = [
+            ("check 5", thesis(None, 0, "us_equity")?, &v[1]),
+            ("check 6", thesis(None, 0, "us_equity")?, &v[2]),
+            ("check 10", thesis(None, 0, "crypto")?, &v[0]),
+            ("check 16", thesis(None, 4, "us_equity")?, &v[0]),
+            ("check 4", thesis(None, 0, "us_equity")?, &v[3]),
+        ];
+        assert_eq!(
+            store.judge(&thesis(None, 0, "us_equity")?, &v[0]),
+            Ok(()),
+            "the paired control: an admission the mandate allows is accepted"
+        );
+        for (name, payload, version) in cases {
+            assert_eq!(
+                store.judge(&payload, version),
+                refused("admitted"),
+                "{name}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A refusal at a check later than the first one the mandate fails is refused at `reason`: the
+    /// first failure decides (§8.5), and the mandate's checks come before eligibility, sources, the
+    /// cap and a full universe.
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn a_thesis_refused_after_its_mandate_fails_an_earlier_check_is_refused() -> Result<(), String>
+    {
+        let open = research(&[])?;
+        let pinned = research(&[("/universe/pinned", "true")])?;
+        let denied = research(&[("/autonomy/admission", r#""deny""#)])?;
+        let both = research(&[
+            ("/universe/pinned", "true"),
+            ("/autonomy/admission", r#""deny""#),
+        ])?;
+        let (store, v) = Store::of(&[&open, &pinned, &denied, &both])?;
+        let cases = [
+            (
+                "pinned and denied, refused at 6",
+                thesis(Some("admission_denied"), 0, "us_equity")?,
+                &v[3],
+            ),
+            (
+                "pinned, refused at 12",
+                thesis(Some("eligibility_floor"), 0, "us_equity")?,
+                &v[1],
+            ),
+            (
+                "pinned, refused at 6",
+                thesis(Some("admission_denied"), 0, "us_equity")?,
+                &v[1],
+            ),
+            (
+                "denied, refused at 17",
+                thesis(Some("universe_full"), 0, "us_equity")?,
+                &v[2],
+            ),
+            (
+                "crypto, refused at 14",
+                thesis(Some("source_not_allowlisted"), 0, "crypto")?,
+                &v[0],
+            ),
+            (
+                "past the cap, refused at 17",
+                thesis(Some("universe_full"), 4, "us_equity")?,
+                &v[0],
+            ),
+        ];
+        assert_eq!(
+            store.judge(&thesis(Some("universe_pinned"), 0, "us_equity")?, &v[1]),
+            Ok(()),
+            "the paired control: a refusal at the first check the mandate fails is accepted"
+        );
+        for (name, payload, version) in cases {
+            assert_eq!(store.judge(&payload, version), refused("reason"), "{name}");
+        }
+        Ok(())
+    }
+
+    /// A refusal at check 5, 6, or 10 the mandate passes is refused at `reason`: those three read
+    /// the mandate alone (check 6 while the overlay raises `auto` only to `ask`), so the record
+    /// names a failure its own mandate does not show.
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn a_thesis_refused_at_a_mandate_check_its_mandate_passes_is_refused() -> Result<(), String> {
+        let open = research(&[])?;
+        let (store, v) = Store::of(&[&open])?;
+        assert_eq!(
+            store.judge(&thesis(Some("eligibility_floor"), 0, "us_equity")?, &v[0]),
+            Ok(()),
+            "the paired control: a refusal at a check the mandate does not decide is accepted"
+        );
+        for reason in [
+            "universe_pinned",
+            "admission_denied",
+            "not_allowed_asset_class",
+        ] {
+            assert_eq!(
+                store.judge(&thesis(Some(reason), 0, "us_equity")?, &v[0]),
+                refused("reason"),
+                "{reason}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The mandate is the stored document `config_refs.mandate_version` names, the one in force when
+    /// the thesis was judged: one admission is accepted under the research mandate and refused under
+    /// a pinned one, both stored, so the check reads the named document and no other.
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn a_thesis_is_judged_under_the_mandate_it_names() -> Result<(), String> {
+        let open = research(&[])?;
+        let pinned = research(&[("/universe/pinned", "true")])?;
+        let (store, v) = Store::of(&[&open, &pinned])?;
+        let admitted = thesis(None, 0, "us_equity")?;
+        assert_eq!(store.judge(&admitted, &v[0]), Ok(()));
+        assert_eq!(store.judge(&admitted, &v[1]), refused("admitted"));
+        Ok(())
+    }
+
+    /// A mandate that is not stored, or is stored under another document's digest, is refused at
+    /// `mandate_version`, never judged from whatever is stored.
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn a_thesis_mandate_that_is_absent_or_an_impostor_is_refused() -> Result<(), String> {
+        let open = research(&[])?;
+        let pinned = research(&[("/universe/pinned", "true")])?;
+        let (_, v) = Store::of(&[&open, &pinned])?;
+        let pinned_document = pinned.canonical().map_err(|e| e.to_string())?;
+        let impostor = Store(BTreeMap::from([(v[0].clone(), pinned_document)]));
+        let empty = Store(BTreeMap::new());
+        let refused_record = thesis(Some("eligibility_floor"), 0, "us_equity")?;
+        let real = Store::of(&[&open])?.0;
+        assert_eq!(
+            real.judge(&refused_record, &v[0]),
+            Ok(()),
+            "the paired control: the named mandate, stored under its own digest, is judged"
+        );
+        for (name, store) in [("absent", &empty), ("impostor", &impostor)] {
+            assert_eq!(
+                store.judge(&refused_record, &v[0]),
+                refused("mandate_version"),
+                "{name}"
+            );
         }
         Ok(())
     }

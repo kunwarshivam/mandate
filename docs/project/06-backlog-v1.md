@@ -912,6 +912,15 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   - the tests PR comes first (DEC-77), and its cases include a pinned universe (MI-20) and
     `admission: deny`.
 
+  *Registration tests PR ([DEC-414](decisions/DEC-414.md)), on
+  `agent/j3-thesis-registration-tests`:* both types catalogued and routed to §9.4, refused as
+  `unimplemented`; the re-derivation is `mandate_spec::context::check_thesis_record`, a stub, with
+  six pending tests (pinned universe, admission `deny`, asset class, revision cap, the named mandate,
+  an absent or impostor document) and four pending `mandate-journal` tests over §9.4's vectors. The
+  implementation PR (DEC-77 stage 2) registers the schema and rules 34 to 38, implements the
+  re-derivation, and deletes only the ten `#[ignore]` lines. Every reader of a thesis record (the
+  lineage fold, the writer's read-back) calls `check_thesis_record` before acting on it.
+
   The writer that adds the model's identity, the instants, and the artifact references to
   `ThesisEntry` is a story of its own. DEC-413 item 5 lists the readings not taken, each a later
   tightening. One is for E17-9's loop: whether a revision without an autopsy is a refusal reason,

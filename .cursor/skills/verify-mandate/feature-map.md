@@ -556,6 +556,27 @@ while a reducing purpose passes it.
   -E 'binary(risk_state) | test(/risk_state/) | test(/universe_change/) |
   test(/version_maps_only/) | test(/impostor/) | test(/schema_version/)'`.
 
+## Research-agent thesis records (journal spec §9.4, under E17-2)
+
+- **Spec:** `docs/specs/journal.md` §9.4 (`ThesisProposed` and `ThesisRevised`, one shared schema,
+  rules 34 to 38); DEC-413, DEC-414. The registration is **a stub and pending tests** (DEC-77 stage
+  2): both types are routed to §9.4 and refused as `unimplemented`, and the mandate re-derivation of
+  §8.5 checks 4, 5, 6, 10 and 16's cap that blocks the registration's acceptance (DEC-413 item 5) is
+  a stub too.
+- **Code:** `crates/mandate-journal/src/control.rs` (`governs`, `THESIS`, `thesis_payload`),
+  `crates/mandate-journal/src/catalogue.rs` (both entries, `man` and `mod`), and
+  `crates/mandate-spec/src/context.rs` (`check_thesis_record`).
+- **Tests:** `control::tests` in `control.rs` (`every_thesis_draft_is_judged_as_its_vectors_say`,
+  `a_required_thesis_member_is_never_null`,
+  `a_thesis_record_at_another_schema_version_is_an_unknown_schema`),
+  `crates/mandate-journal/tests/catalogue.rs` (`thesis_records_are_routed_to_section_9_4`, live, and
+  `thesis_records_refuse_an_unlisted_member`), and `thesis_tests` in `context.rs` (the six
+  re-derivation tests: pinned universe, admission `deny`, asset class, revision cap, the named
+  mandate, an absent or impostor document).
+- **Run:** `cargo nextest run -p mandate-journal -p mandate-spec --run-ignored all
+  -E 'test(/thesis/)'`; the vectors themselves with `uv run --directory python pytest -q
+  mandate_tools/tests/test_journal_research_vectors.py`.
+
 ## Append protocol
 
 - **Spec:** `docs/specs/journal.md` §5.1.
