@@ -1207,11 +1207,17 @@ From E10-1's slice-V implementation (DEC-161):
     each of the four reasons, and the `refused_stop` vector's own form, read from the committed
     vectors. The in-module late-Stop pin goes pending with them (the coordinator-named test
     change), and `refused_only` reads the judged second in either form, so the implementation PR
-    deletes `#[ignore]` lines only (DEC-309 item 3). Tests merged (#462); the implementation PR
-    on `agent/m7-refused-timestamp-impl` fills `payload::stamp`, switches `refused` to it, and
-    deletes the five `#[ignore]` lines, so the drafts commit again. Until it lands the registered
-    schema refuses the integer-form drafts at `append`, as DEC-261 item 7 has standing
-    (rule 3). This follow-up row needs its own story id: its pins and stub cite E8-3, which
+    deletes `#[ignore]` lines only (DEC-309 item 3). Tests merged (#462) and the implementation
+    merged (#469): `refused` stamps through `payload::stamp`, and the refusal drafts commit at
+    `append`; the follow-up on `agent/m7-refused-timestamp-followup` pins the stamp's §4.7 range
+    and corrects the stale doc comments. Still open from the two reviews:
+    - DEC-308 item 2 and DEC-310 item 1 name the integer form's refusal at `append` as
+      `non_canonical`; the vectors and `mandate_journal::Draft::parse` give `schema` at
+      `payload.effective_at` (the #469 review, minor 2). The code's doc comment is corrected; the
+      decisions need a note in a docs change.
+    - #462's description says three live tests read `refused_only`; there are four (its round-2
+      review, minor 7). Description wording on a merged PR, recorded here only.
+    This follow-up row needs its own story id: its pins and stub cite E8-3, which
     `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
     (HLD §8), as a new `schema_version` with its own vectors.
@@ -2064,6 +2070,34 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`
   asserts only times inside the window, so it passes against a `close_window` that is always true
   (#228 review, round 1, minor 3; E6-6's bug list when it lands).
+- **E6-4 harness: family B's trim arm compares the trim** (DEC-250 item 11, DEC-399 item 6).
+  `mandate_risk::trim_proposals` answers since E6-4's implementation PR, but
+  `crates/mandate-refcases/src/mandate/order_builder.rs`'s `trim_first` still fails every
+  `trim_to_target` case, and its `OWED` rows pin the answer (MC-B17 a 3-share `RiskExit`, MC-B30 to
+  MC-B32 none). The arm owes the comparison: a trim's `action`, `qty`, `limit_price` at the bid,
+  `order_usd`, `purpose`, `origin: risk_engine` and `autonomy` (`builtin_risk_reducing`), and, when
+  no trim is proposed, `trim_withheld` and the builder's own answer after it (§6.2 step 1). The
+  guards are not in `trim_proposals`' answer, so naming them needs a reading in its own decision:
+  derive each guard the harness can state from the case (`scale_active_s`, `holding`, the session,
+  the minimum) and require the gate's empty answer to agree, or widen the API in a tests PR first
+  (DEC-77). MC-B17 and MC-B30 to MC-B32 then pass; their status rows follow in a status-only PR.
+- **E6-4 reference: drop `ref.py`'s `factor < 1` trim guard and its dollar minimum** (#466 review,
+  round 1, m2; DEC-399 items 3 and 5). `reference/mandate/ref.py`'s `builder` trims only below a
+  factor of 1 and compares the sell's notional with `min_order_usd`. `mandate_risk::trim_proposals`
+  follows §5.5's text (no guard) and trading spec §5.3 rule 2's quantity minimum, `min_order_size`,
+  which the review agrees is right. Removing the guard only tightens (DEC-176). The follow-up is a
+  reference PR on its own (ES-22): `ref.py`, a regenerated `mandate.yaml` and
+  `fixtures/refcases/mandate.json` if any case changes, and `check_cases.py`, `fuzz.py` and
+  `mutants.py` passing. No trim case states a factor of 1 or a sub-minimum trim today.
+- **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
+  `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
+  `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
+  builder (increments of `0.0001` and `0.000001` exist). Once the snapshot carries the increment,
+  round the trim up on it, so a trim is never off the grid that §5.3 rule 2 refuses.
+- **E6-4 nits** (#466 review, round 1): `UsdExact::times_size_fraction`'s doc still lists "the
+  ladder size factor applied to the target" though the gate's 24-place `Ratio` factor enters
+  through `UsdExact::of_ratio`; say which number each serves (n2). `of_ratio` takes any `Ratio`,
+  and stream F's V-040 is what bounds the factor at one.
 
 From E6-2's builder slice (stream H; found while implementing §8.3, not by a review):
 

@@ -1,8 +1,8 @@
 //! The payload schemas journal spec §9.2 closes (DEC-261, DEC-302, E7-10): the control stream's
 //! records that `ValidationContext::from_journal` reads, and `OwnerCommandRefused` on the agent and
 //! account streams, and `AccountSnapshotRecorded` on the account stream, with consistency rules 17
-//! to 24, subject rules 25 and 26, and copy rule 27. Every rule only refuses a draft; none changes
-//! what a writer may do.
+//! to 24, subject rules 25, 26 and 28, and copy rule 27. Every rule only refuses a draft; none
+//! changes what a writer may do.
 //!
 //! `AccountSnapshotRecorded` registered once stream K's fee-step writer conformed (#456), in the
 //! change that journals that writer's form in `fees`, so the fee step's snapshot is never refused
@@ -121,7 +121,7 @@ pub(crate) fn payload(
     Ok(payload)
 }
 
-/// Subject rules 25 and 26 (`stream_mismatch`), then copy rule 27, on a payload that passed
+/// Subject rules 25, 26 and 28 (`stream_mismatch`), then copy rule 27, on a payload that passed
 /// [`payload`]: reported after `artifact_refs` and `pii_refs` (§9.1's order, which §9.2 keeps).
 pub(crate) fn subject_and_copy(
     event_type: &str,
@@ -152,11 +152,20 @@ pub(crate) fn subject_and_copy(
         "payload.command",
     )?;
     ensure(
+        p.text("reason") != NOT_INDEPENDENT || stream.stream_type() == StreamType::Account,
+        InvalidReason::StreamMismatch,
+        "payload.reason",
+    )?;
+    ensure(
         causation_id.is_some_and(|c| *c != Value::Null),
         InvalidReason::Schema,
         "causation_id",
     )
 }
+
+/// The refusal only the executor writes, of an acknowledgment that lifts a fired tripwire under
+/// `independent_approval_required` (rule 28; mandate spec §5.8, §6.7; DEC-351 items 5 and 6).
+const NOT_INDEPENDENT: &str = "not_independent";
 
 /// `ConfigSnapshotRegistered`'s kind for a signal model.
 const MODEL_KIND: &str = "model_version";
@@ -381,6 +390,7 @@ static OWNER_COMMAND_REFUSED: Ty = Ty::Record(&[
             "step_up_stale",
             "step_up_reused",
             "step_up_method",
+            NOT_INDEPENDENT,
         ]),
     ),
     ("effective_at", Ty::Timestamp),
@@ -851,6 +861,81 @@ mod tests {
             Some(("stream_mismatch".to_owned(), "payload.command".to_owned())),
             "rule 26 (stream) before rule 27 (cause)"
         );
+        Ok(())
+    }
+
+    /// Rule 28: `not_independent` is the executor's refusal of an acknowledgment, so it is accepted on
+    /// the account stream and refused at `payload.reason` on the agent stream, where rule 26 has
+    /// already let a resume or Stop through; a step-up reason stays accepted on both. The report
+    /// order is pinned both ways: a command on the wrong stream is rule 26's (`payload.command`)
+    /// even with `not_independent`, and an uncaused `not_independent` on the agent stream is rule
+    /// 28's (`payload.reason`), not rule 27's (`causation_id`).
+    #[test]
+    fn not_independent_is_an_account_stream_refusal_only() -> Result<(), String> {
+        let payload = |command: &str, reason: &str| -> Result<Value, String> {
+            Ok(Value::Object(
+                [
+                    ("command", command),
+                    ("reason", reason),
+                    ("effective_at", "2026-09-22T13:00:00.000000000Z"),
+                ]
+                .into_iter()
+                .map(|(k, v)| Ok((Key::new(k).map_err(|_| "key")?, Value::Str(v.to_owned()))))
+                .collect::<Result<_, String>>()?,
+            ))
+        };
+        let cause = Value::Str("01J8ZNB00000000000000000C6".to_owned());
+        let at_reason = Some(("stream_mismatch", "payload.reason"));
+        let at_command = Some(("stream_mismatch", "payload.command"));
+        for (stream, command, reason, caused, verdict) in [
+            ("acct:ws_1:a1", "acknowledge", "not_independent", true, None),
+            (
+                "agent:ws_1:agent_a",
+                "stop",
+                "not_independent",
+                true,
+                at_reason,
+            ),
+            (
+                "agent:ws_1:agent_a",
+                "resume",
+                "not_independent",
+                true,
+                at_reason,
+            ),
+            ("agent:ws_1:agent_a", "stop", "step_up_stale", true, None),
+            ("acct:ws_1:a1", "acknowledge", "step_up_reused", true, None),
+            ("acct:ws_1:a1", "stop", "not_independent", true, at_command),
+            (
+                "agent:ws_1:agent_a",
+                "acknowledge",
+                "not_independent",
+                true,
+                at_command,
+            ),
+            (
+                "agent:ws_1:agent_a",
+                "stop",
+                "not_independent",
+                false,
+                at_reason,
+            ),
+        ] {
+            let stream = StreamId::parse(stream).ok_or("a stream id")?;
+            let got = subject_and_copy(
+                "OwnerCommandRefused",
+                &stream,
+                &payload(command, reason)?,
+                caused.then_some(&cause),
+            )
+            .err()
+            .map(|e| (e.reason.code(), e.path));
+            assert_eq!(
+                got,
+                verdict.map(|(code, path)| (code, path.to_owned())),
+                "{stream} {command} {reason} caused={caused}"
+            );
+        }
         Ok(())
     }
 

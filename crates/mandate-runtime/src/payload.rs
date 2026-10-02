@@ -55,8 +55,8 @@ pub(crate) fn count(n: u64, field: &'static str) -> Result<Value, RuntimeError> 
 /// A whole-second risk clock as journal spec §4.7's canonical timestamp, the form §9.2 types
 /// `OwnerCommandRefused`'s `effective_at` (DEC-261 item 7, DEC-308): the instant `UtcNanos` prints
 /// and `UtcNanos::parse` reads back unchanged, on the whole second, never the integer seconds
-/// [`seconds`] writes and the registered schema refuses (`non_canonical` at
-/// `payload.effective_at`). The runtime's one writer of the member, `escalation::refused`, stamps
+/// [`seconds`] writes and the registered schema refuses (`schema` at `payload.effective_at`, as the
+/// vectors' `refused_at_risk_clock_seconds` expects). The runtime's one writer of the member, `escalation::refused`, stamps
 /// through here.
 ///
 /// # Errors
