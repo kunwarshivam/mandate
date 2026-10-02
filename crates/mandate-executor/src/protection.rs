@@ -6848,10 +6848,75 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// #468 round 1, m2: protection resting with no recorded prices has nothing to be re-placed
-    /// at, so it is left resting rather than cancelled.
+    /// The founder's decision on #468, case (a): protection due beside a working exit is re-placed
+    /// for what that exit cannot sell, never left to expire. On 2026-08-28, past the buffer day,
+    /// the OCO for 6 beside [`LONE`] is cancelled with its interval started first, and re-placed
+    /// for the 6 [`LONE`] cannot sell.
     #[test]
-    fn protection_with_no_prices_is_left_alone() -> Result<(), ExecutorError> {
+    fn due_protection_beside_a_working_exit_is_re_placed_for_what_it_cannot_sell()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        let due = trading_day(&mut executor, &ports, "2026-08-28")?;
+        assert_eq!(cancels(&due), vec![OCO]);
+        assert_eq!(actions(&due), vec!["unprotected_start"]);
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            ocos(&placed)
+                .into_iter()
+                .map(|(_, qty, _, _)| qty)
+                .collect::<Vec<_>>(),
+            vec![Qty::parse("6")?],
+            "what {LONE} cannot sell"
+        );
+        Ok(())
+    }
+
+    /// The founder's decision on #468, case (b): an exit that ends unfilled, cancelled or expired,
+    /// beside protection sized around it leaves its shares under-covered. They are protected
+    /// again in the same step, at the resting protection's prices, its interval started before
+    /// the placement.
+    #[test]
+    fn an_exit_that_ends_unfilled_has_its_shares_protected_again_at_once()
+    -> Result<(), ExecutorError> {
+        for status in ["canceled", "expired"] {
+            with_ports!(ports);
+            let mut executor = beside_a_lone_exit(&ports)?;
+            let mut order = reported(
+                LONE,
+                &Held {
+                    purpose: Purpose::RiskExit,
+                    qty: 4,
+                    filled: 0,
+                    acked: true,
+                    live: false,
+                },
+            )?;
+            status.clone_into(&mut order.status);
+            let ended = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(order)), &ports)?;
+            assert_eq!(
+                actions(&ended).first(),
+                Some(&"unprotected_start"),
+                "{status}: {:?}",
+                drafted(&ended)
+            );
+            assert_eq!(
+                ocos(&ended)
+                    .into_iter()
+                    .map(|(_, qty, legs, _)| (qty, legs))
+                    .collect::<Vec<_>>(),
+                vec![(Qty::parse("4")?, legs("170", "140", "4")?)],
+                "{status}"
+            );
+        }
+        Ok(())
+    }
+
+    /// #468 round 1, m2, with the founder's decision on #468: protection resting with no recorded
+    /// prices has nothing to be re-placed at, so it is left resting rather than cancelled, and,
+    /// once due, journaled and alerted, never silent.
+    #[test]
+    fn due_protection_with_no_prices_is_alerted_and_left_alone() -> Result<(), ExecutorError> {
         with_ports!(ports);
         let mut executor = held(&ports)?;
         committed(
@@ -6879,6 +6944,8 @@ mod sequence_tests {
         )?;
         let started = trading_day(&mut executor, &ports, "2026-09-21")?;
         assert!(cancels(&started).is_empty(), "{:?}", drafted(&started));
+        assert_eq!(actions(&started), vec!["expiry_unreplaceable"]);
+        assert_eq!(alerts(&started), vec!["protection_expiring"]);
         Ok(())
     }
 
@@ -7827,6 +7894,9 @@ mod sequence_tests {
         Confirm,
         Pause(bool),
         TradingDay(usize),
+        /// The broker cancels the first exit it holds acknowledged and live, as at a day order's
+        /// close (founder's decision on #468, case (b)).
+        BrokerCancel,
     }
 
     /// The trading days a script's `TradingDayStarted` may name, in order: a later move may name
@@ -7890,6 +7960,9 @@ mod sequence_tests {
         fills: u32,
         paused: bool,
         quiet_since: i64,
+        /// Whether an unprotected interval is open by the oracle's own record: a sequence, a
+        /// passive sequence or a re-placement started and not yet ended.
+        open: bool,
     }
 
     /// 2018-01-01 00:00 ET, the calendar's first date: before it (the 1970 base, the eve of 2018)
@@ -8034,7 +8107,10 @@ mod sequence_tests {
 
         /// §5.4's Σ protective sell quantity ≤ position, counted as `fits` counts it: every
         /// protective order the broker holds live, with every exit it holds live, sells at most the
-        /// position (rule 12). The oracle's own record, never the fold's.
+        /// position (rule 12). And the under-cover arm (the founder's decision on #468): while no
+        /// sequence or re-placement is under way, they sell at least the position, so no held share
+        /// is left without a protective order or an exit. The oracle's own record, never the
+        /// fold's.
         fn within_position(&self) -> Result<(), String> {
             let selling: u32 = self
                 .venue
@@ -8048,12 +8124,26 @@ mod sequence_tests {
                     self.position, self.now
                 ));
             }
+            if !self.open && selling < self.position {
+                return Err(format!(
+                    "{selling} protective and exit orders cover a position of {} at {}, with no \
+                     sequence or re-placement under way",
+                    self.position, self.now
+                ));
+            }
             Ok(())
         }
 
         fn saw(&mut self, draft: &EventDraft) -> Result<(), String> {
             let field = |name: &str| draft.payload.get(name).and_then(Value::as_str);
             let intent = field("intent_id").unwrap_or_default().to_owned();
+            if draft.event_type == "ProtectionChanged" {
+                match field("action") {
+                    Some("unprotected_start" | "passive_start") => self.open = true,
+                    Some("unprotected_end") => self.open = false,
+                    _ => {}
+                }
+            }
             match (draft.event_type.as_str(), field("action")) {
                 ("IntentReceived", _) if intent.starts_with("w-") => {
                     let qty = field("qty")
@@ -8321,6 +8411,7 @@ mod sequence_tests {
             fills: 0,
             paused: false,
             quiet_since: 0,
+            open: false,
         };
         let agent = AgentId("agent-a".to_owned());
         desk.deliver(
@@ -8434,6 +8525,20 @@ mod sequence_tests {
                     executor.state.modes.insert(agent.clone(), mode);
                     None
                 }
+                Move::BrokerCancel => {
+                    let first = desk.venue.iter_mut().find(|(_, held)| {
+                        held.live && held.acked && held.purpose != Purpose::Protective
+                    });
+                    match first {
+                        Some((id, held)) => {
+                            held.live = false;
+                            Some(Input::BrokerUpdate(BrokerUpdate::Order(
+                                reported(id, held).map_err(failed)?,
+                            )))
+                        }
+                        None => None,
+                    }
+                }
                 Move::TradingDay(day) => {
                     let date = TRADING_DATES.get(day).copied().unwrap_or("2026-09-21");
                     let at = clock(RiskClock::from_secs(desk.now)).map_err(failed)?;
@@ -8532,6 +8637,14 @@ mod sequence_tests {
     fn re_protection_beside_a_working_exit_covers_only_the_rest() -> Result<(), String> {
         let script = [Move::Exit(0, 1, 141), Move::Tick(10), Move::Confirm];
         rule_13_script_from(TEN_SECONDS_BEFORE_THE_NIGHT, true, &script)
+    }
+
+    /// The founder's decision on #468, case (b), through the oracle: [`LONE`] cancelled by the
+    /// broker beside an OCO for the other 6 leaves 4 shares with neither a protective order nor an
+    /// exit, and nothing under way (the under-cover arm of [`Desk::within_position`]).
+    #[test]
+    fn an_exit_the_broker_cancels_leaves_no_share_uncovered() -> Result<(), String> {
+        rule_13_script_from(0, true, &[Move::BrokerCancel])
     }
 
     /// #468 round 1, B1, through the oracle: a trading day beside [`LONE`] re-places nothing that
