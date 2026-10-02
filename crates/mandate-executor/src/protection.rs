@@ -8570,15 +8570,23 @@ mod bracket_tests {
     /// still ends.
     #[test]
     fn nothing_left_to_cover_places_no_oco_and_ends_the_interval() -> Result<(), ExecutorError> {
-        let (config, fees) = (executor_config(), fees()?);
-        let ports = Ports {
-            ids: &Ids,
-            mandates: &Everything,
-            instruments: &Everything,
-            config: &config,
-            fees: &fees,
-        };
-        let mut executor = bracketed(&ports)?;
+        with_ports(|ports| {
+            let (_, ended) = nothing_left(ports)?;
+            assert_eq!(submitted(&ended), 0, "nothing to cover: {ended:?}");
+            let actions: Vec<&str> = records(&ended)
+                .into_iter()
+                .filter_map(|draft| draft.payload.get("action").and_then(Value::as_str))
+                .collect();
+            assert!(actions.contains(&"unprotected_end"), "{actions:?}");
+            assert!(!actions.contains(&"placed"), "{actions:?}");
+            Ok(())
+        })
+    }
+
+    /// A bracket entry partly filled for 4 while `agent-b`'s exit of 4 is still selling, reported
+    /// cancelled: nothing is left to cover. Answers the executor and that report's effects.
+    fn nothing_left(ports: &Ports<'_>) -> Result<(Executor, Vec<Effect>), ExecutorError> {
+        let mut executor = bracketed(ports)?;
         let at = || clock(RiskClock::from_secs(10));
         executor.commit_one(
             "FillApplied",
@@ -8605,20 +8613,42 @@ mod bracket_tests {
                 ("risk_clock", at()?),
             ])?,
         )?;
-        let ended = executor.run(report("canceled", "4")?, &ports)?;
-        assert_eq!(submitted(&ended), 0, "nothing to cover: {ended:?}");
-        let actions: Vec<&str> = ended
-            .iter()
-            .filter_map(|effect| match effect {
-                Effect::Journal(draft) if draft.event_type == "ProtectionChanged" => {
-                    draft.payload.get("action").and_then(Value::as_str)
-                }
-                _ => None,
-            })
-            .collect();
-        assert!(actions.contains(&"unprotected_end"), "{actions:?}");
-        assert!(!actions.contains(&"placed"), "{actions:?}");
-        Ok(())
+        let ended = executor.run(report("canceled", "4")?, ports)?;
+        Ok((executor, ended))
+    }
+
+    /// DEC-346 item 4 (#446 round 2, M1): with nothing left to cover no `placed` record is drafted,
+    /// so the interval's `unprotected_end`, naming the entry, is all that marks it protected. Later
+    /// steps record and send nothing; and once the competing exit stops selling and room opens, no
+    /// OCO goes for an entry whose interval has already ended.
+    #[test]
+    fn an_entry_with_nothing_left_to_cover_is_protected_once() -> Result<(), ExecutorError> {
+        with_ports(|ports| {
+            let (mut executor, _) = nothing_left(ports)?;
+            for second in 11..15 {
+                let later = executor.run(Input::Tick(RiskClock::from_secs(second)), ports)?;
+                assert!(
+                    records(&later).is_empty() && submitted(&later) == 0,
+                    "second {second}: nothing more is recorded or sent: {:?}",
+                    drafted(&later)
+                );
+            }
+            executor.commit_one(
+                "OrderStateChanged",
+                object(vec![
+                    ("client_order_id", text("md-sell-b")),
+                    ("state", text("canceled")),
+                    ("risk_clock", clock(RiskClock::from_secs(15))?),
+                ])?,
+            )?;
+            let opened = executor.run(Input::Tick(RiskClock::from_secs(16)), ports)?;
+            assert!(
+                records(&opened).is_empty() && submitted(&opened) == 0,
+                "room opens, and still no late OCO for an entry whose interval ended: {:?}",
+                drafted(&opened)
+            );
+            Ok(())
+        })
     }
 
     /// A bracket's `OrderSubmitted` that names its class without both prices is refused on the
