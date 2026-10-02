@@ -1155,7 +1155,7 @@ mod record_tests {
     }
 
     /// A member the mapping cannot read is refused under its own name, never skipped and never
-    /// defaulted (DEC-303 item 10): an unparseable date, a non-text `params` element, an absent
+    /// defaulted (DEC-303 item 10): an unparsable date, a non-text `params` element, an absent
     /// `admits_instruments`, an empty `kind`, and a bare hex digest (#461 round 1, M3, m1, m2).
     #[test]
     fn each_unreadable_member_is_refused_by_name() -> Result<(), SpecError> {
