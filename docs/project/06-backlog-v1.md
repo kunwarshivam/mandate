@@ -2600,3 +2600,27 @@ From journal spec v0.8 §9.3's review (#470 round 2, DEC-403):
   - **`risk_state.classify`** raises `ValueError` on a path it does not encode instead of reporting
     a `drafts.classification` problem. It fails closed either way, but a reported problem reads
     better.
+
+From the #485 chain's round-3 review (#494 and #496; the coordinator's ruling, 23:58Z, freeze rule), and #508's round 2 (m3′):
+
+- **E7-4: pin that a crowded-out discretionary exit's denial is terminal** (#494 round 3, minor 1;
+  DEC-410 item 3). `a_discretionary_exit_with_nothing_left_is_held_overnight_then_refused_at_the_open`
+  ends one tick after the denial, and the oracle keeps only the latest verdict, so a denial repeated
+  at every tick would pass. Assert one `GateDecided deny` record for that intent over several ticks.
+- **E7-3: the kill switch between rungs** (#494 round 3, minor 2; DEC-410 item 5). Its only script,
+  `a_kill_switch_between_rungs_never_over_sells`, is `pending E7-3`; the claim in §5.5's agent row is
+  pinned only when E7-3 lands.
+- **E7-4: a sell beside a parked remainder that ends unsold before the rung is due** (#494 round 3,
+  minor 4; DEC-410 item 6). With the agent paused across the open, the sell's refusal frees its room
+  and the rung then sends the whole remainder. No script pins that direction: the existing ones shrink
+  the position (`Move::Triggered`) or refuse the ladder's own rung (`Move::Reject`).
+- **E7-4: the window guard's doc says no script reaches an unparked remainder today** (#496 round 3,
+  minor 1). `Desk::within_position`'s parked-only assertion should say in its doc that it holds by
+  construction today and exists to turn red if a change opens the window.
+- **E7-4: `Held` gains an `Unknown` state** (#496 round 3, minor 2). The oracle's
+  `unknown_order_in_flight` check fails every such hold because the script's broker never leaves an
+  order unknown. With an `Unknown` state in `Held`, it becomes a coincidence check against the
+  oracle's own venue record.
+- **E7-4: hoist `overtaken` out of `release_waiting`'s per-exit loop** (#508 round 2, m3′). It runs
+  once per waiting exit, not once per instrument; with the `Unknown` arm in its guard the repeats ask
+  nothing, so this is wasted work only.

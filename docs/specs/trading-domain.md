@@ -465,12 +465,12 @@ protection is canceled), the executor uses the **exit price ladder** (sell; buy 
    a step's cancel that leaves part of the rung unsold, until it sends its next rung or ends.
    - **What it counts.** Its remainder is never stored. Whenever it is read, it is the stepped
      rung's unfilled quantity, capped at the position less the open non-protective sells and less
-     the remainders counted ahead of it. Protective orders are left out, as in rule 4's first check
-     (§5.3), because §5.4 cancels them before a rung is sent. One instrument holds at most two
-     ladders, a sequence's and one without a sequence; the one whose exit's intent id sorts first
-     counts first. Id order is used because it is deterministic, so a replay of the same journal
-     shares the room the same way. Every ladder between rungs belongs to an exit already allowed, so
-     no order of them adds risk.
+     the remainders counted ahead of it. Protective orders are left out, as §5.3's note on risk-
+     reducing orders at the first gate decision leaves them out, because §5.4 cancels them before a
+     rung is sent. One instrument holds at most two ladders, a sequence's and one without a
+     sequence; the one whose exit's intent id sorts first counts first. Id order is used because it
+     is deterministic, so a replay of the same journal shares the room the same way. Every ladder
+     between rungs belongs to an exit already allowed, so no order of them adds risk.
    - **When it counts.** A remainder counts only while something will send it:
      - a sequence's (§5.4) while its ladder climbs: its agent neither paused nor stopped, and its
        unprotected interval not past its bound. A pause or stop after the confirmation suspends
