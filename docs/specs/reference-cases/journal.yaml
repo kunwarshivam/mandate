@@ -3543,16 +3543,6 @@ control_stream:
       outcome: Invalid
       reason: stream_mismatch
       path: payload.command
-  - name: refused_stop_not_independent
-    clause: rule 28
-    base_draft: refused_stop
-    changes:
-    - path: payload.reason
-      value: not_independent
-    expect:
-      outcome: Invalid
-      reason: stream_mismatch
-      path: payload.reason
   - name: refused_stop_without_cause
     clause: rule 27 (rule 16 on the agent stream)
     base_draft: refused_stop
@@ -3652,14 +3642,6 @@ control_stream:
     changes:
     - path: payload.reason
       value: step_up_method
-    expect:
-      outcome: Valid
-  - name: refused_acknowledgment_not_independent
-    clause: rule 28
-    base_draft: refused_acknowledgment
-    changes:
-    - path: payload.reason
-      value: not_independent
     expect:
       outcome: Valid
   - name: provenance_escaped_token
