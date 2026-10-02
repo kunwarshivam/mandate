@@ -294,6 +294,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   openings when their condition is met, so that trust does not outlive the conditions I gave it
   under ([DEC-187](04-decision-log.md#decisions)). The spec change is MI-31, V-044, §6.7, and the MC-W cases
   ([DEC-350](decisions/DEC-350.md) to [DEC-352](decisions/DEC-352.md); claim [#439](https://github.com/kunwarshivam/mandate/issues/439)).
+  **Prerequisite for the account-stream risk-state mapping (#482 round 1, M2; DEC-404 item 7):** `mandate-spec`'s
+  classifier change for DEC-353's two shapes (#444, #471) is a journal-affecting change, because `MandateVersionApplied`'s
+  mapping refuses a record whose stated classification differs from `change::classify`'s. So it lands before any path
+  builds a `ValidationContext` from a real journal (DEC-169's wiring).
   Owed after it: `mandate-spec` parsing the field, V-044, and the §9.2 row (DEC-77 tests then implementation), the executor's
   fold of §6.7, and the `kind: tripwire` harness arm. Also owed, from #443's round 1 (m4): run ruff over `reference/` in
   `cargo xtask ci lint`, so a duplicated definition such as a second `main()` in `reference/mandate/mutants.py` (F811) fails
@@ -1276,14 +1280,24 @@ From E10-1's slice-V implementation (DEC-161):
     §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
     vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
     follow register them and map them to `AgentVersionActive` (a deployed agent's new version) and
-    `UniverseChanged`; until then both stay `unknown_schema` and map to none.
+    `UniverseChanged`; until then both are refused. **Tests first, on `agent/l-risk-state-tests`
+    ([DEC-404](decisions/DEC-404.md)):** both are routed to a stub and refused as `unimplemented`,
+    and nine pending tests (`pending E7-10`) pin the vectors, the 15 non-nullable members, the closed
+    schemas, the mapping, and the requirement below.
     **Required, and blocking this registration's acceptance (#470 round 2, minor 5):** the Rust
     registration re-derives mandate spec §9.2's classification of `new_version` against
     `old_version` from the two stored documents and refuses a `MandateVersionApplied` whose
     `classification` differs. Rule 33 covers only what the record itself carries (the allocation
     change, the floor, and three rejections), so until this lands a risk-increasing version through
     any other §9.2 row can be journaled as applied, labelled `neutral`, with no step-up (DEC-403
-    item 5).
+    item 5). **Two limits on it (#482 round 1, M2; DEC-404 item 7):**
+    - **Coverage.** The re-derivation inherits `change::classify`'s coverage, and DEC-353's two
+      shapes (#444, #471) are not in the Rust classifier yet, so E6-13's classifier code PR is part
+      of closing this hole.
+    - **Order.** A change to `classify` is journal-affecting: a record labelled by an older
+      classifier can become unmappable, and a context that will not build is not a hold an exit may
+      have (rule 13). So E6-13's classifier change lands before any path builds a context from a
+      real journal (DEC-169's wiring). That order is a named prerequisite here and on E6-13's row.
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).
@@ -2123,6 +2137,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   *Tests staged (DEC-401):* `evaluate` refuses a zero proposal before any check, as
   `Unimplemented` until the implementation names it `GateError::ZeroQuantity`; two pending tests
   in `crates/mandate-risk/tests/hand.rs`.
+  *Done (DEC-401, `agent/g-e6-6-zero-qty-impl`):* the refusal is `GateError::ZeroQuantity`, both
+  tests are live, and the in-module property asserts the named refusal.
 - **E7: the gate port's adapter handles `ZeroQuantity`** (stream K, when §9.1's gate port into
   `mandate-executor` is wired; DEC-401 item 5, #486 review, m4). `mandate_risk::evaluate` refuses
   a proposal of zero quantity with `GateError::ZeroQuantity`. The port's adapter must either filter
@@ -2142,6 +2158,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   allowed with `marketable_limit_required`, but not its `limit_price` or `applied`. §4.4 and §5.6
   re-price that exit as the auction window does, so it is the same unpinned pair the auction test
   now pins: the proposal's limit, and no §9.6 control.
+  *Done (`agent/g-e6-6-halt-pins`):* the test asserts the quantity, the proposal's limit and an
+  empty `applied`.
 - **E6-4 harness: family B's trim arm compares the trim** (DEC-250 item 11, DEC-399 item 6).
   `mandate_risk::trim_proposals` answers since E6-4's implementation PR, but
   `crates/mandate-refcases/src/mandate/order_builder.rs`'s `trim_first` still fails every
@@ -2167,6 +2185,12 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   `ref.py`. A rung factor of 1 cannot be written: the schema's `open_fraction` excludes it, and
   `scaling_rung` requires a case's factor to be a rung's. So only the dollar minimum can diverge,
   and no trim case states a sub-minimum trim today.
+  *The guard half is closed with no change:* `ref.py`'s `factor < 1` means "a `scale_sizes` rung is
+  active", since every rung factor is an `open_fraction` below one, and the gate trims only under
+  an active `trim_to_target` rung (DEC-399 item 2), so the two agree on every input the schema can
+  write. Dropping the guard would make `ref.py` withhold a trim `rung_not_confirmed` with no rung
+  active. Only the minimum's reading remains, a question to the coordinator on claim
+  [#123](https://github.com/kunwarshivam/mandate/issues/123).
 - **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
@@ -2176,6 +2200,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   ladder size factor applied to the target" though the gate's 24-place `Ratio` factor enters
   through `UsdExact::of_ratio`; say which number each serves (n2). `of_ratio` takes any `Ratio`,
   and stream F's V-040 is what bounds the factor at one.
+  *Done (`agent/g-e6-4-nits`):* both doc comments say which factor each serves and why any
+  `Ratio` is safe for `of_ratio`.
 
 From E6-2's builder slice (stream H; found while implementing §8.3, not by a review):
 
@@ -2612,7 +2638,9 @@ From journal spec v0.8 §9.3's review (#470 round 2, DEC-403):
     `increase_blocked_while_latched`, `classification` `neutral`, and an `allocation_change` set)
     are pinned by no draft. Each wants a draft and an `order.*` mutant, as §9.2's
     `order.rule_21_first`. Rules 29 and 33 can never both fire, since 29 needs `risk_increasing`
-    and 33 needs anything else, so their relative order needs no pin.
+    and 33 needs anything else, so their relative order needs no pin. The 31-then-32 order is a
+    third reachable pair (a `thesis_admitted` that removes and carries no thesis breaks both), and
+    is unpinned too (#482 round 1, m3).
   - **`universe_size_after`** is checked against nothing, not even the fold of the section's own
     drafts.
   - **`risk_state.classify`** raises `ValueError` on a path it does not encode instead of reporting

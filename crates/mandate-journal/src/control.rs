@@ -8,6 +8,11 @@
 //! change that journals that writer's form in `fees`, so the fee step's snapshot is never refused
 //! for a member while it pauses every agent and alerts the owner (`AGENTS.md` rules 3 and 13,
 //! DEC-261 item 7, DEC-402).
+//!
+//! **The account stream's `MandateVersionApplied` and `UniverseChanged` are routed here, to a stub**
+//! (journal spec v0.8 §9.3, DEC-403, DEC-404). The registration's tests PR refuses both as
+//! `unimplemented`, as they were refused as `unknown_schema` before; the implementation PR
+//! registers their schemas and rules 29 to 33.
 
 use mandate_canon::Value;
 use mandate_num::Usd;
@@ -34,12 +39,17 @@ const REFUSAL: &str = "OwnerCommandRefused";
 /// The account stream's snapshot §9.2 closes, with rule 24.
 const SNAPSHOT: &str = "AccountSnapshotRecorded";
 
+/// The account stream's risk-state records journal spec §9.3 closes, with rules 29 to 33.
+const RISK_STATE: [&str; 2] = ["MandateVersionApplied", "UniverseChanged"];
+
 /// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     match stream.stream_type() {
         StreamType::Control => CONTROL.contains(&event_type),
         StreamType::Agent => event_type == REFUSAL,
-        StreamType::Account => event_type == REFUSAL || event_type == SNAPSHOT,
+        StreamType::Account => {
+            event_type == REFUSAL || event_type == SNAPSHOT || RISK_STATE.contains(&event_type)
+        }
         StreamType::Scheduler => false,
     }
 }
@@ -52,6 +62,9 @@ pub(crate) fn payload(
     payload: &Value,
     config_refs: Option<&Value>,
 ) -> Result<Value, Invalid> {
+    if RISK_STATE.contains(&event_type) {
+        return risk_state_payload();
+    }
     let schema = schema(event_type, schema_version)
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
     let payload = crate::schema::normalize(schema, payload, "payload")?;
@@ -215,6 +228,12 @@ fn ascending(items: &[&str], path: &str) -> Result<(), Invalid> {
         InvalidReason::NonCanonical,
         path,
     )
+}
+
+/// The stub of the risk-state registration's tests PR (DEC-77, DEC-404): journal spec §9.3's
+/// schemas and rules 29 to 33 land with its implementation.
+fn risk_state_payload() -> Result<Value, Invalid> {
+    Err(Invalid::new(InvalidReason::Unimplemented, "payload"))
 }
 
 /// Rule 24 on a compared snapshot: `cash_band` ≥ 0, and `cash_in_band` is `true` exactly when
@@ -410,14 +429,18 @@ mod tests {
     use super::subject_and_copy;
 
     fn section() -> Result<Value, String> {
+        named_section("control_stream")
+    }
+
+    fn named_section(name: &str) -> Result<Value, String> {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
         let fixture = parse(&bytes).map_err(|e| format!("{e:?}"))?;
         fixture
-            .get("control_stream")
+            .get(name)
             .cloned()
-            .ok_or_else(|| "no control_stream".to_owned())
+            .ok_or_else(|| format!("no {name}"))
     }
 
     fn list<'a>(value: &'a Value, name: &str) -> &'a [Value] {
@@ -990,6 +1013,56 @@ mod tests {
         Ok(())
     }
 
+    /// Journal spec §9.3's vectors, judged by `Draft::parse` alone so the mutation gate sees rules 29
+    /// to 33 here: every base and valid draft of `MandateVersionApplied` and `UniverseChanged` is
+    /// accepted, and every invalid one is refused with its reason at its path (DEC-403, DEC-404).
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn every_risk_state_draft_is_judged_as_its_vectors_say() -> Result<(), String> {
+        let section = named_section("risk_state")?;
+        let mut failures = Vec::new();
+        let drafts = section
+            .get("drafts")
+            .and_then(Value::as_object)
+            .ok_or("no drafts")?;
+        let mut accepted: Vec<(String, Value)> = Vec::new();
+        for name in drafts.keys() {
+            accepted.push((
+                format!("base {}", name.as_str()),
+                named("base_draft", Value::Str(name.as_str().to_owned()))?,
+            ));
+        }
+        for case in list(&section, "valid_drafts") {
+            accepted.push((format!("valid {}", text(case, "name")), case.clone()));
+        }
+        for (name, case) in &accepted {
+            let parsed = Draft::parse(&draft(&section, case)?).map(|_| ());
+            if parsed.is_err() {
+                failures.push(format!("{name}: {parsed:?}"));
+            }
+        }
+        let invalid = list(&section, "invalid_drafts");
+        for case in invalid {
+            let expect = case.get("expect").ok_or("no expect")?;
+            let refused = Draft::parse(&draft(&section, case)?)
+                .err()
+                .map(|e| (e.reason.code().to_owned(), e.path));
+            let wanted = (
+                text(expect, "reason").to_owned(),
+                text(expect, "path").to_owned(),
+            );
+            if refused.as_ref() != Some(&wanted) {
+                failures.push(format!("invalid {}: {refused:?}", text(case, "name")));
+            }
+        }
+        assert!(
+            accepted.len() >= 12 && invalid.len() >= 38,
+            "the vectors may add drafts, never drop them"
+        );
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        Ok(())
+    }
+
     /// Rule 24 reports at the first cash member that disagrees with `model_cash`, in the schema's
     /// order: when both `cash_band` and `cash_in_band` disagree, at `cash_band` (#473 round 1, M1).
     #[test]
@@ -1052,6 +1125,111 @@ mod tests {
                 refusal(body),
                 Some(("schema".to_owned(), path.to_owned())),
                 "{members:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The members §9.3 lists without `?`, at every depth, as paths below `payload`, written out
+    /// from the spec's tables rather than read from this module's schemas: each is refused as
+    /// `schema` when `null` (DEC-403, DEC-404). The vectors pin each member's type but not its
+    /// nullability, so this is what keeps a schema loosened to nullable from passing.
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn a_required_risk_state_member_is_never_null() -> Result<(), String> {
+        const RISK_STATE_REQUIRED: [(&str, &[&str]); 2] = [
+            (
+                "version_applied",
+                &[
+                    "agent_id",
+                    "old_version",
+                    "new_version",
+                    "classification",
+                    "step_up.assertion_id",
+                    "step_up.authenticated_at",
+                    "step_up.method",
+                    "result",
+                    "risk_clock",
+                ],
+            ),
+            (
+                "universe_admitted",
+                &[
+                    "agent_id",
+                    "instrument",
+                    "change",
+                    "reason",
+                    "universe_size_after",
+                    "risk_clock",
+                ],
+            ),
+        ];
+        let section = named_section("risk_state")?;
+        let mut checked = 0;
+        for (name, members) in RISK_STATE_REQUIRED {
+            let case = named("base_draft", Value::Str(name.to_owned()))?;
+            assert_eq!(
+                refusal(base(&section, &case)?),
+                None,
+                "the {name} base appends"
+            );
+            for member in members {
+                let mut body = Value::Object(base(&section, &case)?);
+                *value_at(&mut body, &format!("payload.{member}"))? = Value::Null;
+                let Value::Object(body) = body else {
+                    return Err("the base is a record".to_owned());
+                };
+                assert_eq!(
+                    refusal(body),
+                    Some(("schema".to_owned(), format!("payload.{member}"))),
+                    "{name}.{member} = null"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 15);
+        let mut separated = with_payload(
+            base(
+                &section,
+                &named("base_draft", Value::Str("version_rejected".to_owned()))?,
+            )?,
+            "reason",
+            Value::Str("equity_below_exposure".to_owned()),
+        )?;
+        assert_eq!(
+            refusal(separated.clone()),
+            None,
+            "a rejection rule 33 does not read appends"
+        );
+        separated = with_payload(separated, "classification", Value::Null)?;
+        assert_eq!(
+            refusal(separated),
+            Some(("schema".to_owned(), "payload.classification".to_owned())),
+            "a null classification is refused by the schema, where rule 33 cannot answer for it \
+             (#482 round 1, m1)"
+        );
+        Ok(())
+    }
+
+    /// Either risk-state record at any `schema_version` but 1 is refused as `unknown_schema`, as
+    /// every §9.2 type is: each reaches its schema through `schema`'s version gate, never around it
+    /// (#482 round 1, m2; #467 round 1, m3).
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn a_risk_state_record_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
+        let section = named_section("risk_state")?;
+        let two = Int::new(2).ok_or("an integer")?;
+        for name in ["version_applied", "universe_admitted"] {
+            let mut body = base(&section, &named("base_draft", Value::Str(name.to_owned()))?)?;
+            assert_eq!(refusal(body.clone()), None, "the {name} base appends");
+            body.insert(
+                Key::new("schema_version").map_err(|_| "key")?,
+                Value::Int(two),
+            );
+            assert_eq!(
+                refusal(body),
+                Some(("unknown_schema".to_owned(), "payload".to_owned())),
+                "{name}"
             );
         }
         Ok(())

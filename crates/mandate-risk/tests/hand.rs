@@ -1339,9 +1339,16 @@ fn a_dropped_status_feed_is_a_presumed_halt() {
         "§4.4 and §5.6 re-price an exit under a presumed halt; MI-1 forbids denying it"
     );
     assert_eq!(
-        exit.pacing.map(|p| p.marketable_limit_required),
+        exit.pacing.as_ref().map(|p| p.marketable_limit_required),
         Some(true),
         "the allow carries the marketable-limit requirement the exit price ladder needs"
+    );
+    assert_eq!(
+        exit.pacing.map(|p| (p.qty, p.limit_price, p.applied)),
+        Some((qty("10"), price("100"), BTreeSet::new())),
+        "the re-priced exit keeps the proposal's quantity and limit, and no §9.6 control is \
+         applied to it: a risk exit is exempt from §9.6 entirely, so the marketable price is the \
+         exit ladder's to set (§4.4, §5.6)"
     );
 }
 
@@ -1733,7 +1740,6 @@ fn declared_reason_code_variants() -> BTreeSet<String> {
 /// quantity above zero is never refused that way, so the refusal is the zero and not a row it
 /// happens to sit on.
 #[test]
-#[ignore = "pending E6-6"]
 fn a_proposal_of_zero_is_refused_by_name_whatever_else_it_would_be() {
     const COLLARS: [Option<(&str, bool)>; 4] = [
         None,
@@ -1822,7 +1828,6 @@ fn a_proposal_of_zero_is_refused_by_name_whatever_else_it_would_be() {
 
 /// DEC-401's refusal has its own stable code, distinct from every other refusal's.
 #[test]
-#[ignore = "pending E6-6"]
 fn a_zero_proposal_reports_the_zero_quantity_code() {
     let mut s = Scenario::allowing();
     s.proposed = proposal(INSTRUMENT_3, Side::Buy, "0", "100", Origin::OrderBuilder);
