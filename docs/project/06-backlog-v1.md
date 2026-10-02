@@ -2101,6 +2101,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   *Tests staged (DEC-401):* `evaluate` refuses a zero proposal before any check, as
   `Unimplemented` until the implementation names it `GateError::ZeroQuantity`; two pending tests
   in `crates/mandate-risk/tests/hand.rs`.
+  *Done (DEC-401, `agent/g-e6-6-zero-qty-impl`):* the refusal is `GateError::ZeroQuantity`, both
+  tests are live, and the in-module property asserts the named refusal.
 - **E7: the gate port's adapter handles `ZeroQuantity`** (stream K, when §9.1's gate port into
   `mandate-executor` is wired; DEC-401 item 5, #486 review, m4). `mandate_risk::evaluate` refuses
   a proposal of zero quantity with `GateError::ZeroQuantity`. The port's adapter must either filter
@@ -2147,6 +2149,12 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   `ref.py`. A rung factor of 1 cannot be written: the schema's `open_fraction` excludes it, and
   `scaling_rung` requires a case's factor to be a rung's. So only the dollar minimum can diverge,
   and no trim case states a sub-minimum trim today.
+  *The guard half is closed with no change:* `ref.py`'s `factor < 1` means "a `scale_sizes` rung is
+  active", since every rung factor is an `open_fraction` below one, and the gate trims only under
+  an active `trim_to_target` rung (DEC-399 item 2), so the two agree on every input the schema can
+  write. Dropping the guard would make `ref.py` withhold a trim `rung_not_confirmed` with no rung
+  active. Only the minimum's reading remains, a question to the coordinator on claim
+  [#123](https://github.com/kunwarshivam/mandate/issues/123).
 - **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
@@ -2156,6 +2164,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   ladder size factor applied to the target" though the gate's 24-place `Ratio` factor enters
   through `UsdExact::of_ratio`; say which number each serves (n2). `of_ratio` takes any `Ratio`,
   and stream F's V-040 is what bounds the factor at one.
+  *Done (`agent/g-e6-4-nits`):* both doc comments say which factor each serves and why any
+  `Ratio` is safe for `of_ratio`.
 
 From E6-2's builder slice (stream H; found while implementing §8.3, not by a review):
 

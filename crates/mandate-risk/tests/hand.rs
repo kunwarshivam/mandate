@@ -1740,7 +1740,6 @@ fn declared_reason_code_variants() -> BTreeSet<String> {
 /// quantity above zero is never refused that way, so the refusal is the zero and not a row it
 /// happens to sit on.
 #[test]
-#[ignore = "pending E6-6"]
 fn a_proposal_of_zero_is_refused_by_name_whatever_else_it_would_be() {
     const COLLARS: [Option<(&str, bool)>; 4] = [
         None,
@@ -1829,7 +1828,6 @@ fn a_proposal_of_zero_is_refused_by_name_whatever_else_it_would_be() {
 
 /// DEC-401's refusal has its own stable code, distinct from every other refusal's.
 #[test]
-#[ignore = "pending E6-6"]
 fn a_zero_proposal_reports_the_zero_quantity_code() {
     let mut s = Scenario::allowing();
     s.proposed = proposal(INSTRUMENT_3, Side::Buy, "0", "100", Origin::OrderBuilder);
