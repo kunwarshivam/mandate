@@ -131,14 +131,15 @@ pub(crate) fn is_pointer(s: &str) -> bool {
 /// folded, so one asset has one spelling.
 fn is_asset_id(s: &str) -> bool {
     const GROUPS: [usize; 5] = [8, 4, 4, 4, 12];
-    let groups: Vec<&str> = s.split('-').collect();
-    groups.len() == GROUPS.len()
-        && groups.iter().zip(GROUPS).all(|(group, width)| {
+    let mut groups = s.split('-');
+    GROUPS.iter().all(|&width| {
+        groups.next().is_some_and(|group| {
             group.len() == width
                 && group
                     .bytes()
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         })
+    }) && groups.next().is_none()
 }
 
 pub(crate) fn is_ident(s: &str) -> bool {
