@@ -22,7 +22,8 @@
 //! **The gate's other inputs** are DEC-178's "every other check passes" environment, as for family
 //! G: a healthy risk state at the case's equity, a margin account at the fixture's
 //! `account_equity_usd`, and a liquid, tradable, unhalted listing of the pinned instrument, quoted at
-//! the case's own bid and ask at `now`, whose minimum order size is the case's `qty_increment`.
+//! the case's own bid and ask at `now`, whose minimum order size is the case's `qty_increment`;
+//! on a `trim_to_target` base, the trim call reads the case's `min_order_size` instead, when stated.
 //!
 //! **What the harness fills.** The fixture header's four defaults (`session` regular,
 //! `in_close_window` false, fee rates 0, `has_prior_fill` = position above zero) and `ref.py`'s
@@ -306,7 +307,9 @@ fn trim_first(
     stated.agrees_with_clock(&clock, judged)
 }
 
-/// `reference/mandate/ref.py`'s guards, in its order, on the case's own figures: `None` when no
+/// `reference/mandate/ref.py`'s guards, in its order, on the case's own figures, except that
+/// `below_minimum_order` reads the instrument's `min_order_size` (DEC-399 item 8), which `ref.py`
+/// takes up in the reference PR after this harness: `None` when no
 /// trim is due (no factor below one, or an excess under the band), else every guard that withholds
 /// it, empty when none does. Read from the case, not from `trim_proposals`, which names no guard,
 /// so the gate's answer is judged against them rather than explained by them (DEC-400 item 2).
@@ -1628,7 +1631,8 @@ mod tests {
     /// - A trim's minimum is the instrument's minimum order size, not the dollar minimum (§5.5,
     ///   DEC-399 item 8): MC-B17 under a 1000-dollar minimum still trims its 3 shares, and at a
     ///   `min_order_size` of 3 it still does, while at 4 the trim is withheld and the case fails
-    ///   naming `trim_withheld`.
+    ///   naming `below_minimum_order`. With no `min_order_size` stated, the minimum is one
+    ///   increment: on a 3-share grid MC-B17 still trims (#498 review, m1).
     /// - MC-B30 confirmed for 60 seconds is due and unguarded, so the gate's trim is the case's
     ///   action, and the builder's figures the case states are refused.
     /// - Each guard is judged alone, since MC-B31 states two and either would mask the other:
@@ -1653,9 +1657,13 @@ mod tests {
         })?;
         fails_naming(
             run(a_share_above, "MC-B17"),
-            "trim_withheld",
+            "below_minimum_order",
             "MC-B17 at a minimum a share above its trim",
         )?;
+        let on_the_grid = doctored(&fixture, "MC-B17", "/input/qty_increment", |v| {
+            *v = json!("3");
+        })?;
+        run(on_the_grid, "MC-B17").map_err(|e| format!("MC-B17 on a 3-share grid: {e}"))?;
         let confirmed = doctored(&fixture, "MC-B30", "/input/scale_active_s", |v| {
             *v = json!(60);
         })?;
@@ -2147,7 +2155,11 @@ mod tests {
                 )?;
                 plants = plants.saturating_add(1);
             }
-            for (guard, value) in [("scale_active_s", json!(0)), ("holding", json!(false))] {
+            for (guard, value) in [
+                ("scale_active_s", json!(0)),
+                ("holding", json!(false)),
+                ("min_order_size", json!("1")),
+            ] {
                 if trims(&fixture, &case)? {
                     break;
                 }
