@@ -964,7 +964,8 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             replace(batch, &instrument, &sequence)?;
         }
     }
-    brackets(batch)
+    brackets(batch)?;
+    acknowledged(batch)
 }
 
 /// §5.4's bracket entries, after every step: each entry sent as a bracket that has filled anything
@@ -1067,7 +1068,11 @@ fn bracket(
             changed(batch, &instrument, "placed", placed)?;
             request = Some(oco);
         }
-        changed(batch, &instrument, "unprotected_end", named)?;
+        let mut ended = named;
+        if let Some(sent) = &request {
+            ended.push(awaiting(&[&sent.client_order_id]));
+        }
+        changed(batch, &instrument, "unprotected_end", ended)?;
         if let Some(request) = request {
             batch.broker(BrokerRequest::Submit(request));
         }
@@ -1319,8 +1324,54 @@ fn replace(
         purpose: Purpose::Protective,
     };
     place(batch, &request, None, &sequence.agent, prices)?;
-    changed(batch, instrument, "unprotected_end", Vec::new())?;
+    let awaiting = vec![awaiting(&[&request.client_order_id])];
+    changed(batch, instrument, "unprotected_end", awaiting)?;
     batch.broker(BrokerRequest::Submit(request));
+    Ok(())
+}
+
+/// The `awaiting` field of an `unprotected_end` that ends a sequence with new protection sent: the
+/// interval itself ends only once the broker has acknowledged each ([`acknowledged`], DEC-348
+/// item 2).
+fn awaiting(ids: &[&ClientOrderId]) -> (&'static str, Value) {
+    let named: Vec<&str> = ids.iter().map(|id| id.as_str()).collect();
+    ("awaiting", text(named.join(" ")))
+}
+
+/// DEC-348 item 2, after every step: an interval whose sequence ended with new protection sent ends
+/// once the broker has acknowledged every order it waits on — accepted, or already filling or
+/// filled. Nothing else ends it here: a position read as flat is not enough, since the fold's
+/// position lags the broker's reported fills that the protection was sized from (DEC-346 item 3).
+/// A position sold flat while it waits ends it either through the awaited order's own fill or
+/// through the exit's sequence, whose start ends the waiting interval and whose own re-placement,
+/// with nothing left to cover, sends nothing. Until then it stays open, bounded and alerted like
+/// any other. Protection the broker refused, cancelled unacknowledged, or replaced under another id
+/// leaves it open.
+fn acknowledged(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let due: Vec<InstrumentId> = batch
+        .view
+        .awaiting
+        .iter()
+        .filter(|(_, ids)| {
+            ids.iter().all(|id| {
+                batch.view.orders.get(id).is_some_and(|order| {
+                    matches!(
+                        order.state,
+                        OrderState::Accepted
+                            | OrderState::PartiallyFilled
+                            | OrderState::Filled
+                            | OrderState::PendingCancel
+                            | OrderState::PendingReplace
+                    )
+                })
+            })
+        })
+        .map(|(instrument, _)| instrument.clone())
+        .collect();
+    for instrument in due {
+        let pairs = vec![("acknowledged", Value::Bool(true))];
+        changed(batch, &instrument, "unprotected_end", pairs)?;
+    }
     Ok(())
 }
 
@@ -1405,7 +1456,12 @@ pub(crate) fn passive_exit(
         requests.push(request);
     }
     if interval_open(&batch.view, instrument) {
-        changed(batch, instrument, "unprotected_end", Vec::new())?;
+        let sent: Vec<&ClientOrderId> = requests
+            .iter()
+            .map(|order| &order.client_order_id)
+            .collect();
+        let pairs = vec![awaiting(&sent)];
+        changed(batch, instrument, "unprotected_end", pairs)?;
     }
     if selling > Qty::ZERO {
         let pairs = recorded(intent, &sequence.entry, &sequence.agent, prices);
@@ -2332,6 +2388,44 @@ mod sequence_tests {
         })))
     }
 
+    /// The broker's acknowledgment of every protective order `effects` sent: what ends an
+    /// interval whose sequence ended with new protection sent (DEC-348 item 2).
+    fn acknowledge_protection(
+        executor: &mut Executor,
+        effects: &[Effect],
+        ports: &Ports<'_>,
+    ) -> Result<Vec<Effect>, ExecutorError> {
+        let sent: Vec<SubmitOrder> = submissions(effects)
+            .into_iter()
+            .filter(|order| order.purpose == Purpose::Protective)
+            .cloned()
+            .collect();
+        let mut answered = Vec::new();
+        for order in sent {
+            answered.extend(executor.run(broker_answer(&order, "accepted", Qty::ZERO), ports)?);
+        }
+        Ok(answered)
+    }
+
+    /// The broker's report of a protective order the executor sent: `status`, `filled` of it.
+    fn broker_answer(order: &SubmitOrder, status: &str, filled: Qty) -> Input {
+        Input::Broker(Ok(BrokerOutcome::Submitted(BrokerOrder {
+            broker_order_id: format!("b-{}", order.client_order_id.as_str()),
+            client_order_id: Some(order.client_order_id.as_str().to_owned()),
+            instrument: order.instrument.clone(),
+            side: order.side,
+            qty: order.qty,
+            filled_qty: filled,
+            limit_price: order.limit_price,
+            stop_price: order.stop_price,
+            status: status.to_owned(),
+            reject_code: None,
+            replaced_by_broker_order_id: None,
+            legs: Vec::new(),
+            created_on: None,
+        })))
+    }
+
     fn cancels(effects: &[Effect]) -> Vec<&str> {
         effects
             .iter()
@@ -2530,15 +2624,24 @@ mod sequence_tests {
             let settled = executor.run(filled(EXIT, qty)?, &ports)?;
             let placed = submissions(&settled);
             assert!(executor.state.exiting.is_empty(), "{qty}");
-            assert_eq!(
+            let ended = |executor: &Executor| {
                 executor
                     .state
                     .unprotected
                     .last()
-                    .map(|interval| interval.ended_at.is_some()),
-                Some(true),
-                "{qty}: the interval ends"
+                    .map(|interval| interval.ended_at.is_some())
+            };
+            assert_eq!(
+                ended(&executor),
+                Some(remains.is_none()),
+                "{qty}: the interval ends at once with nothing to protect, and otherwise waits \
+                 for the broker to acknowledge the new protection (DEC-348 item 2)"
             );
+            let answered = acknowledge_protection(&mut executor, &settled, &ports)?;
+            assert_eq!(ended(&executor), Some(true), "{qty}: the interval ends");
+            if remains.is_some() {
+                assert_eq!(actions(&answered), vec!["unprotected_end"], "{qty}");
+            }
             let Some(remains) = remains else {
                 assert_eq!(actions(&settled), vec!["unprotected_end"]);
                 assert!(placed.is_empty());
@@ -2586,6 +2689,51 @@ mod sequence_tests {
                 Some((vec![ClientOrderId::parse(&expected_id)?], remains)),
             );
         }
+        Ok(())
+    }
+
+    /// DEC-348 item 2: protection the broker refuses never ends the interval; it stays open, and
+    /// `max_unprotected_s` bounds and alerts it like any other.
+    #[test]
+    fn a_refused_re_placement_leaves_the_interval_open_and_bounded() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let settled = executor.run(filled(EXIT, "5")?, &ports)?;
+        let sent = submissions(&settled)
+            .first()
+            .map(|order| (*order).clone())
+            .ok_or_else(|| missing("the re-placed OCO"))?;
+        let refused = executor.run(
+            Input::Broker(Ok(BrokerOutcome::Submitted(BrokerOrder {
+                broker_order_id: "b-refused".to_owned(),
+                client_order_id: Some(sent.client_order_id.as_str().to_owned()),
+                instrument: sent.instrument.clone(),
+                side: sent.side,
+                qty: sent.qty,
+                filled_qty: Qty::ZERO,
+                limit_price: None,
+                stop_price: None,
+                status: "rejected".to_owned(),
+                reject_code: None,
+                replaced_by_broker_order_id: None,
+                legs: Vec::new(),
+                created_on: None,
+            }))),
+            &ports,
+        )?;
+        assert!(
+            !actions(&refused).contains(&"unprotected_end"),
+            "{:?}",
+            drafted(&refused)
+        );
+        assert_eq!(open_interval(&executor), Some((0, false)));
+        let bound = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
+        assert!(bound.iter().any(|effect| matches!(
+            effect,
+            Effect::Notify(note) if note.message_key == "unprotected_interval_limit"
+        )));
         Ok(())
     }
 
@@ -4918,8 +5066,9 @@ mod sequence_tests {
                     } else {
                         cancel_accepted(&format!("md-{second}"))
                     };
-                    executor.run(end, &beside)?;
+                    let ended = executor.run(end, &beside)?;
                     assert!(stop_covered(&executor)? <= position(&executor)?, "{case}");
+                    acknowledge_protection(&mut executor, &ended, &beside)?;
                     assert_eq!(
                         stop_covered(&executor)?,
                         position(&executor)?,
@@ -5675,6 +5824,12 @@ mod sequence_tests {
                 Purpose::Protective
             )]
         );
+        assert_eq!(
+            open_interval(executor),
+            Some((0, true)),
+            "the re-placement waits for the broker's acknowledgment (DEC-348 item 2)"
+        );
+        acknowledge_protection(executor, &due, ports)?;
         assert_eq!(open_interval(executor), None);
         assert!(executor.state.exiting.is_empty(), "no stale sequence");
         assert_eq!(stop_covered(executor)?, position(executor)?);
@@ -5794,14 +5949,30 @@ mod sequence_tests {
             actions(&placed),
             vec!["placed", "placed", "unprotected_end"]
         );
-        assert_eq!(
+        let interval = |executor: &Executor| {
             executor
                 .state
                 .unprotected
                 .last()
-                .map(|interval| (interval.started_at.secs(), interval.ended_at)),
-            Some((0, Some(RiskClock::from_secs(15))))
+                .map(|interval| (interval.started_at.secs(), interval.ended_at))
+        };
+        assert_eq!(
+            interval(&executor),
+            Some((0, None)),
+            "the placement waits for the broker's acknowledgment (DEC-348 item 2)"
         );
+        let sent: Vec<SubmitOrder> = submissions(&placed).into_iter().cloned().collect();
+        assert_eq!(sent.len(), 2, "the new OCO and the remainder's own");
+        for (at, order) in sent.iter().enumerate() {
+            executor.run(broker_answer(order, "accepted", Qty::ZERO), &ports)?;
+            let expected = (at == 1).then(|| RiskClock::from_secs(15));
+            assert_eq!(
+                interval(&executor),
+                Some((0, expected)),
+                "{at}: the interval ends once every awaited order is acknowledged, not the first \
+                 (#463 round 1, M1)"
+            );
+        }
         executor.run(
             Input::Broker(Ok(BrokerOutcome::Absent {
                 client_order_id: BUY.to_owned(),
@@ -5811,6 +5982,45 @@ mod sequence_tests {
         let later = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
         assert!(actions(&later).is_empty(), "{:?}", drafted(&later));
         assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        Ok(())
+    }
+
+    /// DEC-348 item 2 (#463 round 1, M2): while a re-placement waits for its acknowledgment, the
+    /// interval stays open however many steps pass with the position held, and it ends when the
+    /// awaited order itself fills and leaves the position flat: a filled order was acknowledged.
+    #[test]
+    fn a_waiting_interval_ends_only_on_the_awaited_orders_answer() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let settled = executor.run(filled(EXIT, "5")?, &ports)?;
+        let sent: Vec<SubmitOrder> = submissions(&settled).into_iter().cloned().collect();
+        let [oco] = sent.as_slice() else {
+            return Err(missing("the re-placed OCO"));
+        };
+        let open = |executor: &Executor| {
+            executor
+                .state
+                .unprotected
+                .last()
+                .map(|interval| interval.ended_at.is_none())
+        };
+        for second in 1..4 {
+            executor.run(Input::Tick(RiskClock::from_secs(second)), &ports)?;
+            assert_eq!(
+                open(&executor),
+                Some(true),
+                "{second}: still held, still waiting"
+            );
+        }
+        let gone = executor.run(broker_answer(oco, "filled", oco.qty), &ports)?;
+        assert_eq!(
+            open(&executor),
+            Some(false),
+            "the awaited order's own fill answers it: {:?}",
+            drafted(&gone)
+        );
         Ok(())
     }
 
@@ -5911,6 +6121,7 @@ mod sequence_tests {
                 vec![Qty::parse("3")?]
             };
             assert_eq!(topped_up, expected, "{fills}");
+            acknowledge_protection(&mut executor, &ended, &ports)?;
             assert!(executor.state.exiting.is_empty() && open_interval(&executor).is_none());
         }
         Ok(())
@@ -5965,6 +6176,7 @@ mod sequence_tests {
             vec![(Qty::parse("5")?, legs("170", "140", "5")?)]
         );
         assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        acknowledge_protection(&mut executor, &ended, &ports)?;
         assert!(executor.state.exiting.is_empty() && open_interval(&executor).is_none());
         Ok(())
     }
@@ -6003,20 +6215,23 @@ mod sequence_tests {
                 effect,
                 Effect::Notify(note) if note.message_key == "unprotected_interval_limit"
             )));
-            if waits {
+            let placement = if waits {
                 assert_eq!(abandoned_for(&due), vec!["unprotected_interval_limit"]);
                 assert!(cancels(&due).is_empty(), "{:?}", cancels(&due));
                 assert_eq!(
                     actions(&due),
                     vec!["interval_limit", "placed", "unprotected_end"]
                 );
+                due
             } else {
                 assert!(abandoned_for(&due).is_empty());
                 assert_eq!(cancels(&due), vec![exit.as_str()]);
                 assert_eq!(actions(&due), vec!["interval_limit"]);
                 let confirmed = executor.run(cancel_accepted(&exit), &ports)?;
                 assert_eq!(actions(&confirmed), vec!["placed", "unprotected_end"]);
-            }
+                confirmed
+            };
+            acknowledge_protection(&mut executor, &placement, &ports)?;
             assert_eq!(stop_covered(&executor)?, position(&executor)?, "{waits}");
             assert!(
                 executor.state.exiting.is_empty() && open_interval(&executor).is_none(),
@@ -6727,16 +6942,23 @@ mod sequence_tests {
         fills: u32,
         paused: bool,
         quiet_since: i64,
-        /// Whether the script starts inside the calendar's range: before it (the 1970 base, the
-        /// eve of 2018) every instant reads as the regular session (DEC-260 (13)).
-        calendar: bool,
     }
 
+    /// 2018-01-01 00:00 ET, the calendar's first date: before it (the 1970 base, the eve of 2018)
+    /// every instant reads as the regular session (DEC-260 (13)); from it on, the calendar names
+    /// the session, even in a script that started before it (DEC-392).
+    const CALENDAR_FROM: i64 = 1_514_782_800;
+
     /// §4.3 written out for the oracle, never read from the calendar file: the New York midnight
-    /// of each trading day its scripts can reach (2026-09-01 to 10-16 without Labor Day, and the
-    /// calendar's last week, 2028-12-26 to 29), from which each day's overnight (20:00 the day
-    /// before to 04:00), pre-market, regular (09:30 to 16:00) and after-hours (to 20:00) follow.
-    const TRADING_DAYS: [i64; 37] = [
+    /// of each trading day its scripts can reach (the calendar's first week, 2018-01-02 to 05
+    /// after the New Year holiday, 2026-09-01 to 10-16 without Labor Day, and the calendar's last
+    /// week, 2028-12-26 to 29), from which each day's overnight (20:00 the day before to 04:00),
+    /// pre-market, regular (09:30 to 16:00) and after-hours (to 20:00) follow.
+    const TRADING_DAYS: [i64; 41] = [
+        1_514_869_200,
+        1_514_955_600,
+        1_515_042_000,
+        1_515_128_400,
         1_788_235_200,
         1_788_321_600,
         1_788_408_000,
@@ -6798,19 +7020,24 @@ mod sequence_tests {
             })
         }
 
+        /// Whether the calendar covers `at`.
+        fn covered(at: i64) -> bool {
+            at >= CALENDAR_FROM
+        }
+
         /// Whether `then` and now are one session (§8.2's in-session trade).
         fn same_session(&self, then: i64) -> bool {
-            !self.calendar || Self::segment(then) == Self::segment(self.now)
+            !Self::covered(self.now) || Self::segment(then) == Self::segment(self.now)
         }
 
         /// Whether no v1 session is open now (DEC-30: the overnight session is none).
         fn closed(&self) -> bool {
-            self.calendar && !matches!(Self::segment(self.now), Some((_, 1..=3)))
+            Self::covered(self.now) && !matches!(Self::segment(self.now), Some((_, 1..=3)))
         }
 
         /// Whether now is the regular session, where nothing goes extended-hours.
         fn regular(&self) -> bool {
-            !self.calendar || matches!(Self::segment(self.now), Some((_, 2)))
+            !Self::covered(self.now) || matches!(Self::segment(self.now), Some((_, 2)))
         }
 
         /// Rule 13's session duties on every order the executor sends or journals: no exit goes
@@ -7111,7 +7338,6 @@ mod sequence_tests {
             fills: 0,
             paused: false,
             quiet_since: 0,
-            calendar: start >= 1_514_782_800,
         };
         let agent = AgentId("agent-a".to_owned());
         desk.deliver(
@@ -7287,7 +7513,7 @@ mod sequence_tests {
             TEN_SECONDS_BEFORE_THE_NIGHT,
             SATURDAY,
             1_788_789_600,
-            1_514_739_600,
+            EVE_OF_2018,
             1_861_754_400,
             1_862_150_400,
         ]);
@@ -7321,8 +7547,30 @@ mod sequence_tests {
         rule_13_script(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
     }
 
+    /// CI's minimal input on main (reported on #445): a script from the eve of 2018, before the
+    /// calendar's first date, ticks twelve hours to 2018-01-01 00:00 ET, the New Year holiday's
+    /// overnight, and places a risk exit with no quote. The calendar covers that instant and names
+    /// no session open, so the exit is held `session_closed`, rule 13's broker hold (DEC-260 (13),
+    /// DEC-392); the oracle reads the calendar's range at each instant, not at the script's start.
+    #[test]
+    fn rule_13_holds_for_a_risk_exit_on_the_new_year_holiday_overnight() -> Result<(), String> {
+        let script = [
+            Move::Tick(7_200),
+            Move::Tick(3_600),
+            Move::Tick(3_600),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Exit(0, 1, 141),
+        ];
+        rule_13_script(EVE_OF_2018, &script)
+    }
+
     /// 2026-09-22, a Tuesday, at 19:59:50 ET: ten seconds before the after-hours session ends.
     const TEN_SECONDS_BEFORE_THE_NIGHT: i64 = 1_790_121_590;
+    /// 2017-12-31, a Sunday, at 12:00 ET: seventeen hours before the calendar's first date.
+    const EVE_OF_2018: i64 = 1_514_739_600;
     /// 2026-09-22, a Tuesday, at 17:00 ET: after-hours.
     const AFTER_HOURS: i64 = 1_790_110_800;
     /// 11:00 ET, the regular session.
@@ -7694,6 +7942,14 @@ mod sequence_tests {
                 _ => None,
             })
             .collect();
+        notes.extend(
+            acknowledge_protection(&mut executor, &night, &ports)?
+                .iter()
+                .filter_map(|effect| match effect {
+                    Effect::Notify(note) => Some((note.subject_event.clone(), note.message_key)),
+                    _ => None,
+                }),
+        );
         let mut at = late + 60;
         while at < open {
             for input in [
@@ -8474,6 +8730,54 @@ mod bracket_tests {
             "{case}: the id's suffix is the placed record's own event id"
         );
         Ok(())
+    }
+
+    /// DEC-348 item 2 (#463 round 1, B1): an entry the broker reports terminal partly filled before
+    /// its fills are ingested gets its OCO for the reported quantity, and the interval stays open
+    /// until the broker acknowledges that OCO, though the fold's own position still reads flat.
+    #[test]
+    fn a_reported_fills_oco_waits_for_the_acknowledgment() -> Result<(), ExecutorError> {
+        with_ports(|ports| {
+            let mut executor = bracketed(ports)?;
+            executor.run(report("partially_filled", "4")?, ports)?;
+            let ended = executor.run(report("canceled", "4")?, ports)?;
+            assert_eq!(submitted(&ended), 1, "the OCO goes: {:?}", drafted(&ended));
+            let open = |executor: &Executor| {
+                executor
+                    .state
+                    .unprotected
+                    .last()
+                    .map(|interval| interval.ended_at.is_none())
+            };
+            assert_eq!(open(&executor), Some(true), "{:?}", executor.state.awaiting);
+            executor.run(Input::Tick(RiskClock::from_secs(11)), ports)?;
+            assert_eq!(open(&executor), Some(true), "a later step changes nothing");
+            let oco = ended.iter().find_map(|effect| match effect {
+                Effect::Broker(BrokerRequest::Submit(order)) => Some(order.clone()),
+                _ => None,
+            });
+            let oco = oco.ok_or_else(|| missing("the OCO"))?;
+            executor.run(
+                Input::BrokerUpdate(BrokerUpdate::Order(BrokerOrder {
+                    broker_order_id: "b-oco".to_owned(),
+                    client_order_id: Some(oco.client_order_id.as_str().to_owned()),
+                    instrument: oco.instrument.clone(),
+                    side: oco.side,
+                    qty: oco.qty,
+                    filled_qty: Qty::ZERO,
+                    limit_price: oco.limit_price,
+                    stop_price: oco.stop_price,
+                    status: "accepted".to_owned(),
+                    reject_code: None,
+                    replaced_by_broker_order_id: None,
+                    legs: Vec::new(),
+                    created_on: None,
+                })),
+                ports,
+            )?;
+            assert_eq!(open(&executor), Some(false), "the acknowledgment ends it");
+            Ok(())
+        })
     }
 
     /// Rule 5 and §5.4 (DEC-346 items 4 and 6, #446 round 1 B1, M2, M3): the OCO for a partly

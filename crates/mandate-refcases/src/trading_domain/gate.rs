@@ -83,9 +83,9 @@ use super::{
 use crate::{Json, at, ensure, list_at, str_at, u64_at};
 
 /// §7.3's account fields, read from `initial.account` and from `broker_account_update` data.
-/// `crypto_status` is read through [`Gate::crypto_active()`], a stub pending E6-10 (DEC-285 item 5's
-/// backlog row): no fixture case states one, so the account is crypto-active as the case file's
-/// header defaults it until a case needs the field.
+/// `crypto_status` is read through [`Gate::crypto_active()`] as check 1's `crypto_active` (DEC-285
+/// item 5's backlog row, DEC-315): an account whose case states none is crypto-active, as the case
+/// file's header defaults it.
 pub(super) const STATUS_FIELDS: &[&str] = &[
     "status",
     "trading_blocked",
@@ -272,16 +272,21 @@ impl Gate {
     }
 
     /// §7.3's `crypto_status` as check 1's `crypto_active` (DEC-285 item 5's backlog row, DEC-315):
-    /// `ACTIVE` leaves the gate's `crypto_active` field as it is, any other status stores `false`,
-    /// which refuses crypto openings at check 1, and a stored `false` is never set back, so a later
-    /// `ACTIVE` never lifts a detected inactivity here (lifting is E7-5's). The read is pending
-    /// E6-10: until its story lands the stub refuses every read and reports itself, which
-    /// `the_initial_crypto_status_is_check_1s_crypto_active`,
+    /// `ACTIVE`, spelled exactly as `status` reads it, leaves the gate's `crypto_active` field as it
+    /// is, any other status stores `false`, which refuses crypto openings at check 1, and a stored
+    /// `false` is never set back, so a later `ACTIVE` never lifts a detected inactivity here
+    /// (lifting is E7-5's). A status that is not a string is refused, as `status` is (DEC-395
+    /// item 2). `the_initial_crypto_status_is_check_1s_crypto_active`,
     /// `an_account_update_s_crypto_status_is_check_1s_crypto_active` and
-    /// `a_later_active_crypto_status_never_lifts_a_detected_inactivity` pin the reading against.
+    /// `a_later_active_crypto_status_never_lifts_a_detected_inactivity` pin the reading.
     fn crypto_active(&mut self, value: &Json) -> Result<(), String> {
-        let _ = (&self.crypto_active, value);
-        Err(GateError::Unimplemented("the account's `crypto_status`", "E6-10").to_string())
+        let status = value
+            .as_str()
+            .ok_or("account `crypto_status` is not a string")?;
+        if status != "ACTIVE" {
+            self.crypto_active = false;
+        }
+        Ok(())
     }
 
     /// A `fill` step: one fill on the account for the day-trade fold, and on the working order's
@@ -994,17 +999,13 @@ fn gate_error(e: &GateError) -> String {
 /// would hold it long and understate the day-trade count (#412 review, nit 3, DEC-314), so the
 /// fold refuses it. [`Gate::decide`] refuses a short snapshot before it folds, so the refusal is
 /// reached from [`Gate::check_day_trade_count`] (DEC-314 item 2). A flat position, `0`, is not a
-/// short and folds as no shares held, which `only_a_negative_quantity_is_a_short_to_the_fold` pins. The
-/// refusal is pending E6-10: until its story lands the stub reports itself, which
-/// `a_short_position_is_refused_where_a_day_trade_count_is_expected` pins the refusal against.
+/// short and folds as no shares held, which `only_a_negative_quantity_is_a_short_to_the_fold` pins,
+/// and `a_short_position_is_refused_where_a_day_trade_count_is_expected` pins the refusal's text.
 fn held_overnight(name: &str, qty: SignedQty) -> Result<Qty, String> {
-    let _ = name;
     if qty.is_negative() {
-        return Err(GateError::Unimplemented(
-            "the day-trade fold's refusal of a short position",
-            "E6-10",
-        )
-        .to_string());
+        return Err(format!(
+            "`{name}` is held short, which the day-trade fold refuses (its magnitude would fold as long and understate the day-trade count)"
+        ));
     }
     Ok(qty.abs())
 }
