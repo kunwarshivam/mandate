@@ -11,7 +11,7 @@ use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{
-    flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
+    clock_of, flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
     required_text, usd,
 };
 use crate::state::{
@@ -19,9 +19,9 @@ use crate::state::{
     ObservedAccount, OrderDetail,
 };
 use crate::types::{
-    AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, OcoLegs,
-    Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose, RiskClock, SubmitOrder,
-    TimeInForce, UnprotectedInterval,
+    AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
+    Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose, RiskClock,
+    SubmitOrder, TimeInForce, UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -252,20 +252,19 @@ fn stream_opened(state: &mut ExecutorState, payload: &Value) -> Result<(), Execu
 /// Every account-stream risk input carries `risk_clock`, and it never decreases (journal spec §2,
 /// mandate spec §5.2).
 fn risk_clock(state: &ExecutorState, event: &FoldedEvent) -> Result<RiskClock, ExecutorError> {
-    let secs = optional_int(&event.payload, "risk_clock")
-        .and_then(|secs| i64::try_from(secs).ok())
-        .ok_or_else(|| ExecutorError::RiskClockMissing {
+    let at =
+        clock_of(&event.payload, "risk_clock").ok_or_else(|| ExecutorError::RiskClockMissing {
             event_type: event.event_type.clone(),
         })?;
     if let Some(last) = state.risk_clock
-        && secs < last.secs()
+        && at < last
     {
         return Err(ExecutorError::RiskClockWentBackwards {
             last: last.secs(),
-            found: secs,
+            found: at.secs(),
         });
     }
-    Ok(RiskClock::from_secs(secs))
+    Ok(at)
 }
 
 fn instrument(payload: &Value) -> Result<InstrumentId, ExecutorError> {
@@ -382,7 +381,17 @@ fn request_of(
         tif: optional_text(payload, "tif").map_or(Ok(TimeInForce::Day), tif_of)?,
         limit_price: optional_price(payload, "limit")?,
         stop_price: optional_price(payload, "stop_price")?,
-        bracket: None,
+        bracket: match (
+            optional_text(payload, "order_class"),
+            optional_price(payload, "take_profit")?,
+            optional_price(payload, "stop")?,
+        ) {
+            (Some("bracket"), Some(take_profit), Some(stop)) => {
+                Some(BracketLegs { take_profit, stop })
+            }
+            (Some("bracket"), _, _) => return Err(refused("order_class")),
+            _ => None,
+        },
         oco: match (
             optional_text(payload, "order_class"),
             optional_price(payload, "take_profit")?,
@@ -553,6 +562,9 @@ fn order_state_changed(
             client_order_id: id.as_str().to_owned(),
         })?;
     let detail = state.details.entry(id.clone()).or_default();
+    if let Some(reported) = optional_qty(payload, "filled_qty")? {
+        detail.reported_filled = detail.reported_filled.max(Some(reported));
+    }
     if flag(payload, "cancel_overdue") {
         detail.cancel_overdue = true;
     }
@@ -822,6 +834,10 @@ fn protection_changed(
     let action = required_text(payload, "action")?;
     match action {
         "placed" => {
+            if let Some(entry) = optional_text(payload, "bracket") {
+                let entry = ClientOrderId::parse(entry)?;
+                state.details.entry(entry).or_default().bracket_placed = true;
+            }
             let orders = protective_orders(payload)?;
             let covered = qty(payload, "qty")?;
             let prices = prices_of(payload)?;
@@ -864,6 +880,11 @@ fn protection_changed(
         }
         "unprotected_start" | "passive_start" => {
             let passive = action == "passive_start";
+            if let Some(entry) = optional_text(payload, "bracket") {
+                let entry = ClientOrderId::parse(entry)?;
+                let detail = state.details.entry(entry).or_default();
+                detail.bracket_since = detail.bracket_since.or(Some(at));
+            }
             if let (Some(intent), Some(entry), Some(agent)) = (
                 optional_text(payload, "intent_id"),
                 optional_text(payload, "entry"),
@@ -906,6 +927,10 @@ fn protection_changed(
         "exit_unpriced" | "ladder_floor" => {}
         "interval_limit" | "unprotected_end" => {
             let ends = action == "unprotected_end";
+            if let Some(entry) = optional_text(payload, "bracket").filter(|_| ends) {
+                let entry = ClientOrderId::parse(entry)?;
+                state.details.entry(entry).or_default().bracket_placed = true;
+            }
             if ends
                 && let Some(sequence) = state.exiting.remove(&instrument)
                 && sequence.ladder.parked
