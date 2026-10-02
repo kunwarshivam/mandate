@@ -545,12 +545,15 @@ while a reducing purpose passes it.
   `crates/mandate-spec/src/context.rs` (`JournaledFact::from_record`, the `risk_state_fact` stub).
 - **Tests:** `crates/mandate-refcases/tests/risk_state.rs` (the vectors through `append`, the
   mapping, and the classification re-derivation), `control::tests` in `control.rs`
-  (`every_risk_state_draft_is_judged_as_its_vectors_say`, `a_required_risk_state_member_is_never_null`),
+  (`every_risk_state_draft_is_judged_as_its_vectors_say`, `a_required_risk_state_member_is_never_null`,
+  `a_risk_state_record_at_another_schema_version_is_an_unknown_schema`),
   `crates/mandate-journal/tests/catalogue.rs` (`risk_state_records_are_routed_to_section_9_3`,
-  `risk_state_records_refuse_an_unlisted_member`), and `record_tests` in `context.rs`.
+  `risk_state_records_refuse_an_unlisted_member`), and `record_tests` in `context.rs`
+  (`a_version_maps_only_under_the_classification_its_documents_give`, over 14 §9.2 rows, and
+  `a_version_document_that_is_absent_or_an_impostor_is_refused`).
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-spec -p mandate-refcases
   --run-ignored all -E 'binary(risk_state) | test(/risk_state/) | test(/universe_change/) |
-  test(/version_maps_only/)'`; until the implementation lands, `cargo xtask ci pending` proves the
+  test(/version_maps_only/) | test(/impostor/) | test(/schema_version/)'`; until the implementation lands, `cargo xtask ci pending` proves the
   pending ones fail at their stub.
 
 ## Append protocol

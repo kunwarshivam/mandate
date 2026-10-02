@@ -294,6 +294,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   openings when their condition is met, so that trust does not outlive the conditions I gave it
   under ([DEC-187](04-decision-log.md#decisions)). The spec change is MI-31, V-044, §6.7, and the MC-W cases
   ([DEC-350](decisions/DEC-350.md) to [DEC-352](decisions/DEC-352.md); claim [#439](https://github.com/kunwarshivam/mandate/issues/439)).
+  **Prerequisite for the account-stream risk-state mapping (#482 round 1, M2; DEC-404 item 7):** `mandate-spec`'s
+  classifier change for DEC-353's two shapes (#444, #471) is a journal-affecting change, because `MandateVersionApplied`'s
+  mapping refuses a record whose stated classification differs from `change::classify`'s. So it lands before any path
+  builds a `ValidationContext` from a real journal (DEC-169's wiring).
   Owed after it: `mandate-spec` parsing the field, V-044, and the §9.2 row (DEC-77 tests then implementation), the executor's
   fold of §6.7, and the `kind: tripwire` harness arm. Also owed, from #443's round 1 (m4): run ruff over `reference/` in
   `cargo xtask ci lint`, so a duplicated definition such as a second `main()` in `reference/mandate/mutants.py` (F811) fails
@@ -1248,7 +1252,14 @@ From E10-1's slice-V implementation (DEC-161):
     `classification` differs. Rule 33 covers only what the record itself carries (the allocation
     change, the floor, and three rejections), so until this lands a risk-increasing version through
     any other §9.2 row can be journaled as applied, labelled `neutral`, with no step-up (DEC-403
-    item 5).
+    item 5). **Two limits on it (#482 round 1, M2; DEC-404 item 7):**
+    - **Coverage.** The re-derivation inherits `change::classify`'s coverage, and DEC-353's two
+      shapes (#444, #471) are not in the Rust classifier yet, so E6-13's classifier code PR is part
+      of closing this hole.
+    - **Order.** A change to `classify` is journal-affecting: a record labelled by an older
+      classifier can become unmappable, and a context that will not build is not a hold an exit may
+      have (rule 13). So E6-13's classifier change lands before any path builds a context from a
+      real journal (DEC-169's wiring). That order is a named prerequisite here and on E6-13's row.
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).
@@ -2559,7 +2570,9 @@ From journal spec v0.8 §9.3's review (#470 round 2, DEC-403):
     `increase_blocked_while_latched`, `classification` `neutral`, and an `allocation_change` set)
     are pinned by no draft. Each wants a draft and an `order.*` mutant, as §9.2's
     `order.rule_21_first`. Rules 29 and 33 can never both fire, since 29 needs `risk_increasing`
-    and 33 needs anything else, so their relative order needs no pin.
+    and 33 needs anything else, so their relative order needs no pin. The 31-then-32 order is a
+    third reachable pair (a `thesis_admitted` that removes and carries no thesis breaks both), and
+    is unpinned too (#482 round 1, m3).
   - **`universe_size_after`** is checked against nothing, not even the fold of the section's own
     drafts.
   - **`risk_state.classify`** raises `ValueError` on a path it does not encode instead of reporting
