@@ -540,6 +540,7 @@ fn two_active_rungs_multiply() {
         &s.mandate,
         &s.risk,
         &s.agent,
+        &s.account,
         &instruments,
     )
     .expect("the trims compute");
@@ -578,6 +579,7 @@ fn a_trim_rounds_up_to_the_increment() {
         &s.mandate,
         &s.risk,
         &s.agent,
+        &s.account,
         &instruments,
     )
     .expect("the trims compute");
@@ -617,6 +619,7 @@ fn a_trim_waits_for_the_regular_session() {
             &s.mandate,
             &s.risk,
             &s.agent,
+            &s.account,
             &instruments,
         )
         .expect("the trims compute")
@@ -662,6 +665,7 @@ fn no_trim_while_holding() {
             &s.mandate,
             &s.risk,
             &s.agent,
+            &s.account,
             &instruments,
         )
         .expect("the trims compute")
@@ -706,6 +710,7 @@ fn a_limit_buys_rung_never_trims() {
             &s.mandate,
             &s.risk,
             &s.agent,
+            &s.account,
             &instruments,
         )
         .expect("the trims compute")
@@ -754,6 +759,7 @@ fn a_rung_trims_only_after_breach_confirm_s() {
             &s.mandate,
             &s.risk,
             &s.agent,
+            &s.account,
             &instruments,
         )
         .expect("the trims compute")

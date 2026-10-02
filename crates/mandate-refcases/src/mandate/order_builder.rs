@@ -227,6 +227,7 @@ fn trim_first(
         &scene.mandate,
         &scene.risk,
         &scene.agent,
+        &scene.account,
         &instruments,
     ) {
         Err(e) => Err(gate_error("trim_proposals", &e)),

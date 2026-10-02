@@ -887,8 +887,9 @@ pub struct TrimProposal {
 }
 
 /// §5.5's `trim_to_target` proposals, rounded **up** to the increment so a trim never leaves the
-/// position above its target. The guards of DEC-65 and the readings of DEC-399 are in the `trim`
-/// module's doc.
+/// position above its target, net of the agent's own open non-protective sells in the instrument
+/// in `account`, so a trim already working is never proposed again. The guards of DEC-65 and the
+/// readings of DEC-399 are in the `trim` module's doc.
 ///
 /// # Errors
 /// Returns [`GateError`] when a figure cannot be computed exactly, when the calendar does not cover
@@ -900,9 +901,10 @@ pub fn trim_proposals(
     mandate: &ValidatedMandate,
     risk: &RiskSnapshot,
     agent: &AgentSnapshot,
+    account: &AccountSnapshot,
     instruments: &BTreeMap<AssetId, InstrumentSnapshot>,
 ) -> Result<Vec<TrimProposal>, GateError> {
-    trim::proposals(now, config, mandate, risk, agent, instruments)
+    trim::proposals(now, config, mandate, risk, agent, account, instruments)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -2,7 +2,9 @@
 //! active for `breach_confirm_s`, a position whose market value exceeds `factor × cap` by at least
 //! `rebalance_band × cap` is sold down to `factor × cap` as a risk exit, the quantity rounded **up**
 //! to the increment, if the sell meets the instrument's minimum, for an equity only in the regular
-//! session, and never while the goal is `Holding`.
+//! session, and never while the goal is `Holding`. The agent's own open non-protective sells in the
+//! instrument are subtracted from the excess first, so a trim already working is never proposed
+//! again (DEC-399 item 7).
 //!
 //! The figures are exact, as everywhere in the gate (§5.2): `cap` is check 2's
 //! `min(max_position_usd, max_position_fraction × E)`, the target and the sell stay on
@@ -10,14 +12,14 @@
 
 use std::collections::BTreeMap;
 
-use mandate_num::{Qty, UsdExact};
+use mandate_num::{NumError, Qty, UsdExact};
 use mandate_time::UtcNanos;
 
 use crate::limits::position_cap;
 use crate::spec_types::{GoalState, RiskLimits, ScaleAction};
 use crate::{
-    AgentSnapshot, AssetClass, AssetId, GateConfig, GateError, InstrumentSnapshot, Purpose,
-    RiskSnapshot, Session, TrimProposal, ValidatedMandate, session,
+    AccountSnapshot, AgentSnapshot, AssetClass, AssetId, GateConfig, GateError, InstrumentSnapshot,
+    Purpose, RiskSnapshot, Session, Side, TrimProposal, ValidatedMandate, session,
 };
 
 /// One trim per position far enough above its target, in instrument order (DEC-399 item 1).
@@ -27,6 +29,7 @@ pub(crate) fn proposals(
     mandate: &ValidatedMandate,
     risk: &RiskSnapshot,
     agent: &AgentSnapshot,
+    account: &AccountSnapshot,
     instruments: &BTreeMap<AssetId, InstrumentSnapshot>,
 ) -> Result<Vec<TrimProposal>, GateError> {
     let limits = mandate.risk();
@@ -50,10 +53,17 @@ pub(crate) fn proposals(
             continue;
         }
         let held = agent.positions.get(id).copied().unwrap_or(Qty::ZERO);
+        let on_sale = open_sells(agent, account, id)?;
+        let unsold = match held.checked_sub(on_sale) {
+            Ok(unsold) => unsold,
+            Err(NumError::Negative) => Qty::ZERO,
+            Err(other) => return Err(other.into()),
+        };
         let qty = excess
             .checked_mul(UsdExact::of_qty(held))?
+            .checked_sub(UsdExact::of_qty(on_sale).checked_mul(market_value)?)?
             .ceiled_quotient(market_value, increment(instrument)?)?
-            .min(held);
+            .min(unsold);
         if qty.is_zero() || qty < instrument.min_order_size {
             continue;
         }
@@ -64,6 +74,27 @@ pub(crate) fn proposals(
         });
     }
     Ok(trims)
+}
+
+/// The agent's own open non-protective sells in the instrument, read as §5.3 rule 4's
+/// `sell_available` reads them at the re-run: a trim already working is part of the sell-down, so
+/// it comes off the excess before the next trim is sized (DEC-399 item 7). Protective orders are
+/// not a trim in progress and are not counted.
+fn open_sells(
+    agent: &AgentSnapshot,
+    account: &AccountSnapshot,
+    instrument: &AssetId,
+) -> Result<Qty, GateError> {
+    let mut on_sale = Qty::ZERO;
+    for (_, order) in account.working_orders.iter().filter(|(id, order)| {
+        agent.working_orders.contains(id)
+            && order.instrument == *instrument
+            && order.side == Side::Sell
+            && !order.protective
+    }) {
+        on_sale = on_sale.checked_add(order.open_qty)?;
+    }
+    Ok(on_sale)
 }
 
 /// §5.5: "only once the rung has been active for `breach_confirm_s`", read as a `trim_to_target`
@@ -98,7 +129,10 @@ mod tests {
 
     use super::*;
     use crate::spec_types::{Rung, RungAction};
-    use crate::{AgentId, AgentMode, DayTradeLedger, EtpClass, Exchange, QuoteCurrency};
+    use crate::{
+        AccountState, AccountType, AgentId, AgentMode, ClientOrderId, DayTradeLedger,
+        DayTradeRegime, EtpClass, Exchange, QuoteCurrency, WorkingOrder,
+    };
 
     const HELD: &str = "held";
 
@@ -109,6 +143,7 @@ mod tests {
         limits: RiskLimits,
         risk: RiskSnapshot,
         agent: AgentSnapshot,
+        account: AccountSnapshot,
         instrument: InstrumentSnapshot,
     }
 
@@ -157,6 +192,24 @@ mod tests {
                     orders_today: 0,
                     day_trades: DayTradeLedger::default(),
                 },
+                account: AccountSnapshot {
+                    account_type: AccountType::Margin,
+                    state: AccountState::Active,
+                    crypto_active: true,
+                    regime: DayTradeRegime::IntradayMargin {
+                        maintenance_excess: Usd::parse("100000")?,
+                    },
+                    equity: Usd::parse("10000")?,
+                    prior_close_equity: Usd::parse("10000")?,
+                    model_buying_power: Usd::parse("1000000")?,
+                    broker_buying_power: Usd::parse("1000000")?,
+                    broker_non_marginable_buying_power: Usd::parse("1000000")?,
+                    positions: BTreeMap::new(),
+                    market_values: BTreeMap::new(),
+                    working_orders: BTreeMap::new(),
+                    unknown_orders: BTreeSet::new(),
+                    related_account_resting: BTreeMap::new(),
+                },
                 instrument: InstrumentSnapshot {
                     instrument: id,
                     asset_class: AssetClass::UsEquity,
@@ -177,6 +230,32 @@ mod tests {
                     status_feed_current: true,
                 },
             })
+        }
+
+        /// A working order resting in the account, the agent's own when `mine`.
+        fn resting(
+            &mut self,
+            id: u64,
+            qty: &str,
+            side: Side,
+            protective: bool,
+            mine: bool,
+        ) -> Result<(), GateError> {
+            let order = WorkingOrder {
+                agent: AgentId(if mine { 1 } else { 2 }),
+                instrument: self.instrument.instrument.clone(),
+                side,
+                max_cost: Usd::ZERO,
+                open_qty: Qty::parse(qty)?,
+                protective,
+                opening: false,
+                submitted_on: mandate_time::Date::parse("2026-09-21")?,
+            };
+            self.account.working_orders.insert(ClientOrderId(id), order);
+            if mine {
+                self.agent.working_orders.insert(ClientOrderId(id));
+            }
+            Ok(())
         }
 
         fn crypto(mut self) -> Self {
@@ -220,6 +299,7 @@ mod tests {
                 &mandate,
                 &self.risk,
                 &self.agent,
+                &self.account,
                 &instruments,
             )?;
             for trim in &trims {
@@ -334,6 +414,82 @@ mod tests {
         assert_eq!(scene.trims()?, Vec::new());
         scene.risk.active_rungs = BTreeMap::from([(0, 0), (1, 60)]);
         assert_eq!(scene.trims()?, qty("3")?);
+        Ok(())
+    }
+
+    /// A trim resting for the whole quantity this evaluation would ask for proposes nothing more:
+    /// 250 over the 750 target at 100 a share is 3 shares, and 3 are already on sale.
+    #[test]
+    fn a_resting_trim_for_the_full_quantity_proposes_nothing_more() -> Result<(), GateError> {
+        let mut scene = Scene::new("10", "1000")?;
+        assert_eq!(scene.trims()?, qty("3")?);
+        scene.resting(7, "3", Side::Sell, false, true)?;
+        assert_eq!(scene.trims()?, Vec::new());
+        scene.resting(8, "9", Side::Sell, false, true)?;
+        assert_eq!(
+            scene.trims()?,
+            Vec::new(),
+            "more on sale than is held sells nothing more"
+        );
+        Ok(())
+    }
+
+    /// A resting partial trim leaves only the remainder: with 1 of the 2.5 shares' excess on sale,
+    /// 1.5 rounds up to 2. At a factor of 0 the remainder is capped at what is not yet on sale:
+    /// 2.5 held with 1 on sale leaves 1.5, not the 2 the whole-share ceiling of 1.5 asks for.
+    #[test]
+    fn a_resting_partial_trim_proposes_only_the_remainder() -> Result<(), GateError> {
+        let mut scene = Scene::new("10", "1000")?;
+        scene.resting(7, "1", Side::Sell, false, true)?;
+        assert_eq!(scene.trims()?, qty("2")?);
+        let mut whole = Scene::new("2.5", "250")?;
+        whole.risk.size_factor = Ratio::ZERO;
+        whole.resting(7, "1", Side::Sell, false, true)?;
+        assert_eq!(whole.trims()?, qty("1.5")?);
+        Ok(())
+    }
+
+    /// Evaluation after evaluation with nothing filling, the agent's open sells never exceed what
+    /// one evaluation proposes on its own: the trims accumulate to 3 shares and stop there.
+    #[test]
+    fn repeated_evaluations_never_put_more_than_one_trim_on_sale() -> Result<(), GateError> {
+        let mut scene = Scene::new("10", "1000")?;
+        let single = scene.trims()?;
+        let once = single.first().copied().ok_or(GateError::ConfigOutOfRange)?;
+        let mut on_sale = Qty::ZERO;
+        for evaluation in 0..5_u64 {
+            for trim in scene.trims()? {
+                on_sale = on_sale.checked_add(trim)?;
+                scene.resting(evaluation, &trim.to_string(), Side::Sell, false, true)?;
+            }
+            assert!(
+                on_sale <= once,
+                "evaluation {evaluation}: {on_sale} on sale against {once}"
+            );
+        }
+        assert_eq!(
+            on_sale, once,
+            "the one trim the first evaluation proposed stays on sale"
+        );
+        Ok(())
+    }
+
+    /// Only the agent's own non-protective sells in the instrument are a trim in progress: a
+    /// resting stop, another agent's sell and a buy each leave the 3-share trim whole.
+    #[test]
+    fn only_the_agents_own_unprotected_sells_are_a_trim_in_progress() -> Result<(), GateError> {
+        let mut scene = Scene::new("10", "1000")?;
+        scene.resting(1, "10", Side::Sell, true, true)?;
+        scene.resting(2, "3", Side::Sell, false, false)?;
+        scene.resting(3, "3", Side::Buy, false, true)?;
+        assert_eq!(scene.trims()?, qty("3")?);
+        let mut elsewhere = Scene::new("10", "1000")?;
+        elsewhere.resting(4, "3", Side::Sell, false, true)?;
+        let other = AssetId::new("other").map_err(|_| GateError::InstrumentUnknown)?;
+        for order in elsewhere.account.working_orders.values_mut() {
+            order.instrument = other.clone();
+        }
+        assert_eq!(elsewhere.trims()?, qty("3")?);
         Ok(())
     }
 }

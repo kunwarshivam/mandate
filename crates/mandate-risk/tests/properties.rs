@@ -453,7 +453,7 @@ proptest! {
         instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
 
         let trims = mandate_risk::trim_proposals(
-            s.now, &s.config, &s.mandate, &s.risk, &s.agent, &instruments,
+            s.now, &s.config, &s.mandate, &s.risk, &s.agent, &s.account, &instruments,
         ).expect("the trims compute");
 
         let cap_is_min_of_1500_and_point_two_times_10000 = 1_500_u32;
