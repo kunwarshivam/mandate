@@ -6511,6 +6511,33 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-367 item 1: protection re-placed on a trading day records that day as its creation, so
+    /// the next trading day, some sixty trading days from its expiry, re-places nothing. Undated, it
+    /// would be due again every day.
+    #[test]
+    fn a_re_placement_is_dated_and_not_re_placed_the_next_day() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            protection_drafts(&placed)
+                .iter()
+                .find(|draft| draft.payload.get("action").and_then(Value::as_str) == Some("placed"))
+                .and_then(|draft| draft.payload.get("created_on"))
+                .and_then(Value::as_str),
+            Some("2026-09-21")
+        );
+        acknowledge_protection(&mut executor, &placed, &ports)?;
+        let next = trading_day(&mut executor, &ports, "2026-09-22")?;
+        assert!(
+            cancels(&next).is_empty() && actions(&next).is_empty(),
+            "{:?}",
+            drafted(&next)
+        );
+        Ok(())
+    }
+
     /// #468 round 1, m1: the trading day is the greatest date copied, so a re-copied older fact
     /// never moves it back.
     #[test]
