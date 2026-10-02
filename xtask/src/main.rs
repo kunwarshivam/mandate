@@ -1967,10 +1967,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// (DEC-346 item 7). Slice 2 deleted the other two `properties` rows, whose minimal failure is now
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
-///
-/// The `protection.rs` row is the unapplied-fill over-cover's pin (DEC-421): `main` re-places
-/// protection, so it fails on the size it asserts rather than at a stub, and its fix deletes it.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 5] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1986,10 +1983,6 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 5] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::an_exit_ended_with_a_fill_not_yet_applied_is_re_protected_for_what_the_broker_holds",
     ),
 ];
 

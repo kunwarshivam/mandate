@@ -111,7 +111,7 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .map(|(instrument, _)| instrument.clone())
         .collect();
     for instrument in due {
-        let held = covered(&batch.view, &instrument)?.min(long(&batch.view, &instrument));
+        let held = covered(&batch.view, &instrument)?.min(long(&batch.view, &instrument)?);
         let fresh = batch
             .view
             .quotes
@@ -1041,7 +1041,7 @@ fn bracket(
         let unapplied = filled.checked_sub(order.filled_qty)?;
         let committed = covered(&batch.view, &instrument)?
             .checked_add(still_selling(&batch.view, &instrument)?)?;
-        let room = long(&batch.view, &instrument)
+        let room = long(&batch.view, &instrument)?
             .checked_add(unapplied)?
             .checked_sub(committed)
             .unwrap_or(Qty::ZERO);
@@ -1215,16 +1215,36 @@ fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty,
 /// within the long position together, so no stop outlasts the position once they fill.
 fn fits(view: &ExecutorState, instrument: &InstrumentId) -> Result<bool, ExecutorError> {
     let committed = covered(view, instrument)?.checked_add(still_selling(view, instrument)?)?;
-    Ok(committed <= long(view, instrument))
+    Ok(committed <= long(view, instrument)?)
 }
 
-fn long(view: &ExecutorState, instrument: &InstrumentId) -> Qty {
-    view.positions
+/// The long position in `instrument` as the broker holds it: the folded position less every fill
+/// the broker reported on a sell that has ended and no fill update has applied yet. The
+/// reconciliation the report asked for applies it, and it then reads zero (DEC-421, #515). A live
+/// sell's unapplied fill is left in, because [`still_selling`] counts that order's remainder from
+/// the same applied quantity, so the two cancel.
+fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+    let folded = view
+        .positions
         .get(instrument)
         .copied()
         .unwrap_or(SignedQty::ZERO)
         .max(SignedQty::ZERO)
-        .abs()
+        .abs();
+    let unapplied = view
+        .orders
+        .iter()
+        .filter(|(_, order)| {
+            &order.instrument == instrument && order.side == Side::Sell && order.state.is_terminal()
+        })
+        .filter_map(|(id, order)| {
+            view.details
+                .get(id)
+                .and_then(|detail| detail.reported_filled)
+                .and_then(|reported| reported.checked_sub(order.filled_qty).ok())
+        })
+        .try_fold(Qty::ZERO, Qty::checked_add)?;
+    Ok(folded.checked_sub(unapplied).unwrap_or(Qty::ZERO))
 }
 
 /// The unfilled quantity every live protective order in `instrument` covers.
@@ -1277,7 +1297,7 @@ fn replace(
     instrument: &InstrumentId,
     sequence: &ExitSequence,
 ) -> Result<(), ExecutorError> {
-    let qty = long(&batch.view, instrument)
+    let qty = long(&batch.view, instrument)?
         .checked_sub(covered(&batch.view, instrument)?)
         .unwrap_or(Qty::ZERO);
     let prices = sequence.prices.filter(|_| qty > Qty::ZERO);
@@ -8283,7 +8303,6 @@ mod sequence_tests {
     /// 7, so protection is re-placed for at most 7. Sizing from the fold's 10 would leave ten
     /// protective sells against seven shares (rule 12).
     #[test]
-    #[ignore = "pending E7-4"]
     fn an_exit_ended_with_a_fill_not_yet_applied_is_re_protected_for_what_the_broker_holds()
     -> Result<(), ExecutorError> {
         with_ports!(ports);
