@@ -9,7 +9,7 @@ use mandate_canon::Value;
 
 use crate::error::ExecutorError;
 use crate::fold::fold;
-use crate::payload::{clock, object};
+use crate::payload::{object, risk_clock_stamp};
 use crate::ports::Ports;
 use crate::state::ExecutorState;
 use crate::types::{
@@ -58,7 +58,8 @@ impl<'p, 'a> Batch<'p, 'a> {
             .event_id(self.epoch, self.head, self.drafted.saturating_add(later))
     }
 
-    /// Drafts one account-stream event stamped with the batch's risk clock, folds it into the
+    /// Drafts one account-stream event stamped with the batch's risk clock as §9.2's whole-second
+    /// timestamp (DEC-306), folds it into the
     /// working copy, and answers its id.
     pub(crate) fn journal(
         &mut self,
@@ -66,7 +67,7 @@ impl<'p, 'a> Batch<'p, 'a> {
         causation_id: Option<EventId>,
         mut pairs: Vec<(&str, Value)>,
     ) -> Result<EventId, ExecutorError> {
-        pairs.push(("risk_clock", clock(self.at())?));
+        pairs.push(("risk_clock", risk_clock_stamp(self.at())?));
         let payload = object(pairs)?;
         let event_id = self.next_id();
         let stream = self.view.account_stream();
