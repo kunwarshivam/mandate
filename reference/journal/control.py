@@ -15,6 +15,7 @@ streams that write it. This module is their reference implementation, called by 
    one check it is registered against.
 """
 
+import calendar
 import copy
 import functools
 from decimal import Decimal
@@ -47,6 +48,7 @@ from common import (
     normalize_decimal,
     one_of,
     opt,
+    parse_instant,
     rec,
     rechain,
     sha256_hex,
@@ -154,6 +156,8 @@ REQUIRED_REFS = {
     "AgentStopped": ("mandate_version",),
     "MandateVersionApplied": ("mandate_version",),
     "UniverseChanged": ("mandate_version",),
+    "ThesisProposed": ("mandate_version", "model_version"),
+    "ThesisRevised": ("mandate_version", "model_version"),
 }
 
 # §9.3 (DEC-403): the account stream's risk-state records.
@@ -203,6 +207,59 @@ SCHEMAS[("acct", "UniverseChanged")] = rec(
     ("universe_size_after", INT),
     ("risk_clock", RISK_CLOCK),
 )
+
+# §9.4 (DEC-413): the research agent's thesis records on the agent stream.
+THESIS_REFUSALS = (
+    "direction_not_allowed",
+    "horizon_mismatch",
+    "revision_without_predecessor",
+    "research_disabled",
+    "universe_pinned",
+    "admission_denied",
+    "cost_cap_reached",
+    "not_in_data_universe",
+    "operator_halt",
+    "not_allowed_asset_class",
+    "leveraged_etp_not_enabled",
+    "eligibility_floor",
+    "instrument_group_claimed",
+    "source_not_allowlisted",
+    "no_corroboration",
+    "lineage_retired",
+    "universe_full",
+)
+# Mandate spec §8.5's check number of each reason is its position in that order, from 1.
+CHECK_NUMBER = {reason: number for number, reason in enumerate(THESIS_REFUSALS, start=1)}
+CORROBORATION_CHECK = CHECK_NUMBER["no_corroboration"]
+THESIS = rec(
+    ("model_id", STR),
+    ("model_version", STR),
+    ("content_hash", REF),
+    ("thesis_id", IDENT_T),
+    ("lineage_id", IDENT_T),
+    ("revision", INT),
+    ("predecessor_thesis_id", opt(IDENT_T)),
+    ("autopsy_ref", opt(REF)),
+    ("instrument_id", IDENT_T),
+    ("asset_class", one_of("us_equity", "crypto")),
+    ("direction", STR),
+    ("as_of", TS),
+    ("expires_at", TS),
+    ("horizon_s", INT),
+    ("conviction", DEC),
+    ("confidence", DEC),
+    ("evidence_ref", opt(REF)),
+    ("evidence_sources", list_of(STR)),
+    ("corroboration", opt(one_of("independent_source", "market_data"))),
+    ("invalidation", STR),
+    ("allowlist_version", INT),
+    ("prompt_ref", REF),
+    ("response_ref", REF),
+    ("admitted", BOOL),
+    ("reason", opt(one_of(*THESIS_REFUSALS))),
+)
+SCHEMAS[("agent", "ThesisProposed")] = THESIS
+SCHEMAS[("agent", "ThesisRevised")] = THESIS
 
 
 def is_pointer(text: str) -> bool:
@@ -328,8 +385,8 @@ def encoded(texts: list) -> list[bytes]:
 
 
 def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """The §9.2 consistency rules 17 to 24 and §9.3's 29 to 33, on a well-typed payload, each
-    reported once."""
+    """The §9.2 consistency rules 17 to 24, §9.3's 29 to 33, and §9.4's 34 to 38, on a well-typed
+    payload, each reported once."""
     p = draft["payload"]
     out: list[Violation] = []
 
@@ -419,7 +476,76 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("32.thesis", thesis, "schema", "payload.thesis_id")
         elif p["reason"] == "version_applied" and p["change"] == "admitted":
             rule("32.pinned", not thesis, "schema", "payload.thesis_id")
+    if event_type in ("ThesisProposed", "ThesisRevised"):
+        out += thesis_violations(event_type, draft, skip)
     return out
+
+
+def instant_nanos(text: str) -> int:
+    """A timestamp as nanoseconds since the epoch, so §8.2's horizon is compared exactly."""
+    instant, nanos = parse_instant(text)
+    return calendar.timegm(instant.timetuple()) * 10**9 + nanos
+
+
+def is_integer(value) -> bool:
+    """An integer the type check passed, which a seeded `loose` bug may not have."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+# §9.4's report order, by group: rule 34, its autopsy clause, rules 35 to 37 (all at
+# `payload.reason`), then rule 38. Each `order.<a>.<b>` seeded bug swaps two groups, so a fixture that
+# breaks both shows which is reported first.
+THESIS_ORDER = ("revision", "autopsy", "reason", "model")
+THESIS_ORDER_BUGS = tuple(
+    f"order.{a}.{b}" for i, a in enumerate(THESIS_ORDER) for b in THESIS_ORDER[i + 1 :]
+)
+
+
+def thesis_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.4's rules 34 to 38 on a well-typed thesis record, each reported once, in number order.
+    The guards on each member's type matter only under a seeded `loose` bug, which lets an
+    ill-typed member reach the rules."""
+    p = draft["payload"]
+    groups: dict[str, list[Violation]] = {group: [] for group in THESIS_ORDER}
+
+    def rule(group: str, name: str, holds: bool, reason: str, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            groups[group].append(Violation(f"rule.{name}", reason, path))
+
+    first_thesis = event_type == "ThesisProposed"
+    revised = is_integer(p["revision"]) and p["revision"] > 0
+    rule("revision", "34", first_thesis != revised, "schema", "payload.revision")
+    rule("autopsy", "34.autopsy", not first_thesis or p["autopsy_ref"] is None, "schema", "payload.autopsy_ref")
+    rule("reason", "35", (p["reason"] is None) == (p["admitted"] is True), "schema", "payload.reason")
+    failing = []
+    if p["direction"] != "long" and "rule.36.direction" not in skip:
+        failing.append("direction_not_allowed")
+    instants = all(isinstance(p[m], str) and is_timestamp(p[m]) for m in ("as_of", "expires_at"))
+    if instants and is_integer(p["horizon_s"]):
+        horizon_end = instant_nanos(p["as_of"]) + p["horizon_s"] * 10**9
+        if instant_nanos(p["expires_at"]) != horizon_end and "rule.36.horizon" not in skip:
+            failing.append("horizon_mismatch")
+    predecessor = p["predecessor_thesis_id"] is not None
+    if predecessor != revised and "rule.36.predecessor" not in skip:
+        failing.append("revision_without_predecessor")
+    if failing:
+        rule("reason", "36", p["reason"] == failing[0], "schema", "payload.reason")
+    else:
+        rule("reason", "36.unfailed", p["reason"] not in THESIS_REFUSALS[:3], "schema", "payload.reason")
+    if p["corroboration"] is None:
+        number = CHECK_NUMBER.get(p["reason"]) if isinstance(p["reason"], str) else None
+        rule("reason", "37", number is not None and number <= CORROBORATION_CHECK, "schema", "payload.reason")
+    else:
+        rule("reason", "37.corroborated", p["reason"] != "no_corroboration", "schema", "payload.reason")
+    model_ref = draft["config_refs"].get("model_version")
+    rule("model", "38", model_ref is None or model_ref == p["content_hash"], "schema", "payload.content_hash")
+    order = list(THESIS_ORDER)
+    for bug in THESIS_ORDER_BUGS:
+        if bug in skip:
+            _, first, second = bug.split(".")
+            i, j = order.index(first), order.index(second)
+            order[i], order[j] = order[j], order[i]
+    return [v for group in order for v in groups[group]]
 
 
 def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
