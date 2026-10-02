@@ -727,7 +727,8 @@ PX-13 (a) amends DEC-131 (DEC-136).
 Each question has options, a recommendation, and the reason. Before the founder answered, designs
 followed the recommendation, because each is the more conservative option (rule 9), except PX-13, where
 they followed DEC-131's rule (b); they now follow every recommendation, PX-13 (a) included (DEC-136).
-Answers are recorded as decision-log rows. The labels PX-1 to PX-18 are local to this brief.
+Answers are recorded as decisions: a row in the decision log up to DEC-302, a file under
+`docs/project/decisions/` after that (DEC-344). The labels PX-1 to PX-18 are local to this brief.
 
 **PX-1. How much of the compiled mandate the confirmation screen shows by default.**
 (a) Every field expanded. (b) The plain-language summary and dollar figures on top; below, every
@@ -876,7 +877,7 @@ leaves positions where they are, under whatever protection is resting, with no f
 (DEC-131, the rule before DEC-136). (c) Stop always flattens.
 *Proposed change to DEC-131: (a).* Every ending then has a defined owner of the positions; under (b)
 nobody re-places protection when the GTC orders expire, and the open questions of §7 question 1
-remain. Choosing (a) changes an accepted decision, so under rule 9 it needs a new decision-log entry,
+remain. Choosing (a) changes an accepted decision, so under rule 9 it needs a new decision,
 which the founder makes. What it costs: the runtime's Stop gains a flat-or-release precondition and
 one more owner choice in G2. Before the decision, D2 offered Stop with the plain statement that it
 left positions and resting protection in place, and G2 offered the kill switch for ending with a

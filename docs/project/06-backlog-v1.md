@@ -1694,7 +1694,8 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   entry claims otherwise. The conservative reading is that the flag governs: `ci mutants` also
   mutates safety-critical `tool` crates on the diff, and ES-13's safety-critical limit applies,
   with DEC-178's `risk_gate.rs` and DEC-250's `order_builder.rs` as recorded exceptions or split.
-  Record the reading in a decision-log row in the same change as the xtask edit.
+  Record the reading in a decision (a file under `decisions/`, DEC-344) in the same change as
+  the xtask edit.
   *Done (DEC-253):* the flag governs. `mutated_crates` reads `safety_critical` alone, pinned by
   `the_gate_mutates_every_safety_critical_crate_tool_layer_included`; ADR-0001's ES-11 and ES-13
   say so, and ES-13 records `risk_gate.rs` and `order_builder.rs` as exceptions, not split.
