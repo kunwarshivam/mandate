@@ -999,6 +999,9 @@ fn brackets(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
 /// filled quantity, capped at what the position, as the broker reports it, leaves after every live
 /// protective order and every exit still selling (rule 12: Σ protective sells never exceed the
 /// position), and the interval ends; nothing left to cover places nothing and still ends it.
+/// Unlike [`crate::intent::send`], the OCO's `OrderSubmitted` is not the effect immediately before
+/// its request: the `placed` and `unprotected_end` records sit between them, so the interval's end
+/// is journaled before the send. Rule 5 needs only that the draft comes first in the same list.
 fn bracket(
     batch: &mut Batch<'_, '_>,
     entry: &ClientOrderId,
@@ -8296,8 +8299,9 @@ mod bracket_tests {
         submitted,
     };
     use crate::types::{
-        AgentId, BrokerOrder, BrokerRequest, BrokerUpdate, Effect, EventId, ExecutorConfig, Input,
-        IntentBody, IntentHandoff, ProtectionPrices, Purpose, RiskClock,
+        AgentId, BrokerOrder, BrokerRequest, BrokerUpdate, Effect, EventDraft, EventId,
+        ExecutorConfig, Input, IntentBody, IntentHandoff, ProtectionPrices, Purpose, RiskClock,
+        TimeInForce,
     };
 
     const ENTRY: &str = "01JABCDEFGHJKMNPQRSTVWXYZ1";
@@ -8339,8 +8343,13 @@ mod bracket_tests {
     /// A ready executor that has sent one bracket entry of 10 `AAPL` at 150, stop 140, take-profit
     /// 170, at risk-clock second 10.
     fn bracketed(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        bracketed_at(ports, 10)
+    }
+
+    /// [`bracketed`], sent at risk-clock second `at`.
+    fn bracketed_at(ports: &Ports<'_>, at: i64) -> Result<Executor, ExecutorError> {
         let mut executor = reporting(ports)?;
-        executor.run(Input::Tick(RiskClock::from_secs(10)), ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(at)), ports)?;
         let sent = executor.run(
             Input::Intent(IntentHandoff {
                 intent_id: IntentId(EventId(ENTRY.to_owned())),
@@ -8413,6 +8422,147 @@ mod bracket_tests {
             assert_eq!(cancels(&again), 0, "{case}: once");
         }
         Ok(())
+    }
+
+    fn with_ports<T>(
+        run: impl FnOnce(&Ports<'_>) -> Result<T, ExecutorError>,
+    ) -> Result<T, ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        run(&Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        })
+    }
+
+    /// Every `ProtectionChanged` draft in `effects`.
+    fn records(effects: &[Effect]) -> Vec<&EventDraft> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "ProtectionChanged" => Some(draft),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The `placed` record in `effects`, and the protective order it names.
+    fn placed(effects: &[Effect]) -> Result<(&EventDraft, String), ExecutorError> {
+        let record = records(effects)
+            .into_iter()
+            .find(|draft| draft.payload.get("action").and_then(Value::as_str) == Some("placed"))
+            .ok_or_else(|| missing("the placed record"))?;
+        let named = record
+            .payload
+            .get("orders")
+            .and_then(Value::as_str)
+            .ok_or_else(|| missing("the placed order's id"))?
+            .to_owned();
+        Ok((record, named))
+    }
+
+    /// §2.3 (DEC-346 item 4): the protective order a `placed` record names is `{entry}-p{record}`,
+    /// the record being that `ProtectionChanged` itself, on the completed entry's branch and the
+    /// OCO's alike.
+    fn assert_named_for_its_record(effects: &[Effect], case: &str) -> Result<(), ExecutorError> {
+        let (record, named) = placed(effects)?;
+        assert_eq!(
+            named,
+            format!("{}-p{}", entry_id(), record.event_id.0),
+            "{case}: the id's suffix is the placed record's own event id"
+        );
+        Ok(())
+    }
+
+    /// Rule 5 and §5.4 (DEC-346 items 4 and 6, #446 round 1 B1, M2, M3): the OCO for a partly
+    /// filled entry is a GTC order whose `OrderSubmitted` comes before its `Submit` in the same
+    /// effect list, named for its own `placed` record.
+    #[test]
+    fn the_partial_fill_oco_is_journaled_before_it_is_sent() -> Result<(), ExecutorError> {
+        with_ports(|ports| {
+            let mut executor = bracketed(ports)?;
+            executor.run(report("partially_filled", "4")?, ports)?;
+            let ended = executor.run(report("canceled", "4")?, ports)?;
+            let (_, named) = placed(&ended)?;
+            let journaled = ended.iter().position(|effect| {
+                matches!(effect, Effect::Journal(draft) if draft.event_type == "OrderSubmitted"
+                    && draft.payload.get("client_order_id").and_then(Value::as_str) == Some(named.as_str()))
+            });
+            let sent = ended.iter().position(|effect| {
+                matches!(effect, Effect::Broker(BrokerRequest::Submit(order))
+                    if order.client_order_id.as_str() == named)
+            });
+            assert!(
+                journaled.is_some() && sent.is_some() && journaled < sent,
+                "the journal names the OCO before the broker sees it (rule 5): {:?}",
+                drafted(&ended)
+            );
+            let tif = ended.iter().find_map(|effect| match effect {
+                Effect::Broker(BrokerRequest::Submit(order)) => Some(order.tif),
+                _ => None,
+            });
+            assert_eq!(tif, Some(TimeInForce::Gtc), "the OCO is GTC (§5.4)");
+            assert_named_for_its_record(&ended, "the OCO")
+        })
+    }
+
+    /// Rule 12 (DEC-346 item 4, #446 round 1 B2): an entry is protected once. After its completed
+    /// legs are recorded, or its OCO sent, later steps record and send nothing more.
+    #[test]
+    fn an_entry_is_protected_once() -> Result<(), ExecutorError> {
+        with_ports(|ports| {
+            for terminal in ["filled", "canceled"] {
+                let mut executor = bracketed(ports)?;
+                let filled = if terminal == "filled" { "10" } else { "4" };
+                if terminal == "canceled" {
+                    executor.run(report("partially_filled", "4")?, ports)?;
+                }
+                let ended = executor.run(report(terminal, filled)?, ports)?;
+                assert_named_for_its_record(&ended, terminal)?;
+                for second in 11..15 {
+                    let later = executor.run(Input::Tick(RiskClock::from_secs(second)), ports)?;
+                    assert!(
+                        records(&later).is_empty() && submitted(&later) == 0,
+                        "{terminal}, second {second}: nothing more is recorded or sent: {:?}",
+                        drafted(&later)
+                    );
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// §5.4 (DEC-346 item 5, #446 round 1 M1): an entry still working when its venue reaches the
+    /// closing auction window has its remainder cancelled at once, inside the timeout, and the OCO
+    /// for the filled quantity goes at once too: no session holds protection (rule 13).
+    #[test]
+    fn an_entry_at_the_closing_window_is_cancelled_and_oco_d_at_once() -> Result<(), ExecutorError>
+    {
+        const AT_THREE: i64 = 1_790_017_200;
+        const REGULAR: i64 = 1_790_020_190;
+        const CLOSING: i64 = 1_790_020_200;
+        with_ports(|ports| {
+            let mut executor = bracketed_at(ports, AT_THREE)?;
+            executor.run(Input::Tick(RiskClock::from_secs(REGULAR)), ports)?;
+            let partial = executor.run(report("partially_filled", "4")?, ports)?;
+            assert_eq!(cancels(&partial), 0, "the regular session holds the legs");
+            let closing = executor.run(Input::Tick(RiskClock::from_secs(CLOSING)), ports)?;
+            assert_eq!(
+                cancels(&closing),
+                1,
+                "ten seconds in, well inside the timeout, the closing window cancels the remainder"
+            );
+            let ended = executor.run(report("canceled", "4")?, ports)?;
+            assert_eq!(
+                submitted(&ended),
+                1,
+                "the OCO goes in the closing window: {:?}",
+                drafted(&ended)
+            );
+            Ok(())
+        })
     }
 
     /// Rule 12: the OCO for a partly filled entry never covers more than the position leaves once
