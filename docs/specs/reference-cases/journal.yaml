@@ -5148,6 +5148,26 @@ risk_state:
       outcome: Invalid
       reason: non_canonical
       path: payload.lineage_id
+  - name: admitted_instrument_an_id_not_an_asset_id
+    clause: '§9.3 asset_id: an id that is not the uuid form (#497 round 1, m3)'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.instrument
+      value: BTCUSD
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument
+  - name: admitted_instrument_in_capitals
+    clause: '§9.3 asset_id: lowercase only, so one asset has one spelling'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.instrument
+      value: 7B4A1C2E-2222-4A2B-9C3D-000000000002
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument
   - name: order_29_before_30
     clause: 'rules 29 then 30: a risk-increasing applied record without step-up and with a reason'
     base_draft: version_applied

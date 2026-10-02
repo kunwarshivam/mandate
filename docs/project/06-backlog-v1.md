@@ -1309,10 +1309,10 @@ From E10-1's slice-V implementation (DEC-161):
     - **Unexercised shapes (#482 round 2, m3):** no pair reaches `classify`'s `join` with more than
       one class over several rows (the only multi-path pair is the pinning switch, which returns
       first), and no pair is two identical documents.
-    - **`asset_id` (#497 round 1, m3; DEC-404 item 9):** journal spec v0.10 types `instrument` as an
-      asset ID. The `mandate-journal` code PR (test first, with `result` matched exhaustively, m2) is
-      on `agent/l-risk-state-asset-id`. Next, the reference PR with the `asset_id` vectors and seeded
-      bugs, and #503's m1 and m2 text.
+    - **`asset_id` (#497 round 1, m3; DEC-404 item 9):** done. Journal spec v0.10 types `instrument`
+      as an asset ID (#503), `mandate-journal` enforces it with `result` matched exhaustively (#509),
+      and the reference validator, its `asset_id` vectors, and #503's m1 and m2 text follow on
+      `agent/l-risk-state-asset-id-vectors`.
     - **Members appended under a looser type than the mapping parses (#503 round 1, m3).** Each has
       the same shape as `instrument` had: it appends, then makes the stream's `ValidationContext`
       unbuildable, and a context that will not build is not a hold an exit may have (rule 13).
