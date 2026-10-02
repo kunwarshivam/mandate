@@ -1171,6 +1171,15 @@ From E10-1's slice-V implementation (DEC-161):
     rather than risk-clock seconds (`escalation.rs`, `payload::seconds`). §9.2 supersedes DEC-291
     item 1's "same second" for this member. `crates/mandate-runtime/src/escalation/tests.rs`'s assertion
     that `effective_at` is an integer changes with this writer.
+    The writer's pending pins are the M7 tests PR's (DEC-308 to DEC-310): the refusal's
+    `effective_at` the §4.7 timestamp of the judged second, for a resume refusal, a Stop refusal,
+    each of the four reasons, and the `refused_stop` vector's own form, read from the committed
+    vectors. The in-module late-Stop pin goes pending with them (the coordinator-named test
+    change), and `refused_only` reads the judged second in either form, so the implementation PR
+    deletes `#[ignore]` lines only (DEC-309 item 3). Until the writer's fix lands the registered
+    schema refuses the integer-form drafts at `append`, as DEC-261 item 7 has standing
+    (rule 3). This follow-up row needs its own story id: its pins and stub cite E8-3, which
+    `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
     (HLD §8), as a new `schema_version` with its own vectors.
   - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,
