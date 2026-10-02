@@ -870,8 +870,21 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   *Follow-up (#410 review, minor 3; DEC-282 item 9):* an evaluation whose scoreable set is empty
   against a registered `minimum_scoreable` of zero refuses with `Num(DivisionByZero)` — fail-loud,
   but a code that tells a caller nothing. A tests PR names the refusal (a `ResearchError` arm of
-  its own; the registry's codes are add-only) so the empty report carries its reason, with the
-  frozen surface otherwise unchanged.
+  its own, `empty_scoreable_set`; the registry's codes are add-only) where the nameless code
+  answered: the named code reaches a caller only at a registered `minimum_scoreable` of zero. Below
+  a positive minimum an empty scoreable set still refuses `window_not_closed`, which does not tell
+  "no theses at all" from "theses, none scoreable" (DEC-336); the frozen surface is otherwise
+  unchanged.
+  *Founder question (#435 review, minor 1):* whether the named refusal should answer an empty
+  scoreable set at every minimum, ahead of the count refusal. That changes two pinned ES-09
+  refusal codes (`a_thesis_whose_closes_all_lie_outside_its_window_is_unscoreable` and
+  `a_degenerate_window_is_unscoreable_never_a_figure` pin `window_not_closed`, set by DEC-282
+  item 8), so it is a surface change for the founder, not an agent reading; until then DEC-336's
+  narrower reach holds.
+  *Follow-up (#435 review, minor 3):* `score::basket_return` over an empty `members` slice refuses
+  with the nameless `Num(DivisionByZero)`, pinned live by `an_empty_basket_is_an_error`: loud, so no
+  figure escapes, but a code that tells a caller nothing. A tests PR names it the way DEC-335 named
+  the empty scoreable set (an add-only `ResearchError` arm and code).
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
