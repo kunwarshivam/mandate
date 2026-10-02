@@ -129,7 +129,7 @@ their milestones start.
 - **Specifications are the contract.** Three specs ([trading domain](docs/specs/trading-domain.md),
   [journal](docs/specs/journal.md), [mandate](docs/specs/mandate.md)) define the rules, and each
   ships machine-readable reference cases the code must reproduce exactly. Spec paths are protected
-  in CI: they change only through a recorded decision, in a change that ships no code.
+  in CI: they change only with a recorded decision, in a change that ships no code.
 - **The journal is the source of truth.** Canonical JSON bytes, SHA-256 hash chaining, per-stream
   heads with writer fencing, content-addressed artifacts, and Merkle anchors, with a verifier that
   reports the first failing check by its stable code.
@@ -273,10 +273,7 @@ change that marks reference cases passing (DEC-77). Every pull request merges on
 a written verdict from an independent review agent on a different model from its author (DEC-79),
 which tries to break the change with its own probes. Interpretations the specs leave open are
 recorded as numbered decisions before code is written; the founder reviews after the fact and can
-veto. Each decision is its own file under
-[docs/project/decisions/](docs/project/decisions/README.md) (DEC-344), so parallel streams do not
-contend for one log. They coordinate through claim issues, a reserved-identifier table for the
-other identifiers, and one merge
+veto. Parallel streams coordinate through claim issues, one file per decision, and one merge
 queue ([coordination playbook](.cursor/skills/mandate-mode/playbooks/coordination.md)).
 
 ## Documents
