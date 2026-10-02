@@ -526,7 +526,8 @@ pub(crate) mod tests {
     use mandate_accounting::{
         AssetClass, Config, CryptoFees, EquityFees, InstrumentId, Side, TafCapBasis,
     };
-    use mandate_canon::Value;
+    use mandate_canon::{Value, to_canonical};
+    use mandate_journal::Draft;
     use mandate_num::{
         Bps, FeeCap, FeePerShare, FeeRate, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd,
     };
@@ -2360,6 +2361,86 @@ pub(crate) mod tests {
             1,
             "and the owner is still alerted, about what the snapshot refused to name"
         );
+        Ok(())
+    }
+
+    /// The executor's own `AccountSnapshotRecorded` payloads, journaled as `mandate-journal` would
+    /// be asked to: never refused for one of their members. Journal spec §9.2 needs the fee step's
+    /// three cash members present as `null`, which this writer does not write yet, so registering the
+    /// schema before the writer conforms would refuse the snapshot of the step that pauses every
+    /// agent and alerts the owner (DEC-261 item 7, `AGENTS.md` rules 3 and 13). This fails exactly
+    /// when that order is broken. It is half of a pair: a refusal at the bare `payload` would not trip
+    /// it, and `mandate-journal`'s `account_snapshot_recorded_waits_for_the_fee_step_writer`, which pins
+    /// `unknown_schema` at `payload`, covers that case. Each half carries the other.
+    #[test]
+    fn the_fee_steps_snapshot_is_never_refused_for_its_members() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(1));
+        state.started = true;
+        let mut differing = snapshot(ReconcileReason::FeePosting)?;
+        differing.account.accrued_fees = Usd::parse("3")?;
+        let mut payloads = Vec::new();
+        for observed in [
+            None,
+            Some(ObservedAccount {
+                state: AccountState::Active,
+                multiplier: 1,
+                equity: Usd::ZERO,
+                cash: Usd::ZERO,
+                buying_power: Usd::ZERO,
+                non_marginable_buying_power: Usd::ZERO,
+                accrued_fees: Usd::ZERO,
+                complete: true,
+            }),
+        ] {
+            state.observed = observed;
+            let run = reconcile(&state, &differing, &ports)?;
+            payloads.extend(run.effects.into_iter().filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "AccountSnapshotRecorded" => {
+                    Some(draft.payload)
+                }
+                _ => None,
+            }));
+        }
+        let compared: Vec<bool> = payloads
+            .iter()
+            .map(|payload| payload.get("model_cash").is_some())
+            .collect();
+        assert_eq!(
+            compared,
+            vec![false, true],
+            "the fee step's own snapshot, then a cash comparison's"
+        );
+        for payload in &payloads {
+            let draft = format!(
+                r#"{{"envelope_version":1,"environment":"paper","event_id":"01J8Z3N0A000000000000000R1",
+                "stream_id":"acct:ws1:acct-1","event_type":"AccountSnapshotRecorded","schema_version":1,
+                "event_time":"2026-09-21T21:00:00.000000000Z","clock_source":"broker",
+                "causation_id":null,"correlation_id":null,
+                "actor":{{"kind":"system","id":"executor","version":"0.1.0","build":"sha256:{}"}},
+                "config_refs":{{}},"payload":{},"artifact_refs":[],"pii_refs":[]}}"#,
+                "3".repeat(64),
+                String::from_utf8_lossy(&to_canonical(payload))
+            );
+            let refusal = Draft::parse(draft.as_bytes()).err();
+            assert!(
+                refusal
+                    .as_ref()
+                    .is_none_or(|e| !e.path.starts_with("payload.")),
+                "the snapshot is refused for a member: {refusal:?}"
+            );
+        }
         Ok(())
     }
 }

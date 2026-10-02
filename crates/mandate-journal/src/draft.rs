@@ -7,7 +7,7 @@ use mandate_canon::{Object, Value, parse, to_canonical};
 use mandate_time::UtcNanos;
 
 use crate::schema::{Ty, normalize, normalize_record, parse_digest_ref, payload_schema};
-use crate::{Environment, Invalid, InvalidReason, StreamId, StreamType, agent, catalogue};
+use crate::{Environment, Invalid, InvalidReason, StreamId, StreamType, agent, catalogue, control};
 
 static ENVELOPE: &[(&str, Ty)] = &[
     ("envelope_version", Ty::Int),
@@ -92,8 +92,16 @@ impl Draft {
         let written = fields.get("payload").unwrap_or(&Value::Null);
         let causation_id = fields.get("causation_id");
         let closed = agent::governs(&stream_id, event_type);
+        let controlled = control::governs(&stream_id, event_type);
         let payload = if closed {
             agent::payload(event_type, int("schema_version"), written, causation_id)?
+        } else if controlled {
+            control::payload(
+                event_type,
+                int("schema_version"),
+                written,
+                fields.get("config_refs"),
+            )?
         } else {
             let schema = payload_schema(event_type, int("schema_version"))
                 .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
@@ -117,6 +125,8 @@ impl Draft {
 
         if closed {
             agent::subject_and_copy(event_type, &stream_id, &payload, causation_id)?;
+        } else if controlled {
+            control::subject_and_copy(event_type, &stream_id, &payload, causation_id)?;
         } else if event_type == "StreamOpened"
             && subject(&stream_id, &payload).as_deref() != Some(stream_id.as_str())
         {

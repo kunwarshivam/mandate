@@ -356,6 +356,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   #413). It maps each record to its fact, and the vectors are in `journal.yaml`'s `control_stream`
   section. `PlatformOperatorAction` stays open (DEC-261 item 9, Proposed), so its schema and the
   `ModelWithdrawn` mapping wait for the operator service's specification.
+  *Tests PR* ([DEC-303](04-decision-log.md#decisions)): 17 pending tests against stubs in
+  `mandate-journal`'s `control` module and `mandate-spec`'s `JournaledFact::from_record`. Three live
+  tests keep `AccountSnapshotRecorded` unregistered until stream K's writer conforms (DEC-261 item 7).
 
 ### E8 Escalation and approvals
 
@@ -1070,7 +1073,11 @@ From E10-1's slice-V implementation (DEC-161):
   `ConfigSnapshotRegistered`, `PlatformOperatorAction` (`model_withdrawn`), `MandateVersionCreated`, and
   `MandateConfirmed`. `AgentFlat` needs a source there too (the account ledger's flat-in-every-instrument
   signal). A record left unmapped is a fact the fold never sees, so the mapper's completeness is what
-  covers the facts that only add (DEC-169 item 2).
+  covers the facts that only add (DEC-169 item 2). **Journal spec v0.7 §9.2 leaves
+  `MandateVersionApplied` and `UniverseChanged` (account stream) to their own story** (DEC-303 item 6):
+  E7-10 maps the records §9.2 closes, and those two go with the "account-stream risk-state records" row
+  below. Until it lands they map to none, so the fold fails closed: no version change after the
+  deployment and no admitted instrument are seen.
 - **Journal spec v0.7 §9.2's follow-ups ([DEC-261](04-decision-log.md#decisions)).** Until each
   lands, the drafts it names stay refused at `append`, which adds no risk (rule 3).
   - **Stream K:** the executor's fee-step `AccountSnapshotRecorded` writes `model_cash`, `cash_band`,
@@ -1079,7 +1086,10 @@ From E10-1's slice-V implementation (DEC-161):
     account-stream event). **E7-10's implementation must not register
     `AccountSnapshotRecorded` until this lands.** The fee step pauses every agent and alerts the owner,
     and refusing its snapshot at `append` must never stop it (rules 3 and 13, DEC-261 item 7). E7-10's
-    tests PR pins that ordering with a pending test.
+    tests PR pins that ordering with three live tests (DEC-303 item 4). The registration PR must also
+    turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. Until then they are proven only
+    by `reference/journal/control.py`'s mutants, and `snapshot_drafts_stay_unregistered` reads none of
+    them.
   - **Stream I / M7:** the runtime's `OwnerCommandRefused` writes `effective_at` as a §4.7 timestamp
     rather than risk-clock seconds (`escalation.rs`, `payload::seconds`). §9.2 supersedes DEC-291
     item 1's "same second" for this member. `crates/mandate-runtime/src/escalation/tests.rs`'s assertion
@@ -1091,6 +1101,10 @@ From E10-1's slice-V implementation (DEC-161):
     scope, the acceptable-use action, and the row's "approval".
   - **Proposed, item 10:** a clause binds an account stream to its connection, so that
     `AccountSnapshotRecorded`'s fact needs no argument.
+  - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** a journal spec
+    change closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with vectors.
+    The tests and implementation that follow register them and map them to `AgentVersionActive` (a
+    deployed agent's new version) and `UniverseChanged`.
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).
