@@ -120,18 +120,14 @@ const PENDING_PROPOSAL: &[(&str, &str)] = &[
 
 const PENDING_INITIAL: &[(&str, &str)] = &[("open_orders", "E7-4"), ("agents", "E7-5")];
 
-/// `initial.account` members a later story reads. The day-trade regime and its figures are read
-/// from the initial account ([`gate`], DEC-284).
-const PENDING_INITIAL_ACCOUNT: &[(&str, &str)] = &[("crypto_status", "E6-10")];
-
 /// `broker_account_update` members a later story reads: a change to the regime or its figures in
-/// the middle of a case is not read (DEC-284), and neither is the crypto status.
+/// the middle of a case is not read (DEC-284). The crypto status is not among them any more: the
+/// gate reads it through its stub pending E6-10 (DEC-285 item 5's backlog row, DEC-315).
 const PENDING_ACCOUNT_UPDATE: &[(&str, &str)] = &[
     ("regime", "E6-6"),
     ("prior_day_trades", "E6-6"),
     ("last_equity", "E6-6"),
     ("multiplier", "E6-6"),
-    ("crypto_status", "E6-10"),
 ];
 
 /// Instrument fields read only by the eligibility floor.
@@ -325,15 +321,6 @@ fn pending(case: &Json) -> BTreeSet<String> {
     for key in initial.keys() {
         if let Some(story) = owner(PENDING_INITIAL, key) {
             note(format!("initial `{key}`"), story);
-        }
-    }
-    let account = initial
-        .get("account")
-        .and_then(Json::as_object)
-        .unwrap_or(&empty);
-    for key in account.keys() {
-        if let Some(story) = owner(PENDING_INITIAL_ACCOUNT, key) {
-            note(format!("initial account `{key}`"), story);
         }
     }
     let steps = case.get("steps").and_then(Json::as_array);

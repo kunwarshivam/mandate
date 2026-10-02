@@ -649,10 +649,13 @@ fn the_opposite_fill_interval_runs_from_the_fill_step() -> Result<(), String> {
 #[test]
 fn a_case_that_cannot_run_lists_a_later_proposal_only_after_an_unfilled_one() -> Result<(), String>
 {
-    let waiting = "initial account `crypto_status` not interpreted until E6-10";
+    let waiting = "initial `agents` not interpreted until E7-5";
     expect_eq(
         "RC-09B",
-        run_edited("RC-09B", account("crypto_status", json!("ACTIVE"))),
+        run_edited(
+            "RC-09B",
+            Box::new(|c| put(c, &["initial"], "agents", json!({}))),
+        ),
         Err(format!("{LATER_PROPOSAL_WAITS}; {waiting}")),
     )?;
     expect_eq(
@@ -660,7 +663,7 @@ fn a_case_that_cannot_run_lists_a_later_proposal_only_after_an_unfilled_one() ->
         run_edited(
             "RC-09B",
             Box::new(|c| {
-                put(c, &["initial", "account"], "crypto_status", json!("ACTIVE"))?;
+                put(c, &["initial"], "agents", json!({}))?;
                 let steps = steps_of(c)?;
                 ensure(steps.len() > 2, || "RC-09B has a step 3".to_owned())?;
                 steps.remove(2);
@@ -739,6 +742,51 @@ fn the_overnight_shares_are_the_position_less_today_s_fills() -> Result<(), Stri
             rc_09b_holding_aapl(steps(json!({ "verdict": "allow" }))),
         ),
         Err("step 3: decision.verdict: expected allow, got deny".to_owned()),
+    )
+}
+
+/// A short equity position is refused where a `day_trade_count` expectation reaches the fold,
+/// never folded as long (#412 review, nit 3, DEC-314): `decide` refuses a short snapshot, but the
+/// expectation reaches [`Gate::fold`] without it, and folding the position's magnitude would hold
+/// 10 AAPL long, find no day trade in today's fills, and answer the prior day's one. The refusal
+/// is pending E6-10: until its story lands the stub reports itself, and this test pins the
+/// refusal's text against it.
+#[test]
+#[ignore = "pending E6-10"]
+fn a_short_position_is_refused_where_a_day_trade_count_is_expected() -> Result<(), String> {
+    expect_eq(
+        "a short position under a day_trade_count expectation",
+        run_edited(
+            "RC-09B",
+            Box::new(|c| {
+                put(
+                    c,
+                    &["initial"],
+                    "positions",
+                    json!([{ "instrument": "AAPL", "qty": "-10", "cost_basis": "-1500.00" }]),
+                )?;
+                put(
+                    c,
+                    &["initial", "account"],
+                    "prior_day_trades",
+                    json!([{ "date": "2026-09-18", "instrument": "CCC" }]),
+                )?;
+                object_at(c, &[])?.insert(
+                    "steps".to_owned(),
+                    json!([{
+                        "at": "2026-09-21T12:00:00-04:00",
+                        "event": "mark",
+                        "data": { "instrument": "AAPL", "price": "150.00", "source": "quote" },
+                        "expect": { "day_trade_count": 1 }
+                    }]),
+                );
+                Ok(())
+            }),
+        ),
+        Err(
+            "step 1: `AAPL` is held short, which the day-trade fold refuses (its magnitude would fold as long and understate the day-trade count)"
+                .to_owned(),
+        ),
     )
 }
 
