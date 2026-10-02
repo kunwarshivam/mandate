@@ -328,7 +328,8 @@ def encoded(texts: list) -> list[bytes]:
 
 
 def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """The §9.2 consistency rules 17 to 24, on a well-typed payload, each reported once."""
+    """The §9.2 consistency rules 17 to 24 and §9.3's 29 to 33, on a well-typed payload, each
+    reported once."""
     p = draft["payload"]
     out: list[Violation] = []
 
