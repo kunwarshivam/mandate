@@ -3002,6 +3002,59 @@ control_stream:
       outcome: Invalid
       reason: schema
       path: payload.step_up
+  - name: disclosure_step_up_carries_a_token
+    clause: '§9.2 every schema is closed at every depth: step_up (AGENTS.md rules 6 and 7)'
+    base_seq: 5
+    changes:
+    - path: payload.step_up.token
+      value: reference-fixture-not-a-token
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up.token
+  - name: disclosure_step_up_assertion_not_text
+    clause: '§9.2 step_up.assertion_id: text'
+    base_seq: 5
+    changes:
+    - path: payload.step_up.assertion_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up.assertion_id
+  - name: disclosure_step_up_time_off_form
+    clause: '§9.2 step_up.authenticated_at: a §4.7 timestamp'
+    base_seq: 5
+    changes:
+    - path: payload.step_up.authenticated_at
+      value: '2026-09-20 13:06:50'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.step_up.authenticated_at
+  - name: disclosure_step_up_method_null
+    clause: '§9.2 step_up.method: text, never null'
+    base_seq: 5
+    changes:
+    - path: payload.step_up.method
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up.method
+  - name: provenance_entry_carries_a_span
+    clause: '§9.2 every schema is closed at every depth: a provenance entry (quoted spans are in the record)'
+    base_seq: 6
+    changes:
+    - path: payload.provenance
+      value:
+      - path: /autonomy
+        source: user_entered
+        quoted_span: buy dips
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.provenance[0].quoted_span
   - name: disclosure_version_bare_id
     clause: §9.2 ref
     base_seq: 5
