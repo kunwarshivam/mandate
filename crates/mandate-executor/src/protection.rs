@@ -1141,9 +1141,9 @@ pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorE
 /// exit that arrives after it. An exit allowed while the placement was still to come would
 /// otherwise wait behind it with nothing to cancel it (#489). It runs at every step an exit waits,
 /// the placement's own included, and asks only where no cancel is outstanding: never for an order
-/// already `PendingCancel`, nor for one whose cancel was asked before the broker acknowledged it.
-/// So it asks once, and again only once a refused cancel's query finds the placement still live
-/// (§5.7).
+/// already `PendingCancel`, nor for one `Unknown` while a refused cancel's query is out (never
+/// cancelled blind), nor for one whose cancel was asked before the broker acknowledged it. So it
+/// asks once, and again only once that query finds the placement still live (§5.7).
 fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
     let handed_on = batch
         .view
@@ -1162,6 +1162,7 @@ fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(),
     for id in resting {
         let outstanding = batch.view.orders.get(&id).is_none_or(|order| {
             order.state == OrderState::PendingCancel
+                || order.state == OrderState::Unknown
                 || order.state == OrderState::Submitting && order.cancel_unconfirmed
         });
         if outstanding {
@@ -7697,8 +7698,8 @@ mod sequence_tests {
     /// #508's review, M1: the placement's cancel is asked in the step it is placed, while the
     /// broker has not acknowledged it, and the broker refuses that cancel. The refusal is the
     /// cancel's, not the order's: the placement is never journaled rejected, it is queried, and
-    /// the cancel is asked again once it is seen live, so the exit of 3 still goes. Today the
-    /// placement is never cancelled at all (#489), so this fails on the exit's stranding.
+    /// the cancel is asked again once it is seen live, so the exit of 3 still goes. Before #508
+    /// the placement was never cancelled at all (#489), and this failed on the exit's stranding.
     #[test]
     fn a_refused_cancel_of_an_unacknowledged_placement_is_asked_again() -> Result<(), String> {
         let script = [
@@ -7756,6 +7757,24 @@ mod sequence_tests {
             )),
             "{:?}",
             drafted(&refusal)
+        );
+        assert!(
+            cancels(&refusal).is_empty(),
+            "nothing is cancelled blind while the query is out: {:?}",
+            drafted(&refusal)
+        );
+        let absent = executor.run(
+            Input::Broker(Ok(BrokerOutcome::Absent {
+                client_order_id: placement.clone(),
+            })),
+            &ports,
+        )?;
+        assert!(cancels(&absent).is_empty(), "{:?}", drafted(&absent));
+        let unknown = executor.run(Input::Tick(RiskClock::from_secs(1_800)), &ports)?;
+        assert!(
+            cancels(&unknown).is_empty(),
+            "nor while the order sits unknown: {:?}",
+            drafted(&unknown)
         );
         let live = reported(
             &placement,
