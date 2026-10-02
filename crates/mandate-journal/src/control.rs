@@ -782,7 +782,10 @@ mod tests {
 
     /// Rule 28: `not_independent` is the executor's refusal of an acknowledgment, so it is accepted on
     /// the account stream and refused at `payload.reason` on the agent stream, where rule 26 has
-    /// already let a resume or Stop through; a step-up reason stays accepted on both.
+    /// already let a resume or Stop through; a step-up reason stays accepted on both. The report
+    /// order is pinned both ways: a command on the wrong stream is rule 26's (`payload.command`)
+    /// even with `not_independent`, and an uncaused `not_independent` on the agent stream is rule
+    /// 28's (`payload.reason`), not rule 27's (`causation_id`).
     #[test]
     fn not_independent_is_an_account_stream_refusal_only() -> Result<(), String> {
         let payload = |command: &str, reason: &str| -> Result<Value, String> {
@@ -798,36 +801,55 @@ mod tests {
             ))
         };
         let cause = Value::Str("01J8ZNB00000000000000000C6".to_owned());
-        for (stream, command, reason, verdict) in [
-            ("acct:ws_1:a1", "acknowledge", "not_independent", None),
+        let at_reason = Some(("stream_mismatch", "payload.reason"));
+        let at_command = Some(("stream_mismatch", "payload.command"));
+        for (stream, command, reason, caused, verdict) in [
+            ("acct:ws_1:a1", "acknowledge", "not_independent", true, None),
             (
                 "agent:ws_1:agent_a",
                 "stop",
                 "not_independent",
-                Some("payload.reason"),
+                true,
+                at_reason,
             ),
             (
                 "agent:ws_1:agent_a",
                 "resume",
                 "not_independent",
-                Some("payload.reason"),
+                true,
+                at_reason,
             ),
-            ("agent:ws_1:agent_a", "stop", "step_up_stale", None),
-            ("acct:ws_1:a1", "acknowledge", "step_up_reused", None),
+            ("agent:ws_1:agent_a", "stop", "step_up_stale", true, None),
+            ("acct:ws_1:a1", "acknowledge", "step_up_reused", true, None),
+            ("acct:ws_1:a1", "stop", "not_independent", true, at_command),
+            (
+                "agent:ws_1:agent_a",
+                "acknowledge",
+                "not_independent",
+                true,
+                at_command,
+            ),
+            (
+                "agent:ws_1:agent_a",
+                "stop",
+                "not_independent",
+                false,
+                at_reason,
+            ),
         ] {
             let stream = StreamId::parse(stream).ok_or("a stream id")?;
             let got = subject_and_copy(
                 "OwnerCommandRefused",
                 &stream,
                 &payload(command, reason)?,
-                Some(&cause),
+                caused.then_some(&cause),
             )
             .err()
             .map(|e| (e.reason.code(), e.path));
             assert_eq!(
                 got,
-                verdict.map(|path| ("stream_mismatch", path.to_owned())),
-                "{stream} {command} {reason}"
+                verdict.map(|(code, path)| (code, path.to_owned())),
+                "{stream} {command} {reason} caused={caused}"
             );
         }
         Ok(())
