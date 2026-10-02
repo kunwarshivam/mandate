@@ -37,7 +37,7 @@ use mandate_num::{Price, Qty};
 use mandate_runtime::{
     ActorKind, AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment,
     DryRunVerdict, Effect, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest,
-    FoldedEvent, GateDryRun, IdGen, Input, MandateView, OrderPlan, Ports, Proposal, Purpose,
+    FoldedEvent, GateDryRun, IdGen, Input, MandateView, Mode, OrderPlan, Ports, Proposal, Purpose,
     RiskClock, RuntimeState, Seq, SignalInputs, WorkspaceId, WriterEpoch, fold, handle,
 };
 use mandate_time::NewYorkTime;
@@ -47,6 +47,7 @@ use crate::{Json, at, ensure, list_at, str_at, to_canon, u64_at};
 
 const AGENT_STREAM: &str = "agent:w:a";
 const ACCOUNT_STREAM: &str = "acct:w:c";
+const CONTROL_STREAM: &str = "ctl:w";
 
 const CASE_KEYS: &[&str] = &[
     "id", "kind", "op", "title", "context", "start", "script", "expect",
@@ -82,6 +83,34 @@ const REQUESTED: &[(&str, &str, As)] = &[
     ("timeout_s", "timeout_s", As::Canonical),
     ("deadline", "deadline", As::Seconds),
 ];
+const RESPONDED: &[(&str, &str, As)] = &[
+    ("responder", "responder", As::Canonical),
+    ("verdict", "verdict", As::Canonical),
+    ("step_up", "step_up", As::StepUp),
+    ("result", "result", As::Canonical),
+    ("reason", "reason", As::Canonical),
+    ("effective_at", "effective_at", As::Seconds),
+    ("quorum", "quorum", As::Quorum),
+];
+const RESPONSE_KEYS: &[&str] = &[
+    "source",
+    "approval",
+    "actor_kind",
+    "responder",
+    "verdict",
+    "content_hash",
+    "submitted_at",
+    "step_up",
+];
+const NOW_KEYS: &[&str] = &[
+    "mandate_version",
+    "mode",
+    "instrument_restricted",
+    "in_working_universe",
+    "classification",
+    "dry_run",
+    "mark",
+];
 const DELIVERED: &[(&str, &str, As)] = &[
     ("channel", "channel", As::Canonical),
     ("status", "status", As::Canonical),
@@ -95,6 +124,10 @@ enum As {
     Canonical,
     /// An instant, written by the runtime as its whole second.
     Seconds,
+    /// `{assertion, authenticated_at, method}` or `null`, as the control stream writes it.
+    StepUp,
+    /// Check 7's `{required, independent}`, which the runtime does not record yet (E8-3).
+    Quorum,
 }
 
 /// ULID-shaped agent-stream ids from the epoch, the head and the ordinal in decimal digits, which
@@ -164,10 +197,15 @@ struct Shell {
     view: MandateView,
     classified: Classified,
     verdict: DryRunVerdict,
-    /// The instruments a mark has been folded for.
-    marks: BTreeSet<String>,
+    control_seq: u64,
+    /// The last folded mark of each instrument, in its canonical text.
+    marks: BTreeMap<String, String>,
+    /// The instrument of the last ask, which `now` reads.
+    instrument: Option<String>,
     approval_ids: BTreeMap<String, String>,
     hashes: BTreeMap<String, String>,
+    /// Each `source` handed so far: its control-stream event and the response as the case gave it.
+    sources: BTreeMap<String, (FoldedEvent, Json)>,
 }
 
 pub(super) fn lifecycle_case(case: &Json) -> Result<(), String> {
@@ -258,9 +296,12 @@ impl Shell {
                 decided_by: None,
             },
             verdict: DryRunVerdict::Allow,
-            marks: BTreeSet::new(),
+            control_seq: 0,
+            marks: BTreeMap::new(),
+            instrument: None,
             approval_ids: BTreeMap::new(),
             hashes: BTreeMap::new(),
+            sources: BTreeMap::new(),
         };
         shell.account("ReconciliationRun", vec![("result", text("clean"))], start)?;
         let effects = shell.step(Input::Started(WriterEpoch(1)), None)?;
@@ -279,37 +320,39 @@ impl Shell {
 
     fn run(&mut self, step: &Json) -> Result<Ran, String> {
         let kind = str_at(step, "kind")?;
-        let slice = match kind {
-            "ask" => 1,
-            "response" => 2,
-            "tick" | "fold" | "cancel" | "batch" => 3,
+        let (drafts, asked, decision) = match kind {
+            "ask" => {
+                unknown_members(step, &["kind", "approval", "bound"])
+                    .map_err(|unknown| format!("`ask` members not interpreted: {unknown}"))?;
+                let bound = at(step, "bound")?;
+                let asked = (str_at(step, "approval")?.to_owned(), bound.clone());
+                let mut drafts = journaled(self.ask(bound)?);
+                let decision = drafts
+                    .first()
+                    .filter(|d| d.event_type == "DecisionMade")
+                    .map(|d| d.event_id.clone());
+                if decision.is_some() {
+                    drafts.remove(0);
+                }
+                (drafts, Some(asked), decision)
+            }
+            "response" => {
+                unknown_members(step, &["kind", "response", "now"])
+                    .map_err(|unknown| format!("`response` members not interpreted: {unknown}"))?;
+                self.apply_now(at(step, "now")?)?;
+                (journaled(self.respond(at(step, "response")?)?), None, None)
+            }
+            "tick" | "fold" | "cancel" | "batch" => {
+                return Err(not_implemented(&format!(
+                    "the `{kind}` step, DEC-317's slice 3,"
+                )));
+            }
             other => return Err(format!("`{other}` is not a lifecycle step")),
         };
-        ensure(slice == 1, || {
-            not_implemented(&format!("the `{kind}` step, DEC-317's slice {slice},"))
-        })?;
-        unknown_members(step, &["kind", "approval", "bound"])
-            .map_err(|unknown| format!("`ask` members not interpreted: {unknown}"))?;
-        let bound = at(step, "bound")?;
-        let mut drafts: Vec<EventDraft> = self
-            .ask(bound)?
-            .into_iter()
-            .filter_map(|effect| match effect {
-                Effect::Journal(draft) => Some(draft),
-                _ => None,
-            })
-            .collect();
-        let decision = drafts
-            .first()
-            .filter(|d| d.event_type == "DecisionMade")
-            .map(|d| d.event_id.clone());
-        if decision.is_some() {
-            drafts.remove(0);
-        }
         Ok(Ran {
             drafts,
             clock: self.clock()?,
-            asked: Some((str_at(step, "approval")?.to_owned(), bound.clone())),
+            asked,
             decision,
         })
     }
@@ -373,20 +416,23 @@ impl Shell {
     fn mark(&mut self, instrument: &str, price: &str, risk_clock: i64) -> Result<(), String> {
         let members = vec![("instrument", text(instrument)), ("price", text(price))];
         self.account("MarkUpdated", members, risk_clock)?;
-        self.marks.insert(instrument.to_owned());
+        self.marks.insert(instrument.to_owned(), price.to_owned());
         Ok(())
     }
 
     /// `ask`: the bound order proposed once at a tick of the folded clock, classified `ask` by its
     /// `decided_by`, its reference mark folded at its `seq` first.
     fn ask(&mut self, bound: &Json) -> Result<Vec<Effect>, String> {
-        let known: Vec<&str> = REQUESTED.iter().map(|(case, _, _)| *case).collect();
-        unknown_members(bound, known.get(..13).unwrap_or_default())
+        let members = REQUESTED
+            .split_last()
+            .map_or(REQUESTED, |(_deadline, bound)| bound);
+        let known: Vec<&str> = members.iter().map(|(case, _, _)| *case).collect();
+        unknown_members(bound, &known)
             .map_err(|unknown| format!("`bound` members not interpreted: {unknown}"))?;
         let instrument = str_at(bound, "instrument")?;
         let clock = self.clock()?;
         match at(bound, "reference_mark")? {
-            Json::Null => ensure(!self.marks.contains(instrument), || {
+            Json::Null => ensure(!self.marks.contains_key(instrument), || {
                 "a request with no reference mark, after a mark was folded".to_owned()
             })?,
             mark => {
@@ -432,15 +478,21 @@ impl Shell {
             decided_by: Some(str_at(bound, "decided_by")?.to_owned()),
         };
         self.verdict = DryRunVerdict::Allow;
+        self.instrument = Some(instrument.to_owned());
         self.step(Input::Tick(RiskClock::from_secs(clock)), Some(proposal))
     }
 
     /// Each expected draft against the runtime's, in order.
     fn compare(&mut self, ran: &Ran, expected: &[Json]) -> Result<(), String> {
         let types: Vec<&str> = ran.drafts.iter().map(|d| d.event_type.as_str()).collect();
+        let owed = if types.contains(&"ApprovalRevalidated") {
+            "; re-validation is DEC-317's slice 3"
+        } else {
+            ""
+        };
         ensure(ran.drafts.len() == expected.len(), || {
             format!(
-                "{} drafts expected, the runtime wrote {types:?}",
+                "{} drafts expected, the runtime wrote {types:?}{owed}",
                 expected.len()
             )
         })?;
@@ -472,6 +524,16 @@ impl Shell {
                 &["approval"],
                 vec![("message_id", Some(Value::Null))],
             ),
+            "ApprovalResponded" => (
+                RESPONDED,
+                &["approval", "source"],
+                vec![("role", Some(text("approver")))],
+            ),
+            "ApprovalRevalidated" | "IntentProposed" | "ApprovalTimedOut" | "ApprovalCanceled" => {
+                return vec![not_implemented(&format!(
+                    "the `{event_type}` map, DEC-317's slice 3,"
+                ))];
+            }
             other => return vec![format!("`{other}` is not a draft type the map knows")],
         };
         let mut faults = Vec::new();
@@ -511,6 +573,7 @@ impl Shell {
         }
         faults.extend(match event_type {
             "ApprovalRequested" => self.requested(want, draft, ran),
+            "ApprovalResponded" => self.responded(want, draft),
             _ => self.delivered(want, draft),
         });
         for key in draft.payload.as_object().into_iter().flat_map(|o| o.keys()) {
@@ -583,17 +646,190 @@ impl Shell {
         faults
     }
 
-    /// The draft's `approval` is the runtime's id for the case's name.
+    /// The draft's `approval` is the runtime's id for the case's name, or the name as written when
+    /// none is bound.
     fn names_approval(&self, want: &Json, draft: &EventDraft) -> Vec<String> {
         let wanted = want.get("approval").and_then(Json::as_str);
-        let id = wanted.and_then(|name| self.approval_ids.get(name));
-        match draft.payload.get("approval").and_then(Value::as_str) {
-            Some(got) if id.map(String::as_str) == Some(got) => Vec::new(),
-            got => vec![format!(
-                "`approval`: expected the id of {wanted:?}, got {got:?}"
-            )],
+        let id = wanted.map(|name| translate(&self.approval_ids, name));
+        match (id, draft.payload.get("approval").and_then(Value::as_str)) {
+            (Some(Ok(id)), Some(got)) if id == got => Vec::new(),
+            (id, got) => vec![format!("`approval`: expected {id:?}, got {got:?}")],
         }
     }
+
+    /// An `ApprovalResponded`: its approval, and the control-stream event it copies.
+    fn responded(&self, want: &Json, draft: &EventDraft) -> Vec<String> {
+        let mut faults = self.names_approval(want, draft);
+        let source = want
+            .get("source")
+            .and_then(Json::as_str)
+            .and_then(|name| self.sources.get(name))
+            .map(|(event, _)| &event.event_id);
+        if source.is_none() || draft.causation_id.as_ref() != source {
+            faults.push(format!(
+                "`source`: expected the copy of {source:?}, its cause is {:?}",
+                draft.causation_id
+            ));
+        }
+        faults
+    }
+
+    /// One control-stream event from `actor`, folded at the next `seq` as the tailer folds it.
+    fn control(
+        &mut self,
+        event_type: &str,
+        payload: Value,
+        actor: ActorKind,
+    ) -> Result<FoldedEvent, String> {
+        self.control_seq = self.control_seq.saturating_add(1);
+        let event = FoldedEvent {
+            stream: CONTROL_STREAM.to_owned(),
+            seq: Seq(self.control_seq),
+            event_id: EventId(format!("1{:025}", self.control_seq)),
+            event_type: event_type.to_owned(),
+            causation_id: None,
+            actor,
+            payload,
+        };
+        fold(&mut self.state, &event).map_err(|e| format!("folding {event_type}: {e}"))?;
+        Ok(event)
+    }
+
+    /// `now`: the view, the classification and the dry run as stated, and the mode folded where it
+    /// differs from the runtime's, which must then read as stated. The mode reaches a response's own
+    /// step, which cancels first in a mode exits-only or stricter. The version, the restriction, the
+    /// universe, the classification and the dry run are re-validation's inputs, and the mark is
+    /// read here and folded by DEC-317's slice 3: no step this slice interprets consults them, so
+    /// slice 3's re-validation is where they become checkable.
+    fn apply_now(&mut self, now: &Json) -> Result<(), String> {
+        unknown_members(now, NOW_KEYS)
+            .map_err(|unknown| format!("`now` members not interpreted: {unknown}"))?;
+        let instrument = self
+            .instrument
+            .clone()
+            .ok_or_else(|| "a `now` before any ask".to_owned())?;
+        let id = InstrumentId::new(&instrument).map_err(|e| format!("`instrument`: {e:?}"))?;
+        let held = |key: &str| -> Result<BTreeSet<InstrumentId>, String> {
+            let flag = at(now, key)?
+                .as_bool()
+                .ok_or_else(|| format!("`{key}` is a boolean"))?;
+            Ok(if flag {
+                [id.clone()].into()
+            } else {
+                BTreeSet::new()
+            })
+        };
+        self.view.restricted_instruments = held("instrument_restricted")?;
+        self.view.working_universe = held("in_working_universe")?;
+        self.view.version = str_at(now, "mandate_version")?.to_owned();
+        let classification = at(now, "classification")?;
+        unknown_members(classification, &["decision", "by"])
+            .map_err(|unknown| format!("`classification` members not interpreted: {unknown}"))?;
+        self.classified = Classified {
+            autonomy: match str_at(classification, "decision")? {
+                "auto" => Autonomy::Auto,
+                "ask" => Autonomy::Ask,
+                "deny" => Autonomy::Deny,
+                other => return Err(format!("`{other}` is not a classification")),
+            },
+            decided_by: optional_text(classification, "by")?,
+        };
+        let dry_run = at(now, "dry_run")?;
+        unknown_members(dry_run, &["verdict", "reason"])
+            .map_err(|unknown| format!("`dry_run` members not interpreted: {unknown}"))?;
+        self.verdict = match (
+            str_at(dry_run, "verdict")?,
+            optional_text(dry_run, "reason")?,
+        ) {
+            ("allow", None) => DryRunVerdict::Allow,
+            ("deny", Some(reason_code)) => DryRunVerdict::Deny { reason_code },
+            (verdict, reason) => {
+                return Err(format!(
+                    "a dry run `{verdict}` with reason {reason:?} is not one the gate gives"
+                ));
+            }
+        };
+        let clock = self.clock()?;
+        let mark = optional_text(now, "mark")?;
+        ensure(
+            mark.is_some() || !self.marks.contains_key(&instrument),
+            || "`now` has no mark, after a mark was folded".to_owned(),
+        )?;
+        let mode = str_at(now, "mode")?;
+        let wanted = match mode {
+            "normal" => Mode::Normal,
+            "exits_only" => Mode::ExitsOnly,
+            "paused" => Mode::Paused,
+            "stopped" => Mode::Stopped,
+            other => return Err(format!("`{other}` is not a mode")),
+        };
+        if self.state.effective_mode() != wanted {
+            self.account("AgentModeApplied", vec![("to", text(mode))], clock)?;
+        }
+        ensure(self.state.effective_mode() == wanted, || {
+            format!(
+                "`now` states mode `{mode}`, and the runtime's effective mode is {:?}",
+                self.state.effective_mode()
+            )
+        })
+    }
+
+    /// A response: a new `source` is folded on the control stream and handed in; a re-tailed one
+    /// hands the event already folded again, which must be the same response. The submission's
+    /// `role` is what the CLI writes; the runtime's copy writes its own `approver` and never reads
+    /// this one.
+    fn respond(&mut self, response: &Json) -> Result<Vec<Effect>, String> {
+        unknown_members(response, RESPONSE_KEYS)
+            .map_err(|unknown| format!("`response` members not interpreted: {unknown}"))?;
+        let source = str_at(response, "source")?;
+        if let Some((event, first)) = self.sources.get(source) {
+            ensure(first == response, || {
+                format!("`{source}` is re-tailed with other members than it was first handed with")
+            })?;
+            let event = event.clone();
+            return self.step(Input::Journal(event), None);
+        }
+        let verdict = str_at(response, "verdict")?;
+        ensure(matches!(verdict, "approved" | "skipped"), || {
+            format!("`{verdict}` is not a verdict")
+        })?;
+        let actor = match str_at(response, "actor_kind")? {
+            "user" => ActorKind::User,
+            "agent" => ActorKind::Agent,
+            "system" => ActorKind::System,
+            "broker" => ActorKind::Broker,
+            "platform_operator" => ActorKind::PlatformOperator,
+            other => return Err(format!("`{other}` is not an actor kind")),
+        };
+        let approval = translate(&self.approval_ids, str_at(response, "approval")?)?;
+        let hash = translate(&self.hashes, str_at(response, "content_hash")?)?;
+        let submitted = seconds(second(at(response, "submitted_at")?, "submitted_at")?)?;
+        let payload = object(vec![
+            ("agent", text("a")),
+            ("approval", text(&approval)),
+            ("verdict", text(verdict)),
+            ("content_hash", text(&hash)),
+            ("submitted_at", submitted),
+            ("step_up", step_up(at(response, "step_up")?)?),
+            ("responder", text(str_at(response, "responder")?)),
+            ("role", text("approver")),
+        ])?;
+        let event = self.control("ApprovalResponseSubmitted", payload, actor)?;
+        self.sources
+            .insert(source.to_owned(), (event.clone(), response.clone()));
+        self.step(Input::Journal(event), None)
+    }
+}
+
+/// The drafts among a step's effects, in order.
+fn journaled(effects: Vec<Effect>) -> Vec<EventDraft> {
+    effects
+        .into_iter()
+        .filter_map(|effect| match effect {
+            Effect::Journal(draft) => Some(draft),
+            _ => None,
+        })
+        .collect()
 }
 
 /// One case member against the runtime's, under `how`.
@@ -601,10 +837,57 @@ fn member(how: As, want: &Json, got: Option<&Value>) -> Result<(), String> {
     let wanted = match how {
         As::Seconds => seconds(second(want, "instant")?)?,
         As::Canonical => to_canon(want)?,
+        As::StepUp => step_up(want)?,
+        As::Quorum => {
+            ensure(got.is_some(), || {
+                "the runtime records no quorum: `ApprovalResponded` owes the approver count and \
+                 independence check 7 applied (journal spec §9, mandate spec §6.4), which E8-3's \
+                 runtime does not write yet"
+                    .to_owned()
+            })?;
+            to_canon(want)?
+        }
     };
     ensure(got == Some(&wanted), || {
         format!("expected {want}, got {got:?}")
     })
+}
+
+/// A step-up as the control stream writes it: `{assertion_id, authenticated_at, method}`.
+fn step_up(evidence: &Json) -> Result<Value, String> {
+    if evidence.is_null() {
+        return Ok(Value::Null);
+    }
+    unknown_members(evidence, &["assertion", "authenticated_at", "method"])
+        .map_err(|unknown| format!("`step_up` members not interpreted: {unknown}"))?;
+    let authenticated = second(at(evidence, "authenticated_at")?, "authenticated_at")?;
+    object(vec![
+        ("assertion_id", text(str_at(evidence, "assertion")?)),
+        ("authenticated_at", seconds(authenticated)?),
+        ("method", text(str_at(evidence, "method")?)),
+    ])
+}
+
+fn optional_text(value: &Json, key: &str) -> Result<Option<String>, String> {
+    match at(value, key)? {
+        Json::Null => Ok(None),
+        Json::String(s) => Ok(Some(s.clone())),
+        _ => Err(format!("`{key}` is a string or null")),
+    }
+}
+
+/// The runtime's name for the case's, or the case's own when none is bound, which must not be a
+/// runtime name bound to another (a wrong hash stays wrong).
+fn translate(bound: &BTreeMap<String, String>, name: &str) -> Result<String, String> {
+    match bound.get(name) {
+        Some(runtime) => Ok(runtime.clone()),
+        None => {
+            ensure(!bound.values().any(|runtime| runtime == name), || {
+                format!("`{name}` is a runtime name bound to another case name")
+            })?;
+            Ok(name.to_owned())
+        }
+    }
 }
 
 /// Binds a case name to a runtime one, one to one; each must be present.
