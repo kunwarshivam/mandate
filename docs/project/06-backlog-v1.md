@@ -1113,6 +1113,11 @@ From E10-1's slice-V implementation (DEC-161):
     turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. Until then they are proven only
     by `reference/journal/control.py`'s mutants, and `snapshot_drafts_stay_unregistered` reads none of
     them.
+    The writer's pending pins are #441's (DEC-305 to DEC-307): the fee-step snapshot's payload
+    member for member and type for type, the `risk_clock` stamp, the pause and alert whether or not
+    the snapshot recorded, `IntentReceived` as §9.1's nine members, and `OrderSubmitted`'s
+    `limit_price` as `null`. What the executor's fold reads beyond the registered `IntentReceived`
+    and `OrderSubmitted` waits on DEC-360 (Proposed, the founder).
   - **Stream I / M7:** the runtime's `OwnerCommandRefused` writes `effective_at` as a §4.7 timestamp
     rather than risk-clock seconds (`escalation.rs`, `payload::seconds`). §9.2 supersedes DEC-291
     item 1's "same second" for this member. `crates/mandate-runtime/src/escalation/tests.rs`'s assertion
