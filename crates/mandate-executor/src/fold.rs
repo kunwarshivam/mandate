@@ -772,9 +772,9 @@ fn net_unattributed(
             *left = left.checked_sub(take)?;
             netted = netted.checked_add(take)?;
         }
-        detail.netted = (netted > Qty::ZERO).then_some(netted);
+        detail.netted = Some(netted);
     }
-    pool.retain(|(_, left)| *left > Qty::ZERO);
+    pool.retain(|(_, left)| *left != Qty::ZERO);
     if pool.is_empty() {
         state.unattributed.remove(instrument);
     }
@@ -1296,15 +1296,117 @@ mod tests {
     use mandate_accounting::{InstrumentId, Side};
     use mandate_num::Qty;
 
-    use super::fold;
+    use super::{fold, net_unattributed};
     use crate::error::ExecutorError;
     use crate::ids::{ClientOrderId, IntentId};
     use crate::payload::{clock, object, text};
-    use crate::state::ExecutorState;
+    use crate::state::{ExecutorState, OrderDetail};
     use crate::types::{
         AccountRef, AccountScope, AgentId, EventId, FoldedEvent, Order, OrderState, Purpose,
         RiskClock, Seq, WorkspaceId,
     };
+
+    /// DEC-421 item 5: an unattributed sell of 5 AAPL nets only against an ended AAPL sell's
+    /// unapplied report, here 3 of `md-3-ended`'s. A live AAPL sell, an ended AAPL buy and an
+    /// ended MSFT sell, each with an unapplied report and sorted ahead of it, net nothing, and the
+    /// 2 left wait in the pool for the next ended sell. One submitted after the sell applied
+    /// cannot net it.
+    #[test]
+    fn an_unattributed_sell_nets_only_ended_sells_in_its_instrument() -> Result<(), ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let (aapl, msft) = (InstrumentId::new("AAPL")?, InstrumentId::new("MSFT")?);
+        let rows = [
+            (
+                "md-0-msft",
+                msft.clone(),
+                Side::Sell,
+                OrderState::Canceled,
+                1,
+            ),
+            (
+                "md-1-live",
+                aapl.clone(),
+                Side::Sell,
+                OrderState::Accepted,
+                1,
+            ),
+            ("md-2-buy", aapl.clone(), Side::Buy, OrderState::Canceled, 1),
+            (
+                "md-3-ended",
+                aapl.clone(),
+                Side::Sell,
+                OrderState::Canceled,
+                1,
+            ),
+            (
+                "md-4-later",
+                aapl.clone(),
+                Side::Sell,
+                OrderState::Canceled,
+                9,
+            ),
+        ];
+        for (id, instrument, side, now, submitted) in rows {
+            let client_order_id = ClientOrderId::parse(id)?;
+            state.orders.insert(
+                client_order_id.clone(),
+                Order {
+                    client_order_id: client_order_id.clone(),
+                    intent_id: None,
+                    agent: Some(AgentId("agent-a".to_owned())),
+                    instrument,
+                    side,
+                    qty: Qty::parse("4")?,
+                    filled_qty: Qty::ZERO,
+                    state: now,
+                    attempt: 1,
+                    purpose: Purpose::RiskExit,
+                    absent_lookups: 0,
+                    first_absence_at: None,
+                    cancel_unconfirmed: false,
+                    replaced_by: None,
+                    created_on: None,
+                },
+            );
+            state.details.insert(
+                client_order_id,
+                OrderDetail {
+                    submitted_seq: Some(Seq(submitted)),
+                    reported_filled: Some(Qty::parse("3")?),
+                    ..OrderDetail::default()
+                },
+            );
+        }
+        state
+            .unattributed
+            .insert(aapl.clone(), vec![(Seq(5), Qty::parse("5")?)]);
+        net_unattributed(&mut state, &aapl)?;
+        let netted = |id: &str| -> Result<Option<Qty>, ExecutorError> {
+            Ok(state
+                .details
+                .get(&ClientOrderId::parse(id)?)
+                .and_then(|detail| detail.netted))
+        };
+        assert_eq!(
+            (
+                netted("md-0-msft")?,
+                netted("md-1-live")?,
+                netted("md-2-buy")?,
+                netted("md-3-ended")?,
+                netted("md-4-later")?
+            ),
+            (None, None, None, Some(Qty::parse("3")?), Some(Qty::ZERO))
+        );
+        assert_eq!(
+            state.unattributed.get(&aapl),
+            Some(&vec![(Seq(5), Qty::parse("2")?)]),
+            "the 2 left wait for the next ended sell"
+        );
+        Ok(())
+    }
 
     /// A stream opened on paper, then an `OrderStateChanged` for an order the fold has never seen,
     /// carrying one extra field that names `md-r-e-1`. Without that field the fold answers
