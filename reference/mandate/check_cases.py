@@ -552,7 +552,22 @@ req("MC-W46", tw_fired_at("MC-W46") == [(3, "tripwire:losing_streak")] and C["MC
 req("MC-W47", tw_fired_at("MC-W47") == [] and tw_state("MC-W47")["metrics"]["losing_streak"] == "0"
     and Decimal(C["MC-W47"]["steps"][2]["price"]) - Decimal(C["MC-W47"]["steps"][1]["price"]) == Decimal("1e-12"),
     "the tie rounds to even: the exit breaks even")
-req("MC-W", sum(c.startswith("MC-W") for c in C) == 47, "47 tripwire cases")
+req("MC-W48", tw_fired_at("MC-W48") == [(4, "tripwire:losing_streak")] and C["MC-W48"]["steps"][3]["event"] == "RiskDayStarted"
+    and tw_state("MC-W48", 3)["metrics"]["losing_streak"] == "1", "the streak survives midnight")
+req("MC-W49", C["MC-W49"]["expect"][4]["journal"][0]["reason"] == "step_up_method"
+    and C["MC-W49"]["expect"][5]["journal"][0]["reason"] == "step_up_reused"
+    and C["MC-W49"]["steps"][4]["step_up"]["assertion"] == C["MC-W49"]["steps"][5]["step_up"]["assertion"]
+    and tw_state("MC-W49")["fired"] == {"losing_streak": "exits_only"}, "a refused acknowledgment spends its assertion")
+req("MC-W50", C["MC-W50"]["expect"][4]["journal"] == [{"type": "OwnerCommandRefused", "command": "acknowledge", "reason": "not_independent"}]
+    and C["MC-W50"]["steps"][4]["user"] == C["MC-W50"]["steps"][4]["requester"] and tw_state("MC-W50")["fired"] != {},
+    "the requester cannot lift it under independent approval")
+req("MC-W51", tw_events("MC-W51", 4) == ["RiskLimitLifted"] and C["MC-W51"]["steps"][4]["user"] != C["MC-W51"]["steps"][4]["requester"]
+    and C["MC-W51"]["steps"][4]["independent_approval_required"], "a second user lifts it")
+w52 = [s["expect"] for s in C["MC-W52"]["steps"]]
+req("MC-W52", C["MC-W52"]["kind"] == "risk_state" and "tripwire" in w52[1]["restrictions"] and w52[1]["agent_mode"] == "exits_only"
+    and w52[2].get("error") == "increase_blocked_while_latched" and w52[3]["journal"][0]["type"] == "RiskLimitLifted"
+    and w52[3]["agent_mode"] == "normal" and "error" not in w52[4], "MI-7 while fired; the increase applies after the acknowledgment")
+req("MC-W", sum(c.startswith("MC-W") for c in C) == 52, "52 tripwire cases")
 
 print("cases", len(C), "title assertion failures", len(bad))
 for b in bad:

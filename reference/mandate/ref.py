@@ -593,6 +593,14 @@ class RiskState:
         self.net_contributed = self.A  # dollars allocated in, minus dollars withdrawn (§5.7)
         self.retired = False
         self.working = D(0)
+        self.tw = None            # §6.7: the tripwire fold, when the mandate has tripwires; a fired one is latched (MI-7)
+        self._tw_input = None
+        if (m.get("autonomy") or {}).get("tripwires"):
+            self.tw = Tripwires()
+            self.tw.step({"event": "MandateVersionApplied", "mandate": m})
+            if self.qty > 0:
+                self.tw.book[TW_AGENT_INSTRUMENT] = (self.qty, self.B)
+                self.tw.ever_filled.add(TW_AGENT_INSTRUMENT)
 
     def equity(self):
         return self.A + self.realized + self.qty * self.mark - self.B
@@ -676,6 +684,7 @@ class RiskState:
         self.session = s.get("session", self.session)
         kind = s["event"]
         self._reset_now = False
+        self._tw_input = None
         self._inst_reason = {}
         inst_before = set(self.inst_restrictions)
         # ---- stale-mark timer (advances before this input is applied)
@@ -696,6 +705,9 @@ class RiskState:
                 self.inst_restrictions.discard("stale_mark")
         elif kind == "fill":
             q, px = D(s["qty"]), D(s["price"])
+            if self.tw is not None:
+                self._tw_input = {"event": "FillApplied", "instrument": TW_AGENT_INSTRUMENT, "side": s["side"],
+                                  "qty": s["qty"], "price": s["price"], "fees": "0"}
             if s["side"] == "sell":
                 red = self.B if q == self.qty else r12(self.B * q / self.qty)
                 self.realized += q * px - red
@@ -712,8 +724,13 @@ class RiskState:
             self.conf.pop("max_daily_loss", None)
             self.E0 = E
             ev.append({"type": "RiskDayStarted", "day_start_equity": norm(self.E0)})
+            if self.tw is not None:
+                self._tw_input = {"event": "RiskDayStarted"}
             if self.daily:
                 self.daily["day_started"] = True
+        elif kind == "owner_acknowledged" and s["restriction"].startswith("tripwire:") and self.tw is not None:
+            self._tw_input = {k: v for k, v in s.items() if k in ACK_FIELDS} | {"event": "OwnerAcknowledged",
+                                                                               "tripwire": s["restriction"][len("tripwire:"):]}
         elif kind == "owner_acknowledged":
             err = self._ack(s["restriction"], ev, t)
         elif kind == "allocation_change":
@@ -839,6 +856,8 @@ class RiskState:
                 self.restrictions["lifetime_floor"] = "paused"
                 self.latch("lifetime_floor", "flatten_and_pause", ev, reason=None if why == "confirmed" else why)
                 ev.append({"type": "KillSwitchActivated", "scope": "agent", "initiator": "lifetime_floor"})
+        if self._tw_input is not None:
+            self._tripwires(ev)
         # profit_stop confirmation (§3.1): time in breach, no hard trigger
         g = self.m["goal"]
         if g["type"] == "profit_stop" and "goal_complete" not in self.restrictions and not self.retired:
@@ -864,6 +883,20 @@ class RiskState:
             out["error"] = err
         out.update(extra)
         return out
+
+    def _tripwires(self, ev):
+        """§5.2 and §6.7: tripwires are evaluated after the lifetime floor. A fired one is a latched limit, so MI-7
+        rejects allocation increases while it holds, and one that holds `exits_only` adds restriction `tripwire`."""
+        ev.extend(self.tw.step(self._tw_input))
+        held = self.tw.snapshot()
+        for k in [k for k in self.latched if k.startswith("tripwire:") and k[len("tripwire:"):] not in held["fired"]]:
+            del self.latched[k]
+        for tid in held["fired"]:
+            self.latched[f"tripwire:{tid}"] = True
+        if held["restriction"] is not None:
+            self.restrictions["tripwire"] = held["restriction"]
+        else:
+            self.restrictions.pop("tripwire", None)
 
     def _retire(self, reason, ev):
         """Retirement (§5.7, MI-14): the connection carries the net dollar loss max(0, N - E), whether the
@@ -1098,6 +1131,8 @@ def autonomy(m, a, st=None):
 
 # ------------------------------------------------------------------ tripwires (§6.7; MI-31; DEC-187, DEC-350, DEC-351)
 TRIPWIRE_ALERT_TEXT = "tripwire_fired"
+TW_AGENT_INSTRUMENT = "agent_instrument"   # the risk state's one instrument, as the tripwire fold names it
+ACK_FIELDS = ("at", "step_up", "user", "requester", "independent_approval_required")
 
 def fill_net_realized(book, f):
     """The fill's net realized P&L (trading spec §8.1): its gross realized less its own fees, a buy's gross being 0.
@@ -1121,7 +1156,9 @@ class Tripwires:
     """The tripwire state the executor folds from the agent's account stream (§6.7). Inputs, in `seq` order, by
     `event`: MandateVersionApplied (`mandate` is now in effect), FillApplied or LateFillApplied (the agent's fill:
     instrument, side, qty, price, and its own fees), RiskDayStarted, and OwnerAcknowledged (naming `tripwire`, its
-    `step_up` judged at the risk clock `at` when processed, §6.1). Each tripwire counts its metric over the inputs after the one that armed it: the
+    `step_up` judged at the risk clock `at` when processed, §6.1; under `independent_approval_required`, the
+    acknowledging `user` must not be the `requester` of the lift, §5.8). Each tripwire counts its metric over the
+    inputs after the one that armed it: the
     version that began its run under that id and metric, or the acknowledgment that last lifted it."""
 
     def __init__(self, environment="paper"):
@@ -1184,6 +1221,8 @@ class Tripwires:
             tid = inp["tripwire"]
             if verdict["result"] == "refused":
                 ev.append({"type": "OwnerCommandRefused", "command": "acknowledge", "reason": verdict["reason"]})
+            elif inp.get("independent_approval_required", False) and inp.get("user") == inp.get("requester"):
+                ev.append({"type": "OwnerCommandRefused", "command": "acknowledge", "reason": "not_independent"})
             elif tid in self.fired:
                 del self.fired[tid]
                 ev.append({"type": "RiskLimitLifted", "limit": f"tripwire:{tid}", "reason": "owner_acknowledged"})

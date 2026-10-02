@@ -14780,3 +14780,376 @@ cases:
       restriction: null
       delegations_suspended: false
       metrics: {losing_streak: '0'}
+- id: MC-W48
+  kind: tripwire
+  title: 'A losing streak survives 00:00 New York: one losing exit either side of midnight fires it'
+  base: research_equity_tripwired
+  context: {environment: paper}
+  steps:
+  - event: MandateVersionApplied
+    at: '2026-09-22T14:00:00.000000000Z'
+    patch:
+    - op: add
+      path: /autonomy/tripwires
+      value:
+      - {id: losing_streak, metric: consecutive_losing_exits, threshold: '2', action: exits_only}
+  - {event: FillApplied, at: '2026-09-22T14:00:10.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: buy, qty: '10', price: '100', fees: '0'}
+  - {event: FillApplied, at: '2026-09-22T14:00:20.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: sell, qty: '5', price: '99', fees: '0'}
+  - {event: RiskDayStarted, at: '2026-09-23T04:00:00.000000000Z'}
+  - {event: FillApplied, at: '2026-09-23T05:00:00.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: sell, qty: '5', price: '98', fees: '0'}
+  expect:
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '0'}
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '0'}
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '1'}
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '1'}
+  - journal:
+    - {type: RiskLimitTriggered, limit: 'tripwire:losing_streak', action: exits_only, reason: tripwire_condition,
+      metric: consecutive_losing_exits, threshold: '2', value: '2'}
+    - {type: OwnerAlertSent, subject: 'RiskLimitTriggered:0', text: tripwire_fired}
+    state:
+      fired: {losing_streak: exits_only}
+      restriction: exits_only
+      delegations_suspended: true
+      metrics: {losing_streak: '2'}
+- id: MC-W49
+  kind: tripwire
+  title: A refused acknowledgment still spends its assertion, so replaying it is refused as reused
+  base: research_equity_tripwired
+  context: {environment: paper}
+  steps:
+  - event: MandateVersionApplied
+    at: '2026-09-22T14:00:00.000000000Z'
+    patch:
+    - op: add
+      path: /autonomy/tripwires
+      value:
+      - {id: losing_streak, metric: consecutive_losing_exits, threshold: '2', action: exits_only}
+  - {event: FillApplied, at: '2026-09-22T14:00:10.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: buy, qty: '10', price: '100', fees: '0'}
+  - {event: FillApplied, at: '2026-09-22T14:00:20.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: sell, qty: '5', price: '99', fees: '0'}
+  - {event: FillApplied, at: '2026-09-22T14:00:30.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: sell, qty: '5', price: '98', fees: '0'}
+  - event: OwnerAcknowledged
+    at: '2026-09-22T14:00:40.000000000Z'
+    tripwire: losing_streak
+    step_up: {assertion: as-49, authenticated_at: '2026-09-22T13:59:40.000000000Z', method: password}
+  - event: OwnerAcknowledged
+    at: '2026-09-22T14:00:50.000000000Z'
+    tripwire: losing_streak
+    step_up: {assertion: as-49, authenticated_at: '2026-09-22T13:59:50.000000000Z', method: cli_confirm}
+  expect:
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '0'}
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '0'}
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '1'}
+  - journal:
+    - {type: RiskLimitTriggered, limit: 'tripwire:losing_streak', action: exits_only, reason: tripwire_condition,
+      metric: consecutive_losing_exits, threshold: '2', value: '2'}
+    - {type: OwnerAlertSent, subject: 'RiskLimitTriggered:0', text: tripwire_fired}
+    state:
+      fired: {losing_streak: exits_only}
+      restriction: exits_only
+      delegations_suspended: true
+      metrics: {losing_streak: '2'}
+  - journal:
+    - {type: OwnerCommandRefused, command: acknowledge, reason: step_up_method}
+    state:
+      fired: {losing_streak: exits_only}
+      restriction: exits_only
+      delegations_suspended: true
+      metrics: {losing_streak: '2'}
+  - journal:
+    - {type: OwnerCommandRefused, command: acknowledge, reason: step_up_reused}
+    state:
+      fired: {losing_streak: exits_only}
+      restriction: exits_only
+      delegations_suspended: true
+      metrics: {losing_streak: '2'}
+- id: MC-W50
+  kind: tripwire
+  title: Under independent approval the user who requested the lift cannot acknowledge it
+  base: research_equity_tripwired
+  context: {environment: paper}
+  steps:
+  - event: MandateVersionApplied
+    at: '2026-09-22T14:00:00.000000000Z'
+    patch:
+    - op: add
+      path: /autonomy/tripwires
+      value:
+      - {id: losing_streak, metric: consecutive_losing_exits, threshold: '2', action: exits_only}
+  - {event: FillApplied, at: '2026-09-22T14:00:10.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: buy, qty: '10', price: '100', fees: '0'}
+  - {event: FillApplied, at: '2026-09-22T14:00:20.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: sell, qty: '5', price: '99', fees: '0'}
+  - {event: FillApplied, at: '2026-09-22T14:00:30.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: sell, qty: '5', price: '98', fees: '0'}
+  - event: OwnerAcknowledged
+    at: '2026-09-22T14:00:40.000000000Z'
+    tripwire: losing_streak
+    step_up: {assertion: as-50, authenticated_at: '2026-09-22T13:59:40.000000000Z', method: cli_confirm}
+    user: user:u1
+    requester: user:u1
+    independent_approval_required: true
+  expect:
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '0'}
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '0'}
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '1'}
+  - journal:
+    - {type: RiskLimitTriggered, limit: 'tripwire:losing_streak', action: exits_only, reason: tripwire_condition,
+      metric: consecutive_losing_exits, threshold: '2', value: '2'}
+    - {type: OwnerAlertSent, subject: 'RiskLimitTriggered:0', text: tripwire_fired}
+    state:
+      fired: {losing_streak: exits_only}
+      restriction: exits_only
+      delegations_suspended: true
+      metrics: {losing_streak: '2'}
+  - journal:
+    - {type: OwnerCommandRefused, command: acknowledge, reason: not_independent}
+    state:
+      fired: {losing_streak: exits_only}
+      restriction: exits_only
+      delegations_suspended: true
+      metrics: {losing_streak: '2'}
+- id: MC-W51
+  kind: tripwire
+  title: Under independent approval a second user's acknowledgment lifts it
+  base: research_equity_tripwired
+  context: {environment: paper}
+  steps:
+  - event: MandateVersionApplied
+    at: '2026-09-22T14:00:00.000000000Z'
+    patch:
+    - op: add
+      path: /autonomy/tripwires
+      value:
+      - {id: losing_streak, metric: consecutive_losing_exits, threshold: '2', action: exits_only}
+  - {event: FillApplied, at: '2026-09-22T14:00:10.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: buy, qty: '10', price: '100', fees: '0'}
+  - {event: FillApplied, at: '2026-09-22T14:00:20.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: sell, qty: '5', price: '99', fees: '0'}
+  - {event: FillApplied, at: '2026-09-22T14:00:30.000000000Z', instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005,
+    side: sell, qty: '5', price: '98', fees: '0'}
+  - event: OwnerAcknowledged
+    at: '2026-09-22T14:00:40.000000000Z'
+    tripwire: losing_streak
+    step_up: {assertion: as-51, authenticated_at: '2026-09-22T13:59:40.000000000Z', method: cli_confirm}
+    user: user:u2
+    requester: user:u1
+    independent_approval_required: true
+  expect:
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '0'}
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '0'}
+  - journal: []
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '1'}
+  - journal:
+    - {type: RiskLimitTriggered, limit: 'tripwire:losing_streak', action: exits_only, reason: tripwire_condition,
+      metric: consecutive_losing_exits, threshold: '2', value: '2'}
+    - {type: OwnerAlertSent, subject: 'RiskLimitTriggered:0', text: tripwire_fired}
+    state:
+      fired: {losing_streak: exits_only}
+      restriction: exits_only
+      delegations_suspended: true
+      metrics: {losing_streak: '2'}
+  - journal:
+    - {type: RiskLimitLifted, limit: 'tripwire:losing_streak', reason: owner_acknowledged}
+    state:
+      fired: {}
+      restriction: null
+      delegations_suspended: false
+      metrics: {losing_streak: '0'}
+- id: MC-W52
+  kind: risk_state
+  title: 'A fired tripwire is a latched limit: an allocation increase is rejected until the owner acknowledges it'
+  base: two_stock_swing
+  patch:
+  - {op: replace, path: /risk/max_position_usd, value: '10000'}
+  - {op: replace, path: /risk/max_position_fraction, value: '1'}
+  - {op: replace, path: /risk/max_gross_exposure_usd, value: '10000'}
+  - {op: replace, path: /risk/breach_confirm_s, value: 0}
+  - {op: replace, path: /risk/scale_lift_after_s, value: 0}
+  - {op: replace, path: /risk/daily_breach_min_s, value: 0}
+  - {op: replace, path: /risk/max_daily_loss, value: '0.5'}
+  - op: add
+    path: /autonomy/tripwires
+    value:
+    - {id: losing_streak, metric: consecutive_losing_exits, threshold: '2', action: exits_only}
+  initial: {position_qty: '10', avg_cost: '100', asset_class: us_equity, at: '2026-09-21T14:00:00.000000000Z', inherited_loss_usd: '0'}
+  steps:
+  - event: fill
+    at: '2026-09-21T14:00:10.000000000Z'
+    side: sell
+    qty: '5'
+    price: '99'
+    session: regular
+    expect:
+      agent_equity: '9995'
+      high_water_mark: '10000'
+      drawdown: '0.0005'
+      day_start_equity: '10000'
+      daily_pnl: '-5'
+      daily_pnl_fraction: '-0.0005'
+      capital_base: '10000'
+      size_factor: '1'
+      restrictions: []
+      agent_mode: normal
+      instrument_restrictions: []
+      pending: []
+      net_contributed: '10000'
+      journal: []
+  - event: fill
+    at: '2026-09-21T14:00:20.000000000Z'
+    side: sell
+    qty: '4'
+    price: '98'
+    session: regular
+    expect:
+      agent_equity: '9987'
+      high_water_mark: '10000'
+      drawdown: '0.0013'
+      day_start_equity: '10000'
+      daily_pnl: '-13'
+      daily_pnl_fraction: '-0.0013'
+      capital_base: '10000'
+      size_factor: '1'
+      restrictions: [tripwire]
+      agent_mode: exits_only
+      instrument_restrictions: []
+      pending: []
+      net_contributed: '10000'
+      journal:
+      - {type: RiskLimitTriggered, limit: 'tripwire:losing_streak', action: exits_only, reason: tripwire_condition,
+        metric: consecutive_losing_exits, threshold: '2', value: '2'}
+      - {type: OwnerAlertSent, subject: 'RiskLimitTriggered:0', text: tripwire_fired}
+      - {type: AgentModeApplied, from: normal, to: exits_only}
+  - event: allocation_change
+    at: '2026-09-21T14:00:30.000000000Z'
+    delta_usd: '1000'
+    session: regular
+    expect:
+      agent_equity: '9987'
+      high_water_mark: '10000'
+      drawdown: '0.0013'
+      day_start_equity: '10000'
+      daily_pnl: '-13'
+      daily_pnl_fraction: '-0.0013'
+      capital_base: '10000'
+      size_factor: '1'
+      restrictions: [tripwire]
+      agent_mode: exits_only
+      instrument_restrictions: []
+      pending: []
+      net_contributed: '10000'
+      journal:
+      - {type: MandateVersionApplied, result: rejected, reason: increase_blocked_while_latched}
+      error: increase_blocked_while_latched
+  - event: owner_acknowledged
+    at: '2026-09-21T14:00:40.000000000Z'
+    restriction: tripwire:losing_streak
+    session: regular
+    step_up: {assertion: as-52, authenticated_at: '2026-09-21T14:00:30.000000000Z', method: cli_confirm}
+    expect:
+      agent_equity: '9987'
+      high_water_mark: '10000'
+      drawdown: '0.0013'
+      day_start_equity: '10000'
+      daily_pnl: '-13'
+      daily_pnl_fraction: '-0.0013'
+      capital_base: '10000'
+      size_factor: '1'
+      restrictions: []
+      agent_mode: normal
+      instrument_restrictions: []
+      pending: []
+      net_contributed: '10000'
+      journal:
+      - {type: RiskLimitLifted, limit: 'tripwire:losing_streak', reason: owner_acknowledged}
+      - {type: AgentModeApplied, from: exits_only, to: normal}
+  - event: allocation_change
+    at: '2026-09-21T14:00:50.000000000Z'
+    delta_usd: '1000'
+    session: regular
+    expect:
+      agent_equity: '10987'
+      high_water_mark: '11001.30169219986'
+      drawdown: '0.0013'
+      day_start_equity: '11001.30169219986'
+      daily_pnl: '-14.30169219986'
+      daily_pnl_fraction: '-0.0013'
+      capital_base: '11001.30169219986'
+      size_factor: '1'
+      restrictions: []
+      agent_mode: normal
+      instrument_restrictions: []
+      pending: []
+      net_contributed: '11000'
+      journal:
+      - {type: MandateVersionApplied, result: applied, allocation_change: '1000'}
+  note: The tripwire fold reads the risk state's one instrument; fees are 0, as in every risk-state case.

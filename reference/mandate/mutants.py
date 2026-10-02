@@ -1,38 +1,3 @@
-def run(work, probe):
-    return subprocess.run([sys.executable, "-c", probe], cwd=work, capture_output=True, text=True, timeout=900)
-
-def last(out):
-    return out.stdout.strip().splitlines()[-1] if out.returncode == 0 and out.stdout.strip() else None
-
-def main():
-    survivors = []
-    with tempfile.TemporaryDirectory() as tmp:
-        root = pathlib.Path(tmp)
-        (root / "schemas").symlink_to(REPO / "schemas")
-        (root / "docs").symlink_to(REPO / "docs")
-        work = root / "reference" / "mandate"
-        shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
-        assert last(run(work, TW_PROBE)) == "0", "the tripwire fuzz fails on the unmutated model"
-        assert last(run(work, CASE_PROBE)) == "same", "the MC-W cases differ from the unmutated model's"
-        for name, (old, new) in (MUTANTS | TRIPWIRE_MUTANTS).items():
-            shutil.rmtree(work, ignore_errors=True)
-            shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
-            ref = work / "ref.py"
-            text = ref.read_text()
-            assert old in text, f"mutation anchor missing: {name}"
-            ref.write_text(text.replace(old, new, 1))
-            if name in TRIPWIRE_MUTANTS:
-                by_fuzz = (last(run(work, TW_PROBE)) or "0") != "0"
-                by_cases = last(run(work, CASE_PROBE)) == "differ"
-                caught = by_fuzz and by_cases
-                name = f"{name} (fuzz {'caught' if by_fuzz else 'missed'}, MC-W cases {'caught' if by_cases else 'missed'})"
-            else:
-                caught = (last(run(work, PROBE)) or "0") != "0"
-            print(f"{'caught  ' if caught else 'SURVIVED'} {name}")
-            if not caught:
-                survivors.append(name)
-    sys.exit(1 if survivors else 0)
-
 """Seeds known bugs into a copy of ref.py and checks that fuzz.py catches every one (AGENTS.md: independent oracles)."""
 import pathlib, shutil, subprocess, sys, tempfile
 
@@ -300,6 +265,14 @@ TRIPWIRE_MUTANTS = {
     "V-044 allows a count above 1,000": ('1 <= th <= TRIPWIRE_MAX_COUNT', '1 <= th'),
     "V-044 allows a loss above the allocation": (' and th <= D(m["capital"]["allocation_usd"])', ''),
     "V-044 allows a fraction of a cent": ('ok = -th.as_tuple().exponent <= 2 and ', 'ok = '),
+    "midnight resets the losing streak": ('            for c in self.counters.values():\n                c["day_net"] = D(0)\n',
+                                          '            for c in self.counters.values():\n                c["day_net"] = D(0)\n                c["streak"] = 0\n'),
+    "a refused acknowledgment does not spend its assertion": (
+        '            if inp.get("step_up") is not None and isinstance(inp["step_up"], dict) and "assertion" in inp["step_up"]:',
+        '            if verdict["result"] == "apply" and isinstance(inp.get("step_up"), dict) and "assertion" in inp["step_up"]:'),
+    "the requester lifts a tripwire under independent approval": (
+        '            elif inp.get("independent_approval_required", False) and inp.get("user") == inp.get("requester"):', '            elif False:'),
+    "a fired tripwire does not latch the risk state": ('        for tid in held["fired"]:\n            self.latched[f"tripwire:{tid}"] = True\n', ''),
     "V-044 allows unsorted ids": ('    if not sorted_unique([t["id"] for t in tws]):\n        return {"V-044"}', '    if False:\n        return {"V-044"}'),
 }
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
@@ -311,7 +284,7 @@ PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if 
          "print(len(FAIL))")
 
 TW_PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
-            "fuzz_tripwires(300); fuzz_tripwire_changes(400); fuzz_tripwire_rules(300); print(len(FAIL))")
+            "fuzz_tripwires(300); fuzz_tripwire_changes(400); fuzz_tripwire_rules(300); fuzz_tripwire_latch(200); print(len(FAIL))")
 
 CASE_PROBE = ("import json, yaml\n"
               "try:\n    import generate\nexcept AssertionError:\n    print('differ')\n    raise SystemExit(0)\n"
@@ -319,31 +292,44 @@ CASE_PROBE = ("import json, yaml\n"
               "kept = [c for c in yaml.safe_load(open('../../docs/specs/reference-cases/mandate.yaml'))['cases'] if c['id'].startswith('MC-W')]; "
               "print('differ' if json.loads(json.dumps(mine)) != kept else 'same')")
 
+def run(work, probe):
+    return subprocess.run([sys.executable, "-c", probe], cwd=work, capture_output=True, text=True, timeout=900)
+
+def verdict(out, clean):
+    """A probe's last line, or ERROR when it crashed or printed nothing: a crash is neither a catch nor a survival."""
+    lines = out.stdout.strip().splitlines()
+    if out.returncode != 0 or not lines:
+        return "ERROR"
+    return "caught" if lines[-1] != clean else "missed"
+
 def main():
-    survivors = []
+    bad = []
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         (root / "schemas").symlink_to(REPO / "schemas")
         (root / "docs").symlink_to(REPO / "docs")
         work = root / "reference" / "mandate"
-        for name, (old, new) in MUTANTS.items():
+        shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
+        assert verdict(run(work, TW_PROBE), "0") == "missed", "the tripwire fuzz fails on the unmutated model"
+        assert verdict(run(work, CASE_PROBE), "same") == "missed", "the MC-W cases differ from the unmutated model's"
+        for name, (old, new) in (MUTANTS | TRIPWIRE_MUTANTS).items():
             shutil.rmtree(work, ignore_errors=True)
             shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
             ref = work / "ref.py"
             text = ref.read_text()
             assert old in text, f"mutation anchor missing: {name}"
             ref.write_text(text.replace(old, new, 1))
-            out = subprocess.run([sys.executable, "-c", PROBE], cwd=work, capture_output=True, text=True, timeout=900)
-            caught = out.returncode == 0 and int(out.stdout.strip().splitlines()[-1]) > 0
             if name in TRIPWIRE_MUTANTS:
-                cases = subprocess.run([sys.executable, "-c", CASE_PROBE], cwd=work, capture_output=True, text=True, timeout=900)
-                by_cases = cases.returncode == 0 and cases.stdout.strip().splitlines()[-1] == "differ"
-                caught = caught and by_cases
-                name = f"{name} (fuzz and MC-W cases)" if by_cases else f"{name} (MC-W cases miss it)"
-            print(f"{'caught  ' if caught else 'SURVIVED'} {name}")
-            if not caught:
-                survivors.append(name)
-    sys.exit(1 if survivors else 0)
+                by_fuzz, by_cases = verdict(run(work, TW_PROBE), "0"), verdict(run(work, CASE_PROBE), "same")
+                status = "ERROR" if "ERROR" in (by_fuzz, by_cases) else ("caught" if by_fuzz == by_cases == "caught" else "SURVIVED")
+                name = f"{name} (fuzz {by_fuzz}, MC-W cases {by_cases})"
+            else:
+                status = {"caught": "caught", "missed": "SURVIVED", "ERROR": "ERROR"}[verdict(run(work, PROBE), "0")]
+            print(f"{status:8} {name}", flush=True)
+            if status != "caught":
+                bad.append(name)
+    print(f"{len(MUTANTS) + len(TRIPWIRE_MUTANTS)} mutants, {len(bad)} not caught", flush=True)
+    sys.exit(1 if bad else 0)
 
 if __name__ == "__main__":
     main()

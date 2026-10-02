@@ -1141,6 +1141,7 @@ def own_tripwires(log, env):
             ok = own_step_up_ok(e["own_ev"], e["at_s"], env, seen)
             if isinstance(e["own_ev"], dict) and isinstance(e["own_ev"].get("assertion"), str):
                 seen.add(e["own_ev"]["assertion"])
+            ok = ok and not (e.get("independent_approval_required") and e.get("user") == e.get("requester"))
             refused = not ok
             if ok and e["tripwire"] in fired:
                 del fired[e["tripwire"]]
@@ -1244,8 +1245,12 @@ def rand_tw_history(n, t0, versions=True, acks=True):
                 ev = {"assertion": 7}
             if isinstance(ev, dict) and isinstance(ev.get("assertion"), str):
                 used.append(ev["assertion"])
-            log.append({"event": "OwnerAcknowledged", "at": ts(t), "at_s": t, "tripwire": rng.choice(TW_IDS),
-                        "step_up": wire(ev), "own_ev": ev})
+            ack = {"event": "OwnerAcknowledged", "at": ts(t), "at_s": t, "tripwire": rng.choice(TW_IDS),
+                   "step_up": wire(ev), "own_ev": ev}
+            if rng.random() < 0.3:
+                ack.update(independent_approval_required=True, user=rng.choice(["user:u1", "user:u2"]),
+                           requester=rng.choice(["user:u1", "user:u2", None]))
+            log.append(ack)
     return log
 
 def fuzz_tripwires(n):
@@ -1307,6 +1312,56 @@ def fuzz_tripwires(n):
             tw.step(copy.deepcopy(s))
         rest = [{"journal": tw.step(s), "state": tw.snapshot()} for s in steps[cut:]]
         check(rest == got[cut:], "MI-8 refolding a prefix and continuing gives the same journal and state", cut)
+
+def fuzz_tripwire_latch(n):
+    """MI-7 and §5.9 through the risk state itself: while the recount says a tripwire is fired, the risk state holds it
+    as a latched limit and rejects every allocation increase, and it has restriction `tripwire` exactly while one
+    holds `exits_only`. The risk state's one instrument starts held, so the oracle's log opens with that buy."""
+    for _ in range(n):
+        m = copy.deepcopy(base.swing)
+        m["risk"].update({"max_position_usd": "10000", "max_position_fraction": "1", "max_gross_exposure_usd": "10000"})
+        tws = [t for t in rand_tripwires() if t["metric"] != "new_instruments"] or [rand_tripwire("a_trip") | {"metric": "consecutive_losing_exits", "threshold": "2"}]
+        m["autonomy"]["tripwires"] = tws
+        V.validate(m)
+        t = ESC_T0
+        rs = RiskState(m, "20", "100", "us_equity", ts(t))
+        log = [{"event": "FillApplied", "instrument": TW_AGENT_INSTRUMENT, "side": "buy", "qty": "20", "price": "100", "fees": "0"},
+               {"event": "MandateVersionApplied", "mandate": m}]
+        held = Fraction(20)
+        for k in range(rng.randint(5, 30)):
+            t += rng.choice([1, 5, 30])
+            r = rng.random()
+            if r < 0.55:
+                side = "sell" if held > 1 and rng.random() < 0.7 else "buy"
+                qty = Fraction(rng.choice([1, 2])) if side == "buy" else Fraction(1)
+                held += qty if side == "buy" else -qty
+                px = rng.choice(["98", "99.5", "100", "101"])
+                step = {"event": "fill", "at": ts(t), "side": side, "qty": str(qty), "price": px, "session": "regular"}
+                log.append({"event": "FillApplied", "instrument": TW_AGENT_INSTRUMENT, "side": side, "qty": str(qty),
+                            "price": px, "fees": "0"})
+            elif r < 0.75:
+                ev = {"assertion": f"as-{k}-{rng.randint(0, 10 ** 6)}", "at_s": t - rng.choice([0, 60, 301]), "method": "cli_confirm"}
+                tid = rng.choice([x["id"] for x in tws])
+                step = {"event": "owner_acknowledged", "at": ts(t), "restriction": f"tripwire:{tid}", "session": "regular",
+                        "step_up": wire(ev)}
+                own = {"event": "OwnerAcknowledged", "tripwire": tid, "own_ev": ev, "at_s": t}
+                if rng.random() < 0.3:
+                    extra = {"independent_approval_required": True, "user": rng.choice(["user:u1", "user:u2"]), "requester": "user:u1"}
+                    step.update(extra)
+                    own.update(extra)
+                log.append(own)
+            else:
+                step = {"event": "allocation_change", "at": ts(t), "delta_usd": rng.choice(["100", "-100"]), "session": "regular"}
+            before = own_tripwires(log, "paper")[-1]["held"]
+            out = rs.step(step)
+            after = own_tripwires(log, "paper")[-1]["held"]
+            ctx = (tws, step, before, after, out.get("error"), out["restrictions"])
+            if step["event"] == "allocation_change" and step["delta_usd"] == "100" and before:
+                check(out.get("error") == "increase_blocked_while_latched", "MI-7 a fired tripwire rejects an allocation increase", ctx)
+            check(("tripwire" in out["restrictions"]) == ("exits_only" in after.values()),
+                  "§5.9 restriction tripwire exactly while a fired tripwire holds exits_only", ctx)
+            check({k[len("tripwire:"):] for k in rs.latched if k.startswith("tripwire:")} == set(after),
+                  "§5.8 every fired tripwire, and only one, is a latched limit", ctx)
 
 def own_tripwire_class(ot, nt):
     """§9.2 for tripwires, by id: None when equal; increasing if one is gone, changed its metric, rose, or softened."""
@@ -1959,6 +2014,7 @@ if __name__ == "__main__":
     fuzz_tripwires(400)
     fuzz_tripwire_changes(600)
     fuzz_tripwire_rules(600)
+    fuzz_tripwire_latch(300)
     fuzz_escalation(3000)
     fuzz_policy_quorum(1000)
     fuzz_drift(600)

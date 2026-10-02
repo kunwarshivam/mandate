@@ -271,7 +271,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   under ([DEC-187](04-decision-log.md#decisions)). The spec change is MI-31, V-044, §6.7, and the MC-W cases
   ([DEC-350](decisions/DEC-350.md) to [DEC-352](decisions/DEC-352.md); claim [#439](https://github.com/kunwarshivam/mandate/issues/439)).
   Owed after it: `mandate-spec` parsing the field, V-044, and the §9.2 row (DEC-77 tests then implementation), the executor's
-  fold of §6.7, and the `kind: tripwire` harness arm.
+  fold of §6.7, and the `kind: tripwire` harness arm. Also owed, from #443's round 1 (m4): run ruff over `reference/` in
+  `cargo xtask ci lint`, so a duplicated definition such as a second `main()` in `reference/mandate/mutants.py` (F811) fails
+  the lint rather than reaching review.
   Actions are `end_delegations` or `exits_only`, never `paused` (rule 13). *Accepted when:* a fired
   tripwire acts at its next evaluation, journals the event, alerts with opaque text, and lifts only
   by the owner's acknowledgment with step-up; adding or tightening one applies at once.

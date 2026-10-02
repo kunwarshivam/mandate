@@ -1319,6 +1319,33 @@ tw_case("MC-W47", "A partial exit removes basis rounded half-even at 12 places: 
         [deploy(0, tws(tw_with(TW_STREAK, threshold="1"))), fill(10, "buy", "1", "10"), fill(20, "buy", "1", "10.000000000001"),
          fill(30, "sell", "1", "10")])
 
+tw_case("MC-W48", "A losing streak survives 00:00 New York: one losing exit either side of midnight fires it", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), day(NEXT_DAY),
+         fill(NEXT_DAY + 3600, "sell", "5", "98")])
+tw_case("MC-W49", "A refused acknowledgment still spends its assertion, so replaying it is refused as reused", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         ack(40, "losing_streak", "as-49", method="password"), ack(50, "losing_streak", "as-49")])
+
+def ack_by(at, tid, assertion, user, requester):
+    return dict(ack(at, tid, assertion), user=user, requester=requester, independent_approval_required=True)
+
+tw_case("MC-W50", "Under independent approval the user who requested the lift cannot acknowledge it", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         ack_by(40, "losing_streak", "as-50", "user:u1", "user:u1")])
+tw_case("MC-W51", "Under independent approval a second user's acknowledgment lifts it", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         ack_by(40, "losing_streak", "as-51", "user:u2", "user:u1")])
+TW_RISK = WIDE + FAST + [rep("/risk/max_daily_loss", "0.5"), {"op": "add", "path": "/autonomy/tripwires", "value": [TW_STREAK]}]
+risk_case("MC-W52", "A fired tripwire is a latched limit: an allocation increase is rejected until the owner acknowledges it",
+          "two_stock_swing", TW_RISK, "10", "100", "us_equity", at(14, 0),
+          [{"event": "fill", "at": at(14, 0, 10), "side": "sell", "qty": "5", "price": "99", "session": "regular"},
+           {"event": "fill", "at": at(14, 0, 20), "side": "sell", "qty": "4", "price": "98", "session": "regular"},
+           {"event": "allocation_change", "at": at(14, 0, 30), "delta_usd": "1000", "session": "regular"},
+           {"event": "owner_acknowledged", "at": at(14, 0, 40), "restriction": "tripwire:losing_streak", "session": "regular",
+            "step_up": {"assertion": "as-52", "authenticated_at": at(14, 0, 30), "method": "cli_confirm"}},
+           {"event": "allocation_change", "at": at(14, 0, 50), "delta_usd": "1000", "session": "regular"}],
+          note="The tripwire fold reads the risk state's one instrument; fees are 0, as in every risk-state case.")
+
 W0 = next(i for i, c in enumerate(cases) if c["id"].startswith("MC-W"))
 assert all(c["id"].startswith("MC-W") for c in cases[W0:])
 cases[W0:] = sorted(cases[W0:], key=lambda c: c["id"])
