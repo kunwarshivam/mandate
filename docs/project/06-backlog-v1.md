@@ -919,8 +919,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
     verdict passes over a check that mandate fails: an `admitted: true`, or a `reason` later than
     the first check the document fails;
   - **(#503 round 1, m3)** §9.4's `instrument_id` is typed looser than an asset ID, the latent twin
-    of §9.3's `instrument` before v0.10. No mapping parses it yet. The registration should type it as
-    v0.10's `asset_id` from the start, so it never appends a value a later mapping cannot read.
+    of §9.3's `instrument` before v0.10. No mapping parses it yet. Journal spec v0.11 types it as
+    `asset_id` with four `research` drafts (DEC-413 item 7, [#513](https://github.com/kunwarshivam/mandate/pull/513)), so the
+    registration types it `Ty::AssetId` from the start and never appends a value a later mapping cannot read.
   - the `man` ref on these two records means the mandate in force when the thesis was judged, and
     the tests PR pins that;
   - the tests PR comes first (DEC-77), and its cases include a pinned universe (MI-20) and
