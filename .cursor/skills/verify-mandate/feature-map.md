@@ -517,7 +517,7 @@ while a reducing purpose passes it.
 
 - **Spec:** `docs/specs/journal.md` §9.2 (the control stream's closed schemas, `OwnerCommandRefused`
   on the agent and account streams, the `pointer` and `date` types, consistency rules 17 to 24,
-  subject rules 25 and 26, copy rule 27, and the mapping table); DEC-168, DEC-261, DEC-302, DEC-303,
+  subject rules 25, 26 and 28, copy rule 27, and the mapping table); DEC-168, DEC-261, DEC-302, DEC-303,
   DEC-304, DEC-402. `AccountSnapshotRecorded` and rule 24 are registered with the executor's fee-step
   writer (DEC-261 item 7, DEC-402).
 - **Code:** `crates/mandate-journal/src/control.rs` (`Draft::parse` routes each §9.2 type on its
@@ -533,6 +533,25 @@ while a reducing purpose passes it.
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-spec -p mandate-refcases -p
   mandate-executor -E 'binary(control_stream) | binary(journal_record) | binary(catalogue) |
   test(/control::tests/) | test(the_fee_steps_snapshot_is_never_refused_for_its_members)'`.
+
+## Account-stream risk-state records (journal spec §9.3, under E7-10)
+
+- **Spec:** `docs/specs/journal.md` §9.3 (`MandateVersionApplied` and `UniverseChanged`, rules 29 to
+  33, and the mapping table); DEC-403, DEC-404. The registration is tests first: both are routed to a
+  stub and refused as `unimplemented` until the implementation PR, and the mapping must re-derive
+  §9.2's classification from the two stored documents (DEC-404 item 5).
+- **Code:** `crates/mandate-journal/src/control.rs` (`governs`, the `risk_state_payload` stub),
+  `crates/mandate-journal/src/catalogue.rs` (`UniverseChanged`'s entry), and
+  `crates/mandate-spec/src/context.rs` (`JournaledFact::from_record`, the `risk_state_fact` stub).
+- **Tests:** `crates/mandate-refcases/tests/risk_state.rs` (the vectors through `append`, the
+  mapping, and the classification re-derivation), `control::tests` in `control.rs`
+  (`every_risk_state_draft_is_judged_as_its_vectors_say`, `a_required_risk_state_member_is_never_null`),
+  `crates/mandate-journal/tests/catalogue.rs` (`risk_state_records_are_routed_to_section_9_3`,
+  `risk_state_records_refuse_an_unlisted_member`), and `record_tests` in `context.rs`.
+- **Run:** `cargo nextest run -p mandate-journal -p mandate-spec -p mandate-refcases
+  --run-ignored all -E 'binary(risk_state) | test(/risk_state/) | test(/universe_change/) |
+  test(/version_maps_only/)'`; until the implementation lands, `cargo xtask ci pending` proves the
+  pending ones fail at their stub.
 
 ## Append protocol
 

@@ -59,7 +59,8 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "HighWaterMarkReset"
         | "PositionReleased"
         | "InstrumentRestrictionChanged"
-        | "GoalCompleted" => entry(ACCOUNT, &[MAN]),
+        | "GoalCompleted"
+        | "UniverseChanged" => entry(ACCOUNT, &[MAN]),
         "OrderSubmitted"
         | "OrderStateChanged"
         | "OrderAbandoned"

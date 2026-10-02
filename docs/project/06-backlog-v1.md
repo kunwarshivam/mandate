@@ -1239,7 +1239,10 @@ From E10-1's slice-V implementation (DEC-161):
     §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
     vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
     follow register them and map them to `AgentVersionActive` (a deployed agent's new version) and
-    `UniverseChanged`; until then both stay `unknown_schema` and map to none.
+    `UniverseChanged`; until then both are refused. **Tests first, on `agent/l-risk-state-tests`
+    ([DEC-404](decisions/DEC-404.md)):** both are routed to a stub and refused as `unimplemented`,
+    and nine pending tests (`pending E7-10`) pin the vectors, the 15 non-nullable members, the closed
+    schemas, the mapping, and the requirement below.
     **Required, and blocking this registration's acceptance (#470 round 2, minor 5):** the Rust
     registration re-derives mandate spec §9.2's classification of `new_version` against
     `old_version` from the two stored documents and refuses a `MandateVersionApplied` whose

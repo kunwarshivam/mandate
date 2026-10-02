@@ -72,10 +72,9 @@ pub enum JournaledFact {
     /// `DisclosureAccepted`: a disclosure version the workspace accepted (V-005).
     DisclosureAccepted { version: Digest },
     /// `AgentDeployed`, or `MandateVersionApplied` for a deployed agent: the version in force. The
-    /// latest one per agent replaces the earlier ones. Journal spec v0.7 §9.2 closes only
-    /// `AgentDeployed`, so [`JournaledFact::from_record`] maps it alone. `MandateVersionApplied` and
-    /// `UniverseChanged` wait for the backlog's "account-stream risk-state records" row (DEC-303 item 6),
-    /// and until then they map to none and the fold fails closed.
+    /// latest one per agent replaces the earlier ones. Journal spec v0.7 §9.2 closes `AgentDeployed`
+    /// and v0.8 §9.3 `MandateVersionApplied` (DEC-403); until the latter's registration maps it
+    /// (DEC-404), [`JournaledFact::from_record`] refuses it, so the fold fails closed.
     AgentVersionActive {
         agent: AgentId,
         connection_id: ConnectionId,
@@ -234,6 +233,7 @@ impl JournaledFact {
                     .map_err(|_| malformed("retired_on"))?,
                 loss_added_usd: record.usd("loss_added")?,
             },
+            "MandateVersionApplied" | "UniverseChanged" => return risk_state_fact(),
             "AccountSnapshotRecorded" => Self::AccountSnapshot {
                 connection_id: account_connection
                     .cloned()
@@ -244,6 +244,13 @@ impl JournaledFact {
         };
         Ok(Some(fact))
     }
+}
+
+/// The stub of the risk-state registration's tests PR (DEC-77, DEC-404): journal spec §9.3's
+/// mapping, and the re-derivation of a version's classification from its two stored documents, land
+/// with its implementation. Until then a risk-state record is refused, never skipped.
+fn risk_state_fact() -> Result<Option<JournaledFact>, SpecError> {
+    Err(SpecError::Unimplemented)
 }
 
 /// `ConfigSnapshotRegistered`'s kind for a signal model (journal spec §9.2).
@@ -989,7 +996,7 @@ mod record_tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use mandate_canon::{Digest, Key, Value};
-    use mandate_domain::Environment;
+    use mandate_domain::{AssetId, Environment};
     use mandate_time::Date;
 
     use super::{AgentId, ContextArgs, JournaledFact};
@@ -1133,24 +1140,167 @@ mod record_tests {
         Ok(())
     }
 
-    /// §9.2 closes neither `MandateVersionApplied` nor `UniverseChanged`, so each maps to none and
-    /// the fold fails closed, even given every member a mapped type reads (DEC-303 item 6; #461
-    /// round 1, M2).
+    /// A risk-state record is never skipped: one that cannot be mapped, here because it lacks every
+    /// member §9.3 gives it, is refused, so the fold fails closed (DEC-303 item 6, DEC-404).
     #[test]
-    fn a_type_section_9_2_leaves_open_maps_to_none() -> Result<(), SpecError> {
+    fn a_risk_state_record_is_never_skipped() -> Result<(), SpecError> {
         let record = object(&[
             ("agent_id", text("agent_a")),
             ("connection_id", text("conn_1")),
             ("mandate_version", text(&digest_text('a'))),
-            ("record_ref", text(&digest_text('b'))),
         ])?;
         for event_type in ["MandateVersionApplied", "UniverseChanged"] {
-            assert_eq!(
-                JournaledFact::from_record(event_type, &record, &nothing, None)?,
-                None,
+            assert!(
+                JournaledFact::from_record(event_type, &record, &nothing, None).is_err(),
                 "{event_type}"
             );
         }
+        Ok(())
+    }
+
+    fn universe_change(change: &str) -> Result<Value, SpecError> {
+        object(&[
+            ("agent_id", text("agent_b")),
+            ("instrument", text("7b4a1c2e-2222-4a2b-9c3d-000000000002")),
+            ("change", text(change)),
+            ("reason", text("version_applied")),
+            ("thesis_id", Value::Null),
+            ("lineage_id", Value::Null),
+            ("universe_size_after", Value::Null),
+            ("risk_clock", text("2026-09-22T16:00:00.000000000Z")),
+        ])
+    }
+
+    /// `UniverseChanged` maps to its agent, its instrument, and whether it was admitted (journal spec
+    /// §9.3).
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn a_universe_change_maps_to_its_instrument_admitted_or_removed() -> Result<(), SpecError> {
+        let instrument = AssetId::parse("7b4a1c2e-2222-4a2b-9c3d-000000000002")?;
+        for (change, admitted) in [("admitted", true), ("removed", false)] {
+            assert_eq!(
+                JournaledFact::from_record(
+                    "UniverseChanged",
+                    &universe_change(change)?,
+                    &nothing,
+                    None
+                )?,
+                Some(JournaledFact::UniverseChanged {
+                    agent: AgentId::new("agent_b"),
+                    instrument: instrument.clone(),
+                    admitted,
+                }),
+                "{change}"
+            );
+        }
+        let refused = JournaledFact::from_record(
+            "UniverseChanged",
+            &universe_change("paused")?,
+            &nothing,
+            None,
+        );
+        assert_eq!(refused, Err(SpecError::InvalidInput { what: "change" }));
+        Ok(())
+    }
+
+    fn version_record(
+        old: &Digest,
+        new: &Digest,
+        classification: &str,
+        result: &str,
+    ) -> Result<Value, SpecError> {
+        let sha = |d: &Digest| text(&format!("sha256:{}", d.to_hex()));
+        object(&[
+            ("agent_id", text("agent_a")),
+            ("old_version", sha(old)),
+            ("new_version", sha(new)),
+            ("classification", text(classification)),
+            ("step_up", Value::Null),
+            ("result", text(result)),
+            ("reason", Value::Null),
+            ("allocation_change", Value::Null),
+            ("max_loss_from_allocation", Value::Null),
+            ("risk_clock", text("2026-09-22T14:30:00.000000000Z")),
+        ])
+    }
+
+    /// An applied `MandateVersionApplied` maps to the agent's version in force, read from the stored
+    /// document `new_version` names, and a rejected one to none, but only under the classification
+    /// mandate spec §9.2 gives its two stored documents: under any other it is refused at
+    /// `classification`, applied or rejected alike. The pairs change rows rule 33 cannot see, so
+    /// this is the check that keeps a risk-increasing version from being journaled as `neutral`
+    /// without step-up (DEC-403 item 5; #470 round 2, minor 5). The expected verdicts are written
+    /// from §9.2's rows, not computed by the classifier under test.
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn a_version_maps_only_under_the_classification_its_documents_give() -> Result<(), String> {
+        let old = mandate(&[])?;
+        let pairs = [
+            (
+                mandate(&[("/risk/max_order_usd", r#""2000""#)])?,
+                "risk_increasing",
+            ),
+            (
+                mandate(&[("/risk/max_order_usd", r#""500""#)])?,
+                "risk_reducing",
+            ),
+            (mandate(&[("/name", r#""renamed""#)])?, "neutral"),
+        ];
+        let canonical = |m: &crate::Mandate| m.canonical().map_err(|e| e.to_string());
+        let digest =
+            |m: &crate::Mandate| m.version().map(|v| v.digest()).map_err(|e| e.to_string());
+        let mut stored = BTreeMap::new();
+        stored.insert(digest(&old)?, canonical(&old)?);
+        for (new, _) in &pairs {
+            stored.insert(digest(new)?, canonical(new)?);
+        }
+        let documents = |d: &Digest| stored.get(d).cloned();
+        for (new, verdict) in &pairs {
+            let applied = Some(JournaledFact::AgentVersionActive {
+                agent: AgentId::new("agent_a"),
+                connection_id: new.connection_id.clone(),
+                environment: new.environment,
+                allocation_usd: new
+                    .capital
+                    .allocation_usd
+                    .to_usd()
+                    .map_err(|e| e.to_string())?,
+                pinned: new
+                    .universe
+                    .pinned_instruments
+                    .iter()
+                    .map(|i| i.asset_id.clone())
+                    .collect(),
+            });
+            for (result, fact) in [("applied", applied), ("rejected", None)] {
+                for label in ["risk_increasing", "risk_reducing", "neutral"] {
+                    let record = version_record(&digest(&old)?, &digest(new)?, label, result)
+                        .map_err(|e| e.to_string())?;
+                    let got = JournaledFact::from_record(
+                        "MandateVersionApplied",
+                        &record,
+                        &documents,
+                        None,
+                    );
+                    let want = if label == *verdict {
+                        Ok(fact.clone())
+                    } else {
+                        Err(SpecError::InvalidInput {
+                            what: "classification",
+                        })
+                    };
+                    assert_eq!(got, want, "{verdict} pair, {result}, labelled {label}");
+                }
+            }
+        }
+        let unstored = version_record(&digest(&old)?, &Digest::of(b"absent"), "neutral", "applied")
+            .map_err(|e| e.to_string())?;
+        assert_eq!(
+            JournaledFact::from_record("MandateVersionApplied", &unstored, &documents, None),
+            Err(SpecError::InvalidInput {
+                what: "new_version"
+            })
+        );
         Ok(())
     }
 
