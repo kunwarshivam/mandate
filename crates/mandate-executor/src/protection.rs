@@ -1128,6 +1128,7 @@ fn recorded_placement(
 pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     for exit in waiting_exits(&batch.view) {
         cancel_openings(batch, Some(&exit.agent), Some(&exit.instrument))?;
+        overtaken(batch, &exit.instrument)?;
         if !awaits_cancel(&batch.view, &exit.agent, &exit.instrument, exit.purpose) {
             gate_and_submit(batch, &exit.intent)?;
         }
@@ -1135,12 +1136,21 @@ pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorE
     Ok(())
 }
 
-/// DEC-419: a handed-on placement that does not fit beside the exits still selling or waiting in
-/// `instrument` ([`fits`]) is cancelled for them as soon as it is placed, as [`begin`] cancels it
-/// for an exit that arrives after it. An exit allowed while the placement was still to come would
-/// otherwise wait behind it with nothing to cancel it (#489).
+/// DEC-419: a handed-on placement that does not fit beside the exits still selling, and those
+/// allowed and waiting that are not held, is cancelled for them, as [`begin`] cancels it for an
+/// exit that arrives after it. An exit allowed while the placement was still to come would
+/// otherwise wait behind it with nothing to cancel it (#489). It runs at every step an exit waits,
+/// the placement's own included, and asks only where no cancel is outstanding: never for an order
+/// already `PendingCancel`, nor for one whose cancel was asked before the broker acknowledged it.
+/// So it asks once, and again only once a refused cancel's query finds the placement still live
+/// (§5.7).
 fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
-    if fits(&batch.view, instrument)? {
+    let handed_on = batch
+        .view
+        .exiting
+        .get(instrument)
+        .is_some_and(|sequence| handed(&batch.view, sequence));
+    if !handed_on || fits_beside_movable(&batch.view, instrument)? {
         return Ok(());
     }
     let resting: Vec<ClientOrderId> = batch
@@ -1150,13 +1160,39 @@ fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(),
         .map(|protection| protection.resting.clone())
         .unwrap_or_default();
     for id in resting {
-        if ask_cancel(batch, &id)? {
-            batch.broker(BrokerRequest::Cancel {
-                client_order_id: id,
-            });
+        let outstanding = batch.view.orders.get(&id).is_none_or(|order| {
+            order.state == OrderState::PendingCancel
+                || order.state == OrderState::Submitting && order.cancel_unconfirmed
+        });
+        if outstanding {
+            continue;
         }
+        let requested = vec![("cancel_requested", Value::Bool(true))];
+        transition(batch, &id, OrderState::PendingCancel, requested)?;
+        batch.broker(BrokerRequest::Cancel {
+            client_order_id: id,
+        });
     }
     Ok(())
+}
+
+/// [`fits`], with the exits the gate holds left out: one that cannot move needs no room yet, so no
+/// placement is cancelled for it (#508's review, m1).
+fn fits_beside_movable(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<bool, ExecutorError> {
+    let live = still_selling(view, instrument)?;
+    let held = waiting(view, instrument)
+        .iter()
+        .filter(|intent| view.held.contains(*intent))
+        .filter_map(|intent| match view.bodies.get(intent) {
+            Some(IntentBody::Order { qty, .. }) => Some(*qty),
+            _ => None,
+        })
+        .try_fold(Qty::ZERO, Qty::checked_add)?;
+    let movable = live.checked_sub(held).unwrap_or(Qty::ZERO);
+    Ok(covered(view, instrument)?.checked_add(movable)? <= long(view, instrument))
 }
 
 /// One exit the gate allowed that has no order yet: it waits on its cancels.
@@ -1494,7 +1530,6 @@ pub(crate) fn passive_exit(
     for request in requests {
         batch.broker(BrokerRequest::Submit(request));
     }
-    overtaken(batch, instrument)?;
     Ok(true)
 }
 
@@ -2225,7 +2260,7 @@ mod probe_tests {
 
 #[cfg(test)]
 mod sequence_tests {
-    use std::collections::{BTreeMap, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
     use mandate_accounting::{AssetClass, InstrumentId, Side};
     use mandate_canon::Value;
@@ -2313,6 +2348,7 @@ mod sequence_tests {
                 ("qty", text("6")),
                 ("take_profit", text("170")),
                 ("stop", text("140")),
+                ("created_on", text("2026-06-05")),
             ],
         )?;
         Ok(executor)
@@ -6957,6 +6993,9 @@ mod sequence_tests {
         Fill(u32),
         Confirm,
         Pause(bool),
+        /// The broker refuses the latest cancel it was asked, as for an order it holds in no
+        /// cancelable state (#508's review, M1).
+        Refuse,
     }
 
     const EXIT_PURPOSES: [Purpose; 4] = [
@@ -7015,6 +7054,9 @@ mod sequence_tests {
         fills: u32,
         paused: bool,
         quiet_since: i64,
+        /// Every order a cancel was asked for: a refusal of that cancel is the cancel's, never the
+        /// order's rejection (§5.7).
+        cancelled: BTreeSet<String>,
     }
 
     /// 2018-01-01 00:00 ET, the calendar's first date: before it (the 1970 base, the eve of 2018)
@@ -7160,6 +7202,15 @@ mod sequence_tests {
         fn saw(&mut self, draft: &EventDraft) -> Result<(), String> {
             let field = |name: &str| draft.payload.get(name).and_then(Value::as_str);
             let intent = field("intent_id").unwrap_or_default().to_owned();
+            let id = field("client_order_id").unwrap_or_default();
+            if draft.event_type == "OrderStateChanged"
+                && field("state") == Some("rejected")
+                && self.cancelled.contains(id)
+            {
+                return Err(format!(
+                    "{id}: a refusal of its cancel was read as the order's rejection (§5.7)"
+                ));
+            }
             match (draft.event_type.as_str(), field("action")) {
                 ("IntentReceived", _) if intent.starts_with("w-") => {
                     let qty = field("qty")
@@ -7319,6 +7370,7 @@ mod sequence_tests {
                         Effect::Journal(draft) => self.saw(&draft)?,
                         Effect::Broker(BrokerRequest::Cancel { client_order_id }) => {
                             self.asked.push(client_order_id.as_str().to_owned());
+                            self.cancelled.insert(client_order_id.as_str().to_owned());
                         }
                         Effect::Broker(BrokerRequest::Submit(order)) => {
                             self.sent(
@@ -7427,6 +7479,7 @@ mod sequence_tests {
             fills: 0,
             paused: false,
             quiet_since: 0,
+            cancelled: BTreeSet::new(),
         };
         let agent = AgentId("agent-a".to_owned());
         desk.deliver(
@@ -7534,6 +7587,10 @@ mod sequence_tests {
                         }
                     }
                 }
+                Move::Refuse => desk
+                    .asked
+                    .pop()
+                    .map(|id| refused(&id, "order is not cancelable")),
                 Move::Pause(paused) => {
                     let mode = if paused { Mode::Paused } else { Mode::Normal };
                     desk.paused = paused;
@@ -7631,8 +7688,119 @@ mod sequence_tests {
             Move::Confirm,
             Move::Confirm,
             Move::Tick(1),
+            Move::Confirm,
+            Move::Tick(1),
         ];
         rule_13_script_from(0, true, &script)
+    }
+
+    /// #508's review, M1: the placement's cancel is asked in the step it is placed, while the
+    /// broker has not acknowledged it, and the broker refuses that cancel. The refusal is the
+    /// cancel's, not the order's: the placement is never journaled rejected, it is queried, and
+    /// the cancel is asked again once it is seen live, so the exit of 3 still goes. Today the
+    /// placement is never cancelled at all (#489), so this fails on the exit's stranding.
+    #[test]
+    fn a_refused_cancel_of_an_unacknowledged_placement_is_asked_again() -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(135), None, true),
+            Move::Exit(0, 4, 141),
+            Move::Exit(0, 3, 141),
+            Move::Tick(1_800),
+            Move::Confirm,
+            Move::Refuse,
+            Move::Tick(1),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(1),
+            Move::Confirm,
+            Move::Tick(1),
+        ];
+        rule_13_script_from(0, true, &script)
+    }
+
+    /// #508's review, M1, step by step: the placement's cancel is asked before the broker has
+    /// acknowledged it; the broker refuses it; the refusal is the cancel's, so the placement is
+    /// queried, never journaled rejected; the query finds it live, so the cancel is asked again,
+    /// once; and the next step asks nothing more while that cancel is outstanding.
+    #[test]
+    fn a_refused_cancel_is_queried_then_asked_again_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(0)), &ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(SECOND, "4", "141", Purpose::RiskExit)?, &ports)?;
+        executor.run(sell(EXIT, "3", "141", Purpose::RiskExit)?, &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(1_800)), &ports)?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        let placement = format!("md-{SECOND}");
+        assert!(
+            cancels(&placed).contains(&placement.as_str()),
+            "{:?}",
+            drafted(&placed)
+        );
+        let refusal = executor.run(refused(&placement, "order is not cancelable"), &ports)?;
+        assert!(
+            !refusal.iter().any(|effect| matches!(
+                effect,
+                Effect::Journal(draft)
+                    if draft.payload.get("state").and_then(Value::as_str) == Some("rejected")
+            )),
+            "{:?}",
+            drafted(&refusal)
+        );
+        assert!(
+            refusal.iter().any(|effect| matches!(
+                effect,
+                Effect::Broker(BrokerRequest::GetOrderByClientId(id)) if id.as_str() == placement
+            )),
+            "{:?}",
+            drafted(&refusal)
+        );
+        let live = reported(
+            &placement,
+            &Held {
+                purpose: Purpose::Protective,
+                qty: 4,
+                filled: 0,
+                acked: true,
+                live: true,
+            },
+        )?;
+        let found = executor.run(Input::Broker(Ok(BrokerOutcome::Order(live))), &ports)?;
+        assert_eq!(cancels(&found), vec![placement.as_str()]);
+        let next = executor.run(Input::Tick(RiskClock::from_secs(1_801)), &ports)?;
+        assert!(cancels(&next).is_empty(), "{:?}", drafted(&next));
+        Ok(())
+    }
+
+    /// #508's review, m1: an exit the gate holds cannot move, so a passive exit's placement is not
+    /// cancelled for it. Beside [`LONE`] (4) and a held risk exit of 3, a passive exit of 4 placed
+    /// into a position of 10 stays, though with the held 3 counted it would not fit.
+    #[test]
+    fn a_held_exit_never_has_a_placement_cancelled_for_it() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        let agent = AgentId("agent-a".to_owned());
+        executor.state.modes.insert(agent.clone(), Mode::Paused);
+        let held = executor.run(sell(SECOND, "3", "141", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(verdicts(&held), vec!["hold"]);
+        executor.state.modes.insert(agent, Mode::Normal);
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(EXIT, "4", "141", Purpose::RiskExit)?, &ports)?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&placed).len(),
+            1,
+            "the passive exit is placed: {:?}",
+            drafted(&placed)
+        );
+        assert!(
+            cancels(&placed).is_empty(),
+            "and not cancelled for an exit that cannot go: {:?}",
+            drafted(&placed)
+        );
+        Ok(())
     }
 
     /// #400 round 2's nit: the random oracle reached the composed plant (an exit's step into the
