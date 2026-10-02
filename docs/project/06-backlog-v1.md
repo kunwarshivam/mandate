@@ -2090,6 +2090,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   *Done (`agent/g-e6-6-tests-pins`):* the auction test asserts the re-priced risk exit keeps the
   proposal's limit with no §9.6 control applied, and the close-window test asserts a nanosecond
   before the window, its first and last instants, and the close, on a full and an early-close day.
+- **E6-6: pin a presumed-halt exit's price and controls** (#484 review, round 1, m2).
+  `hand::a_dropped_status_feed_is_a_presumed_halt` asserts that the re-priced market risk exit is
+  allowed with `marketable_limit_required`, but not its `limit_price` or `applied`. §4.4 and §5.6
+  re-price that exit as the auction window does, so it is the same unpinned pair the auction test
+  now pins: the proposal's limit, and no §9.6 control.
 - **E6-4 harness: family B's trim arm compares the trim** (DEC-250 item 11, DEC-399 item 6).
   `mandate_risk::trim_proposals` answers since E6-4's implementation PR, but
   `crates/mandate-refcases/src/mandate/order_builder.rs`'s `trim_first` still fails every
