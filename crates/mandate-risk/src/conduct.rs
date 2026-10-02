@@ -67,7 +67,7 @@ pub(crate) fn mark_and_collar(input: &GateInput<'_>) -> Result<Option<Stop>, Gat
 /// narrower ([`Price::collar_bound`]). The aggressive end is `ask × (1 + x)` for a buy and
 /// `bid × (1 − x)` for a sell; the passive end is the 20% band measured from the same side of the
 /// quote, `ask × (1 − band)` for a buy and `bid × (1 + band)` for a sell (DEC-163 item 2).
-fn collar(input: &GateInput<'_>, quote: SaneQuote) -> Result<(Price, Price), GateError> {
+fn collar(input: &GateInput<'_>, quote: SaneQuote) -> Result<(Price, Price), NumError> {
     let x = collar_x(input);
     let band = input.config.collar_passive_band;
     Ok(match input.proposed.side {
@@ -241,7 +241,7 @@ pub(crate) fn pacing(
         applied: BTreeSet::new(),
     };
     if purpose == Purpose::DiscretionaryExit {
-        price_by_collar(input, &mut pacing).map_err(unrouted_exit)?;
+        price_by_collar(input, &mut pacing)?;
         if at.close_window {
             pacing.marketable_limit_required = true;
             pacing.applied.insert(PacingControl::CloseWindow);
@@ -253,33 +253,6 @@ pub(crate) fn pacing(
     Ok((pacing.marketable_limit_required || !pacing.applied.is_empty()).then_some(pacing))
 }
 
-/// The exit-routing stub (DEC-77, DEC-327): a discretionary exit whose collar cannot be computed
-/// leaves the gate with no answer today, so the executor would hold an `Err` where `AGENTS.md`
-/// rule 13 owes it a routed exit. Two figures reach it, both only for a discretionary exit, since
-/// the collar prices no other purpose:
-///
-/// - the passive end of a sell's collar, `bid × (1 + band)`, cannot be held at the 9 places a price
-///   keeps: [`Price::collar_bound`] returns `overflow`. That is not one threshold: the product
-///   overflows only where it needs nine places and has no trailing zeros to drop, so
-///   `66023468761886947994.619958614` overflows and `66023468761886947995` does not;
-/// - a US equity's passive end falls below one Reg NMS tick (a bid below about `0.0000834` at a
-///   band of 0.2), and putting it on the grid truncates it to zero: [`Price::on_tick`] returns
-///   `not_positive`.
-///
-/// The aggressive end `bid × (1 − x)` rounds up, so it fails only for a configured `x` of one,
-/// where the floor is zero (the same error, the same stub). No participation cap can fail:
-/// `Qty::portion` takes a fraction of at most one, so a slice never overflows and an owner exit
-/// always gets a decision. Until E6-6 lands its reading (a control that cannot be computed paces
-/// nothing and the exit goes as proposed, never denied) the failure is reported, never guessed:
-/// `Unimplemented("pacing", "E6-6")`. The stub widens every arithmetic error on the collar, not
-/// only these two, so a new one would also read as the unimplemented story until E6-6 narrows it.
-fn unrouted_exit(error: GateError) -> GateError {
-    match error {
-        GateError::Num(_) => GateError::Unimplemented("pacing", "E6-6"),
-        other => other,
-    }
-}
-
 /// The collar prices a discretionary exit rather than denying it: a limit below the aggressive
 /// end is raised to it, one above the passive end is lowered to it, and a market order is sent as
 /// a marketable limit at the aggressive end, since "the collar prices them" leaves no exit
@@ -289,19 +262,34 @@ fn unrouted_exit(error: GateError) -> GateError {
 ///
 /// With no usable quote there is no collar to price by, and the exit goes as proposed: §8.2 lets a
 /// reduction take any mark source, and a crossed quote refuses nothing that reduces risk.
+///
+/// A collar the arithmetic cannot compute prices nothing either (DEC-327 item 3, DEC-383). Three
+/// figures reach it, all for a sell, since the collar prices only a discretionary exit:
+///
+/// - the passive end, `bid × (1 + band)`, cannot be held at the 9 places a price keeps
+///   ([`Price::collar_bound`]'s `overflow`). That is not one threshold: the product overflows only
+///   where it needs nine places and has no trailing zeros to drop, so
+///   `66023468761886947994.619958614` overflows and `66023468761886947995` does not;
+/// - a US equity's passive end falls below one Reg NMS tick (a bid below about `0.0000834` at a
+///   band of 0.2), and the grid truncates it to zero ([`Price::on_tick`]'s `not_positive`);
+/// - a configured `x` of one puts the aggressive end, `bid × (1 − x)`, at zero.
+///
+/// The exit keeps its own limit and `applied` does not name the collar: no bound, tick or quote
+/// stands in for the one that could not be computed. The participation caps and the close window
+/// still pace it, and the quote is still usable, so it bars no market order. Only the collar's
+/// arithmetic is read this way, since [`collar_price`] can fail with nothing else. A proposal of
+/// zero reduces nothing, so `AGENTS.md` rule 13 owes it no route: it keeps the collar's error, as
+/// before E6-6, rather than leave the gate as an allowed order of nothing.
 fn price_by_collar(input: &GateInput<'_>, pacing: &mut Pacing) -> Result<(), GateError> {
     let Some(quote) = usable_quote(input).ok().flatten() else {
         return Ok(());
     };
-    let (floor, ceiling) = collar(input, quote)?;
-    let limit = input.proposed.limit_price;
     let market = input.proposed.kind == ProposedKind::Market;
-    let priced = if market || limit < floor {
-        on_grid(input, floor, Adverse::Down)?
-    } else if limit > ceiling {
-        on_grid(input, ceiling, Adverse::Up)?
-    } else {
-        return Ok(());
+    let priced = match collar_price(input, quote, market) {
+        Ok(Some(priced)) => priced,
+        Ok(None) => return Ok(()),
+        Err(_) if input.proposed.qty > Qty::ZERO => return Ok(()),
+        Err(uncomputable) => return Err(uncomputable.into()),
     };
     pacing.limit_price = priced;
     pacing.marketable_limit_required |= market;
@@ -309,7 +297,26 @@ fn price_by_collar(input: &GateInput<'_>, pacing: &mut Pacing) -> Result<(), Gat
     Ok(())
 }
 
-fn on_grid(input: &GateInput<'_>, price: Price, adverse: Adverse) -> Result<Price, GateError> {
+/// The price the collar moves a discretionary exit to, on the grid, or `None` when the exit's
+/// limit already sits inside the collar. The error is the only kind the collar's arithmetic has: a
+/// bound a price cannot hold.
+fn collar_price(
+    input: &GateInput<'_>,
+    quote: SaneQuote,
+    market: bool,
+) -> Result<Option<Price>, NumError> {
+    let (floor, ceiling) = collar(input, quote)?;
+    let limit = input.proposed.limit_price;
+    Ok(if market || limit < floor {
+        Some(on_grid(input, floor, Adverse::Down)?)
+    } else if limit > ceiling {
+        Some(on_grid(input, ceiling, Adverse::Up)?)
+    } else {
+        None
+    })
+}
+
+fn on_grid(input: &GateInput<'_>, price: Price, adverse: Adverse) -> Result<Price, NumError> {
     Ok(match input.instrument.asset_class {
         AssetClass::UsEquity => price.on_tick(TickRule::RegNmsEquity, adverse)?,
         AssetClass::Crypto => price,
