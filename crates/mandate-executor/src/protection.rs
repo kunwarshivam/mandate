@@ -992,7 +992,8 @@ fn brackets(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
 /// broker's own report or an ingested fill, whichever comes first. Complete, its legs are active at
 /// the broker: they are recorded `placed` for the entry's whole quantity at its prices, named
 /// `{entry}-p{record}` (§2.3), and the interval ends. Still working at
-/// `bracket_partial_fill_timeout_s` from that start, or once its venue is no longer the regular
+/// `bracket_partial_fill_timeout_s` from that start, or at `max_unprotected_s` if that bound is
+/// shorter (§5.4's bound cancels the unfilled order), or once its venue is no longer the regular
 /// session before the closing auction window, its remainder is cancelled, once. Terminal partly
 /// filled — after that cancel or by any other path — it gets one GTC OCO at its prices for the
 /// filled quantity, capped at what the position, as the broker reports it, leaves after every live
@@ -1075,8 +1076,11 @@ fn bracket(
         .get(entry)
         .and_then(|detail| detail.bracket_since)
         .unwrap_or(batch.at());
-    let due = batch.at().secs().saturating_sub(since.secs())
-        >= batch.ports.config.bracket_partial_fill_timeout_s
+    let config = batch.ports.config;
+    let bound = config
+        .bracket_partial_fill_timeout_s
+        .min(config.max_unprotected_s);
+    let due = batch.at().secs().saturating_sub(since.secs()) >= bound
         || venue(batch.ports, &instrument, batch.at()) != Venue::Regular;
     let working = matches!(
         order.state,
@@ -8292,8 +8296,8 @@ mod bracket_tests {
         submitted,
     };
     use crate::types::{
-        AgentId, BrokerOrder, BrokerRequest, BrokerUpdate, Effect, EventId, Input, IntentBody,
-        IntentHandoff, ProtectionPrices, Purpose, RiskClock,
+        AgentId, BrokerOrder, BrokerRequest, BrokerUpdate, Effect, EventId, ExecutorConfig, Input,
+        IntentBody, IntentHandoff, ProtectionPrices, Purpose, RiskClock,
     };
 
     const ENTRY: &str = "01JABCDEFGHJKMNPQRSTVWXYZ1";
@@ -8366,35 +8370,48 @@ mod bracket_tests {
     }
 
     /// §5.4: the first partial fill opens the interval and cancels nothing; the remainder is
-    /// cancelled at `bracket_partial_fill_timeout_s` from it, not a second before, and once.
+    /// cancelled at the shorter of `bracket_partial_fill_timeout_s` and `max_unprotected_s` from
+    /// it, not a second before, and once (DEC-346 item 5).
     #[test]
-    fn a_partly_filled_entry_is_cancelled_at_the_timeout_and_not_before()
+    fn a_partly_filled_entry_is_cancelled_at_the_shorter_bound_and_not_before()
     -> Result<(), ExecutorError> {
-        let (config, fees) = (executor_config(), fees()?);
-        let ports = Ports {
-            ids: &Ids,
-            mandates: &Everything,
-            instruments: &Everything,
-            config: &config,
-            fees: &fees,
-        };
-        let mut executor = bracketed(&ports)?;
-        let partial = executor.run(report("partially_filled", "4")?, &ports)?;
-        assert!(
-            drafted(&partial).contains(&"ProtectionChanged"),
-            "{partial:?}"
-        );
-        assert_eq!(
-            cancels(&partial),
-            0,
-            "the first partial fill cancels nothing"
-        );
-        let early = executor.run(Input::Tick(RiskClock::from_secs(69)), &ports)?;
-        assert_eq!(cancels(&early), 0, "59 s in, the legs are still held");
-        let due = executor.run(Input::Tick(RiskClock::from_secs(70)), &ports)?;
-        assert_eq!(cancels(&due), 1, "60 s in, the remainder is cancelled");
-        let again = executor.run(Input::Tick(RiskClock::from_secs(71)), &ports)?;
-        assert_eq!(cancels(&again), 0, "once");
+        let fees = fees()?;
+        for (timeout, limit, due_at) in [(60, 90, 70), (60, 30, 40), (20, 60, 30)] {
+            let config = ExecutorConfig {
+                bracket_partial_fill_timeout_s: timeout,
+                max_unprotected_s: limit,
+                ..executor_config()
+            };
+            let ports = Ports {
+                ids: &Ids,
+                mandates: &Everything,
+                instruments: &Everything,
+                config: &config,
+                fees: &fees,
+            };
+            let case = format!("timeout {timeout}, bound {limit}");
+            let mut executor = bracketed(&ports)?;
+            let partial = executor.run(report("partially_filled", "4")?, &ports)?;
+            assert!(
+                drafted(&partial).contains(&"ProtectionChanged"),
+                "{case}: {partial:?}"
+            );
+            assert_eq!(
+                cancels(&partial),
+                0,
+                "{case}: the first fill cancels nothing"
+            );
+            let early = executor.run(Input::Tick(RiskClock::from_secs(due_at - 1)), &ports)?;
+            assert_eq!(
+                cancels(&early),
+                0,
+                "{case}: a second early, the legs are held"
+            );
+            let due = executor.run(Input::Tick(RiskClock::from_secs(due_at)), &ports)?;
+            assert_eq!(cancels(&due), 1, "{case}: the remainder is cancelled");
+            let again = executor.run(Input::Tick(RiskClock::from_secs(due_at + 1)), &ports)?;
+            assert_eq!(cancels(&again), 0, "{case}: once");
+        }
         Ok(())
     }
 
