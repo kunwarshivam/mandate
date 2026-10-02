@@ -1168,6 +1168,30 @@ pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorE
     Ok(())
 }
 
+/// DEC-419: a handed-on placement that does not fit beside the exits still selling or waiting in
+/// `instrument` ([`fits`]) is cancelled for them as soon as it is placed, as [`begin`] cancels it
+/// for an exit that arrives after it. An exit allowed while the placement was still to come would
+/// otherwise wait behind it with nothing to cancel it (#489).
+fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
+    if fits(&batch.view, instrument)? {
+        return Ok(());
+    }
+    let resting: Vec<ClientOrderId> = batch
+        .view
+        .protection
+        .get(instrument)
+        .map(|protection| protection.resting.clone())
+        .unwrap_or_default();
+    for id in resting {
+        if ask_cancel(batch, &id)? {
+            batch.broker(BrokerRequest::Cancel {
+                client_order_id: id,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// One exit the gate allowed that has no order yet: it waits on its cancels.
 struct WaitingExit {
     intent: IntentId,
@@ -1503,6 +1527,7 @@ pub(crate) fn passive_exit(
     for request in requests {
         batch.broker(BrokerRequest::Submit(request));
     }
+    overtaken(batch, instrument)?;
     Ok(true)
 }
 
@@ -7888,7 +7913,6 @@ mod sequence_tests {
     /// waited past `max_intent_age_s` (DEC-418). The placement that no longer fits beside a
     /// waiting exit is cancelled for it, as for an exit that arrives after it (DEC-419).
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_risk_exit_allowed_during_a_passive_sequences_cancel_is_never_stranded()
     -> Result<(), String> {
         let script = [
