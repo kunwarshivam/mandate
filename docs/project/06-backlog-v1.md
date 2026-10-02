@@ -1816,12 +1816,17 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   so a short would fold as if held long and understate the day-trade count. No v1 case holds one
   (`AGENTS.md` rule 12) and `Gate::decide` refuses a short, but a `day_trade_count` expectation
   reaches the fold without that refusal. Refuse a negative `SignedQty` there instead of taking
-  its magnitude.
+  its magnitude. **Tests staged** in [#438](https://github.com/kunwarshivam/mandate/pull/438)
+  (DEC-314): the refusal is pending E6-10 behind `held_overnight`'s stub, and a flat (`0`)
+  position, which is not a short, is pinned live as folding as no shares held.
 - **Read `crypto_status` in the trading-domain harness** (DEC-285 item 5). The driver hands the gate
   a crypto-active account because no crypto-proposing case states `crypto_status`, and
   `trading_domain_gate_harness.rs` pins it as pending E6-10, initial and in an update. When a case
   needs it, a tests correction (DEC-77) drops those two assertions, and the harness reads it as
-  check 1's `crypto_active`.
+  check 1's `crypto_active`. **Tests staged** in [#438](https://github.com/kunwarshivam/mandate/pull/438)
+  (DEC-315): the two assertions are dropped, the gate carries a `crypto_active` field its
+  snapshot reads, the read is a stub pending E6-10, and two in-module tests pin the stub's report
+  live until the implementation PR replaces them.
 - **RC-09's `alpaca_intraday_margin` variant cannot pass as written** (founder; DEC-285 item 6).
   Its `expect_overrides.step_1: { decision: { verdict: allow } }` merges into a decision that
   keeps `reason_code: legacy_pdt_day_trade_budget`, so the expectation is an allow with a deny's

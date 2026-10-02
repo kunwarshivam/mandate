@@ -832,48 +832,85 @@ fn the_initial_crypto_status_is_check_1s_crypto_active() {
     );
 }
 
+/// RC-09 with `initial_status` as the initial account's `crypto_status`, one
+/// `broker_account_update` step per status in `updates` (at 09:30, 09:40 and 09:50), then a crypto
+/// opening at 10:00 expecting `decision`; `last_equity` lifts the legacy-pdt budget so check 1 is
+/// what decides.
+fn crypto_updates(initial_status: &str, updates: &[&str], decision: Json) -> Result<(), String> {
+    assert!(
+        updates.len() <= 3,
+        "crypto_updates times at most three updates"
+    );
+    let mut steps: Vec<Json> = updates
+        .iter()
+        .zip(["09:30", "09:40", "09:50"])
+        .map(|(status, at)| {
+            json!({
+                "at": format!("2026-09-21T{at}:00-04:00"),
+                "event": "broker_account_update",
+                "data": { "crypto_status": status }
+            })
+        })
+        .collect();
+    steps.push(proposal("2026-09-21T10:00:00-04:00", buy_btc(), decision));
+    run(
+        edited("RC-09", |c| {
+            c["initial"]["account"]["crypto_status"] = json!(initial_status);
+            c["initial"]["account"]["last_equity"] = json!("25000.00");
+            c["steps"] = Json::Array(steps);
+        }),
+        "RC-09",
+    )
+}
+
 /// A `broker_account_update`'s `crypto_status` is check 1's `crypto_active` from that step on
-/// (DEC-285 item 5's backlog row, DEC-315): an update to anything but `ACTIVE` denies the case's
-/// later crypto opening, and an update to `ACTIVE` never lifts a detected inactivity, which the
-/// owner's acknowledgment and refresh lift (E7-5), as with the account's other status fields. The
-/// read is pending E6-10: until its story lands the stub refuses the read and reports itself.
+/// (DEC-285 item 5's backlog row, DEC-315 item 1): an update to anything but `ACTIVE` denies the
+/// case's later crypto opening `crypto_account_inactive`, and an update to `ACTIVE` on an active
+/// account decides it as before. The read is pending E6-10: until its story lands the stub refuses
+/// the read and reports itself.
 #[test]
 #[ignore = "pending E6-10"]
-fn an_account_updates_crypto_status_is_check_1s_crypto_active() {
-    let updated = |initial_status: &str, status: &str, decision: Json| {
-        run(
-            edited("RC-09", |c| {
-                c["initial"]["account"]["crypto_status"] = json!(initial_status);
-                c["initial"]["account"]["last_equity"] = json!("25000.00");
-                c["steps"] = json!([
-                    {
-                        "at": "2026-09-21T09:30:00-04:00",
-                        "event": "broker_account_update",
-                        "data": { "crypto_status": status }
-                    },
-                    proposal("2026-09-21T10:00:00-04:00", buy_btc(), decision)
-                ]);
-            }),
-            "RC-09",
-        )
-    };
+fn an_account_update_s_crypto_status_is_check_1s_crypto_active() {
     assert_eq!(
-        updated(
+        crypto_updates(
             "ACTIVE",
-            "INACTIVE",
+            &["INACTIVE"],
             stop("deny", "crypto_account_inactive")
         ),
         Ok(()),
         "an update to an inactive crypto status denies a later crypto opening"
     );
     assert_eq!(
-        updated(
+        crypto_updates("ACTIVE", &["ACTIVE"], allow()),
+        Ok(()),
+        "an update to ACTIVE on an active account decides the opening as before"
+    );
+}
+
+/// A later `ACTIVE` never lifts a detected crypto inactivity (DEC-315 item 2): the inactivity is
+/// stored until the owner acknowledges and the account is refreshed (E7-5), as with the account's
+/// other status fields, whether it was detected in the initial account or by an earlier update.
+/// The read is pending E6-10: until its story lands the stub refuses the read and reports itself.
+#[test]
+#[ignore = "pending E6-10"]
+fn a_later_active_crypto_status_never_lifts_a_detected_inactivity() {
+    assert_eq!(
+        crypto_updates(
             "INACTIVE",
-            "ACTIVE",
+            &["ACTIVE"],
             stop("deny", "crypto_account_inactive")
         ),
         Ok(()),
-        "an update to ACTIVE never lifts a detected inactivity"
+        "an update to ACTIVE never lifts an inactivity the initial account states"
+    );
+    assert_eq!(
+        crypto_updates(
+            "ACTIVE",
+            &["INACTIVE", "ACTIVE"],
+            stop("deny", "crypto_account_inactive")
+        ),
+        Ok(()),
+        "an update to ACTIVE never lifts an inactivity an earlier update detected"
     );
 }
 
