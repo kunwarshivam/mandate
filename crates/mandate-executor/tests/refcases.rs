@@ -70,18 +70,15 @@ use mandate_num::{Bps, Qty, Rounding};
 use mandate_time::UtcNanos;
 use serde_json::Value as Json;
 
-/// `account` reporting `cash` as its cash, equity and buying power: a case's account holds cash
-/// and the positions its steps name, and no figure here is asserted beyond the cash comparison.
+/// `account` reporting `cash` as its cash. The fixture's `initial.account` names its settled cash
+/// and nothing else, so equity and buying power stay the account's own: settled cash is not
+/// buying power (#447 round 1, m2), and only the cash comparison reads the figure.
 fn holding(
     cash: &str,
     account: mandate_executor::BrokerAccount,
 ) -> mandate_executor::BrokerAccount {
-    let cash = common::usd(&canonical(cash));
     mandate_executor::BrokerAccount {
-        cash,
-        equity: cash,
-        buying_power: cash,
-        non_marginable_buying_power: cash,
+        cash: common::usd(&canonical(cash)),
         ..account
     }
 }
@@ -144,6 +141,20 @@ fn ends_after_protection(step: &Json) -> bool {
                 kind == "journal" && argument.as_str() == Some("unprotected_window_end")
             })
         })
+}
+
+/// The name a `propose_order` step binds to its order when it is proposed: its `name`, where the
+/// step expects no submission. A step that does expect one binds the name to the order its
+/// `submit` matches instead, so a passive exit's OCO, which carries the exit's own id, is never
+/// bound twice (DEC-347 item 4).
+fn named_when_proposed(step: &Json) -> Option<String> {
+    let submits = expected_actions(step)
+        .iter()
+        .any(|(kind, _)| kind.starts_with("submit"));
+    step.get("data")
+        .and_then(|data| text_of(data, "name"))
+        .filter(|_| !submits)
+        .map(str::to_owned)
 }
 
 /// One case as the fixture carries it, with a variant's overrides already applied.
@@ -772,10 +783,7 @@ impl<'p> Drive<'p> {
             "propose_order" => {
                 let body = self.intent_body(&data);
                 let intent = format!("01JREFCASE{index:016}");
-                let submits = expected_actions(step)
-                    .iter()
-                    .any(|(kind, _)| kind.starts_with("submit"));
-                if let Some(named) = text_of(&data, "name").filter(|_| !submits) {
+                if let Some(named) = named_when_proposed(step) {
                     self.names
                         .entry(named.to_owned())
                         .or_insert_with(|| format!("md-{intent}"));
@@ -1454,6 +1462,7 @@ impl Drive<'_> {
                 .checked_add(qty(tolerance))
                 .unwrap_or_else(|e| panic!("{}: {e}", self.case.id));
             let mut off = common::snapshot(self.shell.head().0, ReconcileReason::Scheduled);
+            off.account = self.account_after(step);
             off.positions = vec![common::broker_position(name, &beyond.to_string())];
             let run = mandate_executor::reconcile(&self.shell.state, &off, self.ports)
                 .unwrap_or_else(|e| panic!("{}: {e}", self.case.id));
@@ -1798,16 +1807,27 @@ fn rc_14_exit_step() -> Json {
 
 /// Matches `seen` against [`rc_14_exit_step`] on a freshly seeded RC-14.
 fn rc_14_exit_matches(seen: impl Fn(&str) -> Vec<Seen>) {
+    rc_14_matches(&rc_14_exit_step(), seen);
+}
+
+/// Matches `seen` against `step` on a freshly seeded RC-14.
+fn rc_14_matches(step: &Json, seen: impl Fn(&str) -> Vec<Seen>) {
+    with_rc_14(|drive| {
+        let oco = drive.id_of("oco_1", 0);
+        let seen = seen(&oco);
+        assert!(drive.assert_actions(0, step, &seen));
+    });
+}
+
+/// Runs `check` on a freshly seeded RC-14.
+fn with_rc_14(check: impl FnOnce(&mut Drive<'_>)) {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
     let instruments = FixedInstruments;
     let configuration = config();
     let ports = ports(&ids, &mandates, &instruments, &configuration);
     let mut drive = Drive::new(case("RC-14", None), &ports);
-    let oco = drive.id_of("oco_1", 0);
-    let step = rc_14_exit_step();
-    let seen = seen(&oco);
-    assert!(drive.assert_actions(0, &step, &seen));
+    check(&mut drive);
 }
 
 /// DEC-348 item 1: the start journaled when the cancel is asked, before the confirmation, as the
@@ -1885,4 +1905,124 @@ fn the_guard_catches_an_unasserted_case_listed_passing() {
     assert_eq!(listed_passing(passing, &partly), partly);
     let pending = "[trading_domain]\n'RC-22' = { status = \"pending\", story = \"E6-11\" }\n";
     assert_eq!(listed_passing(pending, &partly), Vec::<String>::new());
+}
+
+/// A step that lists the interval's start before the gate's re-run with no cancel to confirm: the
+/// shape the `rerun_gate` bound governs on its own.
+fn start_then_rerun_step() -> Json {
+    serde_json::json!({
+        "expect": {
+            "actions": [
+                { "journal": INTERVAL_START },
+                { "rerun_gate": "exit_1" },
+            ]
+        }
+    })
+}
+
+/// DEC-348 item 1, the `rerun_gate` bound (#447 round 1, m1): with no confirmation in the step, a
+/// start before the gate's re-run matches.
+#[test]
+fn an_interval_start_before_the_gate_re_runs_matches() {
+    rc_14_matches(&start_then_rerun_step(), |_| {
+        vec![Seen::Journal(INTERVAL_START.to_owned()), Seen::Gate]
+    });
+}
+
+/// DEC-348 item 1, the `rerun_gate` bound: a start only after the gate re-ran fails the case.
+#[test]
+#[should_panic(expected = "starts before the gate re-runs")]
+fn an_interval_start_after_the_gate_re_runs_fails() {
+    rc_14_matches(&start_then_rerun_step(), |_| {
+        vec![
+            Seen::Gate,
+            Seen::Journal(INTERVAL_START.to_owned()),
+            Seen::Gate,
+        ]
+    });
+}
+
+/// DEC-347 item 1: the seed starts as a production shell does, with the startup reconciliation run
+/// and the broker's account reported at the case's own cash, so the executor holds no opening
+/// `startup_reconciliation_pending`.
+#[test]
+fn the_seed_runs_the_startup_reconciliation_and_reports_the_account() {
+    with_rc_14(|drive| {
+        let journaled: Vec<&str> = drive
+            .shell
+            .account_journal
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect();
+        assert!(journaled.contains(&"ReconciliationRun"), "{journaled:?}");
+        assert!(journaled.contains(&"AccountStateObserved"), "{journaled:?}");
+        assert_eq!(
+            drive
+                .shell
+                .state
+                .observed_account()
+                .map(|account| account.cash),
+            Some(common::usd("20000")),
+            "at RC-14's own settled cash"
+        );
+    });
+}
+
+/// DEC-347 item 2: a seeded position is the agent's own, so the seeded protection has a single
+/// holder (DEC-160 (3)(b)) and holds no opening `protection_unattributed`.
+#[test]
+fn the_seeded_protection_belongs_to_the_positions_holder() {
+    with_rc_14(|drive| {
+        let oco = drive.id_of("oco_1", 0);
+        let id =
+            mandate_executor::ClientOrderId::parse(&oco).unwrap_or_else(|e| panic!("{oco}: {e}"));
+        assert_eq!(
+            drive
+                .shell
+                .state
+                .order(&id)
+                .and_then(|order| order.agent.clone()),
+            Some(common::agent(common::AGENT))
+        );
+    });
+}
+
+/// DEC-347 item 3 and #447 round 1, B1: both of an unposted-fee check's reconciliations report the
+/// step's own cash, so the check turns on the quantity alone.
+#[test]
+fn a_reconciliation_check_reports_the_steps_own_cash() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::CRYPTO]);
+    let instruments = FixedInstruments;
+    let configuration = config();
+    let ports = ports(&ids, &mandates, &instruments, &configuration);
+    let rc_07 = case("RC-07", None);
+    let first = rc_07.steps.first().cloned().unwrap_or(Json::Null);
+    let drive = Drive::new(rc_07, &ports);
+    assert_eq!(drive.initial_account().cash, common::usd("100000"));
+    assert_eq!(drive.account_after(&first).cash, common::usd("70000"));
+    assert_eq!(
+        drive.account_after(&Json::Null).cash,
+        common::usd("100000"),
+        "a step that names no cash reports the account at the start"
+    );
+}
+
+/// DEC-347 item 4: a proposal is named when it is made only where its step expects no submission.
+#[test]
+fn a_proposal_is_named_when_made_only_where_no_submission_is_expected() {
+    let rc_22 = case("RC-22", None);
+    let names: Vec<Option<String>> = rc_22
+        .steps
+        .iter()
+        .take(3)
+        .map(named_when_proposed)
+        .collect();
+    assert_eq!(names, vec![None, Some("buy_passive".to_owned()), None]);
+    let passive = case("RC-14", Some("passive_exit_becomes_oco_take_profit"));
+    assert_eq!(
+        passive.steps.first().and_then(named_when_proposed),
+        None,
+        "a step that expects its submission binds the name there"
+    );
 }
