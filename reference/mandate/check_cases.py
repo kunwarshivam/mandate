@@ -582,17 +582,24 @@ req("MC-W57", C["MC-W57"]["kind"] == "risk_state" and C["MC-W57"]["steps"][1]["e
 req("MC-W", sum(c.startswith("MC-W") for c in C) == 57, "57 tripwire cases")
 
 # delegation routing (§9.2, MI-29; #444, DEC-353)
-for cid, cls in {"MC-J01": "risk_increasing", "MC-J02": "risk_reducing", "MC-J03": "risk_increasing", "MC-J04": "risk_reducing",
-                 "MC-J05": "risk_increasing", "MC-J06": "risk_reducing"}.items():
+J_INC = {"MC-J01", "MC-J03", "MC-J05", "MC-J06", "MC-J09"}
+for k in range(1, 11):
+    cid = f"MC-J{k:02}"
+    cls = "risk_increasing" if cid in J_INC else "risk_reducing"
     req(cid, C[cid]["expect"]["classification"] == cls and C[cid]["expect"]["changed_paths"] == ["/autonomy/rules"], cls)
-lifts = lambda b: [x["lifts"] for x in d["bases"][b]["mandate"]["autonomy"].get("delegations", [])]
-req("MC-J01", lifts(C["MC-J01"]["base"]) == ["rule:large_orders"] and C["MC-J01"]["patch"] == C["MC-J02"]["patch"]
-    and lifts(C["MC-J02"]["base"]) == [], "the same widening, with and without the delegation")
-req("MC-J03", lifts(C["MC-J03"]["base"]) == ["rule:low_score"] and C["MC-J03"]["patch"] == C["MC-J04"]["patch"]
-    and lifts(C["MC-J04"]["base"]) == [], "the same removal, with and without the delegation")
-req("MC-J05", lifts(C["MC-J05"]["base"]) == ["default"], "the default is delegated")
-req("MC-J06", d["bases"][C["MC-J06"]["base"]]["mandate"]["autonomy"]["rules"][0]["then"] == "auto", "an auto rule removed")
-req("MC-J", sum(c.startswith("MC-J") for c in C) == 6, "6 routing cases")
+au_of = lambda cid: d["bases"][C[cid]["base"]]["mandate"]["autonomy"]
+lifts = lambda cid: [x["lifts"] for x in au_of(cid).get("delegations", [])]
+bare = lambda cid: {k: v for k, v in d["bases"][C[cid]["base"]]["mandate"].items() if k != "autonomy"} | {
+    "autonomy": {k: v for k, v in au_of(cid).items() if k != "delegations"}}
+for deleg, ctrl, lift in [("MC-J01", "MC-J02", "rule:large_orders"), ("MC-J03", "MC-J04", "rule:low_score"), ("MC-J05", "MC-J08", "default"),
+                          ("MC-J06", "MC-J07", "rule:low_score"), ("MC-J09", "MC-J10", "rule:low_score")]:
+    req(deleg, lifts(deleg) == [lift] and lifts(ctrl) == [] and bare(deleg) == bare(ctrl) and C[deleg]["patch"] == C[ctrl]["patch"],
+        f"the same change as {ctrl}, whose base differs only by the delegation")
+req("MC-J06", au_of("MC-J06")["rules"][0]["then"] == "auto" and C["MC-J06"]["patch"] == [{"op": "remove", "path": "/autonomy/rules/0"}],
+    "an auto rule removed")
+req("MC-J09", au_of("MC-J09")["rules"][0]["then"] == "auto" and au_of("MC-J09")["rules"][0]["when"]["op"] == "lt"
+    and int(C["MC-J09"]["patch"][0]["value"]) < int(au_of("MC-J09")["rules"][0]["when"]["value"]), "an auto rule narrowed")
+req("MC-J", sum(c.startswith("MC-J") for c in C) == 10, "10 routing cases")
 print("cases", len(C), "title assertion failures", len(bad))
 for b in bad:
     print(" ", b)

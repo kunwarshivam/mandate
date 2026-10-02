@@ -81,7 +81,15 @@ MUTANTS = {
     "a widened ask rule a delegation lifts is reducing": (
         '        if rb["then"] == "ask" and d > 0 and f"rule:{rb[\'id\']}" in lifted:\n            return "increasing"\n', ''),
     "removing a rule before a delegated ask is reducing": (
-        '            if ra["then"] != "auto" and later_sources & lifted:\n                return "increasing"\n', ''),
+        '            if later_sources & lifted:\n                return "increasing"\n', ''),
+    "removing an auto rule before a delegated ask is reducing": (
+        '            if later_sources & lifted:', '            if ra["then"] != "auto" and later_sources & lifted:'),
+    "narrowing an auto rule before a delegated ask is reducing": (
+        '        if t == 0 and ({f"rule:{x[\'id\']}" for x in n["rules"][i + 1:]} | {"default"}) & lifted:', '        if False:'),
+    "a rule made an ask a delegation lifts is reducing": (
+        '            if rb["then"] == "ask" and f"rule:{rb[\'id\']}" in lifted:', '            if False:'),
+    "the default made an ask a delegation lifts is reducing": (
+        '    if n["default"] != o["default"] and n["default"] == "ask" and "default" in lifted:', '    if False:'),
     "a delegation bypasses the admission ceiling": (
         '    if a.get("new_instrument", False) and STRICT[au["admission"]] > STRICT[res["decision"]]:',
         '    if a.get("new_instrument", False) and lifted_by is None and STRICT[au["admission"]] > STRICT[res["decision"]]:'),
@@ -292,7 +300,7 @@ TRIPWIRE_MUTANTS = {
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
-         "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(600); fuzz_client_ceiling(300); "
+         "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(1500); fuzz_client_ceiling(300); "
          "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
          "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
          "print(len(FAIL))")

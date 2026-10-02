@@ -312,8 +312,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   Also owed (#443 round 3, m14; #476 round 1, m4): no CI job runs `reference/journal/generate.py` or its seeded bugs, since
   `cargo xtask ci reference` runs only `reference/mandate/`. Its first cost: rule 28's report order went unpinned on
   the reference side until #476 round 1. Run `generate.py --check` per PR.
-  Also owed (#444, DEC-353): `mandate-spec`'s §9.2 classifier treats a rule change that routes an order to a delegated ask
-  as risk-increasing (MC-J01 to MC-J06), with tests first.
+  Also owed (#444, DEC-353; E6-13's code half, tests first): `mandate-spec`'s §9.2 classifier takes DEC-353's rule, so
+  MC-J01, MC-J03, MC-J05, MC-J06 and MC-J09 pass. Size it with what comes first: `mandate-spec` has no delegations at
+  all. `Autonomy` has no `delegations` member and `parse::autonomy`'s member list is closed, so a mandate carrying one is
+  refused at parse (`unknown_member`); the type, the parser and §9.2's `autonomy.delegations` row, which the Rust
+  classifier also lacks, come before the rule has anything to read (#471 round 1, m9).
   **Founder question** (#443 round 2): should a mandate be refused at validation
   when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
   drawdown ladder) then cannot be lifted until a second user exists?

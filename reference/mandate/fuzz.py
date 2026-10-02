@@ -879,15 +879,26 @@ def fuzz_delegation_changes(n):
 
 def fuzz_delegated_rule_changes(n):
     """MI-11 and MI-29 across the two §9.2 rows (#444, DEC-353): a rule change classified reducing or neutral, made
-    while delegations stand unchanged, never decides less strictly, whichever ask the order now reaches and whether
-    a delegation lifts it. The oracle compares decisions only, never the classifier's own conditions."""
+    while delegations stand unchanged, never decides less strictly (MI-11), and never decides by a delegation an order
+    that no delegation decided before (MI-29, as written). The oracle compares decisions only, never the classifier's
+    own conditions. Some versions name a source that is not an ask, which V-041 refuses: the runtime lifts nothing
+    there, so a change that makes it an ask, which some draws make on purpose, must still classify as one that lets a
+    delegation lift more."""
     for _ in range(n):
-        m = rand_delegated_mandate()
+        m = rand_delegated_mandate(any_source=rng.random() < 0.3)
         if m is None:
             continue
         ds = m["autonomy"]["delegations"]
         new = copy.deepcopy(m)
         rest = mutate({k: v for k, v in m["autonomy"].items() if k != "delegations"})
+        if rng.random() < 0.15:
+            rest = copy.deepcopy({k: v for k, v in m["autonomy"].items() if k != "delegations"})
+            named = rng.choice(ds)["lifts"]
+            for r in rest["rules"]:
+                if f"rule:{r['id']}" == named:
+                    r["then"] = "ask"
+            if named == "default":
+                rest["default"] = "ask"
         new["autonomy"] = dict(rest, delegations=copy.deepcopy(ds))
         c, _ = classify(m, new)
         if c not in ("risk_reducing", "neutral"):
@@ -896,9 +907,12 @@ def fuzz_delegated_rule_changes(n):
             t = DELEG_NOW + timedelta(seconds=rng.randint(-3600, 3 * 86400))
             st = rand_state(t, {}, trouble_p=0.1)
             a = rand_autonomy_action()
-            d0, d1 = autonomy(m, a, st)["decision"], autonomy(new, a, st)["decision"]
-            check(STRICT[d1] >= STRICT[d0], "MI-29 a reducing rule change never sends an order to a delegation that lifts it",
-                  (m["autonomy"], new["autonomy"], a, st, d0, d1))
+            r0, r1 = autonomy(m, a, st), autonomy(new, a, st)
+            check(STRICT[r1["decision"]] >= STRICT[r0["decision"]], "MI-11 a reducing rule change never decides less strictly",
+                  (m["autonomy"], new["autonomy"], a, st, r0, r1))
+            check("delegation_id" not in r1 or "delegation_id" in r0,
+                  "MI-29 a reducing rule change never lets a delegation lift a decision no delegation lifted before",
+                  (m["autonomy"], new["autonomy"], a, st, r0, r1))
 
 def fuzz_delegation_rules(n):
     """V-041 (the 30-day span), V-042 (no carry-over past a risk-increasing version), V-043 (caps inside the envelope),
@@ -1877,7 +1891,7 @@ def fuzz_ask_budget(n):
     for _ in range(n):
         noon = int(rng.choice(days).timestamp())
         evs = []
-        for _ in range(rng.randint(0, rng.choice([4, 24]))):
+        for _ in range(rng.randint(0, 24)):
             t = noon + rng.randint(-14 * 3600, 11 * 3600 + 3599)
             kind = rng.choices(["requested", "owner_skipped", "timed_out", "version_applied"], [8, 2, 2, 1])[0]
             evs.append({"event": kind, "at_s": t, "instrument": rng.choice(["A", "B"]), "timeout_s": rng.choice([30, 300, 600])})
@@ -1887,9 +1901,6 @@ def fuzz_ask_budget(n):
         q = rng.choice([last, last + 1, noon + 11 * 3600 + 3599] + [e["at_s"] + e["timeout_s"] + rng.choice([-1, 0]) for e in timeouts])
         q = max(q, last)
         inst = rng.choice(["A", "B"])
-        if timeouts and rng.random() < 0.5:
-            edge = rng.choice(timeouts)
-            q, inst = max(edge["at_s"] + edge["timeout_s"] + rng.choice([-1, 0]), last), edge["instrument"]
         day = datetime.fromtimestamp(q, NYC).date()
         same = lambda e: datetime.fromtimestamp(e["at_s"], NYC).date() == day
         asked = len([e for e in evs if e["event"] == "requested" and same(e)])

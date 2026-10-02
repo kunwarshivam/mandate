@@ -1120,8 +1120,8 @@ e_case("MC-E31", "A grant batched with a cancelling exits-only restriction is no
        [ASK1, {"kind": "batch", "reason": "mode_tightened", "responses": [e_resp("ctl1", 30, H1)], "now": E_NOW}])
 
 # =========================================================== P. delegation routing (§9.2, MI-11, MI-29; #444, DEC-353)
-# A rule change the autonomy row calls reducing is increasing when it sends an order that reached an undelegated ask
-# to an ask a delegation of the new version lifts.
+# A rule change the autonomy row would call reducing is increasing when it can send an order to a rule or default a
+# delegation of the new version lifts (MI-29 as written). Each delegated case has a control without the delegation.
 J_DELEG = lambda lifts: {"op": "add", "path": "/autonomy/delegations", "value": [dict(REVIEW_DELEGATION, lifts=lifts)]}
 J_TWO_ASKS = [rep("/autonomy/rules", [{"id": "large_orders", "when": {"field": "order_usd", "op": "gt", "value": "900"}, "then": "ask"},
                                      {"id": "low_score", "when": {"field": "combined_score", "op": "lt", "value": "0.65"}, "then": "ask"}])]
@@ -1133,9 +1133,11 @@ derived("btc_accumulator_one_ask_delegated_default", "btc_accumulator", J_ONE_AS
         "one ask rule, and a delegation lifts the ask default")
 derived("btc_accumulator_delegated_large", "btc_accumulator", [J_DELEG("rule:large_orders")],
         "a delegation lifts the ask rule large_orders")
-derived("btc_accumulator_two_asks_delegated_small", "btc_accumulator_two_asks_delegated",
-        [{"op": "add", "path": "/autonomy/rules/0", "value": {"id": "small", "when": {"field": "order_usd", "op": "lt", "value": "100"}, "then": "auto"}}],
+J_SMALL = [{"op": "add", "path": "/autonomy/rules/0", "value": {"id": "small", "when": {"field": "order_usd", "op": "lt", "value": "100"}, "then": "auto"}}]
+derived("btc_accumulator_two_asks_delegated_small", "btc_accumulator_two_asks_delegated", J_SMALL,
         "adds an auto rule, small, ahead of both asks")
+derived("btc_accumulator_two_asks_small", "btc_accumulator_two_asks", J_SMALL, "adds an auto rule, small, ahead of both asks")
+derived("btc_accumulator_one_ask", "btc_accumulator", J_ONE_ASK, "one ask rule and an ask default")
 CH_J = [
     ("MC-J01", "Widening an ask rule a delegation lifts is risk-increasing", "btc_accumulator_delegated_large",
      [rep("/autonomy/rules/0/when/value", "800")]),
@@ -1147,8 +1149,16 @@ CH_J = [
      [{"op": "remove", "path": "/autonomy/rules/0"}]),
     ("MC-J05", "Removing an ask rule ahead of an ask default a delegation lifts is risk-increasing", "btc_accumulator_one_ask_delegated_default",
      [{"op": "remove", "path": "/autonomy/rules/0"}]),
-    ("MC-J06", "Removing an auto rule ahead of a delegated ask stays risk-reducing: its orders were already auto",
+    ("MC-J06", "Removing an auto rule ahead of an ask rule a delegation lifts is risk-increasing: a delegation would decide what the rule did",
      "btc_accumulator_two_asks_delegated_small", [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J07", "Removing the same auto rule with no delegation is risk-reducing", "btc_accumulator_two_asks_small",
+     [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J08", "Removing the same ask rule ahead of the ask default with no delegation is risk-reducing", "btc_accumulator_one_ask",
+     [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J09", "Narrowing an auto rule ahead of an ask rule a delegation lifts is risk-increasing", "btc_accumulator_two_asks_delegated_small",
+     [rep("/autonomy/rules/0/when/value", "50")]),
+    ("MC-J10", "Narrowing the same auto rule with no delegation is risk-reducing", "btc_accumulator_two_asks_small",
+     [rep("/autonomy/rules/0/when/value", "50")]),
 ]
 for cid, title, base, patch in CH_J:
     old = MB[base]
