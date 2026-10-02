@@ -435,3 +435,124 @@ mod attribution_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod remainder_tests {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_num::{Qty, SignedQty};
+
+    use super::{PartialGateDecision, Proposal, account_stream_checks};
+    use crate::error::ExecutorError;
+    use crate::ids::{ClientOrderId, IntentId};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Ids, executor_config, fees};
+    use crate::state::{ExecutorState, Ladder, LoneLadder};
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, EventId, Mode, Order, OrderState, Purpose, WorkspaceId,
+    };
+
+    /// Ten AAPL held, `agent-b`'s lone ladder parked between rungs with 4 of its rung unsold, and,
+    /// where `selling` is set, a live risk exit of that many beside it.
+    fn parked(selling: Option<&str>) -> Result<ExecutorState, ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        let agent = AgentId("agent-b".to_owned());
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state
+            .positions
+            .insert(aapl.clone(), SignedQty::parse("10")?);
+        let intent = IntentId(EventId("01JABCDEFGHJKMNPQRSTV00001".to_owned()));
+        let sell = |id: ClientOrderId, qty: &str, at: OrderState| -> Result<Order, ExecutorError> {
+            Ok(Order {
+                client_order_id: id,
+                intent_id: None,
+                agent: Some(agent.clone()),
+                instrument: aapl.clone(),
+                side: Side::Sell,
+                qty: Qty::parse(qty)?,
+                filled_qty: Qty::ZERO,
+                state: at,
+                attempt: 1,
+                purpose: Purpose::RiskExit,
+                absent_lookups: 0,
+                first_absence_at: None,
+                cancel_unconfirmed: false,
+                replaced_by: None,
+                created_on: None,
+            })
+        };
+        let rung = sell(
+            ClientOrderId::for_intent(&intent)?,
+            "4",
+            OrderState::Canceled,
+        )?;
+        state.orders.insert(rung.client_order_id.clone(), rung);
+        if let Some(qty) = selling {
+            let live = sell(ClientOrderId::parse("md-other")?, qty, OrderState::Accepted)?;
+            state.orders.insert(live.client_order_id.clone(), live);
+        }
+        let ladder = Ladder {
+            stepping: true,
+            parked: true,
+            ..Ladder::default()
+        };
+        state.ladders.insert(
+            aapl,
+            LoneLadder {
+                intent,
+                agent,
+                ladder,
+            },
+        );
+        Ok(state)
+    }
+
+    fn ask(
+        state: &ExecutorState,
+        side: Side,
+        qty: &str,
+        purpose: Purpose,
+    ) -> Result<PartialGateDecision, ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        account_stream_checks(
+            state,
+            &Proposal {
+                agent: &AgentId("agent-a".to_owned()),
+                instrument: &InstrumentId::new("AAPL")?,
+                side,
+                qty: Qty::parse(qty)?,
+                purpose,
+                bracketed: false,
+            },
+            &ports,
+        )
+    }
+
+    /// DEC-410 item 1, two agents in one instrument, the review of #494's script: `agent-b`'s
+    /// lone ladder is parked with 4 unsold and `agent-b` is stopped, so nothing will send it. It
+    /// counts nothing, and `agent-a`'s risk exit for the whole position goes whole. Today's gate
+    /// counts no remainder, so this holds now and must keep holding with the fix.
+    #[test]
+    fn a_stopped_agents_parked_ladder_never_shrinks_another_agents_exit()
+    -> Result<(), ExecutorError> {
+        let mut state = parked(None)?;
+        state
+            .modes
+            .insert(AgentId("agent-b".to_owned()), Mode::Stopped);
+        let flatten = ask(&state, Side::Sell, "10", Purpose::RiskExit)?;
+        assert_eq!(
+            (flatten.verdict_name(), flatten.reason_code()),
+            ("allow", "")
+        );
+        Ok(())
+    }
+}
