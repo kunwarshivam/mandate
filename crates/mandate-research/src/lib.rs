@@ -48,11 +48,8 @@
 //! risk (MI-19), and it is the only path by which anything here shrinks the universe: a lowered
 //! `max_instruments` refuses further admissions and never removes (DEC-132 item 14).
 //!
-//! Every entry point has its implementation and returns its own typed errors (DEC-77): the
-//! one exception, staged by the empty-basket follow-up's tests PR, is `basket_return` over a
-//! basket with no members, whose named arm [`ResearchError::EmptyBasket`] the implementation
-//! PR lands. Until then that one path returns [`ResearchError::Unimplemented`], which stays
-//! otherwise only as a pinned ES-09 code.
+//! Every entry point has its implementation and returns its own typed errors (DEC-77);
+//! [`ResearchError::Unimplemented`] stays only as a pinned ES-09 code.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1221,9 +1218,10 @@ pub enum ResearchError {
     /// DEC-380)
     #[error("the basket has no members, so it has no equal-weighted mean")]
     EmptyBasket,
-    /// Returned only by the empty-basket follow-up's stub until its implementation lands
-    /// (DEC-380); kept because ES-09's registry is add-only and the `unimplemented` code is
-    /// pinned live, so a staged story can name itself and its story (DEC-77, DEC-294).
+    /// Returned by no entry point of this crate since the empty-basket follow-up's
+    /// implementation landed its stub (DEC-380); kept because ES-09's registry is add-only and
+    /// the `unimplemented` code is pinned live, so a staged story can name itself and its story
+    /// (DEC-77, DEC-294).
     #[error("{0} is not implemented yet (pending {1})")]
     Unimplemented(&'static str, &'static str),
     #[error(transparent)]
