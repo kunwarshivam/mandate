@@ -828,7 +828,7 @@ impl<'p> Drive<'p> {
                 self.corporate_action(&kind, name, &data, at, &mut seen);
             }
             "reconciliation" | "broker_position_update" => {
-                let taken = self.snapshot(&data);
+                let taken = self.snapshot(&data, step);
                 self.run(
                     Input::BrokerSnapshot(taken),
                     &mut seen,
@@ -1080,8 +1080,9 @@ impl<'p> Drive<'p> {
 
     /// The broker's side for a reconciliation step: the positions it names, and the orders the
     /// harness knows are still working.
-    fn snapshot(&self, data: &Json) -> mandate_executor::BrokerSnapshot {
+    fn snapshot(&self, data: &Json, step: &Json) -> mandate_executor::BrokerSnapshot {
         let mut taken = common::snapshot(self.shell.head().0, ReconcileReason::Scheduled);
+        taken.account = self.account_after(step);
         if let Some(Json::Object(positions)) = data.get("broker_positions") {
             for (fixture, held) in positions {
                 let held = held.as_str().unwrap_or("0");
@@ -1418,7 +1419,7 @@ impl Drive<'_> {
                 taken.account = self.account_after(step);
                 (&self.shell.state, taken)
             }
-            None => (before, self.snapshot(&data)),
+            None => (before, self.snapshot(&data, step)),
         };
         let run = mandate_executor::reconcile(state, &taken, self.ports).unwrap_or_else(|e| {
             panic!(

@@ -2023,7 +2023,25 @@ fn a_pending_corporate_action_difference_is_not_a_mismatch() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = reconciling(&ports);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let bought = event(
+        ACCOUNT_STREAM,
+        2,
+        "FillApplied",
+        with_clock(
+            &[
+                ("fill_id", text("f-0")),
+                ("instrument", text(AAPL)),
+                ("side", text("buy")),
+                ("qty_gross", text("10")),
+                ("price", text("150")),
+            ],
+            0,
+        ),
+    );
+    shell.fold_one(&bought).expect("the position folds");
+    let mut shell = shell.restart_ready(&ports);
     let prepared = event(
         ACCOUNT_STREAM,
         shell.head().0.saturating_add(1),
