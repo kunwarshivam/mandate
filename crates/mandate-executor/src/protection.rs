@@ -1340,27 +1340,31 @@ fn awaiting(ids: &[&ClientOrderId]) -> (&'static str, Value) {
 
 /// DEC-348 item 2, after every step: an interval whose sequence ended with new protection sent ends
 /// once the broker has acknowledged every order it waits on — accepted, or already filling or
-/// filled — or once nothing is held to protect. Until then it stays open, bounded and alerted like
-/// any other. Protection the broker refused or cancelled unacknowledged leaves it open.
+/// filled. Nothing else ends it here: a position read as flat is not enough, since the fold's
+/// position lags the broker's reported fills that the protection was sized from (DEC-346 item 3).
+/// A position sold flat while it waits ends it either through the awaited order's own fill or
+/// through the exit's sequence, whose start ends the waiting interval and whose own re-placement,
+/// with nothing left to cover, sends nothing. Until then it stays open, bounded and alerted like
+/// any other. Protection the broker refused, cancelled unacknowledged, or replaced under another id
+/// leaves it open.
 fn acknowledged(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let due: Vec<InstrumentId> = batch
         .view
         .awaiting
         .iter()
-        .filter(|(instrument, ids)| {
-            long(&batch.view, instrument) == Qty::ZERO
-                || ids.iter().all(|id| {
-                    batch.view.orders.get(id).is_some_and(|order| {
-                        matches!(
-                            order.state,
-                            OrderState::Accepted
-                                | OrderState::PartiallyFilled
-                                | OrderState::Filled
-                                | OrderState::PendingCancel
-                                | OrderState::PendingReplace
-                        )
-                    })
+        .filter(|(_, ids)| {
+            ids.iter().all(|id| {
+                batch.view.orders.get(id).is_some_and(|order| {
+                    matches!(
+                        order.state,
+                        OrderState::Accepted
+                            | OrderState::PartiallyFilled
+                            | OrderState::Filled
+                            | OrderState::PendingCancel
+                            | OrderState::PendingReplace
+                    )
                 })
+            })
         })
         .map(|(instrument, _)| instrument.clone())
         .collect();
@@ -2398,26 +2402,28 @@ mod sequence_tests {
             .collect();
         let mut answered = Vec::new();
         for order in sent {
-            answered.extend(executor.run(
-                Input::Broker(Ok(BrokerOutcome::Submitted(BrokerOrder {
-                    broker_order_id: format!("b-{}", order.client_order_id.as_str()),
-                    client_order_id: Some(order.client_order_id.as_str().to_owned()),
-                    instrument: order.instrument.clone(),
-                    side: order.side,
-                    qty: order.qty,
-                    filled_qty: Qty::ZERO,
-                    limit_price: order.limit_price,
-                    stop_price: order.stop_price,
-                    status: "accepted".to_owned(),
-                    reject_code: None,
-                    replaced_by_broker_order_id: None,
-                    legs: Vec::new(),
-                    created_on: None,
-                }))),
-                ports,
-            )?);
+            answered.extend(executor.run(broker_answer(&order, "accepted", Qty::ZERO), ports)?);
         }
         Ok(answered)
+    }
+
+    /// The broker's report of a protective order the executor sent: `status`, `filled` of it.
+    fn broker_answer(order: &SubmitOrder, status: &str, filled: Qty) -> Input {
+        Input::Broker(Ok(BrokerOutcome::Submitted(BrokerOrder {
+            broker_order_id: format!("b-{}", order.client_order_id.as_str()),
+            client_order_id: Some(order.client_order_id.as_str().to_owned()),
+            instrument: order.instrument.clone(),
+            side: order.side,
+            qty: order.qty,
+            filled_qty: filled,
+            limit_price: order.limit_price,
+            stop_price: order.stop_price,
+            status: status.to_owned(),
+            reject_code: None,
+            replaced_by_broker_order_id: None,
+            legs: Vec::new(),
+            created_on: None,
+        })))
     }
 
     fn cancels(effects: &[Effect]) -> Vec<&str> {
@@ -5955,11 +5961,18 @@ mod sequence_tests {
             Some((0, None)),
             "the placement waits for the broker's acknowledgment (DEC-348 item 2)"
         );
-        acknowledge_protection(&mut executor, &placed, &ports)?;
-        assert_eq!(
-            interval(&executor),
-            Some((0, Some(RiskClock::from_secs(15))))
-        );
+        let sent: Vec<SubmitOrder> = submissions(&placed).into_iter().cloned().collect();
+        assert_eq!(sent.len(), 2, "the new OCO and the remainder's own");
+        for (at, order) in sent.iter().enumerate() {
+            executor.run(broker_answer(order, "accepted", Qty::ZERO), &ports)?;
+            let expected = (at == 1).then(|| RiskClock::from_secs(15));
+            assert_eq!(
+                interval(&executor),
+                Some((0, expected)),
+                "{at}: the interval ends once every awaited order is acknowledged, not the first \
+                 (#463 round 1, M1)"
+            );
+        }
         executor.run(
             Input::Broker(Ok(BrokerOutcome::Absent {
                 client_order_id: BUY.to_owned(),
@@ -5969,6 +5982,45 @@ mod sequence_tests {
         let later = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
         assert!(actions(&later).is_empty(), "{:?}", drafted(&later));
         assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        Ok(())
+    }
+
+    /// DEC-348 item 2 (#463 round 1, M2): while a re-placement waits for its acknowledgment, the
+    /// interval stays open however many steps pass with the position held, and it ends when the
+    /// awaited order itself fills and leaves the position flat: a filled order was acknowledged.
+    #[test]
+    fn a_waiting_interval_ends_only_on_the_awaited_orders_answer() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let settled = executor.run(filled(EXIT, "5")?, &ports)?;
+        let sent: Vec<SubmitOrder> = submissions(&settled).into_iter().cloned().collect();
+        let [oco] = sent.as_slice() else {
+            return Err(missing("the re-placed OCO"));
+        };
+        let open = |executor: &Executor| {
+            executor
+                .state
+                .unprotected
+                .last()
+                .map(|interval| interval.ended_at.is_none())
+        };
+        for second in 1..4 {
+            executor.run(Input::Tick(RiskClock::from_secs(second)), &ports)?;
+            assert_eq!(
+                open(&executor),
+                Some(true),
+                "{second}: still held, still waiting"
+            );
+        }
+        let gone = executor.run(broker_answer(oco, "filled", oco.qty), &ports)?;
+        assert_eq!(
+            open(&executor),
+            Some(false),
+            "the awaited order's own fill answers it: {:?}",
+            drafted(&gone)
+        );
         Ok(())
     }
 
@@ -8645,6 +8697,54 @@ mod bracket_tests {
             "{case}: the id's suffix is the placed record's own event id"
         );
         Ok(())
+    }
+
+    /// DEC-348 item 2 (#463 round 1, B1): an entry the broker reports terminal partly filled before
+    /// its fills are ingested gets its OCO for the reported quantity, and the interval stays open
+    /// until the broker acknowledges that OCO, though the fold's own position still reads flat.
+    #[test]
+    fn a_reported_fills_oco_waits_for_the_acknowledgment() -> Result<(), ExecutorError> {
+        with_ports(|ports| {
+            let mut executor = bracketed(ports)?;
+            executor.run(report("partially_filled", "4")?, ports)?;
+            let ended = executor.run(report("canceled", "4")?, ports)?;
+            assert_eq!(submitted(&ended), 1, "the OCO goes: {:?}", drafted(&ended));
+            let open = |executor: &Executor| {
+                executor
+                    .state
+                    .unprotected
+                    .last()
+                    .map(|interval| interval.ended_at.is_none())
+            };
+            assert_eq!(open(&executor), Some(true), "{:?}", executor.state.awaiting);
+            executor.run(Input::Tick(RiskClock::from_secs(11)), ports)?;
+            assert_eq!(open(&executor), Some(true), "a later step changes nothing");
+            let oco = ended.iter().find_map(|effect| match effect {
+                Effect::Broker(BrokerRequest::Submit(order)) => Some(order.clone()),
+                _ => None,
+            });
+            let oco = oco.ok_or_else(|| missing("the OCO"))?;
+            executor.run(
+                Input::BrokerUpdate(BrokerUpdate::Order(BrokerOrder {
+                    broker_order_id: "b-oco".to_owned(),
+                    client_order_id: Some(oco.client_order_id.as_str().to_owned()),
+                    instrument: oco.instrument.clone(),
+                    side: oco.side,
+                    qty: oco.qty,
+                    filled_qty: Qty::ZERO,
+                    limit_price: oco.limit_price,
+                    stop_price: oco.stop_price,
+                    status: "accepted".to_owned(),
+                    reject_code: None,
+                    replaced_by_broker_order_id: None,
+                    legs: Vec::new(),
+                    created_on: None,
+                })),
+                ports,
+            )?;
+            assert_eq!(open(&executor), Some(false), "the acknowledgment ends it");
+            Ok(())
+        })
     }
 
     /// Rule 5 and §5.4 (DEC-346 items 4 and 6, #446 round 1 B1, M2, M3): the OCO for a partly
