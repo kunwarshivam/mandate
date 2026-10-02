@@ -706,6 +706,7 @@ impl Fold {
             .map(|(connection_id, environment, _, _)| PreviousVersion {
                 environment: *environment,
                 connection_id: connection_id.clone(),
+                mandate: None,
             });
         let membership = args.membership.unwrap_or(Membership {
             workspace_users: 0,

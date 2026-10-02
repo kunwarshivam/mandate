@@ -724,6 +724,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   the same step-up, which applies at the next safe point; the sum of a version's delegation caps
   stays within the allocation ([DEC-196](04-decision-log.md#decisions), V-045); no scope is offered for an admission, a
   two-approver ask, a live environment, or a client session.
+  Also for E8-8 ([#516](https://github.com/kunwarshivam/mandate/pull/516) round 1, minor 8): `mandate-spec`'s V-043
+  bounds each delegation on its own, so twenty delegations can each carry `max_total_usd` equal to the allocation. That is
+  the spec's reading, and the gate enforces every limit regardless (§6.5). The approval card and the MC-U family should
+  consider the aggregate, which is the V-045 the criteria above name and the mandate spec does not yet define.
 
 ### E9 Identity, tenancy, and policy
 
@@ -944,6 +948,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
     elements again (#445, three rounds running, for §9.2; #510 for §9.4). Add a test helper, or an xtask
     check, under which a never-null test derives its paths from the schema's own members, including
     the first and second element of every list member, instead of from a hand-written array.
+  *Follow-ups (#513 review round 1):*
+  - Minor 5: `ModelOutputRecorded.instrument_id` is §9.1 `text`, where mandate spec §8.2's output
+    table types it `uuid`. Decide whether it becomes §9.3's `asset_id`: a §9.1 change, and its own
+    story, spec first (ES-22, DEC-176). Type `PlatformOperatorAction`'s `research_thesis_halt`
+    instrument (§9, DEC-100) the same way when that schema closes.
 
   The writer that adds the model's identity, the instants, and the artifact references to
   `ThesisEntry` is a story of its own. DEC-413 item 5 lists the readings not taken, each a later

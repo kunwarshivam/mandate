@@ -368,6 +368,7 @@ fn the_previous_version_is_the_drafts_agents_last_active_version() {
         Some(PreviousVersion {
             environment: Environment::Live,
             connection_id: conn(THEIRS),
+            mandate: None,
         })
     );
     assert_eq!(
