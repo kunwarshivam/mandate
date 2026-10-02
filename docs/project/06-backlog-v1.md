@@ -2233,6 +2233,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   false, true)` and `min_order_size = 3` leaves a 1-share remainder, which must not be proposed,
   while a whole-excess reading (3 shares) proposes it. Next in stream G, before the reference
   PR's status change.
+  *Done:* `trim::tests::the_minimum_is_judged_on_the_remainder_after_resting_sells`, which fails on
+  a seeded whole-excess reading.
 - **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
