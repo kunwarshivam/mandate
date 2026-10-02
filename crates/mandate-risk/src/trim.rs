@@ -68,7 +68,7 @@ pub(crate) fn proposals(
             continue;
         }
         if qty < instrument.min_order_size {
-            if qty != unsold {
+            if qty != held {
                 continue;
             }
             exempt_full_close()?;
@@ -82,11 +82,13 @@ pub(crate) fn proposals(
     Ok(trims)
 }
 
-/// A trim that sells everything left to sell is never withheld for the instrument's minimum order
-/// size: trading spec §5.3 rule 2 exempts a sell closing the full position, so the minimum would
-/// hold a risk exit the broker accepts (DEC-423, `AGENTS.md` rule 13). Until the implementation
-/// PR, such a trim refuses the whole call as `Unimplemented`, which no production caller reaches
-/// yet; `main` withheld it silently.
+/// A trim of the whole position held is never withheld for the instrument's minimum order size:
+/// trading spec §5.3 rule 2 exempts a sell closing the full position by its exact quantity, so the
+/// minimum would hold a risk exit the broker accepts (DEC-423, `AGENTS.md` rule 13). A trim beside
+/// the agent's own resting sell is not that sell, since the order is not the position's quantity.
+/// Until the implementation PR, such a trim refuses the whole call as `Unimplemented`, which no
+/// production caller reaches yet; `main` withheld it silently. The implementation makes the
+/// exemption infallible (DEC-423 item 4).
 fn exempt_full_close() -> Result<(), GateError> {
     Err(GateError::Unimplemented("the full-close trim", "E6-4"))
 }

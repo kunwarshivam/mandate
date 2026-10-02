@@ -56,7 +56,7 @@
 //! #136 stubbed. E6-6's last row refuses a proposal of zero quantity as
 //! [`GateError::ZeroQuantity`] before any check (DEC-401). [`GateError::Unimplemented`] stays for
 //! DEC-129 item 27's refusal of an opening that breaks a §5.3 rule with no registered reason code,
-//! and, until DEC-423's implementation PR, for a trim that sells everything left to sell below the
+//! and, until DEC-423's implementation PR, for a trim of the whole position held below the
 //! instrument's minimum order size.
 
 use core::fmt::Display;
