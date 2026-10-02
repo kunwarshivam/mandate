@@ -336,7 +336,7 @@ fn steps(view: &ExecutorState, sequence: &ExitSequence) -> bool {
 }
 
 /// Whether the sequence's ladder may still climb: neither bounded nor its agent paused or stopped.
-fn climbs(view: &ExecutorState, sequence: &ExitSequence) -> bool {
+pub(crate) fn climbs(view: &ExecutorState, sequence: &ExitSequence) -> bool {
     view.effective_mode(&sequence.agent) < Mode::Paused
         && !view.unprotected.iter().any(|interval| {
             interval.ended_at.is_none()
@@ -345,6 +345,39 @@ fn climbs(view: &ExecutorState, sequence: &ExitSequence) -> bool {
                     .exiting
                     .get(&interval.instrument)
                     .is_some_and(|running| running.intent == sequence.intent)
+        })
+}
+
+/// What the exit ladders in `instrument` may still send between rungs (DEC-410): a sequence's or a
+/// lone ladder's rung whose step cancel is confirmed with part of it unsold sends that part as its
+/// next rung, at once or, parked, at the next open (DEC-260 (18)). A sequence's ladder that no
+/// longer climbed at that confirmation has ended there and sends nothing (DEC-409). A passive
+/// sequence never steps, so it never counts.
+pub(crate) fn between_rungs(
+    state: &ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<Qty, ExecutorError> {
+    state
+        .exiting
+        .get(instrument)
+        .map(|sequence| (&sequence.intent, sequence.ladder))
+        .into_iter()
+        .chain(
+            state
+                .ladders
+                .get(instrument)
+                .map(|lone| (&lone.intent, lone.ladder)),
+        )
+        .filter(|(_, ladder)| ladder.stepping)
+        .try_fold(Qty::ZERO, |total, (intent, ladder)| {
+            let rung = ClientOrderId::for_intent(intent)?.rung(ladder.rung)?;
+            let left = match state.orders.get(&rung) {
+                Some(order) if order.state == OrderState::Canceled => {
+                    order.qty.checked_sub(order.filled_qty)?
+                }
+                _ => Qty::ZERO,
+            };
+            Ok(total.checked_add(left)?)
         })
 }
 
@@ -8756,7 +8789,6 @@ mod sequence_tests {
     /// against the whole position and the old ladder resumed beside it: 11 against 10. A ladder
     /// that no longer climbs when its step is confirmed ends there (DEC-409).
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_risk_exit_beside_a_sequence_between_rungs_never_over_sells() -> Result<(), String> {
         rule_13_script(0, &stepped_while(Move::Pause(true), Move::Pause(false)))
     }
@@ -8764,7 +8796,6 @@ mod sequence_tests {
     /// DEC-409, stopped: the same walk as [`a_risk_exit_beside_a_sequence_between_rungs_never_over_sells`]
     /// with the agent stopped and resumed rather than paused.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_ladder_stopped_between_rungs_never_resumes_beside_a_new_exit() -> Result<(), String> {
         rule_13_script(0, &stepped_while(Move::Stop(true), Move::Stop(false)))
     }
@@ -8817,7 +8848,6 @@ mod sequence_tests {
     /// parked remainder counts as still selling, so the exit of 8 is sized to the 6 left
     /// (DEC-410); the oracle checks the size against its own count.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_risk_exit_held_overnight_beside_a_parked_ladder_is_sized_to_what_is_left()
     -> Result<(), String> {
         let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
@@ -8831,7 +8861,6 @@ mod sequence_tests {
     /// overnight finds nothing left at the open beside its remainder. It waits
     /// `exit_between_rungs` rather than being refused, and the ladder's rung goes alone.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_risk_exit_beside_a_parked_ladder_selling_everything_waits() -> Result<(), String> {
         let script: Vec<Move> = [
             Move::Quote(Some(150), None, true),
@@ -8854,7 +8883,6 @@ mod sequence_tests {
     /// A risk exit of 5 at the open, beside the 2 still working and the parked 4, is sized to the
     /// 4 left.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_risk_exit_at_the_open_beside_a_parked_sequence_is_sized_to_what_is_left()
     -> Result<(), String> {
         let script = [
@@ -8884,7 +8912,6 @@ mod sequence_tests {
     /// DEC-410, restart between rungs: the parked remainder is folded from the journal, so a
     /// process restarted overnight, and again at the open, counts it as before.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_restart_between_rungs_still_counts_the_parked_remainder() -> Result<(), String> {
         let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
             .into_iter()
@@ -8900,7 +8927,6 @@ mod sequence_tests {
     /// remainder no longer counts, and a new risk exit of 4 is sized to all that is left beside
     /// the 6 still selling, never to less.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_refused_rung_leaves_its_remainder_to_the_next_exit() -> Result<(), String> {
         let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
             .into_iter()
@@ -8929,7 +8955,6 @@ mod sequence_tests {
     /// the new ones included. Live exits and the rungs still to send never exceed the position,
     /// and no exit is denied for a remainder (DEC-408).
     #[test]
-    #[ignore = "pending E7-4"]
     fn rule_13_holds_over_random_scripts_from_between_rungs() -> Result<(), String> {
         let config = ProptestConfig {
             cases: 256,

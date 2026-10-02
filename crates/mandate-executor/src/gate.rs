@@ -16,7 +16,7 @@ use mandate_num::{Qty, SignedQty};
 use crate::error::ExecutorError;
 use crate::payload::{object, text};
 use crate::ports::Ports;
-use crate::protection::rests;
+use crate::protection::{between_rungs, rests};
 use crate::state::ExecutorState;
 use crate::types::{AccountState, AgentId, GateCheck, GateVerdict, Mode, OrderState, Purpose};
 
@@ -33,6 +33,9 @@ pub struct PartialGateDecision {
     /// opening until an account has been journaled, at any time, and a reconciliation has run
     /// since this process started (#206 review; #230 review, minor 1).
     held: bool,
+    /// An allowed risk-reducing sell sized to what is left beside the rungs an exit ladder may
+    /// still send (DEC-410): journaled as `sized_qty`, and folded into the intent's quantity.
+    sized: Option<Qty>,
 }
 
 impl PartialGateDecision {
@@ -43,6 +46,11 @@ impl PartialGateDecision {
             GateVerdict::Deny { .. } if self.held => "hold",
             GateVerdict::Deny { .. } => "deny",
         }
+    }
+
+    /// The quantity an allowed sell was sized to, if the gate sized it (DEC-410).
+    pub(crate) fn sized(&self) -> Option<Qty> {
+        self.sized
     }
 
     pub(crate) fn reason_code(&self) -> &str {
@@ -102,6 +110,9 @@ pub(crate) const UNPRICED: &str = "exit_unpriced";
 /// The hold reasons of an equity exit while no v1 session is open (DEC-260 (13)).
 pub(crate) const SESSION_CLOSED: &str = "session_closed";
 pub(crate) const SESSION_UNKNOWN: &str = "session_unknown";
+/// The hold reason of a risk-reducing sell that fits beside the live sells but finds nothing left
+/// beside the rungs an exit ladder may still send (DEC-410): it waits for room, never denied.
+pub(crate) const BETWEEN_RUNGS: &str = "exit_between_rungs";
 
 /// One order a gate run is asked about.
 pub(crate) struct Proposal<'s> {
@@ -155,8 +166,8 @@ pub(crate) fn account_stream_checks(
         "universe",
         outside.then_some(("instrument_not_in_universe", false)),
     );
-    let exceeds =
-        proposal.side == Side::Sell && available(state, proposal.instrument)? < proposal.qty;
+    let room = available(state, proposal.instrument)?;
+    let exceeds = proposal.side == Side::Sell && room < proposal.qty;
     record(
         "sell_exceeds_available",
         exceeds.then_some(("sell_exceeds_available", false)),
@@ -185,10 +196,27 @@ pub(crate) fn account_stream_checks(
             held,
         ),
     };
-    Ok(PartialGateDecision {
+    let decision = PartialGateDecision {
         verdict,
         checks,
         held,
+        sized: None,
+    };
+    if decision.verdict != GateVerdict::Allow || proposal.side != Side::Sell {
+        return Ok(decision);
+    }
+    let left = room
+        .checked_sub(between_rungs(state, proposal.instrument)?)
+        .unwrap_or(Qty::ZERO);
+    Ok(if left >= proposal.qty {
+        decision
+    } else if left == Qty::ZERO {
+        decision.held_for("between_rungs", BETWEEN_RUNGS)
+    } else {
+        PartialGateDecision {
+            sized: Some(left),
+            ..decision
+        }
     })
 }
 
@@ -432,6 +460,167 @@ mod attribution_tests {
             (GateVerdict::Allow, "allow"),
             "the exit passes every check"
         );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod between_rungs_tests {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_num::{Qty, SignedQty, Usd};
+
+    use super::{PartialGateDecision, Proposal, account_stream_checks};
+    use crate::error::ExecutorError;
+    use crate::ids::{ClientOrderId, IntentId};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Ids, executor_config, fees};
+    use crate::state::{ExecutorState, Ladder, LoneLadder, ObservedAccount};
+    use crate::types::{
+        AccountRef, AccountScope, AccountState, AgentId, EventId, Mode, Order, OrderState, Purpose,
+        Seq, WorkspaceId,
+    };
+
+    /// Ten AAPL held, a lone ladder parked between rungs with 4 of its rung unsold, and, where
+    /// `selling` is set, a live risk exit of that many beside it.
+    fn parked(selling: Option<&str>) -> Result<ExecutorState, ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        let agent = AgentId("agent-a".to_owned());
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state
+            .positions
+            .insert(aapl.clone(), SignedQty::parse("10")?);
+        let intent = IntentId(EventId("01JABCDEFGHJKMNPQRSTV00001".to_owned()));
+        let sell = |id: ClientOrderId, qty: &str, at: OrderState| -> Result<Order, ExecutorError> {
+            Ok(Order {
+                client_order_id: id,
+                intent_id: None,
+                agent: Some(agent.clone()),
+                instrument: aapl.clone(),
+                side: Side::Sell,
+                qty: Qty::parse(qty)?,
+                filled_qty: Qty::ZERO,
+                state: at,
+                attempt: 1,
+                purpose: Purpose::RiskExit,
+                absent_lookups: 0,
+                first_absence_at: None,
+                cancel_unconfirmed: false,
+                replaced_by: None,
+                created_on: None,
+            })
+        };
+        let rung = sell(
+            ClientOrderId::for_intent(&intent)?,
+            "4",
+            OrderState::Canceled,
+        )?;
+        state.orders.insert(rung.client_order_id.clone(), rung);
+        if let Some(qty) = selling {
+            let live = sell(ClientOrderId::parse("md-other")?, qty, OrderState::Accepted)?;
+            state.orders.insert(live.client_order_id.clone(), live);
+        }
+        let ladder = Ladder {
+            stepping: true,
+            parked: true,
+            ..Ladder::default()
+        };
+        state.ladders.insert(
+            aapl,
+            LoneLadder {
+                intent,
+                agent,
+                ladder,
+            },
+        );
+        Ok(state)
+    }
+
+    fn ask(
+        state: &ExecutorState,
+        side: Side,
+        qty: &str,
+        purpose: Purpose,
+    ) -> Result<PartialGateDecision, ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        account_stream_checks(
+            state,
+            &Proposal {
+                agent: &AgentId("agent-a".to_owned()),
+                instrument: &InstrumentId::new("AAPL")?,
+                side,
+                qty: Qty::parse(qty)?,
+                purpose,
+                bracketed: false,
+            },
+            &ports,
+        )
+    }
+
+    /// DEC-410 item 2: beside a parked remainder of 4, a risk exit of 8 is allowed sized to the 6
+    /// left, one of 6 goes whole, and beside a live exit of 6 as well one of 3 is held
+    /// `exit_between_rungs`, never denied.
+    #[test]
+    fn a_risk_exit_is_sized_to_what_the_remainder_leaves_or_waits() -> Result<(), ExecutorError> {
+        let state = parked(None)?;
+        let sized = ask(&state, Side::Sell, "8", Purpose::RiskExit)?;
+        assert_eq!(
+            (sized.verdict_name(), sized.sized()),
+            ("allow", Some(Qty::parse("6")?))
+        );
+        let whole = ask(&state, Side::Sell, "6", Purpose::RiskExit)?;
+        assert_eq!((whole.verdict_name(), whole.sized()), ("allow", None));
+        let waits = ask(&parked(Some("6"))?, Side::Sell, "3", Purpose::RiskExit)?;
+        assert_eq!(
+            (waits.verdict_name(), waits.reason_code(), waits.sized()),
+            ("hold", "exit_between_rungs", None)
+        );
+        Ok(())
+    }
+
+    /// DEC-410 item 2 sizes only an allowed sell: a paused agent's exit keeps its own hold, an
+    /// over-sell against the live exits alone is still denied `sell_exceeds_available` (§5.3 rule
+    /// 4), and an opening buy is never sized against a ladder's remainder.
+    #[test]
+    fn only_an_allowed_sell_is_sized_or_held_for_a_remainder() -> Result<(), ExecutorError> {
+        let mut paused = parked(None)?;
+        paused
+            .modes
+            .insert(AgentId("agent-a".to_owned()), Mode::Paused);
+        let held = ask(&paused, Side::Sell, "8", Purpose::RiskExit)?;
+        assert_eq!(
+            (held.verdict_name(), held.reason_code(), held.sized()),
+            ("hold", "agent_paused", None)
+        );
+        let over = ask(&parked(Some("8"))?, Side::Sell, "3", Purpose::RiskExit)?;
+        assert_eq!(
+            (over.verdict_name(), over.reason_code(), over.sized()),
+            ("deny", "sell_exceeds_available", None)
+        );
+        let mut reconciled = parked(None)?;
+        reconciled.observed = Some(ObservedAccount {
+            state: AccountState::Active,
+            multiplier: 1,
+            equity: Usd::parse("10000")?,
+            cash: Usd::parse("10000")?,
+            buying_power: Usd::parse("10000")?,
+            non_marginable_buying_power: Usd::parse("10000")?,
+            accrued_fees: Usd::ZERO,
+            complete: true,
+        });
+        reconciled.started_at = Some(Seq(1));
+        reconciled.reconciled_through = Some(Seq(2));
+        let buy = ask(&reconciled, Side::Buy, "8", Purpose::Increase)?;
+        assert_eq!((buy.verdict_name(), buy.sized()), ("allow", None));
         Ok(())
     }
 }

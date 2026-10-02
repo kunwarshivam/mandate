@@ -220,6 +220,9 @@ fn journal_decision(
         ("checks", decision.checks_value()?),
         ("evaluation", text("account_stream_only")),
     ];
+    if let Some(sized) = decision.sized() {
+        pairs.push(("sized_qty", text(sized.to_string())));
+    }
     pairs.append(&mut extra);
     batch.journal("GateDecided", None, pairs)
 }

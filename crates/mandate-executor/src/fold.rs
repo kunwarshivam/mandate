@@ -14,6 +14,7 @@ use crate::payload::{
     clock_of, flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
     required_text, usd,
 };
+use crate::protection::climbs;
 use crate::state::{
     Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
     ObservedAccount, OrderDetail, Replacement,
@@ -110,6 +111,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "OrderStateChanged" => {
             adoption(state, event)?;
             rung_stepped(state, payload)?;
+            rung_ended(state, payload)?;
             order_state_changed(state, payload, at)
         }
         "CompensatingEvent" => {
@@ -333,6 +335,12 @@ fn gate_decided(
             if let Some(record) = state.intents.get_mut(&id) {
                 record.allowed_at = Some(at);
             }
+            if let (Some(sized), Some(IntentBody::Order { qty, .. })) = (
+                optional_qty(payload, "sized_qty")?,
+                state.bodies.get_mut(&id),
+            ) {
+                *qty = sized;
+            }
         }
         "deny" => {
             if let Some(record) = state.intents.get_mut(&id) {
@@ -477,6 +485,31 @@ fn rung_stepped(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
     for (intent, ladder) in ladders {
         if ClientOrderId::for_intent(intent)?.rung(ladder.rung)? == id {
             ladder.stepping = true;
+        }
+    }
+    Ok(())
+}
+
+/// DEC-409: a sequence's stepped rung whose cancel is confirmed while its ladder no longer climbs
+/// (its agent paused or stopped, or its interval past its bound) ends the ladder there. The
+/// remainder is never sent as a next rung, so a later resumption cannot send it beside an exit
+/// allowed meanwhile, and protection returns for what is left (§5.4). The mode and the bound are
+/// both folded, so a restart ends the same ladders.
+fn rung_ended(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    if optional_text(payload, "state") != Some("canceled") {
+        return Ok(());
+    }
+    let id = client_order_id(payload)?;
+    let mut ended = Vec::new();
+    for (instrument, sequence) in &state.exiting {
+        let rung = ClientOrderId::for_intent(&sequence.intent)?.rung(sequence.ladder.rung)?;
+        if rung == id && sequence.ladder.stepping && !climbs(state, sequence) {
+            ended.push(instrument.clone());
+        }
+    }
+    for instrument in ended {
+        if let Some(sequence) = state.exiting.get_mut(&instrument) {
+            sequence.ladder.stepping = false;
         }
     }
     Ok(())
