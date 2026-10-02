@@ -1372,7 +1372,6 @@ proptest! {
 /// generated scenario. A plain function over a `TestRunner`, because a pending test must not be one
 /// a macro generates (DEC-137).
 #[test]
-#[ignore = "pending E4-3"]
 fn the_model_refuses_exactly_the_sessions_an_asset_class_never_trades() {
     let empty = Cell::new(0_u32);
     let allowed = Cell::new(0_u32);

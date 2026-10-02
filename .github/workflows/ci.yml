@@ -86,8 +86,9 @@ jobs:
 
   full:
     runs-on: ubuntu-24.04
-    # Mutants on a large safety-critical diff take several minutes.
-    timeout-minutes: 30
+    # 61 mutants on one PR's diff did not finish in 30 minutes (DEC-398); the cap must clear the
+    # mutation run, not cancel it.
+    timeout-minutes: 60
     permissions:
       contents: read
     env:
