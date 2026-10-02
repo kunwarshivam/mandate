@@ -300,7 +300,10 @@ impl UsdExact {
         Self(rate.exact())
     }
 
-    /// The risk state's size factor, which mandate §5.5 multiplies the position cap by.
+    /// The risk state's size factor as the gate reads it, a [`Ratio`] of up to 24 places, which
+    /// mandate §5.5's `trim_to_target` multiplies the position cap by. Any `Ratio` is taken: the
+    /// bound of one is stream F's (V-040), and a factor above one could only raise a trim's
+    /// target and so withhold a trim, never add one.
     pub fn of_ratio(ratio: Ratio) -> Self {
         Self(ratio.exact())
     }
@@ -321,7 +324,9 @@ impl UsdExact {
     }
 
     /// `self × fraction`, exact: `max_position_fraction × E`, `rebalance_band × cap`, and the
-    /// ladder size factor applied to the target.
+    /// order builder's ladder size factor (§8.3, a 12-place [`SizeFraction`]) applied to its
+    /// target. The gate's trim takes the same factor as a [`Ratio`] through
+    /// [`UsdExact::of_ratio`].
     pub fn times_size_fraction(self, fraction: SizeFraction) -> Result<Self, NumError> {
         Ok(Self(self.0.mul(Exact::of(fraction.0))?))
     }

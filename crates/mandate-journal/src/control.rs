@@ -9,10 +9,13 @@
 //! for a member while it pauses every agent and alerts the owner (`AGENTS.md` rules 3 and 13,
 //! DEC-261 item 7, DEC-402).
 //!
-//! **The account stream's `MandateVersionApplied` and `UniverseChanged` are routed here, to a stub**
-//! (journal spec v0.8 §9.3, DEC-403, DEC-404). The registration's tests PR refuses both as
-//! `unimplemented`, as they were refused as `unknown_schema` before; the implementation PR
-//! registers their schemas and rules 29 to 33.
+//! The account stream's `MandateVersionApplied` and `UniverseChanged` are journal spec v0.8 §9.3's,
+//! with rules 29 to 33, routed here beside §9.2's (DEC-403, DEC-404).
+//!
+//! **The agent stream's `ThesisProposed` and `ThesisRevised` are routed here, to a stub** (journal
+//! spec v0.9 §9.4, DEC-413, DEC-414). The registration's tests PR refuses both as `unimplemented`,
+//! as they were refused as `unknown_event_type` before; the implementation PR registers their
+//! shared schema and rules 34 to 38.
 
 use mandate_canon::Value;
 use mandate_num::Usd;
@@ -42,11 +45,14 @@ const SNAPSHOT: &str = "AccountSnapshotRecorded";
 /// The account stream's risk-state records journal spec §9.3 closes, with rules 29 to 33.
 const RISK_STATE: [&str; 2] = ["MandateVersionApplied", "UniverseChanged"];
 
+/// The agent stream's research-agent thesis records journal spec §9.4 closes, with rules 34 to 38.
+const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
+
 /// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     match stream.stream_type() {
         StreamType::Control => CONTROL.contains(&event_type),
-        StreamType::Agent => event_type == REFUSAL,
+        StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
             event_type == REFUSAL || event_type == SNAPSHOT || RISK_STATE.contains(&event_type)
         }
@@ -62,8 +68,8 @@ pub(crate) fn payload(
     payload: &Value,
     config_refs: Option<&Value>,
 ) -> Result<Value, Invalid> {
-    if RISK_STATE.contains(&event_type) {
-        return risk_state_payload();
+    if THESIS.contains(&event_type) {
+        return thesis_payload();
     }
     let schema = schema(event_type, schema_version)
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
@@ -116,6 +122,81 @@ pub(crate) fn payload(
             InvalidReason::Schema,
             "payload.loss_added",
         )?,
+        "MandateVersionApplied" => {
+            let increasing = p.text("classification") == "risk_increasing";
+            ensure(
+                !increasing || !p.is_null("step_up"),
+                InvalidReason::Schema,
+                "payload.step_up",
+            )?;
+            let rejected = p.text("result") == "rejected";
+            ensure(
+                p.is_null("reason") != rejected,
+                InvalidReason::Schema,
+                "payload.reason",
+            )?;
+            for member in ["allocation_change", "max_loss_from_allocation"] {
+                ensure(
+                    !rejected || p.is_null(member),
+                    InvalidReason::Schema,
+                    &format!("payload.{member}"),
+                )?;
+            }
+            let raised = !p.is_null("allocation_change") && {
+                let change = p.text("allocation_change");
+                !change.starts_with('-') && change != "0"
+            };
+            let implied = (!rejected && (raised || !p.is_null("max_loss_from_allocation")))
+                || (rejected
+                    && [
+                        "increase_blocked_while_latched",
+                        "waiting_period",
+                        "still_below_new_floor",
+                    ]
+                    .contains(&p.text("reason")));
+            ensure(
+                !implied || increasing,
+                InvalidReason::Schema,
+                "payload.classification",
+            )?;
+        }
+        "UniverseChanged" => {
+            let reason = p.text("reason");
+            let admitted = p.text("change") == "admitted";
+            let allowed = if admitted {
+                reason == "thesis_admitted" || reason == "version_applied"
+            } else {
+                reason != "thesis_admitted"
+            };
+            ensure(allowed, InvalidReason::Schema, "payload.reason")?;
+            let (thesis, lineage) = (!p.is_null("thesis_id"), !p.is_null("lineage_id"));
+            if thesis != lineage {
+                let null = if thesis {
+                    "payload.lineage_id"
+                } else {
+                    "payload.thesis_id"
+                };
+                return Err(Invalid::new(InvalidReason::Schema, null));
+            }
+            let from_thesis = [
+                "thesis_admitted",
+                "thesis_expired",
+                "thesis_invalidated",
+                "lineage_retired",
+                "operator_halt",
+            ]
+            .contains(&reason);
+            ensure(
+                !from_thesis || thesis,
+                InvalidReason::Schema,
+                "payload.thesis_id",
+            )?;
+            ensure(
+                !(reason == "version_applied" && admitted && thesis),
+                InvalidReason::Schema,
+                "payload.thesis_id",
+            )?;
+        }
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
             for member in ["cash_band", "cash_in_band"] {
@@ -230,9 +311,9 @@ fn ascending(items: &[&str], path: &str) -> Result<(), Invalid> {
     )
 }
 
-/// The stub of the risk-state registration's tests PR (DEC-77, DEC-404): journal spec §9.3's
-/// schemas and rules 29 to 33 land with its implementation.
-fn risk_state_payload() -> Result<Value, Invalid> {
+/// The stub of the thesis registration's tests PR (DEC-77, DEC-414): journal spec §9.4's schema and
+/// rules 34 to 38 land with its implementation.
+fn thesis_payload() -> Result<Value, Invalid> {
     Err(Invalid::new(InvalidReason::Unimplemented, "payload"))
 }
 
@@ -281,9 +362,66 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         "AgentStopped" => &AGENT_STOPPED,
         "OwnerCommandRefused" => &OWNER_COMMAND_REFUSED,
         SNAPSHOT => &ACCOUNT_SNAPSHOT_RECORDED,
+        "MandateVersionApplied" => &MANDATE_VERSION_APPLIED,
+        "UniverseChanged" => &UNIVERSE_CHANGED,
         _ => return None,
     })
 }
+
+static MANDATE_VERSION_APPLIED: Ty = Ty::Record(&[
+    ("agent_id", Ty::Ident),
+    ("old_version", Ty::DigestRef),
+    ("new_version", Ty::DigestRef),
+    (
+        "classification",
+        Ty::OneOf(&["risk_increasing", "risk_reducing", "neutral"]),
+    ),
+    (
+        "step_up",
+        Ty::Nullable(&Ty::Record(&[
+            ("assertion_id", Ty::Str),
+            ("authenticated_at", Ty::Timestamp),
+            ("method", Ty::Str),
+        ])),
+    ),
+    ("result", Ty::OneOf(&["applied", "rejected"])),
+    (
+        "reason",
+        Ty::Nullable(&Ty::OneOf(&[
+            "increase_blocked_while_latched",
+            "equity_below_exposure",
+            "would_trigger_limit",
+            "not_loosening",
+            "waiting_period",
+            "still_below_new_floor",
+        ])),
+    ),
+    ("allocation_change", Ty::Nullable(&Ty::Decimal)),
+    ("max_loss_from_allocation", Ty::Nullable(&Ty::Decimal)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+static UNIVERSE_CHANGED: Ty = Ty::Record(&[
+    ("agent_id", Ty::Ident),
+    ("instrument", Ty::AssetId),
+    ("change", Ty::OneOf(&["admitted", "removed"])),
+    (
+        "reason",
+        Ty::OneOf(&[
+            "thesis_admitted",
+            "thesis_expired",
+            "thesis_invalidated",
+            "lineage_retired",
+            "eligibility_lost",
+            "operator_halt",
+            "version_applied",
+        ]),
+    ),
+    ("thesis_id", Ty::Nullable(&Ty::Ident)),
+    ("lineage_id", Ty::Nullable(&Ty::Ident)),
+    ("universe_size_after", Ty::Int),
+    ("risk_clock", Ty::RiskClock),
+]);
 
 static ACCOUNT_SNAPSHOT_RECORDED: Ty = Ty::Record(&[
     ("status", Ty::Str),
@@ -1017,7 +1155,6 @@ mod tests {
     /// to 33 here: every base and valid draft of `MandateVersionApplied` and `UniverseChanged` is
     /// accepted, and every invalid one is refused with its reason at its path (DEC-403, DEC-404).
     #[test]
-    #[ignore = "pending E7-10"]
     fn every_risk_state_draft_is_judged_as_its_vectors_say() -> Result<(), String> {
         let section = named_section("risk_state")?;
         let mut failures = Vec::new();
@@ -1135,7 +1272,6 @@ mod tests {
     /// `schema` when `null` (DEC-403, DEC-404). The vectors pin each member's type but not its
     /// nullability, so this is what keeps a schema loosened to nullable from passing.
     #[test]
-    #[ignore = "pending E7-10"]
     fn a_required_risk_state_member_is_never_null() -> Result<(), String> {
         const RISK_STATE_REQUIRED: [(&str, &[&str]); 2] = [
             (
@@ -1211,11 +1347,99 @@ mod tests {
         Ok(())
     }
 
+    /// Rule 33 reads a raise only from what the record shows: an applied decrease or a zero change,
+    /// and a rejection the fold reaches without a raise (`equity_below_exposure`,
+    /// `would_trigger_limit`, `not_loosening`), are accepted under any classification, so a
+    /// reducing or neutral version is never refused for them (DEC-403 item 4).
+    #[test]
+    fn rule_33_refuses_nothing_that_shows_no_raise() -> Result<(), String> {
+        let section = named_section("risk_state")?;
+        let text = |t: &str| Value::Str(t.to_owned());
+        let cases: [(&str, &[(&str, Value)]); 5] = [
+            (
+                "version_applied",
+                &[
+                    ("classification", text("risk_reducing")),
+                    ("step_up", Value::Null),
+                    ("allocation_change", text("-2500")),
+                ],
+            ),
+            (
+                "version_applied",
+                &[
+                    ("classification", text("neutral")),
+                    ("step_up", Value::Null),
+                    ("allocation_change", text("0")),
+                ],
+            ),
+            (
+                "version_rejected",
+                &[
+                    ("classification", text("neutral")),
+                    ("step_up", Value::Null),
+                    ("reason", text("equity_below_exposure")),
+                ],
+            ),
+            (
+                "version_rejected",
+                &[
+                    ("classification", text("risk_reducing")),
+                    ("reason", text("would_trigger_limit")),
+                ],
+            ),
+            (
+                "version_rejected",
+                &[
+                    ("classification", text("neutral")),
+                    ("reason", text("not_loosening")),
+                ],
+            ),
+        ];
+        for (name, members) in cases {
+            let mut body = base(&section, &named("base_draft", Value::Str(name.to_owned()))?)?;
+            for (member, value) in members {
+                body = with_payload(body, member, value.clone())?;
+            }
+            assert_eq!(refusal(body), None, "{name} with {members:?}");
+        }
+        Ok(())
+    }
+
+    /// `UniverseChanged.instrument` is journal spec v0.10's `asset_id`: mandate spec §3's lowercase
+    /// `8-4-4-4-12` form. An `id` that is not one, or an asset ID in capitals, is refused as
+    /// `non_canonical` at `payload.instrument`, so it can never append and then leave the stream's
+    /// context unbuildable (DEC-404 item 9; #497 round 1, m3).
+    #[test]
+    fn an_instrument_that_is_not_an_asset_id_is_refused() -> Result<(), String> {
+        let section = named_section("risk_state")?;
+        let case = named("base_draft", Value::Str("universe_admitted".to_owned()))?;
+        assert_eq!(refusal(base(&section, &case)?), None, "the base appends");
+        for instrument in [
+            "BTCUSD",
+            "7B4A1C2E-2222-4A2B-9C3D-000000000002",
+            "7b4a1c2e22224a2b9c3d000000000002",
+            "7b4a1c2e-2222-4a2b-9c3d-00000000002",
+            "7b4a1c2e-2222-4a2b-9c3d-0000000000g2",
+            "7b4a1c2e_2222-4a2b-9c3d-000000000002",
+        ] {
+            let body = with_payload(
+                base(&section, &case)?,
+                "instrument",
+                Value::Str(instrument.to_owned()),
+            )?;
+            assert_eq!(
+                refusal(body),
+                Some(("non_canonical".to_owned(), "payload.instrument".to_owned())),
+                "{instrument}"
+            );
+        }
+        Ok(())
+    }
+
     /// Either risk-state record at any `schema_version` but 1 is refused as `unknown_schema`, as
     /// every §9.2 type is: each reaches its schema through `schema`'s version gate, never around it
     /// (#482 round 1, m2; #467 round 1, m3).
     #[test]
-    #[ignore = "pending E7-10"]
     fn a_risk_state_record_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
         let section = named_section("risk_state")?;
         let two = Int::new(2).ok_or("an integer")?;
@@ -1261,6 +1485,140 @@ mod tests {
                 "payload.provenance[0].path".to_owned()
             ))
         );
+        Ok(())
+    }
+
+    /// Journal spec §9.4's vectors, judged by `Draft::parse` alone so the mutation gate sees rules 34
+    /// to 38 here: every base and valid draft of `ThesisProposed` and `ThesisRevised` is accepted,
+    /// and every invalid one is refused with the first reason and path it expects (DEC-413,
+    /// DEC-414). The order drafts pin which of two broken rules is reported first.
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn every_thesis_draft_is_judged_as_its_vectors_say() -> Result<(), String> {
+        let section = named_section("research")?;
+        let mut failures = Vec::new();
+        let drafts = section
+            .get("drafts")
+            .and_then(Value::as_object)
+            .ok_or("no drafts")?;
+        let mut accepted: Vec<(String, Value)> = Vec::new();
+        for name in drafts.keys() {
+            accepted.push((
+                format!("base {}", name.as_str()),
+                named("base_draft", Value::Str(name.as_str().to_owned()))?,
+            ));
+        }
+        for case in list(&section, "valid_drafts") {
+            accepted.push((format!("valid {}", text(case, "name")), case.clone()));
+        }
+        for (name, case) in &accepted {
+            let parsed = Draft::parse(&draft(&section, case)?).map(|_| ());
+            if parsed.is_err() {
+                failures.push(format!("{name}: {parsed:?}"));
+            }
+        }
+        let invalid = list(&section, "invalid_drafts");
+        for case in invalid {
+            let expect = case.get("expect").ok_or("no expect")?;
+            let refused = Draft::parse(&draft(&section, case)?)
+                .err()
+                .map(|e| (e.reason.code().to_owned(), e.path));
+            let wanted = (
+                text(expect, "reason").to_owned(),
+                text(expect, "path").to_owned(),
+            );
+            if refused.as_ref() != Some(&wanted) {
+                failures.push(format!("invalid {}: {refused:?}", text(case, "name")));
+            }
+        }
+        assert!(
+            accepted.len() >= 16 && invalid.len() >= 60,
+            "the vectors may add drafts, never drop them: {} valid drafts and bases, {} invalid drafts",
+            accepted.len(),
+            invalid.len()
+        );
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        Ok(())
+    }
+
+    /// The members §9.4 lists without `?`, as paths below `payload`, written out from the spec's
+    /// table rather than read from this module's schemas: each is refused as `schema` when `null`
+    /// (DEC-413, DEC-414). The vectors pin each member's type but not its nullability, so this is
+    /// what keeps a member loosened to nullable from passing.
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn a_required_thesis_member_is_never_null() -> Result<(), String> {
+        const THESIS_REQUIRED: [&str; 22] = [
+            "model_id",
+            "model_version",
+            "content_hash",
+            "thesis_id",
+            "lineage_id",
+            "revision",
+            "instrument_id",
+            "asset_class",
+            "direction",
+            "as_of",
+            "expires_at",
+            "horizon_s",
+            "conviction",
+            "confidence",
+            "evidence_sources",
+            "evidence_sources[0]",
+            "evidence_sources[1]",
+            "invalidation",
+            "allowlist_version",
+            "prompt_ref",
+            "response_ref",
+            "admitted",
+        ];
+        let section = named_section("research")?;
+        let mut checked = 0;
+        for name in ["proposed_admitted", "revised_admitted"] {
+            let case = named("base_draft", Value::Str(name.to_owned()))?;
+            assert_eq!(
+                refusal(base(&section, &case)?),
+                None,
+                "the {name} base appends"
+            );
+            for member in THESIS_REQUIRED {
+                let mut body = Value::Object(base(&section, &case)?);
+                *value_at(&mut body, &format!("payload.{member}"))? = Value::Null;
+                let Value::Object(body) = body else {
+                    return Err("the base is a record".to_owned());
+                };
+                assert_eq!(
+                    refusal(body),
+                    Some(("schema".to_owned(), format!("payload.{member}"))),
+                    "{name}.{member} = null"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 44);
+        Ok(())
+    }
+
+    /// Either thesis record at any `schema_version` but 1 is refused as `unknown_schema`: each
+    /// reaches its schema through `schema`'s version gate, never around it (DEC-414).
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn a_thesis_record_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
+        let section = named_section("research")?;
+        let two = Int::new(2).ok_or("an integer")?;
+        for name in ["proposed_admitted", "revised_admitted"] {
+            let mut body = base(&section, &named("base_draft", Value::Str(name.to_owned()))?)?;
+            assert_eq!(refusal(body.clone()), None, "the {name} base appends");
+            body.insert(
+                Key::new("schema_version").map_err(|_| "key")?,
+                Value::Int(two),
+            );
+            assert_eq!(
+                refusal(body),
+                Some(("unknown_schema".to_owned(), "payload".to_owned())),
+                "{name}"
+            );
+        }
         Ok(())
     }
 }
