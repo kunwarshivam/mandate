@@ -197,6 +197,7 @@ impl JournaledFact {
                     .iter()
                     .map(|p| {
                         p.as_str()
+                            .filter(|t| !t.is_empty())
                             .map(Pointer::new)
                             .ok_or(malformed("confirmed_paths"))
                     })
@@ -985,14 +986,17 @@ mod tests {
 /// crate so the mutation gate sees them (DEC-303 item 10).
 #[cfg(test)]
 mod record_tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use mandate_canon::{Digest, Key, Value};
     use mandate_domain::Environment;
+    use mandate_time::Date;
 
-    use super::JournaledFact;
+    use super::{AgentId, ContextArgs, JournaledFact};
     use crate::SpecError;
-    use crate::document::{ConnectionId, Pointer, Source};
+    use crate::document::{ConnectionId, Pointer, Provenance, Source};
+    use crate::validate::ValidationContext;
+    use crate::validate::tests::mandate;
 
     fn object(members: &[(&str, Value)]) -> Result<Value, SpecError> {
         let mut out = mandate_canon::Object::new();
@@ -1058,6 +1062,159 @@ mod record_tests {
                 BTreeMap::from([(Pointer::new("/risk"), source)]),
                 "{label}"
             );
+        }
+        Ok(())
+    }
+    fn digest_text(byte: char) -> String {
+        format!("sha256:{}", byte.to_string().repeat(64))
+    }
+
+    fn refused(event_type: &str, payload: &Value) -> Option<&'static str> {
+        match JournaledFact::from_record(event_type, payload, &nothing, None) {
+            Err(SpecError::InvalidInput { what }) => Some(what),
+            _ => None,
+        }
+    }
+
+    /// `confirmed_paths` is a list of §9.2 pointers, never the empty one (DEC-303 item 13): `""`
+    /// would cover every path, so a `platform_default` path would read as confirmed, which V-020
+    /// and V-022 exist to stop. The record is refused, so the context built from the records that
+    /// map leaves the path unconfirmed (#461 round 1, M1).
+    #[test]
+    fn an_empty_confirmed_path_is_refused_and_confirms_nothing() -> Result<(), SpecError> {
+        let draft = mandate(&[]).map_err(|_| SpecError::InvalidInput { what: "the draft" })?;
+        let version = format!("sha256:{}", draft.version()?.digest().to_hex());
+        let entry = object(&[
+            ("path", text("/autonomy")),
+            ("source", text("platform_default")),
+        ])?;
+        let created = object(&[
+            ("mandate_version", text(&version)),
+            ("provenance", Value::Array(vec![entry])),
+            ("record_ref", text(&digest_text('b'))),
+        ])?;
+        let confirmed = object(&[
+            ("mandate_version", text(&version)),
+            ("confirmed_paths", Value::Array(vec![text("")])),
+            ("record_ref", text(&digest_text('b'))),
+        ])?;
+        assert_eq!(
+            refused("MandateConfirmed", &confirmed),
+            Some("confirmed_paths")
+        );
+        let facts: Vec<JournaledFact> = [
+            ("MandateVersionCreated", &created),
+            ("MandateConfirmed", &confirmed),
+        ]
+        .into_iter()
+        .filter_map(|(event_type, payload)| {
+            JournaledFact::from_record(event_type, payload, &nothing, None)
+                .ok()
+                .flatten()
+        })
+        .collect();
+        let args = ContextArgs {
+            agent: AgentId::new("a"),
+            connection_id: ConnectionId::parse("conn_alpaca_paper_01")?,
+            validation_date: Date::parse("2026-09-24")
+                .map_err(|_| SpecError::InvalidInput { what: "date" })?,
+            membership: None,
+            instrument_groups: BTreeMap::new(),
+            eligibility_failures: BTreeSet::new(),
+        };
+        let context = ValidationContext::from_journal(&draft, args, &facts)?;
+        assert_eq!(
+            context.provenance.entries().get(&Pointer::new("/autonomy")),
+            Some(&Provenance {
+                source: Source::PlatformDefault,
+                confirmed: false,
+            })
+        );
+        Ok(())
+    }
+
+    /// §9.2 closes neither `MandateVersionApplied` nor `UniverseChanged`, so each maps to none and
+    /// the fold fails closed, even given every member a mapped type reads (DEC-303 item 6; #461
+    /// round 1, M2).
+    #[test]
+    fn a_type_section_9_2_leaves_open_maps_to_none() -> Result<(), SpecError> {
+        let record = object(&[
+            ("agent_id", text("agent_a")),
+            ("connection_id", text("conn_1")),
+            ("mandate_version", text(&digest_text('a'))),
+            ("record_ref", text(&digest_text('b'))),
+        ])?;
+        for event_type in ["MandateVersionApplied", "UniverseChanged"] {
+            assert_eq!(
+                JournaledFact::from_record(event_type, &record, &nothing, None)?,
+                None,
+                "{event_type}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A member the mapping cannot read is refused under its own name, never skipped and never
+    /// defaulted (DEC-303 item 10): an unparseable date, a non-text `params` element, an absent
+    /// `admits_instruments`, an empty `kind`, and a bare hex digest (#461 round 1, M3, m1, m2).
+    #[test]
+    fn each_unreadable_member_is_refused_by_name() -> Result<(), SpecError> {
+        let stopped = object(&[
+            ("agent_id", text("agent_a")),
+            ("connection_id", text("conn_1")),
+            ("reason", text("owner_stop")),
+            ("retired_on", text("2026-02-30")),
+            ("loss_added", text("125.5")),
+        ])?;
+        let registration = |kind: &str, params: Vec<Value>, admits: Option<bool>| {
+            let mut members = vec![
+                ("kind", text(kind)),
+                ("content_hash", text(&digest_text('c'))),
+                ("model_id", text("quant.momentum")),
+                ("model_version", text("1.2.0")),
+                ("params", Value::Array(params)),
+            ];
+            if let Some(admits) = admits {
+                members.push(("admits_instruments", Value::Bool(admits)));
+            }
+            object(&members)
+        };
+        let accepted = registration("model_version", vec![text("lookback_bars")], Some(true))?;
+        assert!(
+            JournaledFact::from_record("ConfigSnapshotRegistered", &accepted, &nothing, None)?
+                .is_some(),
+            "the well-formed registration maps"
+        );
+        let disclosure = object(&[
+            ("document", text("terms")),
+            ("version", text(&"d".repeat(64))),
+            ("user", text("user_owner_01")),
+        ])?;
+        let cases = [
+            ("AgentStopped", stopped, "retired_on"),
+            (
+                "ConfigSnapshotRegistered",
+                registration(
+                    "model_version",
+                    vec![text("lookback_bars"), Value::Bool(true)],
+                    Some(true),
+                )?,
+                "params",
+            ),
+            (
+                "ConfigSnapshotRegistered",
+                registration("model_version", vec![text("lookback_bars")], None)?,
+                "admits_instruments",
+            ),
+            (
+                "ConfigSnapshotRegistered",
+                registration("", vec![], None)?,
+                "kind",
+            ),
+            ("DisclosureAccepted", disclosure, "version"),
+        ];
+        for (event_type, payload, member) in cases {
+            assert_eq!(refused(event_type, &payload), Some(member), "{event_type}");
         }
         Ok(())
     }
