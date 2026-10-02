@@ -22,7 +22,8 @@
 //! **The gate's other inputs** are DEC-178's "every other check passes" environment, as for family
 //! G: a healthy risk state at the case's equity, a margin account at the fixture's
 //! `account_equity_usd`, and a liquid, tradable, unhalted listing of the pinned instrument, quoted at
-//! the case's own bid and ask at `now`, whose minimum order size is the case's `qty_increment`.
+//! the case's own bid and ask at `now`, whose minimum order size is the case's `qty_increment`;
+//! on a `trim_to_target` base, the trim call reads the case's `min_order_size` instead, when stated.
 //!
 //! **What the harness fills.** The fixture header's four defaults (`session` regular,
 //! `in_close_window` false, fee rates 0, `has_prior_fill` = position above zero) and `ref.py`'s
@@ -97,9 +98,10 @@ const INPUT_KEYS: &[&str] = &[
     "position_pnl_fraction",
     "scale_active_s",
     "holding",
+    "min_order_size",
 ];
 /// §5.5's trim guards, which only a `trim_to_target` mandate reads.
-const TRIM_INPUT_KEYS: [&str; 2] = ["scale_active_s", "holding"];
+const TRIM_INPUT_KEYS: [&str; 3] = ["scale_active_s", "holding", "min_order_size"];
 const TRIM_EXPECT_KEYS: [&str; 2] = ["origin", "trim_withheld"];
 /// Every member a trim's expectation may state (MC-B17).
 const TRIM_KEYS: [&str; 10] = [
@@ -224,6 +226,13 @@ fn trim_first(
             .ok_or("`scale_active_s` is not a whole number of seconds")?,
     };
     let holding = flag_or(input, "holding", false)?;
+    let min_order_size = match input.get("min_order_size") {
+        None => stated.increment,
+        Some(_) => num(
+            Qty::parse(str_at(input, "min_order_size")?),
+            "min_order_size",
+        )?,
+    };
     let goal_state = if holding {
         GoalState::Holding
     } else {
@@ -233,6 +242,7 @@ fn trim_first(
     if let Some(rung) = scaling_rung(document, stated.gate_size_factor)? {
         scene.risk.active_rungs.insert(rung, active_s);
     }
+    scene.instrument.min_order_size = min_order_size;
     let instruments = BTreeMap::from([(
         scene.instrument.instrument.clone(),
         scene.instrument.clone(),
@@ -264,7 +274,13 @@ fn trim_first(
         proposal.sizes.current_mv,
         exact(expect, "current_mv")?,
     )?;
-    let guards = trim_guards(document, stated, &clock, expect, active_s, holding)?;
+    let guards = trim_guards(
+        document,
+        stated,
+        &clock,
+        expect,
+        (active_s, holding, min_order_size),
+    )?;
     let unguarded = guards.as_ref().is_some_and(Vec::is_empty);
     let judged = match (trims.as_slice(), unguarded) {
         ([trim], true) => compare_trim(document, stated, &clock, &proposal, trim, expect),
@@ -291,7 +307,9 @@ fn trim_first(
     stated.agrees_with_clock(&clock, judged)
 }
 
-/// `reference/mandate/ref.py`'s guards, in its order, on the case's own figures: `None` when no
+/// `reference/mandate/ref.py`'s guards, in its order, on the case's own figures, except that
+/// `below_minimum_order` reads the instrument's `min_order_size` (DEC-399 item 8), which `ref.py`
+/// takes up in the reference PR after this harness: `None` when no
 /// trim is due (no factor below one, or an excess under the band), else every guard that withholds
 /// it, empty when none does. Read from the case, not from `trim_proposals`, which names no guard,
 /// so the gate's answer is judged against them rather than explained by them (DEC-400 item 2).
@@ -300,8 +318,7 @@ fn trim_guards(
     stated: &Inputs,
     clock: &gate::SessionAt,
     expect: &Json,
-    active_s: u64,
-    holding: bool,
+    (active_s, holding, min_order_size): (u64, bool, Qty),
 ) -> Result<Option<Vec<&'static str>>, String> {
     let factor = UsdExact::of_ratio(stated.gate_size_factor);
     let one = num(UsdExact::parse("1"), "one")?;
@@ -337,7 +354,7 @@ fn trim_guards(
     if stated.asset_class == AssetClass::UsEquity && clock.session != gate::Session::Regular {
         guards.push("regular_session_only");
     }
-    if num(sell.notional(stated.bid), "the trim's notional")? < stated.min_order_usd {
+    if sell < min_order_size {
         guards.push("below_minimum_order");
     }
     Ok(Some(guards))
@@ -1555,6 +1572,31 @@ mod tests {
         "MC-B28", "MC-B29", "MC-B30", "MC-B31", "MC-B32",
     ];
 
+    /// MC-B33 and MC-B34, the two cases where the instrument's minimum order size and the dollar
+    /// minimum disagree (DEC-399 item 8). The reference PR that adds them lands after this harness,
+    /// so the fixture holds them or neither; each one present must pass, and the counts below are
+    /// stated for both fixtures. A cleanup drops the fixture without them once they land.
+    const AWAITED: [&str; 2] = ["MC-B33", "MC-B34"];
+    const DOCTORINGS_WITH: usize = 1022;
+    const REFUSED_WITH: usize = 1347;
+
+    /// Whether the fixture already holds the [`AWAITED`] cases.
+    fn awaited(fixture: &Json) -> Result<bool, String> {
+        let present = crate::list_at(fixture, "cases")?
+            .iter()
+            .filter(|c| c["id"].as_str().is_some_and(|id| AWAITED.contains(&id)))
+            .count();
+        crate::ensure(present == 0 || present == AWAITED.len(), || {
+            format!("the fixture holds {present} of the two awaited cases, not none or both")
+        })?;
+        Ok(present == AWAITED.len())
+    }
+
+    /// `without` on today's fixture, `with` once the awaited cases land.
+    fn counted(fixture: &Json, without: usize, with: usize) -> Result<usize, String> {
+        Ok(if awaited(fixture)? { with } else { without })
+    }
+
     fn fixture() -> Result<Json, String> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
         read_fixture(&dir, "mandate.json").map(Arc::unwrap_or_clone)
@@ -1566,55 +1608,62 @@ mod tests {
             .filter(|c| c["kind"] == "builder")
             .cloned()
             .collect();
-        crate::ensure(cases.len() == 32, || {
-            format!("family B is thirty-two cases, found {}", cases.len())
+        let expected = counted(fixture, 32, 34)?;
+        crate::ensure(cases.len() == expected, || {
+            format!("family B is {expected} cases, found {}", cases.len())
         })?;
         Ok(cases)
+    }
+
+    fn listed(id: &str) -> bool {
+        PASSING.contains(&id) || AWAITED.contains(&id)
     }
 
     fn passing(fixture: &Json) -> Result<Vec<Json>, String> {
         Ok(family_b(fixture)?
             .into_iter()
-            .filter(|c| c["id"].as_str().is_some_and(|id| PASSING.contains(&id)))
+            .filter(|c| c["id"].as_str().is_some_and(listed))
             .collect())
     }
 
     /// The gate and the case's own guards must agree.
     ///
-    /// - MC-B17 with a minimum order of 1000 dollars, or of 299.71, a cent above its trim, has
-    ///   its 299.7-dollar trim withheld `below_minimum_order` by `ref.py`'s guards, while the
-    ///   gate, whose minimum is the instrument's one-share `min_order_size`, still trims, so the
-    ///   case fails naming both answers; at 299.7 exactly it still passes.
+    /// - A trim's minimum is the instrument's minimum order size, not the dollar minimum (§5.5,
+    ///   DEC-399 item 8): MC-B17 under a 1000-dollar minimum still trims its 3 shares, and at a
+    ///   `min_order_size` of 3 it still does, while at 4 the trim is withheld and the case fails
+    ///   naming `below_minimum_order`. With no `min_order_size` stated, the minimum is one
+    ///   increment: on a 3-share grid MC-B17 still trims (#498 review, m1).
     /// - MC-B30 confirmed for 60 seconds is due and unguarded, so the gate's trim is the case's
     ///   action, and the builder's figures the case states are refused.
     /// - Each guard is judged alone, since MC-B31 states two and either would mask the other:
-    ///   MC-B30 confirmed and Holding withholds `holding` only, and MC-B31 not Holding withholds
-    ///   `regular_session_only` only; both pass, and a gate that trims through either guard fails
+    ///   MC-B30 confirmed and Holding withholds `holding` only, MC-B31 not Holding withholds
+    ///   `regular_session_only` only, and MC-B30 confirmed at a minimum of 4 shares withholds
+    ///   `below_minimum_order` only; each passes, and a gate that trims through the guard fails
     ///   naming both answers (#478 review, M1).
     #[test]
     fn a_trim_the_gate_and_the_guards_disagree_on_fails_naming_both() -> Result<(), String> {
         let fixture = fixture()?;
-        let minimum = doctored(&fixture, "MC-B17", "/input/min_order_usd", |v| {
+        let dollars = doctored(&fixture, "MC-B17", "/input/min_order_usd", |v| {
             *v = json!("1000");
         })?;
-        fails_naming(
-            run(minimum, "MC-B17"),
-            "below_minimum_order",
-            "MC-B17 at a 1000-dollar minimum",
-        )?;
-        let at_the_trim = doctored(&fixture, "MC-B17", "/input/min_order_usd", |v| {
-            *v = json!("299.7");
+        run(dollars, "MC-B17").map_err(|e| format!("MC-B17 under a 1000-dollar minimum: {e}"))?;
+        let at_the_trim = doctored(&fixture, "MC-B17", "", |case| {
+            put(case, "input", "min_order_size", json!("3"));
         })?;
         run(at_the_trim, "MC-B17")
-            .map_err(|e| format!("MC-B17 at a minimum of its own 299.7: {e}"))?;
-        let a_cent_above = doctored(&fixture, "MC-B17", "/input/min_order_usd", |v| {
-            *v = json!("299.71");
+            .map_err(|e| format!("MC-B17 at a minimum of its own 3 shares: {e}"))?;
+        let a_share_above = doctored(&fixture, "MC-B17", "", |case| {
+            put(case, "input", "min_order_size", json!("4"));
         })?;
         fails_naming(
-            run(a_cent_above, "MC-B17"),
+            run(a_share_above, "MC-B17"),
             "below_minimum_order",
-            "MC-B17 at a minimum a cent above its trim",
+            "MC-B17 at a minimum a share above its trim",
         )?;
+        let on_the_grid = doctored(&fixture, "MC-B17", "/input/qty_increment", |v| {
+            *v = json!("3");
+        })?;
+        run(on_the_grid, "MC-B17").map_err(|e| format!("MC-B17 on a 3-share grid: {e}"))?;
         let confirmed = doctored(&fixture, "MC-B30", "/input/scale_active_s", |v| {
             *v = json!(60);
         })?;
@@ -1638,7 +1687,18 @@ mod tests {
                 json!(["regular_session_only"]),
             );
         })?;
-        run(session_alone, "MC-B31").map_err(|e| format!("MC-B31 not Holding: {e}"))
+        run(session_alone, "MC-B31").map_err(|e| format!("MC-B31 not Holding: {e}"))?;
+        let minimum_alone = doctored(&fixture, "MC-B30", "", |case| {
+            put(case, "input", "scale_active_s", json!(60));
+            put(case, "input", "min_order_size", json!("4"));
+            put(
+                case,
+                "expect",
+                "trim_withheld",
+                json!(["below_minimum_order"]),
+            );
+        })?;
+        run(minimum_alone, "MC-B30").map_err(|e| format!("MC-B30 below the minimum size: {e}"))
     }
 
     /// Sets `key` in the case's `object` member, adding it if the case does not state it.
@@ -1930,13 +1990,15 @@ mod tests {
         let mut seen = 0_usize;
         for case in family_b(&fixture)? {
             let id = id(&case)?;
-            crate::ensure(PASSING.contains(&id.as_str()), || {
-                format!("{id} is not listed")
-            })?;
+            crate::ensure(listed(&id), || format!("{id} is not listed"))?;
             run(fixture.clone(), &id).map_err(|e| format!("{id}: {e}"))?;
             seen = seen.saturating_add(1);
         }
-        crate::expect_eq("cases listed", PASSING.len(), seen)
+        crate::expect_eq(
+            "cases listed",
+            counted(&fixture, PASSING.len(), PASSING.len() + AWAITED.len())?,
+            seen,
+        )
     }
 
     /// MC-B26's pinned pair is read from its base's `symbol` (DEC-285): `BTC/USD` passes, and a
@@ -2003,7 +2065,11 @@ mod tests {
                 )?;
             }
         }
-        crate::expect_eq("doctorings, counted from the fixture", doctorings, 976)
+        crate::expect_eq(
+            "doctorings, counted from the fixture",
+            doctorings,
+            counted(&fixture, 976, DOCTORINGS_WITH)?,
+        )
     }
 
     /// A hold reaches neither the gate nor approval, so a hold that states either fails naming it,
@@ -2046,7 +2112,7 @@ mod tests {
                 fails_naming(run(stated, &id), member, &format!("{id}: {member} stated"))?;
             }
         }
-        crate::expect_eq("holds", holds, 13)
+        crate::expect_eq("holds", holds, counted(&fixture, 13, 14)?)
     }
 
     /// Every member of a case is read: a plant at the top level, in `input`, its `quote`, its
@@ -2089,7 +2155,11 @@ mod tests {
                 )?;
                 plants = plants.saturating_add(1);
             }
-            for (guard, value) in [("scale_active_s", json!(0)), ("holding", json!(false))] {
+            for (guard, value) in [
+                ("scale_active_s", json!(0)),
+                ("holding", json!(false)),
+                ("min_order_size", json!("1")),
+            ] {
                 if trims(&fixture, &case)? {
                     break;
                 }
@@ -2102,9 +2172,9 @@ mod tests {
             }
         }
         crate::expect_eq(
-            "plants: four objects per case, fifty-nine outputs and two working orders",
+            "plants: four objects per case, every output and two working orders",
             plants,
-            32 * 4 + 59 + 2,
+            counted(&fixture, 32 * 4 + 59 + 2, 34 * 4 + 63 + 2)?,
         )
     }
 
@@ -2215,7 +2285,11 @@ mod tests {
                 }
             }
         }
-        crate::expect_eq("inputs refused, counted from the fixture", refused, 1257)
+        crate::expect_eq(
+            "inputs refused, counted from the fixture",
+            refused,
+            counted(&fixture, 1257, REFUSED_WITH)?,
+        )
     }
 
     /// The builder and the gate see one account: the gate state's equity, the instrument's market
