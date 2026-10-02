@@ -94,6 +94,11 @@
 //! caught by the reference cases: the marketable-on-arrival test compares the open with the limit in
 //! the opposite direction from a stop's trigger, and an order that is already resting
 //! (`resting_since_bar`) must never take that test at all.
+//!
+//! The session-of-asset-class refusal the E4-1 follow-up adds (the gap DEC-114 item 2 discloses) has
+//! its own property and its own oracle: a table of the sessions spec §4.3 gives each asset class,
+//! read from the spec's sentence rather than from the model's check, so a check that refuses more or
+//! less than the table cannot pass.
 
 mod common;
 
@@ -101,11 +106,11 @@ use common::{
     AFTER_HOURS_OPEN, Median, NoMedian, PRE_MARKET_OPEN, REGULAR_OPEN, at, bps, fraction, price,
     qty, run,
 };
-use mandate_accounting::{Liquidity, Side};
-use mandate_num::{Bps, Price, Qty};
+use mandate_accounting::{AssetClass, Liquidity, Side};
+use mandate_num::{Bps, Price, Qty, ShareIncrement};
 use mandate_sim::{
     Eligibility, FirstBarVolumes, Instrument, Nanos, OcoLeg, OrderEnd, OrderKind, Session, SimBar,
-    SimConfig, SimFill, SimOrder, SimOutcome, Slippage, TimeInForce,
+    SimConfig, SimFill, SimOrder, SimOutcome, Slippage, TimeInForce, check_sessions_of_asset_class,
 };
 use mandate_time::UtcNanos;
 use proptest::collection::vec;
@@ -1036,6 +1041,80 @@ fn scenario() -> impl Strategy<Value = Scenario> {
         })
 }
 
+/// The sessions spec §4.3 gives each asset class: crypto trades continuously, and a US equity
+/// trades four sessions in New York time. The oracle's own table, read from the spec's sentence and
+/// not from the model's check, so a check that refuses more or less than this cannot pass.
+fn sessions_spec_43_trades(asset_class: AssetClass) -> &'static [Session] {
+    match asset_class {
+        AssetClass::UsEquity => &[
+            Session::Overnight,
+            Session::PreMarket,
+            Session::Regular,
+            Session::AfterHours,
+        ],
+        AssetClass::Crypto => &[Session::Continuous],
+    }
+}
+
+/// A random instrument of either asset class, with the increment each trades in (spec §2.1). The
+/// equity is weighted twice so scenarios where the rule binds are the majority.
+fn instrument_of_either_class() -> impl Strategy<Value = Instrument> {
+    prop_oneof![
+        2 => Just(Instrument {
+            asset_class: AssetClass::UsEquity,
+            increment: ShareIncrement::Whole,
+        }),
+        1 => Just(Instrument {
+            asset_class: AssetClass::Crypto,
+            increment: ShareIncrement::Fractional,
+        }),
+    ]
+}
+
+/// One of the five sessions a bar may be labelled with (spec §4.3), the continuous one weighted so
+/// scenarios where the rule binds are common.
+fn a_session() -> impl Strategy<Value = Session> {
+    prop_oneof![
+        3 => Just(Session::Continuous),
+        2 => Just(Session::Regular),
+        1 => Just(Session::PreMarket),
+        1 => Just(Session::AfterHours),
+        1 => Just(Session::Overnight),
+    ]
+}
+
+/// 1 to 4 consistent bars a minute apart on 2026-09-21, each labelled with a random session. The
+/// rule under test reads only a bar's session beside its instrument's asset class, so every bar
+/// carries the smallest legal rest: its session start is its own start, and one price level with a
+/// one-cent range keeps it consistent (spec §4.1).
+fn mislabellable_bars() -> impl Strategy<Value = Vec<SimBar>> {
+    (1usize..=4, vec(a_session(), 4)).prop_map(|(count, sessions)| {
+        let base = secs("2026-09-21T00:00:00Z");
+        sessions
+            .into_iter()
+            .take(count)
+            .enumerate()
+            .map(|(index, session)| {
+                let open = 99 * UNIT + i128::try_from(index).unwrap() * CENT;
+                let start =
+                    UtcNanos::from_parts(base + 60 * i64::try_from(index).unwrap(), 0).unwrap();
+                SimBar {
+                    start,
+                    open: price_of(open),
+                    high: price_of(open + CENT),
+                    low: price_of(open - CENT),
+                    close: price_of(open),
+                    volume: qty_of(1000 * UNIT),
+                    trade_date: start.date(),
+                    session,
+                    session_start: start,
+                    auction: false,
+                }
+            })
+            .collect()
+    })
+}
+
 proptest! {
     /// Spec §6.4 rule 1: nothing fills before the first bar starting at or after the decision time
     /// plus the decision latency, and the approval latency too when approval was required. The bar
@@ -1278,5 +1357,30 @@ proptest! {
             "canceled legs"
         );
         prop_assert_eq!(outcome.ends, expected.ends, "end states");
+    }
+
+    /// The E4-1 follow-up (the known-issues gap DEC-114 item 2 discloses): the model refuses
+    /// exactly the bar sequences carrying a session the instrument's asset class never trades,
+    /// whatever other sessions the bars mix, and never refuses a sequence the spec's table allows.
+    /// The verdict is the stable reason code (ADR-0001 ES-09); the oracle is
+    /// `sessions_spec_43_trades`, computed from the spec's sentence, not from the check.
+    #[test]
+    #[ignore = "pending E4-1"]
+    fn the_model_refuses_exactly_the_sessions_an_asset_class_never_trades(
+        instrument in instrument_of_either_class(),
+        bars in mislabellable_bars(),
+    ) {
+        let refused = check_sessions_of_asset_class(&instrument, &bars)
+            .map(|_| "ok")
+            .map_err(|e| e.code());
+        let off_the_asset_class = bars
+            .iter()
+            .any(|bar| !sessions_spec_43_trades(instrument.asset_class).contains(&bar.session));
+        let expected = if off_the_asset_class {
+            Err("session_off_asset_class")
+        } else {
+            Ok("ok")
+        };
+        prop_assert_eq!(refused, expected, "the model's verdict on the generated bars");
     }
 }

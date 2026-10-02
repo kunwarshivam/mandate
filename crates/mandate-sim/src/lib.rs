@@ -30,7 +30,7 @@
 
 mod fill;
 
-pub use fill::simulate;
+pub use fill::{check_sessions_of_asset_class, simulate};
 
 use mandate_accounting::{AssetClass, Liquidity, Side};
 use mandate_num::{Bps, Fraction, NumError, Price, Qty, ShareIncrement};
@@ -44,6 +44,8 @@ pub enum SimError {
     InconsistentBar(usize),
     #[error("bar {0} starts before the session it is labelled with")]
     BarBeforeItsSession(usize),
+    #[error("bar {0} is labelled Continuous, which only a crypto instrument trades")]
+    SessionOffAssetClass(usize),
     #[error("an order's quantity must be positive")]
     ZeroQuantity,
     #[error("an order's quantity is not a multiple of the instrument's increment")]
@@ -60,6 +62,11 @@ pub enum SimError {
     DayOrderOnAContinuousInstrument,
     #[error("an order rests from bar {0}, which the bars do not contain")]
     RestingBarOutOfRange(usize),
+    /// The story named in the pending tests has not been implemented yet, so the call cannot be
+    /// answered at all. A stub says so rather than returning a verdict another error could be
+    /// mistaken for (DEC-137).
+    #[error("this session check is not implemented yet")]
+    Unimplemented,
     #[error(transparent)]
     Num(#[from] NumError),
     #[error(transparent)]
@@ -73,6 +80,7 @@ impl SimError {
             Self::BarsOutOfOrder(_) => "bars_out_of_order",
             Self::InconsistentBar(_) => "inconsistent_bar",
             Self::BarBeforeItsSession(_) => "bar_before_its_session",
+            Self::SessionOffAssetClass(_) => "session_off_asset_class",
             Self::ZeroQuantity => "zero_quantity",
             Self::QuantityOffIncrement => "quantity_off_increment",
             Self::ExtendedHoursNeedsALimit => "extended_hours_needs_a_limit",
@@ -81,6 +89,7 @@ impl SimError {
             Self::OcoOnAFractionalInstrument => "oco_on_a_fractional_instrument",
             Self::DayOrderOnAContinuousInstrument => "day_order_on_a_continuous_instrument",
             Self::RestingBarOutOfRange(_) => "resting_bar_out_of_range",
+            Self::Unimplemented => "unimplemented",
             Self::Num(e) => e.code(),
             Self::Time(e) => e.code(),
         }

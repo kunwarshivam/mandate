@@ -118,6 +118,21 @@ fn check_bars(bars: &[SimBar]) -> Result<(), SimError> {
     Ok(())
 }
 
+/// The session-of-asset-class check the E4-1 follow-up adds (the gap DEC-114 item 2 discloses):
+/// spec §4.3 gives crypto the continuous session alone and a US equity four sessions in New York
+/// time, so a continuous bar for any other asset class contradicts the spec and is refused with
+/// [`SimError::SessionOffAssetClass`] rather than simulated — an equity stop must never fill on a
+/// session no equity bar can carry. The implementation PR replaces this stub's body and calls it
+/// from [`simulate`] beside `check_bars`; until then it reports itself, which is what the pending
+/// gate reads (DEC-137).
+pub fn check_sessions_of_asset_class(
+    instrument: &Instrument,
+    bars: &[SimBar],
+) -> Result<(), SimError> {
+    let _ = (instrument, bars);
+    Err(SimError::Unimplemented)
+}
+
 /// The v1 order policy of spec §5.1 and §5.2, checked before anything is simulated, each cause with
 /// its own error and stable code (DEC-108 item 7). An order the platform would never place is
 /// rejected rather than simulated, so no backtest can rest on one.

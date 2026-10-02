@@ -18,14 +18,14 @@ mod common;
 
 use common::{
     AFTER_HOURS_OPEN, Median, NoMedian, approved, at, auction, bar, bar_at, bps, buy, canceled,
-    continuous, crypto, decided, equity, fills, fills_with_median, first_order, for_the_day,
+    continuous, crypto, decided, equity, et, fills, fills_with_median, first_order, for_the_day,
     in_extended_hours, in_session, limit, market, oco, pre_market, price, qty, reported,
     reported_legs, resting, resting_from, run, sell, stop, stop_limit, test_default,
 };
 use mandate_num::{Bps, Qty};
 use mandate_sim::{
     Eligibility, Nanos, OrderEnd, OrderKind, OrderRef, Session, SimBar, SimConfig, SimOrder,
-    Slippage,
+    Slippage, check_sessions_of_asset_class,
 };
 
 /// RC-10's three bars: 09:40 to 09:42 on 2026-09-21, all regular session.
@@ -865,4 +865,101 @@ fn an_overnight_bar_never_fills() {
     let exit = buy(limit("99.5"), "100", resting());
     assert!(fills_with_median("9000", &bars, &[exit]).is_empty());
     assert!(fills_with_median("9000", &bars, &[in_extended_hours(exit)]).is_empty());
+}
+
+/// The sessions an equity bar may carry (spec §4.3) keep filling exactly as they do with no
+/// session-of-asset-class check: a resting limit buy fills at its limit on a bar at the regular
+/// open, at the pre-market open, and at the after-hours open, each the first bar of its session,
+/// and a marketable limit buy arriving on each takes the slipped open the same way. The refusal the
+/// follow-up adds binds the continuous session alone.
+#[test]
+fn an_equity_order_still_fills_its_regular_pre_and_post_bars() {
+    let regular = bar("09:30", ["99.5", "99.7", "99.3", "99.5", "5000"]);
+    let pre = pre_market("04:00", ["99.5", "99.7", "99.3", "99.5", "5000"]);
+    let post = in_session(
+        Session::AfterHours,
+        AFTER_HOURS_OPEN,
+        bar_at(&et("16:00"), ["99.5", "99.7", "99.3", "99.5", "5000"]),
+    );
+    let order = buy(limit("100"), "100", resting_from(0));
+    assert_eq!(
+        fills_with_median("5000", std::slice::from_ref(&regular), &[order]),
+        [(0, "100".to_owned(), "100".to_owned(), "maker")]
+    );
+    let extended = in_extended_hours(order);
+    assert_eq!(
+        fills_with_median("5000", std::slice::from_ref(&pre), &[extended]),
+        [(0, "100".to_owned(), "100".to_owned(), "maker")]
+    );
+    assert_eq!(
+        fills_with_median("5000", std::slice::from_ref(&post), &[extended]),
+        [(0, "100".to_owned(), "100".to_owned(), "maker")]
+    );
+    let arriving = buy(limit("100"), "100", decided("09:30"));
+    assert_eq!(
+        fills_with_median("5000", &[regular], &[arriving]),
+        [(0, "100".to_owned(), "99.52985".to_owned(), "taker")]
+    );
+    let arriving_extended = in_extended_hours(buy(limit("100"), "100", decided("04:00")));
+    assert_eq!(
+        fills_with_median("5000", &[pre], &[arriving_extended]),
+        [(0, "100".to_owned(), "99.52985".to_owned(), "taker")]
+    );
+    let arriving_after = in_extended_hours(buy(limit("100"), "100", decided("16:00")));
+    assert_eq!(
+        fills_with_median("5000", &[post], &[arriving_after]),
+        [(0, "100".to_owned(), "99.52985".to_owned(), "taker")]
+    );
+}
+
+/// Crypto keeps filling on the continuous session the check leaves alone (spec §4.3, last line): a
+/// market buy fills on the second bar, the first whose reference volume a previous same-session bar
+/// supplies, exactly as it does with no session check at all.
+#[test]
+fn a_crypto_order_still_fills_its_continuous_bars() {
+    let bars = [
+        continuous("01:00", ["99.6", "99.8", "99.4", "99.5", "5000"]),
+        continuous("01:01", ["99.5", "99.6", "98.8", "98.9", "5000"]),
+    ];
+    assert_eq!(
+        run(
+            &test_default(),
+            &crypto(),
+            &bars,
+            &NoMedian,
+            &[buy(market(), "0.25", resting_from(0))],
+        )
+        .map(|outcome| reported(&outcome))
+        .unwrap(),
+        [(1, "0.25".to_owned(), "99.52985".to_owned(), "taker")]
+    );
+}
+
+/// The refusal the E4-1 follow-up adds (DEC-114 item 2 discloses the gap): an equity bar labelled
+/// `Continuous` contradicts spec §4.3, and an equity stop must never fill on a session no equity
+/// bar can carry, so the model refuses the bars instead of simulating them. The check stands where
+/// the walk will call it; on this change's stub it reports itself, which is what the pending gate
+/// reads (DEC-137), and the walk-level refusal becomes live with the implementation PR.
+#[test]
+#[ignore = "pending E4-1"]
+fn a_continuous_bar_for_a_us_equity_is_refused() {
+    let mislabelled = in_session(
+        Session::Continuous,
+        &et("01:00"),
+        bar_at(&et("01:00"), ["99.6", "99.8", "99.4", "99.5", "5000"]),
+    );
+    let refused = check_sessions_of_asset_class(&equity(), std::slice::from_ref(&mislabelled))
+        .map(|_| "ok".to_owned())
+        .map_err(|e| e.code().to_owned());
+    assert_eq!(refused, Err("session_off_asset_class".to_owned()));
+    let filled = run(
+        &test_default(),
+        &equity(),
+        &[mislabelled],
+        &NoMedian,
+        &[sell(stop("99"), "100", resting_from(0))],
+    )
+    .map(|outcome| reported(&outcome))
+    .map_err(|e| e.code().to_owned());
+    assert_eq!(filled, Err("session_off_asset_class".to_owned()));
 }
