@@ -8380,6 +8380,33 @@ mod sequence_tests {
         }
     }
 
+    /// The owner's pause, stop or resumption of `agent`, committed to the account stream as the
+    /// executor copies it (mandate spec §5.9) and folded, so a restart folds the mode each
+    /// decision was taken under. It is not stepped: what the executor does on a mode change is
+    /// still E7-4's stub, and the scripts need only the mode.
+    fn mode_applied(
+        executor: &mut Executor,
+        agent: &AgentId,
+        to: &str,
+        now: i64,
+    ) -> Result<(), String> {
+        let failed = |error: ExecutorError| format!("{error:?}");
+        let fact = object(vec![
+            ("agent", text(agent.0.clone())),
+            ("to", text(to)),
+            ("restriction", text("owner")),
+            ("originated", Value::Bool(true)),
+            (
+                "risk_clock",
+                clock(RiskClock::from_secs(now)).map_err(failed)?,
+            ),
+        ])
+        .map_err(failed)?;
+        executor
+            .commit_one("AgentModeApplied", fact)
+            .map_err(failed)
+    }
+
     /// `executor`'s journal folded afresh, with what is process-local (quotes, the watchdog's clock,
     /// the clock, the writer's epoch, and the pause set directly here) carried over: the state a
     /// restart resumes from.
@@ -8593,15 +8620,15 @@ mod sequence_tests {
                     }
                 }
                 Move::Pause(paused) => {
-                    let mode = if paused { Mode::Paused } else { Mode::Normal };
                     desk.paused = paused;
-                    executor.state.modes.insert(agent.clone(), mode);
+                    let to = if paused { "paused" } else { "normal" };
+                    mode_applied(&mut executor, &agent, to, desk.now)?;
                     None
                 }
                 Move::Stop(stopped) => {
-                    let mode = if stopped { Mode::Stopped } else { Mode::Normal };
                     desk.paused = stopped;
-                    executor.state.modes.insert(agent.clone(), mode);
+                    let to = if stopped { "stopped" } else { "normal" };
+                    mode_applied(&mut executor, &agent, to, desk.now)?;
                     None
                 }
                 Move::Reject => {
