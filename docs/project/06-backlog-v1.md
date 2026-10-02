@@ -1593,35 +1593,19 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   doc says so; §5.2 makes protective orders GTC, so a `tif` check would make it unrepresentable.
   (6) `ExchangeCalendar::us_equities()` is parsed inside `expiring`, once per resting protective
   order per instrument per trading day, as `session.rs` also does; parse it once.
-- **E7-4 (stream K), a protection gap to close before the executor trades on paper, from
-  [#468](https://github.com/kunwarshivam/mandate/pull/468) round 2 (M2,
-  [DEC-367](decisions/DEC-367.md) item 4):**
-  - (a) **An exit that outlives the protection.** An exit that stays non-terminal past the
-    protective order's expiry (a GTC crypto exit, or one stuck `Unknown` or `PendingCancel`)
-    defers the re-placement silently. The order then expires at the broker and leaves the position
-    unprotected, with no interval, no journal event and no owner alert. The exit ending does not
-    bring protection back.
-  - (b) **A cancelled or rejected exit.** A re-placement made beside a working exit covers only
-    the rest. If that exit is then cancelled or rejected rather than filled, its shares get no
-    protective order. The re-placement's `unprotected_end` has already cleared `replacing` and
-    `exiting`, and the new protection is dated today, so it is not due.
-  - **The fix.** When an exit goes terminal and the position is under-covered, re-place for the
-    shortfall and alert the owner. Add an under-cover arm to `protection::sequence_tests`'
-    `Desk::within_position`: every share held is covered by a live protective order or a live exit,
-    once no re-placement is under way and no exit sequence runs. That arm would have caught (b).
 - **The US-equities calendar's horizon (stream K), from #468 round 2 (M1):** extend
   `crates/mandate-time/data/us-equities.calendar` well past the GTC window the executor can reach,
   and alert the owner and the operator when the calendar's end is closer than `gtc_expiry_days`
   plus `protective_replace_buffer_trading_days`. DEC-367 item 2's two counts are the net under this
   fix, not the fix.
-- **E7-4 (stream K), from #468 round 2 (minors 3, 4, 5):**
+- **E7-4 (stream K), from #468 round 2 (minors 3 and 5):**
   - (3) `working_exits` never checks the side, unlike `still_selling`. A buy with an exit purpose,
     such as a `Flatten` of a short, would count as selling. v1 has no shorts; copy
     `still_selling`'s `side == Side::Sell` filter.
-  - (4) `exit_working` counts an exit in `OrderState::Intent`, but `working_exits` does not. Both
-    are the safe direction; say so in one clause.
-  - (5) `new_day`'s `if let Some(prices)` is dead now that its filter requires prices. Make the
-    unreachable branch unrepresentable.
+  - (5) `new_day`'s `if let Some(prices)` cannot fail now: protection with no prices is alerted
+    and skipped just before it (DEC-367 item 4 (a′)). Make the unreachable branch
+    unrepresentable. Minor (4) went with `exit_working`, which the founder's decision on #468
+    removed.
 - **E7-4's tests correction (stream K), from the acknowledgment PR ([DEC-348](decisions/DEC-348.md)
   item 2):** the refcase harness's guard that an `unprotected_end` naming what it is `awaiting` is
   not read as the interval's end is reached by no live test, since every case that lists the end

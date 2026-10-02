@@ -962,7 +962,7 @@ fn protection_changed(
         "watchdog" => {
             state.watchdogged.insert(instrument.clone(), at);
         }
-        "exit_unpriced" | "ladder_floor" => {}
+        "exit_unpriced" | "ladder_floor" | "expiry_unreplaceable" => {}
         "unprotected_end" if flag(payload, "acknowledged") => {
             state.awaiting.remove(&instrument);
             if let Some(open) = state
