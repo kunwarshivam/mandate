@@ -386,7 +386,7 @@ static MANDATE_VERSION_APPLIED: Ty = Ty::Record(&[
 
 static UNIVERSE_CHANGED: Ty = Ty::Record(&[
     ("agent_id", Ty::Ident),
-    ("instrument", Ty::Ident),
+    ("instrument", Ty::AssetId),
     ("change", Ty::OneOf(&["admitted", "removed"])),
     (
         "reason",
@@ -1384,6 +1384,37 @@ mod tests {
                 body = with_payload(body, member, value.clone())?;
             }
             assert_eq!(refusal(body), None, "{name} with {members:?}");
+        }
+        Ok(())
+    }
+
+    /// `UniverseChanged.instrument` is journal spec v0.10's `asset_id`: mandate spec §3's lowercase
+    /// `8-4-4-4-12` form. An `id` that is not one, or an asset ID in capitals, is refused as
+    /// `non_canonical` at `payload.instrument`, so it can never append and then leave the stream's
+    /// context unbuildable (DEC-404 item 9; #497 round 1, m3).
+    #[test]
+    fn an_instrument_that_is_not_an_asset_id_is_refused() -> Result<(), String> {
+        let section = named_section("risk_state")?;
+        let case = named("base_draft", Value::Str("universe_admitted".to_owned()))?;
+        assert_eq!(refusal(base(&section, &case)?), None, "the base appends");
+        for instrument in [
+            "BTCUSD",
+            "7B4A1C2E-2222-4A2B-9C3D-000000000002",
+            "7b4a1c2e22224a2b9c3d000000000002",
+            "7b4a1c2e-2222-4a2b-9c3d-00000000002",
+            "7b4a1c2e-2222-4a2b-9c3d-0000000000g2",
+            "7b4a1c2e_2222-4a2b-9c3d-000000000002",
+        ] {
+            let body = with_payload(
+                base(&section, &case)?,
+                "instrument",
+                Value::Str(instrument.to_owned()),
+            )?;
+            assert_eq!(
+                refusal(body),
+                Some(("non_canonical".to_owned(), "payload.instrument".to_owned())),
+                "{instrument}"
+            );
         }
         Ok(())
     }

@@ -912,6 +912,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
     mandate document the record's `config_refs.mandate_version` names, and refuses a record whose
     verdict passes over a check that mandate fails: an `admitted: true`, or a `reason` later than
     the first check the document fails;
+  - **(#503 round 1, m3)** §9.4's `instrument_id` is typed looser than an asset ID, the latent twin
+    of §9.3's `instrument` before v0.10. No mapping parses it yet. The registration should type it as
+    v0.10's `asset_id` from the start, so it never appends a value a later mapping cannot read.
   - the `man` ref on these two records means the mandate in force when the thesis was judged, and
     the tests PR pins that;
   - the tests PR comes first (DEC-77), and its cases include a pinned universe (MI-20) and
@@ -1307,8 +1310,19 @@ From E10-1's slice-V implementation (DEC-161):
       one class over several rows (the only multi-path pair is the pinning switch, which returns
       first), and no pair is two identical documents.
     - **`asset_id` (#497 round 1, m3; DEC-404 item 9):** journal spec v0.10 types `instrument` as an
-      asset ID. Owed, in order: the `mandate-journal` code PR (test first, with `result` matched
-      exhaustively, m2), then the reference PR with the `asset_id` vectors and seeded bugs.
+      asset ID. The `mandate-journal` code PR (test first, with `result` matched exhaustively, m2) is
+      on `agent/l-risk-state-asset-id`. Next, the reference PR with the `asset_id` vectors and seeded
+      bugs, and #503's m1 and m2 text.
+    - **Members appended under a looser type than the mapping parses (#503 round 1, m3).** Each has
+      the same shape as `instrument` had: it appends, then makes the stream's `ValidationContext`
+      unbuildable, and a context that will not build is not a hold an exit may have (rule 13).
+      - `ConfigSnapshotRegistered.model_id`: `text?` at append, but `ModelId::parse` at the mapping.
+        This is the widest of the three.
+      - `agent_id` and `connection_id`: `id` with no length bound at append, but 1 to 64 characters at
+        the mapping (DEC-303 item 16).
+
+      Take both after the DEC-360 change, as one DEC-176 tightening with the same three steps: the
+      spec, then `mandate-journal` test first, then the reference vectors.
     - **The pairs are not valid mandates (#482 round 2, m1):** six of
       `a_version_maps_only_under_the_classification_its_documents_give`'s pairs break a V-rule (V-008,
       V-013, V-034, V-036). Make each valid with a second patched path, so every fixture passes
