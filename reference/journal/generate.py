@@ -2574,7 +2574,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(risk_state.vector_mutants(risk_section))} vector mutants caught; "
         f"{len(research_section['drafts'])} research drafts, {len(research_section['invalid_drafts'])} invalid and "
         f"{len(research_section['valid_drafts'])} valid; {len(research.VALIDATOR_MUTANTS)} validator and "
-        f"{len(research.vector_mutants(research_section))} vector mutants caught"
+        f"{len(research.vector_mutants(research_section))} vector and "
+        f"{len(research.TIGHTEN_MUTANTS)} tightening mutants caught"
     )
     return 0
 
