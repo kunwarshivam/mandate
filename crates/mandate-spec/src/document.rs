@@ -49,13 +49,6 @@ impl MandateVersion {
     pub fn digest(self) -> Digest {
         self.0
     }
-
-    /// The version a journal record names (journal spec §9.2): a digest is a version only once the
-    /// record has been mapped against the document stored under it, or names the document a
-    /// confirmation or a provenance list is about.
-    pub(crate) fn named(digest: Digest) -> Self {
-        Self(digest)
-    }
 }
 
 /// The schema version this crate reads. `mandate_schema_version` is a `const 1` in the schema.
