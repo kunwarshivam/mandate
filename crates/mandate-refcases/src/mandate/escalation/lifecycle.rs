@@ -19,7 +19,9 @@
 //! names are bound one to one to the runtime's request id and hash: the reference model hashes its
 //! request as a stand-in for the content object (`reference/mandate/ref.py`, `escalation_step`), so
 //! a case's hash is a name, and the runtime's `content_hash` must be the digest of its own inline
-//! `content`. Every member the runtime writes is one the case states or one checked here.
+//! `content`. Every member of a draft's payload is one the case states or one checked here, and so
+//! is its cause. The step's other effects, the deadline timer and the opaque notification, are
+//! `mandate-runtime`'s own tests' to pin (DEC-317 item 5).
 //!
 //! **Every member is read (DEC-85).** The case, the context, each step, the bound order, each
 //! expectation and each expected draft are swept, and a member or value this module does not know
@@ -150,6 +152,8 @@ struct Ran {
     drafts: Vec<EventDraft>,
     clock: i64,
     asked: Option<(String, Json)>,
+    /// The `DecisionMade` an ask set aside, which its request names as its cause.
+    decision: Option<EventId>,
 }
 
 /// The shell around one runtime, and the names bound so far.
@@ -295,16 +299,18 @@ impl Shell {
                 _ => None,
             })
             .collect();
-        if drafts
+        let decision = drafts
             .first()
-            .is_some_and(|d| d.event_type == "DecisionMade")
-        {
+            .filter(|d| d.event_type == "DecisionMade")
+            .map(|d| d.event_id.clone());
+        if decision.is_some() {
             drafts.remove(0);
         }
         Ok(Ran {
             drafts,
             clock: self.clock()?,
             asked: Some((str_at(step, "approval")?.to_owned(), bound.clone())),
+            decision,
         })
     }
 
@@ -505,7 +511,7 @@ impl Shell {
         }
         faults.extend(match event_type {
             "ApprovalRequested" => self.requested(want, draft, ran),
-            _ => self.names_approval(want, draft),
+            _ => self.delivered(want, draft),
         });
         for key in draft.payload.as_object().into_iter().flat_map(|o| o.keys()) {
             if !written.contains(key.as_str()) {
@@ -526,6 +532,12 @@ impl Shell {
             return vec!["a request outside an ask".to_owned()];
         };
         let mut faults = Vec::new();
+        if ran.decision.is_none() || draft.causation_id != ran.decision {
+            faults.push(format!(
+                "its cause is {:?}, not the ask's `DecisionMade`",
+                draft.causation_id
+            ));
+        }
         if want.get("approval").and_then(Json::as_str) != Some(approval.as_str()) {
             faults.push(format!("`approval`: expected the ask's `{approval}`"));
         }
@@ -557,6 +569,16 @@ impl Shell {
             {
                 faults.push(format!("bound `{case}`: {e}"));
             }
+        }
+        faults
+    }
+
+    /// An `ApprovalDelivered`: its approval, which is also its cause.
+    fn delivered(&self, want: &Json, draft: &EventDraft) -> Vec<String> {
+        let mut faults = self.names_approval(want, draft);
+        let cause = draft.causation_id.as_ref().map(|cause| cause.0.as_str());
+        if cause.is_none() || cause != draft.payload.get("approval").and_then(Value::as_str) {
+            faults.push(format!("its cause is {cause:?}, not its request"));
         }
         faults
     }

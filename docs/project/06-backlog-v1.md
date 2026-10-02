@@ -448,9 +448,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `mandate-approval`, and MC-E25 to MC-E28, MC-E30 and MC-E32 pass; their `status.toml` rows are the
   status PR's. Still open: the `lifecycle` op's runtime driver for the other 26 cases, which fail
   naming the op until it lands.
-  *Part done (DEC-317):* the `lifecycle` op drives `mandate-runtime`'s `handle` and `fold` under one
-  published map, and fifteen cases pass (MC-E02 to MC-E05, MC-E07 to MC-E16, MC-E31); their
-  `status.toml` rows are the status PR's.
+  *Part done (DEC-317, DEC-366):* the `lifecycle` op drives `mandate-runtime`'s `handle` and
+  `fold` under one published map, landing in three PRs. Slice 1 interprets the `ask` step, and every
+  case still fails at its second step, naming the slice that owes it. Once all three slices land,
+  fifteen cases pass (MC-E02 to MC-E05, MC-E07 to MC-E16, MC-E31); their `status.toml` rows are the
+  status PR's.
   *Follow-up (DEC-317 item 7, E8-3):* the runtime's `ApprovalResponded` records no `quorum`, the
   approver count and independence check 7 applied, which journal spec §9 requires for a grant that
   reaches check 7 (`mandate_approval::quorum` already computes it). Tests first in
