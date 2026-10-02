@@ -72,7 +72,10 @@ pub enum JournaledFact {
     /// `DisclosureAccepted`: a disclosure version the workspace accepted (V-005).
     DisclosureAccepted { version: Digest },
     /// `AgentDeployed`, or `MandateVersionApplied` for a deployed agent: the version in force. The
-    /// latest one per agent replaces the earlier ones.
+    /// latest one per agent replaces the earlier ones. Journal spec v0.7 §9.2 closes only
+    /// `AgentDeployed`, so [`JournaledFact::from_record`] maps it alone. `MandateVersionApplied` and
+    /// `UniverseChanged` wait for the backlog's "account-stream risk-state records" row (DEC-303 item 6),
+    /// and until then they map to none and the fold fails closed.
     AgentVersionActive {
         agent: AgentId,
         connection_id: ConnectionId,

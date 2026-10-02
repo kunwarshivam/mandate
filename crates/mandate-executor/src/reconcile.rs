@@ -2144,7 +2144,9 @@ pub(crate) mod tests {
     /// three cash members present as `null`, which this writer does not write yet, so registering the
     /// schema before the writer conforms would refuse the snapshot of the step that pauses every
     /// agent and alerts the owner (DEC-261 item 7, `AGENTS.md` rules 3 and 13). This fails exactly
-    /// when that order is broken.
+    /// when that order is broken. It is half of a pair: a refusal at the bare `payload` would not trip
+    /// it, and `mandate-journal`'s `account_snapshot_recorded_waits_for_the_fee_step_writer`, which pins
+    /// `unknown_schema` at `payload`, covers that case. Each half carries the other.
     #[test]
     fn the_fee_steps_snapshot_is_never_refused_for_its_members() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);

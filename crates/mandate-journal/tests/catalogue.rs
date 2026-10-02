@@ -477,3 +477,102 @@ fn account_snapshot_recorded_waits_for_the_fee_step_writer() {
         (InvalidReason::UnknownSchema, "payload")
     );
 }
+
+const SHA_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const SHA_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+/// A control-stream draft of `event_type` with `payload` and its sorted `artifact_refs`.
+fn control_draft(event_type: &str, payload: &str, refs: &[&str]) -> Vec<u8> {
+    let d = draft(event_type, CTL, &[]);
+    let d = edit(&d, "payload", Some(payload));
+    let listed: Vec<String> = refs.iter().map(|r| format!("\"{r}\"")).collect();
+    edit(
+        &d,
+        "artifact_refs",
+        Some(&format!("[{}]", listed.join(","))),
+    )
+}
+
+fn disclosure(step_up: &str) -> Vec<u8> {
+    control_draft(
+        "DisclosureAccepted",
+        &format!(
+            r#"{{"document":"leveraged_etp","version":"{SHA_A}","user":"user_owner_01","step_up":{step_up}}}"#
+        ),
+        &[SHA_A],
+    )
+}
+
+fn refusal_of(draft: &[u8]) -> (InvalidReason, String) {
+    let e = Draft::parse(draft).map(|_| ()).unwrap_err();
+    (e.reason, e.path)
+}
+
+/// §9.2 closes every schema at every depth: `step_up`, the one nested record that carries
+/// authentication evidence, refuses an unlisted member at that member, so a raw assertion or a
+/// token has nowhere to sit (`AGENTS.md` rules 6 and 7, #429 round 1, B1).
+#[test]
+#[ignore = "pending E7-10"]
+fn a_step_up_refuses_an_unlisted_member() {
+    let valid = r#"{"assertion_id":"assert_1","authenticated_at":"2026-09-20T13:06:50.000000000Z","method":"webauthn"}"#;
+    assert_eq!(
+        Draft::parse(&disclosure(valid)).map(|_| ()),
+        Ok(()),
+        "the control: a well-formed acceptance appends"
+    );
+    let widened = r#"{"assertion_id":"assert_1","authenticated_at":"2026-09-20T13:06:50.000000000Z","method":"webauthn","token":"reference-fixture-not-a-token"}"#;
+    assert_eq!(
+        refusal_of(&disclosure(widened)),
+        (InvalidReason::Schema, "payload.step_up.token".to_owned())
+    );
+}
+
+/// `step_up.authenticated_at` is a §4.7 timestamp, never other text (#429 round 1, B1).
+#[test]
+#[ignore = "pending E7-10"]
+fn a_step_up_time_is_a_timestamp() {
+    let valid = r#"{"assertion_id":"assert_1","authenticated_at":"2026-09-20T13:06:50.000000000Z","method":"webauthn"}"#;
+    assert_eq!(
+        Draft::parse(&disclosure(valid)).map(|_| ()),
+        Ok(()),
+        "the control"
+    );
+    let off_form = r#"{"assertion_id":"assert_1","authenticated_at":"2026-09-20 13:06:50","method":"webauthn"}"#;
+    assert_eq!(
+        refusal_of(&disclosure(off_form)),
+        (
+            InvalidReason::NonCanonical,
+            "payload.step_up.authenticated_at".to_owned()
+        )
+    );
+}
+
+/// A `provenance` entry is a closed record too: an unlisted member inside it is refused there
+/// (#429 round 1, B1).
+#[test]
+#[ignore = "pending E7-10"]
+fn a_provenance_entry_refuses_an_unlisted_member() {
+    let created = |entry: &str| {
+        control_draft(
+            "MandateVersionCreated",
+            &format!(
+                r#"{{"mandate_version":"{SHA_A}","provenance":[{entry}],"record_ref":"{SHA_B}"}}"#
+            ),
+            &[SHA_A, SHA_B],
+        )
+    };
+    assert_eq!(
+        Draft::parse(&created(r#"{"path":"/autonomy","source":"user_entered"}"#)).map(|_| ()),
+        Ok(()),
+        "the control: a well-formed entry appends"
+    );
+    assert_eq!(
+        refusal_of(&created(
+            r#"{"path":"/autonomy","source":"user_entered","quoted_span":"buy dips"}"#
+        )),
+        (
+            InvalidReason::Schema,
+            "payload.provenance[0].quoted_span".to_owned()
+        )
+    );
+}
