@@ -471,6 +471,116 @@ req("MC-E32", len({datetime.fromisoformat(q["at"][:19] + "+00:00").astimezone(ny
 req("MC-E32", {e["status"] for e in C["MC-E32"]["expect"]} == {"delivered", "suppressed_quiet_hours"}, "both answers")
 req("MC-E", sum(c.startswith("MC-E") for c in C) == 32, "32 escalation cases")
 
+# tripwires (§6.7, MI-31, V-044; DEC-187, DEC-350 to DEC-352)
+for cid, code in {"MC-W07": "V-044", "MC-W08": "V-044", "MC-W09": "V-044", "MC-W10": "V-044", "MC-W12": "V-044",
+                  "MC-W13": "V-044", "MC-W16": "V-020", "MC-W17": "V-042"}.items():
+    req(cid, C[cid]["expect"]["violations"] == [code], f"expected exactly {code}")
+req("MC-W02", C["MC-W02"]["patch"][0]["value"][0]["action"] == "paused", "the paused action")
+req("MC-W05", len(C["MC-W05"]["patch"][0]["value"]) == 21, "21 tripwires")
+for cid, cls in {"MC-W19": "risk_reducing", "MC-W20": "risk_reducing", "MC-W21": "risk_reducing", "MC-W22": "risk_increasing",
+                 "MC-W23": "risk_increasing", "MC-W24": "risk_increasing", "MC-W25": "risk_increasing", "MC-W26": "risk_increasing"}.items():
+    e = C[cid]["expect"]
+    req(cid, e["classification"] == cls and e["changed_paths"] == ["/autonomy/tripwires"]
+        and e["step_up_required"] == (cls == "risk_increasing"), cls)
+
+def tw_fired_at(cid):
+    """The step indices at which each tripwire fired."""
+    return [(i, j["limit"]) for i, x in enumerate(C[cid]["expect"]) for j in x["journal"] if j["type"] == "RiskLimitTriggered"]
+
+def tw_events(cid, i):
+    return [j["type"] for j in C[cid]["expect"][i]["journal"]]
+
+def tw_state(cid, i=-1):
+    return C[cid]["expect"][i]["state"]
+
+def probe(cid, purpose, usd=None):
+    return next(p["expect"] for p in C[cid]["probes"]
+                if p["action"]["purpose"] == purpose and (usd is None or p["action"].get("order_usd") == usd))
+
+for cid in [c for c in C if c.startswith("MC-W") and C[c]["kind"] == "tripwire"]:
+    c = C[cid]
+    req(cid, len(c["steps"]) == len(c["expect"]) and c["steps"][0]["event"] == "MandateVersionApplied", "deployed first, one expectation per step")
+    for x in c["expect"]:
+        for k, j in enumerate(x["journal"]):
+            if j["type"] == "RiskLimitTriggered":
+                req(cid, k + 1 < len(x["journal"]) and x["journal"][k + 1] == {"type": "OwnerAlertSent", "subject": f"RiskLimitTriggered:{k}",
+                                                                                 "text": "tripwire_fired"}, "each firing alerts, opaquely")
+        req(cid, x["state"]["restriction"] in (None, "exits_only"), "never paused")
+        req(cid, x["state"]["delegations_suspended"] == bool(x["state"]["fired"]), "fired exactly when suspended")
+req("MC-W27", tw_fired_at("MC-W27") == [(3, "tripwire:losing_streak")] and tw_state("MC-W27", 2)["metrics"]["losing_streak"] == "1",
+    "the second losing exit, not the first")
+req("MC-W27", tw_state("MC-W27")["restriction"] == "exits_only" and probe("MC-W27", "open")["by"] == "rule:large_orders", "exits only, no delegation")
+for cid in ("MC-W27", "MC-W30"):
+    req(cid, all(probe(cid, p) == {"decision": "auto", "by": "builtin_risk_reducing"} for p in ("discretionary_exit", "owner_exit", "risk_exit")),
+        "exits stay built-in AUTO")
+req("MC-W28", tw_fired_at("MC-W28") == [] and [x["state"]["metrics"]["losing_streak"] for x in C["MC-W28"]["expect"]][2:] == ["1", "0", "1"],
+    "the winning exit resets the streak")
+req("MC-W29", tw_fired_at("MC-W29") == [(4, "tripwire:losing_streak")] and tw_state("MC-W29", 3)["metrics"]["losing_streak"] == "1"
+    and C["MC-W29"]["steps"][3]["side"] == "buy" and C["MC-W29"]["steps"][2]["price"] == "100", "a buy keeps the streak; an exit at cost loses its fee")
+req("MC-W30", tw_fired_at("MC-W30") == [(3, "tripwire:day_loss")] and tw_state("MC-W30")["restriction"] is None
+    and probe("MC-W30", "open", "950")["by"] == "rule:large_orders" and probe("MC-W30", "open", "300")["by"] == "rule:routine",
+    "delegations end, the mode stays normal, auto rules still decide")
+req("MC-W31", tw_fired_at("MC-W31") == [] and tw_state("MC-W31")["metrics"]["day_loss"] == "99.99"
+    and probe("MC-W31", "open", "950")["by"] == "delegation:d1", "one cent short; the delegation lifts")
+req("MC-W32", tw_fired_at("MC-W32") == [] and tw_state("MC-W32", 3)["metrics"]["day_loss"] == "0" and C["MC-W32"]["steps"][3]["event"] == "RiskDayStarted"
+    and tw_state("MC-W32")["metrics"]["day_loss"] == "60", "the new risk day counts afresh")
+req("MC-W33", tw_fired_at("MC-W33") == [(2, "tripwire:day_loss")] and all(s.get("side") in (None, "buy") for s in C["MC-W33"]["steps"]),
+    "commissions alone")
+req("MC-W34", tw_fired_at("MC-W34") == [(4, "tripwire:new_names")] and tw_state("MC-W34", 3)["metrics"]["new_names"] == "1", "re-entry does not count")
+req("MC-W35", tw_fired_at("MC-W35") == [] and tw_state("MC-W35", 3)["metrics"] == {} and tw_state("MC-W35")["metrics"]["losing_streak"] == "1",
+    "nothing before arming counts")
+req("MC-W36", tw_fired_at("MC-W36") == [(4, "tripwire:losing_streak")] and C["MC-W36"]["steps"][4]["event"] == "MandateVersionApplied",
+    "fires at the version's own input")
+req("MC-W37", tw_state("MC-W37", 4)["fired"] == {"losing_streak": "exits_only"} and tw_state("MC-W37", 4)["metrics"] == {}
+    and tw_events("MC-W37", 5) == ["RiskLimitLifted"] and tw_state("MC-W37")["fired"] == {}, "removal keeps it; the acknowledgment lifts")
+req("MC-W38", C["MC-W38"]["expect"][4]["journal"] == [{"type": "OwnerCommandRefused", "command": "acknowledge", "reason": "step_up_stale"}]
+    and tw_state("MC-W38")["fired"] == {"losing_streak": "exits_only"}, "stale step-up refused")
+req("MC-W39", tw_events("MC-W39", 1) == [] and C["MC-W39"]["expect"][5]["journal"][0]["reason"] == "step_up_reused"
+    and tw_state("MC-W39", 5)["fired"] != {} and tw_events("MC-W39", 6) == ["RiskLimitLifted"]
+    and tw_state("MC-W39")["metrics"]["losing_streak"] == "1" and tw_state("MC-W39")["fired"] == {}, "reused refused; fresh lifts and counts afresh")
+req("MC-W40", [i for i, _ in tw_fired_at("MC-W40")] == [3, 6] and tw_events("MC-W40", 4) == ["RiskLimitLifted"], "fires again after two more")
+req("MC-W41", tw_state("MC-W41", 2) == dict(tw_state("MC-W41", 2), restriction=None) and tw_state("MC-W41")["restriction"] == "exits_only"
+    and tw_events("MC-W41", 3) == [], "tightened while fired, held at once without firing again")
+req("MC-W42", tw_state("MC-W42", 4)["fired"] == {"losing_streak": "exits_only"} and tw_state("MC-W42")["restriction"] is None, "softening keeps exits_only")
+req("MC-W43", [l for _, l in tw_fired_at("MC-W43")] == ["tripwire:day_loss", "tripwire:losing_streak"]
+    and tw_events("MC-W43", 2) == ["RiskLimitTriggered", "OwnerAlertSent"] * 2, "two in id order on one fill")
+req("MC-W44", tw_state("MC-W44", 3)["metrics"]["losing_streak"] == "2" and tw_state("MC-W44", 4)["metrics"]["losing_streak"] == "0"
+    and tw_fired_at("MC-W44") == [(6, "tripwire:losing_streak")], "the new metric counts afresh")
+req("MC-W45", tw_events("MC-W45", 3) == [] and tw_state("MC-W45", 3)["metrics"]["losing_streak"] == "1"
+    and tw_fired_at("MC-W45") == [(4, "tripwire:losing_streak")], "an acknowledgment of nothing changes nothing")
+req("MC-W46", tw_fired_at("MC-W46") == [(3, "tripwire:losing_streak")] and C["MC-W46"]["steps"][3]["event"] == "LateFillApplied", "a late fill")
+req("MC-W47", tw_fired_at("MC-W47") == [] and tw_state("MC-W47")["metrics"]["losing_streak"] == "0"
+    and Decimal(C["MC-W47"]["steps"][2]["price"]) - Decimal(C["MC-W47"]["steps"][1]["price"]) == Decimal("1e-12"),
+    "the tie rounds to even: the exit breaks even")
+req("MC-W48", tw_fired_at("MC-W48") == [(4, "tripwire:losing_streak")] and C["MC-W48"]["steps"][3]["event"] == "RiskDayStarted"
+    and tw_state("MC-W48", 3)["metrics"]["losing_streak"] == "1", "the streak survives midnight")
+req("MC-W49", C["MC-W49"]["expect"][4]["journal"][0]["reason"] == "step_up_method"
+    and C["MC-W49"]["expect"][5]["journal"][0]["reason"] == "step_up_reused"
+    and C["MC-W49"]["steps"][4]["step_up"]["assertion"] == C["MC-W49"]["steps"][5]["step_up"]["assertion"]
+    and tw_state("MC-W49")["fired"] == {"losing_streak": "exits_only"}, "a refused acknowledgment spends its assertion")
+req("MC-W50", C["MC-W50"]["expect"][4]["journal"] == [{"type": "OwnerCommandRefused", "command": "acknowledge", "reason": "not_independent"}]
+    and C["MC-W50"]["steps"][4]["user"] == C["MC-W50"]["steps"][4]["requester"] and tw_state("MC-W50")["fired"] != {},
+    "the requester cannot lift it under independent approval")
+req("MC-W51", tw_events("MC-W51", 4) == ["RiskLimitLifted"] and C["MC-W51"]["steps"][4]["user"] != C["MC-W51"]["steps"][4]["requester"]
+    and C["MC-W51"]["steps"][4]["independent_approval_required"], "a second user lifts it")
+w52 = [s["expect"] for s in C["MC-W52"]["steps"]]
+req("MC-W52", C["MC-W52"]["kind"] == "risk_state" and "tripwire" in w52[1]["restrictions"] and w52[1]["agent_mode"] == "exits_only"
+    and w52[2].get("error") == "increase_blocked_while_latched" and w52[3]["journal"][0]["type"] == "RiskLimitLifted"
+    and w52[3]["agent_mode"] == "normal" and "error" not in w52[4], "MI-7 while fired; the increase applies after the acknowledgment")
+for cid, who in (("MC-W53", "requester"), ("MC-W54", "user")):
+    req(cid, C[cid]["steps"][4][who] is None and C[cid]["expect"][4]["journal"][0]["reason"] == "not_independent"
+        and tw_state(cid)["fired"] != {}, f"no {who} named: refused, fail closed")
+req("MC-W55", C["MC-W55"]["steps"][4]["independent_approval_required"] and not C["MC-W55"]["steps"][4]["independent_now"]
+    and C["MC-W55"]["expect"][4]["journal"][0]["reason"] == "not_independent", "bound at the request")
+req("MC-W56", not C["MC-W56"]["steps"][4]["independent_approval_required"] and C["MC-W56"]["steps"][4]["independent_now"]
+    and C["MC-W56"]["expect"][4]["journal"][0]["reason"] == "not_independent", "raised at processing")
+w57 = [s["expect"] for s in C["MC-W57"]["steps"]]
+req("MC-W57", C["MC-W57"]["kind"] == "risk_state" and C["MC-W57"]["steps"][1]["event"] == "risk_day_started"
+    and [j for j in w57[2]["journal"] if j["type"] == "RiskLimitTriggered"][0]["action"] == "end_delegations"
+    and "tripwire" not in w57[2]["restrictions"] and w57[3].get("error") == "increase_blocked_while_latched",
+    "an end_delegations tripwire latches; the loss counts from the new risk day")
+req("MC-W", sum(c.startswith("MC-W") for c in C) == 57, "57 tripwire cases")
+
 print("cases", len(C), "title assertion failures", len(bad))
 for b in bad:
     print(" ", b)

@@ -50,6 +50,10 @@ pub struct ExecutorState {
     pub(crate) reservations: BTreeMap<ClientOrderId, Usd>,
     pub(crate) protection: BTreeMap<InstrumentId, Protection>,
     pub(crate) unprotected: Vec<UnprotectedInterval>,
+    /// The protective orders each instrument's open interval waits on: placed when a sequence, a
+    /// re-placement or a partly filled bracket ended, and acknowledged by the broker before the
+    /// interval ends (DEC-348 item 2).
+    pub(crate) awaiting: BTreeMap<InstrumentId, BTreeSet<ClientOrderId>>,
     pub(crate) copied: BTreeMap<EventId, EventId>,
     /// Each instrument's running exit sequence, `unprotected_start` to `unprotected_end` (§5.4).
     pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
@@ -208,6 +212,7 @@ impl ExecutorState {
             reservations: BTreeMap::new(),
             protection: BTreeMap::new(),
             unprotected: Vec::new(),
+            awaiting: BTreeMap::new(),
             copied: BTreeMap::new(),
             exiting: BTreeMap::new(),
             ladders: BTreeMap::new(),
