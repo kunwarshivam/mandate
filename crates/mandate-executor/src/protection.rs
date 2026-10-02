@@ -1224,30 +1224,41 @@ fn joined(ids: &[ClientOrderId]) -> String {
 /// Whether a GTC order created on `created` is due for re-placement on `today` (§5.4): today is on
 /// or after the trading day `protective_replace_buffer_trading_days` trading days before its expiry,
 /// `gtc_expiry_days` calendar days after its creation — that is, at most that many trading days
-/// remain from today up to the expiry. A day the calendar cannot place counts as a non-trading day:
-/// counting fewer trading days can only bring the re-placement earlier (rule 3, #468 round 1, M2).
+/// remain from today up to the expiry (DEC-367 item 2).
+///
+/// The trading days are counted two ways where the calendar cannot place a day. The low count reads
+/// such a day as non-trading, so the buffer is reached no later than §5.4's (rule 3, #468 round 1,
+/// M2). The high count reads it as trading unless it is a weekend. An order is judged by its low
+/// count, unless that count was already within the buffer on its creation day: such an order was
+/// placed as a re-placement at the calendar's edge, and is judged by its high count, so it is not
+/// due again the day after it is placed (#468 round 2, M1).
 fn expiring(created: Date, today: Date, config: &ExecutorConfig) -> Result<bool, ExecutorError> {
     let mut expiry = created;
     for _ in 0..config.gtc_expiry_days {
         expiry = expiry.next()?;
     }
     let calendar = ExchangeCalendar::us_equities().ok();
-    let mut remaining: u32 = 0;
-    let mut day = today;
-    while day < expiry {
-        let trading = calendar
-            .as_ref()
-            .and_then(|calendar| calendar.is_trading_day(day).ok())
-            .unwrap_or(false);
-        if trading {
-            remaining = remaining.saturating_add(1);
+    let buffer = config.protective_replace_buffer_trading_days;
+    let within = |from: Date, high: bool| -> Result<bool, ExecutorError> {
+        let mut remaining: u32 = 0;
+        let mut day = from;
+        while day < expiry {
+            let trading = calendar
+                .as_ref()
+                .and_then(|calendar| calendar.is_trading_day(day).ok())
+                .unwrap_or(high && !day.is_weekend());
+            if trading {
+                remaining = remaining.saturating_add(1);
+            }
+            if remaining > buffer {
+                return Ok(false);
+            }
+            day = day.next()?;
         }
-        if remaining > config.protective_replace_buffer_trading_days {
-            return Ok(false);
-        }
-        day = day.next()?;
-    }
-    Ok(true)
+        Ok(true)
+    };
+    let placed_at_the_edge = within(created, false)?;
+    within(today, placed_at_the_edge)
 }
 
 /// After every step: a re-placement whose cancels are all confirmed — nothing rests any more —
@@ -6286,6 +6297,15 @@ mod sequence_tests {
             Date::parse("2028-12-21")?,
             &config
         )?);
+        assert!(
+            !super::expiring(
+                Date::parse("2028-12-22")?,
+                Date::parse("2028-12-26")?,
+                &config
+            )?,
+            "an order placed within the buffer at the calendar's edge is judged by its high count, \
+             so it is not due the next trading day (#468 round 2, M1)"
+        );
         Ok(())
     }
 
@@ -6309,9 +6329,9 @@ mod sequence_tests {
     }
 
     /// #468 round 1, B1 (rule 12, §5.4's `fits`): with an exit still working beside the protection,
-    /// the buffer day cancels nothing, since a re-placement for the held quantity would cover what
-    /// that exit may still sell. Once the exit is done, the next trading day, still before the
-    /// expiry (2026-09-03), re-places for the held quantity.
+    /// a due day (2026-08-28, past the buffer day 2026-08-27) cancels nothing, since a re-placement
+    /// for the held quantity would cover what that exit may still sell. Once the exit is done, the
+    /// next trading day, still before the expiry (2026-09-03), re-places for the held quantity.
     #[test]
     fn a_working_exit_defers_the_re_placement_to_the_next_trading_day() -> Result<(), ExecutorError>
     {
@@ -6320,7 +6340,7 @@ mod sequence_tests {
         let first = trading_day(&mut executor, &ports, "2026-08-28")?;
         assert!(
             cancels(&first).is_empty() && actions(&first).is_empty(),
-            "the buffer day leaves protection alone while {LONE} may still sell: {:?}",
+            "a due day leaves protection alone while {LONE} may still sell: {:?}",
             drafted(&first)
         );
         committed(
@@ -6461,7 +6481,7 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// #468 round 1, M4.3 (DEC-367 item 4, DEC-347): an exit sequence that takes the instrument
+    /// #468 round 1, M4.3 (DEC-367 item 5, DEC-347): an exit sequence that takes the instrument
     /// over while a re-placement waits keeps it. The confirmed cancels re-place nothing, though no
     /// exit order is working yet; the sequence re-protects when it ends.
     #[test]
@@ -6534,6 +6554,173 @@ mod sequence_tests {
             cancels(&next).is_empty() && actions(&next).is_empty(),
             "{:?}",
             drafted(&next)
+        );
+        Ok(())
+    }
+
+    /// #468 round 2, M1: at the calendar's edge as well, a re-placement placed on a trading day is
+    /// not re-placed the next one. Placed 2028-12-22, it has five in-range trading days left, so
+    /// its low count is within the buffer the day it is placed; it is judged by its high count.
+    #[test]
+    fn a_re_placement_at_the_calendars_edge_is_not_re_placed_the_next_day()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2028-12-22")?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(submissions(&placed).len(), 1);
+        acknowledge_protection(&mut executor, &placed, &ports)?;
+        let next = trading_day(&mut executor, &ports, "2028-12-26")?;
+        assert!(
+            cancels(&next).is_empty() && actions(&next).is_empty(),
+            "{:?}",
+            drafted(&next)
+        );
+        Ok(())
+    }
+
+    /// [`re_place`] on `executor`'s state for AAPL at 170 over 140: its effects.
+    fn re_placed(executor: &Executor, ports: &Ports<'_>) -> Result<Vec<Effect>, ExecutorError> {
+        let mut batch = crate::batch::Batch::new(&executor.state, ports)?;
+        let recorded = crate::state::Replacement {
+            entry: ClientOrderId::parse("md-held-1")?,
+            agent: AgentId("agent-a".to_owned()),
+            prices: Some(crate::types::ProtectionPrices {
+                stop: Price::parse("140")?,
+                take_profit: Some(Price::parse("170")?),
+            }),
+        };
+        super::re_place(&mut batch, &aapl()?, &recorded)?;
+        Ok(batch.effects)
+    }
+
+    /// Commits an accepted risk-exit sell of `qty` in `instrument` under `id`.
+    fn working_exit(
+        executor: &mut Executor,
+        id: &str,
+        instrument: &str,
+        qty: &str,
+    ) -> Result<(), ExecutorError> {
+        committed(
+            executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(id)),
+                ("agent", text("agent-a")),
+                ("instrument", text(instrument)),
+                ("side", text("sell")),
+                ("qty", text(qty)),
+                ("limit", text("150")),
+                ("purpose", text("risk_exit")),
+            ],
+        )?;
+        committed(
+            executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(id)), ("state", text("accepted"))],
+        )
+    }
+
+    /// #468 round 2, M3 (DEC-367 item 4): only the instrument's own exits count. An exit working in
+    /// MSFT neither defers AAPL's re-placement nor shrinks it.
+    #[test]
+    fn another_instruments_exit_neither_defers_nor_shrinks_a_re_placement()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        working_exit(&mut executor, "md-msft-exit", "MSFT", "4")?;
+        let started = trading_day(&mut executor, &ports, "2026-09-21")?;
+        assert_eq!(cancels(&started), vec![OCO], "not deferred by MSFT's exit");
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            ocos(&placed)
+                .into_iter()
+                .map(|(_, qty, _, _)| qty)
+                .collect::<Vec<_>>(),
+            vec![Qty::parse("10")?],
+            "MSFT's exit sells none of AAPL's shares"
+        );
+        Ok(())
+    }
+
+    /// #468 round 2, M3 (DEC-367 item 4): a working exit counts what it may still sell. An exit of
+    /// 4 that has filled 3 leaves 7 held and 1 still selling, so protection covers 6, not 3.
+    #[test]
+    fn a_partly_filled_exit_counts_only_its_remainder() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        working_exit(&mut executor, LONE, "AAPL", "4")?;
+        committed(
+            &mut executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-lone")),
+                ("client_order_id", text(LONE)),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text("3")),
+                ("price", text("150")),
+            ],
+        )?;
+        let effects = re_placed(&executor, &ports)?;
+        assert_eq!(
+            ocos(&effects)
+                .into_iter()
+                .map(|(_, qty, _, _)| qty)
+                .collect::<Vec<_>>(),
+            vec![Qty::parse("6")?]
+        );
+        Ok(())
+    }
+
+    /// #468 round 2, M3: with the position already below what the working exits may sell, the
+    /// re-placement places nothing and ends its interval, never the whole held quantity.
+    #[test]
+    fn an_over_committed_position_re_places_nothing() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        working_exit(&mut executor, LONE, "AAPL", "4")?;
+        committed(
+            &mut executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-elsewhere")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text("7")),
+                ("price", text("150")),
+            ],
+        )?;
+        let effects = re_placed(&executor, &ports)?;
+        assert!(submissions(&effects).is_empty(), "{:?}", drafted(&effects));
+        assert_eq!(actions(&effects), vec!["unprotected_end"]);
+        Ok(())
+    }
+
+    /// #468 round 2, m7 (DEC-367 item 5): a restart between the confirmed cancel and the
+    /// re-placement resumes it; the first input after the restart re-places the held quantity.
+    #[test]
+    fn a_restart_resumes_a_re_placement() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        executor.commit_one(
+            "OrderStateChanged",
+            object(vec![
+                ("client_order_id", text(OCO)),
+                ("state", text("canceled")),
+                ("risk_clock", clock(RiskClock::from_secs(0))?),
+            ])?,
+        )?;
+        let mut restarted = executor.restarted(&ports)?;
+        assert!(restarted.state.replacing.contains_key(&aapl()?));
+        let first = restarted.run(Input::Tick(RiskClock::from_secs(1)), &ports)?;
+        assert_eq!(
+            ocos(&first)
+                .into_iter()
+                .map(|(_, qty, _, _)| qty)
+                .collect::<Vec<_>>(),
+            vec![Qty::parse("10")?]
         );
         Ok(())
     }
