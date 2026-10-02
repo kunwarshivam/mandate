@@ -380,24 +380,44 @@ fn mode_of(rig: &Rig) -> Mode {
 /// printer a correct stamp calls cannot pass the pins unseen.
 fn timestamp_of(secs: i64) -> Result<String, String> {
     let (days, of_day) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
-    let shifted = days + 719_468;
+    let shifted = days.saturating_add(719_468);
     let (era, day_of_era) = (shifted.div_euclid(146_097), shifted.rem_euclid(146_097));
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_from_march = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_from_march + 2) / 5 + 1;
+    let year_of_era = day_of_era
+        .saturating_sub(day_of_era.div_euclid(1_460))
+        .saturating_add(day_of_era.div_euclid(36_524))
+        .saturating_sub(day_of_era.div_euclid(146_096))
+        .div_euclid(365);
+    let day_of_year = day_of_era.saturating_sub(
+        year_of_era
+            .saturating_mul(365)
+            .saturating_add(year_of_era.div_euclid(4))
+            .saturating_sub(year_of_era.div_euclid(100)),
+    );
+    let month_from_march = day_of_year
+        .saturating_mul(5)
+        .saturating_add(2)
+        .div_euclid(153);
+    let day = day_of_year
+        .saturating_sub(
+            month_from_march
+                .saturating_mul(153)
+                .saturating_add(2)
+                .div_euclid(5),
+        )
+        .saturating_add(1);
     let month = if month_from_march < 10 {
-        month_from_march + 3
+        month_from_march.saturating_add(3)
     } else {
-        month_from_march - 9
+        month_from_march.saturating_sub(9)
     };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    let year = year_of_era
+        .saturating_add(era.saturating_mul(400))
+        .saturating_add(i64::from(month <= 2));
     let civil = format!(
         "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.000000000Z",
-        of_day / 3_600,
-        of_day % 3_600 / 60,
-        of_day % 60
+        of_day.div_euclid(3_600),
+        of_day.rem_euclid(3_600).div_euclid(60),
+        of_day.rem_euclid(60)
     );
     let printed = UtcNanos::from_parts(secs, 0).map_err(failed)?.to_string();
     assert_eq!(
