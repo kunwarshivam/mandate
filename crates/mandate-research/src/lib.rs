@@ -1219,7 +1219,7 @@ pub enum ResearchError {
     #[error("the basket has no members, so it has no equal-weighted mean")]
     EmptyBasket,
     /// Returned by no entry point of this crate since the empty-basket follow-up's
-    /// implementation landed its stub (DEC-380); kept because ES-09's registry is add-only and
+    /// implementation replaced its stub (DEC-380); kept because ES-09's registry is add-only and
     /// the `unimplemented` code is pinned live, so a staged story can name itself and its story
     /// (DEC-77, DEC-294).
     #[error("{0} is not implemented yet (pending {1})")]

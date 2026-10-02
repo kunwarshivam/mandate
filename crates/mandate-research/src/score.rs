@@ -934,12 +934,6 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-282 item 3's precedence with both refusals live (#410 round 1, minor 2): a thesis
-    /// whose horizon closes outside the registered window is refused before the scoreable count
-    /// is consulted, so the answer names the input-integrity failure even when the scoreable
-    /// theses also fall below the registered minimum — the same input without the outside
-    /// thesis refuses with `WindowNotClosed`, so both refusals are live and the order is what
-    /// this pin reads.
     /// DEC-380 item 2 (#455 review, minor 1): a thesis outside the registered window is refused
     /// before the empty basket is ever read, alone and beside a scoreable thesis that would read
     /// it, so the basket's arm never overrides the window refusal DEC-282 item 3 puts first.
@@ -996,10 +990,11 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-380 item 1 (#455 review, minor 2): a basket with members is unchanged, so a member's
-    /// own boundary failure keeps its own code and is never named an empty basket — a member
-    /// with no close strictly after `as_of` within the horizon, and one with no close at or
-    /// before the horizon.
+    /// DEC-380 item 1 (#455 review, minor 2; #460 review, minor 2): a basket with members is
+    /// unchanged, so neither a member's own boundary failure nor the mean's own arithmetic is
+    /// ever named an empty basket — a member with no close strictly after `as_of` within the
+    /// horizon, one with no close at or before the horizon, and three members whose returns sum
+    /// past what a `Ratio` holds, which one such member alone does not.
     #[test]
     fn a_member_s_own_refusal_is_never_named_an_empty_basket() -> Result<(), ResearchError> {
         let close = |secs: i64, price: &str| -> Result<ObservedClose, ResearchError> {
@@ -1026,9 +1021,39 @@ mod tests {
             matches!(refused, Err(ResearchError::NoCloseOnOrBefore)),
             "a member with no exit close keeps its own code, got {refused:?}"
         );
+        let soaring = |id: &str| -> Result<CloseSeries, ResearchError> {
+            CloseSeries::new(
+                AssetId::new(id)?,
+                vec![close(200, "0.000000003")?, close(400, "100000000")?],
+            )
+        };
+        let alone = basket_return(&[soaring("basket-1")?], t(100)?, t(1_000)?);
+        assert!(
+            alone.is_ok(),
+            "the control: one such member's return is a figure, got {alone:?}"
+        );
+        let refused = basket_return(
+            &[
+                soaring("basket-1")?,
+                soaring("basket-2")?,
+                soaring("basket-3")?,
+            ],
+            t(100)?,
+            t(1_000)?,
+        );
+        assert!(
+            matches!(refused, Err(ResearchError::Num(NumError::Overflow))),
+            "a mean whose sum overflows keeps the arithmetic's own code, got {refused:?}"
+        );
         Ok(())
     }
 
+    /// DEC-282 item 3's precedence with both refusals live (#410 round 1, minor 2): a thesis
+    /// whose horizon closes outside the registered window is refused before the scoreable count
+    /// is consulted, so the answer names the input-integrity failure even when the scoreable
+    /// theses also fall below the registered minimum — the same input without the outside
+    /// thesis refuses with `WindowNotClosed`, so both refusals are live and the order is what
+    /// this pin reads.
     #[test]
     fn a_thesis_outside_the_window_is_refused_before_the_minimum() -> Result<(), ResearchError> {
         let first = long_thesis("th-1", "asset-a")?;
