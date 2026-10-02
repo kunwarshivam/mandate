@@ -16,7 +16,7 @@ use crate::payload::{
 };
 use crate::state::{
     Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
-    ObservedAccount, OrderDetail,
+    ObservedAccount, OrderDetail, Replacement,
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
@@ -28,7 +28,12 @@ use crate::types::{
 /// `causation_id` naming its origin, unless the executor originated it itself and says so with
 /// `originated`. `OwnerAcknowledged` and `TradingDayStarted` join them with the slices that
 /// interpret them, and until then answer those slices' stubs like every other event not reached.
-const COPIED: [&str; 3] = ["AgentModeApplied", "ClockAdvanced", "UniverseChanged"];
+const COPIED: [&str; 4] = [
+    "AgentModeApplied",
+    "ClockAdvanced",
+    "TradingDayStarted",
+    "UniverseChanged",
+];
 
 /// Replays one journaled event into the state.
 ///
@@ -132,6 +137,10 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
+        "TradingDayStarted" => {
+            state.trading_day = Some(Date::parse(required_text(payload, "date")?)?);
+            Ok(())
+        }
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
         "FeesCharged" => fees_charged(state, payload),
         "ExternalActivityIngested" => Ok(()),
@@ -841,7 +850,13 @@ fn protection_changed(
             let orders = protective_orders(payload)?;
             let covered = qty(payload, "qty")?;
             let prices = prices_of(payload)?;
-            legs(state, &instrument, &orders, covered, created_on(payload)?);
+            let created = created_on(payload)?;
+            legs(state, &instrument, &orders, covered, created);
+            for id in &orders {
+                if let Some(order) = state.orders.get_mut(id) {
+                    order.created_on = order.created_on.or(created);
+                }
+            }
             if state
                 .exiting
                 .get(&instrument)
@@ -884,6 +899,21 @@ fn protection_changed(
                 let entry = ClientOrderId::parse(entry)?;
                 let detail = state.details.entry(entry).or_default();
                 detail.bracket_since = detail.bracket_since.or(Some(at));
+            }
+            if flag(payload, "replacing")
+                && let (Some(entry), Some(agent)) = (
+                    optional_text(payload, "entry"),
+                    optional_text(payload, "agent"),
+                )
+            {
+                state.replacing.insert(
+                    instrument.clone(),
+                    Replacement {
+                        entry: ClientOrderId::parse(entry)?,
+                        agent: AgentId(agent.to_owned()),
+                        prices: prices_of(payload)?,
+                    },
+                );
             }
             if let (Some(intent), Some(entry), Some(agent)) = (
                 optional_text(payload, "intent_id"),
@@ -954,6 +984,9 @@ fn protection_changed(
             if let Some(entry) = optional_text(payload, "bracket").filter(|_| finished) {
                 let entry = ClientOrderId::parse(entry)?;
                 state.details.entry(entry).or_default().bracket_placed = true;
+            }
+            if finished {
+                state.replacing.remove(&instrument);
             }
             if finished
                 && let Some(sequence) = state.exiting.remove(&instrument)

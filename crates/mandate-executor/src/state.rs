@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
 use mandate_num::{Qty, Rounding, SignedQty, Usd};
+use mandate_time::Date;
 
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
@@ -57,6 +58,12 @@ pub struct ExecutorState {
     pub(crate) copied: BTreeMap<EventId, EventId>,
     /// Each instrument's running exit sequence, `unprotected_start` to `unprotected_end` (§5.4).
     pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
+    /// Each instrument whose protection is being re-placed before its GTC expiry: cancelled, and
+    /// re-placed once the cancels are confirmed, `unprotected_start` to `unprotected_end` (§5.4).
+    pub(crate) replacing: BTreeMap<InstrumentId, Replacement>,
+    /// The latest trading day a copied `TradingDayStarted` began: the creation date of the GTC
+    /// protection placed from then on, and the day §5.4's re-placement buffer is counted from.
+    pub(crate) trading_day: Option<Date>,
     /// Each instrument's exit laddered outside a sequence (§5.6: extended hours, the closing
     /// auction window, a presumed halt), folded from its rungs' `OrderSubmitted`.
     pub(crate) ladders: BTreeMap<InstrumentId, LoneLadder>,
@@ -215,6 +222,8 @@ impl ExecutorState {
             awaiting: BTreeMap::new(),
             copied: BTreeMap::new(),
             exiting: BTreeMap::new(),
+            replacing: BTreeMap::new(),
+            trading_day: None,
             ladders: BTreeMap::new(),
             quotes: BTreeMap::new(),
             sane_bids: BTreeMap::new(),
@@ -505,6 +514,15 @@ pub(crate) struct ExitSequence {
     pub(crate) passive: bool,
     /// Where the exit's price ladder stands, from its journaled rungs (§5.6).
     pub(crate) ladder: Ladder,
+}
+
+/// One re-placement before expiry as its `unprotected_start` journaled it (§5.4): the entry,
+/// agent and prices the new protection takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Replacement {
+    pub(crate) entry: ClientOrderId,
+    pub(crate) agent: AgentId,
+    pub(crate) prices: Option<ProtectionPrices>,
 }
 
 /// An exit §5.6 ladders with no protection to cancel first: its intent, agent and progress.
