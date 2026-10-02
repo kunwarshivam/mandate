@@ -913,14 +913,258 @@ fn the_report_recomputes_from_its_own_fields() {
     );
 }
 
+/// A basket with no members refuses with its own arm and the code ES-09 registers for it, where
+/// it used to reach the mean of nothing and refuse a nameless `Num(DivisionByZero)` (#435
+/// review minor 3, DEC-380). The live pin this replaces held only `Num(_)`; the arm is stricter.
 #[test]
+#[ignore = "pending E17-8"]
 fn an_empty_basket_is_an_error() {
     let refusal = basket_return(&[], t(100), t(1_000))
         .expect_err("an empty basket refuses, never a quiet zero");
     assert!(
-        matches!(refusal, ResearchError::Num(_)),
-        "an empty basket's equal-weighted mean is undefined: the Num error {refusal:?}"
+        matches!(refusal, ResearchError::EmptyBasket),
+        "an empty basket refuses with its own arm, got {refusal:?}"
     );
+    assert_eq!(refusal.code(), "empty_basket");
+    let member = series("basket-1", &[(101, "10"), (999, "11")]);
+    assert_eq!(
+        basket_return(std::slice::from_ref(&member), t(100), t(1_000))
+            .expect("a one-member basket scores"),
+        buy_and_hold(&member, t(100), t(1_000)).expect("the member scores"),
+        "a one-member basket's mean is its member's own return: the arm answers only an empty one"
+    );
+}
+
+/// An evaluation reaches the empty basket only through a scoreable thesis, which measures its
+/// excess against the basket, and then refuses with the basket's own arm at every minimum,
+/// because the baseline is computed before the count refusal (DEC-380). With no scoreable
+/// thesis the basket is never read, so the scoreable set's own refusals keep their precedence:
+/// the empty set at a minimum of zero (DEC-335), the window refusal below a positive one.
+#[test]
+#[ignore = "pending E17-8"]
+fn an_evaluation_against_an_empty_basket_refuses_with_its_own_code() {
+    let index = series("index", &[(101, "400"), (999, "400")]);
+    let scored = thesis("th-1", "asset-1", 100, 1_000, "0");
+    let instruments = BTreeMap::from([(
+        asset("asset-1"),
+        series("asset-1", &[(101, "100"), (999, "120")]),
+    )]);
+    for minimum in [0, 1, 2] {
+        let registered = decision(minimum);
+        let refused = evaluate(&input(
+            &registered,
+            std::slice::from_ref(&scored),
+            &instruments,
+            &[],
+            &index,
+        ))
+        .expect_err("a scoreable thesis against an empty basket has no baseline");
+        assert!(
+            matches!(refused, ResearchError::EmptyBasket),
+            "a scoreable thesis against an empty basket takes the basket's arm at minimum \
+             {minimum}, got {refused:?}"
+        );
+        assert_eq!(refused.code(), "empty_basket");
+    }
+    let unscoreable = thesis("th-2", "missing-2", 100, 1_000, "0");
+    let at_zero = decision(0);
+    let refused = evaluate(&input(
+        &at_zero,
+        std::slice::from_ref(&unscoreable),
+        &instruments,
+        &[],
+        &index,
+    ))
+    .expect_err("an empty scoreable set refuses");
+    assert!(
+        matches!(refused, ResearchError::EmptyScoreableSet),
+        "with no scoreable thesis the basket is never read, got {refused:?}"
+    );
+    let at_one = decision(1);
+    let refused = evaluate(&input(
+        &at_one,
+        std::slice::from_ref(&unscoreable),
+        &instruments,
+        &[],
+        &index,
+    ))
+    .expect_err("an empty scoreable set below the minimum refuses");
+    assert!(
+        matches!(refused, ResearchError::WindowNotClosed),
+        "below a positive minimum the window refusal keeps the empty set, got {refused:?}"
+    );
+}
+
+/// One generated basket scenario: how many members the basket has (`0..=2`), whether each of
+/// up to two theses is scoreable (an unscoreable one names an instrument with no series), and
+/// the registered minimum `0..=2`. Every horizon lies inside the registered window, so the
+/// only refusals in reach are the basket's, the count's, and the empty set's.
+#[derive(Debug)]
+struct BasketPlan {
+    members: usize,
+    scoreable: Vec<bool>,
+    minimum: u32,
+}
+
+/// The basket scenario strategy.
+fn basket_plan() -> impl Strategy<Value = BasketPlan> {
+    (
+        0usize..=2,
+        proptest::collection::vec(any::<bool>(), 0..=2),
+        0u32..3,
+    )
+        .prop_map(|(members, scoreable, minimum)| BasketPlan {
+            members,
+            scoreable,
+            minimum,
+        })
+}
+
+/// How many generated basket scenarios reached each of the property's expectations.
+#[derive(Debug, Default)]
+struct BasketBranchCounts {
+    empty_basket: Cell<u32>,
+    basket_unread: Cell<u32>,
+    below_minimum: Cell<u32>,
+    empty_at_zero: Cell<u32>,
+    reported: Cell<u32>,
+}
+
+/// No generated basket scenario reaches the basket's division by zero (#435 review minor 3,
+/// DEC-380): a scoreable thesis against an empty basket refuses with the basket's own arm at
+/// every minimum, an empty basket no scoreable thesis reads leaves the scoreable set's own
+/// refusals in place, and a non-empty basket reports each row's excess over the basket's mean,
+/// which the oracle takes from its own table of the members' returns (`0` for the first member,
+/// `0.1` for the second) rather than from the crate. Every expectation is reached by at least
+/// one generated scenario. A plain function over a `TestRunner`, because a pending test must not
+/// be one a macro generates.
+#[test]
+#[ignore = "pending E17-8"]
+fn no_basket_reaches_division_by_zero() {
+    let counts = BasketBranchCounts::default();
+    let members = [
+        series("basket-1", &[(101, "100"), (999, "100")]),
+        series("basket-2", &[(101, "100"), (999, "110")]),
+    ];
+    let excess_by_size = ["", "0.2", "0.15"];
+    let mut runner = TestRunner::new(ProptestConfig::with_cases(256));
+    let outcome = runner.run(&basket_plan(), |plan| {
+        let theses: Vec<ClosedThesis> = plan
+            .scoreable
+            .iter()
+            .enumerate()
+            .map(|(index, scoreable)| {
+                let number = index + 1;
+                let instrument = if *scoreable {
+                    format!("asset-{number}")
+                } else {
+                    format!("missing-{number}")
+                };
+                thesis(&format!("th-{number}"), &instrument, 100, 1_000, "0")
+            })
+            .collect();
+        let instruments: BTreeMap<AssetId, CloseSeries> = (1..=plan.scoreable.len())
+            .map(|number| {
+                let id = format!("asset-{number}");
+                (asset(&id), series(&id, &[(101, "100"), (999, "120")]))
+            })
+            .collect();
+        let basket = members.get(..plan.members).unwrap_or(&[]);
+        let index = series("index", &[(101, "400"), (999, "400")]);
+        let registered = decision(plan.minimum);
+        let outcome = evaluate(&input(&registered, &theses, &instruments, basket, &index));
+        if let Err(refused) = &outcome {
+            prop_assert!(
+                !matches!(refused, ResearchError::Num(NumError::DivisionByZero)),
+                "the basket's division by zero is unreachable, got {refused:?}"
+            );
+        }
+        let scoreable = plan
+            .scoreable
+            .iter()
+            .filter(|scoreable| **scoreable)
+            .count();
+        let scoreable = u32::try_from(scoreable).unwrap_or(u32::MAX);
+        if plan.members == 0 && scoreable > 0 {
+            BranchCounts::hit(&counts.empty_basket);
+            prop_assert!(
+                matches!(outcome, Err(ResearchError::EmptyBasket)),
+                "a scoreable thesis against an empty basket takes the basket's arm, got {:?}",
+                outcome.as_ref().err()
+            );
+            return Ok(());
+        }
+        if plan.members == 0 {
+            BranchCounts::hit(&counts.basket_unread);
+        }
+        if scoreable < plan.minimum {
+            BranchCounts::hit(&counts.below_minimum);
+            prop_assert!(
+                matches!(outcome, Err(ResearchError::WindowNotClosed)),
+                "a scoreable set below the minimum keeps the window refusal, got {:?}",
+                outcome.as_ref().err()
+            );
+        } else if scoreable == 0 {
+            BranchCounts::hit(&counts.empty_at_zero);
+            prop_assert!(
+                matches!(outcome, Err(ResearchError::EmptyScoreableSet)),
+                "an empty scoreable set at a minimum of zero keeps its own arm, got {:?}",
+                outcome.as_ref().err()
+            );
+        } else {
+            BranchCounts::hit(&counts.reported);
+            let card = match outcome {
+                Ok(card) => card,
+                Err(refused) => {
+                    return Err(TestCaseError::fail(format!(
+                        "a scoreable set at its minimum against a basket reports, not {refused:?}"
+                    )));
+                }
+            };
+            let expected = r(excess_by_size.get(plan.members).copied().unwrap_or("0"));
+            prop_assert_eq!(
+                card.theses.len(),
+                plan.scoreable
+                    .iter()
+                    .filter(|scoreable| **scoreable)
+                    .count(),
+                "every scoreable thesis is scored"
+            );
+            for row in &card.theses {
+                prop_assert_eq!(
+                    row.excess_over_basket,
+                    expected,
+                    "each row's excess is its 0.2 net over the oracle's basket mean"
+                );
+            }
+        }
+        Ok(())
+    });
+    outcome.expect("no basket reaches the division by zero");
+    for (branch, reached) in [
+        (
+            "a scoreable thesis against an empty basket",
+            &counts.empty_basket,
+        ),
+        (
+            "an empty basket no scoreable thesis reads",
+            &counts.basket_unread,
+        ),
+        ("a scoreable set below the minimum", &counts.below_minimum),
+        (
+            "an empty scoreable set at a minimum of zero",
+            &counts.empty_at_zero,
+        ),
+        (
+            "a scoreable set reported against a basket",
+            &counts.reported,
+        ),
+    ] {
+        assert!(
+            reached.get() > 0,
+            "the generator reaches {branch} at least once, counts {counts:?}"
+        );
+    }
 }
 
 /// One generated thesis: whether it is scoreable (an unscoreable one names an instrument with no

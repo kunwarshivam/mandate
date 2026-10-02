@@ -335,18 +335,30 @@ pub fn buy_and_hold(
 /// returns.
 ///
 /// # Errors
-/// Returns [`ResearchError`] for a member's boundary failure, and
-/// [`ResearchError::Num`] for an empty basket, whose mean is undefined.
+/// Returns [`ResearchError::EmptyBasket`] for a basket with no members, whose mean is
+/// undefined (DEC-380), and [`ResearchError`] for a member's boundary failure.
 pub fn basket_return(
     members: &[CloseSeries],
     as_of: UtcNanos,
     horizon_end: UtcNanos,
 ) -> Result<Ratio, ResearchError> {
+    if members.is_empty() {
+        return empty_basket();
+    }
     let returns = members
         .iter()
         .map(|member| buy_and_hold(member, as_of, horizon_end))
         .collect::<Result<Vec<_>, _>>()?;
     Ratio::mean(&returns).map_err(ResearchError::Num)
+}
+
+/// The empty basket's refusal, stubbed until its implementation lands (DEC-77 stage 1, DEC-380):
+/// the path that reached `Ratio::mean` of nothing and refused `Num(DivisionByZero)`, held by the
+/// follow-up's pending tests to the named arm, its code, and its reach through `evaluate`. The
+/// implementation PR replaces this body with [`ResearchError::EmptyBasket`] and deletes only
+/// their `#[ignore]` lines.
+fn empty_basket() -> Result<Ratio, ResearchError> {
+    Err(ResearchError::Unimplemented("basket_return", "E17-8"))
 }
 
 /// The evaluation itself (DEC-281 items 2 to 7): scores every thesis it can, names the ones it
@@ -358,7 +370,8 @@ pub fn basket_return(
 /// the registered window, [`ResearchError::EmptyScoreableSet`] for an evaluation whose
 /// scoreable set is empty — no theses at all, or every thesis unscoreable — where the count
 /// refusal does not answer it, a registered minimum of zero (DEC-335),
-/// [`ResearchError::WindowNotClosed`] when fewer than the minimum scoreable closed theses are
+/// [`ResearchError::EmptyBasket`] for a scoreable thesis measured against a basket with no
+/// members (DEC-380), [`ResearchError::WindowNotClosed`] when fewer than the minimum scoreable closed theses are
 /// scoreable, and [`ResearchError::Num`] for the arithmetic a figure cannot express.
 pub fn evaluate(input: &EvaluationInput<'_>) -> Result<Scorecard, ResearchError> {
     for thesis in input.theses {
@@ -524,6 +537,7 @@ mod tests {
             ResearchError::EmptyScoreableSet.code(),
             "empty_scoreable_set"
         );
+        assert_eq!(ResearchError::EmptyBasket.code(), "empty_basket");
     }
 
     /// The report's rounding scale, pinned live (DEC-127 item 4's, the same scale every figure

@@ -66,11 +66,6 @@ pub enum SimError {
     DayOrderOnAContinuousInstrument,
     #[error("an order rests from bar {0}, which the bars do not contain")]
     RestingBarOutOfRange(usize),
-    /// The story named in the pending tests has not been implemented yet, so the call cannot be
-    /// answered at all. A stub says so rather than returning a verdict another error could be
-    /// mistaken for (DEC-137).
-    #[error("this session check is not implemented yet")]
-    Unimplemented,
     #[error(transparent)]
     Num(#[from] NumError),
     #[error(transparent)]
@@ -93,7 +88,6 @@ impl SimError {
             Self::OcoOnAFractionalInstrument => "oco_on_a_fractional_instrument",
             Self::DayOrderOnAContinuousInstrument => "day_order_on_a_continuous_instrument",
             Self::RestingBarOutOfRange(_) => "resting_bar_out_of_range",
-            Self::Unimplemented => "unimplemented",
             Self::Num(e) => e.code(),
             Self::Time(e) => e.code(),
         }

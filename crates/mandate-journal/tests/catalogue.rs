@@ -421,7 +421,6 @@ fn a_closed_agent_stream_event_is_never_an_unknown_schema() {
 /// unlisted member is refused at that member, before anything else in it is read (§9.1's order,
 /// which §9.2 keeps).
 #[test]
-#[ignore = "pending E7-10"]
 fn a_closed_control_stream_schema_refuses_an_unlisted_member() {
     assert_eq!(
         CLOSED_BY_SECTION_9_2.len(),
@@ -512,7 +511,6 @@ fn refusal_of(draft: &[u8]) -> (InvalidReason, String) {
 /// authentication evidence, refuses an unlisted member at that member, so a raw assertion or a
 /// token has nowhere to sit (`AGENTS.md` rules 6 and 7, #429 round 1, B1).
 #[test]
-#[ignore = "pending E7-10"]
 fn a_step_up_refuses_an_unlisted_member() {
     let valid = r#"{"assertion_id":"assert_1","authenticated_at":"2026-09-20T13:06:50.000000000Z","method":"webauthn"}"#;
     assert_eq!(
@@ -529,7 +527,6 @@ fn a_step_up_refuses_an_unlisted_member() {
 
 /// `step_up.authenticated_at` is a §4.7 timestamp, never other text (#429 round 1, B1).
 #[test]
-#[ignore = "pending E7-10"]
 fn a_step_up_time_is_a_timestamp() {
     let valid = r#"{"assertion_id":"assert_1","authenticated_at":"2026-09-20T13:06:50.000000000Z","method":"webauthn"}"#;
     assert_eq!(
@@ -550,7 +547,6 @@ fn a_step_up_time_is_a_timestamp() {
 /// A `provenance` entry is a closed record too: an unlisted member inside it is refused there
 /// (#429 round 1, B1).
 #[test]
-#[ignore = "pending E7-10"]
 fn a_provenance_entry_refuses_an_unlisted_member() {
     let created = |entry: &str| {
         control_draft(
