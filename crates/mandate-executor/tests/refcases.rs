@@ -1473,6 +1473,15 @@ impl Drive<'_> {
                  mismatch",
                 self.case.id
             );
+            assert!(
+                run.differences
+                    .iter()
+                    .all(|d| d.kind == mandate_executor::DifferenceKind::Position),
+                "{} step {index}: and the mismatch is the quantity's alone, never the cash's \
+                 (DEC-347 item 3): {:?}",
+                self.case.id,
+                run.differences
+            );
         }
         true
     }
@@ -1998,7 +2007,7 @@ fn a_reconciliation_check_reports_the_steps_own_cash() {
     let ports = ports(&ids, &mandates, &instruments, &configuration);
     let rc_07 = case("RC-07", None);
     let first = rc_07.steps.first().cloned().unwrap_or(Json::Null);
-    let drive = Drive::new(rc_07, &ports);
+    let mut drive = Drive::new(rc_07, &ports);
     assert_eq!(drive.initial_account().cash, common::usd("100000"));
     assert_eq!(drive.account_after(&first).cash, common::usd("70000"));
     assert_eq!(
@@ -2006,6 +2015,25 @@ fn a_reconciliation_check_reports_the_steps_own_cash() {
         common::usd("100000"),
         "a step that names no cash reports the account at the start"
     );
+    drive.date = text_of(&first, "at")
+        .and_then(|at| at.get(..10))
+        .map(str::to_owned);
+    let before = drive.shell.state.clone();
+    drive.step(0, &first);
+    assert!(
+        drive.assert_reconciliation(0, &first, &before),
+        "RC-07 step 0's reconciliation runs live, past the trading day's start, and its \
+         unposted-fee check passes only with the step's cash in both snapshots (#447 round 2, M1)"
+    );
+}
+
+/// DEC-348 item 2: only a step that lists the interval's end after its `submit_protective` has
+/// the protection acknowledged within it. RC-21's step 2 does; its step 3 submits with no end.
+#[test]
+fn only_a_step_ending_after_its_protection_is_acknowledged_within_it() {
+    let rc_21 = case("RC-21", None);
+    let ends: Vec<bool> = rc_21.steps.iter().map(ends_after_protection).collect();
+    assert_eq!(ends, vec![false, false, true, false]);
 }
 
 /// DEC-347 item 4: a proposal is named when it is made only where its step expects no submission.
