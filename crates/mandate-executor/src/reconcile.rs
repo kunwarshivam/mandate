@@ -1500,7 +1500,7 @@ pub(crate) mod tests {
 
     /// An executor that has run its startup reconciliation and then heard the broker report
     /// 100000 of cash, so openings are not held and the next run compares cash.
-    fn reporting(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+    pub(crate) fn reporting(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
         let mut executor = Executor::opened(ports)?;
         executor.run(
             Input::BrokerSnapshot(executor.snapshot(ReconcileReason::Startup)?),

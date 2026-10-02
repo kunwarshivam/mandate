@@ -266,6 +266,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   implementation reads it the gate keeps a crypto opening owed at check 2 and refuses it
   fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a non-USD pair is denied, a
   USD pair passes the floor, and check 2 is whole for crypto (`crates/mandate-risk/tests/usd_pairs.rs`).
+  *Done:* check 2 in `mandate-risk` (#390, #394); the trading-domain harness decides crypto
+  proposals (#419, DEC-285; RC-09 and MC-B26 to MC-B28 passing in #422), and refuses a short in
+  its day-trade fold and reads `crypto_status` (#438 staged, DEC-314, DEC-315; implemented under
+  DEC-395).
 - **E6-11 (Must)** As an owner, I want the daily surveillance report delivered to me and a conduct
   breach to move the agent to `exits_only`, so that §9.6's "breach → agent `exits_only`" and its
   "threshold breaches are routed to the owner, whose acknowledgment is journaled" hold. E6-8 computes
@@ -908,10 +912,13 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   *Follow-up (#435 review, minor 3):* `score::basket_return` over an empty `members` slice refuses
   with the nameless `Num(DivisionByZero)`, pinned live by `an_empty_basket_is_an_error`: loud, so no
   figure escapes, but a code that tells a caller nothing. A tests PR names it the way DEC-335 named
-  the empty scoreable set (an add-only `ResearchError` arm and code). Tests PR open on
-  `agent/j-e17-8-empty-basket-tests` (DEC-380): `ResearchError::EmptyBasket`, code
-  `empty_basket`. The live pin `an_empty_basket_is_an_error` held only `Num(_)`, so it becomes a
-  stricter pending test.
+  the empty scoreable set (an add-only `ResearchError` arm and code). Tests merged in [#455](https://github.com/kunwarshivam/mandate/pull/455) (DEC-380): `ResearchError::EmptyBasket`, code
+  `empty_basket`; the implementation PR (DEC-77 stage 2) replaces the stub with the arm, deletes
+  only the three `#[ignore]` lines, and adds #455's minors 1 and 2 as in-module tests.
+  *Follow-up (#455 review, nit):* `no_basket_reaches_division_by_zero`'s `excess_by_size[0]` is
+  `""`, and `r("")` panics; the `reported` branch never reaches a zero-member basket today, so
+  it never fires, but a later generator change would make it a fixture panic. A tests change
+  gives index 0 a real figure or removes it.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -1489,6 +1496,19 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `an_unconfirmed_owner_exit_waits_for_the_session`) and the owner-confirmed extended-hours path:
   outside the regular session an owner exit sells equities through the ladder only on the
   confirmed bid, bid size and floor, and waits for the session otherwise (§5.5).
+- **E7-4's tests correction (stream K), from slice 2 ([DEC-346](decisions/DEC-346.md) item 7):**
+  `properties::every_unprotected_interval_has_a_journaled_start_and_end` asserts that no interval
+  is open when a script ends. A script that ends while the protected lead's partly filled entry is
+  still inside its interval (no completing fill, no timeout reached and confirmed) fails it on any
+  implementation. Judge an interval that is still open against what could have closed it, then
+  delete its `BEHAVIOUR_ONLY_TESTS` row.
+- **E7-4 (stream K), from slice 2 ([DEC-346](decisions/DEC-346.md), left open):** (1) a re-placement
+  after an exit covers every tranche at the prices of the latest `placed`, because the fold keeps
+  one price pair per instrument; decide this for tranches at different prices (coordinator). (2)
+  Bracket legs and the partial-fill OCO record no `created_on`, so slice 5's trading-day part must
+  date §5.4's re-placement before expiry from the placement's own record. (3) The slice that
+  reconciles protective legs maps `{entry}-p{record}` to the broker's leg ids, and it must land
+  before any shell path hands the executor a protected intent.
 - **E7-4 (stream K), from [#448](https://github.com/kunwarshivam/mandate/pull/448) round 1 (minor
   2, [DEC-349](decisions/DEC-349.md)):** a crypto stop-limit is sized net of the taker fee, the
   larger rate, because `BrokerFill` does not say maker or taker. After a maker fill the stop
@@ -1501,6 +1521,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   (`protection::sequence_tests::rule_13_script`) is dormant: no script holds an exit unexcused long
   enough to reach it. The follow-up either makes the branch bite, with a script that holds an exit
   unexcused and a plant it catches, or deletes it along with `quiet_since`.
+- ~~**E7-4 (stream K), CI's `fast` red at random on `main`** (reported on
+  [#445](https://github.com/kunwarshivam/mandate/pull/445), 2026-10-02):
+  `rule_13_holds_over_random_scripts` refused a risk exit held `session_closed` at 2018-01-01
+  00:00 ET (the New Year holiday's overnight) in a script from the eve of 2018.~~ **Fixed on
+  `agent/k-rule13-holiday-risk-exit` ([DEC-392](decisions/DEC-392.md)).** The executor's hold is
+  DEC-260 (13)'s. The oracle fixed the calendar's coverage at the script's start, so it now reads
+  coverage at each instant, and it knows the trading days of 2018-01-02 to 05. CI's minimal input
+  is the named test `rule_13_holds_for_a_risk_exit_on_the_new_year_holiday_overnight`.
 - **E7-4 (stream K), found by slice 4a's rule-13 oracle (`protection::sequence_tests::rule_13_holds_over_random_scripts`):**
   (1) a passive exit waits on its OCO's cancel confirmation with no bound and no alert: a broker
   that never confirms holds the exit for good, with the protection still resting (rule 13's broker
@@ -1866,10 +1894,6 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   beside a resting protective sell in the same instrument is denied `conduct_limit_breached` though
   §5.3 rule 8 lets a bracket add a tranche. A stop is not in the book until triggered; deciding
   whether it counts would reopen that path.
-- **An exit's pacing can return a gate error** (#311 round 2, minor 1). The property half is done:
-  `properties::an_exit_over_extreme_figures_is_still_routed` (pending E6-6, #436, DEC-327) draws
-  both triggers. The fix is the E6-6 row "route a discretionary exit whose collar cannot be
-  computed" below; delete this row with it.
 - **E6-6 slice 2:** the account-wide fold is `mandate_risk::fold_day_trades` (DEC-259). The
   trading-domain harness reads RC-09's and RC-09B's `regime`, `prior_day_trades`, `last_equity`,
   `multiplier` and `day_trade_count` and drives the ledger through `fold_day_trades` from the
@@ -1891,7 +1915,8 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   reaches the fold without that refusal. Refuse a negative `SignedQty` there instead of taking
   its magnitude. **Tests staged** in [#438](https://github.com/kunwarshivam/mandate/pull/438)
   (DEC-314): the refusal is pending E6-10 behind `held_overnight`'s stub, and a flat (`0`)
-  position, which is not a short, is pinned live as folding as no shares held.
+  position, which is not a short, is pinned live as folding as no shares held. *Done (DEC-395):*
+  the fold refuses with DEC-314's text, down to a billionth of a share.
 - **Read `crypto_status` in the trading-domain harness** (DEC-285 item 5). The driver hands the gate
   a crypto-active account because no crypto-proposing case states `crypto_status`, and
   `trading_domain_gate_harness.rs` pins it as pending E6-10, initial and in an update. When a case
@@ -1899,7 +1924,9 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   check 1's `crypto_active`. **Tests staged** in [#438](https://github.com/kunwarshivam/mandate/pull/438)
   (DEC-315): the two assertions are dropped, the gate carries a `crypto_active` field its
   snapshot reads, the read is a stub pending E6-10, and two in-module tests pin the stub's report
-  live until the implementation PR replaces them.
+  live until the implementation PR replaces them. *Done (DEC-395):* only an exact `ACTIVE` leaves
+  crypto openings open, a non-string status is refused, and the stub pins are replaced by live
+  tests that the status never refuses an equity decision or a crypto risk exit.
 - **RC-09's `alpaca_intraday_margin` variant cannot pass as written** (founder; DEC-285 item 6).
   Its `expect_overrides.step_1: { decision: { verdict: allow } }` merges into a decision that
   keeps `reason_code: legacy_pdt_day_trade_budget`, so the expectation is an allow with a deny's
@@ -1941,13 +1968,19 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   promises the whole rule set is re-checked before any rule is read. Stream F's V-023-at-load in
   `mandate-spec::validate` refuses such a value up front (landed with E10-1's slice V, DEC-161 item 5),
   and the order path's `well_typed` gains the same bound so both report it by name.
-- **E6-6:** route a discretionary exit whose collar cannot be computed (`AGENTS.md` rule 13,
-  DEC-327). A sell's passive collar end `bid × (1 + band)` overflows `Price::collar_bound` at the
-  decimal's edge, or, for a US equity quoted below about `0.0000834`, truncates to zero on the Reg
-  NMS grid (`not_positive`); `conduct::pacing` reports both as `Unimplemented("pacing", "E6-6")`,
-  and the advisory path's `map::verdict_of` turns any gate error into a denial. Skip the control
-  that cannot be computed, so the whole exit goes as proposed, and delete the `#[ignore]` on
-  `an_exit_over_extreme_figures_is_still_routed` (#311 round 2, minor 1; #436 review, M2 to M4).
+- **E6-6:** make a skipped collar countable without a replay. When DEC-383 skips a collar that
+  cannot be computed, `applied` does not name it and nothing is journaled, so the decision is
+  identical to one whose collar computed and bound nothing; a named entry in the decision or a
+  journaled fact would let the skips be counted (#452 review, m2).
+- **E6-6 tests correction:** the doc comment of `properties::an_exit_over_extreme_figures_is_still_routed`
+  still says "Pending E6-6" though the test is live since #452; DEC-77 item 2 kept the
+  implementation PR from touching it (#452 review, m5).
+- **E6-6:** decide a proposal of zero quantity by name. The gate allows one on every path whose
+  checks pass (a zero sell is a reduction, a zero buy passes every limit), so an `Allow` can
+  carry an order of nothing, which the broker refuses; only a discretionary exit over an
+  uncomputable collar keeps the collar's error for it (DEC-383 item 3). Found by the E6-6
+  exit-routing fix's differential matrix (6840 allowed zero rows on `main`); refusing it denies
+  no reduction, since a zero order reduces nothing.
 - **E6-6:** pin the rest of a re-priced exit and of the close window. The tests assert
   `marketable_limit_required` and the quantity of a market exit re-priced in an auction window but
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`

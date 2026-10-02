@@ -115,6 +115,18 @@ pub(crate) struct OrderDetail {
     /// broker's to refuse. A resubmission after a confirmed absence is a new attempt, with a new
     /// detail, which an exit waits on afresh (#174 ruling 5863046153, DEC-160 (18)).
     pub(crate) cancel_overdue: bool,
+    /// The broker's own cumulative filled quantity for the order, from the `filled_qty` its
+    /// latest report carried: a bracket entry's filled quantity before its fills are ingested
+    /// (§5.4's "the filled quantity", DEC-346 item 3).
+    pub(crate) reported_filled: Option<Qty>,
+    /// When a bracket entry's unprotected interval started: its first partial fill, from the
+    /// `ProtectionChanged unprotected_start` that names it as `bracket` (§5.4, DEC-346 item 4).
+    pub(crate) bracket_since: Option<RiskClock>,
+    /// Whether a bracket entry is done with: its legs placed on completion, or its interval ended
+    /// once it was terminal partly filled, with the OCO for its filled quantity or with nothing
+    /// left to cover, from the `ProtectionChanged placed` or `unprotected_end` that names it as
+    /// `bracket`. Each entry is protected once (§5.4, DEC-346 item 4).
+    pub(crate) bracket_placed: bool,
 }
 
 /// An adoption on the journal (`OrderStateChanged` with `adopted`) whose `CompensatingEvent` has

@@ -120,7 +120,6 @@ proptest! {
     /// fails: `Qty::portion` takes a fraction of at most one. Pending E6-6, whose implementation
     /// reads a control that cannot be computed as pacing nothing, so the whole exit goes.
     #[test]
-    #[ignore = "pending E6-6"]
     fn an_exit_over_extreme_figures_is_still_routed(
         origin in prop::sample::select(vec![
             Origin::OrderBuilder, Origin::GoalCompletion, Origin::RemovedInstrument,
