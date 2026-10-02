@@ -106,6 +106,7 @@
 'MC-B14' = { status = "passing", story = "E6-2" }
 'MC-B15' = { status = "passing", story = "E6-2" }
 'MC-B16' = { status = "passing", story = "E6-2" }
+'MC-B17' = { status = "passing", story = "E6-4" }
 'MC-B18' = { status = "passing", story = "E6-2" }
 'MC-B19' = { status = "passing", story = "E6-2" }
 'MC-B20' = { status = "passing", story = "E6-2" }
@@ -118,6 +119,9 @@
 'MC-B27' = { status = "passing", story = "E6-10" }
 'MC-B28' = { status = "passing", story = "E6-10" }
 'MC-B29' = { status = "passing", story = "E6-2" }
+'MC-B30' = { status = "passing", story = "E6-4" }
+'MC-B31' = { status = "passing", story = "E6-4" }
+'MC-B32' = { status = "passing", story = "E6-4" }
 'MC-N01' = { status = "passing", story = "E6-2" }
 'MC-N02' = { status = "passing", story = "E17-3" }
 'MC-N03' = { status = "passing", story = "E17-3" }
@@ -421,12 +425,40 @@
 'MC-D26' = { status = "passing", story = "E6-14" }
 'MC-D27' = { status = "passing", story = "E6-14" }
 # Family E, escalation (stream M7, E8-3; DEC-77 item 3, DEC-292). The ask_permit and deliver_now
-# cases, through mandate-approval (#416). The 26 lifecycle cases wait on the runtime driver.
+# cases, through mandate-approval (#416), and the lifecycle cases, through mandate-runtime's driver
+# (DEC-317, DEC-366). Ten lifecycle cases wait only on `ApprovalResponded.quorum`, which the runtime
+# does not write yet (E8-3); MC-E18 waits on DEC-318, which the founder decides.
+'MC-E01' = { status = "pending", story = "E8-3" }
+'MC-E02' = { status = "passing", story = "E8-3" }
+'MC-E03' = { status = "passing", story = "E8-3" }
+'MC-E04' = { status = "passing", story = "E8-3" }
+'MC-E05' = { status = "passing", story = "E8-3" }
+'MC-E06' = { status = "pending", story = "E8-3" }
+'MC-E07' = { status = "passing", story = "E8-3" }
+'MC-E08' = { status = "passing", story = "E8-3" }
+'MC-E09' = { status = "passing", story = "E8-3" }
+'MC-E10' = { status = "passing", story = "E8-3" }
+'MC-E11' = { status = "passing", story = "E8-3" }
+'MC-E12' = { status = "passing", story = "E8-3" }
+'MC-E13' = { status = "passing", story = "E8-3" }
+'MC-E14' = { status = "passing", story = "E8-3" }
+'MC-E15' = { status = "passing", story = "E8-3" }
+'MC-E16' = { status = "passing", story = "E8-3" }
+'MC-E17' = { status = "pending", story = "E8-3" }
+'MC-E18' = { status = "pending", story = "E8-3" }
+'MC-E19' = { status = "pending", story = "E8-3" }
+'MC-E20' = { status = "pending", story = "E8-3" }
+'MC-E21' = { status = "pending", story = "E8-3" }
+'MC-E22' = { status = "pending", story = "E8-3" }
+'MC-E23' = { status = "pending", story = "E8-3" }
+'MC-E24' = { status = "pending", story = "E8-3" }
 'MC-E25' = { status = "passing", story = "E8-3" }
 'MC-E26' = { status = "passing", story = "E8-3" }
 'MC-E27' = { status = "passing", story = "E8-3" }
 'MC-E28' = { status = "passing", story = "E8-3" }
+'MC-E29' = { status = "pending", story = "E8-3" }
 'MC-E30' = { status = "passing", story = "E8-3" }
+'MC-E31' = { status = "passing", story = "E8-3" }
 'MC-E32' = { status = "passing", story = "E8-3" }
 # Family W, tripwires (stream H, E6-13; DEC-187, DEC-350 to DEC-352). Pending on mandate-spec (V-044, the
 # §9.2 row), the executor's fold of spec §6.7, and a `kind: tripwire` harness arm.

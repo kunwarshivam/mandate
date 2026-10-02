@@ -491,10 +491,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   status PR's. Still open: the `lifecycle` op's runtime driver for the other 26 cases, which fail
   naming the op until it lands.
   *Part done (DEC-317, DEC-366):* the `lifecycle` op drives `mandate-runtime`'s `handle` and
-  `fold` under one published map, landing in three PRs. Slice 1 interprets the `ask` step, and every
-  case still fails at its second step, naming the slice that owes it. Once all three slices land,
-  fifteen cases pass (MC-E02 to MC-E05, MC-E07 to MC-E16, MC-E31); their `status.toml` rows are the
-  status PR's.
+  `fold` under one published map, landed in three PRs (#440, #453, #475). Fifteen cases pass
+  (MC-E02 to MC-E05, MC-E07 to MC-E16, MC-E31), and the status PR marks them passing. It lists the
+  other eleven as pending.
   *Follow-up (DEC-317 item 7, E8-3):* the runtime's `ApprovalResponded` records no `quorum`, the
   approver count and independence check 7 applied, which journal spec §9 requires for a grant that
   reaches check 7 (`mandate_approval::quorum` already computes it). Tests first in
@@ -2101,6 +2100,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   derive each guard the harness can state from the case (`scale_active_s`, `holding`, the session,
   the minimum) and require the gate's empty answer to agree, or widen the API in a tests PR first
   (DEC-77). MC-B17 and MC-B30 to MC-B32 then pass; their status rows follow in a status-only PR.
+  *Done (DEC-400):* the arm compares the trim and derives `ref.py`'s guards from the case; the
+  four cases pass in the harness. Their `status.toml` rows follow in a status-only PR.
 - **E6-4 reference: drop `ref.py`'s `factor < 1` trim guard and its dollar minimum** (#466 review,
   round 1, m2; DEC-399 items 3 and 5). `reference/mandate/ref.py`'s `builder` trims only below a
   factor of 1 and compares the sell's notional with `min_order_usd`. `mandate_risk::trim_proposals`
@@ -2108,7 +2109,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   which the review agrees is right. Removing the guard only tightens (DEC-176). The follow-up is a
   reference PR on its own (ES-22): `ref.py`, a regenerated `mandate.yaml` and
   `fixtures/refcases/mandate.json` if any case changes, and `check_cases.py`, `fuzz.py` and
-  `mutants.py` passing. No trim case states a factor of 1 or a sub-minimum trim today.
+  `mutants.py` passing, and the same two readings removed from the harness's
+  `crates/mandate-refcases/src/mandate/order_builder.rs::trim_guards` (DEC-400), which mirrors
+  `ref.py`. A rung factor of 1 cannot be written: the schema's `open_fraction` excludes it, and
+  `scaling_rung` requires a case's factor to be a rung's. So only the dollar minimum can diverge,
+  and no trim case states a sub-minimum trim today.
 - **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
