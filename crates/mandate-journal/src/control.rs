@@ -1188,6 +1188,50 @@ mod tests {
             }
         }
         assert_eq!(checked, 15);
+        let mut separated = with_payload(
+            base(
+                &section,
+                &named("base_draft", Value::Str("version_rejected".to_owned()))?,
+            )?,
+            "reason",
+            Value::Str("equity_below_exposure".to_owned()),
+        )?;
+        assert_eq!(
+            refusal(separated.clone()),
+            None,
+            "a rejection rule 33 does not read appends"
+        );
+        separated = with_payload(separated, "classification", Value::Null)?;
+        assert_eq!(
+            refusal(separated),
+            Some(("schema".to_owned(), "payload.classification".to_owned())),
+            "a null classification is refused by the schema, where rule 33 cannot answer for it \
+             (#482 round 1, m1)"
+        );
+        Ok(())
+    }
+
+    /// Either risk-state record at any `schema_version` but 1 is refused as `unknown_schema`, as
+    /// every §9.2 type is: each reaches its schema through `schema`'s version gate, never around it
+    /// (#482 round 1, m2; #467 round 1, m3).
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn a_risk_state_record_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
+        let section = named_section("risk_state")?;
+        let two = Int::new(2).ok_or("an integer")?;
+        for name in ["version_applied", "universe_admitted"] {
+            let mut body = base(&section, &named("base_draft", Value::Str(name.to_owned()))?)?;
+            assert_eq!(refusal(body.clone()), None, "the {name} base appends");
+            body.insert(
+                Key::new("schema_version").map_err(|_| "key")?,
+                Value::Int(two),
+            );
+            assert_eq!(
+                refusal(body),
+                Some(("unknown_schema".to_owned(), "payload".to_owned())),
+                "{name}"
+            );
+        }
         Ok(())
     }
 

@@ -1227,35 +1227,95 @@ mod record_tests {
     /// An applied `MandateVersionApplied` maps to the agent's version in force, read from the stored
     /// document `new_version` names, and a rejected one to none, but only under the classification
     /// mandate spec §9.2 gives its two stored documents: under any other it is refused at
-    /// `classification`, applied or rejected alike. The pairs change rows rule 33 cannot see, so
-    /// this is the check that keeps a risk-increasing version from being journaled as `neutral`
-    /// without step-up (DEC-403 item 5; #470 round 2, minor 5). The expected verdicts are written
-    /// from §9.2's rows, not computed by the classifier under test.
+    /// `classification`, applied or rejected alike. The pairs cover the §9.2 rows rule 33 cannot see
+    /// (#482 round 1, M1): a risk maximum, unpinning, `max_instruments`, protection off, a later
+    /// `end_date`, a signal-model change, an asset class added, `behavior.research` set from null,
+    /// pinning from a version with an admitting model (reducing, DEC-121) and from one without, and
+    /// an autonomy `then` in each direction. Each verdict is written from §9.2's table by hand, not
+    /// computed by the classifier under test (DEC-403 item 5; #470 round 2, minor 5).
     #[test]
     #[ignore = "pending E7-10"]
     fn a_version_maps_only_under_the_classification_its_documents_give() -> Result<(), String> {
-        let old = mandate(&[])?;
+        const RESEARCH: &str =
+            r#"{"interval_s": 3600, "cost_cap_usd_per_day": "5", "max_revisions_per_lineage": 3}"#;
+        let base = mandate(&[])?;
+        let unpinned = mandate(&[("/universe/pinned", "false")])?;
+        let admitting = mandate(&[
+            ("/universe/pinned", "false"),
+            ("/behavior/research", RESEARCH),
+            ("/behavior/signal_models/0/admits_instruments", "true"),
+        ])?;
+        let changed = |patch: (&str, &str)| mandate(&[patch]);
         let pairs = [
             (
-                mandate(&[("/risk/max_order_usd", r#""2000""#)])?,
+                &base,
+                changed(("/risk/max_order_usd", r#""2000""#))?,
                 "risk_increasing",
             ),
             (
-                mandate(&[("/risk/max_order_usd", r#""500""#)])?,
+                &base,
+                changed(("/risk/max_order_usd", r#""500""#))?,
                 "risk_reducing",
             ),
-            (mandate(&[("/name", r#""renamed""#)])?, "neutral"),
+            (&base, changed(("/name", r#""renamed""#))?, "neutral"),
+            (
+                &base,
+                changed(("/universe/pinned", "false"))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/universe/max_instruments", "5"))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/protection/enabled", "false"))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/goal/end_date", r#""2027-06-30""#))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/behavior/signal_models/0/weight", r#""0.5""#))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/universe/asset_classes", r#"["crypto", "us_equity"]"#))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/behavior/research", RESEARCH))?,
+                "risk_increasing",
+            ),
+            (&admitting, base.clone(), "risk_reducing"),
+            (&unpinned, base.clone(), "risk_increasing"),
+            (
+                &base,
+                changed(("/autonomy/rules/0/then", r#""deny""#))?,
+                "risk_reducing",
+            ),
+            (
+                &base,
+                changed(("/autonomy/rules/0/then", r#""auto""#))?,
+                "risk_increasing",
+            ),
         ];
         let canonical = |m: &crate::Mandate| m.canonical().map_err(|e| e.to_string());
         let digest =
             |m: &crate::Mandate| m.version().map(|v| v.digest()).map_err(|e| e.to_string());
         let mut stored = BTreeMap::new();
-        stored.insert(digest(&old)?, canonical(&old)?);
-        for (new, _) in &pairs {
+        for (old, new, _) in &pairs {
+            stored.insert(digest(old)?, canonical(old)?);
             stored.insert(digest(new)?, canonical(new)?);
         }
         let documents = |d: &Digest| stored.get(d).cloned();
-        for (new, verdict) in &pairs {
+        for (n, (old, new, verdict)) in pairs.iter().enumerate() {
             let applied = Some(JournaledFact::AgentVersionActive {
                 agent: AgentId::new("agent_a"),
                 connection_id: new.connection_id.clone(),
@@ -1274,7 +1334,7 @@ mod record_tests {
             });
             for (result, fact) in [("applied", applied), ("rejected", None)] {
                 for label in ["risk_increasing", "risk_reducing", "neutral"] {
-                    let record = version_record(&digest(&old)?, &digest(new)?, label, result)
+                    let record = version_record(&digest(old)?, &digest(new)?, label, result)
                         .map_err(|e| e.to_string())?;
                     let got = JournaledFact::from_record(
                         "MandateVersionApplied",
@@ -1289,18 +1349,57 @@ mod record_tests {
                             what: "classification",
                         })
                     };
-                    assert_eq!(got, want, "{verdict} pair, {result}, labelled {label}");
+                    assert_eq!(
+                        got, want,
+                        "pair {n} ({verdict}), {result}, labelled {label}"
+                    );
                 }
             }
         }
-        let unstored = version_record(&digest(&old)?, &Digest::of(b"absent"), "neutral", "applied")
+        Ok(())
+    }
+
+    /// A version's document must be stored and hash to the digest that names it: an absent one, or
+    /// an impostor stored under another document's digest, is refused at the member that names it,
+    /// `old_version` before `new_version`, never mapped from whatever is stored (#482 round 1, m4;
+    /// as `AgentDeployed`).
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn a_version_document_that_is_absent_or_an_impostor_is_refused() -> Result<(), String> {
+        let old = mandate(&[])?;
+        let new = mandate(&[("/name", r#""renamed""#)])?;
+        let other = mandate(&[("/name", r#""impostor""#)])?;
+        let canonical = |m: &crate::Mandate| m.canonical().map_err(|e| e.to_string());
+        let digest =
+            |m: &crate::Mandate| m.version().map(|v| v.digest()).map_err(|e| e.to_string());
+        let record = version_record(&digest(&old)?, &digest(&new)?, "neutral", "applied")
             .map_err(|e| e.to_string())?;
-        assert_eq!(
-            JournaledFact::from_record("MandateVersionApplied", &unstored, &documents, None),
-            Err(SpecError::InvalidInput {
-                what: "new_version"
-            })
-        );
+        let honest = [
+            (digest(&old)?, canonical(&old)?),
+            (digest(&new)?, canonical(&new)?),
+        ];
+        let cases = [
+            (vec![honest[1].clone()], "old_version"),
+            (vec![honest[0].clone()], "new_version"),
+            (
+                vec![(digest(&old)?, canonical(&other)?), honest[1].clone()],
+                "old_version",
+            ),
+            (
+                vec![honest[0].clone(), (digest(&new)?, canonical(&other)?)],
+                "new_version",
+            ),
+        ];
+        for (documents, what) in cases {
+            let stored: BTreeMap<Digest, Value> = documents.into_iter().collect();
+            let got = JournaledFact::from_record(
+                "MandateVersionApplied",
+                &record,
+                &|d: &Digest| stored.get(d).cloned(),
+                None,
+            );
+            assert_eq!(got, Err(SpecError::InvalidInput { what }), "{what}");
+        }
         Ok(())
     }
 
