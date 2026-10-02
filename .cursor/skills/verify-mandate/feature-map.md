@@ -180,7 +180,8 @@ the crate is pending.
   that verdict, with the session and close window from `mandate_risk::session_at`. 28 pass,
   `MC-B22` after hours and `MC-B23` in the close window among them since #347 moved their clocks,
   and the three crypto buys, `MC-B26` to `MC-B28`, since E6-10's check 2 (#422); the four
-  `trim_to_target` cases fail at `mandate_risk::trim_proposals` (E6-4). Its in-module tests doctor the fixture to prove
+  `trim_to_target` cases fail until the arm compares `mandate_risk::trim_proposals`' answer (E6-4, DEC-399
+  item 6), their `OWED` rows pinning that answer. Its in-module tests doctor the fixture to prove
   every member is read, a cash fee rate the gate would not reserve is refused, and a `session` or
   `in_close_window` label that contradicts `now` fails the case.
 - **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; families A and B in the shared
@@ -447,6 +448,8 @@ while a reducing purpose passes it.
   discretionary exit whose collar cannot be computed routed whole by the other controls alone
   (E6-6, DEC-327, DEC-383), and `evaluate_cancel`'s minimum resting time, trading spec §8.2 and
   §9.6),
+  `crates/mandate-risk/src/trim.rs` (`trim_proposals`, mandate §5.5's `trim_to_target` under
+  DEC-65's guards, DEC-399, with in-module boundary tests),
   `crates/mandate-risk/src/surveillance.rs` (§9.6's daily surveillance report: figures and flagged
   thresholds, concentration a figure only, no judgement), `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
