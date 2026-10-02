@@ -1,9 +1,9 @@
 //! E7-10 (DEC-168, DEC-261, DEC-302): the journal vectors' `control_stream` section (journal spec
 //! v0.7 §9.2), family by family, through `mandate-journal`'s `append` and `mandate-spec`'s mapping
 //! to `JournaledFact`. Each family holds a draft the journal must accept and one it must refuse, so
-//! neither a journal that accepts every draft nor one that refuses every draft passes. Every
-//! `AccountSnapshotRecorded` case is held back: that schema is not registered until stream K's
-//! fee-step writer conforms (DEC-261 item 7), which `snapshot_drafts_stay_unregistered` pins.
+//! neither a journal that accepts every draft nor one that refuses every draft passes.
+//! `AccountSnapshotRecorded`'s cases are their own family, registered once stream K's fee-step
+//! writer conforms (DEC-261 item 7, DEC-399).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -305,27 +305,23 @@ fn a_refused_owner_command_is_on_its_own_stream_and_names_its_input() {
     assert_family(&["OwnerCommandRefused"]);
 }
 
-/// DEC-261 item 7: until stream K's fee-step writer conforms, every snapshot draft in the vectors,
-/// valid or invalid, is refused for want of a schema, and never for one of its members.
+/// The account stream's snapshot is closed, with rule 24's cash members `null` together or
+/// compared within the band, and every snapshot draft in the vectors gets its own `expect`: the
+/// fee step's (`snapshot_fees`) and a cash comparison's (`snapshot_reconciled`) are accepted, and
+/// each invalid draft is refused with its reason at its path (DEC-261 item 7, DEC-399).
 #[test]
-fn snapshot_drafts_stay_unregistered() {
+#[ignore = "pending E7-10"]
+fn an_account_snapshot_is_closed_and_checked_by_rule_24() {
     let fx = fixture();
-    let section = section(&fx);
-    let cases: Vec<&Json> = ["valid_drafts", "invalid_drafts"]
-        .iter()
-        .flat_map(|kind| list(section, kind))
-        .filter(|case| event_type_of(&fx, case) == SNAPSHOT)
-        .collect();
-    assert!(cases.len() > 5, "the vectors hold snapshot drafts");
-    for case in cases {
-        let got = append_case(&fx, case);
-        assert!(
-            matches!(&got, AppendOutcome::Invalid { draft: 0, error }
-                if error.reason.code() == "unknown_schema" && error.path == "payload"),
-            "{}: {got:?}",
-            text(case, "name")
-        );
+    let mut failed = family_failures(&fx, &[SNAPSHOT]);
+    for name in ["snapshot_reconciled", "snapshot_fees"] {
+        let base = json!({"name": name, "base_draft": name, "changes": []});
+        let got = append_case(&fx, &base);
+        if !matches!(&got, AppendOutcome::Committed(rows) if rows.len() == 1) {
+            failed.push(format!("base draft {name}: expected Valid, got {got:?}"));
+        }
     }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
 /// The fact a record maps to, written in the vectors' form: decimals and dates as text, sets as

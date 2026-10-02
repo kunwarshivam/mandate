@@ -146,8 +146,12 @@ const CLOSED_BY_SECTION_9_2: &[(&str, &str)] = &[
     ("OwnerCommandRefused", AGENT),
 ];
 
+/// The account stream's snapshot, which §9.2 closes with rule 24 and its registration routes there
+/// (DEC-399). It is kept apart from the eleven pairs until that registration is implemented.
+const SNAPSHOT_ON_ACCOUNT: (&str, &str) = ("AccountSnapshotRecorded", ACCT);
+
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {
-    CLOSED_BY_SECTION_9_2.contains(&(event_type, kind))
+    CLOSED_BY_SECTION_9_2.contains(&(event_type, kind)) || (event_type, kind) == SNAPSHOT_ON_ACCOUNT
 }
 
 fn stream_of(kind: &str) -> &'static str {
@@ -462,18 +466,29 @@ fn a_closed_control_stream_event_is_never_an_unknown_schema() {
     }
 }
 
-/// DEC-261 item 7: `AccountSnapshotRecorded` stays unregistered until stream K's fee-step writer
-/// journals the three cash members as `null`. Refusing the fee step's snapshot at `append` would
-/// stop the step that pauses every agent and alerts the owner (`AGENTS.md` rules 3 and 13). The
-/// change that registers it lands with or after that writer fix, and changes this test with it.
+/// The account stream's snapshot is routed to §9.2's checks, never refused for want of a schema
+/// (DEC-261 item 7, DEC-399). Stream K's fee-step writer conforms (#456), so its registration goes
+/// ahead; the fee step's own snapshot is wired to §9.2's members in the same change, which the
+/// executor's `the_fee_steps_snapshot_is_never_refused_for_its_members` pins.
 #[test]
-fn account_snapshot_recorded_waits_for_the_fee_step_writer() {
-    let refused = Draft::parse(&draft("AccountSnapshotRecorded", ACCT, &[]))
+fn account_snapshot_recorded_is_routed_to_section_9_2() {
+    let (event_type, kind) = SNAPSHOT_ON_ACCOUNT;
+    let refused = Draft::parse(&draft(event_type, kind, &[]))
         .map(|_| ())
         .unwrap_err();
+    assert_ne!(refused.reason, InvalidReason::UnknownSchema);
+}
+
+/// §9.2 closes the snapshot's schema, so a member it does not list is refused as `schema` at that
+/// member, as on the eleven other pairs.
+#[test]
+#[ignore = "pending E7-10"]
+fn account_snapshot_recorded_refuses_an_unlisted_member() {
+    let (event_type, kind) = SNAPSHOT_ON_ACCOUNT;
+    let refused = Draft::parse(&draft(event_type, kind, &[])).map(|_| ());
     assert_eq!(
-        (refused.reason, refused.path.as_str()),
-        (InvalidReason::UnknownSchema, "payload")
+        refused.map_err(|e| (e.reason, e.path)),
+        Err((InvalidReason::Schema, "payload.unregistered".to_owned()))
     );
 }
 
