@@ -372,14 +372,39 @@ fn mode_of(rig: &Rig) -> Mode {
     rig.state.effective_mode()
 }
 
-/// The §4.7 timestamp of a whole second (journal spec §4.7): the canonical instant `UtcNanos`
-/// prints, which `UtcNanos::parse` reads back unchanged. The form §9.2 types the refusal's
+/// The §4.7 timestamp of a whole second (journal spec §4.7), the form §9.2 types the refusal's
 /// `effective_at` (DEC-261 item 7, DEC-308), computed here from the judged second itself rather
-/// than from the writer, so the pins hold an oracle of their own.
+/// than from the writer, so the pins hold an oracle of their own. It is derived twice: by civil
+/// calendar arithmetic over the epoch day (days from 1970-01-01 to a proleptic Gregorian date),
+/// and as the canonical instant `UtcNanos` prints, and the two must agree, so a defect in the
+/// printer a correct stamp calls cannot pass the pins unseen.
 fn timestamp_of(secs: i64) -> Result<String, String> {
-    UtcNanos::from_parts(secs, 0)
-        .map_err(failed)
-        .map(|at| at.to_string())
+    let (days, of_day) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    let shifted = days + 719_468;
+    let (era, day_of_era) = (shifted.div_euclid(146_097), shifted.rem_euclid(146_097));
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_from_march = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_from_march + 2) / 5 + 1;
+    let month = if month_from_march < 10 {
+        month_from_march + 3
+    } else {
+        month_from_march - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    let civil = format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.000000000Z",
+        of_day / 3_600,
+        of_day % 3_600 / 60,
+        of_day % 60
+    );
+    let printed = UtcNanos::from_parts(secs, 0).map_err(failed)?.to_string();
+    assert_eq!(
+        civil, printed,
+        "the civil derivation and `UtcNanos` agree on the §4.7 timestamp of {secs} seconds"
+    );
+    Ok(civil)
 }
 
 /// The refusal's `effective_at` (DEC-308): the writer stamps the §4.7 timestamp of `judged`
@@ -406,32 +431,50 @@ fn stamps_the_judged_second(record: &EventDraft, judged: i64) -> Result<(), Stri
 
 /// The committed vectors' `refused_stop` draft (`fixtures/refcases/journal.json`, generated from
 /// `docs/specs/reference-cases/journal.yaml`): the §4.7 `effective_at` the reference validator
-/// accepts, and the integer seconds its `refused_at_risk_clock_seconds` draft refuses. Both halves
-/// are read, never transcribed, so a vector change re-reads rather than passing silently.
+/// accepts, and the integer seconds its `refused_at_risk_clock_seconds` draft refuses, whose one
+/// change is checked to be `payload.effective_at`. Both halves are read through the crate's own
+/// strict JSON reader (`mandate_canon::parse`), never transcribed, so a vector change re-reads
+/// rather than passing silently, and the crate gains no dependency.
 fn refused_stop_vector() -> Result<(String, i64), String> {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/refcases/journal.json"
     );
-    let text = std::fs::read_to_string(path).map_err(failed)?;
-    let fixture: serde_json::Value = serde_json::from_str(&text).map_err(failed)?;
-    let stamp = fixture
-        .pointer("/control_stream/drafts/refused_stop/payload/effective_at")
-        .and_then(serde_json::Value::as_str)
+    let bytes = std::fs::read(path).map_err(failed)?;
+    let fixture = mandate_canon::parse(&bytes).map_err(failed)?;
+    let control = fixture
+        .get("control_stream")
+        .ok_or_else(|| failed("the vectors carry a control stream"))?;
+    let stamp = control
+        .get("drafts")
+        .and_then(|drafts| drafts.get("refused_stop"))
+        .and_then(|draft| draft.get("payload"))
+        .and_then(|payload| payload.get("effective_at"))
+        .and_then(Value::as_str)
         .ok_or_else(|| failed("the vectors' refused_stop carries no effective_at"))?
         .to_owned();
-    let seconds = fixture
-        .pointer("/control_stream/invalid_drafts")
-        .and_then(serde_json::Value::as_array)
+    let change = control
+        .get("invalid_drafts")
+        .and_then(Value::as_array)
         .ok_or_else(|| failed("the vectors list their invalid drafts"))?
         .iter()
         .find(|draft| {
-            draft.get("name").and_then(serde_json::Value::as_str)
-                == Some("refused_at_risk_clock_seconds")
+            draft.get("name").and_then(Value::as_str) == Some("refused_at_risk_clock_seconds")
         })
         .ok_or_else(|| failed("the vectors refuse integer seconds for effective_at"))?
-        .pointer("/changes/0/value")
-        .and_then(serde_json::Value::as_i64)
+        .get("changes")
+        .and_then(Value::as_array)
+        .and_then(<[Value]>::first)
+        .ok_or_else(|| failed("the refused draft names its change"))?;
+    assert_eq!(
+        change.get("path").and_then(Value::as_str),
+        Some("payload.effective_at"),
+        "the refused draft's first change is the refusal's effective_at"
+    );
+    let seconds = change
+        .get("value")
+        .and_then(Value::as_int)
+        .and_then(|secs| i64::try_from(secs).ok())
         .ok_or_else(|| failed("the refused seconds are an integer"))?;
     Ok((stamp, seconds))
 }
@@ -1033,7 +1076,8 @@ fn a_refusal_stamps_effective_at_for_each_of_its_four_reasons() -> Checked {
 /// is the committed `refused_stop` draft's value — the §4.7 timestamp the reference validator
 /// accepts — for the instant of the integer seconds its `refused_at_risk_clock_seconds` draft
 /// refuses. Both halves are read from `fixtures/refcases/journal.json`, the two are held to name
-/// one instant, and a Stop judged at that instant carries the vector's string member for member.
+/// one instant, the string is held to the test's own second derivation of that instant's §4.7
+/// timestamp, and a Stop judged at that instant carries the vector's string member for member.
 #[test]
 #[ignore = "pending E8-3"]
 fn the_refusals_effective_at_is_the_vectors_refused_stop_timestamp() -> Checked {
@@ -1043,6 +1087,12 @@ fn the_refusals_effective_at_is_the_vectors_refused_stop_timestamp() -> Checked 
         parsed.secs(),
         seconds,
         "the vector's {vector_stamp} and its refused {seconds} seconds name one instant"
+    );
+    assert_eq!(
+        vector_stamp,
+        timestamp_of(seconds)?,
+        "the vector's {vector_stamp} is the §4.7 timestamp of {seconds} seconds by the test's own \
+         derivation, independent of the reference generator"
     );
     let (view, flatten) = (
         view()?,

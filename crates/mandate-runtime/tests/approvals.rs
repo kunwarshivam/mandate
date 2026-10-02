@@ -904,7 +904,9 @@ const REFUSED_MEMBERS: [&str; 3] = ["command", "effective_at", "reason"];
 ///
 /// The judged second is read in the form the writer carries, whatever that form is (DEC-308): the
 /// integer seconds DEC-291's writer shipped, or the §4.7 timestamp of the same instant §9.2 types
-/// (DEC-261 item 7) that the implementation PR stamps. The form itself is pinned by the pending
+/// (DEC-261 item 7) that the implementation PR stamps. The timestamp is compared as an instant, not
+/// a truncated second: one off the whole second, such as `<judged second>.999999999Z`, is not the
+/// judged second. The form itself is pinned by the pending
 /// pins in `escalation::tests`, not here, so the implementation PR changes no `tests/` file but
 /// the `#[ignore]` deletions (DEC-77 item 2, DEC-309).
 fn refused_only(ran: &Ran, source: &EventId, command: &str, reason: &str, judged_at: i64) {
@@ -919,7 +921,10 @@ fn refused_only(ran: &Ran, source: &EventId, command: &str, reason: &str, judged
     assert_eq!(member(draft, "reason"), Some(reason));
     let judged = match draft.payload.get("effective_at") {
         Some(Value::Int(secs)) => i64::try_from(secs.get()).ok(),
-        Some(Value::Str(stamp)) => UtcNanos::parse(stamp).ok().map(UtcNanos::secs),
+        Some(Value::Str(stamp)) => UtcNanos::parse(stamp)
+            .ok()
+            .filter(|instant| instant.nanos() == 0)
+            .map(UtcNanos::secs),
         other => panic!("effective_at is {other:?}, not the judged second {judged_at}"),
     };
     assert_eq!(
