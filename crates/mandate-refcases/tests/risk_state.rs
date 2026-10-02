@@ -135,7 +135,6 @@ fn append(fx: &Json, body: &Json) -> AppendOutcome {
 /// Every base and valid draft of both records appends, and every invalid one is refused with its
 /// reason at its path, for each record type in turn (DEC-403, DEC-404).
 #[test]
-#[ignore = "pending E7-10"]
 fn the_risk_state_records_append_as_their_vectors_say() {
     let fx = fixture();
     let section = section(&fx);
@@ -240,7 +239,6 @@ fn map(section: &Json, body: &Json) -> Result<Option<JournaledFact>, SpecError> 
 /// version in force, read from the stored document `new_version` names; a rejected one to none;
 /// and a universe change to its instrument admitted or removed (journal spec §9.3).
 #[test]
-#[ignore = "pending E7-10"]
 fn each_risk_state_record_maps_to_its_journaled_fact() {
     let fx = fixture();
     let section = section(&fx);
@@ -266,7 +264,6 @@ fn each_risk_state_record_maps_to_its_journaled_fact() {
 /// An applied version whose `new_version` document is not stored is refused at `new_version`,
 /// never skipped, with every other document stored.
 #[test]
-#[ignore = "pending E7-10"]
 fn an_applied_version_whose_document_is_not_stored_is_refused() {
     let fx = fixture();
     let section = section(&fx);
@@ -304,7 +301,6 @@ fn an_applied_version_whose_document_is_not_stored_is_refused() {
 /// this is what keeps a risk-increasing version through any other §9.2 row from being journaled
 /// as applied, labelled `neutral`, with no step-up (#470 round 2, minor 5; DEC-403 item 5).
 #[test]
-#[ignore = "pending E7-10"]
 fn a_version_whose_classification_differs_from_its_documents_is_refused() {
     let fx = fixture();
     let section = section(&fx);
