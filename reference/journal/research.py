@@ -282,7 +282,7 @@ def order_drafts() -> list[dict]:
     pairs = [(a, b) for i, a in enumerate(names) for b in names[i + 1 :]]
     out = []
     for chosen in [*pairs, tuple(names)]:
-        changes = [c for name in chosen for c in groups[name][0]]
+        changes = copy.deepcopy([c for name in chosen for c in groups[name][0]])
         (reason, path), *rest = [groups[name][1] for name in chosen]
         title = "_and_".join(chosen)
         out.append(
@@ -345,7 +345,7 @@ def invalid_drafts() -> list[dict]:
             "proposed_as_a_revision",
             "rule 34: a ThesisProposed is revision 0",
             "proposed_admitted",
-            [change("payload.revision", 1), change("payload.predecessor_thesis_id", "th_01J8ZT00")],
+            copy.deepcopy(AS_A_REVISION),
             "schema",
             "payload.revision",
         ),
@@ -410,6 +410,24 @@ def invalid_drafts() -> list[dict]:
             "rule 36: the first failing check decides",
             "proposed_ignored",
             [change("payload.expires_at", "2026-09-27T14:00:01.000000000Z"), change("payload.reason", "horizon_mismatch")],
+            "schema",
+            "payload.reason",
+        ),
+        invalid(
+            "short_and_without_predecessor_refused_for_the_predecessor",
+            "rule 36: checks 1 and 3 both fail, and check 1 decides",
+            "revised_admitted",
+            [change("payload.direction", "short"), change("payload.predecessor_thesis_id", None),
+             change("payload.admitted", False), change("payload.reason", "revision_without_predecessor")],
+            "schema",
+            "payload.reason",
+        ),
+        invalid(
+            "off_horizon_and_without_predecessor_refused_for_the_predecessor",
+            "rule 36: checks 2 and 3 both fail, and check 2 decides",
+            "revised_admitted",
+            [change("payload.expires_at", "2026-10-03T14:00:01.000000000Z"), change("payload.predecessor_thesis_id", None),
+             change("payload.admitted", False), change("payload.reason", "revision_without_predecessor")],
             "schema",
             "payload.reason",
         ),
@@ -831,6 +849,7 @@ VALIDATOR_MUTANTS = (
     "rule.36.horizon",
     "rule.36.predecessor",
     "rule.36.unfailed",
+    "rule.36.order",
     "rule.37",
     "rule.37.corroborated",
     "rule.38",
@@ -939,10 +958,23 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
     ]
 
 
+# Seeded bugs that add a rule rather than drop one. Each is a tightening the §9.4 text declined
+# because an approved mandate case journals a record it would refuse, so each must make
+# `drafts.reference_cases` fail: `tighten.sorted_sources` is #490 round 1 M1's rule, which refused
+# MC-N07.
+TIGHTEN_MUTANTS = ("tighten.sorted_sources",)
+
+
 def run_mutants(section: dict) -> list[str]:
     """Every seeded bug caught; a vector mutant only by the check it is registered against, with no
-    other check of that check's family also catching it."""
+    other check of that check's family also catching it; and every tightening mutant refusing at
+    least one approved mandate case's thesis record."""
     escaped = []
+    reference_drafts = [reference_case_draft(listed) for listed in section["reference_cases"]]
+    for mutant in TIGHTEN_MUTANTS:
+        skip = frozenset([mutant])
+        if not any(violations(draft, skip) for draft in reference_drafts):
+            escaped.append(f"research tightening mutant {mutant}: no mandate case's thesis record is refused")
     cases = [(copy.deepcopy(d), None) for d in section["drafts"].values()]
     cases += [(draft_for(section, c), None) for c in section["valid_drafts"]]
     cases += [(draft_for(section, c), c["expect"]) for c in section["invalid_drafts"]]

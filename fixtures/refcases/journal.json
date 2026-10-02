@@ -9268,6 +9268,62 @@
     }
    },
    {
+    "name": "short_and_without_predecessor_refused_for_the_predecessor",
+    "clause": "rule 36: checks 1 and 3 both fail, and check 1 decides",
+    "base_draft": "revised_admitted",
+    "changes": [
+     {
+      "path": "payload.direction",
+      "value": "short"
+     },
+     {
+      "path": "payload.predecessor_thesis_id",
+      "value": null
+     },
+     {
+      "path": "payload.admitted",
+      "value": false
+     },
+     {
+      "path": "payload.reason",
+      "value": "revision_without_predecessor"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "off_horizon_and_without_predecessor_refused_for_the_predecessor",
+    "clause": "rule 36: checks 2 and 3 both fail, and check 2 decides",
+    "base_draft": "revised_admitted",
+    "changes": [
+     {
+      "path": "payload.expires_at",
+      "value": "2026-10-03T14:00:01.000000000Z"
+     },
+     {
+      "path": "payload.predecessor_thesis_id",
+      "value": null
+     },
+     {
+      "path": "payload.admitted",
+      "value": false
+     },
+     {
+      "path": "payload.reason",
+      "value": "revision_without_predecessor"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
     "name": "long_refused_as_short",
     "clause": "rule 36: a check the record passes is never the reason",
     "base_draft": "proposed_refused",

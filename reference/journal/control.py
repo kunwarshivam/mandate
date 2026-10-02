@@ -529,7 +529,8 @@ def thesis_violations(event_type: str, draft: dict, skip: frozenset[str]) -> lis
     if predecessor != revised and "rule.36.predecessor" not in skip:
         failing.append("revision_without_predecessor")
     if failing:
-        rule("reason", "36", p["reason"] == failing[0], "schema", "payload.reason")
+        decides = failing[-1] if "rule.36.order" in skip else failing[0]
+        rule("reason", "36", p["reason"] == decides, "schema", "payload.reason")
     else:
         rule("reason", "36.unfailed", p["reason"] not in THESIS_REFUSALS[:3], "schema", "payload.reason")
     if p["corroboration"] is None:
@@ -537,6 +538,9 @@ def thesis_violations(event_type: str, draft: dict, skip: frozenset[str]) -> lis
         rule("reason", "37", number is not None and number <= CORROBORATION_CHECK, "schema", "payload.reason")
     else:
         rule("reason", "37.corroborated", p["reason"] != "no_corroboration", "schema", "payload.reason")
+    sources = p["evidence_sources"] if isinstance(p["evidence_sources"], list) else []
+    if "tighten.sorted_sources" in skip and not ascending(encoded(sources)):
+        groups["reason"].append(Violation("tighten.sorted_sources", "non_canonical", "payload.evidence_sources"))
     model_ref = draft["config_refs"].get("model_version")
     rule("model", "38", model_ref is None or model_ref == p["content_hash"], "schema", "payload.content_hash")
     order = list(THESIS_ORDER)

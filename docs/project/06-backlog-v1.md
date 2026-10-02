@@ -897,7 +897,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   as `ThesisProposed`, so that the agent has ideas without me.
   *Journal half ([DEC-413](decisions/DEC-413.md)):* journal spec v0.9 §9.4 closes
   `ThesisProposed` and `ThesisRevised` in one shared schema with rules 34 to 38, and the vectors
-  gain a generated `research` section (spec PR on `agent/j3-thesis-schemas-spec`, stream J). Next,
+  gain a generated `research` section (merged in [#490](https://github.com/kunwarshivam/mandate/pull/490),
+  stream J; #490 round 2's three minors, a `tighten.*` mutant kind with the sorted-sources rule that
+  refused MC-N07, rule 36's internal order, and the two nits, on `agent/j3-thesis-vectors-minors`). Next,
   the registration in `mandate-journal` under DEC-77: a tests PR with stubs and pending tests, then
   the implementation. **Required, and blocking that registration's acceptance (#490 round 1, M2;
   as #470 round 2 minor 5 for §9.3):**
