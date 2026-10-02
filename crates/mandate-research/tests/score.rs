@@ -17,7 +17,10 @@
 
 use std::collections::BTreeMap;
 
-use mandate_num::{Price, Ratio, Rounding, SignedQty};
+use mandate_num::{NumError, Price, Ratio, Rounding, SignedQty};
+use proptest::prelude::*;
+use proptest::test_runner::{TestCaseError, TestRunner};
+
 use mandate_research::score::{
     CloseSeries, ClosedThesis, EvaluationDecision, EvaluationInput, EvaluationWindow,
     ObservedClose, UnscoreableReason, basket_return, buy_and_hold, entry_close, evaluate,
@@ -916,5 +919,231 @@ fn an_empty_basket_is_an_error() {
     assert!(
         matches!(refusal, ResearchError::Num(_)),
         "an empty basket's equal-weighted mean is undefined: the Num error {refusal:?}"
+    );
+}
+
+/// One generated scenario: how many theses there are (`0..=3`), which of them are scoreable (a
+/// `false` thesis names an instrument with no series), and the registered minimum `0..=4`.
+/// Every close and price comes from the same small fixture family the hand cases use, so every
+/// window return stays inside the ±100% the aggregate's sums of squares are bounded by
+/// (DEC-282 item 6), and the basket and the index are always well formed.
+#[derive(Debug)]
+struct EmptySetPlan {
+    scoreable: Vec<bool>,
+    minimum: u32,
+}
+
+/// The scenario strategy: nothing else varies, so a failure names the boundary it crossed.
+fn empty_set_plan() -> impl Strategy<Value = EmptySetPlan> {
+    (proptest::collection::vec(any::<bool>(), 0..=3), 0u32..4)
+        .prop_map(|(scoreable, minimum)| EmptySetPlan { scoreable, minimum })
+}
+
+/// No generated scenario — an empty input, an all-unscoreable one, or a partly scoreable one,
+/// against a registered minimum from zero to three — ever reaches the aggregate's division by
+/// zero (#410 review minor 3, DEC-282 item 9): a scoreable set the count refusal does not
+/// answer — an empty one at a minimum of zero — refuses with its own arm (DEC-335), an empty
+/// one below a positive minimum keeps the window refusal as #410's round-1 pins freeze it, a
+/// non-empty one below the minimum keeps it too, a thesis outside the registered window is
+/// refused before any of that (DEC-282 item 3), and a set at its minimum reports with the
+/// count an oracle counts for itself. A plain function over a `TestRunner`, because a pending
+/// test must not be one a macro generates.
+#[test]
+#[ignore = "pending E17-8"]
+fn no_scoreable_set_reaches_division_by_zero() {
+    let mut runner = TestRunner::new(ProptestConfig::with_cases(256));
+    let outcome = runner.run(&empty_set_plan(), |plan| {
+        let theses: Vec<ClosedThesis> = plan
+            .scoreable
+            .iter()
+            .enumerate()
+            .map(|(index, scoreable)| {
+                let number = index + 1;
+                let id = format!("th-{number}");
+                if *scoreable {
+                    thesis(&id, &format!("asset-{number}"), 100, 1_000, "0")
+                } else {
+                    thesis(&id, &format!("missing-{number}"), 100, 1_000, "0")
+                }
+            })
+            .collect();
+        let instruments: BTreeMap<AssetId, CloseSeries> = plan
+            .scoreable
+            .iter()
+            .enumerate()
+            .filter(|(_, scoreable)| **scoreable)
+            .map(|(index, _)| {
+                let number = index + 1;
+                let id = format!("asset-{number}");
+                (asset(&id), series(&id, &[(101, "100"), (999, "120")]))
+            })
+            .collect();
+        let basket = vec![series("basket-1", &[(101, "100"), (999, "100")])];
+        let index = series("index", &[(101, "400"), (999, "400")]);
+        let registered = decision(plan.minimum);
+        let outcome = evaluate(&input(&registered, &theses, &instruments, &basket, &index));
+        if let Err(refused) = &outcome {
+            prop_assert!(
+                !matches!(refused, ResearchError::Num(NumError::DivisionByZero)),
+                "the aggregate's division by zero is unreachable, got {refused:?}"
+            );
+        }
+        let outside = theses.iter().any(|thesis| {
+            thesis.horizon_end < registered.window.from || thesis.horizon_end > registered.window.to
+        });
+        let scoreable = theses
+            .iter()
+            .filter(|thesis| {
+                thesis.direction == Direction::Long && instruments.contains_key(&thesis.instrument)
+            })
+            .count();
+        let scoreable = u32::try_from(scoreable).unwrap_or(u32::MAX);
+        if outside {
+            prop_assert!(
+                matches!(outcome, Err(ResearchError::ThesisOutsideWindow)),
+                "a thesis outside the registered window is refused first, got {:?}",
+                outcome.as_ref().err()
+            );
+        } else if scoreable < plan.minimum {
+            prop_assert!(
+                matches!(outcome, Err(ResearchError::WindowNotClosed)),
+                "a scoreable set below the minimum keeps the window refusal, got {:?}",
+                outcome.as_ref().err()
+            );
+        } else if scoreable == 0 {
+            prop_assert!(
+                matches!(outcome, Err(ResearchError::EmptyScoreableSet)),
+                "an empty scoreable set the count refusal does not answer - a minimum of zero - \
+                 refuses with its own arm, got {:?}",
+                outcome.as_ref().err()
+            );
+        } else {
+            let card = match outcome {
+                Ok(card) => card,
+                Err(refused) => {
+                    return Err(TestCaseError::fail(format!(
+                        "a scoreable set at its minimum reports, not {refused:?}"
+                    )));
+                }
+            };
+            prop_assert_eq!(
+                card.scoreable_count,
+                scoreable,
+                "the report's count is the oracle's own"
+            );
+            prop_assert_eq!(
+                card.theses.len().saturating_add(card.unscoreable.len()),
+                theses.len(),
+                "every thesis is either scored or named"
+            );
+        }
+        Ok(())
+    });
+    outcome.expect("no scoreable set reaches the division by zero");
+}
+
+/// The empty scoreable set refuses with its own arm and the code ES-09 registers for it,
+/// wherever the count refusal does not answer it: no theses at all, or every thesis
+/// unscoreable, against a registered minimum of zero — the minimum an empty set is not below,
+/// where the run used to reach the aggregate's mean of nothing and refuse a nameless
+/// `Num(DivisionByZero)` (#410 review minor 3, DEC-282 item 9, DEC-335). Below a positive
+/// minimum the count refusal keeps the empty set, as #410's round-1 pins freeze it; a thesis
+/// outside the registered window is refused before any of that (DEC-282 item 3).
+#[test]
+#[ignore = "pending E17-8"]
+fn an_empty_scoreable_set_refuses_with_its_own_code_at_a_minimum_of_zero() {
+    let instruments = BTreeMap::from([(
+        asset("asset-a"),
+        series("asset-a", &[(101, "100"), (999, "120")]),
+    )]);
+    let basket = vec![series("basket-1", &[(101, "100"), (999, "100")])];
+    let index = series("index", &[(101, "400"), (999, "400")]);
+    let registered = decision(0);
+    let refused = evaluate(&input(&registered, &[], &instruments, &basket, &index))
+        .expect_err("an empty scoreable set against a minimum of zero refuses, named");
+    assert!(
+        matches!(refused, ResearchError::EmptyScoreableSet),
+        "an empty scoreable set refuses with its own arm, got {refused:?}"
+    );
+    assert_eq!(refused.code(), "empty_scoreable_set");
+    let missing = thesis("th-1", "asset-b", 100, 1_000, "0");
+    let refused = evaluate(&input(
+        &registered,
+        &[missing],
+        &instruments,
+        &basket,
+        &index,
+    ))
+    .expect_err("every thesis unscoreable leaves the scoreable set empty");
+    assert!(
+        matches!(refused, ResearchError::EmptyScoreableSet),
+        "an all-unscoreable input refuses with the empty-set arm, got {refused:?}"
+    );
+    for minimum in [1, 3] {
+        let strict = decision(minimum);
+        assert!(
+            matches!(
+                evaluate(&input(&strict, &[], &instruments, &basket, &index)),
+                Err(ResearchError::WindowNotClosed)
+            ),
+            "an empty scoreable set below a positive minimum keeps the count refusal"
+        );
+    }
+    let outside = thesis("th-1", "asset-a", 100, 20_000, "0");
+    assert!(
+        matches!(
+            evaluate(&input(
+                &registered,
+                &[outside],
+                &instruments,
+                &basket,
+                &index
+            )),
+            Err(ResearchError::ThesisOutsideWindow)
+        ),
+        "a thesis outside the registered window is refused before the empty scoreable set"
+    );
+}
+
+/// A non-empty scoreable set is unchanged: at its minimum it reports with one scored row and
+/// nothing named, below it the refusal is still the window's count refusal and never the new
+/// arm — and the empty set at the minimum where it used to reach the aggregate, zero, refuses
+/// with its own arm instead, which is the boundary between the two refusals pinned from both
+/// sides (DEC-336).
+#[test]
+#[ignore = "pending E17-8"]
+fn a_non_empty_scoreable_set_is_unchanged_and_an_empty_one_never_reaches_the_aggregate() {
+    let scored = thesis("th-1", "asset-a", 100, 1_000, "0");
+    let instruments = BTreeMap::from([(
+        asset("asset-a"),
+        series("asset-a", &[(101, "100"), (999, "120")]),
+    )]);
+    let basket = vec![series("basket-1", &[(101, "100"), (999, "100")])];
+    let index = series("index", &[(101, "400"), (999, "400")]);
+    let registered = decision(0);
+    let card = evaluate(&input(
+        &registered,
+        std::slice::from_ref(&scored),
+        &instruments,
+        &basket,
+        &index,
+    ))
+    .expect("one scoreable thesis meets the minimum of zero and reports as before");
+    assert_eq!(card.scoreable_count, 1);
+    assert!(card.unscoreable.is_empty());
+    assert_eq!(card.theses.len(), 1);
+    let strict = decision(2);
+    assert!(
+        matches!(
+            evaluate(&input(&strict, &[scored], &instruments, &basket, &index)),
+            Err(ResearchError::WindowNotClosed)
+        ),
+        "one scoreable thesis against a minimum of two is still the window refusal"
+    );
+    let refused = evaluate(&input(&registered, &[], &instruments, &basket, &index))
+        .expect_err("an empty scoreable set at the minimum where it used to reach the aggregate");
+    assert!(
+        matches!(refused, ResearchError::EmptyScoreableSet),
+        "an empty scoreable set at a minimum of zero takes its own arm, got {refused:?}"
     );
 }
