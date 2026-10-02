@@ -437,7 +437,6 @@ fn rung_submitted(
         floored: flag(payload, "at_floor"),
         stepping: false,
         parked: false,
-        trimmed: None,
     };
     if let Some(sequence) = state
         .exiting
@@ -966,25 +965,24 @@ fn protection_changed(
             state.watchdogged.insert(instrument.clone(), at);
         }
         "exit_unpriced" | "ladder_floor" => {}
-        "remainder_trimmed" => {
+        "rung_short" if optional_qty(payload, "sent")? == Some(Qty::ZERO) => {
             let intent = required_text(payload, "intent_id")?;
-            let cut = optional_qty(payload, "qty")?.ok_or_else(|| refused("qty"))?;
-            let ladders = state
+            if let Some(sequence) = state
                 .exiting
-                .values_mut()
-                .map(|sequence| (&sequence.intent, &mut sequence.ladder))
-                .chain(
-                    state
-                        .ladders
-                        .values_mut()
-                        .map(|lone| (&lone.intent, &mut lone.ladder)),
-                );
-            for (owner, ladder) in ladders {
-                if owner.0.0 == intent {
-                    ladder.trimmed = Some(ladder.trimmed.unwrap_or(Qty::ZERO).checked_add(cut)?);
-                }
+                .get_mut(&instrument)
+                .filter(|sequence| sequence.intent.0.0 == intent)
+            {
+                sequence.ladder.stepping = false;
+            }
+            if state
+                .ladders
+                .get(&instrument)
+                .is_some_and(|lone| lone.intent.0.0 == intent)
+            {
+                state.ladders.remove(&instrument);
             }
         }
+        "rung_short" => {}
         "unprotected_end" if flag(payload, "acknowledged") => {
             state.awaiting.remove(&instrument);
             if let Some(open) = state
