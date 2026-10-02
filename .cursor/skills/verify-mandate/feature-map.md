@@ -468,8 +468,9 @@ while a reducing purpose passes it.
   oracle, which never calls the crate's arithmetic), and the in-module tests in `gate.rs`,
   `conduct.rs` and `surveillance.rs` for the boundaries the files above cannot pin (among them
   E6-6's exit routing, DEC-383: an exit over an uncomputable collar routed at its own limit and
-  sliced as an `i128` oracle computes, an opening over one and a proposal of zero keeping the
-  collar's error, and only `overflow` and `not_positive` skipped). Planted bugs per test: the task
+  sliced as an `i128` oracle computes, an opening over one keeping the collar's error, a
+  proposal of zero refused before the collar is reached (DEC-401), and only `overflow` and
+  `not_positive` skipped). Planted bugs per test: the task
   brief.
 - **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
   `fixtures/refcases/mandate.json`, through `crates/mandate-refcases/src/mandate/risk_gate.rs`
