@@ -528,9 +528,8 @@ pub struct Autonomy {
     /// document that sets one as unimplemented, so it fails closed rather than loading without it.
     pub review_by: Option<Date>,
     /// The owner's standing yeses (§6.5, DEC-181): each turns one kind of `ask` into `auto`, bounded
-    /// and expiring; none when the member is absent. Until E6-13's
-    /// implementation, the parse refuses a document that holds one as unimplemented, so it fails
-    /// closed rather than loading without the rules that bound it (DEC-420).
+    /// and expiring; none when the member is absent. V-041 to V-043 bound them, and the order path
+    /// lifts none until E8-8, which is the stricter side (DEC-420 item 7).
     pub delegations: Vec<Delegation>,
 }
 

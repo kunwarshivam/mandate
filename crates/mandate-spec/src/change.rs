@@ -21,7 +21,7 @@ use mandate_domain::AutonomyDecision;
 
 use crate::condition::{Condition, ConditionValue, Operator};
 use crate::document::{
-    Approval, Autonomy, Delegation, Goal, LadderRung, Mandate, Pointer, Rule, ScaleAction,
+    Approval, Autonomy, Delegation, Goal, LadderRung, Lifts, Mandate, Pointer, Rule, ScaleAction,
     SignalModel, pointer,
 };
 use crate::{SchemaDec, SpecError};
@@ -146,14 +146,24 @@ pub fn pinning_switch(old: &Mandate, new: &Mandate, paths: &[Pointer]) -> Result
 ///
 /// Two identical rule sets are [`ChangeClass::Neutral`]: nothing changed, so nothing was made
 /// stricter either (DEC-172 item 3).
+///
+/// The blocks are compared with their delegations removed; the new block's delegations are read
+/// only for what they lift (`lifts`), for DEC-353's two conditions. A removed rule whose `then` is
+/// not `auto`, ahead of a rule or the default a delegation lifts, or an `ask` rule widened that a
+/// delegation lifts, is increasing: a delegation could then decide an order less strictly (MI-29).
+/// An order that was `auto` stays `auto` wherever it lands, so the changes that move only `auto`
+/// orders stay reducing (DEC-353 item 2). The delegations themselves are §9.2's own row,
+/// [`classify_delegations`].
 pub fn classify_autonomy(old: &Autonomy, new: &Autonomy) -> Result<ChangeClass, SpecError> {
-    if [old, new].iter().any(|a| !a.delegations.is_empty()) {
-        return Err(SpecError::Unimplemented);
-    }
-    if old == new {
+    let lifted: BTreeSet<&Lifts> = new.delegations.iter().map(|d| &d.lifts).collect();
+    let bare = |a: &Autonomy| Autonomy {
+        delegations: Vec::new(),
+        ..a.clone()
+    };
+    if bare(old) == bare(new) {
         return Ok(ChangeClass::Neutral);
     }
-    Ok(if autonomy_reduces(old, new) {
+    Ok(if autonomy_reduces(old, new, &lifted) {
         ChangeClass::RiskReducing
     } else {
         ChangeClass::RiskIncreasing
@@ -170,8 +180,60 @@ pub fn classify_delegations(
     old: &[Delegation],
     new: &[Delegation],
 ) -> Result<ChangeClass, SpecError> {
-    let _ = (old, new);
-    Err(SpecError::Unimplemented)
+    if old == new {
+        return Ok(ChangeClass::Neutral);
+    }
+    let new_ids: Vec<_> = new.iter().map(|d| &d.id).collect();
+    if new_ids.iter().collect::<BTreeSet<_>>().len() != new_ids.len() {
+        return Ok(ChangeClass::RiskIncreasing);
+    }
+    let kept_in_old: Vec<_> = old
+        .iter()
+        .map(|d| &d.id)
+        .filter(|id| new_ids.contains(id))
+        .collect();
+    let kept_in_new: Vec<_> = new_ids
+        .iter()
+        .copied()
+        .filter(|id| old.iter().any(|d| &d.id == *id))
+        .collect();
+    let reduces = kept_in_old == kept_in_new
+        && new.iter().all(|d| {
+            old.iter()
+                .find(|before| before.id == d.id)
+                .is_some_and(|before| narrowed(before, d))
+        });
+    Ok(if reduces {
+        ChangeClass::RiskReducing
+    } else {
+        ChangeClass::RiskIncreasing
+    })
+}
+
+/// §9.2's narrowed delegation: the same `id`, `lifts`, `when`, and `source_approval_id`, no cap
+/// larger, `starts_at` no earlier, and `expires_at` no later. An instant that is no instant
+/// (DEC-420 item 3) narrows nothing.
+fn narrowed(old: &Delegation, new: &Delegation) -> bool {
+    let Delegation {
+        id,
+        lifts,
+        when,
+        max_order_usd,
+        max_orders,
+        max_total_usd,
+        starts_at,
+        expires_at,
+        source_approval_id,
+    } = old;
+    id == &new.id
+        && lifts == &new.lifts
+        && when == &new.when
+        && source_approval_id == &new.source_approval_id
+        && new.max_order_usd <= *max_order_usd
+        && new.max_orders <= *max_orders
+        && new.max_total_usd <= *max_total_usd
+        && matches!((starts_at, new.starts_at), (Some(a), Some(b)) if b >= *a)
+        && matches!((expires_at, new.expires_at), (Some(a), Some(b)) if b <= *a)
 }
 
 /// The changed paths of two canonical values, in pointer order.
@@ -376,6 +438,9 @@ fn row(
         "/autonomy/review_by" => {
             maximum(o.autonomy.review_by.as_ref(), n.autonomy.review_by.as_ref())
         }
+        "/autonomy/delegations" => {
+            classify_delegations(&o.autonomy.delegations, &n.autonomy.delegations)?
+        }
         autonomy if autonomy.starts_with("/autonomy/") => {
             classify_autonomy(&o.autonomy, &n.autonomy)?
         }
@@ -515,7 +580,7 @@ fn is_pinning_switch(old: &Mandate, new: &Mandate, paths: &[Pointer]) -> bool {
 /// `review_by`: §9.2 classifies it by its own row, which [`classify`] reaches on its own path
 /// (`/autonomy/review_by`, DEC-273), so a change to it alone never comes here, and comparing it
 /// here would turn an earlier review date beside a stricter rule into a risk-increasing change.
-fn autonomy_reduces(old: &Autonomy, new: &Autonomy) -> bool {
+fn autonomy_reduces(old: &Autonomy, new: &Autonomy, lifted: &BTreeSet<&Lifts>) -> bool {
     let Autonomy {
         rules: _,
         default,
@@ -539,7 +604,7 @@ fn autonomy_reduces(old: &Autonomy, new: &Autonomy) -> bool {
         ) != ChangeClass::RiskIncreasing
         && new.default >= *default
         && new.admission >= *admission
-        && rules_reduce(old, new)
+        && rules_reduce(old, new, lifted)
 }
 
 /// The rule list's half of the autonomy row. Rules are identified by id: an id only the old list
@@ -549,7 +614,7 @@ fn autonomy_reduces(old: &Autonomy, new: &Autonomy) -> bool {
 /// A new list that repeats an id is increasing, because no shape can be read off a repeated rule
 /// (DEC-172 item 6). An id repeated only in the old list and kept appears twice among the old list's
 /// kept ids and once among the new list's, so the order check refuses it.
-fn rules_reduce(old: &Autonomy, new: &Autonomy) -> bool {
+fn rules_reduce(old: &Autonomy, new: &Autonomy, lifted: &BTreeSet<&Lifts>) -> bool {
     let old_ids: Vec<_> = old.rules.iter().map(|r| &r.id).collect();
     let new_ids: Vec<_> = new.rules.iter().map(|r| &r.id).collect();
     if new_ids.iter().collect::<BTreeSet<_>>().len() != new_ids.len() {
@@ -562,15 +627,33 @@ fn rules_reduce(old: &Autonomy, new: &Autonomy) -> bool {
     }
     let removals_reduce = with_later(&old.rules)
         .filter(|(rule, _)| !new_ids.contains(&&rule.id))
-        .all(|(rule, later)| loosest(later, old.default) >= rule.then);
+        .all(|(rule, later)| {
+            loosest(later, old.default) >= rule.then
+                && (rule.then == AutonomyDecision::Auto || !reaches_a_lift(later, lifted))
+        });
     removals_reduce
         && with_later(&new.rules).all(|(rule, later)| {
             let strictest_after = strictest(later, new.default);
             match old.rules.iter().find(|r| r.id == rule.id) {
                 None => rule.then >= strictest_after,
-                Some(before) => kept_rule_reduces(before, rule, strictest_after),
+                Some(before) => {
+                    kept_rule_reduces(before, rule, strictest_after)
+                        && !(rule.then == AutonomyDecision::Ask
+                            && how_often(&before.when, &rule.when) == Some(Often::More)
+                            && lifted.contains(&Lifts::Rule(rule.id.clone())))
+                }
             }
         })
+}
+
+/// DEC-353: whether a delegation of the new version lifts one of the rules after a removed one, or
+/// the default, which every order reaches last. Removing a rule whose orders were not `auto` then
+/// lets a delegation decide them less strictly (MI-29), so it is increasing.
+fn reaches_a_lift(later: &[Rule], lifted: &BTreeSet<&Lifts>) -> bool {
+    lifted.contains(&Lifts::Default)
+        || later
+            .iter()
+            .any(|rule| lifted.contains(&Lifts::Rule(rule.id.clone())))
 }
 
 /// A kept rule, one of §9.2's shapes or unchanged: with its condition unchanged it may only make

@@ -11,13 +11,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_canon::Value;
 use mandate_domain::{AssetClass, AssetId, AutonomyDecision, Environment};
 use mandate_num::{Fraction, NumError, Usd};
-use mandate_time::Date;
+use mandate_time::{Date, UtcNanos};
 
+use crate::change::{ChangeClass, classify};
 use crate::condition::{
     Condition, ConditionField, ConditionValue, FieldKind, MAX_CONDITION_DEPTH, Operator,
 };
 use crate::document::{
-    ConnectionId, Goal, LadderAction, Mandate, ModelId, Pointer, ProvenanceMap, ScaleAction,
+    ConnectionId, Goal, LadderAction, Lifts, Mandate, ModelId, Pointer, ProvenanceMap, ScaleAction,
     SignalModel, Source, pointer,
 };
 use crate::policy::{PolicyLevel, PolicyViolation, check, platform_base};
@@ -268,6 +269,7 @@ pub fn validate(
     account_rules(mandate, context, &worst_case, &mut violations)?;
     document_rules(mandate, &document, &mut violations);
     condition_rules(mandate, &mut violations);
+    delegation_rules(mandate, context, &mut violations)?;
     provenance_rules(mandate, &document, context, &mut violations);
     universe_rules(mandate, &mut violations);
     let rules = &mandate.autonomy.rules;
@@ -696,8 +698,14 @@ fn universe_rules(m: &Mandate, out: &mut BTreeSet<Violation>) {
 
 /// V-017, V-018, and V-023, over every comparison of every rule.
 fn condition_rules(m: &Mandate, out: &mut BTreeSet<Violation>) {
-    for rule in &m.autonomy.rules {
-        for (comparison, depth) in rule.when.comparisons() {
+    let conditions = m.autonomy.rules.iter().map(|rule| &rule.when).chain(
+        m.autonomy
+            .delegations
+            .iter()
+            .map(|delegation| &delegation.when),
+    );
+    for when in conditions {
+        for (comparison, depth) in when.comparisons() {
             flag(out, depth > MAX_CONDITION_DEPTH, Violation::V017);
             if let Condition::Compare { field, op, value } = comparison {
                 flag(out, field.is_reserved(), Violation::V018);
@@ -705,6 +713,122 @@ fn condition_rules(m: &Mandate, out: &mut BTreeSet<Violation>) {
             }
         }
     }
+}
+
+/// The longest a delegation may stand: 30 days (§6.5, V-041).
+const DELEGATION_MAX_SPAN_S: i64 = 30 * 86_400;
+
+/// V-041, V-042, and V-043 (§6.5, DEC-181, DEC-420).
+///
+/// V-042 classifies on its own basis: the delegations removed from both versions and the new
+/// version's review date in both (DEC-273), so a version increasing only because of what its own
+/// delegations lift carries them (DEC-353 item 4). With the previous document withheld, no
+/// delegation can be shown new, so every one is refused (DEC-420 item 4).
+fn delegation_rules(
+    m: &Mandate,
+    ctx: &ValidationContext,
+    out: &mut BTreeSet<Violation>,
+) -> Result<(), SpecError> {
+    let autonomy = &m.autonomy;
+    if autonomy.delegations.is_empty() {
+        return Ok(());
+    }
+    let ids: BTreeSet<_> = autonomy.delegations.iter().map(|d| &d.id).collect();
+    flag(
+        out,
+        ids.len() != autonomy.delegations.len(),
+        Violation::V041,
+    );
+    let two_approver = autonomy.approval.two_approver_above_usd.as_ref();
+    for d in &autonomy.delegations {
+        let names_an_ask = match &d.lifts {
+            Lifts::Default => autonomy.default == AutonomyDecision::Ask,
+            Lifts::Rule(id) => autonomy
+                .rules
+                .iter()
+                .any(|rule| &rule.id == id && rule.then == AutonomyDecision::Ask),
+        };
+        flag(
+            out,
+            !names_an_ask || !window_holds(d.starts_at, d.expires_at),
+            Violation::V041,
+        );
+        let inside = d.max_order_usd <= m.risk.max_order_usd
+            && d.max_order_usd <= d.max_total_usd
+            && d.max_total_usd <= m.capital.allocation_usd
+            && two_approver.is_none_or(|two| d.max_order_usd <= *two);
+        flag(out, !inside, Violation::V043);
+    }
+    if let Some(previous) = &ctx.previous_version {
+        let carried = match &previous.mandate {
+            None => true,
+            Some(before) => {
+                before
+                    .autonomy
+                    .delegations
+                    .iter()
+                    .any(|d| ids.contains(&d.id))
+                    && classify(
+                        &without_delegations(before, m)?,
+                        &without_delegations(m, m)?,
+                    )?
+                    .class
+                        >= ChangeClass::RiskIncreasing
+            }
+        };
+        flag(out, carried, Violation::V042);
+    }
+    Ok(())
+}
+
+/// `[starts, expires)` is a window, and at most 30 days long. An instant that is no instant is no
+/// window (DEC-420 item 3).
+fn window_holds(starts: Option<UtcNanos>, expires: Option<UtcNanos>) -> bool {
+    match (starts, expires) {
+        (Some(starts), Some(expires)) => {
+            starts < expires
+                && expires
+                    .secs()
+                    .checked_sub(starts.secs())
+                    .is_some_and(|span| {
+                        (span, expires.nanos()) <= (DELEGATION_MAX_SPAN_S, starts.nanos())
+                    })
+        }
+        _ => false,
+    }
+}
+
+/// `m` as V-042 classifies it: its document with the delegations removed and `review_of`'s review
+/// date, or none, in place of its own, parsed again.
+fn without_delegations(m: &Mandate, review_of: &Mandate) -> Result<Mandate, SpecError> {
+    let review = review_of
+        .canonical()?
+        .get("autonomy")
+        .and_then(|autonomy| autonomy.get("review_by"))
+        .cloned();
+    let mut document = m.canonical()?;
+    if let Value::Object(top) = &mut document
+        && let Some((_, Value::Object(autonomy))) =
+            top.iter_mut().find(|(key, _)| key.as_str() == "autonomy")
+    {
+        let review_key = autonomy
+            .keys()
+            .find(|key| key.as_str() == "review_by")
+            .cloned();
+        autonomy.retain(|key, _| key.as_str() != "delegations" && key.as_str() != "review_by");
+        if let Some(value) = review {
+            let key = match review_key {
+                Some(key) => key,
+                None => {
+                    mandate_canon::Key::new("review_by").map_err(|_| SpecError::InvalidInput {
+                        what: "the review date's member name",
+                    })?
+                }
+            };
+            autonomy.insert(key, value);
+        }
+    }
+    Ok(Mandate::parse(&document)?)
 }
 
 /// V-023 (§6.3). A decimal must also fit the exact type the order path compares it as, so a value the
@@ -803,8 +927,10 @@ fn provenance_rules(
             .enumerate()
             .map(|(index, rule)| (rule.then, format!("/autonomy/rules/{index}/then"))),
     )
-    .filter(|(decision, _)| *decision == AutonomyDecision::Auto);
-    for (_, auto) in autos {
+    .filter(|(decision, _)| *decision == AutonomyDecision::Auto)
+    .map(|(_, path)| path)
+    .chain((0..autonomy.delegations.len()).map(|index| format!("/autonomy/delegations/{index}")));
+    for auto in autos {
         flag(
             out,
             entries.iter().any(|(path, provenance)| {
