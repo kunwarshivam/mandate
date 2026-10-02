@@ -13,17 +13,17 @@ documents, and shows every seeded bug caught.
 from __future__ import annotations
 
 import copy
-import decimal
 import functools
-import sys
-from pathlib import Path
+from decimal import Decimal
+
+import yaml
 
 from common import artifact_ref, change, delete, is_ulid, normalize_decimal
 from control import (
     ACCOUNT_STREAM_REF,
     AGENT,
     EXECUTOR,
-    MODEL_CONTENT,
+    MANDATE_CASES,
     WORKSPACE,
     canonical_of,
     check_of,
@@ -52,30 +52,35 @@ BASE_IDS = {
 }
 assert all(is_ulid(i) for i in BASE_IDS.values()), "event IDs (§3)"
 NEW_ALLOCATION = "12500"
-MANDATE_REFERENCE = Path(__file__).resolve().parents[1] / "mandate"
 RESEARCH_BASE = "research_equity"
 
 
 @functools.cache
-def mandate_reference():
-    """`reference/mandate`'s validator and classifier, and the context its bases validate in. Its
-    import sets the decimal precision for itself, so the journal generator's own is restored."""
-    precision = decimal.getcontext().prec
-    sys.path.insert(0, str(MANDATE_REFERENCE))
-    try:
-        import bases
-        import ref
-    finally:
-        sys.path.remove(str(MANDATE_REFERENCE))
-        decimal.getcontext().prec = precision
-    return ref, bases
+def proven_research_document() -> dict:
+    """The mandate reference cases' `research_equity`, after re-hashing it to the canonical hash that
+    file records, so the stored document is the proven base: unpinned, with a research agent and an
+    admitting model, so a thesis can admit under it (MI-20 keeps one out of a pinned universe)."""
+    cases = yaml.safe_load(MANDATE_CASES.read_text(encoding="utf-8"))
+    base = cases["bases"][RESEARCH_BASE]
+    assert artifact_ref(base["mandate"]) == base["canonical_sha256"], "the research base re-hashes"
+    return base["mandate"]
 
 
 def research_document() -> dict:
-    """The mandate reference cases' `research_equity`: unpinned, with a research agent and an
-    admitting model, so a thesis can admit under it (MI-20 keeps one out of a pinned universe)."""
-    ref, bases = mandate_reference()
-    return copy.deepcopy(bases.BASES[RESEARCH_BASE])
+    return copy.deepcopy(proven_research_document())
+
+
+# Each version after the one in force changes exactly one path of it, and mandate spec §9.2 classifies
+# that path by its row: a maximum larger is risk-increasing and smaller risk-reducing, and `name` is
+# neutral. `documents.valid` and `drafts.classification` check the stored documents against these.
+VERSION_PATHS = {
+    "new_document": ("capital/allocation_usd", NEW_ALLOCATION),
+    "renamed_document": ("name", "btc-accumulator-renamed"),
+    "tightened_document": ("capital/max_loss_from_allocation", "0.08"),
+    "loosened_document": ("capital/max_loss_from_allocation", "0.15"),
+}
+MAXIMUMS = ("capital/allocation_usd", "capital/max_loss_from_allocation")
+NEUTRAL = ("name",)
 
 
 def documents() -> dict[str, dict]:
@@ -95,10 +100,7 @@ def documents() -> dict[str, dict]:
 
     return {
         "old_document": old,
-        "new_document": changed("capital/allocation_usd", NEW_ALLOCATION),
-        "renamed_document": changed("name", "btc-accumulator-renamed"),
-        "tightened_document": changed("capital/max_loss_from_allocation", "0.08"),
-        "loosened_document": changed("capital/max_loss_from_allocation", "0.15"),
+        **{name: changed(path, value) for name, (path, value) in VERSION_PATHS.items()},
         "research_document": research_document(),
     }
 
@@ -638,13 +640,64 @@ def found(check: str, message: str) -> str:
     return f"{check}: {message}"
 
 
-def validation_context(ref_module, bases_module) -> dict:
-    """The mandate bases' context, with the registered model the control-stream vectors pin."""
-    registry = dict(bases_module.REGISTRY)
-    entry = dict(registry[MODEL_CONTENT["model_id"]])
-    entry["content_hash"] = artifact_ref(MODEL_CONTENT)
-    registry[MODEL_CONTENT["model_id"]] = entry
-    return dict(bases_module.CTX, registry=registry)
+def differing_paths(old, new, prefix: str = "") -> list[str]:
+    """The leaf paths two documents differ at, `/`-joined; a list differs as a whole."""
+    if isinstance(old, dict) and isinstance(new, dict):
+        out = []
+        for key in sorted(set(old) | set(new)):
+            path = f"{prefix}/{key}".lstrip("/")
+            if key not in old or key not in new:
+                out.append(path)
+            else:
+                out += differing_paths(old[key], new[key], path)
+        return out
+    return [] if old == new else [prefix]
+
+
+def classify(old: dict, new: dict) -> str:
+    """Mandate spec §9.2's verdict for the paths these fixtures change, computed here and not taken
+    from the drafts: any other path is refused rather than guessed (fail closed)."""
+    verdicts = set()
+    for path in differing_paths(old, new):
+        if path in MAXIMUMS:
+            a, b = (Decimal(doc_at(d, path)) for d in (old, new))
+            verdicts.add("risk_increasing" if b > a else "risk_reducing" if b < a else "neutral")
+        elif path in NEUTRAL:
+            verdicts.add("neutral")
+        else:
+            raise ValueError(f"no §9.2 row is encoded here for {path}")
+    for verdict in ("risk_increasing", "risk_reducing"):
+        if verdict in verdicts:
+            return verdict
+    return "neutral"
+
+
+def doc_at(document: dict, path: str):
+    node = document
+    for name in path.split("/"):
+        node = node[name]
+    return node
+
+
+def document_problems(name: str, document: dict, base: dict) -> list[str]:
+    """A stored version is the proven base changed at its one listed path, to a value that keeps the
+    mandate's own bounds: the risk maximums under the allocation (V-013) and the floor a fraction in
+    (0, 1]. The research document is the proven `research_equity` base itself."""
+    if name == "research_document":
+        return [] if document == proven_research_document() else [f"{name} is not the proven research base"]
+    if name == "old_document":
+        return [] if document == base else [f"{name} is not the control-stream vectors' mandate"]
+    path, value = VERSION_PATHS[name]
+    problems = []
+    if differing_paths(base, document) != [path] or doc_at(document, path) != value:
+        problems.append(f"{name} does not change exactly {path} to {value}")
+    risk, capital = document["risk"], document["capital"]
+    order = [risk["max_order_usd"], risk["max_position_usd"], risk["max_gross_exposure_usd"], capital["allocation_usd"]]
+    if [Decimal(x) for x in order] != sorted(Decimal(x) for x in order):
+        problems.append(f"{name} breaks V-013's order")
+    if not Decimal("0") < Decimal(capital["max_loss_from_allocation"]) <= Decimal("1"):
+        problems.append(f"{name}'s floor is not a fraction in (0, 1]")
+    return problems
 
 
 def recompute_facts(section: dict) -> list[dict]:
@@ -681,14 +734,11 @@ def fixtures_hold(section: dict, name: str, draft: dict, stored: dict) -> list[s
     """A base or valid draft is a state the mandate rules can produce: a version record states the
     classification mandate spec §9.2 gives its two stored documents, and an admission through a
     thesis names an unpinned mandate (MI-20)."""
-    ref_module, _ = mandate_reference()
     p, problems = draft["payload"], []
     if draft["event_type"] == "MandateVersionApplied":
         old, new = stored.get(p["old_version"]), stored.get(p["new_version"])
         if old is not None and new is not None:
-            with decimal.localcontext() as ctx:
-                ctx.prec = 60
-                verdict, _ = ref_module.classify(old, new)
+            verdict = classify(old, new)
             if verdict != p["classification"]:
                 problems.append(found("drafts.classification", f"{name}: states {p['classification']}, §9.2 gives {verdict}"))
     if draft["event_type"] == "UniverseChanged" and p["reason"] == "thesis_admitted":
@@ -706,15 +756,10 @@ def check_section(section: dict) -> list[str]:
     for a in section["artifacts"]:
         if canonical_of(a["object"]) != a["canonical"] or "sha256:" + sha(a["canonical"]) != a["ref"]:
             problems.append(found("artifacts.rehash", f"artifact {a['name']}: does not re-hash"))
-    ref_module, bases_module = mandate_reference()
-    context = validation_context(ref_module, bases_module)
+    base = mandate_document()
     for a in section["artifacts"]:
-        with decimal.localcontext() as ctx:
-            ctx.prec = 60
-            valid_schema = ref_module.V.is_valid(a["object"])
-            errors = ref_module.semantic(a["object"], context)[0] if valid_schema else ["schema"]
-        if errors:
-            problems.append(found("documents.valid", f"artifact {a['name']}: not a valid mandate: {sorted(errors)}"))
+        for problem in document_problems(a["name"], a["object"], base):
+            problems.append(found("documents.valid", f"artifact {problem}"))
     for name, draft in section["drafts"].items():
         for ref in draft["artifact_refs"]:
             if ref not in stored:
