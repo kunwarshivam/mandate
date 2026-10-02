@@ -35,6 +35,7 @@ fn autonomy(when: Condition, then: AutonomyDecision) -> Result<Autonomy, String>
         default: Ask,
         admission: Ask,
         review_by: None,
+        delegations: Vec::new(),
         approval: Approval {
             timeout_s: 600,
             on_timeout: OnTimeout::Skip,
