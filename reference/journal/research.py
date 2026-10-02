@@ -304,7 +304,14 @@ def invalid_drafts() -> list[dict]:
     §9.4 member type and rule."""
     first = THESES[0]
     typed = [
-        invalid(f"{member}_ill_typed", "§9.1 types", base, [change(f"payload.{member}", value)], reason, f"payload.{member}")
+        invalid(
+            f"{member}_ill_typed",
+            "§9.4 asset_id" if member == "instrument_id" else "§9.1 types",
+            base,
+            [change(f"payload.{member}", value)],
+            reason,
+            f"payload.{member}",
+        )
         for member, base, value, reason in MEMBER_TYPES
     ]
     return [
