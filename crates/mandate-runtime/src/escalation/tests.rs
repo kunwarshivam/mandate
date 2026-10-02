@@ -878,7 +878,6 @@ fn a_stop_needs_fresh_step_up_and_no_resume_lifts_it() -> Checked {
 /// takes in the implementation PR. It is pending E8-3 until then, and fails at the stub's own
 /// report.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_stop_processed_late_is_refused_at_the_folded_second() -> Checked {
     let (view, flatten) = (
         view()?,
@@ -915,7 +914,6 @@ fn a_stop_processed_late_is_refused_at_the_folded_second() -> Checked {
 /// folded clock reached 1 400 s is refused at the folded second, and the journaled record carries
 /// the stamp the writer writes, never its `submitted_at` and never integer seconds.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_refused_resume_stamps_effective_at_the_judged_second() -> Checked {
     let (view, flatten) = (
         view()?,
@@ -960,7 +958,6 @@ fn a_refused_resume_stamps_effective_at_the_judged_second() -> Checked {
 /// way. A Stop submitted at 1 000 s with evidence authenticated then, read once the folded clock
 /// reached 1 400 s, is stale, and its refusal carries the folded second's §4.7 timestamp.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_refused_stop_stamps_effective_at_the_judged_second() -> Checked {
     let (view, flatten) = (
         view()?,
@@ -1000,7 +997,6 @@ fn a_refused_stop_stamps_effective_at_the_judged_second() -> Checked {
 /// `step_up_reused` on one paper view, and `step_up_method` on a backtest one, where `cli_confirm`
 /// does not count (mandate spec §6.1, DEC-155 item 4).
 #[test]
-#[ignore = "pending E8-3"]
 fn a_refusal_stamps_effective_at_for_each_of_its_four_reasons() -> Checked {
     let mut backtest_view = view()?;
     backtest_view.approval.environment = Environment::Backtest;
@@ -1099,7 +1095,6 @@ fn a_refusal_stamps_effective_at_for_each_of_its_four_reasons() -> Checked {
 /// one instant, the string is held to the test's own second derivation of that instant's §4.7
 /// timestamp, and a Stop judged at that instant carries the vector's string member for member.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_refusals_effective_at_is_the_vectors_refused_stop_timestamp() -> Checked {
     let (vector_stamp, seconds) = refused_stop_vector()?;
     let parsed = UtcNanos::parse(&vector_stamp).map_err(failed)?;
