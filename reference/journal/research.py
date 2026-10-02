@@ -304,11 +304,50 @@ def invalid_drafts() -> list[dict]:
     §9.4 member type and rule."""
     first = THESES[0]
     typed = [
-        invalid(f"{member}_ill_typed", "§9.1 types", base, [change(f"payload.{member}", value)], reason, f"payload.{member}")
+        invalid(
+            f"{member}_ill_typed",
+            "§9.4 asset_id" if member == "instrument_id" else "§9.1 types",
+            base,
+            [change(f"payload.{member}", value)],
+            reason,
+            f"payload.{member}",
+        )
         for member, base, value, reason in MEMBER_TYPES
     ]
     return [
         *typed,
+        invalid(
+            "instrument_id_a_ticker_not_an_asset_id",
+            "§9.4 asset_id: an id that is not mandate spec §3's asset ID",
+            "proposed_admitted",
+            [change("payload.instrument_id", "BTCUSD")],
+            "non_canonical",
+            "payload.instrument_id",
+        ),
+        invalid(
+            "instrument_id_not_a_string",
+            "§9.4 asset_id: not a string",
+            "proposed_admitted",
+            [change("payload.instrument_id", 2)],
+            "schema",
+            "payload.instrument_id",
+        ),
+        invalid(
+            "instrument_id_with_a_trailing_newline",
+            "§9.4 asset_id: the whole string, so a trailing newline is refused",
+            "proposed_admitted",
+            [change("payload.instrument_id", ADMITTED_ASSET + "\n")],
+            "non_canonical",
+            "payload.instrument_id",
+        ),
+        invalid(
+            "instrument_id_an_uppercase_asset_id",
+            "§9.4 asset_id: uppercase is refused, never folded",
+            "proposed_admitted",
+            [change("payload.instrument_id", ADMITTED_ASSET.upper())],
+            "non_canonical",
+            "payload.instrument_id",
+        ),
         invalid(
             "a_source_cited_as_empty_text",
             "§9.1 text, inside the list",
@@ -854,6 +893,10 @@ VALIDATOR_MUTANTS = (
     "rule.37.corroborated",
     "rule.38",
     *THESIS_ORDER_BUGS,
+    "types.asset_id",
+    "types.asset_id_case",
+    "types.asset_id_ident",
+    "types.asset_id_trailing_newline",
     "config_refs.required",
     "open.payload",
     "record.missing",

@@ -724,6 +724,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   the same step-up, which applies at the next safe point; the sum of a version's delegation caps
   stays within the allocation ([DEC-196](04-decision-log.md#decisions), V-045); no scope is offered for an admission, a
   two-approver ask, a live environment, or a client session.
+  Also for E8-8 ([#516](https://github.com/kunwarshivam/mandate/pull/516) round 1, minor 8): `mandate-spec`'s V-043
+  bounds each delegation on its own, so twenty delegations can each carry `max_total_usd` equal to the allocation. That is
+  the spec's reading, and the gate enforces every limit regardless (§6.5). The approval card and the MC-U family should
+  consider the aggregate, which is the V-045 the criteria above name and the mandate spec does not yet define.
 
 ### E9 Identity, tenancy, and policy
 
@@ -919,12 +923,37 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
     verdict passes over a check that mandate fails: an `admitted: true`, or a `reason` later than
     the first check the document fails;
   - **(#503 round 1, m3)** §9.4's `instrument_id` is typed looser than an asset ID, the latent twin
-    of §9.3's `instrument` before v0.10. No mapping parses it yet. The registration should type it as
-    v0.10's `asset_id` from the start, so it never appends a value a later mapping cannot read.
+    of §9.3's `instrument` before v0.10. No mapping parses it yet. Journal spec v0.11 types it as
+    `asset_id` with four `research` drafts (DEC-413 item 7, [#513](https://github.com/kunwarshivam/mandate/pull/513)), so the
+    registration types it `Ty::AssetId` from the start and never appends a value a later mapping cannot read.
   - the `man` ref on these two records means the mandate in force when the thesis was judged, and
     the tests PR pins that;
   - the tests PR comes first (DEC-77), and its cases include a pinned universe (MI-20) and
     `admission: deny`.
+
+  *Registration tests PR ([DEC-414](decisions/DEC-414.md)), on
+  `agent/j3-thesis-registration-tests`:* both types catalogued and routed to §9.4, refused as
+  `unimplemented`; the re-derivation is `mandate_spec::context::check_thesis_record`, a stub, with
+  six pending tests (pinned universe, admission `deny`, asset class, revision cap, the named mandate,
+  an absent or impostor document) and four pending `mandate-journal` tests over §9.4's vectors. The
+  implementation PR (DEC-77 stage 2) registers the schema and rules 34 to 38, implements the
+  re-derivation, and deletes only the ten `#[ignore]` lines. Every reader of a thesis record (the
+  lineage fold, the writer's read-back) calls `check_thesis_record` before acting on it. It lands
+  after journal spec v0.11 ([#513](https://github.com/kunwarshivam/mandate/pull/513), DEC-414 item
+  7) and registers `instrument_id` as `Ty::AssetId`.
+  *Follow-ups (#510 review round 1):*
+  - Minor 1: `thesis_tests`' stored mandates are parsed, not validated, and break V-036 (the admitting
+    model keeps `quant.momentum`). Make each valid with a second patched path (an `llm.` model id),
+    as #482 round 2's m1 asks for `record_tests`.
+  - **M1's rule, one rung up (the trust ladder):** a never-null test has missed a list's
+    elements again (#445, three rounds running, for §9.2; #510 for §9.4). Add a test helper, or an xtask
+    check, under which a never-null test derives its paths from the schema's own members, including
+    the first and second element of every list member, instead of from a hand-written array.
+  *Follow-ups (#513 review round 1):*
+  - Minor 5: `ModelOutputRecorded.instrument_id` is §9.1 `text`, where mandate spec §8.2's output
+    table types it `uuid`. Decide whether it becomes §9.3's `asset_id`: a §9.1 change, and its own
+    story, spec first (ES-22, DEC-176). Type `PlatformOperatorAction`'s `research_thesis_halt`
+    instrument (§9, DEC-100) the same way when that schema closes.
 
   The writer that adds the model's identity, the instants, and the artifact references to
   `ThesisEntry` is a story of its own. DEC-413 item 5 lists the readings not taken, each a later
@@ -1025,7 +1054,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   empty scorecard and is scored only by the E17-8 evaluator; it passes the eligibility floor,
   corroboration, and the autonomy rules like a new thesis and cannot loosen any envelope field; past
   `max_revisions_per_lineage` the lineage is retired and the owner is told. Depends on E17-8 and
-  on one completed DEC-99 evaluation on the DEC-103 thin slice.
+  on one completed DEC-99 evaluation on the DEC-103 thin slice. The lineage fold that reads `ThesisProposed` and
+  `ThesisRevised` calls `mandate_spec::context::check_thesis_record` on each record before acting on
+  it (DEC-414 item 3), as every reader of a thesis record must.
 
 ### E16 Kraken Derivatives US connector (Phase 3)
 

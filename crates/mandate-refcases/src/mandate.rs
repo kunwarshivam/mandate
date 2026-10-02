@@ -630,6 +630,7 @@ fn semantic_context(fixture: &Json, stated: &Json) -> Result<ValidationContext, 
                     environment: environment(str_at(previous, "environment")?)?,
                     connection_id: ConnectionId::parse(str_at(previous, "connection_id")?)
                         .map_err(|e| format!("`previous_version.connection_id`: {}", e.code()))?,
+                    mandate: None,
                 });
             }
             other => return Err(format!("`context.{other}` is not interpreted")),

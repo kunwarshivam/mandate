@@ -11,6 +11,11 @@
 //!
 //! The account stream's `MandateVersionApplied` and `UniverseChanged` are journal spec v0.8 §9.3's,
 //! with rules 29 to 33, routed here beside §9.2's (DEC-403, DEC-404).
+//!
+//! **The agent stream's `ThesisProposed` and `ThesisRevised` are routed here, to a stub** (journal
+//! spec v0.9 §9.4, DEC-413, DEC-414). The registration's tests PR refuses both as `unimplemented`,
+//! as they were refused as `unknown_event_type` before; the implementation PR registers their
+//! shared schema and rules 34 to 38.
 
 use mandate_canon::Value;
 use mandate_num::Usd;
@@ -40,11 +45,14 @@ const SNAPSHOT: &str = "AccountSnapshotRecorded";
 /// The account stream's risk-state records journal spec §9.3 closes, with rules 29 to 33.
 const RISK_STATE: [&str; 2] = ["MandateVersionApplied", "UniverseChanged"];
 
+/// The agent stream's research-agent thesis records journal spec §9.4 closes, with rules 34 to 38.
+const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
+
 /// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     match stream.stream_type() {
         StreamType::Control => CONTROL.contains(&event_type),
-        StreamType::Agent => event_type == REFUSAL,
+        StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
             event_type == REFUSAL || event_type == SNAPSHOT || RISK_STATE.contains(&event_type)
         }
@@ -60,6 +68,9 @@ pub(crate) fn payload(
     payload: &Value,
     config_refs: Option<&Value>,
 ) -> Result<Value, Invalid> {
+    if THESIS.contains(&event_type) {
+        return thesis_payload();
+    }
     let schema = schema(event_type, schema_version)
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
     let payload = crate::schema::normalize(schema, payload, "payload")?;
@@ -298,6 +309,12 @@ fn ascending(items: &[&str], path: &str) -> Result<(), Invalid> {
         InvalidReason::NonCanonical,
         path,
     )
+}
+
+/// The stub of the thesis registration's tests PR (DEC-77, DEC-414): journal spec §9.4's schema and
+/// rules 34 to 38 land with its implementation.
+fn thesis_payload() -> Result<Value, Invalid> {
+    Err(Invalid::new(InvalidReason::Unimplemented, "payload"))
 }
 
 /// Rule 24 on a compared snapshot: `cash_band` ≥ 0, and `cash_in_band` is `true` exactly when
@@ -1468,6 +1485,140 @@ mod tests {
                 "payload.provenance[0].path".to_owned()
             ))
         );
+        Ok(())
+    }
+
+    /// Journal spec §9.4's vectors, judged by `Draft::parse` alone so the mutation gate sees rules 34
+    /// to 38 here: every base and valid draft of `ThesisProposed` and `ThesisRevised` is accepted,
+    /// and every invalid one is refused with the first reason and path it expects (DEC-413,
+    /// DEC-414). The order drafts pin which of two broken rules is reported first.
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn every_thesis_draft_is_judged_as_its_vectors_say() -> Result<(), String> {
+        let section = named_section("research")?;
+        let mut failures = Vec::new();
+        let drafts = section
+            .get("drafts")
+            .and_then(Value::as_object)
+            .ok_or("no drafts")?;
+        let mut accepted: Vec<(String, Value)> = Vec::new();
+        for name in drafts.keys() {
+            accepted.push((
+                format!("base {}", name.as_str()),
+                named("base_draft", Value::Str(name.as_str().to_owned()))?,
+            ));
+        }
+        for case in list(&section, "valid_drafts") {
+            accepted.push((format!("valid {}", text(case, "name")), case.clone()));
+        }
+        for (name, case) in &accepted {
+            let parsed = Draft::parse(&draft(&section, case)?).map(|_| ());
+            if parsed.is_err() {
+                failures.push(format!("{name}: {parsed:?}"));
+            }
+        }
+        let invalid = list(&section, "invalid_drafts");
+        for case in invalid {
+            let expect = case.get("expect").ok_or("no expect")?;
+            let refused = Draft::parse(&draft(&section, case)?)
+                .err()
+                .map(|e| (e.reason.code().to_owned(), e.path));
+            let wanted = (
+                text(expect, "reason").to_owned(),
+                text(expect, "path").to_owned(),
+            );
+            if refused.as_ref() != Some(&wanted) {
+                failures.push(format!("invalid {}: {refused:?}", text(case, "name")));
+            }
+        }
+        assert!(
+            accepted.len() >= 16 && invalid.len() >= 60,
+            "the vectors may add drafts, never drop them: {} valid drafts and bases, {} invalid drafts",
+            accepted.len(),
+            invalid.len()
+        );
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        Ok(())
+    }
+
+    /// The members §9.4 lists without `?`, as paths below `payload`, written out from the spec's
+    /// table rather than read from this module's schemas: each is refused as `schema` when `null`
+    /// (DEC-413, DEC-414). The vectors pin each member's type but not its nullability, so this is
+    /// what keeps a member loosened to nullable from passing.
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn a_required_thesis_member_is_never_null() -> Result<(), String> {
+        const THESIS_REQUIRED: [&str; 22] = [
+            "model_id",
+            "model_version",
+            "content_hash",
+            "thesis_id",
+            "lineage_id",
+            "revision",
+            "instrument_id",
+            "asset_class",
+            "direction",
+            "as_of",
+            "expires_at",
+            "horizon_s",
+            "conviction",
+            "confidence",
+            "evidence_sources",
+            "evidence_sources[0]",
+            "evidence_sources[1]",
+            "invalidation",
+            "allowlist_version",
+            "prompt_ref",
+            "response_ref",
+            "admitted",
+        ];
+        let section = named_section("research")?;
+        let mut checked = 0;
+        for name in ["proposed_admitted", "revised_admitted"] {
+            let case = named("base_draft", Value::Str(name.to_owned()))?;
+            assert_eq!(
+                refusal(base(&section, &case)?),
+                None,
+                "the {name} base appends"
+            );
+            for member in THESIS_REQUIRED {
+                let mut body = Value::Object(base(&section, &case)?);
+                *value_at(&mut body, &format!("payload.{member}"))? = Value::Null;
+                let Value::Object(body) = body else {
+                    return Err("the base is a record".to_owned());
+                };
+                assert_eq!(
+                    refusal(body),
+                    Some(("schema".to_owned(), format!("payload.{member}"))),
+                    "{name}.{member} = null"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 44);
+        Ok(())
+    }
+
+    /// Either thesis record at any `schema_version` but 1 is refused as `unknown_schema`: each
+    /// reaches its schema through `schema`'s version gate, never around it (DEC-414).
+    #[test]
+    #[ignore = "pending E17-2"]
+    fn a_thesis_record_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
+        let section = named_section("research")?;
+        let two = Int::new(2).ok_or("an integer")?;
+        for name in ["proposed_admitted", "revised_admitted"] {
+            let mut body = base(&section, &named("base_draft", Value::Str(name.to_owned()))?)?;
+            assert_eq!(refusal(body.clone()), None, "the {name} base appends");
+            body.insert(
+                Key::new("schema_version").map_err(|_| "key")?,
+                Value::Int(two),
+            );
+            assert_eq!(
+                refusal(body),
+                Some(("unknown_schema".to_owned(), "payload".to_owned())),
+                "{name}"
+            );
+        }
         Ok(())
     }
 }
