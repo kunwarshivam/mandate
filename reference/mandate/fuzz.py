@@ -850,7 +850,7 @@ def mutate_delegations(ds):
         ds.reverse()
 
 def fuzz_delegation_changes(n):
-    """MI-29: a version classified risk-reducing or neutral never lets a delegation lift what the old one would not."""
+    """MI-29: a delegation change classified risk-reducing or neutral never makes a decision less strict."""
     for _ in range(n):
         m = rand_delegated_mandate()
         if m is None:
@@ -876,6 +876,46 @@ def fuzz_delegation_changes(n):
             d0, d1 = autonomy(m, a, st)["decision"], autonomy(new, a, st)["decision"]
             check(STRICT[d1] >= STRICT[d0], "MI-29 a reducing delegation change never lifts more",
                   (m["autonomy"]["delegations"], new["autonomy"]["delegations"], a, st, d0, d1))
+
+def fuzz_delegated_rule_changes(n):
+    """MI-29 across the two §9.2 rows (#444, DEC-353): a rule change classified reducing or neutral, made while
+    delegations stand unchanged, never makes any decision less strict than the previous version gave it, with the
+    delegations in force and the same usage. An order `auto` by a rule may become `auto` by a delegation. The oracle
+    compares decisions only, never the classifier's own conditions. Some versions name a source that is not an ask,
+    which V-041 refuses, and some draws widen the rule a delegation names, or make its source an ask, on purpose."""
+    for _ in range(n):
+        m = rand_delegated_mandate(any_source=rng.random() < 0.3)
+        if m is None:
+            continue
+        ds = m["autonomy"]["delegations"]
+        new = copy.deepcopy(m)
+        rest = mutate({k: v for k, v in m["autonomy"].items() if k != "delegations"})
+        if rng.random() < 0.3:
+            rest = copy.deepcopy({k: v for k, v in m["autonomy"].items() if k != "delegations"})
+            named = rng.choice(ds)["lifts"]
+            for r in rest["rules"]:
+                if f"rule:{r['id']}" == named:
+                    w = r["when"]
+                    wider = [v for v in FIELDS_NUM.get(w["field"], [])
+                             if (D(v) < D(w["value"]) if w["op"] in ("gt", "gte") else D(v) > D(w["value"]))]
+                    if wider and rng.random() < 0.5:
+                        w["value"] = rng.choice(wider)
+                    else:
+                        r["then"] = "ask"
+            if named == "default":
+                rest["default"] = "ask"
+        new["autonomy"] = dict(rest, delegations=copy.deepcopy(ds))
+        c, _ = classify(m, new)
+        if c not in ("risk_reducing", "neutral"):
+            continue
+        for _ in range(25):
+            t = DELEG_NOW + timedelta(seconds=rng.randint(-3600, 3 * 86400))
+            st = rand_state(t, {}, trouble_p=0.1)
+            a = rand_autonomy_action()
+            r0, r1 = autonomy(m, a, st), autonomy(new, a, st)
+            check(STRICT[r1["decision"]] >= STRICT[r0["decision"]],
+                  "MI-29 a reducing rule change never decides less strictly with the delegations in force",
+                  (m["autonomy"], new["autonomy"], a, st, r0, r1))
 
 def fuzz_delegation_rules(n):
     """V-041 (the 30-day span), V-042 (no carry-over past a risk-increasing version), V-043 (caps inside the envelope),
@@ -2015,6 +2055,7 @@ if __name__ == "__main__":
     fuzz_delegations(600)
     fuzz_delegation_changes(600)
     fuzz_delegation_rules(400)
+    fuzz_delegated_rule_changes(1500)
     fuzz_client_ceiling(400)
     fuzz_review(600)
     fuzz_review_changes(600)
