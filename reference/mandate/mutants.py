@@ -78,6 +78,10 @@ MUTANTS = {
     "a delegation ignores its start": ('T(d["starts_at"]) <= now', 'True'),
     "a delegation ignores suspension": (' or delegation_suspended(st):', ':'),
     "a delegation ignores a latched limit": ('\n            or st.get("limit_latched", False)', '\n            or False'),
+    "a widened ask rule a delegation lifts is reducing": (
+        '        if rb["then"] == "ask" and d > 0 and f"rule:{rb[\'id\']}" in lifted:\n            return "increasing"\n', ''),
+    "removing a rule before a delegated ask is reducing": (
+        '            if ra["then"] != "auto" and later_sources & lifted:\n                return "increasing"\n', ''),
     "a delegation bypasses the admission ceiling": (
         '    if a.get("new_instrument", False) and STRICT[au["admission"]] > STRICT[res["decision"]]:',
         '    if a.get("new_instrument", False) and lifted_by is None and STRICT[au["admission"]] > STRICT[res["decision"]]:'),
@@ -288,7 +292,7 @@ TRIPWIRE_MUTANTS = {
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
-         "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_client_ceiling(300); "
+         "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(1500); fuzz_client_ceiling(300); "
          "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
          "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
          "print(len(FAIL))")
@@ -323,6 +327,7 @@ def main():
         source = (HERE / "ref.py").read_text()
         missing = [name for name, (old, _) in (MUTANTS | TRIPWIRE_MUTANTS).items() if old not in source]
         assert not missing, f"mutation anchors missing, checked before any run: {missing}"
+        assert verdict(run(work, PROBE), "0") == "missed", "the shared fuzz fails on the unmutated model"
         assert verdict(run(work, TW_PROBE), "0") == "missed", "the tripwire fuzz fails on the unmutated model"
         assert verdict(run(work, CASE_PROBE), "same") == "missed", "the MC-W cases differ from the unmutated model's"
         for name, (old, new) in (MUTANTS | TRIPWIRE_MUTANTS).items():

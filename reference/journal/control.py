@@ -449,33 +449,54 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("24.in_band", p["cash_in_band"] == inside, "schema", "payload.cash_in_band")
     if event_type == "MandateVersionApplied":
         increasing = p["classification"] == "risk_increasing"
-        rule("29", not increasing or p["step_up"] is not None, "schema", "payload.step_up")
         rejected = p["result"] == "rejected"
-        wrong = []
-        if (p["reason"] is not None) != rejected and "rule.30.reason" not in skip:
-            wrong.append("reason")
-        wrong += [m for m in ("allocation_change", "max_loss_from_allocation") if rejected and p[m] is not None]
-        rule("30", not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
-        applied = p["result"] == "applied"
-        implied = [
-            applied
-            and p["allocation_change"] is not None
-            and Decimal(p["allocation_change"]) > 0
-            and "rule.33.allocation" not in skip,
-            applied and p["max_loss_from_allocation"] is not None and "rule.33.floor" not in skip,
-            rejected and p["reason"] in INCREASING_REJECTIONS and "rule.33.reason" not in skip,
-        ]
-        rule("33", not any(implied) or increasing, "schema", "payload.classification")
+
+        def rule_29() -> None:
+            rule("29", not increasing or p["step_up"] is not None, "schema", "payload.step_up")
+
+        def rule_30() -> None:
+            wrong = []
+            if (p["reason"] is not None) != rejected and "rule.30.reason" not in skip:
+                wrong.append("reason")
+            wrong += [m for m in ("allocation_change", "max_loss_from_allocation") if rejected and p[m] is not None]
+            rule("30", not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
+
+        def rule_33() -> None:
+            applied = p["result"] == "applied"
+            implied = [
+                applied
+                and p["allocation_change"] is not None
+                and Decimal(p["allocation_change"]) > 0
+                and "rule.33.allocation" not in skip,
+                applied and p["max_loss_from_allocation"] is not None and "rule.33.floor" not in skip,
+                rejected and p["reason"] in INCREASING_REJECTIONS and "rule.33.reason" not in skip,
+            ]
+            rule("33", not any(implied) or increasing, "schema", "payload.classification")
+
+        order = [rule_29, rule_30, rule_33]
+        if "order.rule_30_first" in skip:
+            order = [rule_30, rule_29, rule_33]
+        if "order.rule_33_first" in skip:
+            order = [rule_29, rule_33, rule_30]
+        for check in order:
+            check()
     if event_type == "UniverseChanged":
-        allowed = ADMITTING if p["change"] == "admitted" else REMOVING
-        rule("31", p["reason"] in allowed, "schema", "payload.reason")
-        thesis, lineage = p["thesis_id"] is not None, p["lineage_id"] is not None
-        if thesis != lineage:
-            rule("32", False, "schema", "payload.thesis_id" if not thesis else "payload.lineage_id")
-        elif p["reason"] in FROM_A_THESIS:
-            rule("32.thesis", thesis, "schema", "payload.thesis_id")
-        elif p["reason"] == "version_applied" and p["change"] == "admitted":
-            rule("32.pinned", not thesis, "schema", "payload.thesis_id")
+
+        def rule_31() -> None:
+            allowed = ADMITTING if p["change"] == "admitted" else REMOVING
+            rule("31", p["reason"] in allowed, "schema", "payload.reason")
+
+        def rule_32() -> None:
+            thesis, lineage = p["thesis_id"] is not None, p["lineage_id"] is not None
+            if thesis != lineage:
+                rule("32", False, "schema", "payload.thesis_id" if not thesis else "payload.lineage_id")
+            elif p["reason"] in FROM_A_THESIS:
+                rule("32.thesis", thesis, "schema", "payload.thesis_id")
+            elif p["reason"] == "version_applied" and p["change"] == "admitted":
+                rule("32.pinned", not thesis, "schema", "payload.thesis_id")
+
+        for check in [rule_32, rule_31] if "order.rule_32_first" in skip else [rule_31, rule_32]:
+            check()
     if event_type in ("ThesisProposed", "ThesisRevised"):
         out += thesis_violations(event_type, draft, skip)
     return out
@@ -529,7 +550,8 @@ def thesis_violations(event_type: str, draft: dict, skip: frozenset[str]) -> lis
     if predecessor != revised and "rule.36.predecessor" not in skip:
         failing.append("revision_without_predecessor")
     if failing:
-        rule("reason", "36", p["reason"] == failing[0], "schema", "payload.reason")
+        decides = failing[-1] if "rule.36.order" in skip else failing[0]
+        rule("reason", "36", p["reason"] == decides, "schema", "payload.reason")
     else:
         rule("reason", "36.unfailed", p["reason"] not in THESIS_REFUSALS[:3], "schema", "payload.reason")
     if p["corroboration"] is None:
@@ -537,6 +559,9 @@ def thesis_violations(event_type: str, draft: dict, skip: frozenset[str]) -> lis
         rule("reason", "37", number is not None and number <= CORROBORATION_CHECK, "schema", "payload.reason")
     else:
         rule("reason", "37.corroborated", p["reason"] != "no_corroboration", "schema", "payload.reason")
+    sources = p["evidence_sources"] if isinstance(p["evidence_sources"], list) else []
+    if "tighten.sorted_sources" in skip and not ascending(encoded(sources)):
+        groups["reason"].append(Violation("tighten.sorted_sources", "non_canonical", "payload.evidence_sources"))
     model_ref = draft["config_refs"].get("model_version")
     rule("model", "38", model_ref is None or model_ref == p["content_hash"], "schema", "payload.content_hash")
     order = list(THESIS_ORDER)
