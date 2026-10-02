@@ -350,7 +350,10 @@ Lessons from this wave:
 
 1. **M7:** both E8-3 implementations merged (#395, #397). Next, the M7 spec PR (#401: the MC-E cases
    and `OwnerCommandRefused`); then the MC-E harness arm, `OwnerCommandRefused` in the catalogue and
-   the runtime, and the CLI's follow-up tests PR, which lands before the `clap` wiring.
+   the runtime, and the CLI's follow-up tests PR, which lands before the `clap` wiring. The §9.2
+   writer follow-up's tests PR is open on `agent/m7-refused-timestamp-tests` (DEC-308 to DEC-310,
+   DEC-261 item 7); its implementation PR fills `payload::stamp`, switches `refused`, and deletes
+   the five `#[ignore]` lines.
 2. **E6-4 slice R4** (acknowledgments, allocation, floor loosening, goal completion, retirement; in review on `agent/h2-e6-4-r4`)
    and the last nine MC-R status rows; MC-B31 once the trim proposals land.
 3. **E6-3's remaining stacked PRs** (the §5.3 mandate limits, then the agent flatten) and **E6-6's

@@ -1174,6 +1174,15 @@ From E10-1's slice-V implementation (DEC-161):
     rather than risk-clock seconds (`escalation.rs`, `payload::seconds`). §9.2 supersedes DEC-291
     item 1's "same second" for this member. `crates/mandate-runtime/src/escalation/tests.rs`'s assertion
     that `effective_at` is an integer changes with this writer.
+    The writer's pending pins are the M7 tests PR's (DEC-308 to DEC-310): the refusal's
+    `effective_at` the §4.7 timestamp of the judged second, for a resume refusal, a Stop refusal,
+    each of the four reasons, and the `refused_stop` vector's own form, read from the committed
+    vectors. The in-module late-Stop pin goes pending with them (the coordinator-named test
+    change), and `refused_only` reads the judged second in either form, so the implementation PR
+    deletes `#[ignore]` lines only (DEC-309 item 3). Until the writer's fix lands the registered
+    schema refuses the integer-form drafts at `append`, as DEC-261 item 7 has standing
+    (rule 3). This follow-up row needs its own story id: its pins and stub cite E8-3, which
+    `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
     (HLD §8), as a new `schema_version` with its own vectors.
   - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,
@@ -1530,6 +1539,18 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (stream K), from #463 round 1 (minor 4):** `acknowledged` journals an `unprotected_end`
   even when no interval is open for the instrument. The fold makes it a no-op, but the journal
   carries an end that ends nothing. Guard it with `interval_open`.
+- **E7-3 (stream K), from [#457](https://github.com/kunwarshivam/mandate/pull/457) round 1:** a
+  split prepared but not applied when the broker has already posted it is a real state after a
+  crash (the model at Q, the broker at Q × new). §8.5's `pending_corporate_action` window does not
+  cover it: the window runs from the application to the posting. It has two safe outcomes: the model
+  corrected to the posted quantity, or the agents holding the instrument paused with an alert
+  (§11's default). Choose one in a recorded decision before any test pins it.
+- **E7-4 slice 5 (stream K), from [#457](https://github.com/kunwarshivam/mandate/pull/457) round 1
+  (M2), a prerequisite:** add an executor-scoped reference case, or hand tests, for a reverse split
+  and for a split with a fractional result. Pin that the protective sell quantity is re-scaled and
+  never exceeds the position (rule 12). RC-04 reaches only a forward split on whole shares, and
+  RC-05 and RC-23 are accounting-only. The slice-5 corporate-actions implementation PR does not
+  merge before this pin exists.
 - **E7-4's tests correction (stream K), from the acknowledgment PR ([DEC-348](decisions/DEC-348.md)
   item 2):** the refcase harness's guard that an `unprotected_end` naming what it is `awaiting` is
   not read as the interval's end is reached by no live test, since every case that lists the end
