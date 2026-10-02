@@ -2097,6 +2097,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   derive each guard the harness can state from the case (`scale_active_s`, `holding`, the session,
   the minimum) and require the gate's empty answer to agree, or widen the API in a tests PR first
   (DEC-77). MC-B17 and MC-B30 to MC-B32 then pass; their status rows follow in a status-only PR.
+  *Done (DEC-400):* the arm compares the trim and derives `ref.py`'s guards from the case; the
+  four cases pass in the harness. Their `status.toml` rows follow in a status-only PR.
 - **E6-4 reference: drop `ref.py`'s `factor < 1` trim guard and its dollar minimum** (#466 review,
   round 1, m2; DEC-399 items 3 and 5). `reference/mandate/ref.py`'s `builder` trims only below a
   factor of 1 and compares the sell's notional with `min_order_usd`. `mandate_risk::trim_proposals`
@@ -2104,7 +2106,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   which the review agrees is right. Removing the guard only tightens (DEC-176). The follow-up is a
   reference PR on its own (ES-22): `ref.py`, a regenerated `mandate.yaml` and
   `fixtures/refcases/mandate.json` if any case changes, and `check_cases.py`, `fuzz.py` and
-  `mutants.py` passing. No trim case states a factor of 1 or a sub-minimum trim today.
+  `mutants.py` passing, and the same two readings removed from the harness's
+  `crates/mandate-refcases/src/mandate/order_builder.rs::trim_guards` (DEC-400), which mirrors
+  `ref.py`. A rung factor of 1 cannot be written: the schema's `open_fraction` excludes it, and
+  `scaling_rung` requires a case's factor to be a rung's. So only the dollar minimum can diverge,
+  and no trim case states a sub-minimum trim today.
 - **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the

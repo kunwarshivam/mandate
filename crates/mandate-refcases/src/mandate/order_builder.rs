@@ -40,23 +40,24 @@
 //! field on a hold, `clipped_by` on a sell. `clipped_by` absent on a hold means no clip, and
 //! `order_type` absent on a sell means a plain limit.
 //!
-//! **Cases that cannot pass yet fail at their owner.** A `trim_to_target` base asks the risk engine
-//! first (§6.2 step 1); `mandate_risk::trim_proposals` answers (E6-4, DEC-399), and this arm does
-//! not yet compare its trim or `trim_withheld` (DEC-399 item 6). A crypto pair's quote
-//! currency is read from the pinned instrument's `symbol` (`BTC/USD`), and a symbol that does not
-//! name USD as its quote is never read as USD (DEC-254 items 1 and 7, DEC-285).
+//! **A `trim_to_target` base asks the risk engine first** (§6.2 step 1): a trim
+//! `mandate_risk::trim_proposals` proposes is the case's action, and with none the case's
+//! `trim_withheld` must name the guards that hold before the builder proposes (DEC-400). A crypto
+//! pair's quote currency is read from the pinned instrument's `symbol` (`BTC/USD`), and a symbol
+//! that does not name USD as its quote is never read as USD (DEC-254 items 1 and 7, DEC-285).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_builder::{
-    AccountSnapshot, AccumulateGoal, Action, BuilderError, BuilderMandate, Clip, Direction,
-    GateVerdict, GoalKind, HoldReason, Limits, Market, ModelOutput, ModelVersion, OrderShape,
-    Outcome, Proposal, RiskContext, SignalModel, Sizing, decide, propose,
+    AccountSnapshot, AccumulateGoal, Action, ActionContext, BuilderError, BuilderMandate, Clip,
+    Direction, GateVerdict, GoalKind, HoldReason, Limits, Market, ModelOutput, ModelVersion,
+    OrderShape, Outcome, Proposal, RequestedBy, RiskContext, SignalModel, Sizing, classify, decide,
+    propose,
 };
 use mandate_domain::{AssetClass, AssetId, MarketSession, Purpose};
 use mandate_num::{
-    Conviction, CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, Ratio, Signed, SizeFraction,
-    Unit, Usd, UsdExact,
+    Conviction, CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, Ratio, Rounding, Signed,
+    SizeFraction, Unit, Usd, UsdExact,
 };
 use mandate_risk as gate;
 use mandate_risk::spec_types::{GoalState, RiskLimits, Rung, RungAction, ScaleAction};
@@ -100,6 +101,19 @@ const INPUT_KEYS: &[&str] = &[
 /// §5.5's trim guards, which only a `trim_to_target` mandate reads.
 const TRIM_INPUT_KEYS: [&str; 2] = ["scale_active_s", "holding"];
 const TRIM_EXPECT_KEYS: [&str; 2] = ["origin", "trim_withheld"];
+/// Every member a trim's expectation may state (MC-B17).
+const TRIM_KEYS: [&str; 10] = [
+    "cap",
+    "current_mv",
+    "action",
+    "purpose",
+    "origin",
+    "reason",
+    "qty",
+    "limit_price",
+    "order_usd",
+    "autonomy",
+];
 const QUOTE_KEYS: &[&str] = &["bid", "ask"];
 const GATE_STATE_KEYS: &[&str] = &[
     "agent_equity",
@@ -164,7 +178,7 @@ pub(super) fn builder_case(fixture: &Json, case: &Json) -> Result<(), String> {
     let stated = Inputs::read(document, input)?;
     let config = test_default_gate_config()?;
     if document.risk.scale_action == spec_doc::ScaleAction::TrimToTarget {
-        return trim_first(fixture, document, &stated, &config, input);
+        return trim_first(fixture, document, &stated, &config, input, expect);
     }
     for key in TRIM_INPUT_KEYS {
         ensure(input.get(key).is_none(), || {
@@ -191,16 +205,17 @@ pub(super) fn builder_case(fixture: &Json, case: &Json) -> Result<(), String> {
     stated.agrees_with_clock(&clock, judged)
 }
 
-/// §6.2 step 1: under `trim_to_target` the risk engine proposes first, and a case cannot pass until
-/// its trim, its `origin` and its `trim_withheld` guards are compared. E6-4's `trim_proposals`
-/// answers; the comparison is the harness follow-up DEC-399 item 6 records, so the failure carries
-/// the answer for the owed rows to pin.
+/// §6.2 step 1: under `trim_to_target` the risk engine proposes first (DEC-250 item 1). A trim
+/// `mandate_risk::trim_proposals` answers is the case's action, compared with every member the case
+/// states; with none, the case's `trim_withheld` must name exactly the §5.5 guards that hold, and
+/// the builder then proposes as on any other mandate (DEC-400).
 fn trim_first(
     fixture: &Json,
     document: &Mandate,
     stated: &Inputs,
     config: &gate::GateConfig,
     input: &Json,
+    expect: &Json,
 ) -> Result<(), String> {
     let active_s = match input.get("scale_active_s") {
         None => 0,
@@ -208,7 +223,8 @@ fn trim_first(
             .as_u64()
             .ok_or("`scale_active_s` is not a whole number of seconds")?,
     };
-    let goal_state = if flag_or(input, "holding", false)? {
+    let holding = flag_or(input, "holding", false)?;
+    let goal_state = if holding {
         GoalState::Holding
     } else {
         GoalState::Running
@@ -221,7 +237,7 @@ fn trim_first(
         scene.instrument.instrument.clone(),
         scene.instrument.clone(),
     )]);
-    match gate::trim_proposals(
+    let trims = gate::trim_proposals(
         stated.now,
         config,
         &scene.mandate,
@@ -229,14 +245,168 @@ fn trim_first(
         &scene.agent,
         &scene.account,
         &instruments,
-    ) {
-        Err(e) => Err(gate_error("trim_proposals", &e)),
-        Ok(trims) => Err(format!(
-            "`mandate_risk::trim_proposals` answered {trims:?}, and this arm does not yet compare a \
-             `trim_to_target` case's trim, `origin` or `trim_withheld` (§5.5), so the case cannot \
-             pass until it does"
+    )
+    .map_err(|e| gate_error("trim_proposals", &e))?;
+    let clock = gate::session_at(stated.now, config, stated.gate_class())
+        .map_err(|e| gate_error("session_at", &e))?;
+    let proposal = propose(
+        &builder_mandate(document)?,
+        &stated.account,
+        &stated.market(&clock),
+        &stated.risk,
+        &stated.outputs,
+        stated.now,
+    )
+    .map_err(|e| builder_error("propose", &e))?;
+    expect_eq("cap", proposal.sizes.cap, exact(expect, "cap")?)?;
+    expect_eq(
+        "current_mv",
+        proposal.sizes.current_mv,
+        exact(expect, "current_mv")?,
+    )?;
+    let guards = trim_guards(document, stated, &clock, expect, active_s, holding)?;
+    let unguarded = guards.as_ref().is_some_and(Vec::is_empty);
+    let judged = match (trims.as_slice(), unguarded) {
+        ([trim], true) => compare_trim(document, stated, &clock, &proposal, trim, expect),
+        ([], false) => {
+            let stated_guards = match expect.get("trim_withheld") {
+                None => None,
+                Some(_) => Some(
+                    list_at(expect, "trim_withheld")?
+                        .iter()
+                        .map(|g| g.as_str().ok_or("`trim_withheld` lists a non-string"))
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+            };
+            expect_eq("trim_withheld", stated_guards, guards)?;
+            ensure(expect.get("origin").is_none(), || {
+                "`origin`: the builder's proposal states none".to_owned()
+            })?;
+            judge(fixture, document, stated, config, &proposal, expect)
+        }
+        (trims, _) => Err(format!(
+            "`trim_proposals` answered {trims:?} where §5.5's guards give {guards:?}"
         )),
+    };
+    stated.agrees_with_clock(&clock, judged)
+}
+
+/// `reference/mandate/ref.py`'s guards, in its order, on the case's own figures: `None` when no
+/// trim is due (no factor below one, or an excess under the band), else every guard that withholds
+/// it, empty when none does. Read from the case, not from `trim_proposals`, which names no guard,
+/// so the gate's answer is judged against them rather than explained by them (DEC-400 item 2).
+fn trim_guards(
+    document: &Mandate,
+    stated: &Inputs,
+    clock: &gate::SessionAt,
+    expect: &Json,
+    active_s: u64,
+    holding: bool,
+) -> Result<Option<Vec<&'static str>>, String> {
+    let factor = UsdExact::of_ratio(stated.gate_size_factor);
+    let one = num(UsdExact::parse("1"), "one")?;
+    let cap = exact(expect, "cap")?;
+    let current_mv = exact(expect, "current_mv")?;
+    let band = num(
+        cap.checked_mul(UsdExact::of(num(
+            Usd::parse(document.behavior.sizing.rebalance_band.as_str()),
+            "rebalance_band",
+        )?)),
+        "the band",
+    )?;
+    let excess = num(
+        cap.checked_mul(factor)
+            .and_then(|target| current_mv.checked_sub(target)),
+        "the excess",
+    )?;
+    if !num(factor.is_below(one), "size_factor")? || num(excess.is_below(band), "excess")? {
+        return Ok(None);
     }
+    let sell = num(
+        excess.ceiled_quotient(UsdExact::of_price(stated.bid), stated.increment),
+        "the trim's quantity",
+    )?
+    .min(stated.position);
+    let mut guards = Vec::new();
+    if active_s < u64::from(document.risk.breach_confirm_s) {
+        guards.push("rung_not_confirmed");
+    }
+    if holding {
+        guards.push("holding");
+    }
+    if stated.asset_class == AssetClass::UsEquity && clock.session != gate::Session::Regular {
+        guards.push("regular_session_only");
+    }
+    if num(sell.notional(stated.bid), "the trim's notional")? < stated.min_order_usd {
+        guards.push("below_minimum_order");
+    }
+    Ok(Some(guards))
+}
+
+/// MC-B17's members for a trim, its cap and market value already compared: the risk exit itself,
+/// a sell at the bid by the risk engine, AUTO as every risk-reducing purpose is (§6.2 step 3). The
+/// trim reaches no dry run and no builder figure, so the case states none (DEC-400 item 3). The
+/// `limit_price` the case states is checked against the case's own bid: `TrimProposal` carries no
+/// price, so it pins the case file, not the gate. §6.2 step 3 reads only the purpose; the other
+/// facts are the case's, and a trim sells a held position, so it is never a first trade, which is
+/// also what `!has_prior_fill` gives on every trim case.
+fn compare_trim(
+    document: &Mandate,
+    stated: &Inputs,
+    clock: &gate::SessionAt,
+    proposal: &Proposal,
+    trim: &gate::TrimProposal,
+    expect: &Json,
+) -> Result<(), String> {
+    unknown_members(expect, &TRIM_KEYS)
+        .map_err(|unknown| format!("a trim states none of: {unknown}"))?;
+    expect_eq(
+        "instrument",
+        trim.instrument.clone(),
+        stated.instrument_id()?,
+    )?;
+    expect_eq("action", "sell", str_at(expect, "action")?)?;
+    expect_eq("origin", "risk_engine", str_at(expect, "origin")?)?;
+    expect_eq("reason", "trim_to_target", str_at(expect, "reason")?)?;
+    expect_eq(
+        "the purpose the gate assigns",
+        trim.purpose,
+        gate::Purpose::RiskExit,
+    )?;
+    let order_usd = num(trim.qty.notional(stated.bid), "order_usd")?;
+    order_fields(expect, (Purpose::RiskExit, trim.qty, stated.bid, order_usd))?;
+    let classified = classify(
+        &document.autonomy,
+        &ActionContext {
+            purpose: Purpose::RiskExit,
+            order_usd,
+            combined_score: proposal.combined.score,
+            instrument: stated.instrument.clone(),
+            asset_class: stated.asset_class,
+            session: market_session(clock.session),
+            first_trade_in_instrument: false,
+            new_instrument: stated.risk.new_instrument,
+            thesis_confidence: stated.risk.thesis_confidence,
+            drawdown: stated.risk.drawdown,
+            daily_pnl_fraction: stated.risk.daily_pnl_fraction,
+            position_usd_after: num(
+                proposal
+                    .sizes
+                    .current_mv
+                    .checked_sub(UsdExact::of(order_usd))
+                    .and_then(|after| after.round(12, Rounding::HalfEven)),
+                "the position after the trim",
+            )?,
+            gross_usd_after: stated.account.gross_usd,
+            bought_today_usd: stated.risk.bought_today_usd,
+            position_pnl_fraction: stated.risk.position_pnl_fraction,
+            requested_by: RequestedBy::Agent,
+            risk_day: stated.risk.risk_day,
+        },
+    )
+    .map_err(|e| builder_error("classify", &e))?;
+    autonomy::compare(at_of(expect, "autonomy")?, &classified)
+        .map_err(|e| format!("`autonomy`: {e}"))
 }
 
 /// The `scale_sizes` rung whose factor is the case's size factor, which is the rung a trim case
@@ -1376,36 +1546,13 @@ mod tests {
 
     const PLANTED: &str = "zz_planted";
 
-    /// The cases that pass against the merged `mandate-builder` and `mandate-risk`.
-    const PASSING: [&str; 28] = [
+    /// The cases that pass against the merged `mandate-builder` and `mandate-risk`: all thirty-two
+    /// since the trim arm compares MC-B17 and MC-B30 to MC-B32 (DEC-400).
+    const PASSING: [&str; 32] = [
         "MC-B01", "MC-B02", "MC-B03", "MC-B04", "MC-B05", "MC-B06", "MC-B07", "MC-B08", "MC-B09",
-        "MC-B10", "MC-B11", "MC-B12", "MC-B13", "MC-B14", "MC-B15", "MC-B16", "MC-B18", "MC-B19",
-        "MC-B20", "MC-B21", "MC-B22", "MC-B23", "MC-B24", "MC-B25", "MC-B26", "MC-B27", "MC-B28",
-        "MC-B29",
-    ];
-
-    /// The cases that cannot pass yet, each with what owes them and what its failure must say.
-    const OWED: [(&str, &str, &[&str]); 4] = [
-        (
-            "MC-B17",
-            "E6-4's family-B trim arm",
-            &["does not yet compare", "qty: Qty(3), purpose: RiskExit }]"],
-        ),
-        (
-            "MC-B30",
-            "E6-4's family-B trim arm",
-            &["does not yet compare", "answered []"],
-        ),
-        (
-            "MC-B31",
-            "E6-4's family-B trim arm",
-            &["does not yet compare", "answered []"],
-        ),
-        (
-            "MC-B32",
-            "E6-4's family-B trim arm",
-            &["does not yet compare", "answered []"],
-        ),
+        "MC-B10", "MC-B11", "MC-B12", "MC-B13", "MC-B14", "MC-B15", "MC-B16", "MC-B17", "MC-B18",
+        "MC-B19", "MC-B20", "MC-B21", "MC-B22", "MC-B23", "MC-B24", "MC-B25", "MC-B26", "MC-B27",
+        "MC-B28", "MC-B29", "MC-B30", "MC-B31", "MC-B32",
     ];
 
     fn fixture() -> Result<Json, String> {
@@ -1430,6 +1577,84 @@ mod tests {
             .into_iter()
             .filter(|c| c["id"].as_str().is_some_and(|id| PASSING.contains(&id)))
             .collect())
+    }
+
+    /// The gate and the case's own guards must agree.
+    ///
+    /// - MC-B17 with a minimum order of 1000 dollars, or of 299.71, a cent above its trim, has
+    ///   its 299.7-dollar trim withheld `below_minimum_order` by `ref.py`'s guards, while the
+    ///   gate, whose minimum is the instrument's one-share `min_order_size`, still trims, so the
+    ///   case fails naming both answers; at 299.7 exactly it still passes.
+    /// - MC-B30 confirmed for 60 seconds is due and unguarded, so the gate's trim is the case's
+    ///   action, and the builder's figures the case states are refused.
+    /// - Each guard is judged alone, since MC-B31 states two and either would mask the other:
+    ///   MC-B30 confirmed and Holding withholds `holding` only, and MC-B31 not Holding withholds
+    ///   `regular_session_only` only; both pass, and a gate that trims through either guard fails
+    ///   naming both answers (#478 review, M1).
+    #[test]
+    fn a_trim_the_gate_and_the_guards_disagree_on_fails_naming_both() -> Result<(), String> {
+        let fixture = fixture()?;
+        let minimum = doctored(&fixture, "MC-B17", "/input/min_order_usd", |v| {
+            *v = json!("1000");
+        })?;
+        fails_naming(
+            run(minimum, "MC-B17"),
+            "below_minimum_order",
+            "MC-B17 at a 1000-dollar minimum",
+        )?;
+        let at_the_trim = doctored(&fixture, "MC-B17", "/input/min_order_usd", |v| {
+            *v = json!("299.7");
+        })?;
+        run(at_the_trim, "MC-B17")
+            .map_err(|e| format!("MC-B17 at a minimum of its own 299.7: {e}"))?;
+        let a_cent_above = doctored(&fixture, "MC-B17", "/input/min_order_usd", |v| {
+            *v = json!("299.71");
+        })?;
+        fails_naming(
+            run(a_cent_above, "MC-B17"),
+            "below_minimum_order",
+            "MC-B17 at a minimum a cent above its trim",
+        )?;
+        let confirmed = doctored(&fixture, "MC-B30", "/input/scale_active_s", |v| {
+            *v = json!(60);
+        })?;
+        fails_naming(
+            run(confirmed, "MC-B30"),
+            "a trim states none of: buy_conviction",
+            "MC-B30 confirmed at 60 s",
+        )?;
+        let holding_alone = doctored(&fixture, "MC-B30", "", |case| {
+            put(case, "input", "scale_active_s", json!(60));
+            put(case, "input", "holding", json!(true));
+            put(case, "expect", "trim_withheld", json!(["holding"]));
+        })?;
+        run(holding_alone, "MC-B30").map_err(|e| format!("MC-B30 confirmed and Holding: {e}"))?;
+        let session_alone = doctored(&fixture, "MC-B31", "", |case| {
+            put(case, "input", "holding", json!(false));
+            put(
+                case,
+                "expect",
+                "trim_withheld",
+                json!(["regular_session_only"]),
+            );
+        })?;
+        run(session_alone, "MC-B31").map_err(|e| format!("MC-B31 not Holding: {e}"))
+    }
+
+    /// Sets `key` in the case's `object` member, adding it if the case does not state it.
+    fn put(case: &mut Json, object: &str, key: &str, value: Json) {
+        case.get_mut(object)
+            .and_then(Json::as_object_mut)
+            .map(|members| members.insert(key.to_owned(), value));
+    }
+
+    /// Whether the case's base trims (`scale_action: trim_to_target`), where the trim guards are
+    /// inputs the arm reads rather than members it refuses.
+    fn trims(fixture: &Json, case: &Json) -> Result<bool, String> {
+        let base = crate::str_at(case, "base")?;
+        Ok(fixture
+            .pointer(&format!("/bases/{base}/mandate/risk/scale_action"))
+            .is_some_and(|action| action == "trim_to_target"))
     }
 
     fn id(case: &Json) -> Result<String, String> {
@@ -1544,6 +1769,9 @@ mod tests {
         "protective",
     ];
     const ORDER_TYPES: [&str; 2] = ["limit", "marketable_limit"];
+    /// A trim's reason, whose sibling is a hold reason, and the two proposers §6.2 step 1 orders.
+    const TRIM_REASON: &str = "trim_to_target";
+    const ORIGINS: [&str; 2] = ["risk_engine", "builder"];
     const VERDICTS: [&str; 4] = ["allow", "deny", "defer", "hold"];
     const DECISIONS: [&str; 5] = ["auto", "ask", "deny", "skipped", "deferred"];
     /// Two registered reason codes, so a stated code has a sibling that is also one.
@@ -1568,7 +1796,16 @@ mod tests {
     /// `on_timeout` has one variant, `skip`, and so no sibling.
     fn sibling(at: &str, member: &str, value: &Json) -> Option<Json> {
         match (at, member) {
+            ("/expect", "reason") if value == TRIM_REASON => HOLD_REASONS.first().map(|r| json!(r)),
             ("/expect", "reason") => next_in(&HOLD_REASONS, value),
+            ("/expect", "origin") => next_in(&ORIGINS, value),
+            ("/expect", "trim_withheld") => {
+                let stated: Vec<&str> = value.as_array()?.iter().filter_map(Json::as_str).collect();
+                let other = [vec!["rung_not_confirmed"], vec!["holding"]]
+                    .into_iter()
+                    .find(|guards| *guards != stated)?;
+                Some(json!(other))
+            }
             ("/expect", "purpose") => next_in(&PURPOSES, value),
             ("/expect", "order_type") => next_in(&ORDER_TYPES, value),
             ("/expect", "clipped_by") => {
@@ -1688,26 +1925,18 @@ mod tests {
     }
 
     #[test]
-    fn every_builder_case_passes_or_fails_at_its_owner() -> Result<(), String> {
+    fn every_builder_case_passes() -> Result<(), String> {
         let fixture = fixture()?;
         let mut seen = 0_usize;
         for case in family_b(&fixture)? {
             let id = id(&case)?;
-            let result = run(fixture.clone(), &id);
-            if PASSING.contains(&id.as_str()) {
-                result.map_err(|e| format!("{id}: {e}"))?;
-            } else {
-                let (_, owner, needles) = OWED
-                    .iter()
-                    .find(|(owed, _, _)| *owed == id)
-                    .ok_or_else(|| format!("{id} is neither passing nor owed"))?;
-                for needle in *needles {
-                    fails_naming(result.clone(), needle, &format!("{id}, owed to {owner}"))?;
-                }
-            }
+            crate::ensure(PASSING.contains(&id.as_str()), || {
+                format!("{id} is not listed")
+            })?;
+            run(fixture.clone(), &id).map_err(|e| format!("{id}: {e}"))?;
             seen = seen.saturating_add(1);
         }
-        crate::expect_eq("cases listed", PASSING.len() + OWED.len(), seen)
+        crate::expect_eq("cases listed", PASSING.len(), seen)
     }
 
     /// MC-B26's pinned pair is read from its base's `symbol` (DEC-285): `BTC/USD` passes, and a
@@ -1774,7 +2003,7 @@ mod tests {
                 )?;
             }
         }
-        crate::expect_eq("doctorings, counted from the fixture", doctorings, 888)
+        crate::expect_eq("doctorings, counted from the fixture", doctorings, 976)
     }
 
     /// A hold reaches neither the gate nor approval, so a hold that states either fails naming it,
@@ -1817,7 +2046,7 @@ mod tests {
                 fails_naming(run(stated, &id), member, &format!("{id}: {member} stated"))?;
             }
         }
-        crate::expect_eq("holds", holds, 10)
+        crate::expect_eq("holds", holds, 13)
     }
 
     /// Every member of a case is read: a plant at the top level, in `input`, its `quote`, its
@@ -1861,6 +2090,9 @@ mod tests {
                 plants = plants.saturating_add(1);
             }
             for (guard, value) in [("scale_active_s", json!(0)), ("holding", json!(false))] {
+                if trims(&fixture, &case)? {
+                    break;
+                }
                 let stated = doctored(&fixture, &id, "/input", insert(guard, value))?;
                 fails_naming(run(stated, &id), guard, &format!("{id}: {guard} stated"))?;
             }
@@ -1870,9 +2102,9 @@ mod tests {
             }
         }
         crate::expect_eq(
-            "plants: four objects per case, fifty-one outputs and two working orders",
+            "plants: four objects per case, fifty-nine outputs and two working orders",
             plants,
-            28 * 4 + 51 + 2,
+            32 * 4 + 59 + 2,
         )
     }
 
@@ -1983,7 +2215,7 @@ mod tests {
                 }
             }
         }
-        crate::expect_eq("inputs refused, counted from the fixture", refused, 1087)
+        crate::expect_eq("inputs refused, counted from the fixture", refused, 1257)
     }
 
     /// The builder and the gate see one account: the gate state's equity, the instrument's market

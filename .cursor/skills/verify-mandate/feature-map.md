@@ -177,11 +177,13 @@ the crate is pending.
   the spec guard keeps that file apart from code (ES-22). Family B (all 32 `MC-B` cases) runs in the
   shared harness through `crates/mandate-refcases/src/mandate/order_builder.rs` (DEC-250): `propose`,
   then `mandate_risk::evaluate` on the proposed order as §6.2 step 2's dry run, then `decide` on
-  that verdict, with the session and close window from `mandate_risk::session_at`. 28 pass,
-  `MC-B22` after hours and `MC-B23` in the close window among them since #347 moved their clocks,
-  and the three crypto buys, `MC-B26` to `MC-B28`, since E6-10's check 2 (#422); the four
-  `trim_to_target` cases fail until the arm compares `mandate_risk::trim_proposals`' answer (E6-4, DEC-399
-  item 6), their `OWED` rows pinning that answer. Its in-module tests doctor the fixture to prove
+  that verdict, with the session and close window from `mandate_risk::session_at`. All 32 pass:
+  `MC-B22` after hours and `MC-B23` in the close window since #347 moved their clocks, the three
+  crypto buys, `MC-B26` to `MC-B28`, since E6-10's check 2 (#422), and the four `trim_to_target`
+  cases since the trim arm compares `mandate_risk::trim_proposals`' trim and `ref.py`'s guards
+  (E6-4, DEC-400). MC-B17 and MC-B30 to MC-B32 stay `pending` in `status.toml` until their
+  status-only PR, so `cargo nextest run -p mandate-refcases` skips them and only the in-module
+  `every_builder_case_passes` drives them. Its in-module tests doctor the fixture to prove
   every member is read, a cash fee rate the gate would not reserve is refused, and a `session` or
   `in_close_window` label that contradicts `now` fails the case.
 - **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; families A and B in the shared
