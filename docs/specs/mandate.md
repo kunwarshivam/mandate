@@ -20,6 +20,20 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-187](../project/04-decision-log.md#decisions), read by [DEC-350](../project/decisions/DEC-350.md) to [DEC-352](../project/decisions/DEC-352.md)):** tripwires. `autonomy.tripwires` holds
+  conditions the owner sets in advance over the agent's recorded fills (a losing streak, a realized loss
+  in the risk day, new instruments), each with an action, `end_delegations` or `exits_only`, never
+  `paused` (§3, §6.7). A tripwire fires at the first evaluation at which its metric, counted since it
+  was armed, reaches its threshold; it is then a latched limit (`RiskLimitTriggered`, limit
+  `tripwire:<id>`, §5.8, §5.10) that suspends every delegation (§6.5, MI-28) and, for `exits_only`,
+  adds the restriction `tripwire` (§5.9). It alerts with opaque text and lifts only by the owner's
+  acknowledgment with step-up (by a user other than the requester under `independent_approval_required`),
+  which re-arms it with nothing counted (§5.8, §6.1, MI-3, MI-31); an acknowledgment refused for that
+  is journaled with the new reason `not_independent` (§6.1, journal spec rule 28). Adding or
+  tightening one is risk-reducing and applies at once; removing or loosening one is risk-increasing,
+  and no version lifts a fired one (§9.2). V-044 bounds the thresholds (§4.1); the platform may
+  propose tripwires (§7). It only tightens, so no existing reference case changes; the MC-W cases
+  are added (§11).
 - **v0.6, amended ([DEC-261](../project/04-decision-log.md#decisions)):** §10 says where
   [journal spec §9.2](journal.md#92-control-stream-payload-schemas-dec-261) puts each record's
   contents. The version, provenance per path, and confirmed paths are event members. The rest of each
@@ -129,7 +143,7 @@ changes, acknowledgments, version changes, approval requests and responses, and 
 |---|---|
 | MI-1 | Risk reduction is never denied by a mandate limit, conduct control, session rule, or instrument restriction: `risk_exit` and `protective` orders are allowed; `owner_exit` is allowed (outside the regular session, once the bid is confirmed and the owner's step-up is valid as committed, §6.1; otherwise it waits for the regular session); `discretionary_exit` is allowed or deferred. Exits may be held only by agent mode `paused` or `stopped`, an `Unknown` order, or the broker (trading spec principle 4) |
 | MI-2 | An applied allocation change never triggers or lifts a limit, never lowers drawdown or the daily loss fraction, and never raises floor headroom or agent return |
-| MI-3 | Latched limits lift only by their defined path (§5.8): drawdown by owner acknowledgment once flat; daily loss by a new risk day plus `daily_breach_min_s`; the lifetime floor only by a loosening version (§5.7) |
+| MI-3 | Latched limits lift only by their defined path (§5.8): drawdown by owner acknowledgment once flat; daily loss by a new risk day plus `daily_breach_min_s`; the lifetime floor only by a loosening version (§5.7); a fired tripwire only by owner acknowledgment (§6.7) |
 | MI-4 | The lifetime floor bounds cumulative loss: it latches once its breach has accumulated `breach_confirm_s` of breach time, or when 1.25 × its loss level holds on two sane quotes at least min(`breach_confirm_s`, 10 s) apart (checked against an independent oracle) |
 | MI-5 | H ≥ E and 0 ≤ DD < 1 |
 | MI-6 | The effective mode is the strictest active restriction; `AgentModeApplied` is journaled exactly when it changes |
@@ -154,9 +168,10 @@ changes, acknowledgments, version changes, approval requests and responses, and 
 | MI-25 | **Asking is bounded** (§6.4). At most one risk-adding approval is pending per agent, and a risk-adding proposal waits exactly while one is; at most 10 requests per agent per risk day; a skipped instrument is not asked again that risk day until a version applies, nor a timed-out one within `timeout_s`; quiet hours suppress exactly the push deliveries inside [start, end) America/New_York wall time, in both DST states, and never the inbox |
 | MI-26 | A delegation only lifts: with or without `autonomy.delegations`, every decision is the same, except that an `ask` from the rule or default a live delegation names may become `auto`. A `deny` is never lifted, built-in decisions never change, and the admission ceiling still holds (MI-17), so no delegation covers a newly admitted instrument |
 | MI-27 | A delegation is bounded: over any sequence of decisions, the orders decided `auto` under it are each at most its `max_order_usd`, number at most its `max_orders`, total at most its `max_total_usd`, and were all decided in [`starts_at`, `expires_at`) (checked against an independent accumulator over the decision log) |
-| MI-28 | While the agent's effective mode is not `normal`, a drawdown rung is active, a limit is accumulating breach time or latched, or a kill switch in the agent's scope is engaged, every decision is what it would be with no delegations |
+| MI-28 | While the agent's effective mode is not `normal`, a drawdown rung is active, a limit is accumulating breach time or latched, a tripwire has fired and is not acknowledged (§6.7), or a kill switch in the agent's scope is engaged, every decision is what it would be with no delegations |
 | MI-29 | A version classified risk-reducing or neutral never lets a delegation lift a decision the previous version's delegations would not have lifted, given the same usage (the delegation half of MI-11) |
 | MI-30 | An `open` or `increase` order an owner-connected client requested (`requested_by: client`, DEC-141) is never `auto`: it is `ask`, or `deny` when the rules deny, whatever the rules, the default, a delegation, or the admission setting say. Orders the owner or the agent requested are decided exactly as without this rule ([DEC-185](../project/04-decision-log.md#decisions)) |
+| MI-31 | **A tripwire only tightens, and only the owner lifts it** ([DEC-187](../project/04-decision-log.md#decisions)). A tripwire fires at the first evaluation at which its metric, counted over the inputs since it was armed, reaches its threshold, and at no other. Once fired it stays fired through every later input, version, risk day, and restart until the owner acknowledges it with valid step-up (§6.1), and, with `independent_approval_required`, as a user other than the requester (§5.8), which re-arms it with nothing counted. While fired it is a latched limit, so no allocation increase applies (MI-7). While any tripwire is fired, no delegation lifts (MI-28); while one whose action, or whose action in the version in effect, is `exits_only` is fired, the effective mode is at least `exits_only`. With or without `autonomy.tripwires`, every other decision is the same, a tripwire never makes the mode `paused`, and no exit is held or denied by it (MI-1). A version classified risk-reducing or neutral never lifts a fired tripwire, softens what it holds, or makes one fire later (checked against an independent oracle that recounts each metric from the fill log) |
 | MI-32 | **Silence ends autonomy** ([DEC-188](../project/04-decision-log.md#decisions)). From 00:00 America/New_York after `autonomy.review_by` in the version in effect, judged on the risk clock, no `open` or `increase` is `auto`: it is `ask`, or `deny` when the decision without the review date denies, whatever the rules, the default, or a delegation say, and an `ask` keeps its own source. The admission ceiling only tightens (MI-17), so it never yields an `auto` of its own: an `auto` admission setting leaves the rules' `auto` standing, and that is what the review ceiling turns into `ask`. Exits stay built-in AUTO (MI-1). Before that instant, and with no review date, every decision, label, and delegation id is what it would be without this rule. With no risk clock to judge by, nothing is `auto` (checked against an independent oracle that builds the instant from the calendar date) |
 
 ## 2. Lifecycle
@@ -270,12 +285,13 @@ decimal strings; the schema gives each field's bounds.
 | `autonomy.rules[]`, `default`, `approval` | Autonomy rules and approval settings (§6) |
 | `autonomy.admission` | Ceiling on the autonomy decision for the first order in a newly admitted instrument (§6.2); platform default `ask` |
 | `autonomy.delegations[]` | Optional. Owner-created, bounded, expiring permissions that turn an `ask` into `auto` (§6.5); at most 20, in evaluation order. Absent means none |
+| `autonomy.tripwires[]` | Optional. Owner-set conditions over the agent's recorded fills that end its delegations or hold new openings once met, until the owner acknowledges them (§6.7); at most 20, sorted by `id` (V-044). Absent means none |
 | `autonomy.review_by` | Optional. The **review date** (§6.6): the last risk day (§5.4) on which any `auto` or delegation stands. Platform default: the validation date + 90 days (§7). Absent means no review date |
 | `notifications` | Channels and quiet hours |
 
 **Set-like arrays are sorted and unique** (V-009) so that equal mandates hash equally: pinned
 instruments by `asset_id`, signal models by `id`, parameters by `key`, and `asset_classes`,
-`event_sources`, `channels`, and `approvers` lexically. Rule order is significant (first match);
+`event_sources`, `channels`, and `approvers` lexically, and tripwires by `id` (V-044). Rule order is significant (first match);
 rule ids are unique. Delegation order is significant too (the first live match lifts, §6.5), and
 delegation ids are unique (V-041).
 
@@ -366,6 +382,7 @@ and is recorded in `MandateConfirmed`.
 | V-041 | Delegation ids are unique. Each delegation's `lifts` is `default` while `autonomy.default` is `ask`, or `rule:<id>` naming a rule whose `then` is `ask`; and `starts_at` < `expires_at` ≤ `starts_at` + 30 days (2,592,000 s). A version that makes the named rule or the default anything but `ask`, or removes the rule, must remove the delegation too ([DEC-181](../project/04-decision-log.md#decisions)) |
 | V-042 | A version that is risk-increasing on any path other than `autonomy.delegations` and `autonomy.review_by` (§9.2, classified with the delegations removed from both versions and the new version's review date in both) carries no delegation over from the previous version: every delegation id it holds is new. The owner re-creates what they still want, with the step-up that version needs anyway |
 | V-043 | Each delegation's caps fit inside the envelope: `max_order_usd` ≤ `risk.max_order_usd`, `max_order_usd` ≤ `max_total_usd`, and `max_total_usd` ≤ `capital.allocation_usd`; and when `two_approver_above_usd` is set, `max_order_usd` ≤ it, so a delegation never stands in for a second approver. The gate enforces every limit regardless (§6.5); this keeps a delegation from even appearing to widen one |
+| V-044 | Tripwire ids are sorted and unique. A `consecutive_losing_exits` or `new_instruments` threshold is a whole number from 1 to 1,000; a `realized_loss_usd` threshold is in whole cents and at most `capital.allocation_usd`, so a tripwire never appears to guard what it cannot reach ([DEC-187](../project/04-decision-log.md#decisions), [DEC-352](../project/decisions/DEC-352.md)) |
 | V-046 | An `autonomy.review_by` the version sets or moves (absent from, or different from, the previous version's) is not before the validation date and at most 180 days after it; one carried unchanged is not checked again, so a lapsed date stays lapsed through a version that changes something else. A version whose previous version set a review date sets one too ([DEC-188](../project/04-decision-log.md#decisions), [DEC-272](../project/04-decision-log.md#decisions)) |
 
 ### 4.2 Warnings and the confirmation screen
@@ -430,8 +447,8 @@ limits, never pre-filled as values.
   agents get `research_agent_allowed: true` only after the DEC-99 evaluation passes, and then each
   owner's envelope alone decides what may be admitted.
 - `independent_approval_required` (maker-checker): deployment, risk-increasing changes,
-  high-water-mark resets, and loosening a latched lifetime floor need approval by a user other than
-  the requester.
+  high-water-mark resets, loosening a latched lifetime floor, and lifting a fired tripwire (§6.7) need
+  approval by a user other than the requester.
 - **Policy changes** are journaled as `PolicyChanged` (level, diff, author, step-up evidence,
   affected agents). They apply to running agents at the next evaluation as an **overlay**: the
   stricter value governs, and `auto` evaluates as `ask` when `auto_allowed` becomes false, including
@@ -495,8 +512,8 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
 - **Reported ratios** (DD, daily P&L fraction, `position_pnl_fraction`, and the `drawdown` and
   `daily_pnl_fraction` condition fields) are rounded half-even to 12 places.
 - **Evaluation order per input:** settle time; apply the input; update E, then H = max(H, E); ladder
-  rungs in ascending `at`; daily loss (trigger, renewal, or lift); lifetime floor; then the
-  effective mode (§5.9). Journal events follow this order.
+  rungs in ascending `at`; daily loss (trigger, renewal, or lift); lifetime floor; tripwires in `id`
+  order (§6.7); then the effective mode (§5.9). Journal events follow this order.
 
 ### 5.3 Position, exposure, order size, count, and cooldown
 
@@ -592,8 +609,10 @@ Applies to `exits_only` and `flatten_and_pause` rungs, daily loss, the lifetime 
 
 ### 5.8 Acknowledgment and high-water-mark reset (DEC-44, DEC-57)
 
-- **Latched limits:** `drawdown_exits_only`, `drawdown_flatten`, `daily_loss` (until its lift), and
-  `lifetime_floor`.
+- **Latched limits:** `drawdown_exits_only`, `drawdown_flatten`, `daily_loss` (until its lift),
+  `lifetime_floor`, and every fired tripwire (§6.7), which lifts only by the owner's acknowledgment of it
+  with step-up (§6.1) and, with `independent_approval_required`, by a user other than the requester, as
+  for the drawdown ladder below; it touches neither H, C, nor L.
 - **Acknowledging the drawdown ladder** (owner, step-up; with `independent_approval_required`, by
   a user other than the requester):
   - is rejected with `flatten_in_progress` while a flatten has not finished (the agent is not
@@ -609,7 +628,8 @@ Applies to `exits_only` and `flatten_and_pause` rungs, daily loss, the lifetime 
 ### 5.9 Restrictions and the effective mode
 
 Agent restrictions each have a mode and lift independently: `daily_loss`, `drawdown_exits_only`,
-`drawdown_flatten`, `lifetime_floor`, `hard_breach`, `goal_complete`, and the trading spec's account,
+`drawdown_flatten`, `lifetime_floor`, `hard_breach`, `goal_complete`, `tripwire` (mode `exits_only`, while a
+tripwire that holds `exits_only` is fired, §6.7), and the trading spec's account,
 external-activity, reconciliation, and rate-limit restrictions (§7.3, §7.4, §9.7). The **effective
 mode** is the strictest (`normal` < `exits_only` < `paused` < `stopped`); `AgentModeApplied` is
 journaled only when it changes (MI-6). On entering `exits_only` or stricter, the executor cancels
@@ -626,7 +646,7 @@ is admitted again.
 |---|---|---|---|
 | `MandateVersionApplied` | account | A version takes effect or is rejected (§2.2) | agent, old and new version, classification, step-up evidence, allocation change, result and reason |
 | `RiskDayStarted` | account | 00:00 America/New_York | agent, E₀ |
-| `RiskLimitTriggered`, `RiskLimitLifted` | account | A limit or rung changes state | agent, limit (`max_daily_loss`, `drawdown_ladder[i]`, `lifetime_floor`), action, reason (`hard_trigger`, `resolved_at_rollover`, `new_day_breach`, `after_reset`, `owner_acknowledged`), E, H, DD, E₀, C, L, breach time |
+| `RiskLimitTriggered`, `RiskLimitLifted` | account | A limit or rung changes state | agent, limit (`max_daily_loss`, `drawdown_ladder[i]`, `lifetime_floor`, `tripwire:<id>`), action, reason (`hard_trigger`, `resolved_at_rollover`, `new_day_breach`, `after_reset`, `owner_acknowledged`, `tripwire_condition`), E, H, DD, E₀, C, L, breach time; for a tripwire, its metric, threshold, and the value reached (§6.7) |
 | `HighWaterMarkReset` | account | Owner acknowledgment (§5.8) | agent, old and new H, acknowledging user (opaque), step-up evidence |
 | `AgentModeApplied` | account | The effective mode changes | agent, from, to, restrictions; copied by the agent runtime into the agent stream as `AgentModeChanged` |
 | `KillSwitchActivated` | account | A flatten | scope, initiator, orders canceled, sells submitted or deferred |
@@ -665,7 +685,7 @@ stream with `causation_id` and judges it there; nothing the owner's client check
 | Pause | None | — | Always applies |
 | Resume | Required | When the runtime processes it | Refused. A resume lifts only the owner's own pause, never a latched limit or a hold (MI-3) |
 | Stop (DEC-136) | Required | When the runtime processes it | Refused |
-| Acknowledge (§5.8, trading spec §11) | Required | When the runtime processes it | Refused |
+| Acknowledge (§5.8, §6.7, trading spec §11) | Required | When the runtime processes it | Refused |
 | Owner exit | Required | When the owner committed it | Refused **as an owner exit**: it loses only the owner-exit privilege (selling equities outside the regular session at the confirmed bid, DEC-58, DEC-66). The exit is still routed, and never dropped: in the regular session, or at once for crypto; an equity sale outside the session waits for it unless the owner commits it again with a freshly confirmed bid and fresh step-up |
 | Kill switch, any scope | Only for its privileges beyond the stop | When the owner committed it | **Never refused** (DEC-158 option (c)): it stops the agent and flattens as an automated flatten does, equities waiting for the regular session (trading spec §5.5). With valid step-up and a confirmed bid it also sells equities outside the regular session as an owner exit does |
 | Approve (§6.4) | Required, one assertion per approval | The response's effective time | Refused |
@@ -677,7 +697,9 @@ stream with `causation_id` and judges it there; nothing the owner's client check
   `OwnerCommandIssued`, or `OwnerAcknowledged` in the workspace's control stream, whatever that
   event's outcome; and its method is allowed for the environment. Missing or malformed evidence
   counts as missing. A refusal is journaled with `step_up_missing`, `step_up_stale`,
-  `step_up_reused`, or `step_up_method`: a refused approval as its `ApprovalResponded`, and a
+  `step_up_reused`, or `step_up_method`, and an acknowledgment that lifts a fired tripwire may also be
+  refused with `not_independent` under `independent_approval_required` (§5.8, §6.7; never a resume or
+  Stop, journal spec rule 28): a refused approval as its `ApprovalResponded`, and a
   refused resume, Stop, or acknowledgment as `OwnerCommandRefused` on the stream of whichever owner
   judged it (the agent runtime for resume and Stop, the executor for an acknowledgment), naming the
   control-stream event as `causation_id` (journal spec §9, [DEC-280](../project/04-decision-log.md#decisions)).
@@ -964,8 +986,8 @@ stays `ask` and the next delegation is tried:
    `DecisionMade` events that name the delegation, at decision time, whether or not the order later
    fills or the gate at submission denies it (the conservative count);
 5. it is not **suspended**: the effective mode is `normal` (§5.9), no drawdown rung is active
-   (§5.5), no limit is accumulating breach time or latched (§5.6, §5.8), and no kill switch in the
-   agent's scope is engaged (MI-28).
+   (§5.5), no limit is accumulating breach time or latched (§5.6, §5.8), no tripwire has fired and
+   not been acknowledged (§6.7), and no kill switch in the agent's scope is engaged (MI-28).
 
 **Created only by the owner.** A delegation is an envelope field: the owner creates, widens,
 narrows, or removes it only in a confirmed mandate version (V-022). Adding or widening one is
@@ -989,7 +1011,7 @@ delegation, confirmed with the same step-up. That version applies at the next sa
 action is submitted (§2.2), so it neither skips nor covers the action it was offered on.
 
 **Ending.** A delegation stops lifting when it expires, when its usage is spent, while it is
-suspended, and when a version removes it. V-041 removes it with the rule it lifts, and V-042 drops
+suspended (a fired tripwire included, §6.7), and when a version removes it. V-041 removes it with the rule it lifts, and V-042 drops
 every delegation from a version that is risk-increasing elsewhere. Expiry and exhaustion are runtime
 states, not versions; the owner is told when a delegation ends (`OwnerAlertSent`, opaque text only,
 `AGENTS.md` rule 6). Across restart, usage and suspension are rebuilt from the journal (MI-8).
@@ -1042,6 +1064,98 @@ nobody has confirmed since its review date keeps running, but nothing in it acts
   version nor move the date (DEC-141 item 1). A pushed-out date: at most 180 days from
   validation (V-046). Removing the date: refused (V-046).
 
+### 6.7 Tripwires ([DEC-187](../project/04-decision-log.md#decisions), [DEC-350](../project/decisions/DEC-350.md), [DEC-351](../project/decisions/DEC-351.md))
+
+Trust given under one set of conditions should not outlive them. A **tripwire** is a condition the
+owner names in advance; when the agent's own record meets it, the runtime acts at once, without
+asking, and only the owner lifts it. A tripwire only ever reduces risk (MI-31).
+
+| Field | Meaning |
+|---|---|
+| `id` | Unique among the mandate's tripwires, which are sorted by it (V-044); the limit is journaled as `tripwire:<id>` |
+| `metric` | What is counted, from the list below |
+| `threshold` | The tripwire fires when the metric reaches it (≥). A whole number from 1 to 1,000 for a count; whole cents, at most the allocation, for `realized_loss_usd` (V-044) |
+| `action` | `end_delegations` or `exits_only`; never `paused`, which would hold the agent's own exits (`AGENTS.md` rule 13) |
+
+**Metrics.** Each is counted from the agent's fills (`FillApplied` and `LateFillApplied`, when the
+executor applies them) over the tripwire's **window**: the inputs after the one that armed it (below).
+A fill's **net realized** is its gross realized P&L (trading spec §8.1, with the basis removed rounded
+half-even at 12 places) less its own fees, so a buy's is minus its fees.
+
+| `metric` | Value |
+|---|---|
+| `consecutive_losing_exits` | The number of the window's latest sell fills, counted back from the most recent, whose net realized is below 0, stopping at the first that is 0 or more. Buys neither count nor break the streak; each fill of an exit counts on its own, so the count is never lower than it would be per order |
+| `realized_loss_usd` | max(0, −Σ net realized) over the window's fills in the current risk day (§5.4): after both the arming input and the latest `RiskDayStarted`. Gains in the same window offset losses |
+| `new_instruments` | The number of the window's fills that are the agent's first fill ever in their instrument, so re-entering an instrument held before does not count |
+
+Marks never enter a metric, so a bad tick can neither fire nor delay a tripwire.
+
+**Arming.** A tripwire is armed by the `MandateVersionApplied` of the first version in an unbroken run
+of versions that hold its `id` with the same `metric`, and again by each acknowledgment that lifts it.
+A version that only changes its threshold or action keeps the window, so tightening never restarts a
+count; one that changes its metric arms it afresh, which is why that change is risk-increasing (§9.2).
+Fills before the arming input never count.
+
+**Firing.** The executor evaluates every tripwire of the version in effect, in `id` order, after the
+lifetime floor at each input (§5.2). One that is not fired and whose metric has reached its threshold
+fires at that input: `RiskLimitTriggered` (limit `tripwire:<id>`, its action, reason
+`tripwire_condition`, the metric, the threshold, and the value reached), then an `OwnerAlertSent` whose
+payload is the opaque id of that event and one generic text (`AGENTS.md` rule 6); it is a risk-limit
+alert, so quiet hours never suppress it (§6.4). A version input is evaluated too, so a version that
+adds a tripwire, or lowers a threshold to a count already reached, applies at once (§2.2).
+
+**While fired.** A fired tripwire is a latched limit (§5.8): every delegation stops lifting (§6.5
+condition 5, MI-28) and allocation increases are rejected (MI-7). It **holds** the stricter of the
+action it fired with and its action in the version in effect, if that version still holds its `id`;
+while it holds `exits_only`, the agent has restriction `tripwire` (mode `exits_only`, §5.9), whose
+entry cancels working opening orders and pending approvals as any `exits_only` does. Nothing else
+changes: rules, the default, the ceilings, the gate, and every limit decide as before, and exits,
+protective orders, risk exits, owner exits, and kill switches are untouched (MI-1, `AGENTS.md`
+rule 13). A fired tripwire does not fire again; its metric goes on being counted, and only the next
+arming resets it.
+
+**How it ends.** Only the owner's acknowledgment of it lifts it: an `OwnerAcknowledged` naming the
+`RiskLimitTriggered`, judged with step-up when the executor processes it (§6.1). With
+`independent_approval_required`, as for the drawdown ladder (§5.8), the acknowledging user must not be
+the user who requested the lift. The requirement is the stricter of the policy when the lift was
+requested, which the acknowledgment carries, and the overlay when the executor processes it, as §4.3
+and §6.4 check 7 read it. Under it the acknowledgment names both users, and one that names the
+requester as the acknowledging user, or omits either name, is refused with `not_independent` (rule 3:
+a missing name never counts as a second user). With the requirement on and only one user in the
+workspace, a fired tripwire cannot be lifted until a second user exists, as for the drawdown ladder.
+A refused one is journaled as `OwnerCommandRefused` and the tripwire stays fired. A valid one journals
+`RiskLimitLifted` (reason `owner_acknowledged`), lifts the restriction it held, and, if the version in
+effect still holds the `id`, arms it afresh with nothing counted, so the owner is not asked again for
+what they have just seen. An acknowledgment of a tripwire that is not fired changes nothing. No
+version, risk day, restart, or time lifts a fired tripwire: a version that removes it, raises its
+threshold, or softens its action leaves it fired, holding what it held, until it is acknowledged
+(MI-3, MI-31). Across restart, the state is rebuilt by folding the account stream (MI-8).
+
+**Versions.** Tripwires are envelope fields. Adding one, lowering a threshold, or making an action
+stricter (`end_delegations` → `exits_only`) is risk-reducing and applies at once; removing one,
+raising a threshold, softening an action, or changing a metric is risk-increasing and needs step-up
+(§9.2). So removing or loosening a tripwire also drops the delegations a version would carry (V-042).
+The compiler and templates may propose tripwires (`platform_proposed`, shown as proposed and inactive
+until the owner confirms them, §7), because they only reduce risk.
+
+**Attack list.**
+
+- *A careless owner* sets a tripwire that can never fire: V-044 refuses a threshold above 1,000 or a
+  loss above the allocation. One that fires often costs only asks and held openings, never an exit.
+- *A bad model* keeps losing in small steps under a delegation: `consecutive_losing_exits` counts each
+  losing fill, and `realized_loss_usd` sums the day's losses whatever their size; either ends the
+  delegations at the next input. A model cannot acknowledge, edit, or remove a tripwire: those are
+  the owner's, with step-up.
+- *An owner-connected agent* can neither confirm a version nor acknowledge (DEC-141 item 1).
+- *A malicious insider* removes or loosens a tripwire to free the agent: that is risk-increasing and
+  needs step-up, a fired tripwire stays fired through it, and the removal is journaled with the
+  version. Removing and re-adding one restarts its count only through two confirmed versions, the
+  first of them with step-up.
+- *A bad market tick* never enters a metric, which counts fills only.
+- *Splitting an exit into many fills* only raises the losing streak, firing it sooner.
+- *Racing a version against a firing*: inputs are folded in `seq` order, so the version in effect at
+  each input decides, and a reducing version never fires one later (MI-31).
+
 ## 7. Compiler and platform proposals (DEC-97)
 
 - **Envelope fields are every field except:** the system fields (`mandate_schema_version`,
@@ -1070,6 +1184,8 @@ nobody has confirmed since its review date keeps running, but nothing in it acts
   not a proposal); `universe.pinned_instruments`, `environment`, and `connection_id` (V-038).
   The platform proposes ideas through the research agent (§8.4), never by filling in the owner's own
   universe.
+- **Tripwires** (§6.7, DEC-187) may be proposed: they only reduce risk, so a proposal is shown as
+  proposed, and is inactive until the owner confirms it like any other envelope field (V-020).
 - **What the platform proposes by default,** when the user has not stated it:
   `universe.max_instruments` 5 (DEC-117) and `behavior.research.max_revisions_per_lineage` 3
   (DEC-111). Both are shown as proposed and both need confirmation.
@@ -1372,7 +1488,8 @@ invalid (V-031).
 | `end_date` | Increasing if later or removed (null); reducing if earlier |
 | `leveraged_etps_enabled` on, `protection.enabled` off | Increasing (the reverse is reducing) |
 | `autonomy.review_by` ([DEC-188](../project/04-decision-log.md#decisions), §6.6) | Increasing if later or removed; reducing if set where there was none, or earlier. V-042 leaves it out, so a re-confirmation carries the delegations over |
-| Autonomy (every `autonomy` path except `delegations` and `review_by`) | Reducing only if every change is one of the following; anything else (reordering rules, or changing a field, operator, or compound condition, approvers, or the approval timeout) is increasing:<br>• a `then` or the `default` made stricter (auto → ask → deny);<br>• a rule added whose `then` is at least as strict as every later rule and the default;<br>• a rule removed when every later rule and the default are at least as strict as its `then`;<br>• in a single-comparison `auto` rule, one value changed so it matches less often;<br>• in a single-comparison `ask`/`deny` rule, one value changed so it matches more often, when no later rule and not the default is stricter;<br>• `two_approver_above_usd` set or lowered |
+| `autonomy.tripwires` ([DEC-187](../project/04-decision-log.md#decisions), [DEC-352](../project/decisions/DEC-352.md), §6.7) | Matched by `id`. Reducing if every change adds a tripwire, lowers a threshold, or makes an action stricter (`end_delegations` → `exits_only`); increasing if any removes one, raises a threshold, softens an action, or changes a metric. A fired tripwire stays fired whatever the version does (MI-31) |
+| Autonomy (every `autonomy` path except `delegations`, `review_by`, and `tripwires`) | Reducing only if every change is one of the following; anything else (reordering rules, or changing a field, operator, or compound condition, approvers, or the approval timeout) is increasing:<br>• a `then` or the `default` made stricter (auto → ask → deny);<br>• a rule added whose `then` is at least as strict as every later rule and the default;<br>• a rule removed when every later rule and the default are at least as strict as its `then`;<br>• in a single-comparison `auto` rule, one value changed so it matches less often;<br>• in a single-comparison `ask`/`deny` rule, one value changed so it matches more often, when no later rule and not the default is stricter;<br>• `two_approver_above_usd` set or lowered |
 | `autonomy.delegations` ([DEC-181](../project/04-decision-log.md#decisions)) | Classified on its own, with the rest of `autonomy` classified by the row above with the delegations removed from both versions. Reducing only if every change is one of the following; anything else (adding one, reordering, or changing `lifts`, `when`, or `source_approval_id`) is increasing:<br>• a delegation removed;<br>• a delegation narrowed: same `id`, `lifts`, `when`, and `source_approval_id`, with no cap larger, `starts_at` no earlier, and `expires_at` no later.<br>Expiry and exhaustion are runtime states, never versions (§6.5) |
 | Notifications | Removing a channel: increasing. Adding a channel or changing quiet hours: neutral |
 | `name` | Neutral |
@@ -1380,8 +1497,9 @@ invalid (V-031).
 
 **Risk-increasing versions require step-up authentication** (and independent approval where
 policy requires it); reducing and neutral versions take effect on owner confirmation (§2.2). MI-11
-is asserted by fuzzing random autonomy changes against random actions, and MI-29 by fuzzing random
-delegation changes against random actions, times, usage, and suspension states.
+is asserted by fuzzing random autonomy changes against random actions, MI-29 by fuzzing random
+delegation changes against random actions, times, usage, and suspension states, and MI-31's version
+clause by applying random tripwire changes at random inputs of random fill histories.
 
 ## 10. Records (DEC-51, DEC-97)
 
@@ -1409,7 +1527,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 360 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 417 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1435,6 +1553,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Thesis expiry | MC-N20 to MC-N22 | The horizon, invalidation before it, a retired lineage |
 | Stagger | MC-N23 | The deterministic per-workspace offset inside the window |
 | Review date | MC-D01 to MC-D27 | V-046's bounds and its carried and removed dates, the platform default, re-confirming with a delegation (V-042), the §9.2 row, and, as `kind: review` cases at a stated risk clock, §6.2 step 5b either side of 00:00 New York after the date: rules, default, admission, a delegation, a deny, an ask's own source, exits, and no date ([DEC-188](../project/04-decision-log.md#decisions)) |
+| Tripwires | MC-W01 to MC-W57 | Schema rejects (an unknown metric, `paused`, no threshold, 0, 21 tripwires); V-044's order, ids, and threshold bounds at and past each edge; a proposed tripwire confirmed and not; V-042 when a version removes or adds one; the §9.2 row for each change; and, as `kind: tripwire` folds of account-stream inputs, firing at and short of each metric's threshold, a winning exit and a buy in a streak, a buy's fees, the risk-day reset, re-entry, arming, a threshold lowered to the count reached, a fired tripwire removed, softened, and tightened, refused and valid acknowledgments and the fresh count after them, two firings on one fill, a metric changed, a late fill, the half-even tie, a streak across midnight, a refused acknowledgment's assertion replayed, independent approval refusing the requester, a missing requester, and a missing user, binding at the request and at processing, and accepting a second user, the decisions with a delegation before and after a firing, and, as `kind: risk_state` cases, an allocation increase rejected while an `exits_only` and an `end_delegations` tripwire is fired (MI-7), the second across a risk day ([DEC-187](../project/04-decision-log.md#decisions), [DEC-350](../project/decisions/DEC-350.md) to [DEC-352](../project/decisions/DEC-352.md)) |
 | Escalation | MC-E01 to MC-E32 | As `kind: escalation` cases (§6.1, §6.4, MI-21 to MI-25): a timely grant acts with the bound order; a skip, the timeout, lateness at the deadline and by the folded clock; a response copied once; the content hash; every non-`user` actor and an unlisted user; step-up missing, 301 s stale, reused, and `cli_confirm` on `live`; re-validation's version, mode, `deny`, and another trigger; drift at and beyond the band, with no mark, and crypto's 200 bp; the ask budget across the DST change, a skip's and a timeout's suppression; quiet hours for `cli_inbox`, for a push in both DST states, and read as New York wall time rather than UTC; and a grant batched with a cancellation ([DEC-173](../project/04-decision-log.md#decisions), [DEC-280](../project/04-decision-log.md#decisions)) |
 | Change | MC-C01 to MC-C48 | Every classification row, including rule addition, removal, and reordering, the pinning switch, pinning a mandate that had no research agent, the research fields, and the admission ceiling |
 
@@ -1458,3 +1577,6 @@ shared harness, which counts only the families it owns, by case-ID prefix.
     on live `auto` for retail (question 33), and on showing scorecards (question 35).
 11. Counsel's answers on offering delegation scopes and on the track record the approval card may
     show (question 37), and whether retail delegations need a span shorter than 30 days.
+12. Further tripwire metrics (DEC-187's examples): a client request rate, which needs the executor to
+    see `requested_by` on an intent, and firing on an opening order's submission rather than its fill,
+    which needs `GateDecided` as a risk input carrying `risk_clock` (journal spec §2) ([DEC-350](../project/decisions/DEC-350.md)).

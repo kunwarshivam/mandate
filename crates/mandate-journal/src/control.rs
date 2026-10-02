@@ -3,11 +3,12 @@
 //! account streams, with consistency rules 17 to 23, subject rules 25 and 26, and copy rule 27.
 //! Every rule only refuses a draft; none changes what a writer may do.
 //!
-//! **`AccountSnapshotRecorded` is not governed here yet** (DEC-261 item 7). The executor's fee
-//! step still journals it without the three cash members §9.2 requires as `null`, and refusing that
-//! snapshot at `append` must never stop the fee step pausing every agent and alerting the owner
-//! (`AGENTS.md` rules 3 and 13). It is registered, with rule 24, in the change that follows stream
-//! K's writer fix, and until then it stays refused as `unknown_schema`, as it always was.
+//! **`AccountSnapshotRecorded` is routed here, to a stub** (DEC-261 item 7, DEC-402). Stream K's
+//! writer conforms (#456), so its registration's tests PR routes the account stream's snapshot to
+//! §9.2 and refuses it as `unimplemented`, as it was refused as `unknown_schema` before. The
+//! implementation PR registers its schema and rule 24 and wires the fee step's own snapshot writer
+//! in the same change, so the fee step's snapshot is never refused for a member while it pauses
+//! every agent and alerts the owner (`AGENTS.md` rules 3 and 13).
 
 use mandate_canon::Value;
 
@@ -30,12 +31,15 @@ const CONTROL: [&str; 9] = [
 /// The event type §9.2 closes on both the agent and the account stream.
 const REFUSAL: &str = "OwnerCommandRefused";
 
-/// Whether §9.2 governs `event_type` on `stream`. `AccountSnapshotRecorded` is held back (module
-/// doc), and every other event keeps its own registration.
+/// The account stream's snapshot §9.2 closes, with rule 24.
+const SNAPSHOT: &str = "AccountSnapshotRecorded";
+
+/// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     match stream.stream_type() {
         StreamType::Control => CONTROL.contains(&event_type),
-        StreamType::Agent | StreamType::Account => event_type == REFUSAL,
+        StreamType::Agent => event_type == REFUSAL,
+        StreamType::Account => event_type == REFUSAL || event_type == SNAPSHOT,
         StreamType::Scheduler => false,
     }
 }
@@ -48,6 +52,9 @@ pub(crate) fn payload(
     payload: &Value,
     config_refs: Option<&Value>,
 ) -> Result<Value, Invalid> {
+    if event_type == SNAPSHOT {
+        return snapshot_payload();
+    }
     let schema = schema(event_type, schema_version)
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
     let payload = crate::schema::normalize(schema, payload, "payload")?;
@@ -189,6 +196,12 @@ fn ascending(items: &[&str], path: &str) -> Result<(), Invalid> {
         InvalidReason::NonCanonical,
         path,
     )
+}
+
+/// The stub of the snapshot registration's tests PR (DEC-77, DEC-402): §9.2's schema and rule 24
+/// land with its implementation.
+fn snapshot_payload() -> Result<Value, Invalid> {
+    Err(Invalid::new(InvalidReason::Unimplemented, "payload"))
 }
 
 fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {

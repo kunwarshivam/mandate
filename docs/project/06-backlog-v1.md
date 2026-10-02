@@ -292,7 +292,20 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   §6.4's per-agent budget of 10; risk-limit alerts are never capped.
 - **E6-13 (Should)** As an owner, I want tripwires I set in advance to end my delegations or hold new
   openings when their condition is met, so that trust does not outlive the conditions I gave it
-  under ([DEC-187](04-decision-log.md#decisions)). Waits on the mandate spec change for `autonomy.tripwires` (MI-31, V-044).
+  under ([DEC-187](04-decision-log.md#decisions)). The spec change is MI-31, V-044, §6.7, and the MC-W cases
+  ([DEC-350](decisions/DEC-350.md) to [DEC-352](decisions/DEC-352.md); claim [#439](https://github.com/kunwarshivam/mandate/issues/439)).
+  Owed after it: `mandate-spec` parsing the field, V-044, and the §9.2 row (DEC-77 tests then implementation), the executor's
+  fold of §6.7, and the `kind: tripwire` harness arm. Also owed, from #443's round 1 (m4): run ruff over `reference/` in
+  `cargo xtask ci lint`, so a duplicated definition such as a second `main()` in `reference/mandate/mutants.py` (F811) fails
+  the lint rather than reaching review. Also (#443 round 3): the per-PR `cargo xtask ci reference` runs `fuzz.py` but not
+  `reference/mandate/mutants.py`, which only the nightly job runs, so a stale mutation anchor passed `full` on #443's round-2
+  head. Make a missing anchor fail per-PR CI, for example with an anchor-only check that runs in seconds.
+  Also owed, one code PR (#443 round 3): journal spec rule 28 and `OwnerCommandRefused.reason`'s `not_independent` in
+  `mandate-journal`'s §9.2 schema, with the validator check in `reference/journal/control.py`, its two vectors, and its
+  seeded bug.
+  **Founder question** (#443 round 2): should a mandate be refused at validation
+  when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
+  drawdown ladder) then cannot be lifted until a second user exists?
   Actions are `end_delegations` or `exits_only`, never `paused` (rule 13). *Accepted when:* a fired
   tripwire acts at its next evaluation, journals the event, alerts with opaque text, and lifts only
   by the owner's acknowledgment with step-up; adding or tightening one applies at once.
@@ -468,6 +481,22 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `mandate-approval`, and MC-E25 to MC-E28, MC-E30 and MC-E32 pass; their `status.toml` rows are the
   status PR's. Still open: the `lifecycle` op's runtime driver for the other 26 cases, which fail
   naming the op until it lands.
+  *Part done (DEC-317, DEC-366):* the `lifecycle` op drives `mandate-runtime`'s `handle` and
+  `fold` under one published map, landing in three PRs. Slice 1 interprets the `ask` step, and every
+  case still fails at its second step, naming the slice that owes it. Once all three slices land,
+  fifteen cases pass (MC-E02 to MC-E05, MC-E07 to MC-E16, MC-E31); their `status.toml` rows are the
+  status PR's.
+  *Follow-up (DEC-317 item 7, E8-3):* the runtime's `ApprovalResponded` records no `quorum`, the
+  approver count and independence check 7 applied, which journal spec §9 requires for a grant that
+  reaches check 7 (`mandate_approval::quorum` already computes it). Tests first in
+  `mandate-runtime`, then the implementation; MC-E01, MC-E06, MC-E17, MC-E19 to MC-E24 and MC-E29
+  fail on that member alone and flip in the status PR that follows.
+  *Decision needed (DEC-318, Proposed, the founder's under DEC-176):* MC-E18 re-validates a grant while
+  the mode is exits-only and expects `skip` for `mode`, but §6.4 "Cancellation" cancels every pending
+  approval in a step whose effective mode is exits-only or stricter before the step judges a
+  response, so the runtime refuses the grant as `not_pending` (both skip). Either the case is
+  restated as a cancellation (a `mandate.yaml` change) or check 9's `mode` is said to be reachable
+  only by a path the spec names; MC-E18 stays pending until then.
   *Follow-up (the #416 review, minor 3):* every `ask_permit` case asks for one instrument, so
   family E cannot see the budget counted per instrument rather than per agent (`mandate-approval`'s
   own suite does). A future MC-E case should spread its ten asks across instruments. It changes
@@ -1138,9 +1167,12 @@ From E10-1's slice-V implementation (DEC-161):
     `AccountSnapshotRecorded` until this lands.** The fee step pauses every agent and alerts the owner,
     and refusing its snapshot at `append` must never stop it (rules 3 and 13, DEC-261 item 7). E7-10's
     tests PR pins that ordering with three live tests (DEC-303 item 4). The registration PR must also
-    turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. Until then they are proven only
-    by `reference/journal/control.py`'s mutants, and `snapshot_drafts_stay_unregistered` reads none of
-    them.
+    turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. **The writer landed in #456;
+    the registration's tests PR (DEC-402) routes the snapshot to a stub and makes the three ordering
+    pins pending**: `an_account_snapshot_is_closed_and_checked_by_rule_24` turns those drafts on,
+    `account_snapshot_recorded_refuses_an_unlisted_member` closes the schema, and
+    `the_fee_steps_snapshot_is_never_refused_for_its_members` lands the registration and the fee
+    step's writer together.
     The writer's pending pins are #441's (DEC-305 to DEC-307): the fee-step snapshot's payload
     member for member and type for type, the `risk_clock` stamp, the pause and alert whether or not
     the snapshot recorded, `IntentReceived` as §9.1's nine members, and `OrderSubmitted`'s
@@ -1171,6 +1203,17 @@ From E10-1's slice-V implementation (DEC-161):
     rather than risk-clock seconds (`escalation.rs`, `payload::seconds`). §9.2 supersedes DEC-291
     item 1's "same second" for this member. `crates/mandate-runtime/src/escalation/tests.rs`'s assertion
     that `effective_at` is an integer changes with this writer.
+    The writer's pending pins are the M7 tests PR's (DEC-308 to DEC-310): the refusal's
+    `effective_at` the §4.7 timestamp of the judged second, for a resume refusal, a Stop refusal,
+    each of the four reasons, and the `refused_stop` vector's own form, read from the committed
+    vectors. The in-module late-Stop pin goes pending with them (the coordinator-named test
+    change), and `refused_only` reads the judged second in either form, so the implementation PR
+    deletes `#[ignore]` lines only (DEC-309 item 3). Tests merged (#462); the implementation PR
+    on `agent/m7-refused-timestamp-impl` fills `payload::stamp`, switches `refused` to it, and
+    deletes the five `#[ignore]` lines, so the drafts commit again. Until it lands the registered
+    schema refuses the integer-form drafts at `append`, as DEC-261 item 7 has standing
+    (rule 3). This follow-up row needs its own story id: its pins and stub cite E8-3, which
+    `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
     (HLD §8), as a new `schema_version` with its own vectors.
   - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,

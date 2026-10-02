@@ -749,7 +749,7 @@ fn refused(
     };
     let body = payload::object(vec![
         ("command", payload::text(command)),
-        ("effective_at", payload::seconds(judged_at, "effective_at")?),
+        ("effective_at", payload::stamp(judged_at, "effective_at")?),
         ("reason", payload::text(reason)),
     ])?;
     batch.journal("OwnerCommandRefused", cause, body)?;
