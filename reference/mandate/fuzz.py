@@ -1854,7 +1854,7 @@ def fuzz_ask_budget(n):
     for _ in range(n):
         noon = int(rng.choice(days).timestamp())
         evs = []
-        for _ in range(rng.randint(0, 24)):
+        for _ in range(rng.randint(0, rng.choice([4, 24]))):
             t = noon + rng.randint(-14 * 3600, 11 * 3600 + 3599)
             kind = rng.choices(["requested", "owner_skipped", "timed_out", "version_applied"], [8, 2, 2, 1])[0]
             evs.append({"event": kind, "at_s": t, "instrument": rng.choice(["A", "B"]), "timeout_s": rng.choice([30, 300, 600])})
@@ -1864,6 +1864,9 @@ def fuzz_ask_budget(n):
         q = rng.choice([last, last + 1, noon + 11 * 3600 + 3599] + [e["at_s"] + e["timeout_s"] + rng.choice([-1, 0]) for e in timeouts])
         q = max(q, last)
         inst = rng.choice(["A", "B"])
+        if timeouts and rng.random() < 0.5:
+            edge = rng.choice(timeouts)
+            q, inst = max(edge["at_s"] + edge["timeout_s"] + rng.choice([-1, 0]), last), edge["instrument"]
         day = datetime.fromtimestamp(q, NYC).date()
         same = lambda e: datetime.fromtimestamp(e["at_s"], NYC).date() == day
         asked = len([e for e in evs if e["event"] == "requested" and same(e)])
