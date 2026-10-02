@@ -2082,6 +2082,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   derive each guard the harness can state from the case (`scale_active_s`, `holding`, the session,
   the minimum) and require the gate's empty answer to agree, or widen the API in a tests PR first
   (DEC-77). MC-B17 and MC-B30 to MC-B32 then pass; their status rows follow in a status-only PR.
+  *Done (DEC-400):* the arm compares the trim and derives `ref.py`'s guards from the case; the
+  four cases pass in the harness. Their `status.toml` rows follow in a status-only PR.
 - **E6-4 reference: drop `ref.py`'s `factor < 1` trim guard and its dollar minimum** (#466 review,
   round 1, m2; DEC-399 items 3 and 5). `reference/mandate/ref.py`'s `builder` trims only below a
   factor of 1 and compares the sell's notional with `min_order_usd`. `mandate_risk::trim_proposals`
