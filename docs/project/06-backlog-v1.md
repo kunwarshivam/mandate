@@ -1163,16 +1163,15 @@ From E10-1's slice-V implementation (DEC-161):
   - **Stream K:** the executor's fee-step `AccountSnapshotRecorded` writes `model_cash`, `cash_band`,
     and `cash_in_band` as `null`, not absent (§4.2), and every snapshot writes `risk_clock` as a
     whole-second timestamp, not integer seconds (DEC-302; `payload::clock` writes integers on every
-    account-stream event). **E7-10's implementation must not register
-    `AccountSnapshotRecorded` until this lands.** The fee step pauses every agent and alerts the owner,
-    and refusing its snapshot at `append` must never stop it (rules 3 and 13, DEC-261 item 7). E7-10's
-    tests PR pins that ordering with three live tests (DEC-303 item 4). The registration PR must also
-    turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. **The writer landed in #456;
-    the registration landed with the fee step's writer, tests first (#467) and implemented
-    (DEC-402)**: `an_account_snapshot_is_closed_and_checked_by_rule_24` turns those drafts on,
-    `account_snapshot_recorded_refuses_an_unlisted_member` closes the schema, and
-    `the_fee_steps_snapshot_is_never_refused_for_its_members` pins the registration and the fee
-    step's writer together.
+    account-stream event). **Done: the writer landed in #456, and `AccountSnapshotRecorded` registered
+    with rule 24 together with `fees` journaling that writer, tests first (#467), then implemented
+    ([DEC-402](decisions/DEC-402.md)).** DEC-261 item 7's ordering held throughout: the fee step pauses
+    every agent and alerts the owner, and refusing its snapshot at `append` never stops it (rules 3 and
+    13). `an_account_snapshot_is_closed_and_checked_by_rule_24` turns on, in Rust, all 15 snapshot
+    drafts' own `expect` (2 valid and 13 invalid), `account_snapshot_recorded_refuses_an_unlisted_member`
+    closes the schema, and `the_fee_steps_snapshot_is_never_refused_for_its_members` pins the
+    registration and the fee step's writer together; DEC-303 item 4's three live ordering pins are
+    superseded by them.
     The writer's pending pins are #441's (DEC-305 to DEC-307): the fee-step snapshot's payload
     member for member and type for type, the `risk_clock` stamp, the pause and alert whether or not
     the snapshot recorded, `IntentReceived` as §9.1's nine members, and `OrderSubmitted`'s

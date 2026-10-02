@@ -393,7 +393,7 @@ static OWNER_COMMAND_REFUSED: Ty = Ty::Record(&[
 mod tests {
     use std::path::Path;
 
-    use mandate_canon::{Key, Object, Value, parse, to_canonical};
+    use mandate_canon::{Int, Key, Object, Value, parse, to_canonical};
 
     use crate::{Draft, StreamId};
 
@@ -885,6 +885,23 @@ mod tests {
                 "{stream}"
             );
         }
+        Ok(())
+    }
+
+    /// A snapshot at any `schema_version` but 1 is refused as `unknown_schema`, as every other §9.2
+    /// type is: the snapshot reaches its schema through `schema`'s version gate, never around it
+    /// (#467 round 1, m3).
+    #[test]
+    fn a_snapshot_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
+        let section = section()?;
+        let mut body = base_of(&section, "AccountSnapshotRecorded")?;
+        let version = Key::new("schema_version").map_err(|_| "key")?;
+        let two = Int::new(2).ok_or("an integer")?;
+        body.insert(version, Value::Int(two));
+        assert_eq!(
+            refusal(body),
+            Some(("unknown_schema".to_owned(), "payload".to_owned()))
+        );
         Ok(())
     }
 
