@@ -310,6 +310,11 @@ impl JournaledFact {
 /// the version it is stored under; naming `admitted` when the record admits past a check the
 /// mandate fails; and naming `reason` when the record is refused at a check later than the first
 /// one the mandate fails, or at check 5, 6, or 10 when the mandate passes it.
+///
+/// Check 4 asks for a research envelope on a mandate whose model admits instruments as one
+/// expression, as `mandate-research` does: V-036 makes "no admitting model" and "no research
+/// envelope" the same condition for a validated mandate, so two disjuncts would differ only on
+/// documents validation rejects.
 pub fn check_thesis_record(
     payload: &Value,
     mandate_version: &Digest,
@@ -327,15 +332,18 @@ pub fn check_thesis_record(
         .get("revision")
         .and_then(Value::as_int)
         .ok_or(malformed("revision"))?;
+    let admits_instruments = mandate
+        .behavior
+        .signal_models
+        .iter()
+        .any(|model| model.admits_instruments);
     let fails = |check: u8| match check {
-        4 => {
-            mandate.behavior.research.is_none()
-                || !mandate
-                    .behavior
-                    .signal_models
-                    .iter()
-                    .any(|model| model.admits_instruments)
-        }
+        4 => mandate
+            .behavior
+            .research
+            .as_ref()
+            .filter(|_| admits_instruments)
+            .is_none(),
         5 => mandate.universe.pinned,
         6 => mandate.autonomy.admission == AutonomyDecision::Deny,
         10 => !mandate.universe.asset_classes.contains(&asset_class),
