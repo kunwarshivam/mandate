@@ -891,6 +891,14 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
 - **E17-2 (Must)** As an owner, I want a research agent that turns market data, news, filings, and
   the agent's memory into theses (instrument, direction, horizon, evidence, invalidation), journaled
   as `ThesisProposed`, so that the agent has ideas without me.
+  *Journal half ([DEC-413](decisions/DEC-413.md)):* journal spec v0.9 §9.4 closes
+  `ThesisProposed` and `ThesisRevised` in one shared schema with rules 34 to 39, and the vectors
+  gain a generated `research` section (spec PR on `agent/j3-thesis-schemas-spec`, stream J). Next,
+  the registration in `mandate-journal` under DEC-77: a tests PR with stubs and pending tests, then
+  the implementation. The writer that adds the model's identity, the instants, and the artifact
+  references to `ThesisEntry` is a story of its own. DEC-413 item 5 lists the readings not taken,
+  each a later tightening. One is for E17-9's loop: whether a revision without an autopsy is a
+  refusal reason, which would be a mandate spec change.
 - **E17-3 (Must)** As an owner, I want instruments admitted into the working universe only through
   the eligibility floor, the policy's asset classes, `max_instruments`, instrument-group claims, and
   my autonomy rules (`new_instrument`, `thesis_confidence`; default `ask`), journaled as

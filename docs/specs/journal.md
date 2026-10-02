@@ -2,16 +2,25 @@
 
 | | |
 |---|---|
-| **Status** | v0.8 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.9 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1, `control_stream` section of §9.2, and `risk_state` section of §9.3; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, and `research` section of §9.4; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.9 ([DEC-413](../project/decisions/DEC-413.md)):** §9.4 closes the payload schemas of the
+  agent stream's `ThesisProposed` and `ThesisRevised`, which v0.6 left to their own story. Both
+  share one schema. Every member comes from mandate spec §8.2's output fields, §8.4's thesis table,
+  or §9's row, and is traced to `mandate-research`'s `ThesisEntry` or the writer that adds it. The
+  new rules are 34 to 39: the entry type follows the revision, the reason is null exactly on
+  admission, checks 1 to 3 and check 15 are recomputed from the record, the cited sources are in
+  order, and the model reference binds the content hash. No fold reads the records yet, so §9.4
+  maps them to no `JournaledFact`. The test vectors gain a generated `research` section and stay
+  version 3.
 - **v0.8 ([DEC-403](../project/decisions/DEC-403.md)):** §9.3 closes the payload schemas of the two
   account-stream records `ValidationContext::from_journal` reads that v0.7 left to their own story
   (DEC-303 item 6): `MandateVersionApplied` and `UniverseChanged`. Every member comes from mandate
@@ -410,7 +419,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ObservationRecorded` | — | source, instrument, data (artifact) |
 | `ModelInvocationRecorded` | mod | purpose (compiler, fast model, research), provider, model and version, parameters, seed, prompt and retrieved context (artifact), response (artifact), provider request ID |
 | `ModelOutputRecorded` | man | signal model id, version, content hash, instrument, as_of, expires_at, direction, conviction, confidence, horizon, thesis (artifact) and, for the research agent, its thesis and lineage ids; `ignored` reason if not used |
-| `ThesisProposed`, `ThesisRevised` | man, mod | The research agent's output and its admission decision ([mandate spec §8.4, §8.5](mandate.md#84-the-research-agent-dec-97-adr-0002)): research agent id, version, and content hash; thesis id, lineage id, revision, and for `ThesisRevised` the `predecessor_thesis_id` and what the revision changed; instrument, asset class, direction, horizon, evidence and cited sources, corroboration kind, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); `admitted` and the refusal reason from the ordered §8.5 checks |
+| `ThesisProposed`, `ThesisRevised` | man, mod | The research agent's output and its admission decision ([mandate spec §8.4, §8.5](mandate.md#84-the-research-agent-dec-97-adr-0002)): research agent id, version, and content hash; thesis id, lineage id, revision, and for `ThesisRevised` the `predecessor_thesis_id` and what the revision changed; instrument, asset class, direction, horizon, evidence and cited sources, corroboration kind, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); `admitted` and the refusal reason from the ordered §8.5 checks; closed in §9.4 |
 | `DecisionMade` | man | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification and its source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling), `delegation_id` when a delegation lifted it ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003)), and `requested_by` (`agent`, `owner`, or `client`) with the client's id when a connected client asked (mandate §6.2 step 5a, DEC-185); `ask_suppressed` (`budget`, `skipped_today`, `recent_timeout`) when an `ask` was classified but not asked ([mandate spec §6.4](mandate.md#64-approvals)) |
 | `IntentProposed` | man | intent fields (its `event_id` is the intent ID); after a grant, `causation_id` is the `ApprovalRevalidated` |
 | `ApprovalRequested` | man | approval (its `event_id`), instrument, asset class, side, quantity, limit price, purpose, mandate version, `decided_by`, `approvers_required`, `independent_required`, `reference_mark` (`{price, seq}` or null), deadline, `timeout_s`, `on_timeout: skip`, the content object inline (large parts by artifact reference), `content_hash` |
@@ -454,7 +463,8 @@ a record with exactly the listed members, every one present (§4.2). The test ve
 section holds at least one chain event per schema, an invalid draft for every rule below, and valid
 drafts for the cases a rule might be misread to refuse. The other agent-stream events are not
 closed yet: the approval events that v0.5 added (§9, mandate spec §6.4) close in their own change,
-`ModelInvocationRecorded`, `ThesisProposed`, and `ThesisRevised` with their own stories.
+and `ModelInvocationRecorded` in its own story. `ThesisProposed` and `ThesisRevised` are closed in
+§9.4.
 `OwnerCommandRefused` is closed in §9.2, on both streams that write it.
 
 **Types.**
@@ -972,6 +982,90 @@ an instrument was admitted to, or removed from, an agent's working universe.
 | `MandateVersionApplied` with `result` `applied` | `AgentVersionActive` | `agent_id`; `connection_id`, `environment`, `capital.allocation_usd`, and `universe.pinned_instruments[].asset_id` of the stored document `new_version` names, as for `AgentDeployed`. A `new_version` whose document is not stored is refused, as malformed (`InvalidInput`) at `new_version`: the context cannot be built, and nothing is skipped |
 | `MandateVersionApplied` with `result` `rejected` | none | A refused version changes nothing: the record yields no fact and no error |
 | `UniverseChanged` | `UniverseChanged` | `agent_id`, `instrument`, and whether `change` is `admitted` |
+
+### 9.4 Research-agent thesis records ([DEC-413](../project/decisions/DEC-413.md))
+
+This subsection closes the payload schemas of the agent stream's `ThesisProposed` and
+`ThesisRevised`, which §9.1 left to their own story. For these two events it replaces the "Key
+payload fields" column of §9, as §9.1 to §9.3 do for theirs. §9.2's conventions apply unchanged:
+§9.1's types, the absent-member rule, the report order, the required `config_refs` as §9 lists them
+(`mandate_version` and `model_version`), and the rules numbered on from §9.3's. Both events share
+one schema, `schema_version` 1. The entry type follows the revision number, not the verdict, so an
+ignored revision is still a `ThesisRevised` (rule 34).
+
+A record is written for every thesis the admission judges, whether it is admitted, refused, or
+ignored ([mandate spec §8.5](mandate.md#85-admission-and-removal-dec-97-dec-101-dec-103)): a refusal
+admits nothing and is journaled, and an output the first three checks refuse is ignored and journaled
+with its reason (mandate spec §8.2). So no rule refuses a record that a correct writer makes for a
+thesis the admission judged, and the rules recompute from the record only the checks the record
+itself decides: checks 1 to 3, and check 15 from the platform-derived corroboration (rules 36 and
+37). The other checks read the mandate, the policy
+overlay, the working universe, and facts no record carries, so they are the admission's, not this
+schema's.
+
+Every member comes from mandate spec §8.2's output fields, §8.4's thesis table and its
+`ThesisProposed` sentence, or §9's row, and DEC-413 traces each one to `mandate-research`'s
+`ThesisEntry` or to the writer that adds it. The test vectors' `research` section holds base drafts
+of both records on a research agent's stream, the artifacts they name (the research agent's mandate,
+which is the mandate reference cases' `research_equity` with its admitting model's content hash set
+to the stored model content, and each thesis's prompt, response, evidence, and autopsy), an invalid
+draft for every rule and member type, and valid drafts for the cases a rule might be misread to
+refuse. No payload carries a credential or personal data: a thesis is named by opaque IDs, a source
+as cited, and the model's text only by artifact.
+
+**`ThesisProposed`, `ThesisRevised`** on the agent stream ([mandate spec §8.4, §8.5, §8.6](mandate.md#84-the-research-agent-dec-97-adr-0002)):
+one thesis the research agent proposed, and the admission's verdict on it.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `model_id`, `model_version` | `text` | The research agent's id and version, as its output states them |
+| `content_hash` | `ref` | The research agent's content hash ([mandate spec §8.1](mandate.md#81-signal-model-contract-dec-52-dec-97)); the content object is an artifact: rule 39 |
+| `thesis_id`, `lineage_id` | `id` | The thesis and its lineage ([mandate spec §8.6](mandate.md#86-thesis-lifetime-and-revision-lineages-dec-118-dec-111)) |
+| `revision` | `integer` | 0 for a first thesis: rules 34 and 36 |
+| `predecessor_thesis_id` | `id?` | The thesis this one revises, as the output states it: rule 36 |
+| `autopsy_ref` | `ref?` | What the autopsy of the predecessor's failure found and what this revision changes, as an artifact ([DEC-111](../project/04-decision-log.md#decisions)): rule 34 |
+| `instrument_id` | `id` | The instrument's asset ID (mandate spec §3), resolved by the platform |
+| `asset_class` | `us_equity` \| `crypto` | From instrument reference data, never the thesis's claim |
+| `direction` | `text` | As given; a direction v1 does not allow is recorded and ignored: rule 36 |
+| `as_of`, `expires_at` | `timestamp` | Mandate spec §8.2's data cut-off and expiry: rule 36 |
+| `horizon_s` | `integer` | Seconds: rule 36 |
+| `conviction`, `confidence` | `decimal` | As given |
+| `evidence_ref` | `ref?` | The evidence, as an artifact |
+| `evidence_sources` | `[text]` | The sources cited, as cited. Text, not `id`, because check 14 refuses a source off the allowlist and the record keeps what was cited: rule 38 |
+| `corroboration` | `independent_source` \| `market_data`, or `null` | How the platform corroborated the thesis, never what the model asserted; `null` when it did not: rule 37 |
+| `invalidation` | `text` | The conditions that end the thesis before its horizon |
+| `allowlist_version` | `integer` | The source allowlist's version in effect ([DEC-101](../project/04-decision-log.md#decisions)) |
+| `prompt_ref`, `response_ref` | `ref` | The research agent's prompt and response, as artifacts |
+| `admitted` | `boolean` | Whether the admission admitted or renewed the instrument: rule 35 |
+| `reason` | one of mandate spec §8.5's seventeen reasons (`direction_not_allowed` to `universe_full`), or `null` | The first failing check: rules 35 to 37 |
+
+**Consistency rules** (reason `schema` unless stated; the path is the member named):
+
+34. `ThesisProposed` has `revision` 0 and `ThesisRevised` a `revision` above 0 (`payload.revision`);
+    and `autopsy_ref` is `null` on `ThesisProposed` (`payload.autopsy_ref`). Mandate spec §8.4:
+    "a revision is `ThesisRevised`". No rule requires the autopsy on a revision, so a revision whose
+    output omits it is still recorded (DEC-413 item 5).
+35. `reason` is `null` exactly when `admitted` is `true` (`payload.reason`). Mandate spec §8.5: the
+    first failure decides and is the journaled reason, and a success has none.
+36. Checks 1 to 3 recomputed from the record (`payload.reason`): check 1 fails when `direction` is
+    not `long`, check 2 when `expires_at` is not `as_of` plus `horizon_s` seconds (compared exactly,
+    to the nanosecond), and check 3 when `predecessor_thesis_id` is non-null and `revision` is 0, or
+    `null` and `revision` above 0. When one fails, `reason` is the first that fails, in that order;
+    when none fails, `reason` is none of the three.
+37. Check 15 recomputed from the record (`payload.reason`): when `corroboration` is `null`, the
+    thesis fails check 15, so `reason` is a check numbered 15 or lower and never `null`,
+    `lineage_retired`, or `universe_full`; when it is non-null, `reason` is not `no_corroboration`.
+    It reports after rule 36, so a record that breaks both reports both, at the same path.
+38. `evidence_sources` is strictly ascending by bytes, so no source is listed twice
+    (`non_canonical` at `payload.evidence_sources`).
+39. `config_refs.model_version` equals `content_hash` (`payload.content_hash`), as rule 22 binds
+    `AgentDeployed`'s mandate version. A record whose `model_version` ref is missing is reported by
+    §9's required references, not here.
+
+**No mapping to `JournaledFact`.** No fold reads these records yet: the risk-state fold reads the
+account stream's `UniverseChanged` (§9.3), which the executor writes with its `causation_id` naming
+the agent stream's `ThesisProposed` or `ThesisRevised`. The lineage fold's reading of these records
+(mandate spec §8.6) follows with its own story.
 
 ## 10. Anchoring
 
