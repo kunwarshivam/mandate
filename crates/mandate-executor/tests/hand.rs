@@ -3278,12 +3278,26 @@ fn the_watchdog_exit_is_a_risk_exit_through_the_ladder() {
     );
 }
 
-/// The broker's fill of the whole crypto entry `id`: 0.5 `BTC` bought at 60000.
-fn btc_fill(id: &str) -> mandate_executor::BrokerFill {
+/// The broker's fill of the whole crypto entry `id`: `bought` `BTC` at 60000.
+fn btc_fill(id: &str, bought: &str) -> mandate_executor::BrokerFill {
     mandate_executor::BrokerFill {
         instrument: instrument(BTC),
-        ..broker_fill("f-btc-1", Some(id), "0.5", "60000")
+        ..broker_fill("f-btc-1", Some(id), bought, "60000")
     }
+}
+
+/// What a crypto buy of `bought` holds once its taker fee is withheld in the asset, recomputed in
+/// whole nano-units from trading-domain spec §6.3: `fee_qty = round(gross × 25 ÷ 10000, 9,
+/// half_up)`, `received = gross − fee_qty`. Independent of the crate's own decimal arithmetic.
+fn net_of_taker_fee(bought: &str) -> String {
+    let (whole, fraction) = bought.split_once('.').unwrap_or((bought, ""));
+    let digits = format!("{whole}{fraction:0<9}");
+    let gross: u128 = digits.parse().unwrap_or_else(|e| panic!("{bought}: {e}"));
+    let scaled = gross * 25;
+    let fee = scaled / 10_000 + u128::from(scaled % 10_000 >= 5_000);
+    let net = gross - fee;
+    let text = format!("{}.{:09}", net / 1_000_000_000, net % 1_000_000_000);
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
 #[test]
@@ -3325,7 +3339,7 @@ fn a_crypto_position_carries_one_stop_limit_for_the_whole_position() {
         &ports,
     );
     let ran = shell.run(
-        Input::BrokerUpdate(BrokerUpdate::Fill(btc_fill(&id))),
+        Input::BrokerUpdate(BrokerUpdate::Fill(btc_fill(&id, "0.5"))),
         &ports,
     );
 
@@ -3466,6 +3480,7 @@ fn a_crypto_add_is_a_limit_ioc_inside_the_sequence() {
 #[test]
 #[ignore = "pending E7-4"]
 fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
+    const BOUGHT: &str = "0.123456789";
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
     let instruments = FixedInstruments;
@@ -3479,7 +3494,7 @@ fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
         handoff(
             INTENT,
             common::AGENT,
-            protected_opening(BTC, "0.5", "60000", "54000", None),
+            protected_opening(BTC, BOUGHT, "60000", "54000", None),
         ),
         &ports,
     );
@@ -3494,14 +3509,14 @@ fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
             Some(&id),
             BTC,
             Side::Buy,
-            "0.5",
-            "0.5",
+            BOUGHT,
+            BOUGHT,
             "filled",
         ))),
         &ports,
     );
     let first = shell.run(
-        Input::BrokerUpdate(BrokerUpdate::Fill(btc_fill(&id))),
+        Input::BrokerUpdate(BrokerUpdate::Fill(btc_fill(&id, BOUGHT))),
         &ports,
     );
     let stop = first
@@ -3513,6 +3528,12 @@ fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
         stop.limit_price,
         Some(price("53730")),
         "limit = stop x (1 - crypto_stop_limit_offset): 54000 x 0.995 (DEC-36)"
+    );
+    assert_eq!(
+        stop.qty,
+        qty(&net_of_taker_fee(BOUGHT)),
+        "the whole position net of a fee that rounds at the ninth place, half up: 0.123456789 \
+         less round(0.000308641972, 9, half_up) = 0.000308642 (§6.3, DEC-349 item 2)"
     );
 }
 

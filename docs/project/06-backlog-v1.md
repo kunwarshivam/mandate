@@ -1423,6 +1423,13 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `an_unconfirmed_owner_exit_waits_for_the_session`) and the owner-confirmed extended-hours path:
   outside the regular session an owner exit sells equities through the ladder only on the
   confirmed bid, bid size and floor, and waits for the session otherwise (§5.5).
+- **E7-4 (stream K), from [#448](https://github.com/kunwarshivam/mandate/pull/448) round 1 (minor
+  2, [DEC-349](decisions/DEC-349.md)):** a crypto stop-limit is sized net of the taker fee, the
+  larger rate, because `BrokerFill` does not say maker or taker. After a maker fill the stop
+  covers `gross × (taker − maker)` less than the holding, and nothing bounds that remainder.
+  Carry `liquidity` on `BrokerFill` (the connector reads it from Alpaca's fill activity), or
+  re-size the stop when the crypto asset fee posts (`FeesCharged crypto_asset`), so it covers
+  exactly the holding.
 - **E7-4 (stream K), from [#385](https://github.com/kunwarshivam/mandate/pull/385)'s review (minor
   4):** the rule-13 oracle's waiting-exit `limit` branch
   (`protection::sequence_tests::rule_13_script`) is dormant: no script holds an exit unexcused long
