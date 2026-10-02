@@ -277,7 +277,8 @@ pub(crate) fn pacing(
 /// The exit keeps its own limit and `applied` does not name the collar: no bound, tick or quote
 /// stands in for the one that could not be computed. The participation caps and the close window
 /// still pace it, and the quote is still usable, so it bars no market order. Only the collar's
-/// arithmetic is read this way, since [`collar_price`] can fail with nothing else. A proposal of
+/// arithmetic is read this way, since [`collar_price`] can fail with nothing else, and of that only
+/// the two errors these figures produce ([`routed`]). A proposal of
 /// zero reduces nothing, so `AGENTS.md` rule 13 owes it no route: it keeps the collar's error, as
 /// before E6-6, rather than leave the gate as an allowed order of nothing.
 fn price_by_collar(input: &GateInput<'_>, pacing: &mut Pacing) -> Result<(), GateError> {
@@ -285,16 +286,24 @@ fn price_by_collar(input: &GateInput<'_>, pacing: &mut Pacing) -> Result<(), Gat
         return Ok(());
     };
     let market = input.proposed.kind == ProposedKind::Market;
-    let priced = match collar_price(input, quote, market) {
-        Ok(Some(priced)) => priced,
-        Ok(None) => return Ok(()),
-        Err(_) if input.proposed.qty > Qty::ZERO => return Ok(()),
-        Err(uncomputable) => return Err(uncomputable.into()),
+    let Some(priced) = routed(collar_price(input, quote, market), input.proposed.qty)? else {
+        return Ok(());
     };
     pacing.limit_price = priced;
     pacing.marketable_limit_required |= market;
     pacing.applied.insert(PacingControl::Collar);
     Ok(())
+}
+
+/// The collar's answer for an exit of `qty`, with the two figures DEC-383 skips read as no price:
+/// `overflow` and `not_positive`, for a proposal above zero. Every other error is reported, so an
+/// arithmetic failure nobody has diagnosed (a `mandate-num` stub's `unimplemented` among them) is
+/// never skipped silently.
+fn routed(outcome: Result<Option<Price>, NumError>, qty: Qty) -> Result<Option<Price>, NumError> {
+    match outcome {
+        Err(NumError::Overflow | NumError::NotPositive) if qty > Qty::ZERO => Ok(None),
+        other => other,
+    }
 }
 
 /// The price the collar moves a discretionary exit to, on the grid, or `None` when the exit's
@@ -411,4 +420,49 @@ pub(crate) fn evaluate_cancel(input: &CancelInput<'_>) -> Result<Decision, GateE
         checks: vec![outcome],
         computed: Computed::default(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_num::{NumError, Price, Qty};
+
+    use super::routed;
+
+    /// Only `overflow` and `not_positive` are skipped, and only for a proposal above zero (DEC-383
+    /// items 3 and 4, the #452 ruling's m3): any other arithmetic error on a discretionary exit's
+    /// collar is still the gate's error, so a failure nobody diagnosed is reported, not routed.
+    #[test]
+    fn only_the_two_diagnosed_errors_are_skipped() -> Result<(), NumError> {
+        let ten = Qty::parse("10")?;
+        let priced = Price::parse("100")?;
+        for skipped in [NumError::Overflow, NumError::NotPositive] {
+            assert_eq!(
+                routed(Err(skipped), ten),
+                Ok(None),
+                "{skipped:?} is skipped"
+            );
+            assert_eq!(
+                routed(Err(skipped), Qty::ZERO),
+                Err(skipped),
+                "a zero proposal keeps {skipped:?}"
+            );
+        }
+        for reported in [
+            NumError::NotCanonical,
+            NumError::TooPrecise,
+            NumError::Negative,
+            NumError::DivisionByZero,
+            NumError::AboveOne,
+            NumError::Unimplemented,
+        ] {
+            assert_eq!(
+                routed(Err(reported), ten),
+                Err(reported),
+                "{reported:?} is reported, never skipped"
+            );
+        }
+        assert_eq!(routed(Ok(Some(priced)), ten), Ok(Some(priced)));
+        assert_eq!(routed(Ok(None), Qty::ZERO), Ok(None));
+        Ok(())
+    }
 }

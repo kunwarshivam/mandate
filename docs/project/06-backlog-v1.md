@@ -1907,6 +1907,13 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   promises the whole rule set is re-checked before any rule is read. Stream F's V-023-at-load in
   `mandate-spec::validate` refuses such a value up front (landed with E10-1's slice V, DEC-161 item 5),
   and the order path's `well_typed` gains the same bound so both report it by name.
+- **E6-6:** make a skipped collar countable without a replay. When DEC-383 skips a collar that
+  cannot be computed, `applied` does not name it and nothing is journaled, so the decision is
+  identical to one whose collar computed and bound nothing; a named entry in the decision or a
+  journaled fact would let the skips be counted (#452 review, m2).
+- **E6-6 tests correction:** the doc comment of `properties::an_exit_over_extreme_figures_is_still_routed`
+  still says "Pending E6-6" though the test is live since #452; DEC-77 item 2 kept the
+  implementation PR from touching it (#452 review, m5).
 - **E6-6:** decide a proposal of zero quantity by name. The gate allows one on every path whose
   checks pass (a zero sell is a reduction, a zero buy passes every limit), so an `Allow` can
   carry an order of nothing, which the broker refuses; only a discretionary exit over an
