@@ -949,6 +949,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
     elements again (#445, three rounds running, for §9.2; #510 for §9.4). Add a test helper, or an xtask
     check, under which a never-null test derives its paths from the schema's own members, including
     the first and second element of every list member, instead of from a hand-written array.
+  *Follow-ups (#513 review round 1):*
+  - Minor 5: `ModelOutputRecorded.instrument_id` is §9.1 `text`, where mandate spec §8.2's output
+    table types it `uuid`. Decide whether it becomes §9.3's `asset_id`: a §9.1 change, and its own
+    story, spec first (ES-22, DEC-176). Type `PlatformOperatorAction`'s `research_thesis_halt`
+    instrument (§9, DEC-100) the same way when that schema closes.
 
   The writer that adds the model's identity, the instants, and the artifact references to
   `ThesisEntry` is a story of its own. DEC-413 item 5 lists the readings not taken, each a later
