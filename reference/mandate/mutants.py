@@ -1,3 +1,38 @@
+def run(work, probe):
+    return subprocess.run([sys.executable, "-c", probe], cwd=work, capture_output=True, text=True, timeout=900)
+
+def last(out):
+    return out.stdout.strip().splitlines()[-1] if out.returncode == 0 and out.stdout.strip() else None
+
+def main():
+    survivors = []
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "schemas").symlink_to(REPO / "schemas")
+        (root / "docs").symlink_to(REPO / "docs")
+        work = root / "reference" / "mandate"
+        shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
+        assert last(run(work, TW_PROBE)) == "0", "the tripwire fuzz fails on the unmutated model"
+        assert last(run(work, CASE_PROBE)) == "same", "the MC-W cases differ from the unmutated model's"
+        for name, (old, new) in (MUTANTS | TRIPWIRE_MUTANTS).items():
+            shutil.rmtree(work, ignore_errors=True)
+            shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
+            ref = work / "ref.py"
+            text = ref.read_text()
+            assert old in text, f"mutation anchor missing: {name}"
+            ref.write_text(text.replace(old, new, 1))
+            if name in TRIPWIRE_MUTANTS:
+                by_fuzz = (last(run(work, TW_PROBE)) or "0") != "0"
+                by_cases = last(run(work, CASE_PROBE)) == "differ"
+                caught = by_fuzz and by_cases
+                name = f"{name} (fuzz {'caught' if by_fuzz else 'missed'}, MC-W cases {'caught' if by_cases else 'missed'})"
+            else:
+                caught = (last(run(work, PROBE)) or "0") != "0"
+            print(f"{'caught  ' if caught else 'SURVIVED'} {name}")
+            if not caught:
+                survivors.append(name)
+    sys.exit(1 if survivors else 0)
+
 """Seeds known bugs into a copy of ref.py and checks that fuzz.py catches every one (AGENTS.md: independent oracles)."""
 import pathlib, shutil, subprocess, sys, tempfile
 
@@ -225,6 +260,48 @@ MUTANTS = {
                                             'classify(without_delegations(prev), without_delegations(m))'),
     "a bound field does not move the content hash": ('content_hash({k: req[k] for k in sorted(req)})', 'content_hash({k: req[k] for k in sorted(req) if k != "limit_price"})'),
 }
+# Seeded bugs in the tripwires (§6.7, MI-31, V-044; DEC-187, DEC-350 to DEC-352). Each must be caught both by the
+# tripwire fuzz (TW_PROBE) and by the MC-W reference cases, which `main` regenerates from the mutated model and requires
+# to differ. TW_PROBE and the cases are first run on the unmutated model and must come back clean, so a catch is never
+# a failure that was there before the mutation.
+TRIPWIRE_MUTANTS = {
+    "a tripwire fires one past its threshold": ('            if v >= D(t["threshold"]):', '            if v > D(t["threshold"]):'),
+    "a fired tripwire fires again": ('            if tid in self.fired:\n                continue\n', ''),
+    "an acknowledgment without valid step-up lifts a tripwire": ('            if verdict["result"] == "refused":\n                ev.append(',
+                                                                 '            if False:\n                ev.append('),
+    "a version that removes a fired tripwire lifts it": (
+        '            self.counters = {k: v for k, v in self.counters.items() if k in self.current()}\n',
+        '            self.counters = {k: v for k, v in self.counters.items() if k in self.current()}\n'
+        '            self.fired = {k: v for k, v in self.fired.items() if k in self.current()}\n'),
+    "tightening a tripwire re-arms it": ('if tid not in before or before[tid]["metric"] != t["metric"]:', 'if tid not in before or before[tid] != t:'),
+    "changing a tripwire's metric keeps its count": ('if tid not in before or before[tid]["metric"] != t["metric"]:',
+                                                     'if tid not in self.counters:'),
+    "an acknowledgment does not re-arm the tripwire": ('                if tid in self.current():\n                    self.counters[tid] = self.armed()\n', ''),
+    "the realized loss carries across risk days": ('            for c in self.counters.values():\n                c["day_net"] = D(0)\n',
+                                                   '            pass\n'),
+    "a break-even exit extends the losing streak": ('c["streak"] + 1 if net < 0 else 0', 'c["streak"] + 1 if net <= 0 else 0'),
+    "a buy breaks the losing streak": ('                if inp["side"] == "sell":\n                    c["streak"] = c["streak"] + 1 if net < 0 else 0\n',
+                                       '                c["streak"] = (c["streak"] + 1 if net < 0 else 0) if inp["side"] == "sell" else 0\n'),
+    "a buy's fees are not realized loss": ('                c["day_net"] += net\n', '                c["day_net"] += net if inp["side"] == "sell" else 0\n'),
+    "a fill's own fees are left out": ('    return gross - D(f["fees"])', '    return gross'),
+    "the removed basis rounds half-up": ('            u = b - r12(b * qty / q)', '            u = b - (b * qty / q).quantize(D("1e-12"), rounding="ROUND_HALF_UP")'),
+    "new_instruments counts a re-entry": ('            first = inp["instrument"] not in self.ever_filled\n',
+                                          '            first = inp["side"] == "buy" and self.book[inp["instrument"]][0] == D(inp["qty"])\n'),
+    "a fired tripwire leaves delegations lifting": ('\n            or st.get("tripwire_fired", False))', ')'),
+    "an exits_only tripwire pauses the agent": ('"restriction": "exits_only" if "exits_only" in held.values() else None',
+                                                '"restriction": "paused" if "exits_only" in held.values() else None'),
+    "a softened action loosens a fired tripwire": ('if now is not None and TRIPWIRE_ACTIONS[now["action"]] > TRIPWIRE_ACTIONS[a]:', 'if now is not None:'),
+    "the alert names the tripwire": ('"text": TRIPWIRE_ALERT_TEXT})', '"text": f"{TRIPWIRE_ALERT_TEXT} {tid}"})'),
+    "removing a tripwire is reducing": ('        if (b is None or b["metric"] != a["metric"]', '        if b is None:\n            continue\n        if (b["metric"] != a["metric"]'),
+    "raising a threshold is reducing": (' or D(b["threshold"]) > D(a["threshold"])', ''),
+    "softening an action is reducing": ('\n                or TRIPWIRE_ACTIONS[b["action"]] < TRIPWIRE_ACTIONS[a["action"]]):', '):'),
+    "changing a metric is reducing": ('b["metric"] != a["metric"] or ', ''),
+    "V-044 allows a fractional count": ('ok = th == th.to_integral_value() and 1 <= th', 'ok = 1 <= th'),
+    "V-044 allows a count above 1,000": ('1 <= th <= TRIPWIRE_MAX_COUNT', '1 <= th'),
+    "V-044 allows a loss above the allocation": (' and th <= D(m["capital"]["allocation_usd"])', ''),
+    "V-044 allows a fraction of a cent": ('ok = -th.as_tuple().exponent <= 2 and ', 'ok = '),
+    "V-044 allows unsorted ids": ('    if not sorted_unique([t["id"] for t in tws]):\n        return {"V-044"}', '    if False:\n        return {"V-044"}'),
+}
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
@@ -232,6 +309,15 @@ PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if 
          "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
          "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
          "print(len(FAIL))")
+
+TW_PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
+            "fuzz_tripwires(300); fuzz_tripwire_changes(400); fuzz_tripwire_rules(300); print(len(FAIL))")
+
+CASE_PROBE = ("import json, yaml\n"
+              "try:\n    import generate\nexcept AssertionError:\n    print('differ')\n    raise SystemExit(0)\n"
+              "mine = [c for c in generate.doc['cases'] if c['id'].startswith('MC-W')]; "
+              "kept = [c for c in yaml.safe_load(open('../../docs/specs/reference-cases/mandate.yaml'))['cases'] if c['id'].startswith('MC-W')]; "
+              "print('differ' if json.loads(json.dumps(mine)) != kept else 'same')")
 
 def main():
     survivors = []
@@ -249,6 +335,11 @@ def main():
             ref.write_text(text.replace(old, new, 1))
             out = subprocess.run([sys.executable, "-c", PROBE], cwd=work, capture_output=True, text=True, timeout=900)
             caught = out.returncode == 0 and int(out.stdout.strip().splitlines()[-1]) > 0
+            if name in TRIPWIRE_MUTANTS:
+                cases = subprocess.run([sys.executable, "-c", CASE_PROBE], cwd=work, capture_output=True, text=True, timeout=900)
+                by_cases = cases.returncode == 0 and cases.stdout.strip().splitlines()[-1] == "differ"
+                caught = caught and by_cases
+                name = f"{name} (fuzz and MC-W cases)" if by_cases else f"{name} (MC-W cases miss it)"
             print(f"{'caught  ' if caught else 'SURVIVED'} {name}")
             if not caught:
                 survivors.append(name)

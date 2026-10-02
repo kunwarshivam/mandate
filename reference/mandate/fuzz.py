@@ -1,6 +1,7 @@
 """Property-based fuzz of the reference implementation against the invariants of mandate spec §1.1 (MI-1 to MI-32)."""
 import copy, itertools, json, random, sys
 from collections import Counter
+from fractions import Fraction
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from ref import *  # noqa: F401,F403
@@ -1072,6 +1073,350 @@ def fuzz_review_rules(n):
               "V-042 re-confirming carries delegations over unless the version is risk-increasing elsewhere", (elsewhere, errs))
         check("V-046" not in errs, "V-046 a re-confirmation inside 180 days is valid", errs)
 
+# ------------------------------------------------------------------ tripwires (§6.7; MI-31, V-044; DEC-187, DEC-350 to DEC-352)
+# The oracle keeps the raw input log and, after every input, recounts each tripwire's metric from scratch over its
+# window with its own Fraction accounting and half-even rounding, its own arming log, and its own step-up ledger; it
+# never calls the fold, its counters, fill_net_realized, or owner_command.
+TW_INSTS = [base.ABC, base.XYZ, base.QRS, base.BTC]
+TW_IDS = ["a_trip", "b_trip", "c_trip"]
+TW_METRICS = ["consecutive_losing_exits", "new_instruments", "realized_loss_usd"]
+TW_RANK = {"end_delegations": 0, "exits_only": 1}
+TW_GATE_ST = {"now": "2026-09-22T15:00:00.000000000Z", "agent_equity": "10000", "positions_mv": {}, "working_opening_orders": [],
+              "orders_today": 0, "last_exit_fill_at": {}, "working_universe": [base.ABC]}
+
+def own_round12(x):
+    n, rem = divmod(x * 10 ** 12, 1)
+    n = int(n)
+    if rem > Fraction(1, 2) or (rem == Fraction(1, 2) and n % 2):
+        n += 1
+    return Fraction(n, 10 ** 12)
+
+def own_nets(log):
+    """Net realized per fill index, over the whole log: a buy's is minus its fees; a sell's is its proceeds less the
+    basis it removes (all of it when it closes) less its fees."""
+    qty, basis, nets = {}, {}, {}
+    for i, e in enumerate(log):
+        if e["event"] not in ("FillApplied", "LateFillApplied"):
+            continue
+        k, q, p, fee = e["instrument"], Fraction(e["qty"]), Fraction(e["price"]), Fraction(e["fees"])
+        Q, B = qty.get(k, Fraction(0)), basis.get(k, Fraction(0))
+        if e["side"] == "buy":
+            qty[k], basis[k], g = Q + q, B + q * p, Fraction(0)
+        elif q == Q:
+            qty[k], basis[k], g = Fraction(0), Fraction(0), q * p - B
+        else:
+            removed = min(B, own_round12(B * q / Q))
+            qty[k], basis[k], g = Q - q, B - removed, q * p - removed
+        nets[i] = g - fee
+    return nets
+
+def own_metric(metric, window, log, nets, day):
+    fills = [j for j in window if j in nets]
+    if metric == "consecutive_losing_exits":
+        n = 0
+        for j in reversed(fills):
+            if log[j]["side"] == "sell":
+                if nets[j] >= 0:
+                    break
+                n += 1
+        return Fraction(n)
+    if metric == "new_instruments":
+        return Fraction(sum(1 for j in fills if all(log[i]["instrument"] != log[j]["instrument"] for i in nets if i < j)))
+    return max(Fraction(0), -sum((nets[j] for j in fills if j > day), Fraction(0)))
+
+def own_tripwires(log, env):
+    """Per input: the fired ids with the action each holds, the ids newly fired and lifted, refused acknowledgments,
+    and every armed tripwire's metric, recounted from scratch."""
+    nets = own_nets(log)
+    fired, arm, seen, cur, out = {}, {}, set(), {}, []
+    for k, e in enumerate(log):
+        lifted, refused = [], False
+        if e["event"] == "MandateVersionApplied":
+            new = {t["id"]: t for t in e["mandate"]["autonomy"].get("tripwires", [])}
+            for i, t in new.items():
+                if i not in cur or cur[i]["metric"] != t["metric"]:
+                    arm[i] = k
+            cur = new
+        elif e["event"] == "OwnerAcknowledged":
+            ok = own_step_up_ok(e["own_ev"], e["at_s"], env, seen)
+            if isinstance(e["own_ev"], dict) and isinstance(e["own_ev"].get("assertion"), str):
+                seen.add(e["own_ev"]["assertion"])
+            refused = not ok
+            if ok and e["tripwire"] in fired:
+                del fired[e["tripwire"]]
+                lifted.append(e["tripwire"])
+                if e["tripwire"] in cur:
+                    arm[e["tripwire"]] = k
+        day = max([j for j in range(k + 1) if log[j]["event"] == "RiskDayStarted"], default=-1)
+        metrics = {i: own_metric(t["metric"], range(arm[i] + 1, k + 1), log, nets, day) for i, t in cur.items()}
+        newly = [i for i in sorted(cur) if i not in fired and metrics[i] >= Fraction(cur[i]["threshold"])]
+        for i in newly:
+            fired[i] = cur[i]["action"]
+        held = {i: (cur[i]["action"] if i in cur and TW_RANK[cur[i]["action"]] > TW_RANK[a] else a) for i, a in fired.items()}
+        out.append({"held": held, "newly": newly, "lifted": lifted, "refused": refused, "metrics": metrics})
+    return out
+
+def rand_tripwire(i):
+    metric = rng.choice(TW_METRICS)
+    th = str(rng.randint(1, 4)) if metric != "realized_loss_usd" else rng.choice(["0.01", "1", "5", "20", "50.5", "200"])
+    return {"id": i, "metric": metric, "threshold": th, "action": rng.choice(["end_delegations", "exits_only"])}
+
+def rand_tripwires():
+    return [rand_tripwire(i) for i in sorted(rng.sample(TW_IDS, rng.randint(0, 3)))]
+
+def mutate_tripwires(tws):
+    out = copy.deepcopy(tws)
+    for _ in range(rng.randint(1, 2)):
+        op = rng.choice(["add", "remove", "lower", "raise", "stricter", "softer", "metric"])
+        free = [i for i in TW_IDS if i not in {t["id"] for t in out}]
+        if op == "add" and free:
+            out.append(rand_tripwire(rng.choice(free)))
+        elif out:
+            t = rng.choice(out)
+            if op == "remove":
+                out.remove(t)
+            elif op in ("lower", "raise"):
+                v = Fraction(t["threshold"])
+                step = 1 if t["metric"] != "realized_loss_usd" else Fraction(rng.choice([1, 50, 500]), 100)
+                v = v - step if op == "lower" else v + step
+                if v > 0:
+                    t["threshold"] = norm(D(v.numerator) / D(v.denominator))
+            elif op == "stricter":
+                t["action"] = "exits_only"
+            elif op == "softer":
+                t["action"] = "end_delegations"
+            else:
+                t["metric"] = rng.choice(TW_METRICS)
+                if t["metric"] != "realized_loss_usd" and "." in t["threshold"]:
+                    t["threshold"] = "2"
+    return sorted(out, key=lambda t: t["id"])
+
+def tw_mandate(tws):
+    m = copy.deepcopy(base.BASES["research_equity"])
+    if tws or rng.random() < 0.5:
+        m["autonomy"]["tripwires"] = tws
+    V.validate(m)
+    return m
+
+def rand_tw_history(n, t0, versions=True, acks=True):
+    """A random account-stream history: fills that never sell more than is held, risk days, versions, and
+    acknowledgments with good and bad step-up evidence. Evidence carries the oracle's integer `at_s`."""
+    held, log, t = {}, [], t0
+    used = []
+    log.append({"event": "MandateVersionApplied", "at": ts(t), "at_s": t, "mandate": tw_mandate(rand_tripwires())})
+    for _ in range(n):
+        t += rng.choice([1, 5, 60, 600])
+        r = rng.random()
+        if r < 0.62:
+            inst = rng.choice(TW_INSTS[:3])
+            q = held.get(inst, Fraction(0))
+            side = "sell" if q > 0 and rng.random() < 0.55 else "buy"
+            if side == "buy":
+                qty = Fraction(rng.choice([1, 2, 3, 5]))
+            else:
+                qty = rng.choice([q] + [x for x in (Fraction(1, 2), Fraction(1), Fraction(2)) if x < q])
+            held[inst] = q + qty if side == "buy" else q - qty
+            px = rng.choice(["99", "99.99", "100", "100.01", "101", "10.000000000001", "33.33"])
+            log.append({"event": rng.choice(["FillApplied", "FillApplied", "LateFillApplied"]), "at": ts(t), "at_s": t,
+                        "instrument": inst, "side": side, "qty": norm(D(qty.numerator) / D(qty.denominator)), "price": px,
+                        "fees": rng.choice(["0", "0", "0.01", "1"])})
+        elif r < 0.70:
+            log.append({"event": "RiskDayStarted", "at": ts(t), "at_s": t})
+        elif r < 0.82 and versions:
+            prev = next(e["mandate"] for e in reversed(log) if e["event"] == "MandateVersionApplied")
+            log.append({"event": "MandateVersionApplied", "at": ts(t), "at_s": t,
+                        "mandate": tw_mandate(mutate_tripwires(prev["autonomy"].get("tripwires", [])))})
+        elif acks:
+            kind = rng.choice(["fresh", "fresh", "fresh", "stale", "future", "reused", "method", "none", "junk"])
+            aid = f"as-{len(log)}-{rng.randint(0, 10 ** 6)}"
+            ev = {"assertion": aid, "at_s": t - rng.randint(0, 300), "method": "cli_confirm"}
+            if kind == "stale":
+                ev["at_s"] = t - 301
+            elif kind == "future":
+                ev["at_s"] = t + 1
+            elif kind == "reused" and used:
+                ev["assertion"] = rng.choice(used)
+            elif kind == "method":
+                ev["method"] = "password"
+            elif kind == "none":
+                ev = None
+            elif kind == "junk":
+                ev = {"assertion": 7}
+            if isinstance(ev, dict) and isinstance(ev.get("assertion"), str):
+                used.append(ev["assertion"])
+            log.append({"event": "OwnerAcknowledged", "at": ts(t), "at_s": t, "tripwire": rng.choice(TW_IDS),
+                        "step_up": wire(ev), "own_ev": ev})
+    return log
+
+def fuzz_tripwires(n):
+    """MI-31 and MI-28: a tripwire fires exactly at the first input whose recounted metric reaches its threshold, stays
+    fired through versions, risk days, and refused acknowledgments, and lifts only on an acknowledgment with valid
+    step-up, after which it counts afresh; it alerts with opaque text; while fired no delegation lifts, an exits_only
+    one holds openings and never exits, and nothing else changes; refolding a prefix and continuing gives the same."""
+    for _ in range(n):
+        log = rand_tw_history(rng.randint(5, 45), ESC_T0)
+        steps = [{k: v for k, v in e.items() if k not in ("own_ev", "at_s")} for e in log]
+        try:
+            got = tripwire_run(steps)
+        except AssertionError as ex:
+            check(False, "MI-31 the fold accepts every history the oracle does", (str(ex), steps))
+            continue
+        own = own_tripwires(log, "paper")
+        dm = rand_delegated_mandate()
+        for k, (g, o) in enumerate(zip(got, own)):
+            ctx = (k, steps[: k + 1], g, o)
+            st = g["state"]
+            check(st["fired"] == o["held"], "MI-31 the fired set and each held action match the recount", ctx)
+            check({i: Fraction(v) for i, v in st["metrics"].items()} == o["metrics"], "MI-31 each armed metric matches the recount", ctx)
+            trig = [j["limit"] for j in g["journal"] if j["type"] == "RiskLimitTriggered"]
+            check(trig == [f"tripwire:{i}" for i in o["newly"]], "MI-31 a tripwire fires exactly at the first input reaching its threshold", ctx)
+            lift = [j["limit"] for j in g["journal"] if j["type"] == "RiskLimitLifted"]
+            check(lift == [f"tripwire:{i}" for i in o["lifted"]], "MI-31 only an acknowledgment with valid step-up lifts, and only a fired tripwire", ctx)
+            check(any(j["type"] == "OwnerCommandRefused" for j in g["journal"]) == o["refused"],
+                  "§6.1 an acknowledgment without valid step-up is refused and journaled", ctx)
+            alerts = [j for j in g["journal"] if j["type"] == "OwnerAlertSent"]
+            check(len(alerts) == len(o["newly"]), "MI-31 every firing alerts the owner once", ctx)
+            check(all(set(a) == {"type", "subject", "text"} and a["text"] == TRIPWIRE_ALERT_TEXT
+                      and not any(i in a["subject"] for i in TW_IDS + TW_INSTS) for a in alerts),
+                  "rule 6 a tripwire alert carries an opaque subject and generic text only", ctx)
+            check(st["restriction"] == ("exits_only" if "exits_only" in o["held"].values() else None),
+                  "MI-31 an exits_only tripwire, and only one, restricts the agent to exits_only, never paused", ctx)
+            check(st["delegations_suspended"] == bool(o["held"]), "MI-28 a fired tripwire, and only one, suspends delegations", ctx)
+            if dm is not None:
+                now = fmt(DELEG_NOW + timedelta(seconds=rng.randint(0, 3 * 86400)))
+                a = rand_autonomy_action() if rng.random() < 0.8 else {"purpose": rng.choice(sorted(REDUCING))}
+                calm = {"now": now, "usage": {}}
+                r = autonomy(dm, a, tripwire_autonomy_state(st, now))
+                plain = copy.deepcopy(dm)
+                del plain["autonomy"]["delegations"]
+                want = autonomy(plain if o["held"] else dm, a, calm)
+                check(r == want, "MI-31 a fired tripwire changes a decision only by stopping every delegation", (ctx, a, r, want))
+                mode = tripwire_autonomy_state(st, now)["mode"]
+                for purpose in ("risk_exit", "protective", "owner_exit", "discretionary_exit", "open"):
+                    v = order_decision(base.BASES["research_equity"], TW_GATE_ST,
+                                       {"instrument": base.ABC, "purpose": purpose, "qty": "1", "limit_price": "100"},
+                                       mode, set(), "regular", False, owner_confirmed_bid=True)
+                    if purpose == "open":
+                        check((v["verdict"] == "deny") == ("exits_only" in o["held"].values()),
+                              "MI-31 an exits_only tripwire holds openings, and nothing else does", (ctx, v))
+                    else:
+                        check(v["verdict"] == "allow", "MI-1 a tripwire never holds or denies an exit", (ctx, purpose, v))
+        cut = rng.randint(0, len(steps))
+        tw = Tripwires()
+        for s in steps[:cut]:
+            tw.step(copy.deepcopy(s))
+        rest = [{"journal": tw.step(s), "state": tw.snapshot()} for s in steps[cut:]]
+        check(rest == got[cut:], "MI-8 refolding a prefix and continuing gives the same journal and state", cut)
+
+def own_tripwire_class(ot, nt):
+    """§9.2 for tripwires, by id: None when equal; increasing if one is gone, changed its metric, rose, or softened."""
+    if ot == nt:
+        return None
+    by = {t["id"]: t for t in nt}
+    worse = any(t["id"] not in by or by[t["id"]]["metric"] != t["metric"]
+                or Fraction(by[t["id"]]["threshold"]) > Fraction(t["threshold"])
+                or (t["action"], by[t["id"]]["action"]) == ("exits_only", "end_delegations") for t in ot)
+    return "increasing" if worse else "reducing"
+
+def fuzz_tripwire_changes(n):
+    """§9.2 for tripwires, and MI-31's version clause with MI-11: a version classified reducing or neutral, applied at a
+    random input of a random history without acknowledgments, never lifts a fired tripwire, never fires one later or
+    with a softer action, and never decides less strictly than the previous version would have."""
+    for _ in range(n):
+        old_t = rand_tripwires()
+        new_t = mutate_tripwires(old_t)
+        old, new = tw_mandate(old_t), tw_mandate(new_t)
+        c, paths = classify(old, new)
+        own = own_tripwire_class(old_t, new_t)
+        want = {None: "neutral", "increasing": "risk_increasing", "reducing": "risk_reducing"}[own]
+        check(c == want, "§9.2 tripwires classify by their own row", (old_t, new_t, c, paths))
+        if c == "risk_increasing":
+            continue
+        log = rand_tw_history(rng.randint(5, 40), ESC_T0, versions=False, acks=False)
+        log[0]["mandate"] = old
+        at = rng.randint(1, len(log))
+        t = log[at - 1]["at_s"]
+        a_log = log[:at] + [{"event": "MandateVersionApplied", "at": ts(t), "at_s": t, "mandate": old}] + log[at:]
+        b_log = log[:at] + [{"event": "MandateVersionApplied", "at": ts(t), "at_s": t, "mandate": new}] + log[at:]
+        strip = lambda lg: [{k: v for k, v in e.items() if k not in ("own_ev", "at_s")} for e in lg]
+        ra, rb = tripwire_run(strip(a_log)), tripwire_run(strip(b_log))
+        first_a, first_b = {}, {}
+        for k, (x, y) in enumerate(zip(ra, rb)):
+            fa, fb = x["state"]["fired"], y["state"]["fired"]
+            ctx = (old_t, new_t, at, k, fa, fb)
+            check(all(i in fb and TW_RANK[fb[i]] >= TW_RANK[fa[i]] for i in fa),
+                  "MI-31 a reducing version never lifts a fired tripwire or softens what it holds", ctx)
+            for i in fa:
+                first_a.setdefault(i, k)
+            for i in fb:
+                first_b.setdefault(i, k)
+            now = fmt(DELEG_NOW)
+            dm = rand_delegated_mandate()
+            if dm is not None:
+                a = rand_autonomy_action()
+                d0 = autonomy(dm, a, tripwire_autonomy_state(x["state"], now))
+                d1 = autonomy(dm, a, tripwire_autonomy_state(y["state"], now))
+                check(STRICT[d1["decision"]] >= STRICT[d0["decision"]], "MI-11 a reducing tripwire change never loosens autonomy", (ctx, a, d0, d1))
+        check(all(i in first_b and first_b[i] <= k for i, k in first_a.items()), "MI-31 a reducing version never makes a tripwire fire later",
+              (old_t, new_t, first_a, first_b))
+
+def fuzz_tripwire_rules(n):
+    """V-044, V-020, and V-042 for tripwires, against bounds the oracle reads by string surgery: ids sorted and unique;
+    a counted threshold all digits and in [1, 1000]; a loss threshold of at most two decimals and at most the
+    allocation; a proposed tripwire needs confirmation; removing one drops the delegations a version carries."""
+    for _ in range(n):
+        m = copy.deepcopy(base.BASES["research_equity"])
+        alloc = rng.choice(["500", "10000"])
+        m["capital"]["allocation_usd"] = alloc
+        m["risk"].update({"max_order_usd": "100", "max_position_usd": "200", "max_gross_exposure_usd": "500"})
+        tws = []
+        for i in sorted(rng.sample(TW_IDS + ["a_trip"], rng.randint(1, 3))):
+            metric = rng.choice(TW_METRICS)
+            th = rng.choice(["1", "2", "999", "1000", "1001", "2.5", "0.01", "0.001", "499.99", "500", "500.01", "10000", "12.345"])
+            tws.append({"id": i, "metric": metric, "threshold": th, "action": rng.choice(["end_delegations", "exits_only"])})
+        if rng.random() < 0.2:
+            tws.reverse()
+        m["autonomy"]["tripwires"] = tws
+        V.validate(m)
+        ctx = dict(base.CTX)
+        prov = rng.choice([None, {"source": "platform_proposed", "confirmed": True}, {"source": "platform_proposed", "confirmed": False}])
+        if prov is not None:
+            ctx["provenance"] = {"/autonomy/tripwires": prov}
+        errs = semantic(m, ctx)[0]
+        ids = [t["id"] for t in tws]
+
+        def bad(t):
+            th = t["threshold"]
+            whole, _, frac = th.partition(".")
+            if t["metric"] in ("consecutive_losing_exits", "new_instruments"):
+                return frac != "" or not 1 <= int(whole) <= 1000
+            return len(frac) > 2 or Fraction(th) > Fraction(alloc)
+        want = any(a >= b for a, b in zip(ids, ids[1:])) or any(bad(t) for t in tws)
+        check(("V-044" in errs) == want, "V-044 refuses exactly unsorted ids and out-of-range thresholds", (tws, alloc, errs))
+        check(("V-020" in errs) == (prov is not None and not prov["confirmed"]), "V-020 a proposed tripwire is valid once confirmed", (prov, errs))
+        check("V-022" not in errs and "V-038" not in errs, "§7 the platform may propose a tripwire", errs)
+        d = copy.deepcopy(base.BASES["research_equity"])
+        d["autonomy"]["tripwires"] = [{"id": "b_trip", "metric": "consecutive_losing_exits", "threshold": "3", "action": "exits_only"}]
+        d["autonomy"]["delegations"] = [{"id": "d1", "lifts": "rule:large_orders", "when": {"field": "purpose", "op": "in", "value": ["increase", "open"]},
+                                         "max_order_usd": "500", "max_orders": 2, "max_total_usd": "1000",
+                                         "starts_at": fmt(DELEG_NOW), "expires_at": fmt(DELEG_NOW + timedelta(days=10)), "source_approval_id": None}]
+        nxt = copy.deepcopy(d)
+        change = rng.choice(["remove", "raise", "lower", "add", "soften"])
+        tw = nxt["autonomy"]["tripwires"]
+        if change == "remove":
+            tw.clear()
+        elif change == "raise":
+            tw[0]["threshold"] = "4"
+        elif change == "lower":
+            tw[0]["threshold"] = "2"
+        elif change == "soften":
+            tw[0]["action"] = "end_delegations"
+        else:
+            tw.append({"id": "c_trip", "metric": "realized_loss_usd", "threshold": "50", "action": "end_delegations"})
+        errs = semantic(nxt, dict(base.CTX, previous_version=d))[0]
+        check(("V-042" in errs) == (change in ("remove", "raise", "soften")),
+              "V-042 a version that removes or loosens a tripwire carries no delegation; one that adds or tightens does", (change, errs))
+
 # ------------------------------------------------------------------ escalation (§6.1, §6.4; MI-21 to MI-25)
 # The oracles below keep their own integer clock, deadlines, pending set, grant sets, and assertion ledger, and
 # compute New York wall time with datetime.fromtimestamp; none of them calls the admission or re-validation code.
@@ -1611,6 +1956,9 @@ if __name__ == "__main__":
     fuzz_review(600)
     fuzz_review_changes(600)
     fuzz_review_rules(600)
+    fuzz_tripwires(400)
+    fuzz_tripwire_changes(600)
+    fuzz_tripwire_rules(600)
     fuzz_escalation(3000)
     fuzz_policy_quorum(1000)
     fuzz_drift(600)
