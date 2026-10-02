@@ -153,6 +153,8 @@ fn ci(job: &str) -> Result<()> {
             markers()?;
             feature_map()?;
             sh("typos", &[])?;
+            shellcheck_scripts(Path::new(".github/scripts"))?;
+            actionlint_workflows(Path::new(".github/workflows"))?;
             uv_tools(&["ruff", "check", "."])?;
             uv_tools(&["ruff", "format", "--check", "."])
         }
@@ -305,6 +307,94 @@ fn output_in(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
         );
     }
     String::from_utf8(out.stdout).context("non-UTF-8 output")
+}
+
+/// Every file under `dir` whose extension is one of `extensions`, sorted by path so the linter's
+/// command line and report order are stable (E1-4, DEC-329). Directory symlinks are not followed.
+fn files_by_extension(dir: &Path, extensions: &[&str]) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let mut entries: Vec<_> = fs::read_dir(&dir)
+            .with_context(|| format!("reading {}", dir.display()))?
+            .collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            if entry
+                .file_type()
+                .with_context(|| format!("reading {}", path.display()))?
+                .is_dir()
+            {
+                pending.push(path);
+            } else if path
+                .extension()
+                .is_some_and(|e| extensions.contains(&e.to_string_lossy().as_ref()))
+            {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// Runs a linter over paths and embeds its findings in the failure, so a planted `SC2086` or an
+/// unknown workflow key fails the job naming its code. Both tools report their findings on stdout
+/// and keep stderr for their own errors, so both streams travel with the failure. A missing
+/// binary is the loud error [`sh`] reports, never a silent skip (E1-4, DEC-330).
+fn lint_paths(program: &str, args: &[String]) -> Result<()> {
+    eprintln!("    $ {program} {}", args.join(" "));
+    let out = Command::new(program)
+        .args(args)
+        .output()
+        .with_context(|| format!("starting `{program}` (is it installed? see AGENTS.md)"))?;
+    if !out.status.success() {
+        let mut findings = String::from_utf8_lossy(&out.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if !stderr.trim().is_empty() {
+            if !findings.trim().is_empty() {
+                findings.push('\n');
+            }
+            findings.push_str(&stderr);
+        }
+        bail!(
+            "`{program} {}` failed: {}",
+            args.join(" "),
+            findings.trim_end()
+        );
+    }
+    Ok(())
+}
+
+/// ShellCheck over every `*.sh` under `.github/scripts/` (E1-4, DEC-329), the shell that CI's
+/// short path and the merge gate run as they are on the default branch. A directory holding no
+/// scripts still runs the version check, so an uninstalled tool fails the job it belongs to.
+fn shellcheck_scripts(dir: &Path) -> Result<()> {
+    let scripts = files_by_extension(dir, &["sh"])?;
+    if scripts.is_empty() {
+        return sh("shellcheck", &["--version"]);
+    }
+    let args: Vec<String> = scripts
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    lint_paths("shellcheck", &args)
+}
+
+/// actionlint over every `*.yml` and `*.yaml` under `.github/workflows/` (E1-4, DEC-330), so a
+/// workflow mistake fails `fast` instead of waiting for a reviewer. A directory holding no
+/// workflows still runs the version check, so an uninstalled tool fails the job it belongs to.
+fn actionlint_workflows(dir: &Path) -> Result<()> {
+    let workflows = files_by_extension(dir, &["yml", "yaml"])?;
+    if workflows.is_empty() {
+        return sh("actionlint", &["--version"]);
+    }
+    let args: Vec<String> = workflows
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    lint_paths("actionlint", &args)
 }
 
 #[derive(Deserialize)]
@@ -2682,13 +2772,13 @@ mod tests {
 
     use super::{
         BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANTS_OUT, MutatedCrate, PendingTest,
-        PendingTestRun, TestOutcome, backticked_paths, base_ref_in, ci, classify, contains_dec_id,
-        contains_word, failure_cause, first_panic_line, generated_pending_markers,
-        has_pending_tests, is_pending_marker, is_stub_function, listed_mutant_counts,
-        live_test_counts, mutant_verdicts, mutants, mutants_outcome, mutated_crates, names_a_stub,
-        output_in, pending_problems, pending_tests, plain_comment_lines, repo_root,
-        spec_guard_problems, status_flip_problems, test_binary, test_outcomes, unjudged_mutants,
-        verdicts,
+        PendingTestRun, TestOutcome, actionlint_workflows, backticked_paths, base_ref_in, ci,
+        classify, contains_dec_id, contains_word, failure_cause, first_panic_line,
+        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function,
+        listed_mutant_counts, live_test_counts, mutant_verdicts, mutants, mutants_outcome,
+        mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
+        plain_comment_lines, repo_root, shellcheck_scripts, spec_guard_problems,
+        status_flip_problems, test_binary, test_outcomes, unjudged_mutants, verdicts,
     };
 
     #[test]
@@ -4975,6 +5065,77 @@ jq -r "$filter" "$src"
         assert!(
             merged.is_some() && out.contains("ci.yml green"),
             "a path that only contains `web/` needs no web run: {out}"
+        );
+        Ok(())
+    }
+
+    /// E1-4's shellcheck oracle (DEC-329): a clean script passes and a planted `SC2086` fails
+    /// lint naming the code, so the check judges the script it is given. Removing the shellcheck
+    /// call from lint fails this test, the planted bug that shows the oracle bites (DEC-331).
+    #[test]
+    fn a_shellcheck_error_in_a_fixture_script_fails_lint() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-shellcheck-{}", std::process::id()));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        fs::create_dir_all(&dir)?;
+        fs::write(
+            dir.join("clean.sh"),
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\"\n",
+        )?;
+        shellcheck_scripts(&dir).context("a clean script passes shellcheck")?;
+        fs::write(dir.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
+        let err = shellcheck_scripts(&dir)
+            .expect_err("the planted unquoted expansion fails lint as SC2086");
+        fs::remove_dir_all(&dir).ok();
+        let err = format!("{err:#}");
+        assert!(
+            err.contains("SC2086"),
+            "the failure names the code the fixture planted: {err}"
+        );
+        Ok(())
+    }
+
+    /// E1-4's actionlint oracle (DEC-330): a minimal workflow passes and a workflow with an
+    /// unknown key fails lint naming it, so the check judges the workflow it is given. Removing
+    /// the actionlint call from lint fails this test, the planted bug that shows the oracle
+    /// bites (DEC-331).
+    #[test]
+    fn an_actionlint_error_in_a_fixture_workflow_fails_lint() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-actionlint-{}", std::process::id()));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        fs::create_dir_all(&dir)?;
+        fs::write(
+            dir.join("clean.yml"),
+            concat!(
+                "on: push\n",
+                "jobs:\n",
+                "  check:\n",
+                "    runs-on: ubuntu-24.04\n",
+                "    steps:\n",
+                "      - run: echo ok\n",
+            ),
+        )?;
+        actionlint_workflows(&dir).context("a minimal workflow passes actionlint")?;
+        fs::write(
+            dir.join("planted.yml"),
+            concat!(
+                "on:\n",
+                "  push:\n",
+                "    jobs:\n",
+                "      x:\n",
+                "    badopt: 1\n",
+            ),
+        )?;
+        let err = actionlint_workflows(&dir)
+            .expect_err("the planted unknown key fails lint as a syntax error");
+        fs::remove_dir_all(&dir).ok();
+        let err = format!("{err:#}");
+        assert!(
+            err.contains("unexpected key \"badopt\""),
+            "the failure names the key the fixture planted: {err}"
         );
         Ok(())
     }
