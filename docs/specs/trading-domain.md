@@ -325,11 +325,14 @@ queued by the broker for the next eligible session.
    position (exact quantity or the close-position endpoint).
 3. **No order may cross zero** (`would_cross_zero`).
 4. **Sell quantity ≤ position − Σ open sell quantity**, protective legs included
-   (`sell_exceeds_available`). An exit ladder between rungs (§5.6 step 5) counts what it may
-   still send as open. A sell that fits beside the open orders, but not beside a ladder's
-   remainder as well, is sized to what is left. With nothing left, it is held
-   `exit_between_rungs` until room opens. It is never denied for a remainder
-   ([DEC-410](../project/decisions/DEC-410.md)).
+   (`sell_exceeds_available`). An exit ladder's remainder between rungs (§5.6 step 5) is a plan,
+   not an open order ([DEC-410](../project/decisions/DEC-410.md)).
+   - **A risk-reducing sell that trims.** A risk exit, owner exit or flatten that fits beside the
+     open orders, but not beside the remainders as well, goes whole, and the remainders are
+     trimmed by the shortfall (journaled, nothing sent to the broker).
+   - **A discretionary exit** trims nothing. It is sized to what the remainders leave, or, with
+     nothing left, denied `sell_exceeds_available`.
+   - **Protective placements** are not gated here; §5.4 sizes them.
 5. **One side at a time:** an agent's non-protective orders in an instrument are all on the same
    side (`working_order_limit`). Before a risk-reducing sell, the executor cancels the agent's own
    resting opening buys in that instrument and waits for confirmation.
@@ -415,7 +418,7 @@ protective legs are checked against position + entry quantity.
 | Scope | Cancel | Close |
 |---|---|---|
 | Account or workspace | Broker cancel-all endpoint (`Unknown` orders included) | Broker close-position endpoint per instrument |
-| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg (§5.4) or unattributed watchdog exit (§2.3) in an instrument it closes, each by `client_order_id`, confirming each; never cancel-all | Sell exactly the agent's sub-ledger quantity; never close-position (other agents' and the owner's unattributed shares are untouched) |
+| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg (§5.4) or unattributed watchdog exit (§2.3) in an instrument it closes, each by `client_order_id`, confirming each; never cancel-all. The agent's ladders between rungs are plans, not orders: the flatten trims their remainders as it goes (§5.6 step 5) | Sell exactly the agent's sub-ledger quantity; never close-position (other agents' and the owner's unattributed shares are untouched) |
 
 Sequence: apply the final mode first (`paused` for mandate limits; `stopped` for an owner kill
 switch) → cancel → confirm → close (market orders only in the regular session outside auction
@@ -455,15 +458,34 @@ protection is canceled), the executor uses the **exit price ladder** (sell; buy 
    from the next priceable quote or trade: a fallback price is never where the ladder ends.
 5. **Between rungs** ([DEC-409](../project/decisions/DEC-409.md),
    [DEC-410](../project/decisions/DEC-410.md)). A ladder is between rungs from the confirmation of
-   a step's cancel that leaves part of the rung unsold, until it sends that part as its next
-   rung. Until then it still sells that part (§5.3 rule 4). This covers a ladder parked for the
-   next open because no session was open at the confirmation.
-   - **Where a ladder ends.** If the exit's protective sequence (§5.4) no longer climbs at that
-     confirmation, its ladder ends there: the agent is paused or stopped, or the unprotected
-     interval has reached its bound. The remainder is never sent, even if the agent resumes, and
-     protection returns for what is left.
+   a step's cancel that leaves part of the rung unsold. Its remainder is that part, less what
+   sells have trimmed off it (§5.3 rule 4), and the next rung sends at most that.
+   - **When it counts.** A remainder counts as still selling only while something will send it:
+     - a sequence's (§5.4) while its ladder climbs, the agent neither paused nor stopped and the
+       unprotected interval not past its bound;
+     - a ladder without a sequence unless it is parked for the next open while its agent is
+       paused or stopped. It counts again when the agent resumes.
+   - **How it ends.** It ends at any of these:
+     - the next rung is sent;
+     - the rung is refused;
+     - the exit is abandoned;
+     - a trim takes all of it;
+     - the sequence's ladder stops climbing.
+   - **When a sequence's ladder stops climbing.**
+     - **At the confirmation:** the agent is paused or stopped, or the interval is past its
+       bound. The ladder ends there, and the remainder is never sent, even if the agent resumes.
+       Protection returns for what is left once no other exit there is working or waiting
+       (§5.4).
+     - **Later**, at the interval's bound: the ladder ends. A parked one is not carried on when
+       protection returns.
+   - **Protection's return** ends a sequence that was not parked. A parked one becomes a ladder
+     without a sequence, waiting for the next open.
    - **Without a sequence**, a ladder whose step was asked while it climbed is not ended by a
      later pause. If it is parked, it waits for its agent to resume.
+   - **Before anything is released or resumed at each step,** the remainders still counting are
+     trimmed by however much they and the open sells exceed the position. A paused agent that
+     resumes, or a position that shrank while its ladder was parked, so never sends more than
+     is left.
 
 | Tier | `exit_offset` | `exit_offset_step` | `max_exit_offset` |
 |---|---|---|---|
