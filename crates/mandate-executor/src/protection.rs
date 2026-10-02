@@ -7268,7 +7268,10 @@ mod sequence_tests {
         /// §5.4's Σ protective sell quantity ≤ position, counted as `fits` counts it: every
         /// protective order the broker holds live, with every exit it holds live, sells at most the
         /// position (rule 12); and the live exits with every rung a ladder between rungs may still
-        /// send sell at most the position too (DEC-408). The oracle's own record, never the fold's.
+        /// send sell at most the position too (DEC-408). And no sell works beside a ladder between
+        /// rungs unless that ladder is parked for the open, the only state in which a remainder
+        /// lasts: so a sell beside it cannot end unsold before its rung is due (DEC-410 item 7).
+        /// The oracle's own record, never the fold's.
         fn within_position(&mut self) -> Result<(), String> {
             if !self.sums {
                 return Ok(());
@@ -7292,6 +7295,16 @@ mod sequence_tests {
                      {:?} between rungs",
                     self.position, self.now, self.between
                 ));
+            }
+            for exit in self.between.keys() {
+                let beside = self.working(Some(exit));
+                if beside > 0 && !self.parked.contains(exit) {
+                    return Err(format!(
+                        "{beside} working beside {exit}'s remainder, which is not parked for the \
+                         open at {}: the window DEC-410 item 7 says cannot be reached",
+                        self.now
+                    ));
+                }
             }
             Ok(())
         }
@@ -7523,7 +7536,9 @@ mod sequence_tests {
                             exit.purpose, exit.qty
                         ));
                     }
-                    self.between.remove(&intent);
+                    if self.between.remove(&intent).is_some() {
+                        self.parked.remove(&intent);
+                    }
                     if draft.payload.get("laddered") == Some(&Value::Bool(true)) {
                         self.lone.insert(intent.clone());
                     }
@@ -8589,7 +8604,15 @@ mod sequence_tests {
         let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
             .into_iter()
             .chain(TO_THE_OPEN)
-            .chain([Move::RejectFirst, Move::Tick(1), Move::Ack, Move::Tick(1)])
+            .chain([
+                Move::RejectFirst,
+                Move::Tick(1),
+                Move::Ack,
+                Move::Fill(2),
+                Move::Tick(1),
+                Move::Confirm,
+                Move::Tick(1),
+            ])
             .collect();
         let desk = rule_13_script_with(TEN_SECONDS_BEFORE_THE_NIGHT, false, true, &script)?;
         assert_eq!(
@@ -8597,6 +8620,17 @@ mod sequence_tests {
             vec![("01JABCDEFGHJKMNPQRSTV00001".to_owned(), 2, 2)]
         );
         assert_eq!(fate(&desk, 6).2, Some(8), "the 8 went whole");
+        let covered: u32 = desk
+            .venue
+            .values()
+            .filter(|held| held.live && held.purpose == Purpose::Protective)
+            .map(|held| held.qty.saturating_sub(held.filled))
+            .sum();
+        assert_eq!(
+            (desk.position, desk.working(None), covered),
+            (8, 0, 8),
+            "the 8 left unsold are protected, no more and no less (§5.4)"
+        );
         Ok(())
     }
 
