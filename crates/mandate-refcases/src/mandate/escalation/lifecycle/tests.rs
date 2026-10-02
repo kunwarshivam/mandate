@@ -1,16 +1,21 @@
 //! The map's own pieces, on inputs no reference case reaches: a name bound twice or missing, a
 //! reference mark or a quorum with a member too many, a cause record of the right type and the
-//! wrong reason, and a handoff no record authorises.
+//! wrong reason, a handoff no record authorises, a member supplied with no value, and an intent
+//! whose step reads another mandate version than its request bound.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::Value;
+use mandate_journal::Environment;
 use mandate_runtime::{
-    Effect, EventDraft, EventId, FlattenPlan, IntentBody, IntentHandoff, Purpose,
+    ApprovalSettings, Effect, EventDraft, EventId, FlattenPlan, IntentBody, IntentHandoff, Purpose,
 };
 use serde_json::json;
 
-use super::{As, bind, handoffs, member, object, seconds, strip, text, translate};
+use super::{
+    As, Asked, Ran, Shell, bind, extra_fault, handoffs, member, object, seconds, strip, text,
+    translate,
+};
 use crate::ensure;
 
 /// A name binds to one runtime name and a runtime name to one name, and each must be present.
@@ -189,4 +194,82 @@ fn an_unbound_name_passes_as_written() -> Result<(), String> {
     ensure(translate(&bound, "R1").is_err(), || {
         "a runtime name as written".to_owned()
     })
+}
+
+/// A member only the runtime writes is compared when a value is supplied, and only `content` may be
+/// supplied with none: a re-validation's `mode`, `band_bp` or `m_req` with no value fails, so none
+/// can be switched off without the comparison noticing.
+#[test]
+fn only_the_content_is_supplied_uncompared() -> Result<(), String> {
+    let value = text("normal");
+    ensure(
+        extra_fault("mode", Some(&value), Some(&value)).is_none(),
+        || "an equal member failed".to_owned(),
+    )?;
+    ensure(
+        extra_fault("mode", Some(&value), Some(&text("paused"))).is_some(),
+        || "a different member passed".to_owned(),
+    )?;
+    ensure(extra_fault("mode", Some(&value), None).is_some(), || {
+        "a missing member passed".to_owned()
+    })?;
+    ensure(extra_fault("content", None, Some(&value)).is_none(), || {
+        "the content failed".to_owned()
+    })?;
+    for name in ["mode", "band_bp", "m_req"] {
+        ensure(extra_fault(name, None, Some(&value)).is_some(), || {
+            format!("`{name}` with no value passed")
+        })?;
+    }
+    Ok(())
+}
+
+/// An intent's mandate version is the one its request bound, never the step's `now`: check 8 skips
+/// any grant whose `now` differs, so no reference case can separate the two, and this one does.
+#[test]
+fn an_intent_reads_the_version_its_request_bound() -> Result<(), String> {
+    let mut shell = Shell::started(
+        ApprovalSettings {
+            approvers: BTreeSet::from(["u1".to_owned()]),
+            author: "u0".to_owned(),
+            timeout_s: 300,
+            environment: Environment::Paper,
+        },
+        0,
+    )?;
+    shell.asked.insert(
+        "ap1".to_owned(),
+        Asked {
+            id: "R1".to_owned(),
+            version: "sha256:v1".to_owned(),
+            bound: json!({}),
+        },
+    );
+    shell.approval_ids.insert("ap1".to_owned(), "R1".to_owned());
+    let revalidation = draft(
+        "E1",
+        "ApprovalRevalidated",
+        object(vec![("approval", text("R1"))])?,
+    );
+    let intent = EventDraft {
+        causation_id: Some(EventId("E1".to_owned())),
+        ..draft("E2", "IntentProposed", object(Vec::new())?)
+    };
+    let ran = Ran {
+        drafts: vec![revalidation],
+        effects: Vec::new(),
+        clock: 0,
+        asked: None,
+        now: Some(json!({"mandate_version": "sha256:v2"})),
+        decision: None,
+    };
+    let want = |version: &str| json!({"approval": "ap1", "mandate_version": version});
+    let bound = shell.intended(&want("sha256:v1"), &intent, &ran);
+    ensure(bound.is_empty(), || {
+        format!("the bound version failed: {bound:?}")
+    })?;
+    ensure(
+        !shell.intended(&want("sha256:v2"), &intent, &ran).is_empty(),
+        || "`now`'s version passed".to_owned(),
+    )
 }
