@@ -23,6 +23,7 @@ use mandate_time::UtcNanos;
 mod agent;
 mod artifact;
 mod catalogue;
+mod control;
 mod draft;
 mod merkle;
 mod schema;
@@ -168,6 +169,12 @@ pub enum InvalidReason {
     PiiRefs,
     #[error("risk_clock is earlier than the stream's last risk_clock")]
     RiskClockRegressed,
+    /// The stub of E7-10's tests PR (DEC-77): every draft journal spec §9.2 closes is refused with
+    /// this until the implementation PR, which removes the variant. Each was refused as
+    /// `unknown_schema` before, except a control stream's `StreamOpened`, which was refused as
+    /// `schema` (it took the account schema), so it refuses nothing that was accepted.
+    #[error("the control stream's payload checks (§9.2) are not implemented yet")]
+    Unimplemented,
 }
 
 impl InvalidReason {
@@ -190,6 +197,7 @@ impl InvalidReason {
             Self::ArtifactRefs => "artifact_refs",
             Self::PiiRefs => "pii_refs",
             Self::RiskClockRegressed => "risk_clock_regressed",
+            Self::Unimplemented => "unimplemented",
         }
     }
 }
