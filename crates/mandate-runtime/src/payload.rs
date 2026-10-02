@@ -11,6 +11,7 @@ use mandate_accounting::{InstrumentId, Side};
 use mandate_approval::{AssertionId, ContentHash, StepUp, StepUpMethod};
 use mandate_canon::{Digest, Int, Key, Value};
 use mandate_num::{Price, Qty};
+use mandate_time::UtcNanos;
 
 use crate::error::RuntimeError;
 use crate::types::{Initiator, Mode, ModelOutput, OwnerConfirmation, Purpose, RiskClock};
@@ -49,6 +50,22 @@ pub(crate) fn count(n: u64, field: &'static str) -> Result<Value, RuntimeError> 
     Int::new(n)
         .map(Value::Int)
         .ok_or_else(|| non_canonical(field))
+}
+
+/// A whole-second risk clock as journal spec §4.7's canonical timestamp, the form §9.2 types
+/// `OwnerCommandRefused`'s `effective_at` (DEC-261 item 7, DEC-308): the instant `UtcNanos` prints
+/// and `UtcNanos::parse` reads back unchanged, on the whole second, never the integer seconds
+/// [`seconds`] writes and the registered schema refuses (`non_canonical` at
+/// `payload.effective_at`). The runtime's one writer of the member, `escalation::refused`, stamps
+/// through here.
+///
+/// # Errors
+/// [`RuntimeError::NonCanonicalPayload`] naming `field` when the second lies outside the range a §4.7
+/// timestamp can hold.
+pub(crate) fn stamp(at: RiskClock, field: &'static str) -> Result<Value, RuntimeError> {
+    UtcNanos::from_parts(at.secs(), 0)
+        .map(|instant| Value::Str(instant.to_string()))
+        .map_err(|_| non_canonical(field))
 }
 
 /// A risk-clock second that may be negative, which the canonical integer form cannot hold (journal

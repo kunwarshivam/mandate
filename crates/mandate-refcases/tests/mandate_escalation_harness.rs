@@ -2,8 +2,8 @@
 //! compares every expectation, and never lets a case pass for the wrong reason (DEC-85, DEC-292).
 //!
 //! The arm lives in `src/mandate/escalation.rs`. Its `ask_permit` and `deliver_now` ops drive
-//! `mandate_approval::ask_permit` and `mandate_approval::deliver_now`; its `lifecycle` op is not
-//! interpreted yet and fails naming itself. Each test has two halves that need each other: a case
+//! `mandate_approval::ask_permit` and `mandate_approval::deliver_now`; its `lifecycle` op drives
+//! `mandate-runtime` and has its own tests in `mandate_lifecycle_harness.rs`. Each test has two halves that need each other: a case
 //! passes as the fixture states it, which an arm that failed everything could not do, and fails,
 //! naming the member, when that member is edited, dropped, or added, which an arm that compared
 //! nothing could not do.
@@ -88,19 +88,6 @@ fn every_interpreted_case_passes_as_stated() {
     assert_eq!(ids.len(), 6);
     for id in &ids {
         run(fixture.clone(), id).unwrap_or_else(|e| panic!("{id}: {e}"));
-    }
-}
-
-/// DEC-292: a `lifecycle` case fails naming its op until an arm drives the runtime, so none can
-/// pass on an arm that never ran it.
-#[test]
-fn a_lifecycle_case_fails_naming_its_op() {
-    let fixture = fixture();
-    let ids = ids_with_op(&fixture, "lifecycle");
-    assert_eq!(ids.len(), 26);
-    for id in &ids {
-        let failure = run(fixture.clone(), id).expect_err("a lifecycle case cannot pass yet");
-        assert!(failure.contains("`lifecycle`"), "{id}: {failure}");
     }
 }
 
