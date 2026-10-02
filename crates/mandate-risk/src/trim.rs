@@ -77,9 +77,10 @@ pub(crate) fn proposals(
 }
 
 /// The agent's own open non-protective sells in the instrument, read as §5.3 rule 4's
-/// `sell_available` reads them at the re-run: a trim already working is part of the sell-down, so
-/// it comes off the excess before the next trim is sized (DEC-399 item 7). Protective orders are
-/// not a trim in progress and are not counted.
+/// `sell_available` reads them at the first gate decision (§5.3's closing paragraph; the re-run
+/// before submission counts protective legs too): a trim already working is part of the
+/// sell-down, so it comes off the excess before the next trim is sized (DEC-399 item 7).
+/// Protective orders are not a trim in progress and are not counted.
 fn open_sells(
     agent: &AgentSnapshot,
     account: &AccountSnapshot,
@@ -490,6 +491,24 @@ mod tests {
             order.instrument = other.clone();
         }
         assert_eq!(elsewhere.trims()?, qty("3")?);
+        Ok(())
+    }
+
+    /// More on sale than is held sells nothing, even where the value subtraction alone would not
+    /// stop it: at an equity of −10000 the cap is −2000 and the target −1000, so 2000 of excess
+    /// on 10 held with 12 on sale still leaves 8 shares' worth, and only `held − on_sale` being
+    /// negative holds the trim at zero (#466 round-2 review, m2).
+    #[test]
+    fn a_negative_cap_with_more_on_sale_than_held_proposes_nothing() -> Result<(), GateError> {
+        let mut scene = Scene::new("10", "1000")?;
+        scene.risk.agent_equity = Usd::parse("-10000")?;
+        assert_eq!(
+            scene.trims()?,
+            qty("10")?,
+            "nothing on sale: the whole position goes"
+        );
+        scene.resting(7, "12", Side::Sell, false, true)?;
+        assert_eq!(scene.trims()?, Vec::new());
         Ok(())
     }
 }
