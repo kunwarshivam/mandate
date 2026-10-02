@@ -262,6 +262,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   implementation reads it the gate keeps a crypto opening owed at check 2 and refuses it
   fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a non-USD pair is denied, a
   USD pair passes the floor, and check 2 is whole for crypto (`crates/mandate-risk/tests/usd_pairs.rs`).
+  *Done:* check 2 in `mandate-risk` (#390, #394); the trading-domain harness decides crypto
+  proposals (#419, DEC-285; RC-09 and MC-B26 to MC-B28 passing in #422), and refuses a short in
+  its day-trade fold and reads `crypto_status` (#438 staged, DEC-314, DEC-315; implemented under
+  DEC-395).
 - **E6-11 (Must)** As an owner, I want the daily surveillance report delivered to me and a conduct
   breach to move the agent to `exits_only`, so that §9.6's "breach → agent `exits_only`" and its
   "threshold breaches are routed to the owner, whose acknowledgment is journaled" hold. E6-8 computes
@@ -1861,7 +1865,8 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   reaches the fold without that refusal. Refuse a negative `SignedQty` there instead of taking
   its magnitude. **Tests staged** in [#438](https://github.com/kunwarshivam/mandate/pull/438)
   (DEC-314): the refusal is pending E6-10 behind `held_overnight`'s stub, and a flat (`0`)
-  position, which is not a short, is pinned live as folding as no shares held.
+  position, which is not a short, is pinned live as folding as no shares held. *Done (DEC-395):*
+  the fold refuses with DEC-314's text, down to a billionth of a share.
 - **Read `crypto_status` in the trading-domain harness** (DEC-285 item 5). The driver hands the gate
   a crypto-active account because no crypto-proposing case states `crypto_status`, and
   `trading_domain_gate_harness.rs` pins it as pending E6-10, initial and in an update. When a case
@@ -1869,7 +1874,9 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   check 1's `crypto_active`. **Tests staged** in [#438](https://github.com/kunwarshivam/mandate/pull/438)
   (DEC-315): the two assertions are dropped, the gate carries a `crypto_active` field its
   snapshot reads, the read is a stub pending E6-10, and two in-module tests pin the stub's report
-  live until the implementation PR replaces them.
+  live until the implementation PR replaces them. *Done (DEC-395):* only an exact `ACTIVE` leaves
+  crypto openings open, a non-string status is refused, and the stub pins are replaced by live
+  tests that the status never refuses an equity decision or a crypto risk exit.
 - **RC-09's `alpaca_intraday_margin` variant cannot pass as written** (founder; DEC-285 item 6).
   Its `expect_overrides.step_1: { decision: { verdict: allow } }` merges into a decision that
   keeps `reason_code: legacy_pdt_day_trade_budget`, so the expectation is an allow with a deny's
