@@ -25,7 +25,10 @@
 //!   names;
 //! - `protective_sell_qty`: the executor's protective sell quantity in the instrument;
 //! - `initial.open_orders` and `initial.positions`, which are **seeded** as the journal events
-//!   that would have put them there (a `FillApplied`, a `ProtectionChanged` with `placed`).
+//!   that would have put them there (the agent's own `OrderSubmitted`, its `FillApplied` and its
+//!   `filled` state, so the position has a single holder its protection belongs to; a
+//!   `ProtectionChanged` with `placed`), followed by a restart, the startup reconciliation and the
+//!   account report at `initial.account`'s cash, as a production shell starts (DEC-347).
 //!
 //! A gate `decision` is **never** asserted: it is stream I's and stream J's (`mandate-risk`), and
 //! a case whose only expectations are decisions or accounting values is not driven here at all.
@@ -66,6 +69,93 @@ use mandate_executor::{
 use mandate_num::{Bps, Qty, Rounding};
 use mandate_time::UtcNanos;
 use serde_json::Value as Json;
+
+/// `account` reporting `cash` as its cash. The fixture's `initial.account` names its settled cash
+/// and nothing else, so equity and buying power stay the account's own: settled cash is not
+/// buying power (#447 round 1, m2), and only the cash comparison reads the figure.
+fn holding(
+    cash: &str,
+    account: mandate_executor::BrokerAccount,
+) -> mandate_executor::BrokerAccount {
+    mandate_executor::BrokerAccount {
+        cash: common::usd(&canonical(cash)),
+        ..account
+    }
+}
+
+/// The journal action that opens an unprotected interval. The executor journals it when it asks
+/// the cancel, the earlier and tighter instant, so a case matches it anywhere before the
+/// confirmation and the gate's re-run that the fixture lists after it, and never later (the
+/// coordinator's ruling on #174, DEC-348 item 1). Every other action keeps the fixture's order.
+const INTERVAL_START: &str = "unprotected_window_start";
+
+/// The step kinds of other streams, which this harness skips by name: they drive nothing here, so
+/// their `actions` are asserted by nobody here (the coordinator's ruling on #174, DEC-348 item 3).
+const SKIPPED: [&str; 2] = ["fees_charged", "conduct_breach"];
+
+fn skips(step: &Json) -> bool {
+    text_of(step, "event").is_some_and(|kind| SKIPPED.contains(&kind))
+}
+
+/// The driven cases with a step this harness skips that expects actions: nobody here asserts that
+/// step, so the case is never reproduced here in full, and it may not be listed passing.
+fn partly_unasserted() -> Vec<String> {
+    DRIVEN
+        .iter()
+        .filter(|key| {
+            let (id, variant) = match key.split_once("::") {
+                Some((id, variant)) => (id, Some(variant)),
+                None => (**key, None),
+            };
+            case(id, variant)
+                .steps
+                .iter()
+                .any(|step| skips(step) && !expected_actions(step).is_empty())
+        })
+        .map(|key| (*key).to_owned())
+        .collect()
+}
+
+/// The keys `status` lists as passing among `keys`.
+fn listed_passing(status: &str, keys: &[String]) -> Vec<String> {
+    keys.iter()
+        .filter(|key| {
+            status.lines().any(|line| {
+                line.trim_start().starts_with(&format!("'{key}' ="))
+                    && line.contains("status = \"passing\"")
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// Whether `step` lists the interval's end after a `submit_protective`: the broker accepted the
+/// new protection within the step (DEC-348 item 2).
+fn ends_after_protection(step: &Json) -> bool {
+    let actions = expected_actions(step);
+    actions
+        .iter()
+        .position(|(kind, _)| kind == "submit_protective")
+        .is_some_and(|submitted| {
+            actions.iter().skip(submitted).any(|(kind, argument)| {
+                kind == "journal" && argument.as_str() == Some("unprotected_window_end")
+            })
+        })
+}
+
+/// The name a `propose_order` step binds to its order when it is proposed: its `name`, where the
+/// step expects no submission. A step that does expect one binds the name to the order its
+/// `submit` matches instead, so a passive exit's OCO, which carries the exit's own id, is never
+/// bound twice (DEC-347 item 4).
+fn named_when_proposed(step: &Json) -> Option<String> {
+    let submits = expected_actions(step)
+        .iter()
+        .any(|(kind, _)| kind.starts_with("submit"));
+    step.get("data")
+        .and_then(|data| text_of(data, "name"))
+        .filter(|_| !submits)
+        .map(str::to_owned)
+}
 
 /// One case as the fixture carries it, with a variant's overrides already applied.
 struct Case {
@@ -330,14 +420,36 @@ impl<'p> Drive<'p> {
                 text_of(position, "cost_basis").unwrap_or("0"),
                 text_of(position, "qty").unwrap_or("1"),
             );
+            let bought = format!("md-seed{n}");
+            self.fold(
+                "OrderSubmitted",
+                &[
+                    ("client_order_id", text(&bought)),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(name)),
+                    ("side", text("buy")),
+                    ("qty", text(&held.to_string())),
+                    ("limit", text(&each)),
+                ],
+                before,
+            );
             self.fold(
                 "FillApplied",
                 &[
                     ("fill_id", text(&format!("seed-{n}"))),
+                    ("client_order_id", text(&bought)),
                     ("instrument", text(name)),
                     ("side", text("buy")),
                     ("qty_gross", text(&held.to_string())),
                     ("price", text(&each)),
+                ],
+                before,
+            );
+            self.fold(
+                "OrderStateChanged",
+                &[
+                    ("client_order_id", text(&bought)),
+                    ("state", text("filled")),
                 ],
                 before,
             );
@@ -395,8 +507,39 @@ impl<'p> Drive<'p> {
             self.resting
                 .insert(name.to_owned(), ProtectionPrices { stop, take_profit });
         }
-        let (restarted, _) = self.shell.restart(self.ports);
+        let (mut restarted, _) = self.shell.restart(self.ports);
+        restarted.ready_with(self.ports, self.initial_account());
         self.shell = restarted;
+    }
+
+    /// The broker's account after `step`: its expected settled cash where the step names one, as
+    /// the broker would report it, else the account at the start.
+    fn account_after(&self, step: &Json) -> mandate_executor::BrokerAccount {
+        let start = self.initial_account();
+        match step
+            .get("expect")
+            .and_then(|expect| expect.get("cash"))
+            .and_then(|cash| text_of(cash, "settled"))
+        {
+            Some(cash) => holding(cash, start),
+            None => start,
+        }
+    }
+
+    /// The broker's account at the start: `initial.account`'s settled cash, or the shell's
+    /// default account where the case names none.
+    fn initial_account(&self) -> mandate_executor::BrokerAccount {
+        let reported = common::broker_account();
+        match self
+            .case
+            .initial
+            .get("account")
+            .and_then(|account| account.get("cash"))
+            .and_then(|cash| text_of(cash, "settled"))
+        {
+            Some(cash) => holding(cash, reported),
+            None => reported,
+        }
     }
 
     /// Runs one input and records what it did.
@@ -430,7 +573,7 @@ impl<'p> Drive<'p> {
                             Some("unprotected_start") => {
                                 seen.push(Seen::Journal("unprotected_window_start".to_owned()));
                             }
-                            Some("unprotected_end") => {
+                            Some("unprotected_end") if draft.payload.get("awaiting").is_none() => {
                                 seen.push(Seen::Journal("unprotected_window_end".to_owned()));
                             }
                             _ => {}
@@ -639,8 +782,14 @@ impl<'p> Drive<'p> {
         match kind.as_str() {
             "propose_order" => {
                 let body = self.intent_body(&data);
+                let intent = format!("01JREFCASE{index:016}");
+                if let Some(named) = named_when_proposed(step) {
+                    self.names
+                        .entry(named.to_owned())
+                        .or_insert_with(|| format!("md-{intent}"));
+                }
                 self.run(
-                    common::handoff(&format!("01JREFCASE{index:016}"), common::AGENT, body),
+                    common::handoff(&intent, common::AGENT, body),
                     &mut seen,
                     "the proposal",
                 );
@@ -687,7 +836,7 @@ impl<'p> Drive<'p> {
                 );
             }
             "fill" => self.accounting_fill(index, name, &data, at),
-            "fees_charged" | "conduct_breach" => {}
+            skipped if SKIPPED.contains(&skipped) => {}
             other => panic!(
                 "{} step {index}: `{other}` is a step kind this harness does not know, so the \
                  case cannot pass by skipping it",
@@ -700,7 +849,35 @@ impl<'p> Drive<'p> {
         {
             self.confirm_cancels(&mut seen);
         }
+        if ends_after_protection(step) {
+            self.acknowledge_protection(&mut seen);
+        }
         seen
+    }
+
+    /// Answers, within the step, every protective submission the broker has not answered: a step
+    /// that lists the interval's end after its `submit_protective` saw the broker accept it, and
+    /// the interval ends at that acknowledgment, never at the submission (DEC-348 item 2).
+    fn acknowledge_protection(&mut self, seen: &mut Vec<Seen>) {
+        let protective: Vec<String> = self
+            .unanswered
+            .iter()
+            .filter(|id| {
+                self.submitted
+                    .get(*id)
+                    .is_some_and(|order| order.purpose == Purpose::Protective)
+            })
+            .cloned()
+            .collect();
+        self.unanswered.retain(|id| !protective.contains(id));
+        for id in protective {
+            let accepted = self.broker_order(&id, "accepted", "0");
+            self.run(
+                Input::Broker(Ok(BrokerOutcome::Submitted(accepted))),
+                seen,
+                "the protection's acknowledgment",
+            );
+        }
     }
 
     fn order_update(&mut self, index: usize, data: &Json, seen: &mut Vec<Seen>) {
@@ -1093,6 +1270,8 @@ impl Drive<'_> {
         ];
         let mut from = 0usize;
         let mut last_cancel: Option<usize> = None;
+        let mut confirmed: Option<usize> = None;
+        let mut opened: Option<usize> = None;
         for (kind, argument) in &expected {
             assert!(
                 known.contains(&kind.as_str()),
@@ -1100,7 +1279,8 @@ impl Drive<'_> {
                 self.case.id
             );
             let unordered = kind == "alert_owner" || kind == "refresh_account";
-            let start = if unordered { 0 } else { from };
+            let opens = kind == "journal" && argument.as_str() == Some(INTERVAL_START);
+            let start = if unordered || opens { 0 } else { from };
             let found = (start..seen.len()).find(|&at| {
                 seen.get(at)
                     .is_some_and(|s| self.matches(kind, argument, s, index))
@@ -1112,6 +1292,29 @@ impl Drive<'_> {
                     self.case.id
                 )
             });
+            if opens {
+                assert!(
+                    confirmed.is_none_or(|confirmation| at < confirmation),
+                    "{} step {index}: the interval starts when the cancel is asked, never after \
+                     its confirmation (DEC-348 item 1): {seen:?}",
+                    self.case.id
+                );
+                opened = Some(at);
+                continue;
+            }
+            if kind == "rerun_gate"
+                && let Some(started) = opened.take()
+            {
+                assert!(
+                    started < at,
+                    "{} step {index}: the interval starts before the gate re-runs (DEC-348 item \
+                     1): {seen:?}",
+                    self.case.id
+                );
+            }
+            if kind == "await_cancel_confirmed" {
+                confirmed = Some(at);
+            }
             if kind.starts_with("cancel") {
                 last_cancel = Some(at);
             }
@@ -1212,6 +1415,7 @@ impl Drive<'_> {
             Some(broker) => {
                 let mut taken = common::snapshot(self.shell.head().0, ReconcileReason::Scheduled);
                 taken.positions = vec![common::broker_position(name, &canonical(broker))];
+                taken.account = self.account_after(step);
                 (&self.shell.state, taken)
             }
             None => (before, self.snapshot(&data)),
@@ -1258,6 +1462,7 @@ impl Drive<'_> {
                 .checked_add(qty(tolerance))
                 .unwrap_or_else(|e| panic!("{}: {e}", self.case.id));
             let mut off = common::snapshot(self.shell.head().0, ReconcileReason::Scheduled);
+            off.account = self.account_after(step);
             off.positions = vec![common::broker_position(name, &beyond.to_string())];
             let run = mandate_executor::reconcile(&self.shell.state, &off, self.ports)
                 .unwrap_or_else(|e| panic!("{}: {e}", self.case.id));
@@ -1267,6 +1472,15 @@ impl Drive<'_> {
                 "{} step {index}: the unposted fee explains exactly {tolerance}, so {beyond} is a \
                  mismatch",
                 self.case.id
+            );
+            assert!(
+                run.differences
+                    .iter()
+                    .all(|d| d.kind == mandate_executor::DifferenceKind::Position),
+                "{} step {index}: and the mismatch is the quantity's alone, never the cash's \
+                 (DEC-347 item 3): {:?}",
+                self.case.id,
+                run.differences
             );
         }
         true
@@ -1472,7 +1686,7 @@ fn drive(case: Case) {
         let before = drive.shell.state.clone();
         let seen = drive.step(index, step);
         let checks = [
-            drive.assert_actions(index, step, &seen),
+            !skips(step) && drive.assert_actions(index, step, &seen),
             drive.assert_orders(index, step),
             drive.assert_reconciliation(index, step, &before),
             drive.assert_protection(index, step),
@@ -1583,4 +1797,260 @@ fn trading_domain_rc_15_external_order_detected() {
 #[ignore = "pending E7-3"]
 fn trading_domain_rc_15_unexplained_403s() {
     drive(case("RC-15", Some("unexplained_403s")));
+}
+
+/// The RC-14 base case's first step as the fixture orders it: the cancel, its confirmation, the
+/// interval's start, then the gate's re-run.
+fn rc_14_exit_step() -> Json {
+    serde_json::json!({
+        "expect": {
+            "actions": [
+                { "cancel": "oco_1" },
+                { "await_cancel_confirmed": "oco_1" },
+                { "journal": INTERVAL_START },
+                { "rerun_gate": "exit_1" },
+            ]
+        }
+    })
+}
+
+/// Matches `seen` against [`rc_14_exit_step`] on a freshly seeded RC-14.
+fn rc_14_exit_matches(seen: impl Fn(&str) -> Vec<Seen>) {
+    rc_14_matches(&rc_14_exit_step(), seen);
+}
+
+/// Matches `seen` against `step` on a freshly seeded RC-14.
+fn rc_14_matches(step: &Json, seen: impl Fn(&str) -> Vec<Seen>) {
+    with_rc_14(|drive| {
+        let oco = drive.id_of("oco_1", 0);
+        let seen = seen(&oco);
+        assert!(drive.assert_actions(0, step, &seen));
+    });
+}
+
+/// Runs `check` on a freshly seeded RC-14.
+fn with_rc_14(check: impl FnOnce(&mut Drive<'_>)) {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let instruments = FixedInstruments;
+    let configuration = config();
+    let ports = ports(&ids, &mandates, &instruments, &configuration);
+    let mut drive = Drive::new(case("RC-14", None), &ports);
+    check(&mut drive);
+}
+
+/// DEC-348 item 1: the start journaled when the cancel is asked, before the confirmation, as the
+/// executor journals it, matches the fixture's later position.
+#[test]
+fn an_interval_start_journaled_with_the_cancel_matches() {
+    rc_14_exit_matches(|oco| {
+        vec![
+            Seen::Journal(INTERVAL_START.to_owned()),
+            Seen::Cancel(oco.to_owned()),
+            Seen::Gate,
+            Seen::Confirmed(oco.to_owned()),
+            Seen::Gate,
+        ]
+    });
+}
+
+/// DEC-348 item 1: a start journaled after the cancel's confirmation, the fixture's literal order,
+/// is the looser bound, and fails the case.
+#[test]
+#[should_panic(expected = "never after its confirmation")]
+fn an_interval_start_journaled_after_the_confirmation_fails() {
+    rc_14_exit_matches(|oco| {
+        vec![
+            Seen::Cancel(oco.to_owned()),
+            Seen::Gate,
+            Seen::Confirmed(oco.to_owned()),
+            Seen::Journal(INTERVAL_START.to_owned()),
+            Seen::Gate,
+        ]
+    });
+}
+
+/// DEC-348 item 1: a step with no start before the gate's re-run fails the case.
+#[test]
+#[should_panic(expected = "expected `journal`")]
+fn an_interval_that_never_starts_fails() {
+    rc_14_exit_matches(|oco| {
+        vec![
+            Seen::Cancel(oco.to_owned()),
+            Seen::Gate,
+            Seen::Confirmed(oco.to_owned()),
+            Seen::Gate,
+        ]
+    });
+}
+
+/// DEC-348 item 3: a case with a step this harness skips and does not assert is never listed
+/// passing in `crates/mandate-refcases/status.toml`; RC-22's `conduct_breach` step is the one
+/// today, owed by E6-11.
+#[test]
+fn a_case_with_an_unasserted_step_is_never_listed_passing() {
+    let partly = partly_unasserted();
+    assert_eq!(
+        partly,
+        vec!["RC-22".to_owned()],
+        "the cases with an unasserted step"
+    );
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mandate-refcases/status.toml");
+    let status =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(
+        listed_passing(&status, &partly),
+        Vec::<String>::new(),
+        "a case checked by nobody in part is not reproduced, so it is not passing"
+    );
+}
+
+/// The guard's plant: RC-22 listed passing is caught, and a pending listing is not.
+#[test]
+fn the_guard_catches_an_unasserted_case_listed_passing() {
+    let partly = vec!["RC-22".to_owned()];
+    let passing = "[trading_domain]\n'RC-22' = { status = \"passing\", story = \"E7-4\" }\n";
+    assert_eq!(listed_passing(passing, &partly), partly);
+    let pending = "[trading_domain]\n'RC-22' = { status = \"pending\", story = \"E6-11\" }\n";
+    assert_eq!(listed_passing(pending, &partly), Vec::<String>::new());
+}
+
+/// A step that lists the interval's start before the gate's re-run with no cancel to confirm: the
+/// shape the `rerun_gate` bound governs on its own.
+fn start_then_rerun_step() -> Json {
+    serde_json::json!({
+        "expect": {
+            "actions": [
+                { "journal": INTERVAL_START },
+                { "rerun_gate": "exit_1" },
+            ]
+        }
+    })
+}
+
+/// DEC-348 item 1, the `rerun_gate` bound (#447 round 1, m1): with no confirmation in the step, a
+/// start before the gate's re-run matches.
+#[test]
+fn an_interval_start_before_the_gate_re_runs_matches() {
+    rc_14_matches(&start_then_rerun_step(), |_| {
+        vec![Seen::Journal(INTERVAL_START.to_owned()), Seen::Gate]
+    });
+}
+
+/// DEC-348 item 1, the `rerun_gate` bound: a start only after the gate re-ran fails the case.
+#[test]
+#[should_panic(expected = "starts before the gate re-runs")]
+fn an_interval_start_after_the_gate_re_runs_fails() {
+    rc_14_matches(&start_then_rerun_step(), |_| {
+        vec![
+            Seen::Gate,
+            Seen::Journal(INTERVAL_START.to_owned()),
+            Seen::Gate,
+        ]
+    });
+}
+
+/// DEC-347 item 1: the seed starts as a production shell does, with the startup reconciliation run
+/// and the broker's account reported at the case's own cash, so the executor holds no opening
+/// `startup_reconciliation_pending`.
+#[test]
+fn the_seed_runs_the_startup_reconciliation_and_reports_the_account() {
+    with_rc_14(|drive| {
+        let journaled: Vec<&str> = drive
+            .shell
+            .account_journal
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect();
+        assert!(journaled.contains(&"ReconciliationRun"), "{journaled:?}");
+        assert!(journaled.contains(&"AccountStateObserved"), "{journaled:?}");
+        assert_eq!(
+            drive
+                .shell
+                .state
+                .observed_account()
+                .map(|account| account.cash),
+            Some(common::usd("20000")),
+            "at RC-14's own settled cash"
+        );
+    });
+}
+
+/// DEC-347 item 2: a seeded position is the agent's own, so the seeded protection has a single
+/// holder (DEC-160 (3)(b)) and holds no opening `protection_unattributed`.
+#[test]
+fn the_seeded_protection_belongs_to_the_positions_holder() {
+    with_rc_14(|drive| {
+        let oco = drive.id_of("oco_1", 0);
+        let id =
+            mandate_executor::ClientOrderId::parse(&oco).unwrap_or_else(|e| panic!("{oco}: {e}"));
+        assert_eq!(
+            drive
+                .shell
+                .state
+                .order(&id)
+                .and_then(|order| order.agent.clone()),
+            Some(common::agent(common::AGENT))
+        );
+    });
+}
+
+/// DEC-347 item 3 and #447 round 1, B1: both of an unposted-fee check's reconciliations report the
+/// step's own cash, so the check turns on the quantity alone.
+#[test]
+fn a_reconciliation_check_reports_the_steps_own_cash() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::CRYPTO]);
+    let instruments = FixedInstruments;
+    let configuration = config();
+    let ports = ports(&ids, &mandates, &instruments, &configuration);
+    let rc_07 = case("RC-07", None);
+    let first = rc_07.steps.first().cloned().unwrap_or(Json::Null);
+    let mut drive = Drive::new(rc_07, &ports);
+    assert_eq!(drive.initial_account().cash, common::usd("100000"));
+    assert_eq!(drive.account_after(&first).cash, common::usd("70000"));
+    assert_eq!(
+        drive.account_after(&Json::Null).cash,
+        common::usd("100000"),
+        "a step that names no cash reports the account at the start"
+    );
+    drive.date = text_of(&first, "at")
+        .and_then(|at| at.get(..10))
+        .map(str::to_owned);
+    let before = drive.shell.state.clone();
+    drive.step(0, &first);
+    assert!(
+        drive.assert_reconciliation(0, &first, &before),
+        "RC-07 step 0's reconciliation runs live, past the trading day's start, and its \
+         unposted-fee check passes only with the step's cash in both snapshots (#447 round 2, M1)"
+    );
+}
+
+/// DEC-348 item 2: only a step that lists the interval's end after its `submit_protective` has
+/// the protection acknowledged within it. RC-21's step 2 does; its step 3 submits with no end.
+#[test]
+fn only_a_step_ending_after_its_protection_is_acknowledged_within_it() {
+    let rc_21 = case("RC-21", None);
+    let ends: Vec<bool> = rc_21.steps.iter().map(ends_after_protection).collect();
+    assert_eq!(ends, vec![false, false, true, false]);
+}
+
+/// DEC-347 item 4: a proposal is named when it is made only where its step expects no submission.
+#[test]
+fn a_proposal_is_named_when_made_only_where_no_submission_is_expected() {
+    let rc_22 = case("RC-22", None);
+    let names: Vec<Option<String>> = rc_22
+        .steps
+        .iter()
+        .take(3)
+        .map(named_when_proposed)
+        .collect();
+    assert_eq!(names, vec![None, Some("buy_passive".to_owned()), None]);
+    let passive = case("RC-14", Some("passive_exit_becomes_oco_take_profit"));
+    assert_eq!(
+        passive.steps.first().and_then(named_when_proposed),
+        None,
+        "a step that expects its submission binds the name there"
+    );
 }
