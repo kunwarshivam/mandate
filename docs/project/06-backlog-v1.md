@@ -300,9 +300,18 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   the lint rather than reaching review. Also (#443 round 3): the per-PR `cargo xtask ci reference` runs `fuzz.py` but not
   `reference/mandate/mutants.py`, which only the nightly job runs, so a stale mutation anchor passed `full` on #443's round-2
   head. Make a missing anchor fail per-PR CI, for example with an anchor-only check that runs in seconds.
-  Also owed, one code PR (#443 round 3): journal spec rule 28 and `OwnerCommandRefused.reason`'s `not_independent` in
-  `mandate-journal`'s §9.2 schema, with the validator check in `reference/journal/control.py`, its two vectors, and its
-  seeded bug.
+  ~~Also owed (#443 round 3): journal spec rule 28 and `OwnerCommandRefused.reason`'s `not_independent`~~ Done in two PRs:
+  the code ([#474](https://github.com/kunwarshivam/mandate/pull/474): `mandate-journal`'s schema and rule 28), then the
+  reference (the validator check in `reference/journal/control.py`, its two vectors, and its seeded bug). Also owed (#474
+  round 1, m1): a test that pins every closed value list in `mandate-journal`'s §9.2 schemas against the spec's, so
+  widening one, as #474 widened `OwnerCommandRefused.reason`, fails unless the spec says so. Copy `REQUIRED` in
+  `crates/mandate-journal/src/control.rs`: a list written out from the spec's tables, not read back from the schema, since a
+  bare `OneOf` checks nothing against widening ([#476](https://github.com/kunwarshivam/mandate/pull/476) round 1, m3).
+  Also owed (#476 round 1, m2), in the next `mandate-journal` code PR: raise `control::tests`' two draft-count floors
+  (`parsed >= 6`, `checked >= 49`) to the measured counts, so dropping a vector fails them as their messages say.
+  Also owed (#443 round 3, m14; #476 round 1, m4): no CI job runs `reference/journal/generate.py` or its seeded bugs, since
+  `cargo xtask ci reference` runs only `reference/mandate/`. Its first cost: rule 28's report order went unpinned on
+  the reference side until #476 round 1. Run `generate.py --check` per PR.
   **Founder question** (#443 round 2): should a mandate be refused at validation
   when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
   drawdown ladder) then cannot be lifted until a second user exists?
@@ -1162,16 +1171,15 @@ From E10-1's slice-V implementation (DEC-161):
   - **Stream K:** the executor's fee-step `AccountSnapshotRecorded` writes `model_cash`, `cash_band`,
     and `cash_in_band` as `null`, not absent (§4.2), and every snapshot writes `risk_clock` as a
     whole-second timestamp, not integer seconds (DEC-302; `payload::clock` writes integers on every
-    account-stream event). **E7-10's implementation must not register
-    `AccountSnapshotRecorded` until this lands.** The fee step pauses every agent and alerts the owner,
-    and refusing its snapshot at `append` must never stop it (rules 3 and 13, DEC-261 item 7). E7-10's
-    tests PR pins that ordering with three live tests (DEC-303 item 4). The registration PR must also
-    turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. **The writer landed in #456;
-    the registration's tests PR (DEC-402) routes the snapshot to a stub and makes the three ordering
-    pins pending**: `an_account_snapshot_is_closed_and_checked_by_rule_24` turns those drafts on,
-    `account_snapshot_recorded_refuses_an_unlisted_member` closes the schema, and
-    `the_fee_steps_snapshot_is_never_refused_for_its_members` lands the registration and the fee
-    step's writer together.
+    account-stream event). **Done: the writer landed in #456, and `AccountSnapshotRecorded` registered
+    with rule 24 together with `fees` journaling that writer, tests first (#467), then implemented
+    ([DEC-402](decisions/DEC-402.md)).** DEC-261 item 7's ordering held throughout: the fee step pauses
+    every agent and alerts the owner, and refusing its snapshot at `append` never stops it (rules 3 and
+    13). `an_account_snapshot_is_closed_and_checked_by_rule_24` turns on, in Rust, all 15 snapshot
+    drafts' own `expect` (2 valid and 13 invalid), `account_snapshot_recorded_refuses_an_unlisted_member`
+    closes the schema, and `the_fee_steps_snapshot_is_never_refused_for_its_members` pins the
+    registration and the fee step's writer together; DEC-303 item 4's three live ordering pins are
+    superseded by them.
     The writer's pending pins are #441's (DEC-305 to DEC-307): the fee-step snapshot's payload
     member for member and type for type, the `risk_clock` stamp, the pause and alert whether or not
     the snapshot recorded, `IntentReceived` as §9.1's nine members, and `OrderSubmitted`'s
@@ -1226,10 +1234,18 @@ From E10-1's slice-V implementation (DEC-161):
     scope, the acceptable-use action, and the row's "approval".
   - **Proposed, item 10:** a clause binds an account stream to its connection, so that
     `AccountSnapshotRecorded`'s fact needs no argument.
-  - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** a journal spec
-    change closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with vectors.
-    The tests and implementation that follow register them and map them to `AgentVersionActive` (a
-    deployed agent's new version) and `UniverseChanged`.
+  - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** journal spec v0.8
+    §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
+    vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
+    follow register them and map them to `AgentVersionActive` (a deployed agent's new version) and
+    `UniverseChanged`; until then both stay `unknown_schema` and map to none.
+    **Required, and blocking this registration's acceptance (#470 round 2, minor 5):** the Rust
+    registration re-derives mandate spec §9.2's classification of `new_version` against
+    `old_version` from the two stored documents and refuses a `MandateVersionApplied` whose
+    `classification` differs. Rule 33 covers only what the record itself carries (the allocation
+    change, the floor, and three rejections), so until this lands a risk-increasing version through
+    any other §9.2 row can be journaled as applied, labelled `neutral`, with no step-up (DEC-403
+    item 5).
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).
@@ -2070,6 +2086,34 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`
   asserts only times inside the window, so it passes against a `close_window` that is always true
   (#228 review, round 1, minor 3; E6-6's bug list when it lands).
+- **E6-4 harness: family B's trim arm compares the trim** (DEC-250 item 11, DEC-399 item 6).
+  `mandate_risk::trim_proposals` answers since E6-4's implementation PR, but
+  `crates/mandate-refcases/src/mandate/order_builder.rs`'s `trim_first` still fails every
+  `trim_to_target` case, and its `OWED` rows pin the answer (MC-B17 a 3-share `RiskExit`, MC-B30 to
+  MC-B32 none). The arm owes the comparison: a trim's `action`, `qty`, `limit_price` at the bid,
+  `order_usd`, `purpose`, `origin: risk_engine` and `autonomy` (`builtin_risk_reducing`), and, when
+  no trim is proposed, `trim_withheld` and the builder's own answer after it (§6.2 step 1). The
+  guards are not in `trim_proposals`' answer, so naming them needs a reading in its own decision:
+  derive each guard the harness can state from the case (`scale_active_s`, `holding`, the session,
+  the minimum) and require the gate's empty answer to agree, or widen the API in a tests PR first
+  (DEC-77). MC-B17 and MC-B30 to MC-B32 then pass; their status rows follow in a status-only PR.
+- **E6-4 reference: drop `ref.py`'s `factor < 1` trim guard and its dollar minimum** (#466 review,
+  round 1, m2; DEC-399 items 3 and 5). `reference/mandate/ref.py`'s `builder` trims only below a
+  factor of 1 and compares the sell's notional with `min_order_usd`. `mandate_risk::trim_proposals`
+  follows §5.5's text (no guard) and trading spec §5.3 rule 2's quantity minimum, `min_order_size`,
+  which the review agrees is right. Removing the guard only tightens (DEC-176). The follow-up is a
+  reference PR on its own (ES-22): `ref.py`, a regenerated `mandate.yaml` and
+  `fixtures/refcases/mandate.json` if any case changes, and `check_cases.py`, `fuzz.py` and
+  `mutants.py` passing. No trim case states a factor of 1 or a sub-minimum trim today.
+- **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
+  `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
+  `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
+  builder (increments of `0.0001` and `0.000001` exist). Once the snapshot carries the increment,
+  round the trim up on it, so a trim is never off the grid that §5.3 rule 2 refuses.
+- **E6-4 nits** (#466 review, round 1): `UsdExact::times_size_fraction`'s doc still lists "the
+  ladder size factor applied to the target" though the gate's 24-place `Ratio` factor enters
+  through `UsdExact::of_ratio`; say which number each serves (n2). `of_ratio` takes any `Ratio`,
+  and stream F's V-040 is what bounds the factor at one.
 
 From E6-2's builder slice (stream H; found while implementing §8.3, not by a review):
 
@@ -2488,3 +2532,27 @@ item 25; held back by the freeze rule, one row each):
   `a_client_opening_is_never_auto_and_every_other_request_decides_as_before` cover rules, defaults,
   admission and requester only. E8-8's tests PR adds live, spent, expired and suspended delegations
   to both and asserts that none lifts a client's order (MI-26, MI-30).
+
+From journal spec v0.8 §9.3's review (#470 round 2, DEC-403):
+
+- *Decision needed (founder, Proposed under DEC-79; the dependency registry is founder-owned):*
+  add `jsonschema` to the `python/` project, so `reference/journal/risk_state.py`'s
+  `documents.valid` can run `reference/mandate`'s full schema and semantic validators instead of
+  its narrow check (#470 round 2, minor 5). Until then the dependency is not added. The narrow
+  check holds a stored version to the proven base changed at its one listed path, with V-013's
+  order and a floor in (0, 1]. It does not stand in for the mandate schema, for any other V-rule,
+  or for a wrong entry in `VERSION_PATHS` itself, which it shares with the document builder (minor
+  4). `drafts.classification` catches the dangerous sub-case, a wrong value that changes the §9.2
+  verdict. All six of today's documents were checked against the full validators by hand.
+- **§9.3's vectors: three coverage gaps (#470 round 2, minors 1, 7 and 8).**
+  - **Report orders.** The 29-then-30 order (an applied, risk-increasing record with `step_up`
+    null and a `reason` set) and the 30-then-33 order (a rejected record with
+    `increase_blocked_while_latched`, `classification` `neutral`, and an `allocation_change` set)
+    are pinned by no draft. Each wants a draft and an `order.*` mutant, as §9.2's
+    `order.rule_21_first`. Rules 29 and 33 can never both fire, since 29 needs `risk_increasing`
+    and 33 needs anything else, so their relative order needs no pin.
+  - **`universe_size_after`** is checked against nothing, not even the fold of the section's own
+    drafts.
+  - **`risk_state.classify`** raises `ValueError` on a path it does not encode instead of reporting
+    a `drafts.classification` problem. It fails closed either way, but a reported problem reads
+    better.
