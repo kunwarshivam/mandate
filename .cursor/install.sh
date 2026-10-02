@@ -25,6 +25,8 @@ TOOLS=(
   "typos 1.50.2 https://github.com/crate-ci/typos/releases/download/v1.50.2/typos-v1.50.2-x86_64-unknown-linux-musl.tar.gz abcb3e257c7c2abeff4d903f7fe68071357637605bdb283ce2251f44bc70dc09 ./typos"
   "gitleaks 8.30.1 https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb gitleaks"
   "cargo-mutants 27.1.0 https://github.com/sourcefrog/cargo-mutants/releases/download/v27.1.0/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e cargo-mutants"
+  "shellcheck 0.11.0 https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6 shellcheck-v0.11.0/shellcheck"
+  "actionlint 1.7.12 https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 actionlint"
 )
 
 installed_version() {
@@ -33,6 +35,8 @@ installed_version() {
     cargo-nextest) cargo-nextest nextest --version 2>/dev/null | awk 'NR==1 {print $2}' ;;
     typos) typos --version 2>/dev/null | awk '{print $2}' ;;
     gitleaks) gitleaks version 2>/dev/null ;;
+    shellcheck) shellcheck --version 2>/dev/null | awk '/version:/ {print $2}' ;;
+    actionlint) actionlint -version 2>/dev/null | awk 'NR==1 {print $1}' ;;
     cargo-mutants) cargo-mutants mutants --version 2>/dev/null | awk '{print $2}' ;;
   esac
 }

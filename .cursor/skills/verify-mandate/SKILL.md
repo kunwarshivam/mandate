@@ -17,7 +17,7 @@ if it lacks something you need twice, add a subcommand (the `correction` playboo
 | Command | Proves |
 |---|---|
 | `cargo xtask check` | Every per-PR job, as CI runs them. Required before proposing any change |
-| `cargo xtask ci lint` | fmt, clippy `-D warnings`, crate layering, debt markers and plain comments, the feature map, typos, ruff |
+| `cargo xtask ci lint` | shellcheck over `.github/scripts/`, actionlint over `.github/workflows/`, fmt, clippy `-D warnings`, crate layering, debt markers and plain comments, the feature map, typos, ruff |
 | `cargo xtask ci test` | nextest, doctests, pytest; reference cases marked `passing` in `status.toml` |
 | `cargo xtask ci pending` | Every test in the workspace marked `#[ignore = "pending <story>"]` fails on the change's code |
 | `cargo xtask ci mutants` | cargo-mutants on the changed source of every crate `xtask/layers.toml` marks `safety_critical = true`, the `tool`-layer `mandate-refcases` harness included (DEC-253): every mutant caught |
