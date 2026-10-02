@@ -558,8 +558,11 @@ impl Shell {
     /// `ask`: the bound order proposed once at a tick of the folded clock, classified `ask` by its
     /// `decided_by`, its reference mark folded at its `seq` first.
     fn ask(&mut self, bound: &Json) -> Result<Vec<Effect>, String> {
-        let known: Vec<&str> = REQUESTED.iter().map(|(case, _, _)| *case).collect();
-        unknown_members(bound, known.get(..13).unwrap_or_default())
+        let members = REQUESTED
+            .split_last()
+            .map_or(REQUESTED, |(_deadline, bound)| bound);
+        let known: Vec<&str> = members.iter().map(|(case, _, _)| *case).collect();
+        unknown_members(bound, &known)
             .map_err(|unknown| format!("`bound` members not interpreted: {unknown}"))?;
         let instrument = str_at(bound, "instrument")?;
         let clock = self.clock()?;
@@ -984,7 +987,9 @@ impl Shell {
     }
 
     /// A response: a new `source` is folded on the control stream and handed in; a re-tailed one
-    /// hands the event already folded again, which must be the same response.
+    /// hands the event already folded again, which must be the same response. The submission's
+    /// `role` is what the CLI writes; the runtime's copy writes its own `approver` and never reads
+    /// this one.
     fn respond(&mut self, response: &Json) -> Result<Vec<Effect>, String> {
         unknown_members(response, RESPONSE_KEYS)
             .map_err(|unknown| format!("`response` members not interpreted: {unknown}"))?;

@@ -1,9 +1,9 @@
 //! Family E's `lifecycle` op drives `mandate-runtime` itself, reads every member of every case, and
 //! compares every member of every expected draft (DEC-85, DEC-292 item 3, DEC-317).
 //!
-//! DEC-317's first slice interprets the `ask` step, so every case is exercised through its first
-//! step: the case cut to that step passes, and the whole case fails at its second step naming the
-//! slice that interprets it. Each test has two halves that need each other: a case passes as the
+//! DEC-317's three slices interpret every step, so every case is exercised through its first step,
+//! fifteen pass whole, and the rest fail naming the story or the decision that owes what they stop
+//! at. Each test has two halves that need each other: a case passes as the
 //! fixture states it, which an arm that failed everything could not do, and fails, naming what
 //! changed, when a member is edited, dropped, or added, which an arm that compared nothing could not.
 
@@ -337,15 +337,13 @@ fn a_retailed_source_is_copied_once() {
     fails_naming(copied_twice, "MC-E02", "drafts expected");
 }
 
-/// `now` reaches the runtime: a mode it states is folded, so an exits-only `now` cancels the
-/// approval before the response is judged; any classification and dry run the gate can give is
-/// read, and a skip, which re-validates nothing, still ends the approval.
+/// The mode `now` states reaches the runtime: it is folded, so an exits-only `now` cancels the
+/// approval before the response is judged.
 #[test]
-fn now_is_read_and_reaches_the_runtime() {
-    let fixture = fixture();
+fn a_mode_now_states_reaches_the_runtime() {
     fails_naming(
         with(
-            &fixture,
+            &fixture(),
             "MC-E02",
             "/script/1/now/mode",
             json!("exits_only"),
@@ -353,6 +351,14 @@ fn now_is_read_and_reaches_the_runtime() {
         "MC-E02",
         r#"["AgentModeChanged", "ApprovalCanceled", "ApprovalResponded"]"#,
     );
+}
+
+/// The rest of `now` is read: any classification and dry run the gate can give, a restriction, the
+/// universe, a version and a mark are accepted. They are re-validation's inputs, and a skip
+/// re-validates nothing, so it still ends the approval; the re-validating cases check them.
+#[test]
+fn the_rest_of_now_is_read() {
+    let fixture = fixture();
     for (path, value) in [
         (
             "/script/1/now/classification",

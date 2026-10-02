@@ -12,6 +12,7 @@ use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Int, Key, Value};
 use mandate_journal::Environment;
 use mandate_num::{Price, Qty};
+use mandate_time::UtcNanos;
 
 use super::*;
 use crate::ports::{FlattenPlanner, GateDryRun, IdGen, OrderPlan, Ports};
@@ -369,6 +370,133 @@ fn command(
 
 fn mode_of(rig: &Rig) -> Mode {
     rig.state.effective_mode()
+}
+
+/// The §4.7 timestamp of a whole second (journal spec §4.7), the form §9.2 types the refusal's
+/// `effective_at` (DEC-261 item 7, DEC-308), computed here from the judged second itself rather
+/// than from the writer, so the pins hold an oracle of their own. It is derived twice: by civil
+/// calendar arithmetic over the epoch day (days from 1970-01-01 to a proleptic Gregorian date),
+/// and as the canonical instant `UtcNanos` prints, and the two must agree, so a defect in the
+/// printer a correct stamp calls cannot pass the pins unseen.
+fn timestamp_of(secs: i64) -> Result<String, String> {
+    let (days, of_day) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    let shifted = days.saturating_add(719_468);
+    let (era, day_of_era) = (shifted.div_euclid(146_097), shifted.rem_euclid(146_097));
+    let year_of_era = day_of_era
+        .saturating_sub(day_of_era.div_euclid(1_460))
+        .saturating_add(day_of_era.div_euclid(36_524))
+        .saturating_sub(day_of_era.div_euclid(146_096))
+        .div_euclid(365);
+    let day_of_year = day_of_era.saturating_sub(
+        year_of_era
+            .saturating_mul(365)
+            .saturating_add(year_of_era.div_euclid(4))
+            .saturating_sub(year_of_era.div_euclid(100)),
+    );
+    let month_from_march = day_of_year
+        .saturating_mul(5)
+        .saturating_add(2)
+        .div_euclid(153);
+    let day = day_of_year
+        .saturating_sub(
+            month_from_march
+                .saturating_mul(153)
+                .saturating_add(2)
+                .div_euclid(5),
+        )
+        .saturating_add(1);
+    let month = if month_from_march < 10 {
+        month_from_march.saturating_add(3)
+    } else {
+        month_from_march.saturating_sub(9)
+    };
+    let year = year_of_era
+        .saturating_add(era.saturating_mul(400))
+        .saturating_add(i64::from(month <= 2));
+    let civil = format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.000000000Z",
+        of_day.div_euclid(3_600),
+        of_day.rem_euclid(3_600).div_euclid(60),
+        of_day.rem_euclid(60)
+    );
+    let printed = UtcNanos::from_parts(secs, 0).map_err(failed)?.to_string();
+    assert_eq!(
+        civil, printed,
+        "the civil derivation and `UtcNanos` agree on the §4.7 timestamp of {secs} seconds"
+    );
+    Ok(civil)
+}
+
+/// The refusal's `effective_at` (DEC-308): the writer stamps the §4.7 timestamp of `judged`
+/// through `payload::stamp`, and the journaled record carries that value. It fails at the stub's
+/// own report until the implementation stamps, and at the assertion messages once it stamps
+/// anything but the judged second's canonical timestamp (DEC-77).
+fn stamps_the_judged_second(record: &EventDraft, judged: i64) -> Result<(), String> {
+    let expected = timestamp_of(judged)?;
+    let stamped = payload::stamp(RiskClock::from_secs(judged), "effective_at").map_err(failed)?;
+    assert_eq!(
+        stamped,
+        Value::Str(expected.clone()),
+        "effective_at is the §4.7 timestamp {expected} of the judged second {judged}, never \
+         integer risk-clock seconds (journal spec §9.2, DEC-261 item 7, DEC-308)"
+    );
+    assert_eq!(
+        record.payload.get("effective_at"),
+        Some(&stamped),
+        "the refusal carries the stamp of the judged second {judged}, never its \
+         `submitted_at` (DEC-308)"
+    );
+    Ok(())
+}
+
+/// The committed vectors' `refused_stop` draft (`fixtures/refcases/journal.json`, generated from
+/// `docs/specs/reference-cases/journal.yaml`): the §4.7 `effective_at` the reference validator
+/// accepts, and the integer seconds its `refused_at_risk_clock_seconds` draft refuses, whose one
+/// change is checked to be `payload.effective_at`. Both halves are read through the crate's own
+/// strict JSON reader (`mandate_canon::parse`), never transcribed, so a vector change re-reads
+/// rather than passing silently, and the crate gains no dependency.
+fn refused_stop_vector() -> Result<(String, i64), String> {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/refcases/journal.json"
+    );
+    let bytes = std::fs::read(path).map_err(failed)?;
+    let fixture = mandate_canon::parse(&bytes).map_err(failed)?;
+    let control = fixture
+        .get("control_stream")
+        .ok_or_else(|| failed("the vectors carry a control stream"))?;
+    let stamp = control
+        .get("drafts")
+        .and_then(|drafts| drafts.get("refused_stop"))
+        .and_then(|draft| draft.get("payload"))
+        .and_then(|payload| payload.get("effective_at"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| failed("the vectors' refused_stop carries no effective_at"))?
+        .to_owned();
+    let change = control
+        .get("invalid_drafts")
+        .and_then(Value::as_array)
+        .ok_or_else(|| failed("the vectors list their invalid drafts"))?
+        .iter()
+        .find(|draft| {
+            draft.get("name").and_then(Value::as_str) == Some("refused_at_risk_clock_seconds")
+        })
+        .ok_or_else(|| failed("the vectors refuse integer seconds for effective_at"))?
+        .get("changes")
+        .and_then(Value::as_array)
+        .and_then(<[Value]>::first)
+        .ok_or_else(|| failed("the refused draft names its change"))?;
+    assert_eq!(
+        change.get("path").and_then(Value::as_str),
+        Some("payload.effective_at"),
+        "the refused draft's first change is the refusal's effective_at"
+    );
+    let seconds = change
+        .get("value")
+        .and_then(Value::as_int)
+        .and_then(|secs| i64::try_from(secs).ok())
+        .ok_or_else(|| failed("the refused seconds are an integer"))?;
+    Ok((stamp, seconds))
 }
 
 /// DEC-257 item 8: only an age outside the window is `stale`; evidence that is reused, of a method
@@ -743,7 +871,14 @@ fn a_stop_needs_fresh_step_up_and_no_resume_lifts_it() -> Checked {
 /// the runtime processes it. One submitted at 1 000 s with evidence authenticated then, read once
 /// the folded clock reached 1 400 s, is stale, and its `OwnerCommandRefused` records the folded
 /// second as `effective_at`, never its `submitted_at`.
+///
+/// The coordinator named this test's change for the §9.2 writer follow-up (DEC-261 item 7,
+/// DEC-308): the assertion DEC-291's writer shipped, that `effective_at` is the integer of the
+/// folded second, now holds the §4.7 timestamp of that same instant, through the stamp the writer
+/// takes in the implementation PR. It is pending E8-3 until then, and fails at the stub's own
+/// report.
 #[test]
+#[ignore = "pending E8-3"]
 fn a_stop_processed_late_is_refused_at_the_folded_second() -> Checked {
     let (view, flatten) = (
         view()?,
@@ -771,9 +906,256 @@ fn a_stop_processed_late_is_refused_at_the_folded_second() -> Checked {
     let record = the(&ran, "OwnerCommandRefused")?;
     assert_eq!(member(record, "reason"), Some("step_up_stale"));
     assert_eq!(record.causation_id.as_ref(), Some(&stop.event_id));
+    stamps_the_judged_second(record, processed)?;
+    Ok(())
+}
+
+/// Journal spec §9.2 (DEC-261 item 7, DEC-308): a refused resume records `effective_at` as the
+/// §4.7 timestamp of the second it was judged at. One submitted at 1 000 s and read once the
+/// folded clock reached 1 400 s is refused at the folded second, and the journaled record carries
+/// the stamp the writer writes, never its `submitted_at` and never integer seconds.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_refused_resume_stamps_effective_at_the_judged_second() -> Checked {
+    let (view, flatten) = (
+        view()?,
+        Recording {
+            asked: RefCell::new(Vec::new()),
+        },
+    );
+    let plan = Plan::of(Vec::new(), Autonomy::Auto);
+    let ports = Ports {
+        ids: &Ids,
+        gate: &Allow,
+        plan: &plan,
+        flatten: &flatten,
+        view: &view,
+    };
+    let (mut rig, _) = Rig::started(&ports)?;
+    let (_, ran) = rig.control(
+        COMMAND_ISSUED,
+        command("a", "pause", ("agent", "a"), Value::Null, false)?,
+        &ports,
+    )?;
+    assert_eq!(types(&ran), vec!["AgentModeChanged"]);
+    let judged = AT.saturating_add(400);
+    rig.step(Input::Tick(RiskClock::from_secs(judged)), &ports)?;
+    let (_, ran) = rig.control(
+        COMMAND_ISSUED,
+        command(
+            "a",
+            "resume",
+            ("agent", "a"),
+            evidence("late-resume", AT.saturating_sub(301))?,
+            false,
+        )?,
+        &ports,
+    )?;
+    assert_eq!(types(&ran), vec!["OwnerCommandRefused"]);
+    stamps_the_judged_second(the(&ran, "OwnerCommandRefused")?, judged)?;
+    Ok(())
+}
+
+/// Journal spec §9.2 (DEC-261 item 7, DEC-308): a refused Stop records `effective_at` the same
+/// way. A Stop submitted at 1 000 s with evidence authenticated then, read once the folded clock
+/// reached 1 400 s, is stale, and its refusal carries the folded second's §4.7 timestamp.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_refused_stop_stamps_effective_at_the_judged_second() -> Checked {
+    let (view, flatten) = (
+        view()?,
+        Recording {
+            asked: RefCell::new(Vec::new()),
+        },
+    );
+    let plan = Plan::of(Vec::new(), Autonomy::Auto);
+    let ports = Ports {
+        ids: &Ids,
+        gate: &Allow,
+        plan: &plan,
+        flatten: &flatten,
+        view: &view,
+    };
+    let (mut rig, _) = Rig::started(&ports)?;
+    let judged = AT.saturating_add(400);
+    rig.step(Input::Tick(RiskClock::from_secs(judged)), &ports)?;
+    let (_, ran) = rig.control(
+        COMMAND_ISSUED,
+        command(
+            "a",
+            "stop",
+            ("agent", "a"),
+            evidence("late-stop", AT.saturating_sub(301))?,
+            false,
+        )?,
+        &ports,
+    )?;
+    assert_eq!(types(&ran), vec!["OwnerCommandRefused"]);
+    stamps_the_judged_second(the(&ran, "OwnerCommandRefused")?, judged)?;
+    Ok(())
+}
+
+/// Journal spec §9.2 (DEC-261 item 7, DEC-308): every reason a resume or Stop can be refused
+/// carries the same §4.7 stamp of the judged second — `step_up_missing` and `step_up_stale` and
+/// `step_up_reused` on one paper view, and `step_up_method` on a backtest one, where `cli_confirm`
+/// does not count (mandate spec §6.1, DEC-155 item 4).
+#[test]
+#[ignore = "pending E8-3"]
+fn a_refusal_stamps_effective_at_for_each_of_its_four_reasons() -> Checked {
+    let mut backtest_view = view()?;
+    backtest_view.approval.environment = Environment::Backtest;
+    let (view, flatten) = (
+        view()?,
+        Recording {
+            asked: RefCell::new(Vec::new()),
+        },
+    );
+    let plan = Plan::of(Vec::new(), Autonomy::Auto);
+    let ports = Ports {
+        ids: &Ids,
+        gate: &Allow,
+        plan: &plan,
+        flatten: &flatten,
+        view: &view,
+    };
+    let (mut rig, _) = Rig::started(&ports)?;
+    let judged = AT.saturating_add(400);
+    rig.step(Input::Tick(RiskClock::from_secs(judged)), &ports)?;
+    for (step_up, reason) in [
+        (Value::Null, "step_up_missing"),
+        (
+            evidence("stale-four", AT.saturating_sub(301))?,
+            "step_up_stale",
+        ),
+    ] {
+        let (_, ran) = rig.control(
+            COMMAND_ISSUED,
+            command("a", "stop", ("agent", "a"), step_up, false)?,
+            &ports,
+        )?;
+        assert_eq!(types(&ran), vec!["OwnerCommandRefused"]);
+        let record = the(&ran, "OwnerCommandRefused")?;
+        assert_eq!(member(record, "reason"), Some(reason));
+        stamps_the_judged_second(record, judged)?;
+    }
+    let (_, ran) = rig.control(
+        COMMAND_ISSUED,
+        command(
+            "a",
+            "pause",
+            ("agent", "a"),
+            evidence("shared-four", judged.saturating_sub(1))?,
+            false,
+        )?,
+        &ports,
+    )?;
+    assert_eq!(types(&ran), vec!["AgentModeChanged"]);
+    let (_, ran) = rig.control(
+        COMMAND_ISSUED,
+        command(
+            "a",
+            "stop",
+            ("agent", "a"),
+            evidence("shared-four", judged.saturating_sub(1))?,
+            false,
+        )?,
+        &ports,
+    )?;
+    assert_eq!(types(&ran), vec!["OwnerCommandRefused"]);
+    let record = the(&ran, "OwnerCommandRefused")?;
+    assert_eq!(member(record, "reason"), Some("step_up_reused"));
+    stamps_the_judged_second(record, judged)?;
+
+    let backtest_ports = Ports {
+        ids: &Ids,
+        gate: &Allow,
+        plan: &plan,
+        flatten: &flatten,
+        view: &backtest_view,
+    };
+    let (mut rig, _) = Rig::started(&backtest_ports)?;
+    let (_, ran) = rig.control(
+        COMMAND_ISSUED,
+        command(
+            "a",
+            "stop",
+            ("agent", "a"),
+            evidence("method-four", AT)?,
+            false,
+        )?,
+        &backtest_ports,
+    )?;
+    assert_eq!(types(&ran), vec!["OwnerCommandRefused"]);
+    let record = the(&ran, "OwnerCommandRefused")?;
+    assert_eq!(member(record, "reason"), Some("step_up_method"));
+    stamps_the_judged_second(record, AT)?;
+    Ok(())
+}
+
+/// Journal spec §9.2 and its test vectors (DEC-261 item 7, DEC-308): the refusal's `effective_at`
+/// is the committed `refused_stop` draft's value — the §4.7 timestamp the reference validator
+/// accepts — for the instant of the integer seconds its `refused_at_risk_clock_seconds` draft
+/// refuses. Both halves are read from `fixtures/refcases/journal.json`, the two are held to name
+/// one instant, the string is held to the test's own second derivation of that instant's §4.7
+/// timestamp, and a Stop judged at that instant carries the vector's string member for member.
+#[test]
+#[ignore = "pending E8-3"]
+fn the_refusals_effective_at_is_the_vectors_refused_stop_timestamp() -> Checked {
+    let (vector_stamp, seconds) = refused_stop_vector()?;
+    let parsed = UtcNanos::parse(&vector_stamp).map_err(failed)?;
     assert_eq!(
-        record.payload.get("effective_at").and_then(Value::as_int),
-        u64::try_from(processed).ok()
+        parsed.secs(),
+        seconds,
+        "the vector's {vector_stamp} and its refused {seconds} seconds name one instant"
+    );
+    assert_eq!(
+        vector_stamp,
+        timestamp_of(seconds)?,
+        "the vector's {vector_stamp} is the §4.7 timestamp of {seconds} seconds by the test's own \
+         derivation, independent of the reference generator"
+    );
+    let (view, flatten) = (
+        view()?,
+        Recording {
+            asked: RefCell::new(Vec::new()),
+        },
+    );
+    let plan = Plan::of(Vec::new(), Autonomy::Auto);
+    let ports = Ports {
+        ids: &Ids,
+        gate: &Allow,
+        plan: &plan,
+        flatten: &flatten,
+        view: &view,
+    };
+    let (mut rig, _) = Rig::started(&ports)?;
+    rig.step(Input::Tick(RiskClock::from_secs(seconds)), &ports)?;
+    let (_, ran) = rig.control(
+        COMMAND_ISSUED,
+        command(
+            "a",
+            "stop",
+            ("agent", "a"),
+            evidence("vector", seconds.saturating_sub(301))?,
+            false,
+        )?,
+        &ports,
+    )?;
+    assert_eq!(types(&ran), vec!["OwnerCommandRefused"]);
+    let record = the(&ran, "OwnerCommandRefused")?;
+    assert_eq!(member(record, "command"), Some("stop"));
+    assert_eq!(member(record, "reason"), Some("step_up_stale"));
+    let stamped = payload::stamp(RiskClock::from_secs(seconds), "effective_at").map_err(failed)?;
+    assert_eq!(
+        stamped,
+        Value::Str(vector_stamp.clone()),
+        "the stamp is the vector's §4.7 form {vector_stamp}, never the integer seconds the \
+         vectors refuse (journal spec §9.2, DEC-261 item 7, DEC-308)"
+    );
+    assert_eq!(
+        record.payload.get("effective_at"),
+        Some(&stamped),
+        "the refusal carries the vector's timestamp"
     );
     Ok(())
 }

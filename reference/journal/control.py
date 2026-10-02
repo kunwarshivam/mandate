@@ -77,10 +77,15 @@ POINTER = T("pointer")
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
 REFUSED_COMMANDS = {"agent": ("resume", "stop"), "acct": ("acknowledge",)}
-REFUSAL_REASONS = ("step_up_missing", "step_up_stale", "step_up_reused", "step_up_method")
+REFUSAL_REASONS = ("step_up_missing", "step_up_stale", "step_up_reused", "step_up_method", "not_independent")
 MODEL_KIND = "model_version"
 MODEL_MEMBERS = ("model_id", "model_version", "admits_instruments")
 CASH_MEMBERS = ("cash_band", "cash_in_band")
+RULE_21_REORDERINGS = {
+    "order.rule_21_version_first": ("model_id", "model_version"),
+    "order.rule_21_admits_first": ("model_version", "admits_instruments"),
+}
+RULE_21_PARAMS_FIRST = "order.rule_21_params_first"
 
 SCHEMAS: dict[tuple[str, str], T] = {
     ("ctl", "StreamOpened"): rec(("stream_type", one_of("control")), ("workspace_id", IDENT_T)),
@@ -227,7 +232,10 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
         names = [name for name, _ in ty.fields]
         out = []
         depth = nested_record(path)
-        if "record.extra" not in skip and f"open.{depth}" not in skip:
+        past_first = path.endswith("]") and not path.endswith("[0]")
+        if past_first and f"open_after_first.{depth}" in skip:
+            pass
+        elif "record.extra" not in skip and f"open.{depth}" not in skip:
             out += [
                 Violation("record.extra", "schema", f"{path}.{k}".lstrip("."))
                 for k in sorted(value)
@@ -239,18 +247,31 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
                 read_as_null = inner.kind == "nullable" and "record.missing.nullable" in skip
                 if "record.missing" not in skip and not read_as_null:
                     out.append(Violation("record.missing", "schema", member))
-            elif f"loose.{depth}.{name}" not in skip:
+            elif f"loose.{depth}.{name}" in skip:
+                pass
+            elif f"text.{depth}.{name}" in skip:
+                out += payload_type_violations(STR, value[name], member, skip)
+            elif value[name] is None and f"nullable.{depth}.{name}" in skip:
+                pass
+            else:
                 out += payload_type_violations(inner, value[name], member, skip)
         return out
     if ty.kind == "list" and isinstance(value, list):
+        checked = value[:1] if f"first_only.{path.rsplit('.', 1)[-1]}" in skip else value
         return [
             v
-            for i, item in enumerate(value)
+            for i, item in enumerate(checked)
             for v in payload_type_violations(ty.inner, item, f"{path}[{i}]", skip)
         ]
     if ty.kind == "nullable":
         return [] if value is None else payload_type_violations(ty.inner, value, path, skip)
     return type_violations(ty, value, path, skip)
+
+
+def encoded(texts: list) -> list[bytes]:
+    """A list's elements as bytes to order; a seeded bug can let a `null` element through, which
+    reads as empty text, as the journal's own reader does."""
+    return [(t if isinstance(t, str) else "").encode() for t in texts]
 
 
 def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
@@ -263,20 +284,34 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             out.append(Violation(f"rule.{name}", reason, path))
 
     if event_type == "MandateVersionCreated":
-        paths = [entry["path"].encode() for entry in p["provenance"]]
+        paths = [(entry["path"] or "").encode() for entry in p["provenance"]]
         rule("17", ascending(paths), "non_canonical", "payload.provenance")
     if event_type == "MandateConfirmed":
-        paths = [path.encode() for path in p["confirmed_paths"]]
+        paths = encoded(p["confirmed_paths"])
         rule("18", ascending(paths), "non_canonical", "payload.confirmed_paths")
     if event_type == "ConnectionEstablished":
-        rule("19", ascending([s.encode() for s in p["scopes"]]), "non_canonical", "payload.scopes")
+        rule("19", ascending(encoded(p["scopes"])), "non_canonical", "payload.scopes")
     if event_type == "ConfigSnapshotRegistered":
-        rule("20", ascending([s.encode() for s in p["params"]]), "non_canonical", "payload.params")
+        rule_20_first = "order.rule_21_first" not in skip
+        if rule_20_first:
+            rule("20", ascending(encoded(p["params"])), "non_canonical", "payload.params")
         model = p["kind"] == MODEL_KIND
-        wrong = [m for m in MODEL_MEMBERS if (p[m] is not None) != model]
-        if not model and p["params"] and "rule.21.params" not in skip:
-            wrong.append("params")
+        order = [*MODEL_MEMBERS, "params"]
+        for bug, (a, b) in RULE_21_REORDERINGS.items():
+            if bug in skip:
+                i, j = order.index(a), order.index(b)
+                order[i], order[j] = order[j], order[i]
+        if RULE_21_PARAMS_FIRST in skip:
+            order = ["params", *MODEL_MEMBERS]
+        params_wrong = not model and p["params"] and "rule.21.params" not in skip
+        wrong = [
+            m
+            for m in order
+            if (m == "params" and params_wrong) or (m != "params" and (p[m] is not None) != model)
+        ]
         rule("21", not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
+        if not rule_20_first:
+            rule("20", ascending(encoded(p["params"])), "non_canonical", "payload.params")
     if event_type == "AgentDeployed" and "mandate_version" in draft["config_refs"]:
         theirs = draft["config_refs"]["mandate_version"]
         if "rule.22.prefix" in skip:
@@ -874,15 +909,20 @@ def expected_facts(arts: dict[str, dict]) -> list[dict]:
 # --------------------------------------------------------------------------- drafts
 
 
-def invalid(name, clause, base, changes, reason, path):
+def invalid(name, clause, base, changes, reason, path, also=()):
+    """`also` lists, in report order, the later rules a draft breaks on purpose: the journal
+    reports only the first, and the generator checks the whole order."""
     where = {"base_seq": SEQ[base]} if base in SEQ else {"base_draft": base}
-    return {
-        "name": name,
-        "clause": clause,
-        **where,
-        "changes": changes,
-        "expect": {"outcome": "Invalid", "reason": reason, "path": path},
-    }
+    expect = {"outcome": "Invalid", "reason": reason, "path": path}
+    if also:
+        expect["also"] = [{"reason": r, "path": at} for r, at in also]
+    return {"name": name, "clause": clause, **where, "changes": changes, "expect": expect}
+
+
+def reported(got: list[Violation], want: dict) -> bool:
+    """The draft breaks exactly the rules its expectation lists, in that order."""
+    listed = [(want["reason"], want["path"])] + [(a["reason"], a["path"]) for a in want.get("also", [])]
+    return [(v.reason, v.path) for v in got] == listed
 
 
 def valid(name, clause, base, changes):
@@ -905,10 +945,108 @@ def last_byte_flipped(ref: str) -> str:
     return ref[:-1] + ("0" if ref[-1] != "0" else "1")
 
 
+def chain_payload(name: str) -> dict:
+    """A copy of the named chain event's payload, to change one element of a list in it."""
+    return copy.deepcopy(chain_bodies(artifacts())[SEQ[name] - 1]["payload"])
+
+
+def second_nulled(items: list) -> list:
+    return [items[0], None, *items[2:]]
+
+
 def invalid_drafts() -> list[dict]:
-    """Each draft breaks exactly one rule; together they cover every §9.2 member type and rule."""
+    """Each draft breaks exactly one rule, or the rules its `also` lists; together they cover every
+    §9.2 member type and rule."""
     version = artifact_ref(artifacts()["mandate_document"])
+    scopes = chain_payload("connection")["scopes"]
+    params = chain_payload("model_registered")["params"]
+    confirmed = chain_payload("confirmed")["confirmed_paths"]
+    entries = chain_payload("version_created")["provenance"]
+    path_nulled = copy.deepcopy(entries)
+    path_nulled[1]["path"] = None
+    spanned = copy.deepcopy(entries)
+    spanned[1]["quoted_span"] = "keep it under ten percent"
     return [
+        invalid(
+            "disclosure_step_up_assertion_null",
+            "§9.2 DisclosureAccepted.step_up.assertion_id: never null",
+            "disclosure",
+            [change("payload.step_up.assertion_id", None)],
+            "schema",
+            "payload.step_up.assertion_id",
+        ),
+        invalid(
+            "disclosure_step_up_time_null",
+            "§9.2 DisclosureAccepted.step_up.authenticated_at: never null",
+            "disclosure",
+            [change("payload.step_up.authenticated_at", None)],
+            "schema",
+            "payload.step_up.authenticated_at",
+        ),
+        invalid(
+            "provenance_second_path_null",
+            "§9.2 MandateVersionCreated.provenance[].path: never null, in every entry",
+            "version_created",
+            [change("payload.provenance", path_nulled)],
+            "schema",
+            "payload.provenance[1].path",
+        ),
+        invalid(
+            "provenance_second_entry_quoted_span",
+            "§9.2 every schema is closed, in every provenance entry",
+            "version_created",
+            [change("payload.provenance", spanned)],
+            "schema",
+            "payload.provenance[1].quoted_span",
+        ),
+        invalid(
+            "connection_second_scope_null",
+            "§9.2 ConnectionEstablished.scopes: every element is text",
+            "connection",
+            [change("payload.scopes", second_nulled(scopes))],
+            "schema",
+            "payload.scopes[1]",
+        ),
+        invalid(
+            "confirmed_second_path_null",
+            "§9.2 MandateConfirmed.confirmed_paths: every element is a pointer",
+            "confirmed",
+            [change("payload.confirmed_paths", second_nulled(confirmed))],
+            "schema",
+            "payload.confirmed_paths[1]",
+        ),
+        invalid(
+            "model_second_param_null",
+            "§9.2 ConfigSnapshotRegistered.params: every element is text",
+            "model_registered",
+            [change("payload.params", second_nulled(params))],
+            "schema",
+            "payload.params[1]",
+        ),
+        invalid(
+            "fee_named_and_versioned",
+            "rule 21: the first offending member, model_id before model_version",
+            "fee_registered",
+            [change("payload.model_id", "pairs"), change("payload.model_version", "1")],
+            "schema",
+            "payload.model_id",
+        ),
+        invalid(
+            "fee_versioned_and_admitting",
+            "rule 21: the first offending member, model_version before admits_instruments",
+            "fee_registered",
+            [change("payload.model_version", "1"), change("payload.admits_instruments", False)],
+            "schema",
+            "payload.model_version",
+        ),
+        invalid(
+            "fee_named_with_params",
+            "rule 21: a model member before params",
+            "fee_registered",
+            [change("payload.model_id", "pairs"), change("payload.params", ["lookback_bars"])],
+            "schema",
+            "payload.model_id",
+        ),
         invalid(
             "connection_carries_a_key",
             "§9.2 no credential member (AGENTS.md rules 6 and 7)",
@@ -1059,6 +1197,15 @@ def invalid_drafts() -> list[dict]:
             "payload.params",
         ),
         invalid(
+            "fee_params_unsorted",
+            "rules 20 and 21: the lower-numbered rule is reported first",
+            "fee_registered",
+            [change("payload.params", ["taker_bps", "maker_bps"])],
+            "non_canonical",
+            "payload.params",
+            also=[("schema", "payload.params")],
+        ),
+        invalid(
             "model_params_unsorted",
             "rule 20",
             "model_registered",
@@ -1072,6 +1219,14 @@ def invalid_drafts() -> list[dict]:
             "version_created",
             [change("payload.mandate_version", "btc-accumulator-v1"), refs("version_record")],
             "non_canonical",
+            "payload.mandate_version",
+        ),
+        invalid(
+            "version_created_without_version",
+            "§9.2 MandateVersionCreated.mandate_version: never null",
+            "version_created",
+            [change("payload.mandate_version", None), refs("version_record")],
+            "schema",
             "payload.mandate_version",
         ),
         invalid(
@@ -1403,6 +1558,14 @@ def invalid_drafts() -> list[dict]:
             "payload.reason",
         ),
         invalid(
+            "refused_at_a_date",
+            "§9.1 timestamp: the §4.7 form, not any text",
+            "refused_stop",
+            [change("payload.effective_at", "2026-10-02")],
+            "non_canonical",
+            "payload.effective_at",
+        ),
+        invalid(
             "refused_at_risk_clock_seconds",
             "§9.1 timestamp",
             "refused_stop",
@@ -1649,11 +1812,12 @@ def check_section(section: dict) -> list[str]:
     for case in section["invalid_drafts"]:
         got = violations(draft_for(section, case))
         want = case["expect"]
-        if len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"]):
+        if not reported(got, want):
             problems.append(
                 found(
                     "invalid_drafts",
-                    f"{case['name']}: expected exactly {want['reason']} at {want['path']}, got {got}",
+                    f"{case['name']}: expected exactly {want['reason']} at {want['path']}"
+                    f" and {want.get('also', [])}, got {got}",
                 )
             )
     for case in section["valid_drafts"]:
@@ -1767,10 +1931,22 @@ VALIDATOR_MUTANTS = (
     "types.risk_clock",
     "types.risk_clock_whole",
     "types.risk_clock_nullable",
+    "text.payload.effective_at",
+    "nullable.payload.mandate_version",
     "artifact_refs",
     "config_refs.required",
     *(f"rule.{n}" for n in range(17, 25)),
     "rule.21.params",
+    "order.rule_21_first",
+    *RULE_21_REORDERINGS,
+    RULE_21_PARAMS_FIRST,
+    "nullable.step_up.assertion_id",
+    "nullable.step_up.authenticated_at",
+    "nullable.provenance_entry.path",
+    "open_after_first.provenance_entry",
+    "first_only.scopes",
+    "first_only.confirmed_paths",
+    "first_only.params",
     "rule.22.prefix",
     "rule.24.band",
     "rule.24.in_band",
@@ -1948,7 +2124,7 @@ def run_mutants(section: dict) -> list[str]:
             if want is None:
                 caught |= bool(got)
             else:
-                caught |= len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"])
+                caught |= not reported(got, want)
         if not caught:
             escaped.append(f"control validator mutant {mutant}")
     for name, check, mutated in vector_mutants(section):

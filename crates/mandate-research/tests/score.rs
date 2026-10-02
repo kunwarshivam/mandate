@@ -917,7 +917,6 @@ fn the_report_recomputes_from_its_own_fields() {
 /// it used to reach the mean of nothing and refuse a nameless `Num(DivisionByZero)` (#435
 /// review minor 3, DEC-380). The live pin this replaces held only `Num(_)`; the arm is stricter.
 #[test]
-#[ignore = "pending E17-8"]
 fn an_empty_basket_is_an_error() {
     let refusal = basket_return(&[], t(100), t(1_000))
         .expect_err("an empty basket refuses, never a quiet zero");
@@ -941,7 +940,6 @@ fn an_empty_basket_is_an_error() {
 /// thesis the basket is never read, so the scoreable set's own refusals keep their precedence:
 /// the empty set at a minimum of zero (DEC-335), the window refusal below a positive one.
 #[test]
-#[ignore = "pending E17-8"]
 fn an_evaluation_against_an_empty_basket_refuses_with_its_own_code() {
     let index = series("index", &[(101, "400"), (999, "400")]);
     let scored = thesis("th-1", "asset-1", 100, 1_000, "0");
@@ -1039,7 +1037,6 @@ struct BasketBranchCounts {
 /// one generated scenario. A plain function over a `TestRunner`, because a pending test must not
 /// be one a macro generates.
 #[test]
-#[ignore = "pending E17-8"]
 fn no_basket_reaches_division_by_zero() {
     let counts = BasketBranchCounts::default();
     let members = [

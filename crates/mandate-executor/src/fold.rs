@@ -11,7 +11,7 @@ use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{
-    flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
+    clock_of, flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
     required_text, usd,
 };
 use crate::state::{
@@ -252,20 +252,19 @@ fn stream_opened(state: &mut ExecutorState, payload: &Value) -> Result<(), Execu
 /// Every account-stream risk input carries `risk_clock`, and it never decreases (journal spec §2,
 /// mandate spec §5.2).
 fn risk_clock(state: &ExecutorState, event: &FoldedEvent) -> Result<RiskClock, ExecutorError> {
-    let secs = optional_int(&event.payload, "risk_clock")
-        .and_then(|secs| i64::try_from(secs).ok())
-        .ok_or_else(|| ExecutorError::RiskClockMissing {
+    let at =
+        clock_of(&event.payload, "risk_clock").ok_or_else(|| ExecutorError::RiskClockMissing {
             event_type: event.event_type.clone(),
         })?;
     if let Some(last) = state.risk_clock
-        && secs < last.secs()
+        && at < last
     {
         return Err(ExecutorError::RiskClockWentBackwards {
             last: last.secs(),
-            found: secs,
+            found: at.secs(),
         });
     }
-    Ok(RiskClock::from_secs(secs))
+    Ok(at)
 }
 
 fn instrument(payload: &Value) -> Result<InstrumentId, ExecutorError> {
@@ -914,6 +913,13 @@ fn protection_changed(
                 );
             }
             if !passive {
+                if state.awaiting.remove(&instrument).is_some()
+                    && let Some(waiting) = state.unprotected.iter_mut().find(|interval| {
+                        interval.instrument == instrument && interval.ended_at.is_none()
+                    })
+                {
+                    waiting.ended_at = Some(at);
+                }
                 state.unprotected.push(UnprotectedInterval {
                     instrument,
                     started_at: at,
@@ -926,13 +932,30 @@ fn protection_changed(
             state.watchdogged.insert(instrument.clone(), at);
         }
         "exit_unpriced" | "ladder_floor" => {}
+        "unprotected_end" if flag(payload, "acknowledged") => {
+            state.awaiting.remove(&instrument);
+            if let Some(open) = state
+                .unprotected
+                .iter_mut()
+                .find(|interval| interval.instrument == instrument && interval.ended_at.is_none())
+            {
+                open.ended_at = Some(at);
+            }
+        }
         "interval_limit" | "unprotected_end" => {
-            let ends = action == "unprotected_end";
-            if let Some(entry) = optional_text(payload, "bracket").filter(|_| ends) {
+            let awaiting = protective_orders_named(payload, "awaiting")?;
+            let ends = action == "unprotected_end" && awaiting.is_empty();
+            if !awaiting.is_empty() {
+                state
+                    .awaiting
+                    .insert(instrument.clone(), awaiting.into_iter().collect());
+            }
+            let finished = action == "unprotected_end";
+            if let Some(entry) = optional_text(payload, "bracket").filter(|_| finished) {
                 let entry = ClientOrderId::parse(entry)?;
                 state.details.entry(entry).or_default().bracket_placed = true;
             }
-            if ends
+            if finished
                 && let Some(sequence) = state.exiting.remove(&instrument)
                 && sequence.ladder.parked
             {
@@ -950,7 +973,7 @@ fn protection_changed(
             {
                 if ends {
                     open.ended_at = Some(at);
-                } else {
+                } else if !finished {
                     open.alerted = true;
                 }
             }
@@ -1088,8 +1111,19 @@ fn created_on(payload: &Value) -> Result<Option<Date>, ExecutorError> {
 
 /// The protective orders a `ProtectionChanged` names, space- or comma-separated.
 fn protective_orders(payload: &Value) -> Result<Vec<ClientOrderId>, ExecutorError> {
-    required_text(payload, "orders")?
-        .split(|c: char| c == ',' || c.is_whitespace())
+    ids(required_text(payload, "orders")?)
+}
+
+/// The protective orders a record names under `key`, none where it names none.
+fn protective_orders_named(
+    payload: &Value,
+    key: &str,
+) -> Result<Vec<ClientOrderId>, ExecutorError> {
+    optional_text(payload, key).map_or(Ok(Vec::new()), ids)
+}
+
+fn ids(raw: &str) -> Result<Vec<ClientOrderId>, ExecutorError> {
+    raw.split(|c: char| c == ',' || c.is_whitespace())
         .filter(|raw| !raw.is_empty())
         .map(ClientOrderId::parse)
         .collect()
@@ -2568,6 +2602,74 @@ mod protection_tests {
             stream.state.copied_origin(&EventId("e-3".to_owned()))?,
             None
         );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod interval_tests {
+    use mandate_canon::Value;
+
+    use crate::error::ExecutorError;
+    use crate::payload::{clock, object};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Executor, Ids, executor_config, fees};
+    use crate::types::RiskClock;
+
+    fn protection_changed(
+        executor: &mut Executor,
+        at: i64,
+        mut pairs: Vec<(&str, Value)>,
+    ) -> Result<(), ExecutorError> {
+        pairs.push(("instrument", Value::Str("AAPL".to_owned())));
+        pairs.push(("risk_clock", clock(RiskClock::from_secs(at))?));
+        executor.commit_one("ProtectionChanged", object(pairs)?)
+    }
+
+    fn action(name: &str) -> (&'static str, Value) {
+        ("action", Value::Str(name.to_owned()))
+    }
+
+    /// DEC-348 item 2: an interval waiting on the broker's acknowledgment of new protection is
+    /// ended by the next start in its instrument, at that instant, and a new interval opens; an
+    /// interval that already ended is never touched again.
+    #[test]
+    fn a_start_ends_the_interval_waiting_on_an_acknowledgment() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        protection_changed(&mut executor, 1, vec![action("unprotected_start")])?;
+        protection_changed(&mut executor, 2, vec![action("unprotected_end")])?;
+        protection_changed(&mut executor, 3, vec![action("unprotected_start")])?;
+        let awaiting = ("awaiting", Value::Str("md-a-p1".to_owned()));
+        protection_changed(&mut executor, 4, vec![action("unprotected_end"), awaiting])?;
+        let spans = |executor: &Executor| -> Vec<(i64, Option<i64>)> {
+            executor
+                .state
+                .unprotected
+                .iter()
+                .map(|interval| {
+                    (
+                        interval.started_at.secs(),
+                        interval.ended_at.map(RiskClock::secs),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(spans(&executor), vec![(1, Some(2)), (3, None)]);
+        assert_eq!(executor.state.awaiting.len(), 1);
+        protection_changed(&mut executor, 5, vec![action("unprotected_start")])?;
+        assert_eq!(
+            spans(&executor),
+            vec![(1, Some(2)), (3, Some(5)), (5, None)]
+        );
+        assert!(executor.state.awaiting.is_empty());
         Ok(())
     }
 }
