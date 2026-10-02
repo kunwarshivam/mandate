@@ -32,8 +32,16 @@ and says which story needs it.
 ## 3. Reserve identifiers before you use them
 
 Decision IDs (`DEC-`), open decisions (`OD-`), ADR numbers, and epic and story IDs collide
-silently between sessions: two open PRs have already minted the same DEC numbers. The single
-registry is the **Reserved identifiers** table at the end of
+silently between sessions: two open PRs have already minted the same DEC numbers.
+
+**Decision IDs (DEC-344).** Each decision is a file, `docs/project/decisions/DEC-<n>.md`, and its
+[README](../../../../docs/project/decisions/README.md) is the procedure: take the range your
+dispatch gives you, or the next integer after the highest on `main`; add the file with the status
+`Reserved` in your first commit; fill it in when you decide. The decision log takes no new decision
+or `DEC-` reservation rows, and a PR edits only its own decision files. Two PRs that take the same
+number add the same path and cannot both merge, so the second renumbers.
+
+**Every other identifier.** The registry is the **Reserved identifiers** table at the end of
 `docs/project/04-decision-log.md`. Before the first commit that uses a new identifier:
 
 1. Take the next integer for that prefix after the highest one in the table or in the log's
@@ -48,9 +56,10 @@ registry is the **Reserved identifiers** table at the end of
 
 ## 4. Shared files
 
-The work tracker, the decision log, the backlog, the feature map, and `status.toml` are edited by
-everyone. In each: add or change only the rows for your own stories; never rewrite another
-coordinator's rows; append rather than reorder. Rebase onto `main` immediately before merging
+The work tracker, the backlog, the feature map, and `status.toml` are edited by everyone. (The
+decision log was one of them until DEC-344 gave each decision its own file.) In each: add or
+change only the rows for your own stories; never rewrite another coordinator's rows; append
+rather than reorder. Rebase onto `main` immediately before merging
 and resolve conflicts by keeping both sides.
 
 ## 5. One merge queue

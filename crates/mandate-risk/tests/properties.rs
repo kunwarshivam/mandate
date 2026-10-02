@@ -10,9 +10,12 @@
 mod common;
 
 use common::oracle::{Breach, ShadowLedger, breached, gross_limit, position_cap, scaled};
-use common::{INSTRUMENT_2, INSTRUMENT_3, Scenario, asset, proposal, qty, usd};
+use common::{INSTRUMENT_2, INSTRUMENT_3, Scenario, asset, price, proposal, qty, usd};
 use mandate_risk::{AgentMode, CheckOutcome, Origin, Purpose, ReasonCode, Side, Verdict, evaluate};
 use proptest::prelude::*;
+
+/// A second in [`mandate_time::UtcNanos`]' nanoseconds, the precision the gate compares at.
+const NANOS_PER_SEC: i64 = 1_000_000_000;
 
 /// Purposes that reduce risk. MI-1 is about exactly these four.
 const REDUCING: [Origin; 7] = [
@@ -103,6 +106,71 @@ proptest! {
             matches!(d.verdict, Verdict::Allow | Verdict::Defer | Verdict::Hold),
             "a discretionary exit was denied: {:?}",
             d.reason
+        );
+    }
+
+    /// An exit the pacing cannot compute is still routed: an owner or a discretionary exit gets a
+    /// decision, never an error, never a denial, and never a slice its pacing could not compute
+    /// (`AGENTS.md` rule 13; backlog "#311 round 2, minor 1", DEC-327). Two quotes are drawn on
+    /// purpose for the two ways a sell's collar fails today: `66023468761886947994.619958614`,
+    /// whose passive end `bid × 1.2` needs nine places past the decimal's maximum
+    /// ([`Price::collar_bound`]'s `overflow`), and `0.0000833`, whose passive end sits below one
+    /// Reg NMS tick and truncates to zero on the grid ([`Price::on_tick`]'s `not_positive`); the
+    /// decimal's own edges sit beside them. The volumes at the edges show that no participation cap
+    /// fails: `Qty::portion` takes a fraction of at most one. Pending E6-6, whose implementation
+    /// reads a control that cannot be computed as pacing nothing, so the whole exit goes.
+    #[test]
+    #[ignore = "pending E6-6"]
+    fn an_exit_over_extreme_figures_is_still_routed(
+        origin in prop::sample::select(vec![
+            Origin::OrderBuilder, Origin::GoalCompletion, Origin::RemovedInstrument,
+            Origin::OwnerClose, Origin::OwnerKillSwitch,
+        ]),
+        quote in prop::option::of(prop::sample::select(vec![
+            "79228162514264337593.543950335", "66023468761886947994.619958614",
+            "0.0000833", "0.000000001", "99.95",
+        ])),
+        trailing in prop::option::of(prop::sample::select(vec![
+            "79228162514264337593.543950335", "100000", "0",
+        ])),
+        adv in prop::option::of(prop::sample::select(vec![
+            "79228162514264337593.543950335", "1000000", "0",
+        ])),
+        fractionable in any::<bool>(),
+    ) {
+        let mut s = Scenario::allowing();
+        s.instrument.fractionable = fractionable;
+        if let Some(text) = quote {
+            let at = price(text);
+            s.market.quote = Some(mandate_risk::SaneQuote {
+                bid: at,
+                ask: at,
+                at: common::at("2026-09-21T14:59:59Z"),
+            });
+        } else {
+            s.market.quote = None;
+        }
+        s.market.trailing_5m_volume = trailing.map(qty);
+        s.market.adv_20d = adv.map(qty);
+        s.agent
+            .positions
+            .insert(asset(INSTRUMENT_3), qty("10"));
+        s.proposed = proposal(
+            INSTRUMENT_3, Side::Sell, "10", "100", origin,
+        );
+
+        let d = evaluate(&s.input());
+        prop_assert!(
+            d.is_ok(),
+            "an exit is routed, never an error: {:?}",
+            d
+        );
+        let d = d.expect("the exit is routed");
+        prop_assert_eq!(d.verdict, Verdict::Allow, "an exit is never denied");
+        prop_assert_eq!(
+            d.pacing.map_or(qty("10"), |p| p.qty),
+            qty("10"),
+            "a control that cannot be computed paces nothing: the whole exit goes (DEC-327 item 3)"
         );
     }
 
@@ -558,16 +626,33 @@ proptest! {
     }
 
     /// §9.6: only an **opposite**-side fill starts the sixty-second interval, and "within 60
-    /// seconds after" includes its last instant, so a fill exactly 60 s ago still blocks (DEC-163
-    /// item 3).
+    /// seconds after" includes its last instant, so a fill exactly 60 s ago still blocks and one
+    /// 60 s and a nanosecond ago does not (DEC-163 item 3). The fill's age is drawn in nanoseconds
+    /// and carries both sides of the boundary explicitly, and `now` is drawn off the whole second,
+    /// so the boundary is pinned every run at the precision the gate compares at, and a gate that
+    /// dropped either instant's nanoseconds is caught, not only when the uniform range happens to
+    /// land on it (#311 round 2, minor 2, DEC-328).
     #[test]
     fn only_an_opposite_side_fill_starts_the_interval(
         opposite in any::<bool>(),
-        elapsed in 0_i64..120,
+        elapsed_ns in prop_oneof![
+            Just(NANOS_PER_SEC * 60),
+            Just(NANOS_PER_SEC * 60 + 1),
+            Just(NANOS_PER_SEC * 60 - 1),
+            Just(NANOS_PER_SEC * 61),
+            0_i64..NANOS_PER_SEC * 120,
+        ],
+        now_nanos in prop_oneof![Just(0_u32), Just(999_999_999), 0_u32..1_000_000_000],
     ) {
         let mut s = Scenario::allowing();
-        let fill_at = mandate_time::UtcNanos::from_parts(s.now.secs() - elapsed, 0)
+        s.now = mandate_time::UtcNanos::from_parts(s.now.secs(), now_nanos)
             .expect("the test instant is in range");
+        let fill_ns = s.now.secs() * NANOS_PER_SEC + i64::from(s.now.nanos()) - elapsed_ns;
+        let fill_at = mandate_time::UtcNanos::from_parts(
+            fill_ns.div_euclid(NANOS_PER_SEC),
+            u32::try_from(fill_ns.rem_euclid(NANOS_PER_SEC)).expect("a remainder below a second"),
+        )
+        .expect("the test instant is in range");
         let side = if opposite {
             mandate_risk::RestingSide::Sell
         } else {
@@ -578,7 +663,7 @@ proptest! {
         let d = evaluate(&s.input()).expect("the gate decides");
         let blocked = d.reason == Some(ReasonCode::OppositeFillInterval);
         prop_assert_eq!(
-            blocked, opposite && elapsed <= 60,
+            blocked, opposite && elapsed_ns <= NANOS_PER_SEC * 60,
             "a buy after a sell fill within 60 s is blocked; a buy after a buy fill is not"
         );
     }
