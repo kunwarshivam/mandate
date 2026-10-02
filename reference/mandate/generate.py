@@ -1119,6 +1119,46 @@ cases.append({"id": "MC-E32", "kind": "escalation", "op": "deliver_now",
 e_case("MC-E31", "A grant batched with a cancelling exits-only restriction is not pending and never acts (DEC-131 item 25(j))",
        [ASK1, {"kind": "batch", "reason": "mode_tightened", "responses": [e_resp("ctl1", 30, H1)], "now": E_NOW}])
 
+# =========================================================== P. delegation routing (§9.2, MI-11, MI-29; #444, DEC-353)
+# A rule change the autonomy row calls reducing is increasing when it sends an order that reached an undelegated ask
+# to an ask a delegation of the new version lifts.
+J_DELEG = lambda lifts: {"op": "add", "path": "/autonomy/delegations", "value": [dict(REVIEW_DELEGATION, lifts=lifts)]}
+J_TWO_ASKS = [rep("/autonomy/rules", [{"id": "large_orders", "when": {"field": "order_usd", "op": "gt", "value": "900"}, "then": "ask"},
+                                     {"id": "low_score", "when": {"field": "combined_score", "op": "lt", "value": "0.65"}, "then": "ask"}])]
+J_ONE_ASK = [rep("/autonomy/rules", [{"id": "large_orders", "when": {"field": "order_usd", "op": "gt", "value": "900"}, "then": "ask"}])]
+derived("btc_accumulator_two_asks", "btc_accumulator", J_TWO_ASKS, "two ask rules and an ask default, no auto rule")
+derived("btc_accumulator_two_asks_delegated", "btc_accumulator_two_asks", [J_DELEG("rule:low_score")],
+        "a delegation lifts the later ask rule, low_score")
+derived("btc_accumulator_one_ask_delegated_default", "btc_accumulator", J_ONE_ASK + [J_DELEG("default")],
+        "one ask rule, and a delegation lifts the ask default")
+derived("btc_accumulator_delegated_large", "btc_accumulator", [J_DELEG("rule:large_orders")],
+        "a delegation lifts the ask rule large_orders")
+derived("btc_accumulator_two_asks_delegated_small", "btc_accumulator_two_asks_delegated",
+        [{"op": "add", "path": "/autonomy/rules/0", "value": {"id": "small", "when": {"field": "order_usd", "op": "lt", "value": "100"}, "then": "auto"}}],
+        "adds an auto rule, small, ahead of both asks")
+CH_J = [
+    ("MC-J01", "Widening an ask rule a delegation lifts is risk-increasing", "btc_accumulator_delegated_large",
+     [rep("/autonomy/rules/0/when/value", "800")]),
+    ("MC-J02", "Widening the same ask rule with no delegation is risk-reducing", "btc_accumulator",
+     [rep("/autonomy/rules/0/when/value", "800")]),
+    ("MC-J03", "Removing an ask rule ahead of an ask rule a delegation lifts is risk-increasing", "btc_accumulator_two_asks_delegated",
+     [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J04", "Removing the same ask rule with no delegation is risk-reducing", "btc_accumulator_two_asks",
+     [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J05", "Removing an ask rule ahead of an ask default a delegation lifts is risk-increasing", "btc_accumulator_one_ask_delegated_default",
+     [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J06", "Removing an auto rule ahead of a delegated ask stays risk-reducing: its orders were already auto",
+     "btc_accumulator_two_asks_delegated_small", [{"op": "remove", "path": "/autonomy/rules/0"}]),
+]
+for cid, title, base, patch in CH_J:
+    old = MB[base]
+    new = apply_patch(old, patch)
+    assert V.is_valid(new) and semantic(old, CTX)[0] == [] and semantic(new, CTX)[0] == [], (cid, semantic(old, CTX), semantic(new, CTX))
+    got, paths = classify(old, new)
+    cases.append({"id": cid, "kind": "change", "title": title, "base": base, "patch": patch,
+                  "expect": {"classification": got, "changed_paths": paths, "old_version": version(old), "new_version": version(new),
+                             "step_up_required": got == "risk_increasing"}})
+
 # =========================================================== O. tripwires (§6.7, MI-31, V-044; DEC-187, DEC-350 to DEC-352)
 # Family W. The fold's inputs are account-stream events in seq order at the risk clock `at`; a MandateVersionApplied
 # step applies `patch` to the case's base. Every mandate a case applies passes every V-rule.

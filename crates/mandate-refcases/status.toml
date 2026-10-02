@@ -487,3 +487,10 @@
 'MC-W55' = { status = "pending", story = "E6-13" }
 'MC-W56' = { status = "pending", story = "E6-13" }
 'MC-W57' = { status = "pending", story = "E6-13" }
+# Family J, delegation routing (stream H, #444; DEC-353). Pending on mandate-spec's §9.2 row (E10-3).
+'MC-J01' = { status = "pending", story = "E6-13" }
+'MC-J02' = { status = "pending", story = "E6-13" }
+'MC-J03' = { status = "pending", story = "E6-13" }
+'MC-J04' = { status = "pending", story = "E6-13" }
+'MC-J05' = { status = "pending", story = "E6-13" }
+'MC-J06' = { status = "pending", story = "E6-13" }

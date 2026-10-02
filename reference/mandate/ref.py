@@ -1659,12 +1659,16 @@ def classify_delegations(od, nd):
             return "increasing"
     return "reducing"
 
-def classify_autonomy(o, n):
+def classify_autonomy(o, n, lifted=frozenset()):
+    """§9.2's autonomy row. `lifted` is the asks the new version's delegations name: a change that sends an order
+    which used to reach an undelegated ask to one of them would let a delegation lift what it did not lift before,
+    so it is increasing (MI-29, DEC-353)."""
     o, n = ({k: v for k, v in x.items() if k != "tripwires"} for x in (o, n))
     od, nd = o.get("delegations", []), n.get("delegations", [])
     if od or nd:
         o, n = {k: v for k, v in o.items() if k != "delegations"}, {k: v for k, v in n.items() if k != "delegations"}
-        parts = ([classify_delegations(od, nd)] if od != nd else []) + ([classify_autonomy(o, n)] if o != n else [])
+        rest = classify_autonomy(o, n, frozenset(d["lifts"] for d in nd)) if o != n else None
+        parts = ([classify_delegations(od, nd)] if od != nd else []) + ([rest] if rest else [])
         return "increasing" if "increasing" in parts else "reducing"
     oa, na = o["approval"], n["approval"]
     if oa["approvers"] != na["approvers"] or oa["timeout_s"] != na["timeout_s"] or oa["on_timeout"] != na["on_timeout"]:
@@ -1683,6 +1687,9 @@ def classify_autonomy(o, n):
         if ra["id"] not in nids:
             later = [STRICT[x["then"]] for x in o["rules"][i + 1:]] + [STRICT[o["default"]]]
             if any(x < STRICT[ra["then"]] for x in later):
+                return "increasing"
+            later_sources = {f"rule:{x['id']}" for x in o["rules"][i + 1:]} | {"default"}
+            if ra["then"] != "auto" and later_sources & lifted:
                 return "increasing"
     orules = {r["id"]: r for r in o["rules"]}
     for i, rb in enumerate(n["rules"]):
@@ -1707,6 +1714,8 @@ def classify_autonomy(o, n):
         if t == 0 and d > 0:
             return "increasing"
         if t > 0 and (d < 0 or any(x > t for x in later)):
+            return "increasing"
+        if rb["then"] == "ask" and d > 0 and f"rule:{rb['id']}" in lifted:
             return "increasing"
     return "reducing"
 

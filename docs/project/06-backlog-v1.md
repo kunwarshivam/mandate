@@ -303,6 +303,8 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   Also owed, one code PR (#443 round 3): journal spec rule 28 and `OwnerCommandRefused.reason`'s `not_independent` in
   `mandate-journal`'s §9.2 schema, with the validator check in `reference/journal/control.py`, its two vectors, and its
   seeded bug.
+  Also owed (#444, DEC-353): `mandate-spec`'s §9.2 classifier treats a rule change that routes an order to a delegated ask
+  as risk-increasing (MC-J01 to MC-J06), with tests first.
   **Founder question** (#443 round 2): should a mandate be refused at validation
   when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
   drawdown ladder) then cannot be lifted until a second user exists?

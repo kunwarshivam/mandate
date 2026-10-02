@@ -581,6 +581,18 @@ req("MC-W57", C["MC-W57"]["kind"] == "risk_state" and C["MC-W57"]["steps"][1]["e
     "an end_delegations tripwire latches; the loss counts from the new risk day")
 req("MC-W", sum(c.startswith("MC-W") for c in C) == 57, "57 tripwire cases")
 
+# delegation routing (§9.2, MI-29; #444, DEC-353)
+for cid, cls in {"MC-J01": "risk_increasing", "MC-J02": "risk_reducing", "MC-J03": "risk_increasing", "MC-J04": "risk_reducing",
+                 "MC-J05": "risk_increasing", "MC-J06": "risk_reducing"}.items():
+    req(cid, C[cid]["expect"]["classification"] == cls and C[cid]["expect"]["changed_paths"] == ["/autonomy/rules"], cls)
+lifts = lambda b: [x["lifts"] for x in d["bases"][b]["mandate"]["autonomy"].get("delegations", [])]
+req("MC-J01", lifts(C["MC-J01"]["base"]) == ["rule:large_orders"] and C["MC-J01"]["patch"] == C["MC-J02"]["patch"]
+    and lifts(C["MC-J02"]["base"]) == [], "the same widening, with and without the delegation")
+req("MC-J03", lifts(C["MC-J03"]["base"]) == ["rule:low_score"] and C["MC-J03"]["patch"] == C["MC-J04"]["patch"]
+    and lifts(C["MC-J04"]["base"]) == [], "the same removal, with and without the delegation")
+req("MC-J05", lifts(C["MC-J05"]["base"]) == ["default"], "the default is delegated")
+req("MC-J06", d["bases"][C["MC-J06"]["base"]]["mandate"]["autonomy"]["rules"][0]["then"] == "auto", "an auto rule removed")
+req("MC-J", sum(c.startswith("MC-J") for c in C) == 6, "6 routing cases")
 print("cases", len(C), "title assertion failures", len(bad))
 for b in bad:
     print(" ", b)
