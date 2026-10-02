@@ -1,9 +1,9 @@
 //! Family E's `lifecycle` op drives `mandate-runtime` itself, reads every member of every case, and
 //! compares every member of every expected draft (DEC-85, DEC-292 item 3, DEC-317).
 //!
-//! DEC-317's first slice interprets the `ask` step, so every case is exercised through its first
-//! step: the case cut to that step passes, and the whole case fails at its second step naming the
-//! slice that interprets it. Each test has two halves that need each other: a case passes as the
+//! DEC-317's first slice interprets the `ask` step and its second the responses, so every case is
+//! exercised through its first step, eleven pass whole, and the rest fail naming the slice, the
+//! story or the decision that owes what they stop at. Each test has two halves that need each other: a case passes as the
 //! fixture states it, which an arm that failed everything could not do, and fails, naming what
 //! changed, when a member is edited, dropped, or added, which an arm that compared nothing could not.
 
@@ -111,8 +111,9 @@ const QUORUM: [&str; 10] = [
     "MC-E29",
 ];
 
-/// The twenty-six split as slice 2 stands. Eleven pass whole. The ten that re-validate fail on the
-/// quorum and name slice 3 for the re-validation. The four with a tick, a fold, a cancellation or a
+/// The twenty-six split as slice 2 stands. Eleven pass whole. The ten that re-validate name slice 3
+/// for the re-validation, and nine of them fail on the quorum; MC-E22 fails on its draft count
+/// first, since its mark is folded only by slice 3. The four with a tick, a fold, a cancellation or a
 /// batch name slice 3 at that step. MC-E18 fails because the runtime cancels in a step whose mode is
 /// exits-only before it judges the response (§6.4 "Cancellation", DEC-318).
 #[test]
@@ -123,8 +124,13 @@ fn the_lifecycle_cases_split_as_slice_2_stands() {
     }
     for id in QUORUM {
         fails_naming(fixture.clone(), id, "DEC-317's slice 3");
+        let named = if id == "MC-E22" {
+            "2 drafts expected"
+        } else {
+            "the runtime records no quorum"
+        };
+        fails_naming(fixture.clone(), id, named);
     }
-    fails_naming(fixture.clone(), "MC-E01", "the runtime records no quorum");
     for (id, step) in [
         ("MC-E03", "tick"),
         ("MC-E05", "fold"),
@@ -288,15 +294,13 @@ fn a_retailed_source_is_copied_once() {
     fails_naming(copied_twice, "MC-E02", "drafts expected");
 }
 
-/// `now` reaches the runtime: a mode it states is folded, so an exits-only `now` cancels the
-/// approval before the response is judged; any classification and dry run the gate can give is
-/// read, and a skip, which re-validates nothing, still ends the approval.
+/// The mode `now` states reaches the runtime: it is folded, so an exits-only `now` cancels the
+/// approval before the response is judged.
 #[test]
-fn now_is_read_and_reaches_the_runtime() {
-    let fixture = fixture();
+fn a_mode_now_states_reaches_the_runtime() {
     fails_naming(
         with(
-            &fixture,
+            &fixture(),
             "MC-E02",
             "/script/1/now/mode",
             json!("exits_only"),
@@ -304,6 +308,15 @@ fn now_is_read_and_reaches_the_runtime() {
         "MC-E02",
         r#"["AgentModeChanged", "ApprovalCanceled", "ApprovalResponded"]"#,
     );
+}
+
+/// The rest of `now` is read: any classification and dry run the gate can give, a restriction, the
+/// universe, a version and a mark are accepted. They are re-validation's inputs, which no step of
+/// this slice consults, so a skip, which re-validates nothing, still ends the approval; slice 3 makes
+/// them checkable.
+#[test]
+fn the_rest_of_now_is_read() {
+    let fixture = fixture();
     for (path, value) in [
         (
             "/script/1/now/classification",
