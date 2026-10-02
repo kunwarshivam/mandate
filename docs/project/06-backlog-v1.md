@@ -2087,6 +2087,12 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   *Tests staged (DEC-401):* `evaluate` refuses a zero proposal before any check, as
   `Unimplemented` until the implementation names it `GateError::ZeroQuantity`; two pending tests
   in `crates/mandate-risk/tests/hand.rs`.
+- **E7: the gate port's adapter handles `ZeroQuantity`** (stream K, when §9.1's gate port into
+  `mandate-executor` is wired; DEC-401 item 5, #486 review, m4). `mandate_risk::evaluate` refuses
+  a proposal of zero quantity with `GateError::ZeroQuantity`. The port's adapter must either filter
+  a zero quantity before calling the gate or treat that refusal as nothing to do. It must never let
+  the refusal abort a multi-order step (a flatten, an exit-price ladder rung, an exit sequence).
+  A test in the port's own suite pins it.
 - **E6-6:** pin the rest of a re-priced exit and of the close window. The tests assert
   `marketable_limit_required` and the quantity of a market exit re-priced in an auction window but
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`

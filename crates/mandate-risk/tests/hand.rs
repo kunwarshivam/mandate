@@ -1725,13 +1725,22 @@ fn declared_reason_code_variants() -> BTreeSet<String> {
 
 /// DEC-401: a proposal of zero quantity is no order, and the gate refuses it by name before any
 /// check, whatever else it would be. The grid is every origin, both sides, flat and held, every
-/// agent mode, both passes, and a working universe read or not. On every row the oracle is the
-/// quantity alone: zero is `zero_quantity`, ahead of the unread universe's own error, and the
-/// smallest quantity above zero is never refused that way, so the refusal is the zero and not a
-/// row it happens to sit on.
+/// agent mode, both passes, a working universe read or not, and four quotes: an ordinary one and
+/// the three over which a collar cannot be computed (DEC-383's: the passive end overflowing at
+/// the decimal's maximum, truncating to zero at `0.0000833`, and a configured `x` of one). On
+/// every row the oracle is the quantity alone: zero is `zero_quantity`, ahead of the unread
+/// universe's own error and of the collar's arithmetic (DEC-401 item 3), and the smallest
+/// quantity above zero is never refused that way, so the refusal is the zero and not a row it
+/// happens to sit on.
 #[test]
 #[ignore = "pending E6-6"]
 fn a_proposal_of_zero_is_refused_by_name_whatever_else_it_would_be() {
+    const COLLARS: [Option<(&str, bool)>; 4] = [
+        None,
+        Some(("79228162514264337593.543950335", false)),
+        Some(("0.0000833", false)),
+        Some(("99.95", true)),
+    ];
     let origins = [
         Origin::OrderBuilder,
         Origin::GoalCompletion,
@@ -1761,24 +1770,42 @@ fn a_proposal_of_zero_is_refused_by_name_whatever_else_it_would_be() {
                 for mode in modes {
                     for pass in passes {
                         for universe_read in [true, false] {
-                            for (quantity, zero) in [("0", true), ("0.000000001", false)] {
-                                let mut s = Scenario::allowing();
-                                s.pass = pass;
-                                s.agent.mode = mode;
-                                s.agent.positions.insert(asset(INSTRUMENT_3), qty(held));
-                                s.proposed = proposal(INSTRUMENT_3, side, quantity, "100", origin);
-                                if !universe_read {
-                                    s.universe = mandate_risk::WorkingUniverse::Unavailable;
+                            for collar in COLLARS {
+                                for (quantity, zero) in [("0", true), ("0.000000001", false)] {
+                                    let mut s = Scenario::allowing();
+                                    if let Some((quote, x_is_one)) = collar {
+                                        s.market.quote = Some(mandate_risk::SaneQuote {
+                                            bid: price(quote),
+                                            ask: price(quote),
+                                            at: s.now,
+                                        });
+                                        if x_is_one {
+                                            s.config.collar_liquid_x = fraction("1");
+                                            s.config.collar_other_x = fraction("1");
+                                            s.config.collar_crypto_x = fraction("1");
+                                        }
+                                    }
+                                    s.pass = pass;
+                                    s.agent.mode = mode;
+                                    s.agent.positions.insert(asset(INSTRUMENT_3), qty(held));
+                                    s.proposed =
+                                        proposal(INSTRUMENT_3, side, quantity, "100", origin);
+                                    if !universe_read {
+                                        s.universe = mandate_risk::WorkingUniverse::Unavailable;
+                                    }
+                                    let decided = evaluate(&s.input());
+                                    let refused_as_zero = matches!(
+                                        decided,
+                                        Err(mandate_risk::GateError::ZeroQuantity)
+                                    );
+                                    assert_eq!(
+                                        refused_as_zero, zero,
+                                        "{origin:?} {side:?} of {quantity} with {held} held, {mode:?}, \
+                                     {pass:?}, universe read {universe_read}, quote {collar:?}: \
+                                     {decided:?}"
+                                    );
+                                    rows = rows.saturating_add(1);
                                 }
-                                let decided = evaluate(&s.input());
-                                let refused_as_zero =
-                                    matches!(decided, Err(mandate_risk::GateError::ZeroQuantity));
-                                assert_eq!(
-                                    refused_as_zero, zero,
-                                    "{origin:?} {side:?} of {quantity} with {held} held, {mode:?}, \
-                                     {pass:?}, universe read {universe_read}: {decided:?}"
-                                );
-                                rows = rows.saturating_add(1);
                             }
                         }
                     }
@@ -1788,7 +1815,7 @@ fn a_proposal_of_zero_is_refused_by_name_whatever_else_it_would_be() {
     }
     assert_eq!(
         rows,
-        10 * 2 * 2 * 4 * 2 * 2 * 2,
+        10 * 2 * 2 * 4 * 2 * 2 * 4 * 2,
         "every row of the grid was decided"
     );
 }
