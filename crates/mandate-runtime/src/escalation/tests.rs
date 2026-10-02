@@ -428,9 +428,9 @@ fn timestamp_of(secs: i64) -> Result<String, String> {
 }
 
 /// The refusal's `effective_at` (DEC-308): the writer stamps the §4.7 timestamp of `judged`
-/// through `payload::stamp`, and the journaled record carries that value. It fails at the stub's
-/// own report until the implementation stamps, and at the assertion messages once it stamps
-/// anything but the judged second's canonical timestamp (DEC-77).
+/// through `payload::stamp`, and the journaled record carries that value. It fails at the
+/// assertion messages when the writer stamps anything but the judged second's canonical timestamp
+/// (DEC-77).
 fn stamps_the_judged_second(record: &EventDraft, judged: i64) -> Result<(), String> {
     let expected = timestamp_of(judged)?;
     let stamped = payload::stamp(RiskClock::from_secs(judged), "effective_at").map_err(failed)?;
@@ -875,8 +875,7 @@ fn a_stop_needs_fresh_step_up_and_no_resume_lifts_it() -> Checked {
 /// The coordinator named this test's change for the §9.2 writer follow-up (DEC-261 item 7,
 /// DEC-308): the assertion DEC-291's writer shipped, that `effective_at` is the integer of the
 /// folded second, now holds the §4.7 timestamp of that same instant, through the stamp the writer
-/// takes in the implementation PR. It is pending E8-3 until then, and fails at the stub's own
-/// report.
+/// takes (#469).
 #[test]
 fn a_stop_processed_late_is_refused_at_the_folded_second() -> Checked {
     let (view, flatten) = (
@@ -1152,6 +1151,32 @@ fn the_refusals_effective_at_is_the_vectors_refused_stop_timestamp() -> Checked 
         Some(&stamped),
         "the refusal carries the vector's timestamp"
     );
+    Ok(())
+}
+
+/// Journal spec §4.7 (DEC-308; the #469 review, minor 1): a §4.7 timestamp holds the seconds from
+/// `1970-01-01T00:00:00Z` to `9999-12-31T23:59:59Z`. `payload::stamp` writes both ends, and refuses
+/// a second beyond either one as `NonCanonicalPayload` naming the field, never clamping it to the
+/// nearer end or writing it in another form.
+#[test]
+fn a_second_outside_the_timestamp_range_is_refused_naming_the_field() -> Checked {
+    const LAST_SECOND: i64 = 253_402_300_799;
+    for inside in [0, 1, LAST_SECOND] {
+        assert_eq!(
+            payload::stamp(RiskClock::from_secs(inside), "effective_at"),
+            Ok(Value::Str(timestamp_of(inside)?)),
+            "{inside} seconds lies inside the §4.7 range and is stamped as its own instant"
+        );
+    }
+    for outside in [-1, i64::MIN, LAST_SECOND.saturating_add(1), i64::MAX] {
+        assert_eq!(
+            payload::stamp(RiskClock::from_secs(outside), "effective_at"),
+            Err(RuntimeError::NonCanonicalPayload {
+                field: "effective_at".to_owned(),
+            }),
+            "{outside} seconds lies outside the §4.7 range and is refused naming the field"
+        );
+    }
     Ok(())
 }
 
