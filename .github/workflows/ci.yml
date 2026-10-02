@@ -86,7 +86,8 @@ jobs:
 
   full:
     runs-on: ubuntu-24.04
-    # Mutants on a diff near ES-13's size take up to half an hour (DEC-398).
+    # 61 mutants on one PR's diff did not finish in 30 minutes (DEC-398); the cap must clear the
+    # mutation run, not cancel it.
     timeout-minutes: 60
     permissions:
       contents: read
