@@ -15,6 +15,7 @@
 //! because the stubs return an error where the case expects a figure or a refusal it does not
 //! make.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 
 use mandate_num::{NumError, Price, Ratio, Rounding, SignedQty};
@@ -922,21 +923,61 @@ fn an_empty_basket_is_an_error() {
     );
 }
 
-/// One generated scenario: how many theses there are (`0..=3`), which of them are scoreable (a
-/// `false` thesis names an instrument with no series), and the registered minimum `0..=4`.
-/// Every close and price comes from the same small fixture family the hand cases use, so every
-/// window return stays inside the ±100% the aggregate's sums of squares are bounded by
-/// (DEC-282 item 6), and the basket and the index are always well formed.
+/// One generated thesis: whether it is scoreable (an unscoreable one names an instrument with no
+/// series) and the second its horizon closes at, inside the registered window `[t(0),
+/// t(10_000)]` or past its end.
+#[derive(Debug)]
+struct PlannedThesis {
+    scoreable: bool,
+    horizon_end: i64,
+}
+
+/// One generated scenario: how many theses there are (`0..=3`), each one's scoreability and
+/// horizon, and the registered minimum `0..=3`. Every close and price comes from the same small
+/// fixture family the hand cases use, so every window return stays inside the ±100% the
+/// aggregate's sums of squares are bounded by (DEC-282 item 6), and the basket and the index are
+/// always well formed.
 #[derive(Debug)]
 struct EmptySetPlan {
-    scoreable: Vec<bool>,
+    theses: Vec<PlannedThesis>,
     minimum: u32,
+}
+
+/// A horizon inside the registered window three times in four, past its end once in four, so a
+/// thesis outside the window meets every scoreable count and every minimum (#435 review minor 2).
+fn planned_horizon() -> impl Strategy<Value = i64> {
+    prop_oneof![3 => Just(1_000_i64), 1 => Just(12_000_i64)]
 }
 
 /// The scenario strategy: nothing else varies, so a failure names the boundary it crossed.
 fn empty_set_plan() -> impl Strategy<Value = EmptySetPlan> {
-    (proptest::collection::vec(any::<bool>(), 0..=3), 0u32..4)
-        .prop_map(|(scoreable, minimum)| EmptySetPlan { scoreable, minimum })
+    (
+        proptest::collection::vec(
+            (any::<bool>(), planned_horizon()).prop_map(|(scoreable, horizon_end)| PlannedThesis {
+                scoreable,
+                horizon_end,
+            }),
+            0..=3,
+        ),
+        0u32..4,
+    )
+        .prop_map(|(theses, minimum)| EmptySetPlan { theses, minimum })
+}
+
+/// How many generated scenarios reached each of the property's four expectations.
+#[derive(Debug, Default)]
+struct BranchCounts {
+    outside: Cell<u32>,
+    below_minimum: Cell<u32>,
+    empty_at_zero: Cell<u32>,
+    reported: Cell<u32>,
+}
+
+impl BranchCounts {
+    /// Counts one scenario that reached `branch`.
+    fn hit(branch: &Cell<u32>) {
+        branch.set(branch.get().saturating_add(1));
+    }
 }
 
 /// No generated scenario — an empty input, an all-unscoreable one, or a partly scoreable one,
@@ -946,32 +987,35 @@ fn empty_set_plan() -> impl Strategy<Value = EmptySetPlan> {
 /// one below a positive minimum keeps the window refusal as #410's round-1 pins freeze it, a
 /// non-empty one below the minimum keeps it too, a thesis outside the registered window is
 /// refused before any of that (DEC-282 item 3), and a set at its minimum reports with the
-/// count an oracle counts for itself. A plain function over a `TestRunner`, because a pending
-/// test must not be one a macro generates.
+/// count an oracle counts for itself. Every one of the four expectations is reached by at least
+/// one generated scenario, so none of them reads as coverage it does not give. A plain function
+/// over a `TestRunner`, because a pending test must not be one a macro generates.
 #[test]
 #[ignore = "pending E17-8"]
 fn no_scoreable_set_reaches_division_by_zero() {
+    let counts = BranchCounts::default();
     let mut runner = TestRunner::new(ProptestConfig::with_cases(256));
     let outcome = runner.run(&empty_set_plan(), |plan| {
         let theses: Vec<ClosedThesis> = plan
-            .scoreable
+            .theses
             .iter()
             .enumerate()
-            .map(|(index, scoreable)| {
+            .map(|(index, planned)| {
                 let number = index + 1;
                 let id = format!("th-{number}");
-                if *scoreable {
-                    thesis(&id, &format!("asset-{number}"), 100, 1_000, "0")
+                let instrument = if planned.scoreable {
+                    format!("asset-{number}")
                 } else {
-                    thesis(&id, &format!("missing-{number}"), 100, 1_000, "0")
-                }
+                    format!("missing-{number}")
+                };
+                thesis(&id, &instrument, 100, planned.horizon_end, "0")
             })
             .collect();
         let instruments: BTreeMap<AssetId, CloseSeries> = plan
-            .scoreable
+            .theses
             .iter()
             .enumerate()
-            .filter(|(_, scoreable)| **scoreable)
+            .filter(|(_, planned)| planned.scoreable)
             .map(|(index, _)| {
                 let number = index + 1;
                 let id = format!("asset-{number}");
@@ -999,18 +1043,21 @@ fn no_scoreable_set_reaches_division_by_zero() {
             .count();
         let scoreable = u32::try_from(scoreable).unwrap_or(u32::MAX);
         if outside {
+            BranchCounts::hit(&counts.outside);
             prop_assert!(
                 matches!(outcome, Err(ResearchError::ThesisOutsideWindow)),
                 "a thesis outside the registered window is refused first, got {:?}",
                 outcome.as_ref().err()
             );
         } else if scoreable < plan.minimum {
+            BranchCounts::hit(&counts.below_minimum);
             prop_assert!(
                 matches!(outcome, Err(ResearchError::WindowNotClosed)),
                 "a scoreable set below the minimum keeps the window refusal, got {:?}",
                 outcome.as_ref().err()
             );
         } else if scoreable == 0 {
+            BranchCounts::hit(&counts.empty_at_zero);
             prop_assert!(
                 matches!(outcome, Err(ResearchError::EmptyScoreableSet)),
                 "an empty scoreable set the count refusal does not answer - a minimum of zero - \
@@ -1018,6 +1065,7 @@ fn no_scoreable_set_reaches_division_by_zero() {
                 outcome.as_ref().err()
             );
         } else {
+            BranchCounts::hit(&counts.reported);
             let card = match outcome {
                 Ok(card) => card,
                 Err(refused) => {
@@ -1040,6 +1088,20 @@ fn no_scoreable_set_reaches_division_by_zero() {
         Ok(())
     });
     outcome.expect("no scoreable set reaches the division by zero");
+    for (branch, reached) in [
+        ("a thesis outside the window", &counts.outside),
+        ("a scoreable set below the minimum", &counts.below_minimum),
+        (
+            "an empty scoreable set at a minimum of zero",
+            &counts.empty_at_zero,
+        ),
+        ("a scoreable set at its minimum", &counts.reported),
+    ] {
+        assert!(
+            reached.get() > 0,
+            "the generator reaches {branch} at least once, counts {counts:?}"
+        );
+    }
 }
 
 /// The empty scoreable set refuses with its own arm and the code ES-09 registers for it,

@@ -24,7 +24,7 @@ reading that loosens the spec toward the code still goes to the founder.
 | What must v1 do? | [docs/product/04-prd-v1.md](docs/product/04-prd-v1.md) |
 | What should I work on? | [docs/project/06-backlog-v1.md](docs/project/06-backlog-v1.md), in milestone order from [docs/project/02-milestones-and-wbs.md](docs/project/02-milestones-and-wbs.md) |
 | Where does the work stand, and what is next? | [docs/project/08-work-tracker.md](docs/project/08-work-tracker.md), updated at the end of every session |
-| What has already been decided? | [docs/project/04-decision-log.md](docs/project/04-decision-log.md) |
+| What has already been decided? | [docs/project/04-decision-log.md](docs/project/04-decision-log.md) for DEC-01 to DEC-302, and one file per decision under [docs/project/decisions/](docs/project/decisions/README.md) after that (DEC-344) |
 | What are the exact trading rules (accounting, orders, fees, settlement, account rules)? | [docs/specs/trading-domain.md](docs/specs/trading-domain.md) and its [reference cases](docs/specs/reference-cases/trading-domain.yaml), which tests must reproduce exactly |
 | What is a mandate, which invariants must hold, and how are limits, autonomy, and the order builder defined? | [docs/specs/mandate.md](docs/specs/mandate.md), the [mandate](schemas/mandate.schema.json) and [policy](schemas/policy.schema.json) schemas, and its [reference cases](docs/specs/reference-cases/mandate.yaml) |
 | How are events journaled, hashed, stored, and replayed? | [docs/specs/journal.md](docs/specs/journal.md) and its [test vectors](docs/specs/reference-cases/journal.yaml) |
@@ -48,7 +48,7 @@ reading that loosens the spec toward the code still goes to the founder.
 8. **Never place real orders.** Use broker paper environments (Alpaca paper), venue demo
    environments, and local fixtures only. Never ask for, read, or use live credentials or
    production secrets.
-9. **Accepted decisions are binding.** To deviate, write a new decision-log entry. Agents accept
+9. **Accepted decisions are binding.** To deviate, write a new decision. Agents accept
    reversible engineering and process decisions themselves and proceed; decisions reserved for the
    founder (DEC-79: live money, spending, legal and compliance text, weakening a safety rule) stay
    Proposed while agents continue with the most conservative option.
@@ -193,7 +193,9 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   reading that adds no risk, and weakens no safety invariant or non-negotiable), run
   `cargo xtask refcases --write`; never edit them by hand.
 - **Tasks** use `docs/project/templates/task.md`; PRs use `.github/pull_request_template.md`;
-  decisions use `docs/adr/template.md` plus a decision-log row.
+  decisions are one file each, `docs/project/decisions/DEC-<n>.md` (DEC-344; the format and how to
+  reserve a number are in that directory's README), and an architecture decision also gets an ADR
+  from `docs/adr/template.md`. The decision log takes no new rows.
 - **Rust** for the core: runtime, risk, execution, connectors, market data, journal.
 - **Python** for research, model tooling, and the SDK.
 - No `unwrap()` or `expect()` in non-test Rust code on trading paths; return typed errors.

@@ -6,8 +6,10 @@
 | **Date** | YYYY-MM-DD |
 | **Deciders** | Founder, or who decided under delegation |
 
-Every ADR has a row in the [decision log](../project/04-decision-log.md), which stays the binding
-index ([ADR-0001](0001-engineering-setup.md) ES-16). Copy this file to `NNNN-slug.md`.
+Every ADR has a decision behind it: a file under [decisions/](../project/decisions/README.md)
+(DEC-344), or for the earlier ones a row in the [decision log](../project/04-decision-log.md). The
+decisions stay the binding index ([ADR-0001](0001-engineering-setup.md) ES-16). Copy this file to
+`NNNN-slug.md`.
 
 ## Context
 
