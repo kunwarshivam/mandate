@@ -92,6 +92,60 @@ fn holding(
 /// coordinator's ruling on #174, DEC-348 item 1). Every other action keeps the fixture's order.
 const INTERVAL_START: &str = "unprotected_window_start";
 
+/// The step kinds of other streams, which this harness skips by name: they drive nothing here, so
+/// their `actions` are asserted by nobody here (the coordinator's ruling on #174, DEC-348 item 3).
+const SKIPPED: [&str; 2] = ["fees_charged", "conduct_breach"];
+
+fn skips(step: &Json) -> bool {
+    text_of(step, "event").is_some_and(|kind| SKIPPED.contains(&kind))
+}
+
+/// The driven cases with a step this harness skips that expects actions: nobody here asserts that
+/// step, so the case is never reproduced here in full, and it may not be listed passing.
+fn partly_unasserted() -> Vec<String> {
+    DRIVEN
+        .iter()
+        .filter(|key| {
+            let (id, variant) = match key.split_once("::") {
+                Some((id, variant)) => (id, Some(variant)),
+                None => (**key, None),
+            };
+            case(id, variant)
+                .steps
+                .iter()
+                .any(|step| skips(step) && !expected_actions(step).is_empty())
+        })
+        .map(|key| (*key).to_owned())
+        .collect()
+}
+
+/// The keys `status` lists as passing among `keys`.
+fn listed_passing(status: &str, keys: &[String]) -> Vec<String> {
+    keys.iter()
+        .filter(|key| {
+            status.lines().any(|line| {
+                line.trim_start().starts_with(&format!("'{key}' ="))
+                    && line.contains("status = \"passing\"")
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// Whether `step` lists the interval's end after a `submit_protective`: the broker accepted the
+/// new protection within the step (DEC-348 item 2).
+fn ends_after_protection(step: &Json) -> bool {
+    let actions = expected_actions(step);
+    actions
+        .iter()
+        .position(|(kind, _)| kind == "submit_protective")
+        .is_some_and(|submitted| {
+            actions.iter().skip(submitted).any(|(kind, argument)| {
+                kind == "journal" && argument.as_str() == Some("unprotected_window_end")
+            })
+        })
+}
+
 /// One case as the fixture carries it, with a variant's overrides already applied.
 struct Case {
     id: String,
@@ -508,7 +562,7 @@ impl<'p> Drive<'p> {
                             Some("unprotected_start") => {
                                 seen.push(Seen::Journal("unprotected_window_start".to_owned()));
                             }
-                            Some("unprotected_end") => {
+                            Some("unprotected_end") if draft.payload.get("awaiting").is_none() => {
                                 seen.push(Seen::Journal("unprotected_window_end".to_owned()));
                             }
                             _ => {}
@@ -774,7 +828,7 @@ impl<'p> Drive<'p> {
                 );
             }
             "fill" => self.accounting_fill(index, name, &data, at),
-            "fees_charged" | "conduct_breach" => {}
+            skipped if SKIPPED.contains(&skipped) => {}
             other => panic!(
                 "{} step {index}: `{other}` is a step kind this harness does not know, so the \
                  case cannot pass by skipping it",
@@ -787,7 +841,35 @@ impl<'p> Drive<'p> {
         {
             self.confirm_cancels(&mut seen);
         }
+        if ends_after_protection(step) {
+            self.acknowledge_protection(&mut seen);
+        }
         seen
+    }
+
+    /// Answers, within the step, every protective submission the broker has not answered: a step
+    /// that lists the interval's end after its `submit_protective` saw the broker accept it, and
+    /// the interval ends at that acknowledgment, never at the submission (DEC-348 item 2).
+    fn acknowledge_protection(&mut self, seen: &mut Vec<Seen>) {
+        let protective: Vec<String> = self
+            .unanswered
+            .iter()
+            .filter(|id| {
+                self.submitted
+                    .get(*id)
+                    .is_some_and(|order| order.purpose == Purpose::Protective)
+            })
+            .cloned()
+            .collect();
+        self.unanswered.retain(|id| !protective.contains(id));
+        for id in protective {
+            let accepted = self.broker_order(&id, "accepted", "0");
+            self.run(
+                Input::Broker(Ok(BrokerOutcome::Submitted(accepted))),
+                seen,
+                "the protection's acknowledgment",
+            );
+        }
     }
 
     fn order_update(&mut self, index: usize, data: &Json, seen: &mut Vec<Seen>) {
@@ -1586,7 +1668,7 @@ fn drive(case: Case) {
         let before = drive.shell.state.clone();
         let seen = drive.step(index, step);
         let checks = [
-            drive.assert_actions(index, step, &seen),
+            !skips(step) && drive.assert_actions(index, step, &seen),
             drive.assert_orders(index, step),
             drive.assert_reconciliation(index, step, &before),
             drive.assert_protection(index, step),
@@ -1771,4 +1853,36 @@ fn an_interval_that_never_starts_fails() {
             Seen::Gate,
         ]
     });
+}
+
+/// DEC-348 item 3: a case with a step this harness skips and does not assert is never listed
+/// passing in `crates/mandate-refcases/status.toml`; RC-22's `conduct_breach` step is the one
+/// today, owed by E6-11.
+#[test]
+fn a_case_with_an_unasserted_step_is_never_listed_passing() {
+    let partly = partly_unasserted();
+    assert_eq!(
+        partly,
+        vec!["RC-22".to_owned()],
+        "the cases with an unasserted step"
+    );
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mandate-refcases/status.toml");
+    let status =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(
+        listed_passing(&status, &partly),
+        Vec::<String>::new(),
+        "a case checked by nobody in part is not reproduced, so it is not passing"
+    );
+}
+
+/// The guard's plant: RC-22 listed passing is caught, and a pending listing is not.
+#[test]
+fn the_guard_catches_an_unasserted_case_listed_passing() {
+    let partly = vec!["RC-22".to_owned()];
+    let passing = "[trading_domain]\n'RC-22' = { status = \"passing\", story = \"E7-4\" }\n";
+    assert_eq!(listed_passing(passing, &partly), partly);
+    let pending = "[trading_domain]\n'RC-22' = { status = \"pending\", story = \"E6-11\" }\n";
+    assert_eq!(listed_passing(pending, &partly), Vec::<String>::new());
 }
