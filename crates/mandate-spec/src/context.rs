@@ -1645,14 +1645,17 @@ mod thesis_tests {
     struct Store(BTreeMap<Digest, Value>);
 
     impl Store {
-        fn of(mandates: &[&Mandate]) -> Result<(Self, Vec<Digest>), String> {
+        fn of<const N: usize>(mandates: [&Mandate; N]) -> Result<(Self, [Digest; N]), String> {
             let mut stored = BTreeMap::new();
             let mut digests = Vec::new();
             for m in mandates {
                 let digest = m.version().map_err(|e| e.to_string())?.digest();
-                stored.insert(digest.clone(), m.canonical().map_err(|e| e.to_string())?);
+                stored.insert(digest, m.canonical().map_err(|e| e.to_string())?);
                 digests.push(digest);
             }
+            let digests = digests
+                .try_into()
+                .map_err(|_| "one digest per mandate".to_owned())?;
             Ok((Self(stored), digests))
         }
 
@@ -1676,7 +1679,7 @@ mod thesis_tests {
         let open = research(&[])?;
         let pinned = research(&[("/universe/pinned", "true")])?;
         let denied = research(&[("/autonomy/admission", r#""deny""#)])?;
-        let (store, v) = Store::of(&[&open, &pinned, &denied])?;
+        let (store, v) = Store::of([&open, &pinned, &denied])?;
         let cases = [
             ("admitted", thesis(None, 0, "us_equity")?, &v[0]),
             (
@@ -1747,7 +1750,7 @@ mod thesis_tests {
         let pinned = research(&[("/universe/pinned", "true")])?;
         let denied = research(&[("/autonomy/admission", r#""deny""#)])?;
         let unresearched = mandate(&[("/universe/pinned", "false")])?;
-        let (store, v) = Store::of(&[&open, &pinned, &denied, &unresearched])?;
+        let (store, v) = Store::of([&open, &pinned, &denied, &unresearched])?;
         let cases = [
             ("check 5", thesis(None, 0, "us_equity")?, &v[1]),
             ("check 6", thesis(None, 0, "us_equity")?, &v[2]),
@@ -1784,7 +1787,7 @@ mod thesis_tests {
             ("/universe/pinned", "true"),
             ("/autonomy/admission", r#""deny""#),
         ])?;
-        let (store, v) = Store::of(&[&open, &pinned, &denied, &both])?;
+        let (store, v) = Store::of([&open, &pinned, &denied, &both])?;
         let cases = [
             (
                 "pinned and denied, refused at 6",
@@ -1835,7 +1838,7 @@ mod thesis_tests {
     #[ignore = "pending E17-2"]
     fn a_thesis_refused_at_a_mandate_check_its_mandate_passes_is_refused() -> Result<(), String> {
         let open = research(&[])?;
-        let (store, v) = Store::of(&[&open])?;
+        let (store, v) = Store::of([&open])?;
         assert_eq!(
             store.judge(&thesis(Some("eligibility_floor"), 0, "us_equity")?, &v[0]),
             Ok(()),
@@ -1863,7 +1866,7 @@ mod thesis_tests {
     fn a_thesis_is_judged_under_the_mandate_it_names() -> Result<(), String> {
         let open = research(&[])?;
         let pinned = research(&[("/universe/pinned", "true")])?;
-        let (store, v) = Store::of(&[&open, &pinned])?;
+        let (store, v) = Store::of([&open, &pinned])?;
         let admitted = thesis(None, 0, "us_equity")?;
         assert_eq!(store.judge(&admitted, &v[0]), Ok(()));
         assert_eq!(store.judge(&admitted, &v[1]), refused("admitted"));
@@ -1877,12 +1880,12 @@ mod thesis_tests {
     fn a_thesis_mandate_that_is_absent_or_an_impostor_is_refused() -> Result<(), String> {
         let open = research(&[])?;
         let pinned = research(&[("/universe/pinned", "true")])?;
-        let (_, v) = Store::of(&[&open, &pinned])?;
+        let (_, v) = Store::of([&open, &pinned])?;
         let pinned_document = pinned.canonical().map_err(|e| e.to_string())?;
-        let impostor = Store(BTreeMap::from([(v[0].clone(), pinned_document)]));
+        let impostor = Store(BTreeMap::from([(v[0], pinned_document)]));
         let empty = Store(BTreeMap::new());
         let refused_record = thesis(Some("eligibility_floor"), 0, "us_equity")?;
-        let real = Store::of(&[&open])?.0;
+        let real = Store::of([&open])?.0;
         assert_eq!(
             real.judge(&refused_record, &v[0]),
             Ok(()),
