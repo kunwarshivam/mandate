@@ -2200,7 +2200,7 @@ mod probe_tests {
 
 #[cfg(test)]
 mod sequence_tests {
-    use std::collections::{BTreeMap, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
     use mandate_accounting::{AssetClass, InstrumentId, Side};
     use mandate_canon::Value;
@@ -2288,6 +2288,7 @@ mod sequence_tests {
                 ("qty", text("6")),
                 ("take_profit", text("170")),
                 ("stop", text("140")),
+                ("created_on", text("2026-06-05")),
             ],
         )?;
         Ok(executor)
@@ -6932,6 +6933,9 @@ mod sequence_tests {
         Fill(u32),
         Confirm,
         Pause(bool),
+        /// The broker refuses the latest cancel it was asked, as for an order it holds in no
+        /// cancelable state (#508's review, M1).
+        Refuse,
     }
 
     const EXIT_PURPOSES: [Purpose; 4] = [
@@ -6990,6 +6994,9 @@ mod sequence_tests {
         fills: u32,
         paused: bool,
         quiet_since: i64,
+        /// Every order a cancel was asked for: a refusal of that cancel is the cancel's, never the
+        /// order's rejection (§5.7).
+        cancelled: BTreeSet<String>,
     }
 
     /// 2018-01-01 00:00 ET, the calendar's first date: before it (the 1970 base, the eve of 2018)
@@ -7135,6 +7142,15 @@ mod sequence_tests {
         fn saw(&mut self, draft: &EventDraft) -> Result<(), String> {
             let field = |name: &str| draft.payload.get(name).and_then(Value::as_str);
             let intent = field("intent_id").unwrap_or_default().to_owned();
+            let id = field("client_order_id").unwrap_or_default();
+            if draft.event_type == "OrderStateChanged"
+                && field("state") == Some("rejected")
+                && self.cancelled.contains(id)
+            {
+                return Err(format!(
+                    "{id}: a refusal of its cancel was read as the order's rejection (§5.7)"
+                ));
+            }
             match (draft.event_type.as_str(), field("action")) {
                 ("IntentReceived", _) if intent.starts_with("w-") => {
                     let qty = field("qty")
@@ -7294,6 +7310,7 @@ mod sequence_tests {
                         Effect::Journal(draft) => self.saw(&draft)?,
                         Effect::Broker(BrokerRequest::Cancel { client_order_id }) => {
                             self.asked.push(client_order_id.as_str().to_owned());
+                            self.cancelled.insert(client_order_id.as_str().to_owned());
                         }
                         Effect::Broker(BrokerRequest::Submit(order)) => {
                             self.sent(
@@ -7402,6 +7419,7 @@ mod sequence_tests {
             fills: 0,
             paused: false,
             quiet_since: 0,
+            cancelled: BTreeSet::new(),
         };
         let agent = AgentId("agent-a".to_owned());
         desk.deliver(
@@ -7509,6 +7527,10 @@ mod sequence_tests {
                         }
                     }
                 }
+                Move::Refuse => desk
+                    .asked
+                    .pop()
+                    .map(|id| refused(&id, "order is not cancelable")),
                 Move::Pause(paused) => {
                     let mode = if paused { Mode::Paused } else { Mode::Normal };
                     desk.paused = paused;
@@ -7607,8 +7629,64 @@ mod sequence_tests {
             Move::Confirm,
             Move::Confirm,
             Move::Tick(1),
+            Move::Confirm,
+            Move::Tick(1),
         ];
         rule_13_script_from(0, true, &script)
+    }
+
+    /// #508's review, M1: the placement's cancel is asked in the step it is placed, while the
+    /// broker has not acknowledged it, and the broker refuses that cancel. The refusal is the
+    /// cancel's, not the order's: the placement is never journaled rejected, it is queried, and
+    /// the cancel is asked again once it is seen live, so the exit of 3 still goes. Today the
+    /// placement is never cancelled at all (#489), so this fails on the exit's stranding.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_refused_cancel_of_an_unacknowledged_placement_is_asked_again() -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(135), None, true),
+            Move::Exit(0, 4, 141),
+            Move::Exit(0, 3, 141),
+            Move::Tick(1_800),
+            Move::Confirm,
+            Move::Refuse,
+            Move::Tick(1),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(1),
+            Move::Confirm,
+            Move::Tick(1),
+        ];
+        rule_13_script_from(0, true, &script)
+    }
+
+    /// #508's review, m1: an exit the gate holds cannot move, so a passive exit's placement is not
+    /// cancelled for it. Beside [`LONE`] (4) and a held risk exit of 3, a passive exit of 4 placed
+    /// into a position of 10 stays, though with the held 3 counted it would not fit.
+    #[test]
+    fn a_held_exit_never_has_a_placement_cancelled_for_it() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        let agent = AgentId("agent-a".to_owned());
+        executor.state.modes.insert(agent.clone(), Mode::Paused);
+        let held = executor.run(sell(SECOND, "3", "141", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(verdicts(&held), vec!["hold"]);
+        executor.state.modes.insert(agent, Mode::Normal);
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(EXIT, "4", "141", Purpose::RiskExit)?, &ports)?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&placed).len(),
+            1,
+            "the passive exit is placed: {:?}",
+            drafted(&placed)
+        );
+        assert!(
+            cancels(&placed).is_empty(),
+            "and not cancelled for an exit that cannot go: {:?}",
+            drafted(&placed)
+        );
+        Ok(())
     }
 
     /// #400 round 2's nit: the random oracle reached the composed plant (an exit's step into the

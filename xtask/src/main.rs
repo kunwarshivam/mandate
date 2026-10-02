@@ -1968,10 +1968,10 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
-/// The `protection` row is #489's (DEC-418): a risk exit stranded behind a placement the executor
-/// made, a wrong answer from code that runs, caught by the rule-13 oracle's bound. The fix
-/// (DEC-419) deletes it with the `#[ignore]` line.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 5] = [
+/// The two `protection` rows are #489's (DEC-418): a risk exit stranded behind a placement the
+/// executor made, a wrong answer from code that runs, caught by the rule-13 oracle's bound. The
+/// fix (DEC-419) deletes them with the `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 6] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1991,6 +1991,10 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 5] = [
     (
         "crates/mandate-executor/src/protection.rs",
         "sequence_tests::a_risk_exit_allowed_during_a_passive_sequences_cancel_is_never_stranded",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_refused_cancel_of_an_unacknowledged_placement_is_asked_again",
     ),
 ];
 
