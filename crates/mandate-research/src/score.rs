@@ -431,7 +431,7 @@ pub fn evaluate(input: &EvaluationInput<'_>) -> Result<Scorecard, ResearchError>
         return Err(ResearchError::WindowNotClosed);
     }
     if count == 0 {
-        return empty_scoreable_set();
+        return Err(ResearchError::EmptyScoreableSet);
     }
     let excesses_basket: Vec<Ratio> = theses.iter().map(|row| row.excess_over_basket).collect();
     let excesses_index: Vec<Ratio> = theses.iter().map(|row| row.excess_over_index).collect();
@@ -458,16 +458,6 @@ pub fn evaluate(input: &EvaluationInput<'_>) -> Result<Scorecard, ResearchError>
         lower_bound_index,
         passed: lower_bound_basket > Ratio::ZERO && lower_bound_index > Ratio::ZERO,
     })
-}
-
-/// The empty scoreable set's refusal, stubbed until its implementation lands (DEC-77 stage 1,
-/// DEC-337): the path the count refusal does not answer — an empty set at a registered minimum
-/// of zero, which reached `Ratio::mean` of nothing and refused `Num(DivisionByZero)` — held by
-/// the follow-up's pending tests to the named arm, its code, and its precedence. The
-/// implementation PR replaces this body with [`ResearchError::EmptyScoreableSet`] and deletes
-/// only their `#[ignore]` lines (DEC-335).
-fn empty_scoreable_set() -> Result<Scorecard, ResearchError> {
-    Err(ResearchError::Unimplemented("evaluate", "E17-8"))
 }
 
 /// `(exit − entry) ÷ entry`, one rounding at 12 places half-even (DEC-281 item 4): the window

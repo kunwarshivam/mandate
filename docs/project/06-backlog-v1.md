@@ -874,7 +874,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   answered: the named code reaches a caller only at a registered `minimum_scoreable` of zero. Below
   a positive minimum an empty scoreable set still refuses `window_not_closed`, which does not tell
   "no theses at all" from "theses, none scoreable" (DEC-336); the frozen surface is otherwise
-  unchanged.
+  unchanged. Tests merged in [#435](https://github.com/kunwarshivam/mandate/pull/435); the
+  implementation PR (DEC-77 stage 2) replaces the stub with the named arm and deletes only the
+  three `#[ignore]` lines.
   *Founder question (#435 review, minor 1):* whether the named refusal should answer an empty
   scoreable set at every minimum, ahead of the count refusal. That changes two pinned ES-09
   refusal codes (`a_thesis_whose_closes_all_lie_outside_its_window_is_unscoreable` and

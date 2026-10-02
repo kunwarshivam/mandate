@@ -685,7 +685,8 @@ proves each pending test fails on them (DEC-110).
 - **Code:** `mandate-research`: `crates/mandate-research/src/lib.rs` (the thesis and its platform facts as typed data,
   `checks` and `admit` for the §8.5 decision, `fold_theses` for the §8.6 lineages, `expire_theses`
   for the three removals, `stagger_offset`, `stagger_release_at` and `next_proposal_at` for §8.4's
-  timing, and the `ResearchEvent` entries the crate produces) and
+  timing, and the `ResearchEvent` entries the crate produces),
+  `crates/mandate-research/src/score.rs` (E17-8's `evaluate`, the pure forward-paper scorer) and
   `crates/mandate-research/src/spec_types.rs` (the narrow stream-F views the first implementation PR
   after F's tests PR deletes). It **never calls a model:** a model output arrives as a typed value,
   and the platform boundary that produces it is E17-2's shell story. The spike that found the shape
@@ -699,6 +700,9 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-research/tests/properties.rs` (the four oracles: the universe replayed from the
   emitted events, the failing-check set computed unordered, an independent lineage counter, and the
   oracle self-checks that fail on a seeded bug),
+  `crates/mandate-research/tests/score.rs` (E17-8's forward-paper scoring: hand-calculated cases,
+  the boundary rules, and the empty scoreable set's named refusal `empty_scoreable_set` at a
+  registered minimum of zero, DEC-335 and DEC-336, with its branch-counting property),
   `crates/mandate-research/tests/refcases.rs` (25 of the 28 family-N cases loaded from
   `fixtures/refcases/mandate.json` rather than typed out; the three that state `first_order_autonomy`
   wait for stream H's `classify`), and `crates/mandate-research/tests/rules.rs` (the rule logic this
