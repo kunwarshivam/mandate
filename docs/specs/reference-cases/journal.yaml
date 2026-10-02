@@ -6036,7 +6036,7 @@ research:
     base_draft: proposed_admitted
     changes:
     - path: payload.horizon_s
-      value: -432000
+      value: '432000'
     expect:
       outcome: Invalid
       reason: schema
@@ -6056,7 +6056,7 @@ research:
     base_draft: proposed_admitted
     changes:
     - path: payload.confidence
-      value: 0.7
+      value: 1
     expect:
       outcome: Invalid
       reason: schema
