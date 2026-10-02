@@ -18,3 +18,4 @@ __pycache__/
 
 # proptest writes failure seeds next to the test that produced them; never committed
 *.proptest-regressions
+proptest-regressions/
