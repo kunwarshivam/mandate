@@ -1,27 +1,33 @@
 """Journal spec v0.8 §9.3's reference vectors (DEC-403): the account stream's `MandateVersionApplied`
 and `UniverseChanged`.
 
-The schemas and rules 28 to 31 live in `control.py`, beside §9.2's, so one validator judges every
-closed schema. This module builds the `risk_state` section: the two stored mandate documents a
-version change names, base drafts of both records on the account stream, the `JournaledFact` each
-maps to, an invalid draft for every rule and member type, and valid drafts for the cases a rule might
-be misread to refuse. It checks the section with its own oracles and shows every seeded bug caught.
+The schemas and rules 29 to 33 live in `control.py`, beside §9.2's, so one validator judges every
+closed schema. This module builds the `risk_state` section: the stored mandate documents the records
+name, base drafts of both records on the account stream, the `JournaledFact` each maps to, an invalid
+draft for every rule and member type, and valid drafts for the cases a rule might be misread to
+refuse. It checks the section with its own oracles, including that every stored document is a valid
+mandate and that every base and valid draft states the classification mandate spec §9.2 gives its two
+documents, and shows every seeded bug caught.
 """
 
 from __future__ import annotations
 
 import copy
+import decimal
+import functools
+import sys
+from pathlib import Path
 
 from common import artifact_ref, change, delete, is_ulid, normalize_decimal
 from control import (
     ACCOUNT_STREAM_REF,
     AGENT,
     EXECUTOR,
+    MODEL_CONTENT,
     WORKSPACE,
     canonical_of,
     check_of,
     draft_for,
-    found,
     invalid,
     mandate_document,
     reported,
@@ -46,20 +52,64 @@ BASE_IDS = {
 }
 assert all(is_ulid(i) for i in BASE_IDS.values()), "event IDs (§3)"
 NEW_ALLOCATION = "12500"
+MANDATE_REFERENCE = Path(__file__).resolve().parents[1] / "mandate"
+RESEARCH_BASE = "research_equity"
+
+
+@functools.cache
+def mandate_reference():
+    """`reference/mandate`'s validator and classifier, and the context its bases validate in. Its
+    import sets the decimal precision for itself, so the journal generator's own is restored."""
+    precision = decimal.getcontext().prec
+    sys.path.insert(0, str(MANDATE_REFERENCE))
+    try:
+        import bases
+        import ref
+    finally:
+        sys.path.remove(str(MANDATE_REFERENCE))
+        decimal.getcontext().prec = precision
+    return ref, bases
+
+
+def research_document() -> dict:
+    """The mandate reference cases' `research_equity`: unpinned, with a research agent and an
+    admitting model, so a thesis can admit under it (MI-20 keeps one out of a pinned universe)."""
+    ref, bases = mandate_reference()
+    return copy.deepcopy(bases.BASES[RESEARCH_BASE])
 
 
 def documents() -> dict[str, dict]:
-    """The version in force and the one applied after it: the same mandate with its allocation
-    raised, which mandate spec §9.2 classifies as risk-increasing."""
+    """The version in force (`old_document`), four versions after it that mandate spec §9.2
+    classifies as risk-increasing (allocation or floor raised), neutral (renamed), and risk-reducing
+    (floor lowered), and the research agent's mandate."""
     old = mandate_document()
-    new = copy.deepcopy(old)
-    new["capital"]["allocation_usd"] = NEW_ALLOCATION
-    return {"old_document": old, "new_document": new}
+
+    def changed(path: str, value) -> dict:
+        new = copy.deepcopy(old)
+        *parents, last = path.split("/")
+        node = new
+        for name in parents:
+            node = node[name]
+        node[last] = value
+        return new
+
+    return {
+        "old_document": old,
+        "new_document": changed("capital/allocation_usd", NEW_ALLOCATION),
+        "renamed_document": changed("name", "btc-accumulator-renamed"),
+        "tightened_document": changed("capital/max_loss_from_allocation", "0.08"),
+        "loosened_document": changed("capital/max_loss_from_allocation", "0.15"),
+        "research_document": research_document(),
+    }
+
+
+def refs() -> dict[str, str]:
+    return {name: artifact_ref(doc) for name, doc in documents().items()}
 
 
 def base_drafts() -> dict[str, dict]:
-    docs = documents()
-    old, new = artifact_ref(docs["old_document"]), artifact_ref(docs["new_document"])
+    r = refs()
+    old, new, research = r["old_document"], r["new_document"], r["research_document"]
 
     def draft(name, event_type, at, payload, version):
         return {
@@ -76,16 +126,15 @@ def base_drafts() -> dict[str, dict]:
             "actor": dict(EXECUTOR),
             "config_refs": {"mandate_version": version},
             "payload": payload,
-            "artifact_refs": sorted({old, new} & {v for v in payload.values() if isinstance(v, str)}),
+            "artifact_refs": sorted({v for v in payload.values() if isinstance(v, str) and v.startswith("sha256:")}),
             "pii_refs": [],
         }
 
-    applied_at = "2026-09-22T14:30:00.000000000Z"
     return {
         "version_applied": draft(
             "version_applied",
             "MandateVersionApplied",
-            applied_at,
+            "2026-09-22T14:30:00.000000000Z",
             {
                 "agent_id": AGENT,
                 "old_version": old,
@@ -132,7 +181,7 @@ def base_drafts() -> dict[str, dict]:
                 "universe_size_after": 1,
                 "risk_clock": "2026-09-22T16:00:00.000000000Z",
             },
-            old,
+            research,
         ),
         "universe_removed_pinned": draft(
             "universe_removed_pinned",
@@ -180,11 +229,20 @@ def expected_facts() -> list[dict]:
     ]
 
 
+def versions(old: str, new: str) -> list[dict]:
+    """The changes that name another pair of stored documents, with `artifact_refs` to match."""
+    return [
+        change("payload.old_version", old),
+        change("payload.new_version", new),
+        change("artifact_refs", sorted({old, new})),
+    ]
+
+
 def invalid_drafts() -> list[dict]:
     """Each draft breaks exactly one rule, or the rules its `also` lists; together they cover every
     §9.3 member type and rule."""
-    docs = documents()
-    old = artifact_ref(docs["old_document"])
+    r = refs()
+    old = r["old_document"]
     return [
         invalid(
             "applied_carries_a_comment",
@@ -211,10 +269,18 @@ def invalid_drafts() -> list[dict]:
             "payload.risk_clock",
         ),
         invalid(
+            "applied_agent_not_an_id",
+            "§9.1 id",
+            "version_applied",
+            [change("payload.agent_id", "agent a")],
+            "non_canonical",
+            "payload.agent_id",
+        ),
+        invalid(
             "applied_old_version_a_bare_hash",
             "§9.1 ref",
             "version_applied",
-            [change("payload.old_version", old.removeprefix("sha256:")), change("artifact_refs", [artifact_ref(docs["new_document"])])],
+            [change("payload.old_version", old.removeprefix("sha256:")), change("artifact_refs", [r["new_document"]])],
             "non_canonical",
             "payload.old_version",
         ),
@@ -249,6 +315,15 @@ def invalid_drafts() -> list[dict]:
             [change("payload.allocation_change", "2,500")],
             "non_canonical",
             "payload.allocation_change",
+        ),
+        invalid(
+            "loosened_floor_as_a_percentage",
+            "§9.1 decimal",
+            "version_applied",
+            [*versions(old, r["loosened_document"]), change("payload.allocation_change", None),
+             change("payload.max_loss_from_allocation", "15%")],
+            "non_canonical",
+            "payload.max_loss_from_allocation",
         ),
         invalid(
             "applied_step_up_carries_a_token",
@@ -315,6 +390,39 @@ def invalid_drafts() -> list[dict]:
             "payload.reason",
         ),
         invalid(
+            "raise_classified_neutral",
+            "rule 33: an applied allocation increase is risk-increasing",
+            "version_applied",
+            [change("payload.classification", "neutral")],
+            "schema",
+            "payload.classification",
+        ),
+        invalid(
+            "floor_raise_classified_reducing",
+            "rule 33: an applied floor raise is risk-increasing",
+            "version_applied",
+            [*versions(old, r["loosened_document"]), change("payload.classification", "risk_reducing"),
+             change("payload.allocation_change", None), change("payload.max_loss_from_allocation", "0.15")],
+            "schema",
+            "payload.classification",
+        ),
+        invalid(
+            "latched_increase_classified_neutral",
+            "rule 33: a latched increase is refused only on a risk-increasing version",
+            "version_rejected",
+            [change("payload.classification", "neutral")],
+            "schema",
+            "payload.classification",
+        ),
+        invalid(
+            "raise_classified_neutral_without_step_up",
+            "rules 29 and 33: a misclassified raise is reported at its classification",
+            "version_applied",
+            [change("payload.classification", "neutral"), change("payload.step_up", None)],
+            "schema",
+            "payload.classification",
+        ),
+        invalid(
             "applied_without_mandate_ref",
             "§9 required config_refs",
             "version_applied",
@@ -353,6 +461,22 @@ def invalid_drafts() -> list[dict]:
             [change("payload.reason", "owner_added")],
             "non_canonical",
             "payload.reason",
+        ),
+        invalid(
+            "admitted_thesis_not_an_id",
+            "§9.1 id",
+            "universe_admitted",
+            [change("payload.thesis_id", "thesis 01")],
+            "non_canonical",
+            "payload.thesis_id",
+        ),
+        invalid(
+            "admitted_lineage_not_an_id",
+            "§9.1 id",
+            "universe_admitted",
+            [change("payload.lineage_id", "lineage/01")],
+            "non_canonical",
+            "payload.lineage_id",
         ),
         invalid(
             "thesis_admission_removes",
@@ -403,12 +527,21 @@ def invalid_drafts() -> list[dict]:
             "payload.thesis_id",
         ),
         invalid(
-            "pinned_removal_names_a_thesis",
-            "rule 32: a pinned list names no thesis",
+            "pinned_admission_names_a_thesis",
+            "rule 32: an instrument a pinned list admits follows from no thesis",
             "universe_removed_pinned",
-            [change("payload.thesis_id", THESIS), change("payload.lineage_id", LINEAGE)],
+            [change("payload.change", "admitted"), change("payload.universe_size_after", 1),
+             change("payload.thesis_id", THESIS), change("payload.lineage_id", LINEAGE)],
             "schema",
             "payload.thesis_id",
+        ),
+        invalid(
+            "pinning_switch_removal_with_thesis_alone",
+            "rule 32: null together, at the null one",
+            "universe_removed_pinned",
+            [change("payload.thesis_id", THESIS)],
+            "schema",
+            "payload.lineage_id",
         ),
         invalid(
             "removed_on_the_control_stream",
@@ -422,36 +555,51 @@ def invalid_drafts() -> list[dict]:
 
 
 def valid_drafts() -> list[dict]:
+    """Each is a state mandate spec §9.2 and the risk fold can produce, and asserts what its title
+    says: the documents it names classify as it states."""
+    r = refs()
+    old = r["old_document"]
     return [
         valid(
             "neutral_without_step_up",
             "rule 29: only a risk-increasing version needs step-up",
             "version_applied",
-            [change("payload.classification", "neutral"), change("payload.step_up", None)],
+            [*versions(old, r["renamed_document"]), change("payload.classification", "neutral"),
+             change("payload.step_up", None), change("payload.allocation_change", None)],
         ),
         valid(
             "reducing_with_step_up",
             "rule 29: step-up is allowed on any version",
             "version_applied",
-            [change("payload.classification", "risk_reducing")],
+            [*versions(old, r["tightened_document"]), change("payload.classification", "risk_reducing"),
+             change("payload.allocation_change", None)],
         ),
         valid(
             "applied_changing_neither",
             "rule 30: an applied version may change neither the allocation nor the floor",
             "version_applied",
-            [change("payload.allocation_change", None)],
+            [*versions(old, r["renamed_document"]), change("payload.classification", "neutral"),
+             change("payload.allocation_change", None)],
         ),
         valid(
             "floor_loosened",
-            "rule 30: an applied floor-loosening version",
+            "rules 30 and 33: an applied floor raise, risk-increasing with step-up",
             "version_applied",
-            [change("payload.allocation_change", None), change("payload.max_loss_from_allocation", "0.15")],
+            [*versions(old, r["loosened_document"]), change("payload.allocation_change", None),
+             change("payload.max_loss_from_allocation", "0.15")],
         ),
         valid(
             "pinned_instrument_admitted",
             "rule 31: version_applied admits",
             "universe_removed_pinned",
             [change("payload.change", "admitted"), change("payload.universe_size_after", 1)],
+        ),
+        valid(
+            "pinning_switch_removes_a_thesis_instrument",
+            "rule 32: DEC-121's pinning switch removes an admitted instrument and names its thesis",
+            "universe_admitted",
+            [change("payload.change", "removed"), change("payload.reason", "version_applied"),
+             change("payload.universe_size_after", 0)],
         ),
         valid(
             "eligibility_lost_on_a_pinned_instrument",
@@ -463,7 +611,8 @@ def valid_drafts() -> list[dict]:
             "eligibility_lost_on_a_thesis",
             "rule 32: eligibility_lost may name its thesis",
             "universe_admitted",
-            [change("payload.change", "removed"), change("payload.reason", "eligibility_lost"), change("payload.universe_size_after", 0)],
+            [change("payload.change", "removed"), change("payload.reason", "eligibility_lost"),
+             change("payload.universe_size_after", 0)],
         ),
     ]
 
@@ -473,11 +622,29 @@ def valid_drafts() -> list[dict]:
 ORACLE_CHECKS = (
     "artifacts.rehash",
     "artifacts.missing",
+    "documents.valid",
     "drafts.valid",
+    "drafts.classification",
+    "drafts.thesis_under_research",
     "facts.recompute",
     "invalid_drafts",
     "valid_drafts",
 )
+
+
+def found(check: str, message: str) -> str:
+    if check not in ORACLE_CHECKS:
+        raise ValueError(f"unregistered check {check}")
+    return f"{check}: {message}"
+
+
+def validation_context(ref_module, bases_module) -> dict:
+    """The mandate bases' context, with the registered model the control-stream vectors pin."""
+    registry = dict(bases_module.REGISTRY)
+    entry = dict(registry[MODEL_CONTENT["model_id"]])
+    entry["content_hash"] = artifact_ref(MODEL_CONTENT)
+    registry[MODEL_CONTENT["model_id"]] = entry
+    return dict(bases_module.CTX, registry=registry)
 
 
 def recompute_facts(section: dict) -> list[dict]:
@@ -510,13 +677,44 @@ def recompute_facts(section: dict) -> list[dict]:
     return out
 
 
+def fixtures_hold(section: dict, name: str, draft: dict, stored: dict) -> list[str]:
+    """A base or valid draft is a state the mandate rules can produce: a version record states the
+    classification mandate spec §9.2 gives its two stored documents, and an admission through a
+    thesis names an unpinned mandate (MI-20)."""
+    ref_module, _ = mandate_reference()
+    p, problems = draft["payload"], []
+    if draft["event_type"] == "MandateVersionApplied":
+        old, new = stored.get(p["old_version"]), stored.get(p["new_version"])
+        if old is not None and new is not None:
+            with decimal.localcontext() as ctx:
+                ctx.prec = 60
+                verdict, _ = ref_module.classify(old, new)
+            if verdict != p["classification"]:
+                problems.append(found("drafts.classification", f"{name}: states {p['classification']}, §9.2 gives {verdict}"))
+    if draft["event_type"] == "UniverseChanged" and p["reason"] == "thesis_admitted":
+        mandate = stored.get(draft["config_refs"].get("mandate_version"))
+        if mandate is None or mandate["universe"]["pinned"]:
+            problems.append(found("drafts.thesis_under_research", f"{name}: a thesis admits under a pinned mandate"))
+    return problems
+
+
 def check_section(section: dict) -> list[str]:
     """Every failure, so seeded bugs can be shown caught."""
     problems = []
     stored = {a["ref"]: a for a in section["artifacts"]}
+    objects = {ref: a["object"] for ref, a in stored.items()}
     for a in section["artifacts"]:
         if canonical_of(a["object"]) != a["canonical"] or "sha256:" + sha(a["canonical"]) != a["ref"]:
             problems.append(found("artifacts.rehash", f"artifact {a['name']}: does not re-hash"))
+    ref_module, bases_module = mandate_reference()
+    context = validation_context(ref_module, bases_module)
+    for a in section["artifacts"]:
+        with decimal.localcontext() as ctx:
+            ctx.prec = 60
+            valid_schema = ref_module.V.is_valid(a["object"])
+            errors = ref_module.semantic(a["object"], context)[0] if valid_schema else ["schema"]
+        if errors:
+            problems.append(found("documents.valid", f"artifact {a['name']}: not a valid mandate: {sorted(errors)}"))
     for name, draft in section["drafts"].items():
         for ref in draft["artifact_refs"]:
             if ref not in stored:
@@ -524,6 +722,7 @@ def check_section(section: dict) -> list[str]:
         got = violations(draft)
         if got:
             problems.append(found("drafts.valid", f"base draft {name}: {got}"))
+        problems += fixtures_hold(section, name, draft, objects)
     if recompute_facts(section) != section["journaled_facts"]:
         problems.append(found("facts.recompute", "the listed facts are not what the drafts map to"))
     for case in section["invalid_drafts"]:
@@ -531,9 +730,11 @@ def check_section(section: dict) -> list[str]:
         if not reported(got, case["expect"]):
             problems.append(found("invalid_drafts", f"{case['name']}: expected {case['expect']}, got {got}"))
     for case in section["valid_drafts"]:
-        got = violations(draft_for(section, case))
+        draft = draft_for(section, case)
+        got = violations(draft)
         if got:
             problems.append(found("valid_drafts", f"{case['name']}: expected Valid, got {got}"))
+        problems += fixtures_hold(section, case["name"], draft, objects)
     return problems
 
 
@@ -547,10 +748,18 @@ VALIDATOR_MUTANTS = (
     "rule.32",
     "rule.32.thesis",
     "rule.32.pinned",
+    "rule.33",
+    "rule.33.allocation",
+    "rule.33.floor",
+    "rule.33.reason",
+    "loose.payload.agent_id",
     "loose.payload.old_version",
     "loose.payload.instrument",
     "loose.payload.classification",
     "loose.payload.universe_size_after",
+    "loose.payload.thesis_id",
+    "loose.payload.lineage_id",
+    "loose.payload.max_loss_from_allocation",
     "open.step_up",
 )
 
@@ -566,6 +775,19 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
     def artifact(s, name):
         return next(a for a in s["artifacts"] if a["name"] == name)
 
+    def valid_case(s, name):
+        return next(c for c in s["valid_drafts"] if c["name"] == name)
+
+    def edited(s, name, path, value):
+        a = artifact(s, name)
+        node = a["object"]
+        *parents, last = path.split("/")
+        for p in parents:
+            node = node[p]
+        node[last] = value
+        a["canonical"] = canonical_of(a["object"])
+        a["ref"] = "sha256:" + sha(a["canonical"])
+
     return [
         (
             "an artifact's object edited",
@@ -578,9 +800,28 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(lambda s: s["drafts"]["universe_admitted"]["artifact_refs"].append("sha256:" + "e" * 64)),
         ),
         (
+            "a stored version is not a valid mandate",
+            "documents.valid",
+            mutated(lambda s: edited(s, "renamed_document", "risk/max_order_usd", "999999")),
+        ),
+        (
             "a base draft breaks rule 29",
             "drafts.valid",
             mutated(lambda s: s["drafts"]["version_rejected"]["payload"].update(step_up=None)),
+        ),
+        (
+            "a valid draft relabels a raise as neutral and drops step-up",
+            "drafts.classification",
+            mutated(
+                lambda s: valid_case(s, "neutral_without_step_up")["changes"].__setitem__(
+                    slice(0, 3), versions(refs()["old_document"], refs()["tightened_document"])
+                )
+            ),
+        ),
+        (
+            "a thesis admits under a pinned mandate",
+            "drafts.thesis_under_research",
+            mutated(lambda s: s["drafts"]["universe_admitted"]["config_refs"].update(mandate_version=refs()["old_document"])),
         ),
         (
             "a listed fact differs",
@@ -595,7 +836,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         (
             "a valid draft breaks a rule",
             "valid_drafts",
-            mutated(lambda s: s["valid_drafts"][0]["changes"].append(change("payload.result", "rejected"))),
+            mutated(lambda s: valid_case(s, "pinned_instrument_admitted")["changes"].append(change("payload.result", "x"))),
         ),
     ]
 
