@@ -169,6 +169,12 @@ pub enum InvalidReason {
     PiiRefs,
     #[error("risk_clock is earlier than the stream's last risk_clock")]
     RiskClockRegressed,
+    /// The stub of the `AccountSnapshotRecorded` registration's tests PR (DEC-77, DEC-402): the
+    /// account stream's snapshot is routed to journal spec §9.2's checks and refused with this until
+    /// the implementation PR registers its schema and rule 24, which removes the variant. It was
+    /// refused as `unknown_schema` before, so this refuses nothing that was accepted.
+    #[error("the account snapshot's payload checks (§9.2) are not implemented yet")]
+    Unimplemented,
 }
 
 impl InvalidReason {
@@ -191,6 +197,7 @@ impl InvalidReason {
             Self::ArtifactRefs => "artifact_refs",
             Self::PiiRefs => "pii_refs",
             Self::RiskClockRegressed => "risk_clock_regressed",
+            Self::Unimplemented => "unimplemented",
         }
     }
 }
