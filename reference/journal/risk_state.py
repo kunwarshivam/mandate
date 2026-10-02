@@ -434,7 +434,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "admitted_instrument_not_an_id",
-            "§9.1 id",
+            "§9.3 asset_id",
             "universe_admitted",
             [change("payload.instrument", "BTC/USD")],
             "non_canonical",
@@ -486,6 +486,14 @@ def invalid_drafts() -> list[dict]:
             "universe_admitted",
             [change("payload.instrument", "BTCUSD")],
             "non_canonical",
+            "payload.instrument",
+        ),
+        invalid(
+            "admitted_instrument_not_a_string",
+            "§9.3 asset_id: not a string (#509 round 1, m2)",
+            "universe_admitted",
+            [change("payload.instrument", 2)],
+            "schema",
             "payload.instrument",
         ),
         invalid(
