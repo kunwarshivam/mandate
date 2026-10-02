@@ -2280,22 +2280,25 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   quantity reading is the one that stays**: do not remove it.
   *Done (the minimum half, reference side):* #504 moves `ref.py` to the same quantity minimum, has
   §5.5 name it, and adds MC-B33 and MC-B34, which pin the two readings' difference.
-- **E6-4: a trim that sells everything left to sell is never withheld for the minimum
-  ([DEC-423](decisions/DEC-423.md); #504 review, M1, and the coordinator's ruling there).
-  Required next in stream G, ahead of MC-B33 and MC-B34's status PR and the harness cleanup.**
+- **E6-4: a trim of the whole position is never withheld for the minimum
+  ([DEC-423](decisions/DEC-423.md); #504 review, M1, the coordinator's ruling there, and its
+  narrowing on #520). Required next in stream G, ahead of MC-B33 and MC-B34's status PR and the
+  harness cleanup.**
   `trim::proposals` (DEC-399 item 5) and, since #504, `ref.py` withhold a trim below
-  `min_order_size` even when it is the whole unsold quantity. Trading spec §5.3 rule 2 exempts a
-  sell closing the full position, and `account_rules.rs` and `conduct.rs` both call it always
-  valid, so this is a risk exit held by a venue minimum. The review's case: 0.0002 BTC at a
-  600,000 bid (120 dollars), a cap of 100, a confirmed factor of 0.5, a 0.0001 increment and a
-  `min_order_size` of 0.001; the trim is 0.0002, the whole position, and it is withheld at every
-  evaluation. In order:
-  (1) a DEC-77 tests PR in `mandate-risk`: a trim equal to the unsold quantity is proposed below
-  `min_order_size` (this crypto case and an equity one), and a sub-minimum trim that is not a full
-  close is still withheld;
+  `min_order_size` even when it is the whole position held. Trading spec §5.3 rule 2 exempts a
+  sell closing the full position by its exact quantity, and nothing further down the gate refuses
+  a risk exit, so this is a risk exit held by a minimum the broker does not apply. A remainder
+  beside one of the agent's own resting sells is not that sell, and stays withheld. In order:
+  (1) a DEC-77 tests PR in `mandate-risk` (#520): a trim of the whole position is proposed below
+  `min_order_size` (equity, under a protective stop, and crypto at a zero and a non-zero target),
+  and a sub-minimum trim that is not the whole position is still withheld (beside a resting sell,
+  one increment short, and 3 of 10);
   (2) the gate change;
   (3) §5.5 gains the exemption, `ref.py` takes it, a new case states the full-close trim, and the
   harness's `trim_guards` moves with them, as #498 did.
+  The #504 review's own case (0.0002 BTC, a cap of 100, factor 0.5, a 0.001 minimum) is **not**
+  released by this: on the gate's 1e-9 grid its trim is 0.000116667, not the whole position. The
+  "real quantity grid" row below closes it.
 - **E6-4 reference: `ref.py` judges the trim's minimum on the whole excess, not on the remainder
   after open sells** (#504 review, m2). `ref.py`'s builder has no open-sell input, so it sizes the
   trim on the whole excess. The gate subtracts the agent's own resting sells first (DEC-399 items 5
@@ -2331,7 +2334,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
   builder (increments of `0.0001` and `0.000001` exist). Once the snapshot carries the increment,
-  round the trim up on it, so a trim is never off the grid that §5.3 rule 2 refuses.
+  round the trim up on it, so a trim is never off the grid that §5.3 rule 2 refuses. **This is
+  also what releases the #504 review's case** ([DEC-423](decisions/DEC-423.md), Rationale): 0.0002
+  BTC, a cap of 100, factor 0.5 and a 0.001 minimum give a trim of 0.000116667 on the 1e-9 grid,
+  withheld below the minimum, but 0.0002 on the venue's 0.0001 grid, the whole position, which
+  DEC-423 exempts. Add that case as a trim test when this lands.
 - **E6-4 nits** (#466 review, round 1): `UsdExact::times_size_fraction`'s doc still lists "the
   ladder size factor applied to the target" though the gate's 24-place `Ratio` factor enters
   through `UsdExact::of_ratio`; say which number each serves (n2). `of_ratio` takes any `Ratio`,
