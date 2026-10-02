@@ -9,7 +9,8 @@
 //!
 //! **`ask`** is a tick at the folded clock whose order plan proposes the bound order once, classified
 //! `ask` by its `decided_by`, the dry run allowing it. Its reference mark is folded first as the
-//! account stream's `MarkUpdated` at its `seq`, the seqs before it repeating its price. The step's
+//! account stream's `MarkUpdated` at its `seq`, the seqs before it repeating its price; a `seq` the
+//! stream has already passed binds no such mark, which the comparison then refuses. The step's
 //! `DecisionMade` records the decision the script starts from, and is set aside. The other steps land
 //! in DEC-317's later slices and fail naming theirs until then.
 //!
@@ -437,9 +438,6 @@ impl Shell {
                     format!("`reference_mark` members not interpreted: {unknown}")
                 })?;
                 let (price, seq) = (str_at(mark, "price")?, u64_at(mark, "seq")?);
-                ensure(seq > self.account_seq, || {
-                    format!("a reference mark at seq {seq} is not after the account stream's head")
-                })?;
                 for _ in self.account_seq..seq {
                     self.mark(instrument, price, clock)?;
                 }
