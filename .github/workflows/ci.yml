@@ -27,6 +27,8 @@ env:
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
   CARGO_MUTANTS_VERSION: "27.1.0"
   CARGO_MUTANTS_SHA256: "dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e"
+  ACTIONLINT_VERSION: "1.7.12"
+  ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
 
 jobs:
   fast:
@@ -59,7 +61,13 @@ jobs:
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         if: steps.change.outputs.docs_only != 'true'
         with:
-          tool: cargo-nextest@0.9.146,typos@1.50.2
+          tool: cargo-nextest@0.9.146,typos@1.50.2,shellcheck@0.11.0
+      - name: Install actionlint (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          curl -sSfL -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum --check
+          tar xzf actionlint.tgz actionlint && sudo install actionlint /usr/local/bin/ && rm actionlint actionlint.tgz
       # `test` runs xtask's own tests, and one of them drives the whole mutation gate over a fixture
       # repository, so this check needs the tool the gate calls as well (DEC-139).
       - name: Install cargo-mutants (checksum-verified)

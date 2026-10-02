@@ -19,7 +19,9 @@
 //! names are bound one to one to the runtime's request id and hash: the reference model hashes its
 //! request as a stand-in for the content object (`reference/mandate/ref.py`, `escalation_step`), so
 //! a case's hash is a name, and the runtime's `content_hash` must be the digest of its own inline
-//! `content`. Every member the runtime writes is one the case states or one checked here.
+//! `content`. Every member of a draft's payload is one the case states or one checked here, and so
+//! is its cause. The step's other effects, the deadline timer and the opaque notification, are
+//! `mandate-runtime`'s own tests' to pin (DEC-317 item 5).
 //!
 //! **Every member is read (DEC-85).** The case, the context, each step, the bound order, each
 //! expectation and each expected draft are swept, and a member or value this module does not know
@@ -200,6 +202,8 @@ struct Ran {
     clock: i64,
     asked: Option<(String, Json)>,
     now: Option<Json>,
+    /// The `DecisionMade` an ask set aside, which its request names as its cause.
+    decision: Option<EventId>,
 }
 
 /// An approval the runtime asked for, by the case's name: the request's `event_id`, the mandate
@@ -364,6 +368,7 @@ impl Shell {
             clock: 0,
             asked: None,
             now: step.get("now").cloned(),
+            decision: None,
         };
         let records: &[(&str, &str)] = match kind {
             "ask" => {
@@ -419,7 +424,10 @@ impl Shell {
                 _ => None,
             })
             .collect();
-        strip(&mut ran.drafts, records)?;
+        ran.decision = strip(&mut ran.drafts, records)?
+            .into_iter()
+            .find(|d| d.event_type == "DecisionMade")
+            .map(|d| d.event_id);
         ran.clock = self.clock()?;
         Ok(ran)
     }
@@ -697,6 +705,7 @@ impl Shell {
             "ApprovalRequested" => self.requested(want, draft, ran),
             "ApprovalResponded" => self.responded(want, draft),
             "IntentProposed" => self.intended(want, draft, ran),
+            "ApprovalDelivered" => self.delivered(want, draft),
             _ => self.names_approval(want, draft),
         });
         for key in draft.payload.as_object().into_iter().flat_map(|o| o.keys()) {
@@ -718,6 +727,12 @@ impl Shell {
             return vec!["a request outside an ask".to_owned()];
         };
         let mut faults = Vec::new();
+        if ran.decision.is_none() || draft.causation_id != ran.decision {
+            faults.push(format!(
+                "its cause is {:?}, not the ask's `DecisionMade`",
+                draft.causation_id
+            ));
+        }
         if want.get("approval").and_then(Json::as_str) != Some(approval.as_str()) {
             faults.push(format!("`approval`: expected the ask's `{approval}`"));
         }
@@ -783,6 +798,16 @@ impl Shell {
             faults.push(format!(
                 "`mandate_version`: the approval's request bound {version:?}"
             ));
+        }
+        faults
+    }
+
+    /// An `ApprovalDelivered`: its approval, which is also its cause.
+    fn delivered(&self, want: &Json, draft: &EventDraft) -> Vec<String> {
+        let mut faults = self.names_approval(want, draft);
+        let cause = draft.causation_id.as_ref().map(|cause| cause.0.as_str());
+        if cause.is_none() || cause != draft.payload.get("approval").and_then(Value::as_str) {
+            faults.push(format!("its cause is {cause:?}, not its request"));
         }
         faults
     }
@@ -1025,11 +1050,16 @@ fn cause_records(reason: &str) -> &'static [(&'static str, &'static str)] {
     }
 }
 
-/// Sets aside the step's first drafts as `records` names them, by type and, where given, reason.
-fn strip(drafts: &mut Vec<EventDraft>, records: &[(&str, &str)]) -> Result<(), String> {
+/// Sets aside the step's first drafts as `records` names them, by type and, where given, reason,
+/// and returns them.
+fn strip(
+    drafts: &mut Vec<EventDraft>,
+    records: &[(&str, &str)],
+) -> Result<Vec<EventDraft>, String> {
+    let mut removed = Vec::new();
     for (event_type, reason) in records {
         let Some(first) = drafts.first() else {
-            return Ok(());
+            return Ok(removed);
         };
         let fits = first.event_type == *event_type
             && (reason.is_empty() || first.payload.get("reason") == Some(&text(reason)));
@@ -1039,9 +1069,9 @@ fn strip(drafts: &mut Vec<EventDraft>, records: &[(&str, &str)]) -> Result<(), S
                 first.event_type, first.payload
             )
         })?;
-        drafts.remove(0);
+        removed.push(drafts.remove(0));
     }
-    Ok(())
+    Ok(removed)
 }
 
 /// Every handoff follows the draft that records it in the same list: an order its `IntentProposed`,

@@ -111,7 +111,7 @@ fn a_cause_record_is_set_aside_only_as_named() -> Result<(), String> {
     strip(&mut drafts, &[("AgentModeChanged", "")])?;
     ensure(drafts == vec![cancel], || format!("{drafts:?}"))?;
     let mut none = Vec::new();
-    strip(&mut none, &[("DecisionMade", "")])
+    strip(&mut none, &[("DecisionMade", "")]).map(|_| ())
 }
 
 /// A handoff follows the record that authorises it, and every intent is handed exactly once.
