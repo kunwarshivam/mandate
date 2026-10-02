@@ -6373,32 +6373,8 @@ research:
       outcome: Invalid
       reason: schema
       path: payload.reason
-  - name: sources_out_of_order
-    clause: rule 38
-    base_draft: proposed_admitted
-    changes:
-    - path: payload.evidence_sources
-      value:
-      - news_wire_a
-      - filings_sec_edgar
-    expect:
-      outcome: Invalid
-      reason: non_canonical
-      path: payload.evidence_sources
-  - name: a_source_cited_twice
-    clause: rule 38
-    base_draft: proposed_admitted
-    changes:
-    - path: payload.evidence_sources
-      value:
-      - filings_sec_edgar
-      - filings_sec_edgar
-    expect:
-      outcome: Invalid
-      reason: non_canonical
-      path: payload.evidence_sources
   - name: model_ref_names_another_model
-    clause: rule 39
+    clause: rule 38
     base_draft: proposed_admitted
     changes:
     - path: config_refs.model_version
@@ -6422,6 +6398,145 @@ research:
       also:
       - reason: schema
         path: payload.reason
+  - name: order_revision_and_autopsy
+    clause: 'report order: revision, autopsy, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - &id001
+      path: payload.revision
+      value: 1
+    - &id002
+      path: payload.predecessor_thesis_id
+      value: th_01J8ZT00
+    - &id003
+      path: payload.autopsy_ref
+      value: sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.revision
+      also:
+      - reason: schema
+        path: payload.autopsy_ref
+  - name: order_revision_and_reason
+    clause: 'report order: revision, reason, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - *id001
+    - *id002
+    - &id004
+      path: payload.reason
+      value: universe_full
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.revision
+      also:
+      - reason: schema
+        path: payload.reason
+  - name: order_revision_and_model
+    clause: 'report order: revision, model, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - *id001
+    - *id002
+    - &id005
+      path: config_refs.model_version
+      value: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.revision
+      also:
+      - reason: schema
+        path: payload.content_hash
+  - name: order_autopsy_and_reason
+    clause: 'report order: autopsy, reason, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - *id003
+    - *id004
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.autopsy_ref
+      also:
+      - reason: schema
+        path: payload.reason
+  - name: order_autopsy_and_model
+    clause: 'report order: autopsy, model, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - *id003
+    - *id005
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.autopsy_ref
+      also:
+      - reason: schema
+        path: payload.content_hash
+  - name: order_reason_and_model
+    clause: 'report order: reason, model, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - *id004
+    - *id005
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+      also:
+      - reason: schema
+        path: payload.content_hash
+  - name: order_revision_and_autopsy_and_reason_and_model
+    clause: 'report order: revision, autopsy, reason, model, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - *id001
+    - *id002
+    - *id003
+    - *id004
+    - *id005
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.revision
+      also:
+      - reason: schema
+        path: payload.autopsy_ref
+      - reason: schema
+        path: payload.reason
+      - reason: schema
+        path: payload.content_hash
   - name: proposed_without_model_ref
     clause: '§9 required config_refs: mod'
     base_draft: proposed_admitted
@@ -6541,7 +6656,7 @@ research:
     expect:
       outcome: Valid
   - name: admitted_citing_no_source_on_market_data
-    clause: 'rule 38: an empty list is in order, and market data corroborates'
+    clause: '§9.4 evidence_sources: an empty list, and market data corroborates'
     base_draft: proposed_admitted
     changes:
     - path: payload.evidence_sources
@@ -6555,16 +6670,27 @@ research:
       - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
     expect:
       outcome: Valid
-  - name: a_source_off_the_allowlist_is_recorded_as_cited
-    clause: '§9.4 evidence_sources: text, so check 14''s refusal keeps what the model cited'
+  - name: mc_n07_sources_are_recorded_as_cited
+    clause: '§9.4 evidence_sources: MC-N07''s pair, out of order and off the allowlist, recorded as given'
     base_draft: proposed_refused
     changes:
     - path: payload.evidence_sources
       value:
-      - filings_sec_edgar
-      - unvetted.example/blog
+      - src.filings
+      - src.anonymous_blog
     - path: payload.reason
       value: source_not_allowlisted
+    expect:
+      outcome: Valid
+  - name: a_source_cited_twice_is_kept
+    clause: '§9.4 evidence_sources: duplicates kept, as the model gave them'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.evidence_sources
+      value:
+      - filings_sec_edgar
+      - news_wire_a
+      - filings_sec_edgar
     expect:
       outcome: Valid
   - name: refused_when_the_universe_is_full
@@ -6585,3 +6711,112 @@ research:
       value: '2026-09-22T14:00:00.000000000Z'
     expect:
       outcome: Valid
+  reference_cases:
+  - case: MC-N01
+    thesis_id: th-1
+    event_type: ThesisProposed
+  - case: MC-N02
+    thesis_id: th-2
+    event_type: ThesisProposed
+  - case: MC-N03
+    thesis_id: th-3
+    event_type: ThesisProposed
+  - case: MC-N04
+    thesis_id: th-4
+    event_type: ThesisProposed
+  - case: MC-N05
+    thesis_id: th-5
+    event_type: ThesisProposed
+  - case: MC-N06
+    thesis_id: th-6
+    event_type: ThesisProposed
+  - case: MC-N07
+    thesis_id: th-7
+    event_type: ThesisProposed
+  - case: MC-N08
+    thesis_id: th-8
+    event_type: ThesisProposed
+  - case: MC-N09
+    thesis_id: th-9
+    event_type: ThesisProposed
+  - case: MC-N10
+    thesis_id: th-10
+    event_type: ThesisProposed
+  - case: MC-N11
+    thesis_id: th-11
+    event_type: ThesisProposed
+  - case: MC-N12
+    thesis_id: th-12
+    event_type: ThesisProposed
+  - case: MC-N13
+    thesis_id: th-13
+    event_type: ThesisProposed
+  - case: MC-N14
+    thesis_id: th-14
+    event_type: ThesisProposed
+  - case: MC-N15
+    thesis_id: th-15
+    event_type: ThesisProposed
+  - case: MC-N16
+    thesis_id: th-16
+    event_type: ThesisProposed
+  - case: MC-N25
+    thesis_id: th-17
+    event_type: ThesisProposed
+  - case: MC-N26
+    thesis_id: th-18
+    event_type: ThesisProposed
+  - case: MC-N17
+    thesis_id: th-20
+    event_type: ThesisProposed
+  - case: MC-N17
+    thesis_id: th-21
+    event_type: ThesisRevised
+  - case: MC-N17
+    thesis_id: th-22
+    event_type: ThesisRevised
+  - case: MC-N17
+    thesis_id: th-23
+    event_type: ThesisRevised
+  - case: MC-N17
+    thesis_id: th-24
+    event_type: ThesisRevised
+  - case: MC-N18
+    thesis_id: th-30
+    event_type: ThesisProposed
+  - case: MC-N18
+    thesis_id: th-31
+    event_type: ThesisRevised
+  - case: MC-N19
+    thesis_id: th-40
+    event_type: ThesisRevised
+  - case: MC-N24
+    thesis_id: th-50
+    event_type: ThesisProposed
+  - case: MC-N24
+    thesis_id: th-51
+    event_type: ThesisRevised
+  - case: MC-N24
+    thesis_id: th-52
+    event_type: ThesisRevised
+  - case: MC-N27
+    thesis_id: th-60
+    event_type: ThesisProposed
+  - case: MC-N27
+    thesis_id: th-61
+    event_type: ThesisRevised
+  - case: MC-N27
+    thesis_id: th-62
+    event_type: ThesisRevised
+  - case: MC-N28
+    thesis_id: th-70
+    event_type: ThesisProposed
+  - case: MC-N28
+    thesis_id: th-71
+    event_type: ThesisRevised
+  - case: MC-N28
+    thesis_id: th-80
+    event_type: ThesisProposed
+  - case: MC-N28
+    thesis_id: th-72
+    event_type: ThesisRevised

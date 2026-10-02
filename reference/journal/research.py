@@ -1,7 +1,7 @@
 """Journal spec v0.9 §9.4's reference vectors (DEC-413): the agent stream's `ThesisProposed` and
 `ThesisRevised`.
 
-The schemas and rules 34 to 39 live in `control.py`, beside §9.2's and §9.3's, so one validator
+The schemas and rules 34 to 38 live in `control.py`, beside §9.2's and §9.3's, so one validator
 judges every closed schema. This module builds the `research` section: the stored artifacts the
 records name (the research agent's mandate, its model content, and each thesis's prompt, response,
 evidence, and autopsy), base drafts of both records on a research agent's stream, an invalid draft
@@ -15,10 +15,15 @@ alone decides. Every seeded bug is shown caught.
 from __future__ import annotations
 
 import copy
+import functools
+
+import yaml
 
 from common import artifact_ref, change, delete, digest_strings, is_ulid
 from control import (
     CHECK_NUMBER,
+    MANDATE_CASES,
+    THESIS_ORDER_BUGS,
     WORKSPACE,
     canonical_of,
     check_of,
@@ -197,6 +202,7 @@ def base_drafts() -> dict[str, dict]:
                 retired,
                 lineage_id=LINEAGE,
                 revision=4,
+                # Revision 4's predecessor is revision 3, a thesis no draft here records.
                 predecessor_thesis_id="th_01J8ZTB0D",
                 autopsy_ref=ref(f"autopsy_{retired}"),
                 as_of="2026-10-04T14:00:00.000000000Z",
@@ -255,6 +261,42 @@ MEMBER_TYPES = (
     ("admitted", "proposed_admitted", "true", "schema"),
     ("reason", "proposed_refused", "stale_thesis", "non_canonical"),
 )
+
+
+FOREIGN_MODEL_REF = "sha256:" + "2" * 64
+AS_A_REVISION = [change("payload.revision", 1), change("payload.predecessor_thesis_id", "th_01J8ZT00")]
+
+
+def order_drafts() -> list[dict]:
+    """One draft for each pair of §9.4's report-order groups, and one breaking all four: rule 34
+    (`payload.revision`), its autopsy clause (`payload.autopsy_ref`), rules 35 to 37
+    (`payload.reason`), and rule 38 (`payload.content_hash`). Each expects every violation in
+    number order, so each `order.*` seeded bug that swaps two groups is caught by that pair's draft."""
+    groups = {
+        "revision": (AS_A_REVISION, ("schema", "payload.revision")),
+        "autopsy": ([change("payload.autopsy_ref", ref(f"autopsy_{THESES[3]}"))], ("schema", "payload.autopsy_ref")),
+        "reason": ([change("payload.reason", "universe_full")], ("schema", "payload.reason")),
+        "model": ([change("config_refs.model_version", FOREIGN_MODEL_REF)], ("schema", "payload.content_hash")),
+    }
+    names = list(groups)
+    pairs = [(a, b) for i, a in enumerate(names) for b in names[i + 1 :]]
+    out = []
+    for chosen in [*pairs, tuple(names)]:
+        changes = [c for name in chosen for c in groups[name][0]]
+        (reason, path), *rest = [groups[name][1] for name in chosen]
+        title = "_and_".join(chosen)
+        out.append(
+            invalid(
+                f"order_{title}",
+                f"report order: {', '.join(chosen)}, in number order",
+                "proposed_admitted",
+                changes,
+                reason,
+                path,
+                also=rest,
+            )
+        )
+    return out
 
 
 def invalid_drafts() -> list[dict]:
@@ -420,26 +462,10 @@ def invalid_drafts() -> list[dict]:
             "payload.reason",
         ),
         invalid(
-            "sources_out_of_order",
-            "rule 38",
-            "proposed_admitted",
-            [change("payload.evidence_sources", list(reversed(SOURCES)))],
-            "non_canonical",
-            "payload.evidence_sources",
-        ),
-        invalid(
-            "a_source_cited_twice",
-            "rule 38",
-            "proposed_admitted",
-            [change("payload.evidence_sources", [SOURCES[0], SOURCES[0]])],
-            "non_canonical",
-            "payload.evidence_sources",
-        ),
-        invalid(
             "model_ref_names_another_model",
-            "rule 39",
+            "rule 38",
             "proposed_admitted",
-            [change("config_refs.model_version", "sha256:" + "2" * 64)],
+            [change("config_refs.model_version", FOREIGN_MODEL_REF)],
             "schema",
             "payload.content_hash",
         ),
@@ -452,6 +478,7 @@ def invalid_drafts() -> list[dict]:
             "payload.reason",
             also=[("schema", "payload.reason")],
         ),
+        *order_drafts(),
         invalid(
             "proposed_without_model_ref",
             "§9 required config_refs: mod",
@@ -537,16 +564,22 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "admitted_citing_no_source_on_market_data",
-            "rule 38: an empty list is in order, and market data corroborates",
+            "§9.4 evidence_sources: an empty list, and market data corroborates",
             "proposed_admitted",
             [change("payload.evidence_sources", []), change("payload.evidence_ref", None)],
         ),
         valid(
-            "a_source_off_the_allowlist_is_recorded_as_cited",
-            "§9.4 evidence_sources: text, so check 14's refusal keeps what the model cited",
+            "mc_n07_sources_are_recorded_as_cited",
+            "§9.4 evidence_sources: MC-N07's pair, out of order and off the allowlist, recorded as given",
             "proposed_refused",
-            [change("payload.evidence_sources", ["filings_sec_edgar", "unvetted.example/blog"]),
+            [change("payload.evidence_sources", ["src.filings", "src.anonymous_blog"]),
              change("payload.reason", "source_not_allowlisted")],
+        ),
+        valid(
+            "a_source_cited_twice_is_kept",
+            "§9.4 evidence_sources: duplicates kept, as the model gave them",
+            "proposed_admitted",
+            [change("payload.evidence_sources", [SOURCES[0], SOURCES[1], SOURCES[0]])],
         ),
         valid(
             "refused_when_the_universe_is_full",
@@ -572,6 +605,8 @@ ORACLE_CHECKS = (
     "drafts.valid",
     "drafts.pinned_model",
     "drafts.mandate_checks",
+    "cases.listed",
+    "drafts.reference_cases",
     "invalid_drafts",
     "valid_drafts",
 )
@@ -609,8 +644,11 @@ def document_problems(name: str, document: dict) -> list[str]:
 
 # The §8.5 checks the stored mandate decides, by number. The policy overlay only tightens (mandate
 # spec §4.3), so a check the mandate fails always fails, and the record's verdict never passes over
-# it. Checks 5 and 10 read the mandate alone, so a refusal at either must fail by the mandate; the
-# overlay can also fail checks 4, 6, and 16, so a refusal there need not.
+# it. Checks 5, 6, and 10 read the mandate alone, so a refusal at any of them must fail by the mandate.
+# Check 6 belongs here only while the overlay's `effective_admission` raises `auto` to `ask` and
+# never to `deny` (`PolicyOverlay::effective_admission`); an overlay that could deny moves it out.
+# The overlay can fail check 4 (`research_agent_allowed`) and check 16 has the folded `retired` flag
+# besides the cap, so a refusal at either need not fail by the mandate.
 def mandate_failures(document: dict, payload: dict) -> list[int]:
     research = document["behavior"]["research"]
     universe = document["universe"]
@@ -629,7 +667,7 @@ def mandate_failures(document: dict, payload: dict) -> list[int]:
     return failures
 
 
-DECIDED_BY_THE_MANDATE = (5, 10)
+DECIDED_BY_THE_MANDATE = (5, 6, 10)
 
 
 def fixtures_hold(name: str, draft: dict, stored: dict) -> list[str]:
@@ -648,6 +686,98 @@ def fixtures_hold(name: str, draft: dict, stored: dict) -> list[str]:
     if failures and (number is None or number > failures[0]):
         problems.append(found("drafts.mandate_checks", f"{name}: its mandate fails check {failures[0]} first"))
     return problems
+
+
+THESIS_EVENTS = ("ThesisProposed", "ThesisRevised")
+PLACEHOLDER_PROMPT = "sha256:" + "a" * 64
+PLACEHOLDER_RESPONSE = "sha256:" + "b" * 64
+
+
+@functools.cache
+def mandate_cases() -> dict:
+    return yaml.safe_load(MANDATE_CASES.read_text(encoding="utf-8"))
+
+
+def journaled_theses(value):
+    """Every `ThesisProposed` and `ThesisRevised` entry in a case's expectation, in file order."""
+    if isinstance(value, dict):
+        if value.get("type") in THESIS_EVENTS:
+            yield value
+        for inner in value.values():
+            yield from journaled_theses(inner)
+    elif isinstance(value, list):
+        for inner in value:
+            yield from journaled_theses(inner)
+
+
+def reference_case_listing() -> list[dict]:
+    """The thesis records the approved mandate reference cases journal: case, thesis, and type."""
+    return [
+        {"case": case["id"], "thesis_id": entry["thesis_id"], "event_type": entry["type"]}
+        for case in mandate_cases()["cases"]
+        for entry in journaled_theses(case.get("expect"))
+    ]
+
+
+def reference_case_draft(listed: dict) -> dict:
+    """The §9.4 record a correct writer makes for one listed entry: the case's thesis input, the
+    entry's verdict and platform-derived corroboration, and the case base's admitting model. Members
+    no case states (the artifacts, the allowlist version) take placeholders, which no rule reads."""
+    cases = mandate_cases()
+    case = next(c for c in cases["cases"] if c["id"] == listed["case"])
+    entry = next(e for e in journaled_theses(case["expect"]) if e["thesis_id"] == listed["thesis_id"])
+    inputs = case["input"]
+    theses = inputs["theses"] if "theses" in inputs else [inputs["thesis"]]
+    thesis = next(t for t in theses if t["thesis_id"] == listed["thesis_id"])
+    base = cases["bases"][case["base"]]
+    models = base["mandate"]["behavior"]["signal_models"]
+    # A base whose research agent cannot admit (a pinned universe, MI-20) still names it as `llm.`.
+    (model,) = admitting_models(base["mandate"]) or [m for m in models if m["id"].startswith("llm.")]
+    stated = thesis["corroboration"]["kind"] if thesis.get("corroboration") else None
+    payload = {
+        "model_id": model["id"],
+        "model_version": model["version"],
+        "content_hash": model["content_hash"],
+        "thesis_id": thesis["thesis_id"],
+        "lineage_id": thesis["lineage_id"],
+        "revision": thesis["revision"],
+        "predecessor_thesis_id": thesis["predecessor_thesis_id"],
+        "autopsy_ref": None,
+        "instrument_id": thesis["instrument_id"],
+        "asset_class": thesis["asset_class"],
+        "direction": thesis["direction"],
+        "as_of": thesis["as_of"],
+        "expires_at": thesis["expires_at"],
+        "horizon_s": thesis["horizon_s"],
+        "conviction": thesis["conviction"],
+        "confidence": thesis["confidence"],
+        "evidence_ref": None,
+        "evidence_sources": list(thesis["evidence_sources"]),
+        "corroboration": entry.get("corroboration", stated),
+        "invalidation": thesis["invalidation"],
+        "allowlist_version": 1,
+        "prompt_ref": PLACEHOLDER_PROMPT,
+        "response_ref": PLACEHOLDER_RESPONSE,
+        "admitted": entry["admitted"],
+        "reason": entry.get("reason"),
+    }
+    return {
+        "envelope_version": 1,
+        "environment": "paper",
+        "event_id": BASE_IDS["proposed_admitted"],
+        "stream_id": STREAM,
+        "event_type": listed["event_type"],
+        "schema_version": 1,
+        "event_time": thesis["as_of"],
+        "clock_source": "local",
+        "causation_id": None,
+        "correlation_id": None,
+        "actor": dict(RUNTIME),
+        "config_refs": {"mandate_version": base["canonical_sha256"], "model_version": model["content_hash"]},
+        "payload": payload,
+        "artifact_refs": sorted(digest_strings(payload)),
+        "pii_refs": [],
+    }
 
 
 def check_section(section: dict) -> list[str]:
@@ -681,6 +811,12 @@ def check_section(section: dict) -> list[str]:
         if got:
             problems.append(found("valid_drafts", f"{case['name']}: expected Valid, got {got}"))
         problems += fixtures_hold(case["name"], draft, objects)
+    if section["reference_cases"] != reference_case_listing():
+        problems.append(found("cases.listed", "the listing is not every thesis record the mandate cases journal"))
+    for listed in section["reference_cases"]:
+        got = violations(reference_case_draft(listed))
+        if got:
+            problems.append(found("drafts.reference_cases", f"{listed['case']} {listed['thesis_id']}: {got}"))
     return problems
 
 
@@ -698,7 +834,7 @@ VALIDATOR_MUTANTS = (
     "rule.37",
     "rule.37.corroborated",
     "rule.38",
-    "rule.39",
+    *THESIS_ORDER_BUGS,
     "config_refs.required",
     "open.payload",
     "record.missing",
@@ -767,6 +903,25 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             ),
         ),
         (
+            "a valid draft is refused at admission_denied under a mandate that asks",
+            "drafts.mandate_checks",
+            mutated(
+                lambda s: valid_case(s, "uncorroborated_refused_by_an_earlier_check")["changes"].append(
+                    change("payload.reason", "admission_denied")
+                )
+            ),
+        ),
+        (
+            "a mandate case's thesis record is left out of the listing",
+            "cases.listed",
+            mutated(lambda s: s["reference_cases"].pop()),
+        ),
+        (
+            "a mandate case's first thesis is listed as a revision",
+            "drafts.reference_cases",
+            mutated(lambda s: s["reference_cases"][0].update(event_type="ThesisRevised")),
+        ),
+        (
             "an invalid draft's expectation differs",
             "invalid_drafts",
             mutated(lambda s: s["invalid_drafts"][0]["expect"].update(path="payload.model_name")),
@@ -828,4 +983,5 @@ def build_section() -> dict:
         "drafts": base_drafts(),
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
+        "reference_cases": reference_case_listing(),
     }

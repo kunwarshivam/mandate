@@ -385,7 +385,7 @@ def encoded(texts: list) -> list[bytes]:
 
 
 def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """The §9.2 consistency rules 17 to 24, §9.3's 29 to 33, and §9.4's 34 to 39, on a well-typed
+    """The §9.2 consistency rules 17 to 24, §9.3's 29 to 33, and §9.4's 34 to 38, on a well-typed
     payload, each reported once."""
     p = draft["payload"]
     out: list[Violation] = []
@@ -492,22 +492,31 @@ def is_integer(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+# §9.4's report order, by group: rule 34, its autopsy clause, rules 35 to 37 (all at
+# `payload.reason`), then rule 38. Each `order.<a>.<b>` seeded bug swaps two groups, so a fixture that
+# breaks both shows which is reported first.
+THESIS_ORDER = ("revision", "autopsy", "reason", "model")
+THESIS_ORDER_BUGS = tuple(
+    f"order.{a}.{b}" for i, a in enumerate(THESIS_ORDER) for b in THESIS_ORDER[i + 1 :]
+)
+
+
 def thesis_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.4's rules 34 to 39 on a well-typed thesis record, each reported once, in number order.
+    """§9.4's rules 34 to 38 on a well-typed thesis record, each reported once, in number order.
     The guards on each member's type matter only under a seeded `loose` bug, which lets an
     ill-typed member reach the rules."""
     p = draft["payload"]
-    out: list[Violation] = []
+    groups: dict[str, list[Violation]] = {group: [] for group in THESIS_ORDER}
 
-    def rule(name: str, holds: bool, reason: str, path: str) -> None:
+    def rule(group: str, name: str, holds: bool, reason: str, path: str) -> None:
         if not holds and f"rule.{name}" not in skip:
-            out.append(Violation(f"rule.{name}", reason, path))
+            groups[group].append(Violation(f"rule.{name}", reason, path))
 
     first_thesis = event_type == "ThesisProposed"
     revised = is_integer(p["revision"]) and p["revision"] > 0
-    rule("34", first_thesis != revised, "schema", "payload.revision")
-    rule("34.autopsy", not first_thesis or p["autopsy_ref"] is None, "schema", "payload.autopsy_ref")
-    rule("35", (p["reason"] is None) == (p["admitted"] is True), "schema", "payload.reason")
+    rule("revision", "34", first_thesis != revised, "schema", "payload.revision")
+    rule("autopsy", "34.autopsy", not first_thesis or p["autopsy_ref"] is None, "schema", "payload.autopsy_ref")
+    rule("reason", "35", (p["reason"] is None) == (p["admitted"] is True), "schema", "payload.reason")
     failing = []
     if p["direction"] != "long" and "rule.36.direction" not in skip:
         failing.append("direction_not_allowed")
@@ -520,19 +529,23 @@ def thesis_violations(event_type: str, draft: dict, skip: frozenset[str]) -> lis
     if predecessor != revised and "rule.36.predecessor" not in skip:
         failing.append("revision_without_predecessor")
     if failing:
-        rule("36", p["reason"] == failing[0], "schema", "payload.reason")
+        rule("reason", "36", p["reason"] == failing[0], "schema", "payload.reason")
     else:
-        rule("36.unfailed", p["reason"] not in THESIS_REFUSALS[:3], "schema", "payload.reason")
+        rule("reason", "36.unfailed", p["reason"] not in THESIS_REFUSALS[:3], "schema", "payload.reason")
     if p["corroboration"] is None:
         number = CHECK_NUMBER.get(p["reason"]) if isinstance(p["reason"], str) else None
-        rule("37", number is not None and number <= CORROBORATION_CHECK, "schema", "payload.reason")
+        rule("reason", "37", number is not None and number <= CORROBORATION_CHECK, "schema", "payload.reason")
     else:
-        rule("37.corroborated", p["reason"] != "no_corroboration", "schema", "payload.reason")
-    sources = p["evidence_sources"] if isinstance(p["evidence_sources"], list) else []
-    rule("38", ascending(encoded(sources)), "non_canonical", "payload.evidence_sources")
+        rule("reason", "37.corroborated", p["reason"] != "no_corroboration", "schema", "payload.reason")
     model_ref = draft["config_refs"].get("model_version")
-    rule("39", model_ref is None or model_ref == p["content_hash"], "schema", "payload.content_hash")
-    return out
+    rule("model", "38", model_ref is None or model_ref == p["content_hash"], "schema", "payload.content_hash")
+    order = list(THESIS_ORDER)
+    for bug in THESIS_ORDER_BUGS:
+        if bug in skip:
+            _, first, second = bug.split(".")
+            i, j = order.index(first), order.index(second)
+            order[i], order[j] = order[j], order[i]
+    return [v for group in order for v in groups[group]]
 
 
 def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:

@@ -892,13 +892,41 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   the agent's memory into theses (instrument, direction, horizon, evidence, invalidation), journaled
   as `ThesisProposed`, so that the agent has ideas without me.
   *Journal half ([DEC-413](decisions/DEC-413.md)):* journal spec v0.9 §9.4 closes
-  `ThesisProposed` and `ThesisRevised` in one shared schema with rules 34 to 39, and the vectors
+  `ThesisProposed` and `ThesisRevised` in one shared schema with rules 34 to 38, and the vectors
   gain a generated `research` section (spec PR on `agent/j3-thesis-schemas-spec`, stream J). Next,
   the registration in `mandate-journal` under DEC-77: a tests PR with stubs and pending tests, then
-  the implementation. The writer that adds the model's identity, the instants, and the artifact
-  references to `ThesisEntry` is a story of its own. DEC-413 item 5 lists the readings not taken,
-  each a later tightening. One is for E17-9's loop: whether a revision without an autopsy is a
-  refusal reason, which would be a mandate spec change.
+  the implementation. **Required, and blocking that registration's acceptance (#490 round 1, M2;
+  as #470 round 2 minor 5 for §9.3):**
+  - the registration re-derives mandate spec §8.5 checks 4, 5, 6, 10, and 16's cap from the
+    mandate document the record's `config_refs.mandate_version` names, and refuses a record whose
+    verdict passes over a check that mandate fails: an `admitted: true`, or a `reason` later than
+    the first check the document fails;
+  - the `man` ref on these two records means the mandate in force when the thesis was judged, and
+    the tests PR pins that;
+  - the tests PR comes first (DEC-77), and its cases include a pinned universe (MI-20) and
+    `admission: deny`.
+
+  The writer that adds the model's identity, the instants, and the artifact references to
+  `ThesisEntry` is a story of its own. DEC-413 item 5 lists the readings not taken, each a later
+  tightening. One is for E17-9's loop: whether a revision without an autopsy is a refusal reason,
+  which would be a mandate spec change.
+  *Follow-ups (#490 review round 1, under the freeze rule):*
+  - Minor 1: `research.py`'s stored mandate fails V-007 against `reference/mandate/bases.py`'s
+    registry, which pins `llm.research_agent` at the placeholder hash. That is expected, since the
+    vectors store the model object, but DEC-413 item 4 should say so. Once stream L lands
+    `jsonschema` in `python/` (founder-approved 2026-10-02), `documents.valid` moves to
+    `reference/mandate`'s full validators with a registry that pins the stored content hash.
+  - Minor 3: `invalidation` is §9.1's `text` (non-empty) while `Invalidation::new` refuses blank
+    text, so `"   "` passes §9.4. Tighten to non-blank, or record why not.
+  - Minor 5: §9.4 should say the records change no envelope field (MI-16), and put that obligation
+    on the lineage fold that later reads them.
+  - Minor 6: nine reason codes appear in no base or valid draft. Checks 5 and 10, which the oracle
+    requires to fail by the document, are unrepresentable under the one stored mandate: add a second
+    stored document (`pinned: true`, or `asset_classes: [crypto]`) and a base draft for each.
+  - Nits: `test_a_hand_edited_research_vector_is_refused` asserts on the literal
+    `allowlist_version: 7`; the PR-size note (ES-13, 1,199 hand-written lines, mostly fixture tables).
+  - Two questions for a later mandate-spec change: whether §8.2's `conviction` and `confidence`
+    ranges should be §8.5 refusals, and whether journal `text` gets a maximum length.
 - **E17-3 (Must)** As an owner, I want instruments admitted into the working universe only through
   the eligibility floor, the policy's asset classes, `max_instruments`, instrument-group claims, and
   my autonomy rules (`new_instrument`, `thesis_confidence`; default `ask`), journaled as

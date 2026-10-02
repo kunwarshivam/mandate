@@ -16,9 +16,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   agent stream's `ThesisProposed` and `ThesisRevised`, which v0.6 left to their own story. Both
   share one schema. Every member comes from mandate spec §8.2's output fields, §8.4's thesis table,
   or §9's row, and is traced to `mandate-research`'s `ThesisEntry` or the writer that adds it. The
-  new rules are 34 to 39: the entry type follows the revision, the reason is null exactly on
-  admission, checks 1 to 3 and check 15 are recomputed from the record, the cited sources are in
-  order, and the model reference binds the content hash. No fold reads the records yet, so §9.4
+  new rules are 34 to 38: the entry type follows the revision, the reason is null exactly on
+  admission, checks 1 to 3 and check 15 are recomputed from the record, and the model reference
+  binds the content hash. The cited sources are recorded in the order given. No fold reads the records yet, so §9.4
   maps them to no `JournaledFact`. The test vectors gain a generated `research` section and stay
   version 3.
 - **v0.8 ([DEC-403](../project/decisions/DEC-403.md)):** §9.3 closes the payload schemas of the two
@@ -1010,8 +1010,11 @@ of both records on a research agent's stream, the artifacts they name (the resea
 which is the mandate reference cases' `research_equity` with its admitting model's content hash set
 to the stored model content, and each thesis's prompt, response, evidence, and autopsy), an invalid
 draft for every rule and member type, and valid drafts for the cases a rule might be misread to
-refuse. No payload carries a credential or personal data: a thesis is named by opaque IDs, a source
-as cited, and the model's text only by artifact.
+refuse. Every thesis record the approved mandate reference cases journal passes these rules, and the
+section lists them. The vectors also pin the report order between rule 34, its autopsy clause, rules
+35 to 37, and rule 38. No payload carries a credential or a personal-data field, and the prompt,
+response, evidence, and autopsy are carried only by artifact. Two members are the model's own text in
+the payload: `invalidation`, and the cited `evidence_sources`.
 
 **`ThesisProposed`, `ThesisRevised`** on the agent stream ([mandate spec §8.4, §8.5, §8.6](mandate.md#84-the-research-agent-dec-97-adr-0002)):
 one thesis the research agent proposed, and the admission's verdict on it.
@@ -1019,7 +1022,7 @@ one thesis the research agent proposed, and the admission's verdict on it.
 | Member | Type | Meaning |
 |---|---|---|
 | `model_id`, `model_version` | `text` | The research agent's id and version, as its output states them |
-| `content_hash` | `ref` | The research agent's content hash ([mandate spec §8.1](mandate.md#81-signal-model-contract-dec-52-dec-97)); the content object is an artifact: rule 39 |
+| `content_hash` | `ref` | The research agent's content hash ([mandate spec §8.1](mandate.md#81-signal-model-contract-dec-52-dec-97)); the content object is an artifact: rule 38 |
 | `thesis_id`, `lineage_id` | `id` | The thesis and its lineage ([mandate spec §8.6](mandate.md#86-thesis-lifetime-and-revision-lineages-dec-118-dec-111)) |
 | `revision` | `integer` | 0 for a first thesis: rules 34 and 36 |
 | `predecessor_thesis_id` | `id?` | The thesis this one revises, as the output states it: rule 36 |
@@ -1031,9 +1034,9 @@ one thesis the research agent proposed, and the admission's verdict on it.
 | `horizon_s` | `integer` | Seconds: rule 36 |
 | `conviction`, `confidence` | `decimal` | As given |
 | `evidence_ref` | `ref?` | The evidence, as an artifact |
-| `evidence_sources` | `[text]` | The sources cited, as cited. Text, not `id`, because check 14 refuses a source off the allowlist and the record keeps what was cited: rule 38 |
+| `evidence_sources` | `[text]` | The sources cited, in the order given, duplicates kept. Text, not `id`, and in no required order, because check 14 refuses a source off the allowlist and the record keeps what was cited (mandate case MC-N07 cites `src.filings` before `src.anonymous_blog`) |
 | `corroboration` | `independent_source` \| `market_data`, or `null` | How the platform corroborated the thesis, never what the model asserted; `null` when it did not: rule 37 |
-| `invalidation` | `text` | The conditions that end the thesis before its horizon |
+| `invalidation` | `text` | The conditions that end the thesis before its horizon, as the model gave them |
 | `allowlist_version` | `integer` | The source allowlist's version in effect ([DEC-101](../project/04-decision-log.md#decisions)) |
 | `prompt_ref`, `response_ref` | `ref` | The research agent's prompt and response, as artifacts |
 | `admitted` | `boolean` | Whether the admission admitted or renewed the instrument: rule 35 |
@@ -1055,10 +1058,7 @@ one thesis the research agent proposed, and the admission's verdict on it.
 37. Check 15 recomputed from the record (`payload.reason`): when `corroboration` is `null`, the
     thesis fails check 15, so `reason` is a check numbered 15 or lower and never `null`,
     `lineage_retired`, or `universe_full`; when it is non-null, `reason` is not `no_corroboration`.
-    It reports after rule 36, so a record that breaks both reports both, at the same path.
-38. `evidence_sources` is strictly ascending by bytes, so no source is listed twice
-    (`non_canonical` at `payload.evidence_sources`).
-39. `config_refs.model_version` equals `content_hash` (`payload.content_hash`), as rule 22 binds
+38. `config_refs.model_version` equals `content_hash` (`payload.content_hash`), as rule 22 binds
     `AgentDeployed`'s mandate version. A record whose `model_version` ref is missing is reported by
     §9's required references, not here.
 
