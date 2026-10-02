@@ -41,7 +41,8 @@
 //! `order_type` absent on a sell means a plain limit.
 //!
 //! **Cases that cannot pass yet fail at their owner.** A `trim_to_target` base asks the risk engine
-//! first (§6.2 step 1), and `mandate_risk::trim_proposals` is E6-4's stub. A crypto pair's quote
+//! first (§6.2 step 1); `mandate_risk::trim_proposals` answers (E6-4, DEC-399), and this arm does
+//! not yet compare its trim or `trim_withheld` (DEC-399 item 6). A crypto pair's quote
 //! currency is read from the pinned instrument's `symbol` (`BTC/USD`), and a symbol that does not
 //! name USD as its quote is never read as USD (DEC-254 items 1 and 7, DEC-285).
 
@@ -191,8 +192,9 @@ pub(super) fn builder_case(fixture: &Json, case: &Json) -> Result<(), String> {
 }
 
 /// §6.2 step 1: under `trim_to_target` the risk engine proposes first, and a case cannot pass until
-/// its trim, its `origin` and its `trim_withheld` guards are compared, which E6-4's
-/// `trim_proposals` must answer before this arm can.
+/// its trim, its `origin` and its `trim_withheld` guards are compared. E6-4's `trim_proposals`
+/// answers; the comparison is the harness follow-up DEC-399 item 6 records, so the failure carries
+/// the answer for the owed rows to pin.
 fn trim_first(
     fixture: &Json,
     document: &Mandate,
@@ -225,6 +227,7 @@ fn trim_first(
         &scene.mandate,
         &scene.risk,
         &scene.agent,
+        &scene.account,
         &instruments,
     ) {
         Err(e) => Err(gate_error("trim_proposals", &e)),
@@ -1385,23 +1388,23 @@ mod tests {
     const OWED: [(&str, &str, &[&str]); 4] = [
         (
             "MC-B17",
-            "E6-4",
-            &["mandate_risk::trim_proposals", "pending E6-4"],
+            "E6-4's family-B trim arm",
+            &["does not yet compare", "qty: Qty(3), purpose: RiskExit }]"],
         ),
         (
             "MC-B30",
-            "E6-4",
-            &["mandate_risk::trim_proposals", "pending E6-4"],
+            "E6-4's family-B trim arm",
+            &["does not yet compare", "answered []"],
         ),
         (
             "MC-B31",
-            "E6-4",
-            &["mandate_risk::trim_proposals", "pending E6-4"],
+            "E6-4's family-B trim arm",
+            &["does not yet compare", "answered []"],
         ),
         (
             "MC-B32",
-            "E6-4",
-            &["mandate_risk::trim_proposals", "pending E6-4"],
+            "E6-4's family-B trim arm",
+            &["does not yet compare", "answered []"],
         ),
     ];
 

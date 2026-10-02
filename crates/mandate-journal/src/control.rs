@@ -1,16 +1,16 @@
 //! The payload schemas journal spec §9.2 closes (DEC-261, DEC-302, E7-10): the control stream's
 //! records that `ValidationContext::from_journal` reads, and `OwnerCommandRefused` on the agent and
-//! account streams, with consistency rules 17 to 23, subject rules 25 and 26, and copy rule 27.
-//! Every rule only refuses a draft; none changes what a writer may do.
+//! account streams, and `AccountSnapshotRecorded` on the account stream, with consistency rules 17
+//! to 24, subject rules 25, 26 and 28, and copy rule 27. Every rule only refuses a draft; none
+//! changes what a writer may do.
 //!
-//! **`AccountSnapshotRecorded` is routed here, to a stub** (DEC-261 item 7, DEC-402). Stream K's
-//! writer conforms (#456), so its registration's tests PR routes the account stream's snapshot to
-//! §9.2 and refuses it as `unimplemented`, as it was refused as `unknown_schema` before. The
-//! implementation PR registers its schema and rule 24 and wires the fee step's own snapshot writer
-//! in the same change, so the fee step's snapshot is never refused for a member while it pauses
-//! every agent and alerts the owner (`AGENTS.md` rules 3 and 13).
+//! `AccountSnapshotRecorded` registered once stream K's fee-step writer conformed (#456), in the
+//! change that journals that writer's form in `fees`, so the fee step's snapshot is never refused
+//! for a member while it pauses every agent and alerts the owner (`AGENTS.md` rules 3 and 13,
+//! DEC-261 item 7, DEC-402).
 
 use mandate_canon::Value;
+use mandate_num::Usd;
 
 use crate::schema::Ty;
 use crate::{Invalid, InvalidReason, StreamId, StreamType};
@@ -44,7 +44,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     }
 }
 
-/// The payload normalized against its §9.2 schema, then consistency rules 17 to 23 in number order
+/// The payload normalized against its §9.2 schema, then consistency rules 17 to 24 in number order
 /// (reported only on a well-typed payload). `config_refs` is the envelope's, which rule 22 reads.
 pub(crate) fn payload(
     event_type: &str,
@@ -52,9 +52,6 @@ pub(crate) fn payload(
     payload: &Value,
     config_refs: Option<&Value>,
 ) -> Result<Value, Invalid> {
-    if event_type == SNAPSHOT {
-        return snapshot_payload();
-    }
     let schema = schema(event_type, schema_version)
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
     let payload = crate::schema::normalize(schema, payload, "payload")?;
@@ -106,12 +103,25 @@ pub(crate) fn payload(
             InvalidReason::Schema,
             "payload.loss_added",
         )?,
+        SNAPSHOT => {
+            let compared = !p.is_null("model_cash");
+            for member in ["cash_band", "cash_in_band"] {
+                ensure(
+                    p.is_null(member) != compared,
+                    InvalidReason::Schema,
+                    &format!("payload.{member}"),
+                )?;
+            }
+            if compared {
+                cash_in_band(p)?;
+            }
+        }
         _ => {}
     }
     Ok(payload)
 }
 
-/// Subject rules 25 and 26 (`stream_mismatch`), then copy rule 27, on a payload that passed
+/// Subject rules 25, 26 and 28 (`stream_mismatch`), then copy rule 27, on a payload that passed
 /// [`payload`]: reported after `artifact_refs` and `pii_refs` (§9.1's order, which §9.2 keeps).
 pub(crate) fn subject_and_copy(
     event_type: &str,
@@ -142,11 +152,20 @@ pub(crate) fn subject_and_copy(
         "payload.command",
     )?;
     ensure(
+        p.text("reason") != NOT_INDEPENDENT || stream.stream_type() == StreamType::Account,
+        InvalidReason::StreamMismatch,
+        "payload.reason",
+    )?;
+    ensure(
         causation_id.is_some_and(|c| *c != Value::Null),
         InvalidReason::Schema,
         "causation_id",
     )
 }
+
+/// The refusal only the executor writes, of an acknowledgment that lifts a fired tripwire under
+/// `independent_approval_required` (rule 28; mandate spec §5.8, §6.7; DEC-351 items 5 and 6).
+const NOT_INDEPENDENT: &str = "not_independent";
 
 /// `ConfigSnapshotRegistered`'s kind for a signal model.
 const MODEL_KIND: &str = "model_version";
@@ -198,10 +217,33 @@ fn ascending(items: &[&str], path: &str) -> Result<(), Invalid> {
     )
 }
 
-/// The stub of the snapshot registration's tests PR (DEC-77, DEC-402): §9.2's schema and rule 24
-/// land with its implementation.
-fn snapshot_payload() -> Result<Value, Invalid> {
-    Err(Invalid::new(InvalidReason::Unimplemented, "payload"))
+/// Rule 24 on a compared snapshot: `cash_band` ≥ 0, and `cash_in_band` is `true` exactly when
+/// |`cash` − `model_cash`| ≤ `cash_band`. The amounts are compared as exact `Usd`; one too large to
+/// compare exactly is refused as `schema` at that member, never compared approximately (DEC-402).
+fn cash_in_band(p: Payload<'_>) -> Result<(), Invalid> {
+    let amount = |member: &str| {
+        Usd::parse(p.text(member))
+            .map_err(|_| Invalid::new(InvalidReason::Schema, format!("payload.{member}")))
+    };
+    let band = amount("cash_band")?;
+    ensure(
+        !band.is_negative(),
+        InvalidReason::Schema,
+        "payload.cash_band",
+    )?;
+    let drift = amount("cash")?
+        .checked_sub(amount("model_cash")?)
+        .map_err(|_| Invalid::new(InvalidReason::Schema, "payload.model_cash"))?;
+    let drift = if drift.is_negative() {
+        drift.negated()
+    } else {
+        drift
+    };
+    ensure(
+        p.0.get("cash_in_band") == Some(&Value::Bool(drift <= band)),
+        InvalidReason::Schema,
+        "payload.cash_in_band",
+    )
 }
 
 fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
@@ -219,9 +261,28 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         "AgentDeployed" => &AGENT_DEPLOYED,
         "AgentStopped" => &AGENT_STOPPED,
         "OwnerCommandRefused" => &OWNER_COMMAND_REFUSED,
+        SNAPSHOT => &ACCOUNT_SNAPSHOT_RECORDED,
         _ => return None,
     })
 }
+
+static ACCOUNT_SNAPSHOT_RECORDED: Ty = Ty::Record(&[
+    ("status", Ty::Str),
+    ("crypto_status", Ty::Str),
+    ("trading_blocked", Ty::Bool),
+    ("account_blocked", Ty::Bool),
+    ("trade_suspended_by_user", Ty::Bool),
+    ("multiplier", Ty::Int),
+    ("equity", Ty::Decimal),
+    ("cash", Ty::Decimal),
+    ("buying_power", Ty::Decimal),
+    ("non_marginable_buying_power", Ty::Decimal),
+    ("accrued_fees", Ty::Decimal),
+    ("model_cash", Ty::Nullable(&Ty::Decimal)),
+    ("cash_band", Ty::Nullable(&Ty::Decimal)),
+    ("cash_in_band", Ty::Nullable(&Ty::Bool)),
+    ("risk_clock", Ty::RiskClock),
+]);
 
 static STREAM_OPENED: Ty = Ty::Record(&[
     ("stream_type", Ty::OneOf(&["control"])),
@@ -329,6 +390,7 @@ static OWNER_COMMAND_REFUSED: Ty = Ty::Record(&[
             "step_up_stale",
             "step_up_reused",
             "step_up_method",
+            NOT_INDEPENDENT,
         ]),
     ),
     ("effective_at", Ty::Timestamp),
@@ -336,19 +398,16 @@ static OWNER_COMMAND_REFUSED: Ty = Ty::Record(&[
 
 /// The vectors' `control_stream` section, read inside this crate so the mutation gate, which runs
 /// only the mutated crate's own tests, judges §9.2's rules here as well as in `mandate-refcases`.
-/// A draft is checked by `Draft::parse` alone; `AccountSnapshotRecorded`'s drafts are left out,
-/// since that schema is not registered yet (module doc).
+/// A draft is checked by `Draft::parse` alone.
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use mandate_canon::{Key, Object, Value, parse, to_canonical};
+    use mandate_canon::{Int, Key, Object, Value, parse, to_canonical};
 
     use crate::{Draft, StreamId};
 
     use super::subject_and_copy;
-
-    const SNAPSHOT: &str = "AccountSnapshotRecorded";
 
     fn section() -> Result<Value, String> {
         let path =
@@ -417,16 +476,13 @@ mod tests {
         }
     }
 
-    /// The case's draft, or `None` for a snapshot draft, which is held back.
-    fn draft(section: &Value, case: &Value) -> Result<Option<Vec<u8>>, String> {
+    /// The case's draft: its base with its changes applied.
+    fn draft(section: &Value, case: &Value) -> Result<Vec<u8>, String> {
         let mut body = base(section, case)?;
-        if body.get("event_type").and_then(Value::as_str) == Some(SNAPSHOT) {
-            return Ok(None);
-        }
         for change in list(case, "changes") {
             apply(&mut body, change)?;
         }
-        Ok(Some(to_canonical(&Value::Object(body))))
+        Ok(to_canonical(&Value::Object(body)))
     }
 
     #[test]
@@ -443,27 +499,31 @@ mod tests {
                 .into_iter()
                 .collect(),
             );
-            let bytes = draft(&section, &case)?.ok_or("the chain holds no snapshot")?;
+            let bytes = draft(&section, &case)?;
             let parsed = Draft::parse(&bytes).map(|d| d.event_type().to_owned());
             assert_eq!(parsed, Ok(text(entry, "event_type").to_owned()));
         }
         let mut parsed = 0;
         for case in list(&section, "valid_drafts") {
-            if let Some(bytes) = draft(&section, case)? {
-                assert_eq!(
-                    Draft::parse(&bytes).map(|_| ()),
-                    Ok(()),
-                    "{}",
-                    text(case, "name")
-                );
-                parsed += 1;
-            }
+            let bytes = draft(&section, case)?;
+            assert_eq!(
+                Draft::parse(&bytes).map(|_| ()),
+                Ok(()),
+                "{}",
+                text(case, "name")
+            );
+            parsed += 1;
         }
         assert!(
-            parsed >= 6,
-            "{parsed} valid drafts on a registered schema; a vectors change may add more, never fewer"
+            parsed >= 8,
+            "{parsed} valid drafts; a vectors change may add more, never fewer"
         );
-        for name in ["refused_stop", "refused_acknowledgment"] {
+        for name in [
+            "refused_stop",
+            "refused_acknowledgment",
+            "snapshot_reconciled",
+            "snapshot_fees",
+        ] {
             let case = Value::Object(
                 [(
                     Key::new("base_draft").map_err(|_| "key")?,
@@ -472,7 +532,7 @@ mod tests {
                 .into_iter()
                 .collect(),
             );
-            let bytes = draft(&section, &case)?.ok_or("not a snapshot")?;
+            let bytes = draft(&section, &case)?;
             assert_eq!(Draft::parse(&bytes).map(|_| ()), Ok(()), "{name}");
         }
         Ok(())
@@ -483,9 +543,7 @@ mod tests {
         let section = section()?;
         let mut checked = 0;
         for case in list(&section, "invalid_drafts") {
-            let Some(bytes) = draft(&section, case)? else {
-                continue;
-            };
+            let bytes = draft(&section, case)?;
             let expect = case.get("expect").ok_or("no expect")?;
             let refused = Draft::parse(&bytes)
                 .err()
@@ -498,8 +556,8 @@ mod tests {
             checked += 1;
         }
         assert!(
-            checked >= 49,
-            "{checked} invalid drafts on a registered schema; a vectors change may add more, never fewer"
+            checked >= 75,
+            "{checked} invalid drafts; a vectors change may add more, never fewer"
         );
         Ok(())
     }
@@ -509,7 +567,7 @@ mod tests {
     /// nullable cannot also drop its member from this list (#445 round 1, B2; round 2, C1). A list
     /// is named by its first and second elements, so a check that stops after the first is seen
     /// (#445 round 3, D1).
-    const REQUIRED: [(&str, &[&str]); 10] = [
+    const REQUIRED: [(&str, &[&str]); 11] = [
         ("StreamOpened", &["stream_type", "workspace_id"]),
         (
             "ConnectionEstablished",
@@ -579,12 +637,35 @@ mod tests {
             "OwnerCommandRefused",
             &["command", "reason", "effective_at"],
         ),
+        (
+            "AccountSnapshotRecorded",
+            &[
+                "status",
+                "crypto_status",
+                "trading_blocked",
+                "account_blocked",
+                "trade_suspended_by_user",
+                "multiplier",
+                "equity",
+                "cash",
+                "buying_power",
+                "non_marginable_buying_power",
+                "accrued_fees",
+                "risk_clock",
+            ],
+        ),
     ];
 
-    /// The first base of `event_type`: a chain event, or the agent-stream refusal draft.
+    /// The first base of `event_type`: a chain event, the agent-stream refusal draft, or the
+    /// compared snapshot draft.
     fn base_of(section: &Value, event_type: &str) -> Result<Object, String> {
-        let case = if event_type == "OwnerCommandRefused" {
-            named("base_draft", Value::Str("refused_stop".to_owned()))?
+        let drafted = match event_type {
+            "OwnerCommandRefused" => Some("refused_stop"),
+            "AccountSnapshotRecorded" => Some("snapshot_reconciled"),
+            _ => None,
+        };
+        let case = if let Some(name) = drafted {
+            named("base_draft", Value::Str(name.to_owned()))?
         } else {
             let seq = list(section, "chain")
                 .iter()
@@ -672,7 +753,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 44);
+        assert_eq!(checked, 56);
         let mut body = Value::Object(base_of(&section, "MandateVersionCreated")?);
         let Value::Object(entry) = value_at(&mut body, "payload.provenance[1]")? else {
             return Err("a provenance entry is a record".to_owned());
@@ -783,6 +864,81 @@ mod tests {
         Ok(())
     }
 
+    /// Rule 28: `not_independent` is the executor's refusal of an acknowledgment, so it is accepted on
+    /// the account stream and refused at `payload.reason` on the agent stream, where rule 26 has
+    /// already let a resume or Stop through; a step-up reason stays accepted on both. The report
+    /// order is pinned both ways: a command on the wrong stream is rule 26's (`payload.command`)
+    /// even with `not_independent`, and an uncaused `not_independent` on the agent stream is rule
+    /// 28's (`payload.reason`), not rule 27's (`causation_id`).
+    #[test]
+    fn not_independent_is_an_account_stream_refusal_only() -> Result<(), String> {
+        let payload = |command: &str, reason: &str| -> Result<Value, String> {
+            Ok(Value::Object(
+                [
+                    ("command", command),
+                    ("reason", reason),
+                    ("effective_at", "2026-09-22T13:00:00.000000000Z"),
+                ]
+                .into_iter()
+                .map(|(k, v)| Ok((Key::new(k).map_err(|_| "key")?, Value::Str(v.to_owned()))))
+                .collect::<Result<_, String>>()?,
+            ))
+        };
+        let cause = Value::Str("01J8ZNB00000000000000000C6".to_owned());
+        let at_reason = Some(("stream_mismatch", "payload.reason"));
+        let at_command = Some(("stream_mismatch", "payload.command"));
+        for (stream, command, reason, caused, verdict) in [
+            ("acct:ws_1:a1", "acknowledge", "not_independent", true, None),
+            (
+                "agent:ws_1:agent_a",
+                "stop",
+                "not_independent",
+                true,
+                at_reason,
+            ),
+            (
+                "agent:ws_1:agent_a",
+                "resume",
+                "not_independent",
+                true,
+                at_reason,
+            ),
+            ("agent:ws_1:agent_a", "stop", "step_up_stale", true, None),
+            ("acct:ws_1:a1", "acknowledge", "step_up_reused", true, None),
+            ("acct:ws_1:a1", "stop", "not_independent", true, at_command),
+            (
+                "agent:ws_1:agent_a",
+                "acknowledge",
+                "not_independent",
+                true,
+                at_command,
+            ),
+            (
+                "agent:ws_1:agent_a",
+                "stop",
+                "not_independent",
+                false,
+                at_reason,
+            ),
+        ] {
+            let stream = StreamId::parse(stream).ok_or("a stream id")?;
+            let got = subject_and_copy(
+                "OwnerCommandRefused",
+                &stream,
+                &payload(command, reason)?,
+                caused.then_some(&cause),
+            )
+            .err()
+            .map(|e| (e.reason.code(), e.path));
+            assert_eq!(
+                got,
+                verdict.map(|(code, path)| (code, path.to_owned())),
+                "{stream} {command} {reason} caused={caused}"
+            );
+        }
+        Ok(())
+    }
+
     /// Rule 26 names the account and agent streams only; on any other a refused command matches
     /// nothing, so it is refused (DEC-303 item 12). No other stream routes the type today.
     #[test]
@@ -812,6 +968,90 @@ mod tests {
                 got,
                 verdict.map(|path| ("stream_mismatch", path.to_owned())),
                 "{stream}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A snapshot at any `schema_version` but 1 is refused as `unknown_schema`, as every other §9.2
+    /// type is: the snapshot reaches its schema through `schema`'s version gate, never around it
+    /// (#467 round 1, m3).
+    #[test]
+    fn a_snapshot_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
+        let section = section()?;
+        let mut body = base_of(&section, "AccountSnapshotRecorded")?;
+        let version = Key::new("schema_version").map_err(|_| "key")?;
+        let two = Int::new(2).ok_or("an integer")?;
+        body.insert(version, Value::Int(two));
+        assert_eq!(
+            refusal(body),
+            Some(("unknown_schema".to_owned(), "payload".to_owned()))
+        );
+        Ok(())
+    }
+
+    /// Rule 24 reports at the first cash member that disagrees with `model_cash`, in the schema's
+    /// order: when both `cash_band` and `cash_in_band` disagree, at `cash_band` (#473 round 1, M1).
+    #[test]
+    fn rule_24_reports_the_band_before_the_flag() -> Result<(), String> {
+        let section = section()?;
+        let compared_alone = with_payload(
+            with_payload(
+                base_of(&section, "AccountSnapshotRecorded")?,
+                "cash_band",
+                Value::Null,
+            )?,
+            "cash_in_band",
+            Value::Null,
+        )?;
+        let flagged_alone = with_payload(
+            base_of(&section, "AccountSnapshotRecorded")?,
+            "model_cash",
+            Value::Null,
+        )?;
+        for (name, body) in [
+            ("model_cash alone", compared_alone),
+            ("band and flag alone", flagged_alone),
+        ] {
+            assert_eq!(
+                refusal(body),
+                Some(("schema".to_owned(), "payload.cash_band".to_owned())),
+                "{name}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Rule 24 compares exact `Usd`: an amount `Usd` cannot hold is refused as `schema` at that
+    /// member, and a difference of two that fit but overflows at `model_cash`. None is ever compared
+    /// approximately or accepted (DEC-402 item 6; #473 round 1, M2).
+    #[test]
+    fn an_amount_rule_24_cannot_compare_exactly_is_refused() -> Result<(), String> {
+        let section = section()?;
+        let near = "78999999999999999999999999999";
+        let cases: [(&[(&str, &str)], &str); 3] = [
+            (
+                &[("cash_band", "9.9999999999999999999999999999")],
+                "payload.cash_band",
+            ),
+            (
+                &[("cash", "10000000000000000000000000000.1")],
+                "payload.cash",
+            ),
+            (
+                &[("cash", near), ("model_cash", &format!("-{near}"))],
+                "payload.model_cash",
+            ),
+        ];
+        for (members, path) in cases {
+            let mut body = base_of(&section, "AccountSnapshotRecorded")?;
+            for (member, value) in members {
+                body = with_payload(body, member, Value::Str((*value).to_owned()))?;
+            }
+            assert_eq!(
+                refusal(body),
+                Some(("schema".to_owned(), path.to_owned())),
+                "{members:?}"
             );
         }
         Ok(())

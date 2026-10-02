@@ -1415,6 +1415,7 @@ name = "mandate-journal"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-num",
  "mandate-time",
  "proptest",
  "thiserror",
