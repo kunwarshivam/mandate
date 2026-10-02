@@ -325,7 +325,11 @@ queued by the broker for the next eligible session.
    position (exact quantity or the close-position endpoint).
 3. **No order may cross zero** (`would_cross_zero`).
 4. **Sell quantity ≤ position − Σ open sell quantity**, protective legs included
-   (`sell_exceeds_available`).
+   (`sell_exceeds_available`). An exit ladder between rungs (§5.6 step 5) counts what it may
+   still send as open. A sell that fits beside the open orders, but not beside a ladder's
+   remainder as well, is sized to what is left. With nothing left, it is held
+   `exit_between_rungs` until room opens. It is never denied for a remainder
+   ([DEC-410](../project/decisions/DEC-410.md)).
 5. **One side at a time:** an agent's non-protective orders in an instrument are all on the same
    side (`working_order_limit`). Before a risk-reducing sell, the executor cancels the agent's own
    resting opening buys in that instrument and waits for confirmation.
@@ -449,6 +453,17 @@ protection is canceled), the executor uses the **exit price ladder** (sell; buy 
    alerted. A `discretionary_exit` is held and re-evaluated on every tick; the hold is journaled
    once, never dropped, and the owner alerted as for the fallback. The ladder resumes stepping
    from the next priceable quote or trade: a fallback price is never where the ladder ends.
+5. **Between rungs** ([DEC-409](../project/decisions/DEC-409.md),
+   [DEC-410](../project/decisions/DEC-410.md)). A ladder is between rungs from the confirmation of
+   a step's cancel that leaves part of the rung unsold, until it sends that part as its next
+   rung. Until then it still sells that part (§5.3 rule 4). This covers a ladder parked for the
+   next open because no session was open at the confirmation.
+   - **Where a ladder ends.** If the exit's protective sequence (§5.4) no longer climbs at that
+     confirmation, its ladder ends there: the agent is paused or stopped, or the unprotected
+     interval has reached its bound. The remainder is never sent, even if the agent resumes, and
+     protection returns for what is left.
+   - **Without a sequence**, a ladder whose step was asked while it climbed is not ended by a
+     later pause. If it is parked, it waits for its agent to resume.
 
 | Tier | `exit_offset` | `exit_offset_step` | `max_exit_offset` |
 |---|---|---|---|
