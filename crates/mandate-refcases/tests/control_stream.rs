@@ -217,7 +217,6 @@ fn assert_family(event_types: &[&str]) {
 }
 
 #[test]
-#[ignore = "pending E7-10"]
 fn the_control_chain_appends_and_verifies_with_its_artifacts() {
     let fx = fixture();
     let section = section(&fx);
@@ -272,43 +271,36 @@ fn the_control_chain_appends_and_verifies_with_its_artifacts() {
 }
 
 #[test]
-#[ignore = "pending E7-10"]
 fn the_control_stream_opens_with_its_own_workspace() {
     assert_family(&["StreamOpened"]);
 }
 
 #[test]
-#[ignore = "pending E7-10"]
 fn a_connection_is_named_by_id_and_scopes_and_never_by_a_key() {
     assert_family(&["ConnectionEstablished", "ConnectionRevoked"]);
 }
 
 #[test]
-#[ignore = "pending E7-10"]
 fn a_disclosure_is_accepted_with_step_up_for_one_stored_version() {
     assert_family(&["DisclosureAccepted"]);
 }
 
 #[test]
-#[ignore = "pending E7-10"]
 fn a_configuration_registers_under_its_hash_and_a_model_with_its_terms() {
     assert_family(&["ConfigSnapshotRegistered"]);
 }
 
 #[test]
-#[ignore = "pending E7-10"]
 fn a_mandate_version_binds_its_document_provenance_and_confirmation() {
     assert_family(&["MandateVersionCreated", "MandateConfirmed"]);
 }
 
 #[test]
-#[ignore = "pending E7-10"]
 fn a_deployment_and_a_retirement_bind_their_version() {
     assert_family(&["AgentDeployed", "AgentStopped"]);
 }
 
 #[test]
-#[ignore = "pending E7-10"]
 fn a_refused_owner_command_is_on_its_own_stream_and_names_its_input() {
     assert_family(&["OwnerCommandRefused"]);
 }
@@ -396,7 +388,6 @@ fn fact_json(fact: &JournaledFact) -> Json {
 /// the account stream's connection the derivation gives; the facts must be exactly the vectors'
 /// `journaled_facts`, and every other record must map to none.
 #[test]
-#[ignore = "pending E7-10"]
 fn each_record_maps_to_its_journaled_fact() {
     let fx = fixture();
     let section = section(&fx);

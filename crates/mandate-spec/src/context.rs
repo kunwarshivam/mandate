@@ -138,12 +138,171 @@ impl JournaledFact {
     /// refused, never skipped, because a fact the fold never sees takes the value that refuses only
     /// for facts that add (module doc), and a dropped `ConnectionRevoked` would not.
     pub fn from_record(
-        _event_type: &str,
-        _payload: &Value,
-        _documents: &dyn Fn(&Digest) -> Option<Value>,
-        _account_connection: Option<&ConnectionId>,
+        event_type: &str,
+        payload: &Value,
+        documents: &dyn Fn(&Digest) -> Option<Value>,
+        account_connection: Option<&ConnectionId>,
     ) -> Result<Option<Self>, SpecError> {
-        Err(SpecError::Unimplemented)
+        let record = Record(payload);
+        let fact = match event_type {
+            "ConnectionEstablished" => Self::ConnectionEstablished {
+                connection_id: record.connection("connection_id")?,
+                environment: match record.text("environment")? {
+                    "paper" => Environment::Paper,
+                    "live" => Environment::Live,
+                    _ => return Err(malformed("environment")),
+                },
+            },
+            "ConnectionRevoked" => Self::ConnectionRevoked {
+                connection_id: record.connection("connection_id")?,
+            },
+            "DisclosureAccepted" => Self::DisclosureAccepted {
+                version: record.digest("version")?,
+            },
+            "ConfigSnapshotRegistered" if record.text("kind")? != MODEL_KIND => return Ok(None),
+            "ConfigSnapshotRegistered" => Self::ModelRegistered {
+                id: ModelId::parse(record.text("model_id")?).map_err(|_| malformed("model_id"))?,
+                model: RegisteredModel {
+                    version: record.text("model_version")?.to_owned(),
+                    content_hash: record.digest("content_hash")?,
+                    params: record
+                        .list("params")?
+                        .iter()
+                        .map(|p| p.as_str().map(str::to_owned).ok_or(malformed("params")))
+                        .collect::<Result<_, _>>()?,
+                    admits_instruments: match payload.get("admits_instruments") {
+                        Some(Value::Bool(admits)) => *admits,
+                        _ => return Err(malformed("admits_instruments")),
+                    },
+                },
+            },
+            "MandateVersionCreated" => Self::MandateVersionCreated {
+                version: MandateVersion::named(record.digest("mandate_version")?),
+                sources: record
+                    .list("provenance")?
+                    .iter()
+                    .map(|entry| {
+                        let entry = Record(entry);
+                        Ok((
+                            Pointer::new(entry.text("path")?),
+                            source(entry.text("source")?)?,
+                        ))
+                    })
+                    .collect::<Result<_, SpecError>>()?,
+            },
+            "MandateConfirmed" => Self::MandateConfirmed {
+                version: MandateVersion::named(record.digest("mandate_version")?),
+                confirmed_paths: record
+                    .list("confirmed_paths")?
+                    .iter()
+                    .map(|p| {
+                        p.as_str()
+                            .map(Pointer::new)
+                            .ok_or(malformed("confirmed_paths"))
+                    })
+                    .collect::<Result<_, _>>()?,
+            },
+            "AgentDeployed" => {
+                let version = record.digest("mandate_version")?;
+                let stored = documents(&version).ok_or(malformed("mandate_version"))?;
+                let mandate = Mandate::parse(&stored).map_err(|_| malformed("mandate_version"))?;
+                if mandate.version()?.digest() != version {
+                    return Err(malformed("mandate_version"));
+                }
+                Self::AgentVersionActive {
+                    agent: AgentId::new(record.id("agent_id")?),
+                    connection_id: mandate.connection_id.clone(),
+                    environment: mandate.environment,
+                    allocation_usd: mandate
+                        .capital
+                        .allocation_usd
+                        .to_usd()
+                        .map_err(|_| malformed("mandate_version"))?,
+                    pinned: mandate
+                        .universe
+                        .pinned_instruments
+                        .iter()
+                        .map(|i| i.asset_id.clone())
+                        .collect(),
+                }
+            }
+            "AgentStopped" => Self::AgentStopped {
+                agent: AgentId::new(record.id("agent_id")?),
+                connection_id: record.connection("connection_id")?,
+                retired_on: Date::parse(record.text("retired_on")?)
+                    .map_err(|_| malformed("retired_on"))?,
+                loss_added_usd: record.usd("loss_added")?,
+            },
+            "AccountSnapshotRecorded" => Self::AccountSnapshot {
+                connection_id: account_connection
+                    .cloned()
+                    .ok_or(malformed("account_connection"))?,
+                equity_usd: record.usd("equity")?,
+            },
+            _ => return Ok(None),
+        };
+        Ok(Some(fact))
+    }
+}
+
+/// `ConfigSnapshotRegistered`'s kind for a signal model (journal spec §9.2).
+const MODEL_KIND: &str = "model_version";
+
+/// A member the fact needs that the payload does not hold in §9.2's form.
+fn malformed(what: &'static str) -> SpecError {
+    SpecError::InvalidInput { what }
+}
+
+fn source(text: &str) -> Result<Source, SpecError> {
+    Ok(match text {
+        "user_stated" => Source::UserStated,
+        "user_entered" => Source::UserEntered,
+        "template_structure" => Source::TemplateStructure,
+        "platform_proposed" => Source::PlatformProposed,
+        "platform_default" => Source::PlatformDefault,
+        _ => return Err(malformed("provenance")),
+    })
+}
+
+/// A record's payload, read member by member, each refused under its own name.
+struct Record<'a>(&'a Value);
+
+impl<'a> Record<'a> {
+    fn text(&self, name: &'static str) -> Result<&'a str, SpecError> {
+        self.0
+            .get(name)
+            .and_then(Value::as_str)
+            .filter(|t| !t.is_empty())
+            .ok_or(malformed(name))
+    }
+
+    fn id(&self, name: &'static str) -> Result<&'a str, SpecError> {
+        let text = self.text(name)?;
+        ConnectionId::parse(text)
+            .map(|_| text)
+            .map_err(|_| malformed(name))
+    }
+
+    fn connection(&self, name: &'static str) -> Result<ConnectionId, SpecError> {
+        ConnectionId::parse(self.text(name)?).map_err(|_| malformed(name))
+    }
+
+    fn digest(&self, name: &'static str) -> Result<Digest, SpecError> {
+        self.text(name)?
+            .strip_prefix("sha256:")
+            .and_then(Digest::from_hex)
+            .ok_or(malformed(name))
+    }
+
+    fn usd(&self, name: &'static str) -> Result<Usd, SpecError> {
+        Usd::parse(self.text(name)?).map_err(|_| malformed(name))
+    }
+
+    fn list(&self, name: &'static str) -> Result<&'a [Value], SpecError> {
+        self.0
+            .get(name)
+            .and_then(Value::as_array)
+            .ok_or(malformed(name))
     }
 }
 
