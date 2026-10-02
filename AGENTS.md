@@ -48,7 +48,7 @@ reading that loosens the spec toward the code still goes to the founder.
 8. **Never place real orders.** Use broker paper environments (Alpaca paper), venue demo
    environments, and local fixtures only. Never ask for, read, or use live credentials or
    production secrets.
-9. **Accepted decisions are binding.** To deviate, write a new decision-log entry. Agents accept
+9. **Accepted decisions are binding.** To deviate, write a new decision. Agents accept
    reversible engineering and process decisions themselves and proceed; decisions reserved for the
    founder (DEC-79: live money, spending, legal and compliance text, weakening a safety rule) stay
    Proposed while agents continue with the most conservative option.

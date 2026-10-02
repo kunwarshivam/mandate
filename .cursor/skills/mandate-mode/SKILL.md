@@ -20,13 +20,16 @@ skill, then the vendored skills (`how`, `why`, `tdd`, `blast-radius`, `interroga
 ## Decide, record, continue
 
 Do not wait for the founder. When a stop condition fires (a spec ambiguity or error, a new
-dependency, a deviation from an accepted decision), write the decision-log entry, choose, and keep
-going:
+dependency, a deviation from an accepted decision), write the decision as its own file,
+`docs/project/decisions/DEC-<n>.md` (DEC-344; the directory's README has the format and how to
+take a number), choose, and keep going:
 
-- engineering and process decisions: record as "Accepted (agent)" with the rationale and
-  alternatives, then act on it;
-- decisions reserved for the founder: record as Proposed, continue with the most conservative
-  option, and list it at the top of your report.
+- engineering and process decisions: set the status to Accepted, name yourself and the delegation
+  under "Decided by", give the rationale and alternatives, then act on it;
+- decisions reserved for the founder: set the status to Proposed, continue with the most
+  conservative option, and list it at the top of your report.
+
+The decision log (`docs/project/04-decision-log.md`) holds DEC-01 to DEC-302 and takes no new rows.
 
 Reserved for the founder (DEC-79): anything involving live trading, live credentials, or real money
 (never do these; AGENTS.md rule 8); spending or new paid services; legal and compliance text; and
