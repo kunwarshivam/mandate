@@ -2211,6 +2211,29 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   quantity reading is the one that stays**: do not remove it.
   *Done (the minimum half, reference side):* #504 moves `ref.py` to the same quantity minimum, has
   §5.5 name it, and adds MC-B33 and MC-B34, which pin the two readings' difference.
+- **E6-4: a trim that sells everything left to sell is never withheld for the minimum
+  ([DEC-423](decisions/DEC-423.md); #504 review, M1, and the coordinator's ruling there).
+  Required next in stream G, ahead of MC-B33 and MC-B34's status PR and the harness cleanup.**
+  `trim::proposals` (DEC-399 item 5) and, since #504, `ref.py` withhold a trim below
+  `min_order_size` even when it is the whole unsold quantity. Trading spec §5.3 rule 2 exempts a
+  sell closing the full position, and `account_rules.rs` and `conduct.rs` both call it always
+  valid, so this is a risk exit held by a venue minimum. The review's case: 0.0002 BTC at a
+  600,000 bid (120 dollars), a cap of 100, a confirmed factor of 0.5, a 0.0001 increment and a
+  `min_order_size` of 0.001; the trim is 0.0002, the whole position, and it is withheld at every
+  evaluation. In order:
+  (1) a DEC-77 tests PR in `mandate-risk`: a trim equal to the unsold quantity is proposed below
+  `min_order_size` (this crypto case and an equity one), and a sub-minimum trim that is not a full
+  close is still withheld;
+  (2) the gate change;
+  (3) §5.5 gains the exemption, `ref.py` takes it, a new case states the full-close trim, and the
+  harness's `trim_guards` moves with them, as #498 did.
+- **E6-4 reference: `ref.py` judges the trim's minimum on the whole excess, not on the remainder
+  after open sells** (#504 review, m2). `ref.py`'s builder has no open-sell input, so it sizes the
+  trim on the whole excess. The gate subtracts the agent's own resting sells first (DEC-399 items 5
+  and 7, pinned by #507). For example, 10 shares held, 2 resting on an agent sell, an excess of 3
+  shares and a `min_order_size` of 3: the gate proposes nothing (a 1-share remainder), and `ref.py`
+  proposes 3. No reference case states a resting sell. The oracle errs toward selling more, so a
+  case that reached it would fail loudly. Carry an open-sell input into `ref.py` and add a case.
 - **E6-4 harness cleanup: drop the transitional branches once MC-B33 and MC-B34 are on `main`**
   (#498 review, M1). In `crates/mandate-refcases/src/mandate/order_builder.rs`:
   (a) drop `AWAITED`, `awaited`, `counted` and the without-branch, so the case list and the sweep
