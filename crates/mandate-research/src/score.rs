@@ -335,13 +335,16 @@ pub fn buy_and_hold(
 /// returns.
 ///
 /// # Errors
-/// Returns [`ResearchError`] for a member's boundary failure, and
-/// [`ResearchError::Num`] for an empty basket, whose mean is undefined.
+/// Returns [`ResearchError::EmptyBasket`] for a basket with no members, whose mean is
+/// undefined (DEC-380), and [`ResearchError`] for a member's boundary failure.
 pub fn basket_return(
     members: &[CloseSeries],
     as_of: UtcNanos,
     horizon_end: UtcNanos,
 ) -> Result<Ratio, ResearchError> {
+    if members.is_empty() {
+        return Err(ResearchError::EmptyBasket);
+    }
     let returns = members
         .iter()
         .map(|member| buy_and_hold(member, as_of, horizon_end))
@@ -354,12 +357,14 @@ pub fn basket_return(
 /// mean excess, the one-sided bound, and pass against both baselines.
 ///
 /// # Errors
-/// Returns [`ResearchError::ThesisOutsideWindow`] for a thesis whose horizon closes outside
-/// the registered window, [`ResearchError::EmptyScoreableSet`] for an evaluation whose
-/// scoreable set is empty — no theses at all, or every thesis unscoreable — where the count
-/// refusal does not answer it, a registered minimum of zero (DEC-335),
+/// In the order they are checked: [`ResearchError::ThesisOutsideWindow`] for a thesis whose
+/// horizon closes outside the registered window; while scoring each thesis,
+/// [`ResearchError::EmptyBasket`] for a scoreable thesis measured against a basket with no
+/// members (DEC-380) and [`ResearchError::Num`] for the arithmetic a figure cannot express;
 /// [`ResearchError::WindowNotClosed`] when fewer than the minimum scoreable closed theses are
-/// scoreable, and [`ResearchError::Num`] for the arithmetic a figure cannot express.
+/// scoreable; and [`ResearchError::EmptyScoreableSet`] for an evaluation whose scoreable set
+/// is empty — no theses at all, or every thesis unscoreable — where the count refusal does not
+/// answer it, a registered minimum of zero (DEC-335).
 pub fn evaluate(input: &EvaluationInput<'_>) -> Result<Scorecard, ResearchError> {
     for thesis in input.theses {
         if thesis.horizon_end < input.decision.window.from
@@ -524,6 +529,7 @@ mod tests {
             ResearchError::EmptyScoreableSet.code(),
             "empty_scoreable_set"
         );
+        assert_eq!(ResearchError::EmptyBasket.code(), "empty_basket");
     }
 
     /// The report's rounding scale, pinned live (DEC-127 item 4's, the same scale every figure
@@ -924,6 +930,120 @@ mod tests {
                 Ratio::parse("0")?
             )),
             "the close at the horizon itself is the first close inside the window, and the last close at or before the horizon: entry and exit are one close, so the window return is zero, a figure"
+        );
+        Ok(())
+    }
+
+    /// DEC-380 item 2 (#455 review, minor 1): a thesis outside the registered window is refused
+    /// before the empty basket is ever read, alone and beside a scoreable thesis that would read
+    /// it, so the basket's arm never overrides the window refusal DEC-282 item 3 puts first.
+    #[test]
+    fn a_thesis_outside_the_window_is_refused_before_an_empty_basket() -> Result<(), ResearchError>
+    {
+        let scored = long_thesis("th-1", "asset-a")?;
+        let mut outside = long_thesis("th-2", "asset-b")?;
+        outside.horizon_end = t(12_000)?;
+        let instruments = BTreeMap::from([
+            (
+                AssetId::new("asset-a")?,
+                two_closes("asset-a", "100", "110")?,
+            ),
+            (
+                AssetId::new("asset-b")?,
+                two_closes("asset-b", "100", "110")?,
+            ),
+        ]);
+        let registered = EvaluationDecision {
+            window: EvaluationWindow {
+                from: t(0)?,
+                to: t(10_000)?,
+            },
+            minimum_scoreable: 0,
+            z: Ratio::parse("1.645")?,
+        };
+        let index = two_closes("index", "400", "400")?;
+        for theses in [vec![outside.clone()], vec![scored.clone(), outside.clone()]] {
+            let refused = evaluate(&EvaluationInput {
+                decision: &registered,
+                theses: &theses,
+                instruments: &instruments,
+                basket: &[],
+                index: &index,
+            });
+            assert!(
+                matches!(refused, Err(ResearchError::ThesisOutsideWindow)),
+                "the window refusal comes before the empty basket, got {refused:?}"
+            );
+        }
+        let refused = evaluate(&EvaluationInput {
+            decision: &registered,
+            theses: &[scored],
+            instruments: &instruments,
+            basket: &[],
+            index: &index,
+        });
+        assert!(
+            matches!(refused, Err(ResearchError::EmptyBasket)),
+            "the control: the same scoreable thesis inside the window reads the empty basket, \
+             got {refused:?}"
+        );
+        Ok(())
+    }
+
+    /// DEC-380 item 1 (#455 review, minor 2; #460 review, minor 2): a basket with members is
+    /// unchanged, so neither a member's own boundary failure nor the mean's own arithmetic is
+    /// ever named an empty basket — a member with no close strictly after `as_of` within the
+    /// horizon, one with no close at or before the horizon, and three members whose returns sum
+    /// past what a `Ratio` holds, which one such member alone does not.
+    #[test]
+    fn a_member_s_own_refusal_is_never_named_an_empty_basket() -> Result<(), ResearchError> {
+        let close = |secs: i64, price: &str| -> Result<ObservedClose, ResearchError> {
+            Ok(ObservedClose {
+                at: t(secs)?,
+                price: Price::parse(price)?,
+            })
+        };
+        let no_entry = CloseSeries::new(
+            AssetId::new("basket-1")?,
+            vec![close(50, "100")?, close(2_000, "110")?],
+        )?;
+        let no_exit = CloseSeries::new(
+            AssetId::new("basket-2")?,
+            vec![close(2_000, "100")?, close(3_000, "110")?],
+        )?;
+        let refused = basket_return(&[no_entry], t(100)?, t(1_000)?);
+        assert!(
+            matches!(refused, Err(ResearchError::NoCloseAfter)),
+            "a member with no entry close keeps its own code, got {refused:?}"
+        );
+        let refused = basket_return(&[no_exit], t(100)?, t(1_000)?);
+        assert!(
+            matches!(refused, Err(ResearchError::NoCloseOnOrBefore)),
+            "a member with no exit close keeps its own code, got {refused:?}"
+        );
+        let soaring = |id: &str| -> Result<CloseSeries, ResearchError> {
+            CloseSeries::new(
+                AssetId::new(id)?,
+                vec![close(200, "0.000000003")?, close(400, "100000000")?],
+            )
+        };
+        let alone = basket_return(&[soaring("basket-1")?], t(100)?, t(1_000)?);
+        assert!(
+            alone.is_ok(),
+            "the control: one such member's return is a figure, got {alone:?}"
+        );
+        let refused = basket_return(
+            &[
+                soaring("basket-1")?,
+                soaring("basket-2")?,
+                soaring("basket-3")?,
+            ],
+            t(100)?,
+            t(1_000)?,
+        );
+        assert!(
+            matches!(refused, Err(ResearchError::Num(NumError::Overflow))),
+            "a mean whose sum overflows keeps the arithmetic's own code, got {refused:?}"
         );
         Ok(())
     }

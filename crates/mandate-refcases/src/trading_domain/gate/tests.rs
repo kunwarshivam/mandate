@@ -752,7 +752,6 @@ fn the_overnight_shares_are_the_position_less_today_s_fills() -> Result<(), Stri
 /// is pending E6-10: until its story lands the stub reports itself, and this test pins the
 /// refusal's text against it.
 #[test]
-#[ignore = "pending E6-10"]
 fn a_short_position_is_refused_where_a_day_trade_count_is_expected() -> Result<(), String> {
     expect_eq(
         "a short position under a day_trade_count expectation",
@@ -798,8 +797,10 @@ fn a_short_position_is_refused_where_a_day_trade_count_is_expected() -> Result<(
 /// `a_flat_initial_position_is_no_position_to_the_fold` pins at the case level. Every negative is
 /// refused, from a ten-millionth of a share through half a share to whole shares, so a
 /// refusal narrowed to a whole share (`qty.abs() >= 1`), which would fold a sub-share short as long,
-/// fails here too (#438 review, round 2, blocker 2). Until E6-10 lands the refusal is the stub's
-/// report; the implementation PR swaps it for DEC-314's text (DEC-77's 2026-09-27 amendment).
+/// fails here too (#438 review, round 2, blocker 2), and so does one narrowed to a hundred-millionth
+/// (`qty.abs() >= 0.00000001`), which would fold the smallest short a case can state, a billionth
+/// of a share, as long (#438 review, round 3, m6). The refusal is DEC-314's text, swapped in for
+/// the stub's report by E6-10's implementation (DEC-77's 2026-09-27 amendment, DEC-395 item 3).
 #[test]
 fn only_a_negative_quantity_is_a_short_to_the_fold() -> Result<(), String> {
     for (position, held) in [("0", "0"), ("10", "10")] {
@@ -807,13 +808,13 @@ fn only_a_negative_quantity_is_a_short_to_the_fold() -> Result<(), String> {
         let shares = Qty::parse(held).map_err(|e| e.to_string())?;
         expect_eq(position, held_overnight("AAPL", qty), Ok(shares))?;
     }
-    for position in ["-0.0000001", "-0.5", "-1", "-10"] {
+    for position in ["-0.000000001", "-0.0000001", "-0.5", "-1", "-10"] {
         let qty = SignedQty::parse(position).map_err(|e| e.to_string())?;
         expect_eq(
             position,
             held_overnight("AAPL", qty),
             Err(
-                "the day-trade fold's refusal of a short position is not implemented yet (pending E6-10)"
+                "`AAPL` is held short, which the day-trade fold refuses (its magnitude would fold as long and understate the day-trade count)"
                     .to_owned(),
             ),
         )?;
@@ -864,50 +865,108 @@ fn a_flat_initial_position_is_no_position_to_the_fold() -> Result<(), String> {
     )
 }
 
-/// The report a `crypto_status` read gives until E6-10 lands (DEC-315 item 3): the stub's own,
-/// where `main` before DEC-315 answered `` initial account `crypto_status` not interpreted until
-/// E6-10 ``. The implementation PR replaces the stub and these two tests (DEC-77's 2026-09-27
-/// amendment).
-const CRYPTO_STATUS_STUB: &str =
-    "the account's `crypto_status` is not implemented yet (pending E6-10)";
+/// RC-09 with `crypto_status` stated in the initial account or in a `broker_account_update` at
+/// 09:30, before its first step.
+fn rc_09_with_crypto_status(in_update: bool, status: Json) -> Result<(), String> {
+    if !in_update {
+        return run_edited("RC-09", account("crypto_status", status));
+    }
+    run_edited(
+        "RC-09",
+        Box::new(move |c| {
+            steps_of(c)?.insert(
+                0,
+                json!({
+                    "at": "2026-09-21T09:30:00-04:00",
+                    "event": "broker_account_update",
+                    "data": { "crypto_status": status }
+                }),
+            );
+            Ok(())
+        }),
+    )
+}
 
-/// An initial account stating `crypto_status` reaches the gate's read of it, which reports its
-/// stub, whatever the status: it is no longer noted as not interpreted, and never silently read as
-/// crypto-active.
+/// A `crypto_status` is read wherever a case states it, initial or in an update, and refuses
+/// nothing but crypto openings (DEC-315 item 1, DEC-395 item 4): under `ACTIVE` and `INACTIVE`
+/// alike RC-09 passes as written, its AAPL opening denied by the day-trade budget, never by the
+/// crypto status, and its BTCUSD risk exit allowed, since check 1's `crypto_active` never refuses a
+/// risk exit (`AGENTS.md` rule 13). These replace the two pins of the stub's report (DEC-315
+/// item 3).
 #[test]
-fn an_initial_crypto_status_reports_its_stub_until_e6_10() -> Result<(), String> {
-    for status in ["ACTIVE", "INACTIVE"] {
+fn a_crypto_status_never_refuses_an_equity_decision_or_a_crypto_risk_exit() -> Result<(), String> {
+    for in_update in [false, true] {
+        for status in ["ACTIVE", "INACTIVE"] {
+            expect_eq(
+                &format!("{status}, in an update: {in_update}"),
+                rc_09_with_crypto_status(in_update, json!(status)),
+                Ok(()),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// A `crypto_status` that is not a string is refused, initial or in an update, as `status` is,
+/// rather than read as active or inactive (DEC-395 item 2).
+#[test]
+fn a_crypto_status_that_is_not_a_string_is_refused() -> Result<(), String> {
+    for value in [json!(true), json!(null), json!(1)] {
         expect_eq(
-            status,
-            run_edited("RC-09", account("crypto_status", json!(status))),
-            Err(CRYPTO_STATUS_STUB.to_owned()),
+            &format!("initial {value}"),
+            rc_09_with_crypto_status(false, value.clone()),
+            Err("account `crypto_status` is not a string".to_owned()),
+        )?;
+        expect_eq(
+            &format!("updated {value}"),
+            rc_09_with_crypto_status(true, value),
+            Err("step 1: account `crypto_status` is not a string".to_owned()),
         )?;
     }
     Ok(())
 }
 
-/// A `broker_account_update` stating `crypto_status` reaches the gate's read of it at that step,
-/// which reports its stub: the update is no longer refused as a field not interpreted.
+/// Only `ACTIVE`, spelled exactly, leaves crypto openings open (DEC-395 item 2): a status in
+/// another case, padded, or empty denies RC-09's BTCUSD opening `crypto_account_inactive`, as
+/// `status` reads only an exact `ACTIVE` as active. `last_equity` lifts the legacy-pdt budget so
+/// check 1 is what decides.
 #[test]
-fn an_account_update_s_crypto_status_reports_its_stub_until_e6_10() -> Result<(), String> {
-    for status in ["ACTIVE", "INACTIVE"] {
+fn only_an_exact_active_crypto_status_leaves_crypto_openings_open() -> Result<(), String> {
+    let buy_btc = |status: &'static str, decision: Json| -> Edit {
+        Box::new(move |c| {
+            put(c, &["initial", "account"], "crypto_status", json!(status))?;
+            put(c, &["initial", "account"], "last_equity", json!("25000.00"))?;
+            object_at(c, &[])?.insert(
+                "steps".to_owned(),
+                json!([{
+                    "at": "2026-09-21T10:00:00-04:00",
+                    "event": "propose_order",
+                    "data": {
+                        "instrument": "BTCUSD", "side": "buy", "type": "limit",
+                        "qty": "0.01", "limit_price": "60000.00", "purpose": "open"
+                    },
+                    "expect": { "decision": decision }
+                }]),
+            );
+            Ok(())
+        })
+    };
+    expect_eq(
+        "ACTIVE",
+        run_edited("RC-09", buy_btc("ACTIVE", json!({ "verdict": "allow" }))),
+        Ok(()),
+    )?;
+    for status in ["active", "Active", " ACTIVE", "ACTIVE ", ""] {
         expect_eq(
             status,
             run_edited(
                 "RC-09",
-                Box::new(move |c| {
-                    steps_of(c)?.insert(
-                        0,
-                        json!({
-                            "at": "2026-09-21T09:30:00-04:00",
-                            "event": "broker_account_update",
-                            "data": { "crypto_status": status }
-                        }),
-                    );
-                    Ok(())
-                }),
+                buy_btc(
+                    status,
+                    json!({ "verdict": "deny", "reason_code": "crypto_account_inactive" }),
+                ),
             ),
-            Err(format!("step 1: {CRYPTO_STATUS_STUB}")),
+            Ok(()),
         )?;
     }
     Ok(())

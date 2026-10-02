@@ -808,7 +808,6 @@ fn buy_btc() -> Json {
 /// lifted at the $25,000 threshold, is the only check the pair leaves to differ). The read is
 /// pending E6-10: until its story lands the stub refuses the read and reports itself.
 #[test]
-#[ignore = "pending E6-10"]
 fn the_initial_crypto_status_is_check_1s_crypto_active() {
     let with_status = |status: &str, decision: Json| {
         run(
@@ -869,7 +868,6 @@ fn crypto_updates(initial_status: &str, updates: &[&str], decision: Json) -> Res
 /// account decides it as before. The read is pending E6-10: until its story lands the stub refuses
 /// the read and reports itself.
 #[test]
-#[ignore = "pending E6-10"]
 fn an_account_update_s_crypto_status_is_check_1s_crypto_active() {
     assert_eq!(
         crypto_updates(
@@ -892,7 +890,6 @@ fn an_account_update_s_crypto_status_is_check_1s_crypto_active() {
 /// other status fields, whether it was detected in the initial account or by an earlier update.
 /// The read is pending E6-10: until its story lands the stub refuses the read and reports itself.
 #[test]
-#[ignore = "pending E6-10"]
 fn a_later_active_crypto_status_never_lifts_a_detected_inactivity() {
     assert_eq!(
         crypto_updates(

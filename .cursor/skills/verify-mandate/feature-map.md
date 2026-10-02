@@ -83,14 +83,18 @@ every workspace crate and reference-case suite has an entry and that every path 
   backtest mark is the bar close); DEC-106 records the choices §6.4 leaves open.
 - **Code:** `mandate-sim`: `crates/mandate-sim/src/lib.rs` (bars with their session labels, orders,
   configuration, fills, end states, errors), `crates/mandate-sim/src/fill.rs` (the pure walk over
-  bars: timing, sessions, the shared volume cap, market, limit, stop, stop-limit, and OCO rules);
+  bars: timing, sessions, the shared volume cap, market, limit, stop, stop-limit, and OCO rules,
+  and `check_sessions_of_asset_class`, which refuses a bar on a session its instrument's asset class
+  never trades, spec §4.3, E4-3, DEC-377);
   the arithmetic is `mandate-num`'s (`Fraction`, `Qty::portion`, `Price::slipped`,
   `Bps::sqrt_impact`).
 - **Tests:** `crates/mandate-sim/tests/hand.rs` (every order of RC-10, RC-12, and RC-19 recomputed
   by hand, plus the rules those cases do not reach: latency, day-order cancellation, the shared cap,
-  the 20-session median, `sqrt` impact, adverse rounding, crypto),
+  the 20-session median, `sqrt` impact, adverse rounding, crypto, and E4-3's session-of-asset-class
+  refusal by bar index, code, and message),
   `crates/mandate-sim/tests/properties.rs` (one property per rule and per never-or-always clause,
-  against an order-major `i128` simulator as the oracle), `crates/mandate-num/tests/num.rs` (the
+  against an order-major `i128` simulator as the oracle, and E4-3's refusal against spec §4.3's
+  session table), `crates/mandate-num/tests/num.rs` (the
   fill model's arithmetic against an i128 oracle and hand-computed roots),
   `crates/mandate-refcases/tests/harness.rs` (the backtest harness reads every key the cases state).
 - **Reference cases:** `trading_domain::RC-10`, `RC-12`, and `RC-19` in
@@ -173,10 +177,10 @@ the crate is pending.
   the spec guard keeps that file apart from code (ES-22). Family B (all 32 `MC-B` cases) runs in the
   shared harness through `crates/mandate-refcases/src/mandate/order_builder.rs` (DEC-250): `propose`,
   then `mandate_risk::evaluate` on the proposed order as §6.2 step 2's dry run, then `decide` on
-  that verdict, with the session and close window from `mandate_risk::session_at`. 25 pass,
-  `MC-B22` after hours and `MC-B23` in the close window among them since #347 moved their clocks;
-  the four `trim_to_target` cases fail at `mandate_risk::trim_proposals` (E6-4) and the three
-  crypto buys at the gate's owed check 2 (E6-10). Its in-module tests doctor the fixture to prove
+  that verdict, with the session and close window from `mandate_risk::session_at`. 28 pass,
+  `MC-B22` after hours and `MC-B23` in the close window among them since #347 moved their clocks,
+  and the three crypto buys, `MC-B26` to `MC-B28`, since E6-10's check 2 (#422); the four
+  `trim_to_target` cases fail at `mandate_risk::trim_proposals` (E6-4). Its in-module tests doctor the fixture to prove
   every member is read, a cash fee rate the gate would not reserve is refused, and a `session` or
   `in_close_window` label that contradicts `now` fails the case.
 - **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; families A and B in the shared
@@ -381,6 +385,16 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   reviewer's three paths, and `no_exit_waits_past_the_bound_but_under_a_rule_13_hold`, a property
   over random scripts against an oracle read from the drafts. Run: `cargo nextest run -p
   mandate-executor --lib protection::sequence_tests`.
+- **Account-stream writers (E7-10, DEC-305 to DEC-307, DEC-389, DEC-390):** `risk_clock` as
+  §9.2's whole-second timestamp (`payload::risk_clock_stamp`, stamped by `Batch::journal`; the
+  fold reads it and the older integer seconds through `payload::clock_of`), the fee step's pause
+  and alert whether or not its snapshot recorded (`reconcile::fee_step_pause_and_alert`), the fee
+  step's §9.2 snapshot payload (`reconcile::fee_step_snapshot_fields`), and §9.1's
+  `IntentReceived` and `OrderSubmitted`'s `limit_price` (`intent::intent_received_fields`,
+  `intent::order_submitted_optional_fields`); the last three are not yet wired (DEC-389 items 2
+  and 3). Pins are in-module and read the journal vectors: `payload::stamp_tests`,
+  `intent::draft_member_tests`, and `reconcile::tests::the_fee_steps_*`. Run: `cargo nextest run
+  -p mandate-executor -E 'test(fee_steps) | test(draft_member_tests) | test(stamp_tests)'`.
 - **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
   `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
   `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they
@@ -397,9 +411,10 @@ E6-9 check 3's halt and no market orders under a presumed halt (a market exit is
 E6-7 check 2's eligibility floor, E6-6 `session_at`, check 3's sessions, the rest of check 4,
 check 7's buying power and check 8's `legacy_pdt` budget with its account-wide ledger fold, and E6-8 check 5's mark and collar,
 check 6's conduct controls, the pacing of an allowed exit, `evaluate_cancel` and `surveillance`
-(DEC-163). Until every check exists the gate fails closed for adding risk (DEC-129 item 29): a
-crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by reading
-`InstrumentSnapshot::quote_currency` (DEC-254), while a reducing purpose passes a check still owed.
+(DEC-163), and E6-10 check 2's USD pairs for crypto, read from
+`InstrumentSnapshot::quote_currency` (DEC-254, DEC-255), so every check is whole for both asset
+classes. Were a check still owed, the gate would fail closed for adding risk (DEC-129 item 29),
+while a reducing purpose passes it.
 
 - **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
   §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
@@ -428,8 +443,10 @@ crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by re
   account-wide from every agent's fills, DEC-259, with its in-module hand tests and a running-total
   oracle property),
   `crates/mandate-risk/src/conduct.rs` (check 5's fresh quote and collar, check 6's conduct
-  controls, the collar, participation and close-window pacing of an allowed exit, and
-  `evaluate_cancel`'s minimum resting time, trading spec §8.2 and §9.6),
+  controls, the collar, participation and close-window pacing of an allowed exit, a
+  discretionary exit whose collar cannot be computed routed whole by the other controls alone
+  (E6-6, DEC-327, DEC-383), and `evaluate_cancel`'s minimum resting time, trading spec §8.2 and
+  §9.6),
   `crates/mandate-risk/src/surveillance.rs` (§9.6's daily surveillance report: figures and flagged
   thresholds, concentration a figure only, no judgement), `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
@@ -439,14 +456,17 @@ crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by re
   spec, the mode rule, the `Unknown`-order rule, the account states, the eligibility floor, and a
   check that every reason code the gate can emit is registered in the founder-owned case file),
   `crates/mandate-risk/tests/properties.rs` (one property per invariant and per "never" or "always"
-  in §9, including MI-1 scoped to its own words, the mode rule, MI-8, and a shadow-ledger sequence
-  property), `crates/mandate-risk/tests/usd_pairs.rs` (§3.2 item 7's USD pairs for crypto, E6-10:
+  in §9, including MI-1 scoped to its own words, the mode rule, MI-8, a shadow-ledger sequence
+  property, and `an_exit_over_extreme_figures_is_still_routed`), `crates/mandate-risk/tests/usd_pairs.rs` (§3.2 item 7's USD pairs for crypto, E6-10:
   a non-USD or unstated pair denied at check 2, a USD pair passing, check 2 whole for crypto, an
   exit in any pair and a US equity never judged by the rule, and a property whose oracle is
-  `opening ∧ crypto ∧ quote ≠ USD`; pending E6-10 except the exit, equity and check-1 cases),
+  `opening ∧ crypto ∧ quote ≠ USD`; live since E6-10's implementation, #394),
   `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
-  oracle, which never calls the crate's arithmetic), and the in-module tests in `gate.rs` and
-  `surveillance.rs` for the boundaries the files above cannot pin. Planted bugs per test: the task
+  oracle, which never calls the crate's arithmetic), and the in-module tests in `gate.rs`,
+  `conduct.rs` and `surveillance.rs` for the boundaries the files above cannot pin (among them
+  E6-6's exit routing, DEC-383: an exit over an uncomputable collar routed at its own limit and
+  sliced as an `i128` oracle computes, an opening over one and a proposal of zero keeping the
+  collar's error, and only `overflow` and `not_positive` skipped). Planted bugs per test: the task
   brief.
 - **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
   `fixtures/refcases/mandate.json`, through `crates/mandate-refcases/src/mandate/risk_gate.rs`
@@ -489,6 +509,25 @@ crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by re
   `fixtures/refcases/journal.json`, generated by `reference/journal/generate.py`).
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-refcases --run-ignored all -E
   'binary(agent_stream) | test(/agent_stream/)'`.
+
+## Control-stream payload schemas and the `JournaledFact` mapping (E7-10)
+
+- **Spec:** `docs/specs/journal.md` §9.2 (the control stream's closed schemas, `OwnerCommandRefused`
+  on the agent and account streams, the `pointer` and `date` types, consistency rules 17 to 23,
+  subject rules 25 and 26, copy rule 27, and the mapping table); DEC-168, DEC-261, DEC-302, DEC-303,
+  DEC-304. `AccountSnapshotRecorded` and rule 24 are not registered yet (DEC-261 item 7).
+- **Code:** `crates/mandate-journal/src/control.rs` (`Draft::parse` routes each §9.2 type on its
+  stream; `payload`, then `subject_and_copy`), `crates/mandate-journal/src/schema.rs` (`Ty::Pointer`),
+  `crates/mandate-spec/src/context.rs` (`JournaledFact::from_record`, a stub until the mapping's PR, DEC-303 item 8).
+- **Tests:** `crates/mandate-refcases/tests/control_stream.rs` (one test per §9.2 family, the chain,
+  and the mapping over the vectors' `journaled_facts`), `crates/mandate-spec/tests/journal_record.rs`
+  (the mapping from hand-written records), `crates/mandate-journal/tests/catalogue.rs` (unlisted
+  members at every depth; `account_snapshot_recorded_waits_for_the_fee_step_writer`),
+  `control::tests` in `control.rs` (the vectors inside the crate), and
+  `mandate-executor`'s `reconcile::tests::the_fee_steps_snapshot_is_never_refused_for_its_members`.
+- **Run:** `cargo nextest run -p mandate-journal -p mandate-spec -p mandate-refcases -p
+  mandate-executor -E 'binary(control_stream) | binary(journal_record) | binary(catalogue) |
+  test(/control::tests/) | test(the_fee_steps_snapshot_is_never_refused_for_its_members)'`.
 
 ## Append protocol
 
@@ -776,13 +815,17 @@ proves each pending test fails on them (DEC-110).
   power; every other step type and expectation key fails as "not interpreted until" its owning
   story), `crates/mandate-refcases/src/trading_domain/gate.rs` (E6-9's gate driver, DEC-199:
   `propose_order` steps and the `decision` expectation through `mandate_risk::evaluate`, and the
-  account's §7.3 status from `initial.account` and `broker_account_update`; its in-module tests
-  run RC-15's steps 3 and 4 in a `closing_only` account),
+  account's §7.3 status from `initial.account` and `broker_account_update`, `crypto_status` as
+  check 1's `crypto_active` with only an exact `ACTIVE` active and a detected inactivity never
+  lifted, and a short refused by the day-trade fold (E6-10, DEC-314, DEC-315, DEC-395); its
+  in-module tests run RC-15's steps 3 and 4 in a `closing_only` account),
   `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/tests/harness.rs`
   (the harness reads the account type and checks `buying_power`: RC-08 and RC-18's cash variant
   without their gate step), `crates/mandate-refcases/tests/trading_domain_gate_harness.rs` (the gate
   driver reads every key it claims, an edited decision fails, and what it cannot read is refused;
-  RC-15's `status_not_active` without its later stories' expectations passes),
+  RC-15's `status_not_active` without its later stories' expectations passes; RC-09's crypto
+  opening denied `crypto_account_inactive` by an initial or updated `crypto_status`, and never
+  lifted by a later `ACTIVE`),
   `crates/mandate-refcases/src/mandate/research.rs` (family N of the
   mandate suite, through `mandate-research`), `crates/mandate-refcases/src/mandate/autonomy.rs`
   (family A, through `mandate-builder`'s `classify`), `crates/mandate-refcases/src/mandate/order_builder.rs`

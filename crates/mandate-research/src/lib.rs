@@ -1213,9 +1213,15 @@ pub enum ResearchError {
     /// DEC-282 item 9, DEC-335)
     #[error("an evaluation's scoreable set is empty, so there is nothing to aggregate")]
     EmptyScoreableSet,
-    /// Returned by no entry point of this crate since E17-6's implementation landed the last
-    /// stubs; kept because ES-09's registry is add-only and the `unimplemented` code is pinned
-    /// live, so a future staged story can name itself and its story again (DEC-77, DEC-294).
+    /// A basket with no members has no equal-weighted mean, and refuses under its own name
+    /// rather than the nameless division its mean of nothing reached (#435 review minor 3,
+    /// DEC-380)
+    #[error("the basket has no members, so it has no equal-weighted mean")]
+    EmptyBasket,
+    /// Returned by no entry point of this crate since the empty-basket follow-up's
+    /// implementation replaced its stub (DEC-380); kept because ES-09's registry is add-only and
+    /// the `unimplemented` code is pinned live, so a staged story can name itself and its story
+    /// (DEC-77, DEC-294).
     #[error("{0} is not implemented yet (pending {1})")]
     Unimplemented(&'static str, &'static str),
     #[error(transparent)]
@@ -1250,6 +1256,7 @@ impl ResearchError {
             Self::ThesisOutsideWindow => "thesis_outside_window",
             Self::NegativeExposure => "negative_exposure",
             Self::EmptyScoreableSet => "empty_scoreable_set",
+            Self::EmptyBasket => "empty_basket",
             Self::Unimplemented(_, _) => "unimplemented",
             Self::SpecType(_) => "spec_type",
             Self::Num(e) => e.code(),
