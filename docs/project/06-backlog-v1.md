@@ -906,10 +906,13 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   *Follow-up (#435 review, minor 3):* `score::basket_return` over an empty `members` slice refuses
   with the nameless `Num(DivisionByZero)`, pinned live by `an_empty_basket_is_an_error`: loud, so no
   figure escapes, but a code that tells a caller nothing. A tests PR names it the way DEC-335 named
-  the empty scoreable set (an add-only `ResearchError` arm and code). Tests PR open on
-  `agent/j-e17-8-empty-basket-tests` (DEC-380): `ResearchError::EmptyBasket`, code
-  `empty_basket`. The live pin `an_empty_basket_is_an_error` held only `Num(_)`, so it becomes a
-  stricter pending test.
+  the empty scoreable set (an add-only `ResearchError` arm and code). Tests merged in [#455](https://github.com/kunwarshivam/mandate/pull/455) (DEC-380): `ResearchError::EmptyBasket`, code
+  `empty_basket`; the implementation PR (DEC-77 stage 2) replaces the stub with the arm, deletes
+  only the three `#[ignore]` lines, and adds #455's minors 1 and 2 as in-module tests.
+  *Follow-up (#455 review, nit):* `no_basket_reaches_division_by_zero`'s `excess_by_size[0]` is
+  `""`, and `r("")` panics; the `reported` branch never reaches a zero-member basket today, so
+  it never fires, but a later generator change would make it a fixture panic. A tests change
+  gives index 0 a real figure or removes it.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
