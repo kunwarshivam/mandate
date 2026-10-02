@@ -390,6 +390,51 @@ pub(crate) fn journal_rung(
     Ok(())
 }
 
+/// `IntentReceived`'s intent members, as journal spec §9.1 closes them and the vectors'
+/// `IntentReceived` carries them: `agent_id`, `instrument_id`, `type`, `tif`, and `limit_price`,
+/// beside `intent_id`, `side`, `qty`, and `purpose` — never `agent`, `kind`, `instrument`, or
+/// `limit` (DEC-174 item 5). `type` is the intent's order type and `tif` the one the submission
+/// will carry, so the record names the order the gate will actually decide. The body is the
+/// intent's own, so the members come from what the agent proposed. The protective prices stay
+/// beside this list, as `received` writes them today.
+///
+/// # Errors
+/// [`ExecutorError::Unimplemented`] in this tests PR; `received` builds its pairs from this in
+/// the implementation PR, which deletes the pending pins (DEC-77).
+#[allow(
+    dead_code,
+    reason = "the tests PR ships this writer and its contract; `received` calls it in the implementation PR (DEC-77, DEC-83)"
+)]
+pub(crate) fn intent_received_fields(
+    intent_id: &IntentId,
+    agent: &AgentId,
+    body: &IntentBody,
+    tif: TimeInForce,
+) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
+    let _ = (intent_id, agent, body, tif);
+    Err(ExecutorError::Unimplemented { story: "E7-10" })
+}
+
+/// `OrderSubmitted`'s optional members, present as `null` when they are empty rather than omitted
+/// (§4.2, DEC-174 item 5): the intent the submission serves, the limit a market order never has,
+/// the stop price, and the OCO class and its two legs. A draft that omits a schema-declared
+/// member is refused at that member, so an empty one must read as `null`.
+///
+/// # Errors
+/// [`ExecutorError::Unimplemented`] in this tests PR; `journal_rung` replaces its conditional
+/// members with this in the implementation PR, which deletes the pending pins (DEC-77).
+#[allow(
+    dead_code,
+    reason = "the tests PR ships this writer and its contract; `journal_rung` calls it in the implementation PR (DEC-77, DEC-83)"
+)]
+pub(crate) fn order_submitted_optional_fields(
+    request: &SubmitOrder,
+    intent: Option<&IntentId>,
+) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
+    let _ = (request, intent);
+    Err(ExecutorError::Unimplemented { story: "E7-10" })
+}
+
 /// `OrderAbandoned`: one of §5.7's two cases — a gate re-check that does not allow, or an intent
 /// older than `max_intent_age` — or §5.4's bound cancelling an exit that has no order yet
 /// ([`crate::protection::bound`]). Terminal, so the reservation is released and a later re-hand of
@@ -574,6 +619,213 @@ mod bracket_call_tests {
         assert_eq!(
             executor.run(add("01JABCDEFGHJKMNPQRSTVWXYZ2", Some(prices))?, &ports),
             Err(ExecutorError::Unimplemented { story: "E7-4" })
+        );
+        Ok(())
+    }
+}
+
+/// The account-stream writers' member pins (DEC-174 item 5, journal spec §9.1 and the vectors):
+/// each reads its expectations from the committed fixture, so a vector change re-reads rather
+/// than passing silently.
+#[cfg(test)]
+mod draft_member_tests {
+    use std::collections::BTreeMap;
+
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_num::{Price, Qty};
+    use serde_json::Value as Json;
+
+    use super::intent_received_fields;
+    use super::order_submitted_optional_fields;
+    use crate::error::ExecutorError;
+    use crate::ids::{ClientOrderId, IntentId};
+    use crate::types::{
+        AgentId, EventId, IntentBody, OcoLegs, OrderType, Purpose, SubmitOrder, TimeInForce,
+    };
+
+    /// The journal vectors' `IntentReceived` draft (`fixtures/refcases/journal.json`, the
+    /// account-stream chain's seq 2), whose payload is the member list §9.1 closes.
+    fn vector_intent_received() -> Result<BTreeMap<String, String>, ExecutorError> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/refcases/journal.json"
+        );
+        let text = std::fs::read_to_string(path).map_err(|_| non_canonical())?;
+        let fixture: Json = serde_json::from_str(&text).map_err(|_| non_canonical())?;
+        let body = fixture.pointer("/chain/1/body").ok_or_else(non_canonical)?;
+        let event_type = body
+            .get("event_type")
+            .and_then(Json::as_str)
+            .ok_or_else(non_canonical)?;
+        assert_eq!(
+            event_type, "IntentReceived",
+            "the vector at seq 2 is the intent"
+        );
+        let payload = body.get("payload").ok_or_else(non_canonical)?;
+        payload
+            .as_object()
+            .ok_or_else(non_canonical)?
+            .iter()
+            .map(|(name, value)| {
+                Ok((
+                    name.clone(),
+                    value.as_str().ok_or_else(non_canonical)?.to_owned(),
+                ))
+            })
+            .collect()
+    }
+
+    fn non_canonical() -> ExecutorError {
+        ExecutorError::NonCanonicalPayload {
+            field: "journal fixture".to_owned(),
+        }
+    }
+
+    fn vector_intent() -> Result<IntentId, ExecutorError> {
+        Ok(IntentId(EventId("01J8Z3M1P0000000000000000X".to_owned())))
+    }
+
+    /// `IntentReceived` names its members as the vectors do: `agent_id`, `instrument_id`,
+    /// `limit_price`, `type`, and `tif`, beside `intent_id`, `side`, `qty`, and `purpose` — the
+    /// vector's own values for the vector's own intent, never `agent`, `kind`, `instrument`, or
+    /// `limit` (DEC-174 item 5).
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn intent_received_names_the_members_the_vectors_intent_carries() -> Result<(), ExecutorError> {
+        let vector = vector_intent_received()?;
+        let written: BTreeMap<String, String> = intent_received_fields(
+            &vector_intent()?,
+            &AgentId("agent_a".to_owned()),
+            &IntentBody::Order {
+                instrument: InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")?,
+                side: Side::Buy,
+                qty: Qty::parse("10")?,
+                limit: Price::parse("150")?,
+                purpose: Purpose::Open,
+                protection: None,
+            },
+            TimeInForce::Day,
+        )?
+        .into_iter()
+        .map(|(name, value)| {
+            let carried = match value {
+                mandate_canon::Value::Str(carried) => carried,
+                other => return Err(non_canonical_field(&other)),
+            };
+            Ok((name.to_owned(), carried))
+        })
+        .collect::<Result<_, ExecutorError>>()?;
+        assert_eq!(
+            written, vector,
+            "the executor's IntentReceived is the vector's intent fields, member for member"
+        );
+        Ok(())
+    }
+
+    fn non_canonical_field(other: &mandate_canon::Value) -> ExecutorError {
+        let _ = other;
+        ExecutorError::NonCanonicalPayload {
+            field: "intent member".to_owned(),
+        }
+    }
+
+    /// A market order with no intent, no stop, and no OCO writes its empty members as `null`,
+    /// never omits them (§4.2, DEC-174 item 5): the schema reads a missing member as a refusal,
+    /// so an empty one must be present as `null`.
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn order_submitted_writes_null_for_its_empty_members() -> Result<(), ExecutorError> {
+        let market = SubmitOrder {
+            client_order_id: ClientOrderId::seeded_for_tests("c-1"),
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Sell,
+            qty: Qty::parse("5")?,
+            order_type: OrderType::Market,
+            tif: TimeInForce::Day,
+            limit_price: None,
+            stop_price: None,
+            bracket: None,
+            oco: None,
+            extended_hours: false,
+            purpose: Purpose::RiskExit,
+        };
+        let written = order_submitted_optional_fields(&market, None)?;
+        let empty: BTreeMap<&str, mandate_canon::Value> = written.into_iter().collect();
+        let expected: BTreeMap<&str, mandate_canon::Value> = [
+            ("intent_id", mandate_canon::Value::Null),
+            ("limit_price", mandate_canon::Value::Null),
+            ("stop_price", mandate_canon::Value::Null),
+            ("order_class", mandate_canon::Value::Null),
+            ("take_profit", mandate_canon::Value::Null),
+            ("stop", mandate_canon::Value::Null),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            empty, expected,
+            "every optional member is present as null: {:?}",
+            empty
+        );
+        Ok(())
+    }
+
+    /// And the same members carry their values when they have them, none omitted: a limit order
+    /// under an intent with OCO legs names all of them (§4.2).
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn order_submitted_carries_its_optional_members_when_they_have_values()
+    -> Result<(), ExecutorError> {
+        let intent = IntentId(EventId("01J8Z3M1P0000000000000000X".to_owned()));
+        let bracketed = SubmitOrder {
+            client_order_id: ClientOrderId::seeded_for_tests("c-2"),
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Buy,
+            qty: Qty::parse("10")?,
+            order_type: OrderType::Limit,
+            tif: TimeInForce::Day,
+            limit_price: Some(Price::parse("150")?),
+            stop_price: None,
+            bracket: None,
+            oco: Some(OcoLegs {
+                take_profit: Price::parse("160")?,
+                stop: Price::parse("140")?,
+                qty: Qty::parse("10")?,
+            }),
+            extended_hours: false,
+            purpose: Purpose::Open,
+        };
+        let written = order_submitted_optional_fields(&bracketed, Some(&intent))?;
+        let carried: BTreeMap<&str, String> = written
+            .into_iter()
+            .map(|(name, value)| match value {
+                mandate_canon::Value::Str(carried) => Ok((name, carried)),
+                mandate_canon::Value::Null => Ok((name, String::from("null"))),
+                _ => Err(non_canonical()),
+            })
+            .collect::<Result<_, ExecutorError>>()?;
+        assert_eq!(
+            carried.get("intent_id").map(String::as_str),
+            Some("01J8Z3M1P0000000000000000X"),
+            "the submission names the intent it serves: {carried:?}"
+        );
+        assert_eq!(
+            carried.get("limit_price").map(String::as_str),
+            Some("150"),
+            "the limit carries its price"
+        );
+        assert_eq!(
+            carried.get("order_class").map(String::as_str),
+            Some("oco"),
+            "the OCO class is named"
+        );
+        assert_eq!(
+            (
+                carried.get("take_profit").map(String::as_str),
+                carried.get("stop").map(String::as_str),
+                carried.get("stop_price").map(String::as_str),
+            ),
+            (Some("160"), Some("140"), Some("null")),
+            "the legs carry their prices, and the unused stop price is null, not absent"
         );
         Ok(())
     }
