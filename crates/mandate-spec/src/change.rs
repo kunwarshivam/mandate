@@ -21,7 +21,8 @@ use mandate_domain::AutonomyDecision;
 
 use crate::condition::{Condition, ConditionValue, Operator};
 use crate::document::{
-    Approval, Autonomy, Goal, LadderRung, Mandate, Pointer, Rule, ScaleAction, SignalModel, pointer,
+    Approval, Autonomy, Delegation, Goal, LadderRung, Mandate, Pointer, Rule, ScaleAction,
+    SignalModel, pointer,
 };
 use crate::{SchemaDec, SpecError};
 
@@ -146,6 +147,9 @@ pub fn pinning_switch(old: &Mandate, new: &Mandate, paths: &[Pointer]) -> Result
 /// Two identical rule sets are [`ChangeClass::Neutral`]: nothing changed, so nothing was made
 /// stricter either (DEC-172 item 3).
 pub fn classify_autonomy(old: &Autonomy, new: &Autonomy) -> Result<ChangeClass, SpecError> {
+    if !old.delegations.is_empty() || !new.delegations.is_empty() {
+        return Err(SpecError::Unimplemented);
+    }
     if old == new {
         return Ok(ChangeClass::Neutral);
     }
@@ -154,6 +158,20 @@ pub fn classify_autonomy(old: &Autonomy, new: &Autonomy) -> Result<ChangeClass, 
     } else {
         ChangeClass::RiskIncreasing
     })
+}
+
+/// §9.2's `autonomy.delegations` row (DEC-181), matched by `id`: reducing only if every change
+/// removes a delegation or narrows one (same `id`, `lifts`, `when`, and `source_approval_id`, no cap
+/// larger, `starts_at` no earlier, and `expires_at` no later); anything else, adding one or
+/// reordering included, is increasing. Expiry and exhaustion are runtime states, never versions.
+///
+/// The stub of E6-13's tests PR (DEC-77): every pending test fails on it.
+pub fn classify_delegations(
+    old: &[Delegation],
+    new: &[Delegation],
+) -> Result<ChangeClass, SpecError> {
+    let _ = (old, new);
+    Err(SpecError::Unimplemented)
 }
 
 /// The changed paths of two canonical values, in pointer order.
@@ -358,6 +376,9 @@ fn row(
         "/autonomy/review_by" => {
             maximum(o.autonomy.review_by.as_ref(), n.autonomy.review_by.as_ref())
         }
+        "/autonomy/delegations" => {
+            classify_delegations(&o.autonomy.delegations, &n.autonomy.delegations)?
+        }
         autonomy if autonomy.starts_with("/autonomy/") => {
             classify_autonomy(&o.autonomy, &n.autonomy)?
         }
@@ -510,6 +531,7 @@ fn autonomy_reduces(old: &Autonomy, new: &Autonomy) -> bool {
                 two_approver_above_usd,
             },
         review_by: _,
+        delegations: _,
     } = old;
     approvers == &new.approval.approvers
         && timeout_s == &new.approval.timeout_s

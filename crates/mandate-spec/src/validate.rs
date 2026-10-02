@@ -67,6 +67,15 @@ pub enum Violation {
     /// The `scale_sizes` factors' fractional digits sum past 12, so some set of active rungs would
     /// have a size factor the order builder cannot multiply by exactly (DEC-167).
     V040,
+    /// A delegation's id repeats, its `lifts` names a source that is not an `ask`, or its window is
+    /// empty or longer than 30 days (§6.5, DEC-181).
+    V041,
+    /// A version risk-increasing on any path but the delegations and the review date carries a
+    /// delegation over from the previous version (§9.2 read with the delegations removed, DEC-353
+    /// item 4).
+    V042,
+    /// A delegation's caps do not fit inside the envelope, or stand in for a second approver.
+    V043,
 }
 
 impl Violation {
@@ -105,6 +114,9 @@ impl Violation {
             Self::V038 => "V-038",
             Self::V039 => "V-039",
             Self::V040 => "V-040",
+            Self::V041 => "V-041",
+            Self::V042 => "V-042",
+            Self::V043 => "V-043",
         }
     }
 }
@@ -196,11 +208,16 @@ impl GroupId {
     }
 }
 
-/// What V-031 compares a new version against: the two fields that may never change.
+/// What V-031 and V-042 compare a new version against: the two fields that may never change, and
+/// the previous version itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreviousVersion {
     pub environment: Environment,
     pub connection_id: ConnectionId,
+    /// The previous version's document, which V-042 classifies the new one against. `None` when the
+    /// caller holds only the version's identity: V-042 then cannot tell a carried delegation from a
+    /// new one, so it refuses every delegation the new version holds, failing closed (DEC-420).
+    pub mandate: Option<Mandate>,
 }
 
 /// The four dollar figures §4.2 puts on the confirmation screen.

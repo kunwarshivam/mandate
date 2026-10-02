@@ -360,6 +360,7 @@ pub fn policy(
                 .map(|t| dec(t, DecGrammar::PositiveDecimal)),
         },
         review_by: None,
+        delegations: Vec::new(),
     }
 }
 
