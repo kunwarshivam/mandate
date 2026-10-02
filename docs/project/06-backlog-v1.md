@@ -1235,10 +1235,18 @@ From E10-1's slice-V implementation (DEC-161):
     scope, the acceptable-use action, and the row's "approval".
   - **Proposed, item 10:** a clause binds an account stream to its connection, so that
     `AccountSnapshotRecorded`'s fact needs no argument.
-  - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** a journal spec
-    change closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with vectors.
-    The tests and implementation that follow register them and map them to `AgentVersionActive` (a
-    deployed agent's new version) and `UniverseChanged`.
+  - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** journal spec v0.8
+    §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
+    vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
+    follow register them and map them to `AgentVersionActive` (a deployed agent's new version) and
+    `UniverseChanged`; until then both stay `unknown_schema` and map to none.
+    **Required, and blocking this registration's acceptance (#470 round 2, minor 5):** the Rust
+    registration re-derives mandate spec §9.2's classification of `new_version` against
+    `old_version` from the two stored documents and refuses a `MandateVersionApplied` whose
+    `classification` differs. Rule 33 covers only what the record itself carries (the allocation
+    change, the floor, and three rejections), so until this lands a risk-increasing version through
+    any other §9.2 row can be journaled as applied, labelled `neutral`, with no step-up (DEC-403
+    item 5).
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).
@@ -2525,3 +2533,27 @@ item 25; held back by the freeze rule, one row each):
   `a_client_opening_is_never_auto_and_every_other_request_decides_as_before` cover rules, defaults,
   admission and requester only. E8-8's tests PR adds live, spent, expired and suspended delegations
   to both and asserts that none lifts a client's order (MI-26, MI-30).
+
+From journal spec v0.8 §9.3's review (#470 round 2, DEC-403):
+
+- *Decision needed (founder, Proposed under DEC-79; the dependency registry is founder-owned):*
+  add `jsonschema` to the `python/` project, so `reference/journal/risk_state.py`'s
+  `documents.valid` can run `reference/mandate`'s full schema and semantic validators instead of
+  its narrow check (#470 round 2, minor 5). Until then the dependency is not added. The narrow
+  check holds a stored version to the proven base changed at its one listed path, with V-013's
+  order and a floor in (0, 1]. It does not stand in for the mandate schema, for any other V-rule,
+  or for a wrong entry in `VERSION_PATHS` itself, which it shares with the document builder (minor
+  4). `drafts.classification` catches the dangerous sub-case, a wrong value that changes the §9.2
+  verdict. All six of today's documents were checked against the full validators by hand.
+- **§9.3's vectors: three coverage gaps (#470 round 2, minors 1, 7 and 8).**
+  - **Report orders.** The 29-then-30 order (an applied, risk-increasing record with `step_up`
+    null and a `reason` set) and the 30-then-33 order (a rejected record with
+    `increase_blocked_while_latched`, `classification` `neutral`, and an `allocation_change` set)
+    are pinned by no draft. Each wants a draft and an `order.*` mutant, as §9.2's
+    `order.rule_21_first`. Rules 29 and 33 can never both fire, since 29 needs `risk_increasing`
+    and 33 needs anything else, so their relative order needs no pin.
+  - **`universe_size_after`** is checked against nothing, not even the fold of the section's own
+    drafts.
+  - **`risk_state.classify`** raises `ValueError` on a path it does not encode instead of reporting
+    a `drafts.classification` problem. It fails closed either way, but a reported problem reads
+    better.

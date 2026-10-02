@@ -31,6 +31,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import control
+import risk_state
 import yaml
 from common import (
     apply_change,
@@ -2493,10 +2494,10 @@ def split_file(text: str) -> tuple[str, str | None]:
     return (head, tail) if found else (text, None)
 
 
-def render(v3_text: str, section: dict, control_section: dict) -> str:
+def render(v3_text: str, section: dict, control_section: dict, risk_section: dict) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
-        {"agent_stream": section, "control_stream": control_section},
+        {"agent_stream": section, "control_stream": control_section, "risk_state": risk_section},
         Dumper=Dumper,
         sort_keys=False,
         allow_unicode=True,
@@ -2520,19 +2521,26 @@ def main(argv: list[str] | None = None) -> int:
     self_test(v3)
     section = build_section(v3)
     control_section = control.build_section(v3)
+    risk_section = risk_state.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
     problems += control.check_section(control_section)
     problems += control.run_mutants(control_section)
+    problems += risk_state.check_section(risk_section)
+    problems += risk_state.run_mutants(risk_section)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
         return 1
 
-    rendered = render(text, section, control_section)
+    rendered = render(text, section, control_section, risk_section)
     reread = yaml.safe_load(rendered)
-    if check_chain(reread["agent_stream"], v3) or control.check_section(reread["control_stream"]):
+    if (
+        check_chain(reread["agent_stream"], v3)
+        or control.check_section(reread["control_stream"])
+        or risk_state.check_section(reread["risk_state"])
+    ):
         print("FAIL the rendered YAML does not read back to the same vectors", file=sys.stderr)
         return 1
     if args.check:
@@ -2550,7 +2558,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(control_section['chain'])} control-stream events, {len(control_section['drafts'])} base drafts, "
         f"{len(control_section['journaled_facts'])} journaled facts, {len(control_section['invalid_drafts'])} invalid "
         f"and {len(control_section['valid_drafts'])} valid drafts; {len(control.VALIDATOR_MUTANTS)} validator and "
-        f"{len(control.vector_mutants(control_section))} vector mutants caught"
+        f"{len(control.vector_mutants(control_section))} vector mutants caught; "
+        f"{len(risk_section['drafts'])} risk-state drafts, {len(risk_section['invalid_drafts'])} invalid and "
+        f"{len(risk_section['valid_drafts'])} valid; {len(risk_state.VALIDATOR_MUTANTS)} validator and "
+        f"{len(risk_state.vector_mutants(risk_section))} vector mutants caught"
     )
     return 0
 

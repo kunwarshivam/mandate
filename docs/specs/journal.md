@@ -2,16 +2,23 @@
 
 | | |
 |---|---|
-| **Status** | v0.7 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.8 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1 and `control_stream` section of §9.2; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1, `control_stream` section of §9.2, and `risk_state` section of §9.3; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.8 ([DEC-403](../project/decisions/DEC-403.md)):** §9.3 closes the payload schemas of the two
+  account-stream records `ValidationContext::from_journal` reads that v0.7 left to their own story
+  (DEC-303 item 6): `MandateVersionApplied` and `UniverseChanged`. Every member comes from mandate
+  spec §5.10's row, from a writer that exists (`mandate-spec`'s risk fold, `mandate-research`'s
+  admission and removal), or from §2's `risk_clock`. The new rules are 29 to 33, and §9.3 maps each
+  record to its `JournaledFact`. The test vectors gain a generated `risk_state` section and stay
+  version 3.
 - **v0.7, amended ([DEC-351](../project/decisions/DEC-351.md) item 5):** `OwnerCommandRefused` may
   carry `not_independent`, the executor's refusal of an acknowledgment that lifts a fired tripwire
   under `independent_approval_required` from the user who requested the lift ([mandate spec
@@ -683,7 +690,7 @@ the control stream's `StreamOpened`,
 `MandateVersionCreated`, `MandateConfirmed`, `AgentDeployed`, and `AgentStopped`, and the account
 stream's `AccountSnapshotRecorded`. It also closes `OwnerCommandRefused` on both streams that write
 it ([DEC-291](../project/04-decision-log.md#decisions)). The fold also reads `UniverseChanged` and
-`MandateVersionApplied` (account stream), which close with their own stories, and
+`MandateVersionApplied` (account stream), which close in §9.3, and
 `PlatformOperatorAction`, which stays open (below). For these events it replaces the "Key payload
 fields" column of §9, and the required `config_refs` stay as §9 lists them. §9.1's types, its
 absent-member rule, and its report order apply unchanged, with the rules below numbered on from
@@ -878,6 +885,93 @@ what no event carries the same way.
 | `AgentDeployed` | `AgentVersionActive` | `agent_id`; `connection_id`, `environment`, `capital.allocation_usd`, and `universe.pinned_instruments[].asset_id` of the stored document `mandate_version` names. A document that is not stored maps to none, and the mapping refuses it |
 | `AgentStopped` | `AgentStopped` | `agent_id`, `connection_id`, `retired_on`, `loss_added` |
 | `AccountSnapshotRecorded` | `AccountSnapshot` | `equity`, with the account stream's connection given |
+
+### 9.3 Account-stream risk-state records ([DEC-403](../project/decisions/DEC-403.md))
+
+This subsection closes the payload schemas of the account stream's `MandateVersionApplied` and
+`UniverseChanged`, the two records `ValidationContext::from_journal` reads that §9.2 left to their
+own story ([DEC-303](../project/decisions/DEC-303.md) item 6). For these two events it replaces the
+"Key payload fields" column of §9, as §9.1 and §9.2 do for theirs. §9.2's conventions apply unchanged:
+§9.1's and §9.2's types, the absent-member rule, the report order, the required `config_refs` as §9
+lists them, and the rules numbered on from §9.2's. Each schema is `schema_version` 1. Both are risk
+inputs, so each carries `risk_clock` (§2).
+
+Every member comes from mandate spec §5.10's row, from a writer that exists, or from §2, and DEC-403
+traces each one: `mandate-spec`'s risk fold writes `MandateVersionApplied`'s result, rejection
+reason, allocation change, and floor fraction, and `mandate-research` writes `UniverseChanged`'s
+instrument, change, reason, thesis and lineage, and size. The test vectors' `risk_state` section
+holds base drafts of both records on the account stream, the stored mandate documents they name (each
+a valid mandate, with every version record stating the classification mandate spec §9.2 gives its two
+documents, and every admission through a thesis naming an unpinned mandate), the
+`JournaledFact` each maps to, an invalid draft for every rule, and valid drafts for the cases a rule
+might be misread to refuse. No payload carries a credential or personal data: an agent and a
+thesis are named by opaque IDs, and step-up evidence by its assertion.
+
+**`MandateVersionApplied`** on the account stream ([mandate spec §2.2, §5.10](mandate.md#22-applying-a-new-version)):
+a version took effect for an agent, or was refused at application.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `agent_id` | `id` | The agent the version is for |
+| `old_version` | `ref` | The version in force before |
+| `new_version` | `ref` | The version applied, or refused |
+| `classification` | `risk_increasing` \| `risk_reducing` \| `neutral` | Mandate spec §9.2's verdict of `new_version` against `old_version`. An invalid change never validates (V-031), so it never reaches application: rules 29 and 33 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}?` | The owner's step-up evidence, as `DisclosureAccepted`'s: rule 29 |
+| `result` | `applied` \| `rejected` | |
+| `reason` | `increase_blocked_while_latched` \| `equity_below_exposure` \| `would_trigger_limit` \| `not_loosening` \| `waiting_period` \| `still_below_new_floor`, or `null` | Why it was refused (mandate spec §5.1, §5.7): rule 30 |
+| `allocation_change` | `decimal?` | The signed dollar change in the allocation it applied (mandate spec §5.1): rule 30 |
+| `max_loss_from_allocation` | `decimal?` | The fraction a floor-loosening version raised the floor to (mandate spec §5.7): rule 30 |
+| `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
+
+**`UniverseChanged`** on the account stream ([mandate spec §2.3, §8.5](mandate.md#23-the-working-universe-at-runtime-dec-97)):
+an instrument was admitted to, or removed from, an agent's working universe.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `agent_id` | `id` | The agent whose working universe changed |
+| `instrument` | `id` | The instrument's asset ID (mandate spec §3) |
+| `change` | `admitted` \| `removed` | Rule 31 |
+| `reason` | `thesis_admitted` \| `thesis_expired` \| `thesis_invalidated` \| `lineage_retired` \| `eligibility_lost` \| `operator_halt` \| `version_applied` | Mandate spec §5.10's reasons: rule 31 |
+| `thesis_id`, `lineage_id` | `id?` | The thesis the change follows from, and its lineage: rule 32 |
+| `universe_size_after` | `integer` | The working universe's size after the change |
+| `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
+
+**Consistency rules** (reason `schema`; the path is the member named):
+
+29. `MandateVersionApplied`: `step_up` is non-null when `classification` is `risk_increasing`
+    (`payload.step_up`). Mandate spec §9.2: a risk-increasing version requires step-up.
+30. `MandateVersionApplied`: `reason` is non-null exactly when `result` is `rejected`, and
+    `allocation_change` and `max_loss_from_allocation` are `null` when it is. Reported at the first
+    offending member, in that order. A refused version changes nothing.
+31. `UniverseChanged`: `thesis_admitted` only admits; `thesis_expired`, `thesis_invalidated`,
+    `lineage_retired`, `eligibility_lost`, and `operator_halt` only remove; `version_applied` does
+    either (`payload.reason`). Mandate spec §8.5 admits only through a thesis or a version, and
+    removes for the rest.
+32. `UniverseChanged`: `thesis_id` and `lineage_id` are `null` together, reported at the one that is
+    `null` (as rule 13). They are non-null for `thesis_admitted`, `thesis_expired`,
+    `thesis_invalidated`, `lineage_retired`, and `operator_halt`, which each follow from a thesis
+    (an operator halts per thesis, DEC-100), and `null` for an admission with `version_applied`,
+    which follows from a pinned list and no thesis (`payload.thesis_id`). A removal with
+    `version_applied` may name its thesis or not: DEC-121's pinning switch removes instruments the
+    research agent had admitted through a thesis (mandate spec §9.2), and a pinned list's own
+    removal has none. `eligibility_lost` may be either too: a pinned instrument can lose
+    eligibility.
+33. `MandateVersionApplied`: `classification` is `risk_increasing` when the record itself shows a
+    risk-increasing change: an `applied` one with `allocation_change` greater than 0 or with a
+    non-null `max_loss_from_allocation` (mandate spec §9.2's maximums row), or a `rejected` one with
+    `reason` `increase_blocked_while_latched`, `waiting_period`, or `still_below_new_floor`, which
+    the risk fold reaches only on an allocation increase or a floor raise (mandate spec §5.1, §5.7)
+    (`payload.classification`). It reports after rules 29 and 30, so a record whose `step_up` is
+    missing because its classification is wrong is reported here, at the classification. With rule
+    29 it keeps a risk-increasing version from being journaled as applied without step-up.
+
+**The mapping to `JournaledFact`**, as §9.2's:
+
+| Record | Fact | From |
+|---|---|---|
+| `MandateVersionApplied` with `result` `applied` | `AgentVersionActive` | `agent_id`; `connection_id`, `environment`, `capital.allocation_usd`, and `universe.pinned_instruments[].asset_id` of the stored document `new_version` names, as for `AgentDeployed`. A `new_version` whose document is not stored is refused, as malformed (`InvalidInput`) at `new_version`: the context cannot be built, and nothing is skipped |
+| `MandateVersionApplied` with `result` `rejected` | none | A refused version changes nothing: the record yields no fact and no error |
+| `UniverseChanged` | `UniverseChanged` | `agent_id`, `instrument`, and whether `change` is `admitted` |
 
 ## 10. Anchoring
 
