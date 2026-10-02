@@ -138,7 +138,8 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
         "TradingDayStarted" => {
-            state.trading_day = Some(Date::parse(required_text(payload, "date")?)?);
+            let date = Date::parse(required_text(payload, "date")?)?;
+            state.trading_day = Some(state.trading_day.map_or(date, |current| current.max(date)));
             Ok(())
         }
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),

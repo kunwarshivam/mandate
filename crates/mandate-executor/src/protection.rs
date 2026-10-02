@@ -1117,8 +1117,9 @@ fn created(view: &ExecutorState) -> Option<(&'static str, Value)> {
 }
 
 /// §5.4's re-placement before expiry, at a copied `TradingDayStarted`: in every instrument where
-/// protection rests, no exit sequence runs and no re-placement is under way, protection with a GTC
-/// order on or past its buffer day ([`expiring`]) is cancelled — all of it, by id, as an exit
+/// protection rests at known prices, no exit sequence runs, no other exit is working and no
+/// re-placement is under way, protection with a GTC order on or past its buffer day ([`expiring`]),
+/// or with no recorded creation date, is cancelled — all of it, by id, as an exit
 /// sequence's first step is — and the start of the interval records the entry, agent and prices
 /// the new protection takes. Once the cancels are confirmed, [`settle`] re-places it for the held
 /// quantity ([`re_place`]) and the interval ends. An exit that starts meanwhile takes the
@@ -1133,15 +1134,17 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .iter()
         .filter(|(instrument, protection)| {
             !protection.resting.is_empty()
+                && protection.prices.is_some()
                 && !batch.view.exiting.contains_key(*instrument)
                 && !batch.view.replacing.contains_key(*instrument)
+                && !exit_working(&batch.view, instrument)
                 && protection.resting.iter().any(|id| {
                     batch
                         .view
                         .orders
                         .get(id)
                         .and_then(|order| order.created_on)
-                        .is_some_and(|created| {
+                        .is_none_or(|created| {
                             expiring(created, today, batch.ports.config).unwrap_or(true)
                         })
                 })
@@ -1183,6 +1186,34 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     Ok(())
 }
 
+/// Whether an exit order is working in `instrument`. While one is, a re-placement for the held
+/// quantity could cover what that exit may still sell (rule 12, §5.4's `fits`), so no re-placement
+/// starts and none re-places; the next trading day after the exit is terminal re-places, still
+/// inside the buffer (#468 round 1, B1).
+fn exit_working(view: &ExecutorState, instrument: &InstrumentId) -> bool {
+    view.orders.values().any(|order| {
+        &order.instrument == instrument && exits(order.purpose) && !order.state.is_terminal()
+    })
+}
+
+/// What the exit orders working in `instrument` may still sell: the broker holds them, so
+/// protection re-placed beside them covers only the rest (rule 12, §5.4's `fits`). Unlike
+/// [`still_selling`], an exit intent with no order yet — held, parked or waiting on its cancels —
+/// counts nothing here: its sequence re-protects around it (#468 round 1, B1).
+fn working_exits(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+    view.orders
+        .values()
+        .filter(|order| {
+            &order.instrument == instrument
+                && exits(order.purpose)
+                && !order.state.is_terminal()
+                && order.state != OrderState::Intent
+        })
+        .try_fold(Qty::ZERO, |sum, order| {
+            Ok(sum.checked_add(order.qty.checked_sub(order.filled_qty)?)?)
+        })
+}
+
 fn joined(ids: &[ClientOrderId]) -> String {
     ids.iter()
         .map(ClientOrderId::as_str)
@@ -1193,8 +1224,8 @@ fn joined(ids: &[ClientOrderId]) -> String {
 /// Whether a GTC order created on `created` is due for re-placement on `today` (§5.4): today is on
 /// or after the trading day `protective_replace_buffer_trading_days` trading days before its expiry,
 /// `gtc_expiry_days` calendar days after its creation — that is, at most that many trading days
-/// remain from today up to the expiry. A day the calendar cannot place counts as a trading day,
-/// which can only bring the re-placement earlier (rule 3).
+/// remain from today up to the expiry. A day the calendar cannot place counts as a non-trading day:
+/// counting fewer trading days can only bring the re-placement earlier (rule 3, #468 round 1, M2).
 fn expiring(created: Date, today: Date, config: &ExecutorConfig) -> Result<bool, ExecutorError> {
     let mut expiry = created;
     for _ in 0..config.gtc_expiry_days {
@@ -1207,7 +1238,7 @@ fn expiring(created: Date, today: Date, config: &ExecutorConfig) -> Result<bool,
         let trading = calendar
             .as_ref()
             .and_then(|calendar| calendar.is_trading_day(day).ok())
-            .unwrap_or(!day.is_weekend());
+            .unwrap_or(false);
         if trading {
             remaining = remaining.saturating_add(1);
         }
@@ -1228,7 +1259,9 @@ fn replacements(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .replacing
         .iter()
         .filter(|(instrument, _)| {
-            !rests(&batch.view, instrument) && !batch.view.exiting.contains_key(*instrument)
+            !rests(&batch.view, instrument)
+                && !batch.view.exiting.contains_key(*instrument)
+                && !exit_working(&batch.view, instrument)
         })
         .map(|(instrument, recorded)| (instrument.clone(), recorded.clone()))
         .collect();
@@ -1428,8 +1461,10 @@ fn re_place(
     instrument: &InstrumentId,
     sequence: &Replacement,
 ) -> Result<(), ExecutorError> {
+    let committed =
+        covered(&batch.view, instrument)?.checked_add(working_exits(&batch.view, instrument)?)?;
     let qty = long(&batch.view, instrument)
-        .checked_sub(covered(&batch.view, instrument)?)
+        .checked_sub(committed)
         .unwrap_or(Qty::ZERO);
     let prices = sequence.prices.filter(|_| qty > Qty::ZERO);
     let Some(prices) = prices else {
@@ -2395,6 +2430,55 @@ mod sequence_tests {
         let mut pairs = pairs;
         pairs.push(("risk_clock", clock(RiskClock::from_secs(0))?));
         executor.commit_one(event_type, object(pairs)?)
+    }
+
+    /// An accepted risk exit of 4 with no sequence of its own, sent while nothing rested.
+    const LONE: &str = "md-exit-1";
+
+    /// Ten AAPL that `agent-a` bought, with [`LONE`] working beside an OCO for the other 6, the cap
+    /// DEC-346 item 6 applies (position less exits still selling): #468 round 1's B1 state.
+    fn beside_a_lone_exit(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        for (id, purpose, qty) in [(LONE, "risk_exit", "4"), (OCO, "protective", "6")] {
+            let mut pairs = vec![
+                ("client_order_id", text(id)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text(qty)),
+                ("purpose", text(purpose)),
+            ];
+            if purpose == "protective" {
+                pairs.extend([
+                    ("tif", text("gtc")),
+                    ("order_class", text("oco")),
+                    ("take_profit", text("170")),
+                    ("stop", text("140")),
+                ]);
+            } else {
+                pairs.push(("limit", text("150")));
+            }
+            committed(&mut executor, "OrderSubmitted", pairs)?;
+            committed(
+                &mut executor,
+                "OrderStateChanged",
+                vec![("client_order_id", text(id)), ("state", text("accepted"))],
+            )?;
+        }
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(OCO)),
+                ("qty", text("6")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+                ("created_on", text("2026-06-05")),
+            ],
+        )?;
+        Ok(executor)
     }
 
     /// Ten AAPL that `agent-a` bought, protected by one GTC OCO at 170 over 140 named for the
@@ -6176,23 +6260,316 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// Past the calendar's last date, a weekday counts as a trading day and a weekend day does
-    /// not: 2030-04-01 is a GTC order's expiry from 2030-01-01, and from Friday 2030-03-22 six
-    /// weekdays remain, one more than the buffer, while from the Monday after five do.
+    /// DEC-367 item 2 (#468 round 1, M2): a day the calendar cannot place counts as a non-trading
+    /// day, so the buffer is reached earlier, never later. A GTC order created 2028-10-07 expires
+    /// 2029-01-05, and every day from 2029-01-01, New Year's Day, lies past the calendar's last
+    /// date. On Thursday 2028-12-28 the old reading counted six trading days (the 28th, the 29th
+    /// and 2029-01-01 to 04) and re-placed a day late; counted as none, the days past the range
+    /// leave two and it is due. Five in-range trading days remain from 2028-12-22 (the 25th is
+    /// Christmas), so it is due there, and six from the 21st, so it is not yet.
     #[test]
-    fn a_day_past_the_calendar_counts_by_the_weekend() -> Result<(), ExecutorError> {
+    fn a_day_past_the_calendar_never_delays_the_re_placement() -> Result<(), ExecutorError> {
         let config = executor_config();
-        let created = Date::parse("2030-01-01")?;
-        assert!(!super::expiring(
+        let created = Date::parse("2028-10-07")?;
+        assert!(super::expiring(
             created,
-            Date::parse("2030-03-22")?,
+            Date::parse("2028-12-28")?,
             &config
         )?);
         assert!(super::expiring(
             created,
-            Date::parse("2030-03-25")?,
+            Date::parse("2028-12-22")?,
             &config
         )?);
+        assert!(!super::expiring(
+            created,
+            Date::parse("2028-12-21")?,
+            &config
+        )?);
+        Ok(())
+    }
+
+    /// A copied `TradingDayStarted` for `date`, committed as the executor copies it and stepped.
+    fn trading_day(
+        executor: &mut Executor,
+        ports: &Ports<'_>,
+        date: &str,
+    ) -> Result<Vec<Effect>, ExecutorError> {
+        committed(
+            executor,
+            "TradingDayStarted",
+            vec![("date", text(date)), ("originated", Value::Bool(true))],
+        )?;
+        let day = executor
+            .journal
+            .last()
+            .cloned()
+            .ok_or_else(|| missing("the trading day"))?;
+        executor.run(Input::Journal(day), ports)
+    }
+
+    /// #468 round 1, B1 (rule 12, §5.4's `fits`): with an exit still working beside the protection,
+    /// the buffer day cancels nothing, since a re-placement for the held quantity would cover what
+    /// that exit may still sell. Once the exit is done, the next trading day, still before the
+    /// expiry (2026-09-03), re-places for the held quantity.
+    #[test]
+    fn a_working_exit_defers_the_re_placement_to_the_next_trading_day() -> Result<(), ExecutorError>
+    {
+        with_ports!(ports);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        let first = trading_day(&mut executor, &ports, "2026-08-28")?;
+        assert!(
+            cancels(&first).is_empty() && actions(&first).is_empty(),
+            "the buffer day leaves protection alone while {LONE} may still sell: {:?}",
+            drafted(&first)
+        );
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(LONE)), ("state", text("canceled"))],
+        )?;
+        let second = trading_day(&mut executor, &ports, "2026-08-31")?;
+        assert_eq!(cancels(&second), vec![OCO]);
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            ocos(&placed)
+                .into_iter()
+                .map(|(_, qty, _, _)| qty)
+                .collect::<Vec<_>>(),
+            vec![Qty::parse("10")?],
+            "the held quantity, now that nothing else sells it"
+        );
+        Ok(())
+    }
+
+    /// #468 round 1, B1's matching guard: a re-placement whose cancels are confirmed while an exit
+    /// works with no sequence of its own, a state a restart may leave between the two, re-places
+    /// nothing until that exit is done, and then re-places for the held quantity.
+    #[test]
+    fn a_re_placement_waits_for_a_working_exit() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(LONE)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("4")),
+                ("limit", text("150")),
+                ("purpose", text("risk_exit")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(LONE)), ("state", text("accepted"))],
+        )?;
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert!(
+            submissions(&confirmed).is_empty(),
+            "{:?}",
+            drafted(&confirmed)
+        );
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(LONE)), ("state", text("canceled"))],
+        )?;
+        let later = executor.run(Input::Tick(RiskClock::from_secs(1)), &ports)?;
+        assert_eq!(
+            ocos(&later)
+                .into_iter()
+                .map(|(_, qty, _, _)| qty)
+                .collect::<Vec<_>>(),
+            vec![Qty::parse("10")?]
+        );
+        Ok(())
+    }
+
+    /// #468 round 1, M4.1 (rule 5, DEC-348 item 1): the re-placement's interval starts before its
+    /// cancel is sent, so `max_unprotected_s` runs from the earlier instant.
+    #[test]
+    fn a_re_placement_starts_its_interval_before_it_cancels() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let started = trading_day(&mut executor, &ports, "2026-09-21")?;
+        let start = started.iter().position(|effect| {
+            matches!(effect, Effect::Journal(draft) if draft.event_type == "ProtectionChanged"
+                && draft.payload.get("action").and_then(Value::as_str) == Some("unprotected_start"))
+        });
+        let cancel = started
+            .iter()
+            .position(|effect| matches!(effect, Effect::Broker(BrokerRequest::Cancel { .. })));
+        assert!(
+            start.is_some() && cancel.is_some() && start < cancel,
+            "{:?}",
+            drafted(&started)
+        );
+        Ok(())
+    }
+
+    /// #468 round 1, M4.2 (DEC-367 item 3): every resting protective order in the instrument is
+    /// cancelled, two tranches here, not only the first.
+    #[test]
+    fn a_re_placement_cancels_every_tranche() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        let second = "md-held-1-p2";
+        for (id, qty) in [(OCO, "6"), (second, "4")] {
+            committed(
+                &mut executor,
+                "OrderSubmitted",
+                vec![
+                    ("client_order_id", text(id)),
+                    ("agent", text("agent-a")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("sell")),
+                    ("qty", text(qty)),
+                    ("tif", text("gtc")),
+                    ("purpose", text("protective")),
+                    ("order_class", text("oco")),
+                    ("take_profit", text("170")),
+                    ("stop", text("140")),
+                ],
+            )?;
+            committed(
+                &mut executor,
+                "OrderStateChanged",
+                vec![("client_order_id", text(id)), ("state", text("accepted"))],
+            )?;
+            committed(
+                &mut executor,
+                "ProtectionChanged",
+                vec![
+                    ("instrument", text("AAPL")),
+                    ("action", text("placed")),
+                    ("orders", text(id)),
+                    ("qty", text(qty)),
+                    ("take_profit", text("170")),
+                    ("stop", text("140")),
+                ],
+            )?;
+        }
+        let started = trading_day(&mut executor, &ports, "2026-09-21")?;
+        let mut cancelled = cancels(&started);
+        cancelled.sort_unstable();
+        assert_eq!(cancelled, vec![OCO, second]);
+        Ok(())
+    }
+
+    /// #468 round 1, M4.3 (DEC-367 item 4, DEC-347): an exit sequence that takes the instrument
+    /// over while a re-placement waits keeps it. The confirmed cancels re-place nothing, though no
+    /// exit order is working yet; the sequence re-protects when it ends.
+    #[test]
+    fn an_exit_takes_a_re_placement_over() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("unprotected_start")),
+                ("intent_id", text(EXIT)),
+                ("entry", text("md-held-1")),
+                ("agent", text("agent-a")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+            ],
+        )?;
+        assert!(executor.state.exiting.contains_key(&aapl()?));
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert!(
+            submissions(&confirmed)
+                .iter()
+                .all(|order| order.purpose != Purpose::Protective),
+            "{:?}",
+            drafted(&confirmed)
+        );
+        Ok(())
+    }
+
+    /// #468 round 1, M4.4: a re-placement is forgotten once its interval ends, so no later step
+    /// re-places from its stale record.
+    #[test]
+    fn a_finished_re_placement_is_forgotten() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        assert!(executor.state.replacing.contains_key(&aapl()?));
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(submissions(&placed).len(), 1);
+        assert!(executor.state.replacing.is_empty());
+        acknowledge_protection(&mut executor, &placed, &ports)?;
+        let later = executor.run(Input::Tick(RiskClock::from_secs(5)), &ports)?;
+        assert!(submissions(&later).is_empty() && actions(&later).is_empty());
+        Ok(())
+    }
+
+    /// #468 round 1, m1: the trading day is the greatest date copied, so a re-copied older fact
+    /// never moves it back.
+    #[test]
+    fn an_older_trading_day_never_moves_the_day_back() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-22")?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        assert_eq!(executor.state.trading_day, Some(Date::parse("2026-09-22")?));
+        Ok(())
+    }
+
+    /// #468 round 1, m2: protection resting with no recorded prices has nothing to be re-placed
+    /// at, so it is left resting rather than cancelled.
+    #[test]
+    fn protection_with_no_prices_is_left_alone() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(OCO)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("10")),
+                ("limit", text("170")),
+                ("purpose", text("protective")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(OCO)),
+                ("qty", text("10")),
+            ],
+        )?;
+        let started = trading_day(&mut executor, &ports, "2026-09-21")?;
+        assert!(cancels(&started).is_empty(), "{:?}", drafted(&started));
+        Ok(())
+    }
+
+    /// #468 round 1, m7: a second trading day while a re-placement still waits on its cancels
+    /// starts no second one.
+    #[test]
+    fn a_second_trading_day_starts_no_second_re_placement() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        let again = trading_day(&mut executor, &ports, "2026-09-22")?;
+        assert!(
+            actions(&again).is_empty() && cancels(&again).is_empty(),
+            "{:?}",
+            drafted(&again)
+        );
         Ok(())
     }
 
@@ -7124,7 +7501,12 @@ mod sequence_tests {
         Fill(u32),
         Confirm,
         Pause(bool),
+        TradingDay(usize),
     }
+
+    /// The trading days a script's `TradingDayStarted` may name, in order: a later move may name
+    /// an earlier one, as a re-copied or out-of-order fact would.
+    const TRADING_DATES: [&str; 4] = ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"];
 
     const EXIT_PURPOSES: [Purpose; 4] = [
         Purpose::RiskExit,
@@ -7144,6 +7526,7 @@ mod sequence_tests {
             2 => (1_u32..=3).prop_map(Move::Fill),
             3 => Just(Move::Confirm),
             1 => any::<bool>().prop_map(Move::Pause),
+            1 => (0_usize..TRADING_DATES.len()).prop_map(Move::TradingDay),
         ]
     }
 
@@ -7322,6 +7705,25 @@ mod sequence_tests {
                 .map(|(_, exit)| exit.qty)
                 .sum();
             qty.saturating_add(working).saturating_add(waiting) > self.position
+        }
+
+        /// §5.4's Σ protective sell quantity ≤ position, counted as `fits` counts it: every
+        /// protective order the broker holds live, with every exit it holds live, sells at most the
+        /// position (rule 12). The oracle's own record, never the fold's.
+        fn within_position(&self) -> Result<(), String> {
+            let selling: u32 = self
+                .venue
+                .values()
+                .filter(|held| held.live)
+                .map(|held| held.qty.saturating_sub(held.filled))
+                .sum();
+            if selling > self.position {
+                return Err(format!(
+                    "{selling} may sell against a position of {} at {}",
+                    self.position, self.now
+                ));
+            }
+            Ok(())
         }
 
         fn saw(&mut self, draft: &EventDraft) -> Result<(), String> {
@@ -7555,24 +7957,40 @@ mod sequence_tests {
     }
 
     fn rule_13_script(start: i64, script: &[Move]) -> Result<(), String> {
+        rule_13_script_from(start, false, script)
+    }
+
+    /// [`rule_13_script`], from [`beside_a_lone_exit`] where `lone` is set.
+    fn rule_13_script_from(start: i64, lone: bool, script: &[Move]) -> Result<(), String> {
         let failed = |error: ExecutorError| format!("{error:?}");
         let (config, fees) = (executor_config(), fees().map_err(failed)?);
         let ports = tiered_ports(&config, &fees);
-        let mut executor = protected(&ports).map_err(failed)?;
+        let mut executor = if lone {
+            beside_a_lone_exit(&ports)
+        } else {
+            protected(&ports)
+        }
+        .map_err(failed)?;
+        let held = |purpose, qty| Held {
+            purpose,
+            qty,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let venue = if lone {
+            BTreeMap::from([
+                (OCO.to_owned(), held(Purpose::Protective, 6)),
+                (LONE.to_owned(), held(Purpose::RiskExit, 4)),
+            ])
+        } else {
+            BTreeMap::from([(OCO.to_owned(), held(Purpose::Protective, 10))])
+        };
         let mut desk = Desk {
             now: start,
             quotes: Vec::new(),
             position: 10,
-            venue: BTreeMap::from([(
-                OCO.to_owned(),
-                Held {
-                    purpose: Purpose::Protective,
-                    qty: 10,
-                    filled: 0,
-                    acked: true,
-                    live: true,
-                },
-            )]),
+            venue,
             asked: Vec::new(),
             exits: BTreeMap::new(),
             fills: 0,
@@ -7691,10 +8109,25 @@ mod sequence_tests {
                     executor.state.modes.insert(agent.clone(), mode);
                     None
                 }
+                Move::TradingDay(day) => {
+                    let date = TRADING_DATES.get(day).copied().unwrap_or("2026-09-21");
+                    let at = clock(RiskClock::from_secs(desk.now)).map_err(failed)?;
+                    let fact = object(vec![
+                        ("date", text(date)),
+                        ("originated", Value::Bool(true)),
+                        ("risk_clock", at),
+                    ])
+                    .map_err(failed)?;
+                    executor
+                        .commit_one("TradingDayStarted", fact)
+                        .map_err(failed)?;
+                    executor.journal.last().cloned().map(Input::Journal)
+                }
             };
             if let Some(input) = input {
                 desk.deliver(&mut executor, &ports, input)?;
             }
+            desk.within_position()?;
             if matches!(next, Move::Tick(_)) {
                 desk.bounded(&config)?;
             }
@@ -7759,10 +8192,28 @@ mod sequence_tests {
         ]);
         TestRunner::new(config)
             .run(
-                &(starts, prop::collection::vec(moves(), 1..64)),
-                |(start, script)| rule_13_script(start, &script).map_err(TestCaseError::fail),
+                &(starts, any::<bool>(), prop::collection::vec(moves(), 1..64)),
+                |(start, lone, script)| {
+                    rule_13_script_from(start, lone, &script).map_err(TestCaseError::fail)
+                },
             )
             .map_err(|error| error.to_string())
+    }
+
+    /// #468 round 1, M5: the Σ oracle's first catch beside an exit with no sequence of its own. A
+    /// risk exit held at the night's start re-protects at once (DEC-160 (12)), and that protection
+    /// covers only what [`LONE`] cannot still sell: 6, never the held 10.
+    #[test]
+    fn re_protection_beside_a_working_exit_covers_only_the_rest() -> Result<(), String> {
+        let script = [Move::Exit(0, 1, 141), Move::Tick(10), Move::Confirm];
+        rule_13_script_from(TEN_SECONDS_BEFORE_THE_NIGHT, true, &script)
+    }
+
+    /// #468 round 1, B1, through the oracle: a trading day beside [`LONE`] re-places nothing that
+    /// [`LONE`] may still sell.
+    #[test]
+    fn a_trading_day_beside_a_working_exit_never_over_covers() -> Result<(), String> {
+        rule_13_script_from(0, true, &[Move::TradingDay(0), Move::Confirm])
     }
 
     /// #400 round 2's nit: the random oracle reached the composed plant (an exit's step into the

@@ -1506,6 +1506,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   protection again, and §5.4's bound alerts once per interval. The position then stays unprotected
   indefinitely, with that one owner alert as its only signal. Re-place (or escalate) when an
   awaited order is refused, and keep alerting while the interval stays open.
+  The same holds for a re-placement before expiry ([DEC-367](decisions/DEC-367.md)), where the
+  executor itself chose to open the interval: a refused re-placement is alerted once at the bound
+  and never retried (#468 round 1, minor 5).
 - **E7-4 (stream K), from #463 round 1 (minor 1):** a protective order the broker replaced
   (`Accepted → Replaced`, §5.7's `ReplacedPair`) is not counted as acknowledged. Its successor is
   live under another `client_order_id` that `awaiting` does not name, so the interval stays open
@@ -1526,6 +1529,13 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   never exceeds the position (rule 12). RC-04 reaches only a forward split on whole shares, and
   RC-05 and RC-23 are accounting-only. The slice-5 corporate-actions implementation PR does not
   merge before this pin exists.
+- **E7-4 (stream K), from [#468](https://github.com/kunwarshivam/mandate/pull/468) round 1
+  (minors 3, 4, 6):** (3) `expiring`'s date-arithmetic error resolves toward re-placing early
+  (`.unwrap_or(true)` in `new_day`), but nothing pins it; it fails only at `Date::next`'s upper
+  bound, so no test reaches it today. (4) `expiring` never checks that the order is GTC, though its
+  doc says so; §5.2 makes protective orders GTC, so a `tif` check would make it unrepresentable.
+  (6) `ExchangeCalendar::us_equities()` is parsed inside `expiring`, once per resting protective
+  order per instrument per trading day, as `session.rs` also does; parse it once.
 - **E7-4's tests correction (stream K), from the acknowledgment PR ([DEC-348](decisions/DEC-348.md)
   item 2):** the refcase harness's guard that an `unprotected_end` naming what it is `awaiting` is
   not read as the interval's end is reached by no live test, since every case that lists the end
