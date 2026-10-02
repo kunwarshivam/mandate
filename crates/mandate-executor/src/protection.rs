@@ -2230,7 +2230,7 @@ mod sequence_tests {
     use proptest::prop_oneof;
     use proptest::test_runner::TestRunner;
 
-    use super::rests;
+    use super::{long, rests};
     use crate::error::ExecutorError;
     use crate::fold::fold;
     use crate::ids::{ClientOrderId, IntentId};
@@ -2240,11 +2240,11 @@ mod sequence_tests {
         Everything, Executor, Ids, aapl, account, drafted, executor_config, fees, missing,
         submitted,
     };
-    use crate::state::ExecutorState;
+    use crate::state::{ExecutorState, OrderDetail};
     use crate::types::{
         AgentId, BrokerFill, BrokerOrder, BrokerOutcome, BrokerReject, BrokerRequest,
         BrokerUnknown, BrokerUpdate, Effect, EventDraft, EventId, ExecutorConfig, ExitTier, FillId,
-        Input, IntentBody, IntentHandoff, MandateVersion, MarketObservation, Mode, OcoLegs,
+        Input, IntentBody, IntentHandoff, MandateVersion, MarketObservation, Mode, OcoLegs, Order,
         OrderState, OrderType, Purpose, ReconcileReason, RiskClock, SubmitOrder, TimeInForce,
     };
 
@@ -8349,6 +8349,78 @@ mod sequence_tests {
             "protection re-placed for {protected_qty:?} while the broker holds 7: {:?}",
             drafted(&after)
         );
+        Ok(())
+    }
+
+    /// DEC-421's reading of what the broker holds, alone: of ten AAPL, a sell that ended with 3
+    /// reported and none applied leaves 7. A live sell's unapplied fill, an ended buy's, and an
+    /// ended sell's in another instrument each leave it at 7.
+    #[test]
+    fn the_long_held_counts_only_ended_sells_in_its_own_instrument() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut state = protected(&ports)?.state;
+        let msft = InstrumentId::new("MSFT")?;
+        for (id, instrument, side, state_now, reported) in [
+            (
+                "md-ended-sell",
+                aapl()?,
+                Side::Sell,
+                OrderState::Canceled,
+                "3",
+            ),
+            (
+                "md-live-sell",
+                aapl()?,
+                Side::Sell,
+                OrderState::PartiallyFilled,
+                "2",
+            ),
+            (
+                "md-ended-buy",
+                aapl()?,
+                Side::Buy,
+                OrderState::Canceled,
+                "5",
+            ),
+            (
+                "md-other-sell",
+                msft.clone(),
+                Side::Sell,
+                OrderState::Filled,
+                "4",
+            ),
+        ] {
+            let client_order_id = ClientOrderId::parse(id)?;
+            state.orders.insert(
+                client_order_id.clone(),
+                Order {
+                    client_order_id: client_order_id.clone(),
+                    intent_id: None,
+                    agent: Some(AgentId("agent-a".to_owned())),
+                    instrument,
+                    side,
+                    qty: Qty::parse("5")?,
+                    filled_qty: Qty::ZERO,
+                    state: state_now,
+                    attempt: 1,
+                    purpose: Purpose::RiskExit,
+                    absent_lookups: 0,
+                    first_absence_at: None,
+                    cancel_unconfirmed: false,
+                    replaced_by: None,
+                    created_on: None,
+                },
+            );
+            state.details.insert(
+                client_order_id,
+                OrderDetail {
+                    reported_filled: Some(Qty::parse(reported)?),
+                    ..OrderDetail::default()
+                },
+            );
+        }
+        assert_eq!(long(&state, &aapl()?)?, Qty::parse("7")?);
+        assert_eq!(long(&state, &msft)?, Qty::ZERO, "never below zero");
         Ok(())
     }
 }
