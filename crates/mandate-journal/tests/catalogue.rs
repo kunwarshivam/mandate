@@ -482,7 +482,6 @@ fn account_snapshot_recorded_is_routed_to_section_9_2() {
 /// §9.2 closes the snapshot's schema, so a member it does not list is refused as `schema` at that
 /// member, as on the eleven other pairs.
 #[test]
-#[ignore = "pending E7-10"]
 fn account_snapshot_recorded_refuses_an_unlisted_member() {
     let (event_type, kind) = SNAPSHOT_ON_ACCOUNT;
     let refused = Draft::parse(&draft(event_type, kind, &[])).map(|_| ());
