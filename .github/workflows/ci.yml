@@ -86,8 +86,8 @@ jobs:
 
   full:
     runs-on: ubuntu-24.04
-    # Mutants on a large safety-critical diff take several minutes.
-    timeout-minutes: 30
+    # Mutants on a diff near ES-13's size take up to half an hour (DEC-398).
+    timeout-minutes: 60
     permissions:
       contents: read
     env:
