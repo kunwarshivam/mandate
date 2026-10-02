@@ -53,7 +53,8 @@ Mandate is built by the founder working with AI coding agents. Agents follow
 | [Project charter](project/01-project-charter.md) | Objectives, scope, deliverables, stakeholders, governance |
 | [Milestones and WBS](project/02-milestones-and-wbs.md) | Milestone map, work packages, critical path, phase gates |
 | [RAID log](project/03-raid-log.md) | Risks, assumptions, issues, dependencies |
-| [Decision log](project/04-decision-log.md) | Accepted, proposed, and open decisions |
+| [Decision log](project/04-decision-log.md) | Accepted, proposed, and open decisions, DEC-01 to DEC-302 |
+| [Decisions](project/decisions/README.md) | One file per decision from DEC-344 on, and how to write one |
 | [Roles and RACI](project/05-raci.md) | Roles to fill and responsibilities |
 | [Backlog: v1](project/06-backlog-v1.md) | Epics and user stories with acceptance criteria |
 | [Quality and release plan](project/07-quality-and-release.md) | Definitions of ready and done, test strategy, release gates, incidents |

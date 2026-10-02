@@ -16,15 +16,19 @@ silent.
 
 1. **Take a number.** Use the range your dispatch or claim gives you. With none, fetch `main` and
    take the next integer after the highest of: the files here, the decision log's rows, and its
-   Reserved identifiers table. DEC-200 to DEC-249 are the web UI's block and do not count as the
-   highest.
+   Reserved identifiers table.
 2. **Reserve it in your first commit** by adding `DEC-<n>.md` with the status `Reserved`, who holds
-   it, and one line on what it is for. Reserve only what you will use: a number is never reused.
+   it, and one line on what it is for. The file is what protects the number: citing a number in a
+   PR description or a commit message reserves nothing. Reserve only what you will use.
 3. **Fill it in** in the PR that makes the decision, and set the status.
 4. **Change nothing else here.** A PR edits only its own decision files. To change an accepted
-   decision, write a new one that supersedes it, and edit the old file's status line only.
+   decision, write a new one that supersedes it, and edit only the old decision's status: the
+   status line of its file, or for DEC-01 to DEC-302 the Status cell of its row in the decision
+   log, which is the one edit that table still takes.
 
-A reservation that is abandoned keeps its file, with the status `Released`.
+A number that reached `main` is never reused: a reservation abandoned after it merged keeps its
+file, with the status `Released`. A reservation in a PR that is closed without merging leaves
+nothing on `main`, so the number is free and the next lane takes it.
 
 ## Format
 
@@ -48,9 +52,18 @@ What was decided. Number the items when there are several, so they can be cited 
 ## Alternatives considered
 ```
 
-Status values mean what they mean in the decision log: **Proposed** is recommended and waiting for
-the founder; an agent may set **Accepted** itself only for decisions DEC-79 and DEC-176 leave to
-agents.
+The status values:
+
+- **Reserved:** the number is held and the decision is not written yet.
+- **Proposed:** recommended and waiting for the founder. Work continues with the most conservative
+  option.
+- **Accepted:** binding. An agent may set it itself only for decisions DEC-79 and DEC-176 leave to
+  agents.
+- **Superseded by DEC-<m>:** replaced by a later decision, which says what changed.
+- **Released:** a reservation that reached `main` and was then abandoned.
+
+A question nobody has decided yet is not a decision file: it stays an `OD-` row in the decision
+log's Open decisions table.
 
 ## Numbers below DEC-344
 
