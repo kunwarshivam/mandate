@@ -3278,6 +3278,14 @@ fn the_watchdog_exit_is_a_risk_exit_through_the_ladder() {
     );
 }
 
+/// The broker's fill of the whole crypto entry `id`: 0.5 `BTC` bought at 60000.
+fn btc_fill(id: &str) -> mandate_executor::BrokerFill {
+    mandate_executor::BrokerFill {
+        instrument: instrument(BTC),
+        ..broker_fill("f-btc-1", Some(id), "0.5", "60000")
+    }
+}
+
 #[test]
 #[ignore = "pending E7-4"]
 fn a_crypto_position_carries_one_stop_limit_for_the_whole_position() {
@@ -3304,7 +3312,7 @@ fn a_crypto_position_carries_one_stop_limit_for_the_whole_position() {
         .map(|o| o.client_order_id.as_str().to_owned())
         .expect("the crypto entry is sent");
 
-    let ran = shell.run(
+    shell.run(
         Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
             "b-1",
             Some(&id),
@@ -3316,13 +3324,22 @@ fn a_crypto_position_carries_one_stop_limit_for_the_whole_position() {
         ))),
         &ports,
     );
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(btc_fill(&id))),
+        &ports,
+    );
 
     let protection = ran
         .submissions()
         .into_iter()
         .find(|o| o.order_type == mandate_executor::OrderType::StopLimit)
         .expect("one GTC stop-limit for the whole position (§5.4, DEC-36)");
-    assert_eq!(protection.qty, qty("0.5"), "for the whole position");
+    assert_eq!(
+        protection.qty,
+        qty("0.49875"),
+        "for the whole position, less the 0.00125 its buy withholds as the taker fee, the larger \
+         rate: a stop-limit never outlasts the position once that fee posts (RC-07, RC-20)"
+    );
     assert_eq!(
         protection.tif,
         mandate_executor::TimeInForce::Gtc,
@@ -3344,25 +3361,59 @@ fn a_crypto_add_is_a_limit_ioc_inside_the_sequence() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let held = event(
-        ACCOUNT_STREAM,
-        2,
-        "FillApplied",
-        with_clock(
-            &[
-                ("fill_id", text("f-0")),
-                ("instrument", text(BTC)),
-                ("side", text("buy")),
-                ("qty_gross", text("0.5")),
-                ("price", text("60000")),
-            ],
-            10,
+    for held in [
+        event(
+            ACCOUNT_STREAM,
+            2,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-btc")),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(BTC)),
+                    ("side", text("buy")),
+                    ("qty", text("0.5")),
+                    ("limit", text("60000")),
+                ],
+                10,
+            ),
         ),
-    );
-    shell.fold_one(&held).expect("the crypto position folds");
+        event(
+            ACCOUNT_STREAM,
+            3,
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text("f-0")),
+                    ("client_order_id", text("md-held-btc")),
+                    ("instrument", text(BTC)),
+                    ("side", text("buy")),
+                    ("qty_gross", text("0.5")),
+                    ("price", text("60000")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            4,
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-btc")),
+                    ("state", text("filled")),
+                ],
+                10,
+            ),
+        ),
+    ] {
+        shell
+            .fold_one(&held)
+            .expect("the agent's own crypto position folds, so its stop-limit has a holder");
+    }
     let protection = event(
         ACCOUNT_STREAM,
-        3,
+        5,
         "ProtectionChanged",
         with_clock(
             &[
@@ -3437,7 +3488,7 @@ fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
         .first()
         .map(|o| o.client_order_id.as_str().to_owned())
         .expect("the entry is sent");
-    let first = shell.run(
+    shell.run(
         Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
             "b-1",
             Some(&id),
@@ -3447,6 +3498,10 @@ fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
             "0.5",
             "filled",
         ))),
+        &ports,
+    );
+    let first = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(btc_fill(&id))),
         &ports,
     );
     let stop = first
