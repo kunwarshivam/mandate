@@ -388,7 +388,6 @@ fn fact_json(fact: &JournaledFact) -> Json {
 /// the account stream's connection the derivation gives; the facts must be exactly the vectors'
 /// `journaled_facts`, and every other record must map to none.
 #[test]
-#[ignore = "pending E7-10"]
 fn each_record_maps_to_its_journaled_fact() {
     let fx = fixture();
     let section = section(&fx);
