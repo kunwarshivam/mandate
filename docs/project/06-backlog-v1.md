@@ -1509,6 +1509,26 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   date §5.4's re-placement before expiry from the placement's own record. (3) The slice that
   reconciles protective legs maps `{entry}-p{record}` to the broker's leg ids, and it must land
   before any shell path hands the executor a protected intent.
+- **E7-4 (stream K), from [#463](https://github.com/kunwarshivam/mandate/pull/463) round 1
+  (minor 2), its own story:** after a re-placement the broker refuses or cancels unacknowledged, the
+  `unprotected_end` carrying `awaiting` has already ended the sequence, so nothing re-places
+  protection again, and §5.4's bound alerts once per interval. The position then stays unprotected
+  indefinitely, with that one owner alert as its only signal. Re-place (or escalate) when an
+  awaited order is refused, and keep alerting while the interval stays open.
+- **E7-4 (stream K), from #463 round 1 (minor 1):** a protective order the broker replaced
+  (`Accepted → Replaced`, §5.7's `ReplacedPair`) is not counted as acknowledged. Its successor is
+  live under another `client_order_id` that `awaiting` does not name, so the interval stays open
+  on a position that is in fact protected. Follow the replacement link when deciding the
+  acknowledgment.
+- **E7-4 (stream K), from #463 round 1 (minor 4):** `acknowledged` journals an `unprotected_end`
+  even when no interval is open for the instrument. The fold makes it a no-op, but the journal
+  carries an end that ends nothing. Guard it with `interval_open`.
+- **E7-4's tests correction (stream K), from the acknowledgment PR ([DEC-348](decisions/DEC-348.md)
+  item 2):** the refcase harness's guard that an `unprotected_end` naming what it is `awaiting` is
+  not read as the interval's end is reached by no live test, since every case that lists the end
+  after a `submit_protective` also has the step's own acknowledgment end it, and the matcher finds
+  that later record either way. Add a harness test that feeds an awaiting end with no
+  acknowledgment and asserts the step does not match `journal: unprotected_window_end`.
 - **E7-4 (stream K), from [#448](https://github.com/kunwarshivam/mandate/pull/448) round 1 (minor
   2, [DEC-349](decisions/DEC-349.md)):** a crypto stop-limit is sized net of the taker fee, the
   larger rate, because `BrokerFill` does not say maker or taker. After a maker fill the stop
