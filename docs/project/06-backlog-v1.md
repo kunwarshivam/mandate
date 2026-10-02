@@ -1280,11 +1280,9 @@ From E10-1's slice-V implementation (DEC-161):
     §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
     vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
     follow register them and map them to `AgentVersionActive` (a deployed agent's new version) and
-    `UniverseChanged`; until then both are refused. **Tests first, on `agent/l-risk-state-tests`
-    ([DEC-404](decisions/DEC-404.md)):** both are routed to a stub and refused as `unimplemented`,
-    and nine pending tests (`pending E7-10`) pin the vectors, the 15 non-nullable members, the closed
-    schemas, the mapping, and the requirement below.
-    **Required, and blocking this registration's acceptance (#470 round 2, minor 5):** the Rust
+    `UniverseChanged`. **Done ([DEC-404](decisions/DEC-404.md)):** tests first in #482, then the
+    registration and the mapping on `agent/l-risk-state-impl`, with the requirement below.
+    **Required, and met by the implementation (#470 round 2, minor 5):** the Rust
     registration re-derives mandate spec §9.2's classification of `new_version` against
     `old_version` from the two stored documents and refuses a `MandateVersionApplied` whose
     `classification` differs. Rule 33 covers only what the record itself carries (the allocation
@@ -1298,6 +1296,13 @@ From E10-1's slice-V implementation (DEC-161):
       classifier can become unmappable, and a context that will not build is not a hold an exit may
       have (rule 13). So E6-13's classifier change lands before any path builds a context from a
       real journal (DEC-169's wiring). That order is a named prerequisite here and on E6-13's row.
+    - **Unexercised shapes (#482 round 2, m3):** no pair reaches `classify`'s `join` with more than
+      one class over several rows (the only multi-path pair is the pinning switch, which returns
+      first), and no pair is two identical documents.
+    - **The pairs are not valid mandates (#482 round 2, m1):** six of
+      `a_version_maps_only_under_the_classification_its_documents_give`'s pairs break a V-rule (V-008,
+      V-013, V-034, V-036). Make each valid with a second patched path, so every fixture passes
+      every rule it is not meant to fail.
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).

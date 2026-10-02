@@ -73,8 +73,8 @@ pub enum JournaledFact {
     DisclosureAccepted { version: Digest },
     /// `AgentDeployed`, or `MandateVersionApplied` for a deployed agent: the version in force. The
     /// latest one per agent replaces the earlier ones. Journal spec v0.7 §9.2 closes `AgentDeployed`
-    /// and v0.8 §9.3 `MandateVersionApplied` (DEC-403); until the latter's registration maps it
-    /// (DEC-404), [`JournaledFact::from_record`] refuses it, so the fold fails closed.
+    /// and v0.8 §9.3 an applied `MandateVersionApplied`, each read from the stored document its
+    /// version names (DEC-403, DEC-404).
     AgentVersionActive {
         agent: AgentId,
         connection_id: ConnectionId,
@@ -131,9 +131,11 @@ impl JournaledFact {
     /// in the record. `account_connection` is the connection the record's account stream belongs to,
     /// which no record names yet (DEC-261 item 10), so an `AccountSnapshotRecorded` needs it.
     ///
-    /// `Err` when the record cannot be mapped: a deployment whose document is not stored, or does
-    /// not hash to the version it is stored under; a snapshot with no connection given; or a member
-    /// the fact needs that the payload does not hold in §9.2's form. A record that cannot be mapped is
+    /// `Err` when the record cannot be mapped: a deployment or a version change whose document is not
+    /// stored, or does not hash to the version it is stored under; a version change whose
+    /// `classification` is not `change::classify`'s verdict of its two documents, applied or rejected
+    /// alike (DEC-404 item 5); a snapshot with no connection given; or a member the fact needs that
+    /// the payload does not hold in §9.2's or §9.3's form. A record that cannot be mapped is
     /// refused, never skipped, because a fact the fold never sees takes the value that refuses only
     /// for facts that add (module doc), and a dropped `ConnectionRevoked` would not.
     pub fn from_record(
@@ -233,7 +235,51 @@ impl JournaledFact {
                     .map_err(|_| malformed("retired_on"))?,
                 loss_added_usd: record.usd("loss_added")?,
             },
-            "MandateVersionApplied" | "UniverseChanged" => return risk_state_fact(),
+            "UniverseChanged" => Self::UniverseChanged {
+                agent: AgentId::new(record.id("agent_id")?),
+                instrument: AssetId::parse(record.text("instrument")?)
+                    .map_err(|_| malformed("instrument"))?,
+                admitted: match record.text("change")? {
+                    "admitted" => true,
+                    "removed" => false,
+                    _ => return Err(malformed("change")),
+                },
+            },
+            "MandateVersionApplied" => {
+                let stored = |name: &'static str| -> Result<Mandate, SpecError> {
+                    let version = record.digest(name)?;
+                    let document = documents(&version).ok_or(malformed(name))?;
+                    let mandate = Mandate::parse(&document).map_err(|_| malformed(name))?;
+                    if mandate.version()?.digest() != version {
+                        return Err(malformed(name));
+                    }
+                    Ok(mandate)
+                };
+                let (old, new) = (stored("old_version")?, stored("new_version")?);
+                let verdict = crate::change::classify(&old, &new)?.class;
+                if record.text("classification")? != verdict.as_str() {
+                    return Err(malformed("classification"));
+                }
+                if record.text("result")? != "applied" {
+                    return Ok(None);
+                }
+                Self::AgentVersionActive {
+                    agent: AgentId::new(record.id("agent_id")?),
+                    connection_id: new.connection_id.clone(),
+                    environment: new.environment,
+                    allocation_usd: new
+                        .capital
+                        .allocation_usd
+                        .to_usd()
+                        .map_err(|_| malformed("new_version"))?,
+                    pinned: new
+                        .universe
+                        .pinned_instruments
+                        .iter()
+                        .map(|i| i.asset_id.clone())
+                        .collect(),
+                }
+            }
             "AccountSnapshotRecorded" => Self::AccountSnapshot {
                 connection_id: account_connection
                     .cloned()
@@ -244,13 +290,6 @@ impl JournaledFact {
         };
         Ok(Some(fact))
     }
-}
-
-/// The stub of the risk-state registration's tests PR (DEC-77, DEC-404): journal spec §9.3's
-/// mapping, and the re-derivation of a version's classification from its two stored documents, land
-/// with its implementation. Until then a risk-state record is refused, never skipped.
-fn risk_state_fact() -> Result<Option<JournaledFact>, SpecError> {
-    Err(SpecError::Unimplemented)
 }
 
 /// `ConfigSnapshotRegistered`'s kind for a signal model (journal spec §9.2).
@@ -1174,7 +1213,6 @@ mod record_tests {
     /// `UniverseChanged` maps to its agent, its instrument, and whether it was admitted (journal spec
     /// §9.3).
     #[test]
-    #[ignore = "pending E7-10"]
     fn a_universe_change_maps_to_its_instrument_admitted_or_removed() -> Result<(), SpecError> {
         let instrument = AssetId::parse("7b4a1c2e-2222-4a2b-9c3d-000000000002")?;
         for (change, admitted) in [("admitted", true), ("removed", false)] {
@@ -1232,9 +1270,11 @@ mod record_tests {
     /// `end_date`, a signal-model change, an asset class added, `behavior.research` set from null,
     /// pinning from a version with an admitting model (reducing, DEC-121) and from one without, and
     /// an autonomy `then` in each direction. Each verdict is written from §9.2's table by hand, not
-    /// computed by the classifier under test (DEC-403 item 5; #470 round 2, minor 5).
+    /// computed by the classifier under test (DEC-403 item 5; #470 round 2, minor 5). The pairs are
+    /// parsed, not validated: six break a V-rule (V-008, V-013, V-034, V-036), so this also pins that
+    /// the mapping does not validate the stored documents, which classification never consults
+    /// (#482 round 2, m1).
     #[test]
-    #[ignore = "pending E7-10"]
     fn a_version_maps_only_under_the_classification_its_documents_give() -> Result<(), String> {
         const RESEARCH: &str =
             r#"{"interval_s": 3600, "cost_cap_usd_per_day": "5", "max_revisions_per_lineage": 3}"#;
@@ -1364,7 +1404,6 @@ mod record_tests {
     /// `old_version` before `new_version`, never mapped from whatever is stored (#482 round 1, m4;
     /// as `AgentDeployed`).
     #[test]
-    #[ignore = "pending E7-10"]
     fn a_version_document_that_is_absent_or_an_impostor_is_refused() -> Result<(), String> {
         let old = mandate(&[])?;
         let new = mandate(&[("/name", r#""renamed""#)])?;
@@ -1379,6 +1418,7 @@ mod record_tests {
             (digest(&new)?, canonical(&new)?),
         ];
         let cases = [
+            (vec![], "old_version"),
             (vec![honest[1].clone()], "old_version"),
             (vec![honest[0].clone()], "new_version"),
             (
