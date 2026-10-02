@@ -24,10 +24,16 @@ builder, versioning, change classification, and the records kept.
   `trim_to_target` minimum is named: a trim is sent only if its quantity is at least the
   instrument's minimum order size (`min_order_size`, [trading spec §5.3](trading-domain.md) rule 2),
   which is the minimum the risk gate holds. §8.3 step 5's "minimum order" is named as the minimum
-  order value, `min_order_usd`, with its rule unchanged. The reference model judges a trim by the
-  quantity. Where the two minimums disagree, it declines only a sell that §5.3 rule 2 would refuse
-  anyway. No existing reference case changes, the four trim cases state `min_order_size`, and
-  MC-B33 and MC-B34 are added where the two minimums disagree (§11).
+  order value, `min_order_usd`, with its rule unchanged, and so is the `accumulate` goal's minimum
+  order (§3). The reference model judges a trim by the quantity, which matches the gate. Where the
+  two minimums disagree, a trim below `min_order_size` that is not a full close is an order the
+  broker would refuse for size. **Known defect:** a trim that would close the whole position is, on
+  this version, still withheld below `min_order_size`, though trading spec §5.3 rule 2 exempts a
+  full close. For example, 0.0002 BTC at a 600,000 bid (120 dollars) with a cap of 100, a confirmed
+  factor of 0.5 and a `min_order_size` of 0.001: the trim is the whole position, and it is withheld
+  at every evaluation. [DEC-423](../project/decisions/DEC-423.md) fixes it, in the gate first and
+  then here. No existing reference case changes, the four trim cases state `min_order_size`, and
+  MC-B33 and MC-B34 are added where the two minimums disagree; MC-B33 sits on the boundary (§11).
 - **v0.6, amended ([DEC-353](../project/decisions/DEC-353.md), [#444](https://github.com/kunwarshivam/mandate/issues/444)):**
   §9.2's autonomy row no longer calls a rule change reducing when it sends an order that reached an
   undelegated ask to an ask a delegation of the new version lifts: widening an `ask` rule a
@@ -321,7 +327,7 @@ it. `null` means no end.
 | Type | Parameters | Behavior | Done when | Then |
 |---|---|---|---|---|
 | `continuous` | `end_date`, `on_complete` | Trades the working universe (§2.3) | `end_date` passes | `on_complete` |
-| `accumulate` | instrument, `target_qty`, `max_avg_price` (or null), `max_spend_usd`, `end_date`, `on_complete` | Buys only the goal instrument; the universe is **pinned** to exactly that instrument and admits nothing (V-003). **Discretionary exits are disabled**; risk exits and protection apply. Buys are clipped (§8.3) | Remaining quantity (`target_qty` − position) is below one increment or below the minimum order; remaining spend is below the minimum order; or `end_date` passes | `on_complete` |
+| `accumulate` | instrument, `target_qty`, `max_avg_price` (or null), `max_spend_usd`, `end_date`, `on_complete` | Buys only the goal instrument; the universe is **pinned** to exactly that instrument and admits nothing (V-003). **Discretionary exits are disabled**; risk exits and protection apply. Buys are clipped (§8.3) | Remaining quantity (`target_qty` − position) is below one increment or below the minimum order value (`min_order_usd`); remaining spend is below the minimum order value (`min_order_usd`); or `end_date` passes | `on_complete` |
 | `profit_stop` | `profit_level`, `end_date` | Trades the working universe (§2.3) | Agent return reaches the level, confirmed in the risk state by breach time per §5.6 with no hard trigger: E − C ≥ `profit_level` × C (C = capital base, §5.1); or `end_date` passes | Discretionary exit of every position, then Retired (`AgentStopped`, reason `profit_stop_reached` or `end_date`) |
 
 - `profit_stop` is a stop condition, not a target: the UI shows `profit_level` as the level at
@@ -572,7 +578,7 @@ exits, and the kill switch are never denied by them (MI-1).
 
 | Action | Trigger | Effect | Lifts when |
 |---|---|---|---|
-| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, a position with MV − factor × cap ≥ `rebalance_band` × cap is sold down to factor × cap as a `risk_exit` (quantity rounded up to the increment) at the next evaluation, only once the rung has been active for `breach_confirm_s`, only if its quantity is at least the instrument's minimum order size (`min_order_size`, trading spec §5.3 rule 2; not §8.3 step 5's minimum order value), for equities only in the regular session, and never while Holding (DEC-65) | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
+| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, a position with MV − factor × cap ≥ `rebalance_band` × cap is sold down to factor × cap as a `risk_exit` (quantity rounded up to the increment) at the next evaluation, only once the rung has been active for `breach_confirm_s`, only if its quantity is at least the instrument's minimum order size (`min_order_size`, the minimum the risk gate holds; not §8.3 step 5's minimum order value), which matches the gate; a trim below it that is not a full close is an order the broker would refuse for size, and a trim that would close the whole position is still withheld, a known defect [DEC-423](../project/decisions/DEC-423.md) fixes, for equities only in the regular session, and never while Holding (DEC-65) | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
 | `exits_only` | Confirmed (§5.6) | Restriction `drawdown_exits_only` (mode `exits_only`) | Owner acknowledgment (§5.8) |
 | `flatten_and_pause` | Confirmed (§5.6) | Agent-scoped kill switch; restriction `drawdown_flatten` (mode `paused`) | Owner acknowledgment once flat (§5.8) |
 
