@@ -2081,6 +2081,9 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   uncomputable collar keeps the collar's error for it (DEC-383 item 3). Found by the E6-6
   exit-routing fix's differential matrix (6840 allowed zero rows on `main`); refusing it denies
   no reduction, since a zero order reduces nothing.
+  *Tests staged (DEC-401):* `evaluate` refuses a zero proposal before any check, as
+  `Unimplemented` until the implementation names it `GateError::ZeroQuantity`; two pending tests
+  in `crates/mandate-risk/tests/hand.rs`.
 - **E6-6:** pin the rest of a re-priced exit and of the close window. The tests assert
   `marketable_limit_required` and the quantity of a market exit re-priced in an auction window but
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`

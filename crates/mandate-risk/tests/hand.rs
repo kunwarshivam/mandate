@@ -1686,3 +1686,87 @@ fn declared_reason_code_variants() -> BTreeSet<String> {
     );
     variants
 }
+
+/// DEC-401: a proposal of zero quantity is no order, and the gate refuses it by name before any
+/// check, whatever else it would be. The grid is every origin, both sides, flat and held, every
+/// agent mode, both passes, and a working universe read or not. On every row the oracle is the
+/// quantity alone: zero is `zero_quantity`, ahead of the unread universe's own error, and the
+/// smallest quantity above zero is never refused that way, so the refusal is the zero and not a
+/// row it happens to sit on.
+#[test]
+#[ignore = "pending E6-6"]
+fn a_proposal_of_zero_is_refused_by_name_whatever_else_it_would_be() {
+    let origins = [
+        Origin::OrderBuilder,
+        Origin::GoalCompletion,
+        Origin::RemovedInstrument,
+        Origin::RiskEngine,
+        Origin::TrimToTarget,
+        Origin::StopWatchdog,
+        Origin::AutomatedKillSwitch,
+        Origin::OwnerClose,
+        Origin::OwnerKillSwitch,
+        Origin::ProtectiveLeg,
+    ];
+    let modes = [
+        AgentMode::Normal,
+        AgentMode::ExitsOnly,
+        AgentMode::Paused,
+        AgentMode::Stopped,
+    ];
+    let passes = [
+        mandate_risk::GatePass::First,
+        mandate_risk::GatePass::BeforeSubmission,
+    ];
+    let mut rows = 0_u32;
+    for origin in origins {
+        for side in [Side::Buy, Side::Sell] {
+            for held in ["0", "10"] {
+                for mode in modes {
+                    for pass in passes {
+                        for universe_read in [true, false] {
+                            for (quantity, zero) in [("0", true), ("0.000000001", false)] {
+                                let mut s = Scenario::allowing();
+                                s.pass = pass;
+                                s.agent.mode = mode;
+                                s.agent.positions.insert(asset(INSTRUMENT_3), qty(held));
+                                s.proposed = proposal(INSTRUMENT_3, side, quantity, "100", origin);
+                                if !universe_read {
+                                    s.universe = mandate_risk::WorkingUniverse::Unavailable;
+                                }
+                                let decided = evaluate(&s.input());
+                                let refused_as_zero =
+                                    matches!(decided, Err(mandate_risk::GateError::ZeroQuantity));
+                                assert_eq!(
+                                    refused_as_zero, zero,
+                                    "{origin:?} {side:?} of {quantity} with {held} held, {mode:?}, \
+                                     {pass:?}, universe read {universe_read}: {decided:?}"
+                                );
+                                rows = rows.saturating_add(1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        rows,
+        10 * 2 * 2 * 4 * 2 * 2 * 2,
+        "every row of the grid was decided"
+    );
+}
+
+/// DEC-401's refusal has its own stable code, distinct from every other refusal's.
+#[test]
+#[ignore = "pending E6-6"]
+fn a_zero_proposal_reports_the_zero_quantity_code() {
+    let mut s = Scenario::allowing();
+    s.proposed = proposal(INSTRUMENT_3, Side::Buy, "0", "100", Origin::OrderBuilder);
+    let refused = evaluate(&s.input());
+    assert_eq!(
+        refused.as_ref().map_err(mandate_risk::GateError::code),
+        Err("zero_quantity"),
+        "the refusal names the zero: {refused:?}"
+    );
+}
