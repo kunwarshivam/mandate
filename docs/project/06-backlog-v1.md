@@ -2153,8 +2153,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   active", since every rung factor is an `open_fraction` below one, and the gate trims only under
   an active `trim_to_target` rung (DEC-399 item 2), so the two agree on every input the schema can
   write. Dropping the guard would make `ref.py` withhold a trim `rung_not_confirmed` with no rung
-  active. Only the minimum's reading remains, a question to the coordinator on claim
-  [#123](https://github.com/kunwarshivam/mandate/issues/123).
+  active.
+  *Done (the minimum half):* the coordinator's ruling on claim
+  [#123](https://github.com/kunwarshivam/mandate/issues/123) took option (a), DEC-399 item 8.
+  `ref.py` and the harness's `trim_guards` judge `below_minimum_order` by the instrument's
+  `min_order_size`, §5.5 names that minimum, and MC-B33 and MC-B34 pin the two readings' difference.
 - **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
