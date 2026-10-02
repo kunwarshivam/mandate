@@ -1167,9 +1167,12 @@ From E10-1's slice-V implementation (DEC-161):
     `AccountSnapshotRecorded` until this lands.** The fee step pauses every agent and alerts the owner,
     and refusing its snapshot at `append` must never stop it (rules 3 and 13, DEC-261 item 7). E7-10's
     tests PR pins that ordering with three live tests (DEC-303 item 4). The registration PR must also
-    turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. Until then they are proven only
-    by `reference/journal/control.py`'s mutants, and `snapshot_drafts_stay_unregistered` reads none of
-    them.
+    turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. **The writer landed in #456;
+    the registration's tests PR (DEC-402) routes the snapshot to a stub and makes the three ordering
+    pins pending**: `an_account_snapshot_is_closed_and_checked_by_rule_24` turns those drafts on,
+    `account_snapshot_recorded_refuses_an_unlisted_member` closes the schema, and
+    `the_fee_steps_snapshot_is_never_refused_for_its_members` lands the registration and the fee
+    step's writer together.
     The writer's pending pins are #441's (DEC-305 to DEC-307): the fee-step snapshot's payload
     member for member and type for type, the `risk_clock` stamp, the pause and alert whether or not
     the snapshot recorded, `IntentReceived` as §9.1's nine members, and `OrderSubmitted`'s
