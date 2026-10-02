@@ -990,6 +990,73 @@ mod tests {
         Ok(())
     }
 
+    /// Rule 24 reports at the first cash member that disagrees with `model_cash`, in the schema's
+    /// order: when both `cash_band` and `cash_in_band` disagree, at `cash_band` (#473 round 1, M1).
+    #[test]
+    fn rule_24_reports_the_band_before_the_flag() -> Result<(), String> {
+        let section = section()?;
+        let compared_alone = with_payload(
+            with_payload(
+                base_of(&section, "AccountSnapshotRecorded")?,
+                "cash_band",
+                Value::Null,
+            )?,
+            "cash_in_band",
+            Value::Null,
+        )?;
+        let flagged_alone = with_payload(
+            base_of(&section, "AccountSnapshotRecorded")?,
+            "model_cash",
+            Value::Null,
+        )?;
+        for (name, body) in [
+            ("model_cash alone", compared_alone),
+            ("band and flag alone", flagged_alone),
+        ] {
+            assert_eq!(
+                refusal(body),
+                Some(("schema".to_owned(), "payload.cash_band".to_owned())),
+                "{name}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Rule 24 compares exact `Usd`: an amount `Usd` cannot hold is refused as `schema` at that
+    /// member, and a difference of two that fit but overflows at `model_cash`. None is ever compared
+    /// approximately or accepted (DEC-402 item 6; #473 round 1, M2).
+    #[test]
+    fn an_amount_rule_24_cannot_compare_exactly_is_refused() -> Result<(), String> {
+        let section = section()?;
+        let near = "78999999999999999999999999999";
+        let cases: [(&[(&str, &str)], &str); 3] = [
+            (
+                &[("cash_band", "9.9999999999999999999999999999")],
+                "payload.cash_band",
+            ),
+            (
+                &[("cash", "10000000000000000000000000000.1")],
+                "payload.cash",
+            ),
+            (
+                &[("cash", near), ("model_cash", &format!("-{near}"))],
+                "payload.model_cash",
+            ),
+        ];
+        for (members, path) in cases {
+            let mut body = base_of(&section, "AccountSnapshotRecorded")?;
+            for (member, value) in members {
+                body = with_payload(body, member, Value::Str((*value).to_owned()))?;
+            }
+            assert_eq!(
+                refusal(body),
+                Some(("schema".to_owned(), path.to_owned())),
+                "{members:?}"
+            );
+        }
+        Ok(())
+    }
+
     /// `/` is one empty reference token: RFC 6901 grammar admits it, and §9.2's "one or more
     /// `/`-prefixed reference tokens" does too, so it is accepted; only the empty pointer is not
     /// (DEC-303 item 13).

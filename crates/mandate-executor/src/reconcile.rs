@@ -461,7 +461,10 @@ pub(crate) fn fee_step_snapshot_fields(
 /// never a reason to skip the pause, because a pause is risk reduction no validation may deny
 /// (`AGENTS.md` rules 3 and 13, DEC-261 item 7). The one exception is a batch that can journal
 /// nothing at all, a risk clock outside §4.7's range: the pause's own draft fails the same way, so
-/// the whole input fails and nothing is sent.
+/// the whole input fails and nothing is sent. The guarantee also needs the fee step's snapshot to
+/// conform to journal spec §9.2: `Batch::journal` does not validate a draft and `append` refuses a
+/// batch whole, so a snapshot refused there would take the pause with it, which is why `fees`
+/// journals [`fee_step_snapshot_fields`] (DEC-402).
 pub(crate) fn fee_step_pause_and_alert(
     batch: &mut Batch<'_, '_>,
     recorded: Option<EventId>,
@@ -2555,12 +2558,10 @@ pub(crate) mod tests {
 
     /// The executor's own `AccountSnapshotRecorded` payloads, journaled as `mandate-journal` would
     /// be asked to: each is accepted whole. Journal spec §9.2 needs the fee step's three cash members
-    /// present as `null`, so the change that registers the schema also wires
-    /// [`super::fee_step_snapshot_fields`] into `fees`, or the snapshot of the step that pauses every
-    /// agent and alerts the owner would be refused (DEC-261 item 7, DEC-389 item 2, DEC-402,
-    /// `AGENTS.md` rules 3 and 13). Each payload is parsed before its members are compared, so the
-    /// journal's stub answers first; once registered, the fee step's reduced form is refused at
-    /// `payload.model_cash` and this fails until the writer is wired.
+    /// present as `null`, so `fees` journals [`super::fee_step_snapshot_fields`], or the snapshot of
+    /// the step that pauses every agent and alerts the owner would be refused (DEC-261 item 7,
+    /// DEC-389 item 2, DEC-402, `AGENTS.md` rules 3 and 13). Each payload is parsed before its
+    /// members are compared, so a reduced form the journal refuses fails here at its member.
     #[test]
     fn the_fee_steps_snapshot_is_never_refused_for_its_members() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
