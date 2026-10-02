@@ -227,6 +227,20 @@ fn self_trade(input: &GateInput<'_>) -> bool {
 /// - A discretionary or an owner exit is sliced by the participation caps (§9.6).
 ///
 /// A risk exit and a protective order are paced by none of these (`AGENTS.md` rule 13).
+/// The exit-routing stub (DEC-77): a figure the exit's pacing cannot compute leaves the gate with
+/// no answer today, and `pacing` hands back the arithmetic error, so the executor holds an `Err`
+/// where rule 13 owes it a routed exit (`AGENTS.md` rule 13, backlog "#311 round 2, minor 1" — an
+/// extreme quote overflows [`Price::collar_bound`]'s aggressive bound, and an extreme volume can
+/// overflow [`Qty::portion`]'s cap). Until E6-6 lands the reading — a bound that cannot be
+/// computed paces nothing and the exit goes as proposed, never denied — the failure is reported,
+/// never guessed: `Unimplemented("pacing", "E6-6")` (DEC-327).
+fn unrouted_exit(error: GateError) -> GateError {
+    match error {
+        GateError::Num(_) => GateError::Unimplemented("pacing", "E6-6"),
+        other => other,
+    }
+}
+
 pub(crate) fn pacing(
     input: &GateInput<'_>,
     purpose: Purpose,
@@ -241,14 +255,14 @@ pub(crate) fn pacing(
         applied: BTreeSet::new(),
     };
     if purpose == Purpose::DiscretionaryExit {
-        price_by_collar(input, &mut pacing)?;
+        price_by_collar(input, &mut pacing).map_err(unrouted_exit)?;
         if at.close_window {
             pacing.marketable_limit_required = true;
             pacing.applied.insert(PacingControl::CloseWindow);
         }
     }
     if matches!(purpose, Purpose::DiscretionaryExit | Purpose::OwnerExit) {
-        slice(input, &mut pacing)?;
+        slice(input, &mut pacing).map_err(unrouted_exit)?;
     }
     Ok((pacing.marketable_limit_required || !pacing.applied.is_empty()).then_some(pacing))
 }

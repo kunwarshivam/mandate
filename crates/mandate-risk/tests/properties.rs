@@ -10,7 +10,7 @@
 mod common;
 
 use common::oracle::{Breach, ShadowLedger, breached, gross_limit, position_cap, scaled};
-use common::{INSTRUMENT_2, INSTRUMENT_3, Scenario, asset, proposal, qty, usd};
+use common::{INSTRUMENT_2, INSTRUMENT_3, Scenario, asset, price, proposal, qty, usd};
 use mandate_risk::{AgentMode, CheckOutcome, Origin, Purpose, ReasonCode, Side, Verdict, evaluate};
 use proptest::prelude::*;
 
@@ -103,6 +103,65 @@ proptest! {
             matches!(d.verdict, Verdict::Allow | Verdict::Defer | Verdict::Hold),
             "a discretionary exit was denied: {:?}",
             d.reason
+        );
+    }
+
+    /// An exit the pacing cannot compute is still routed: an owner or a discretionary exit with
+    /// extreme prices or volumes gets a decision, never an error, and never a denial
+    /// (`AGENTS.md` rule 13; backlog "#311 round 2, minor 1", DEC-327). The quote and the volumes
+    /// sit at the decimal's edges, where [`Price::collar_bound`]'s aggressive bound and
+    /// [`Qty::portion`]'s caps overflow — the edges the other properties' small, total generators
+    /// deliberately never reach. Pending E6-6, whose implementation reads a bound that cannot be
+    /// computed as pacing nothing, the exit going as proposed.
+    #[test]
+    #[ignore = "pending E6-6"]
+    fn an_exit_over_extreme_figures_is_still_routed(
+        origin in prop::sample::select(vec![
+            Origin::OrderBuilder, Origin::GoalCompletion, Origin::RemovedInstrument,
+            Origin::OwnerClose, Origin::OwnerKillSwitch,
+        ]),
+        quote in prop::option::of(prop::sample::select(vec![
+            "79228162514264337593.543950335", "0.000000001", "99.95",
+        ])),
+        trailing in prop::option::of(prop::sample::select(vec![
+            "79228162514264337593.543950335", "100000", "0",
+        ])),
+        adv in prop::option::of(prop::sample::select(vec![
+            "79228162514264337593.543950335", "1000000", "0",
+        ])),
+        fractionable in any::<bool>(),
+    ) {
+        let mut s = Scenario::allowing();
+        s.instrument.fractionable = fractionable;
+        if let Some(text) = quote {
+            let at = price(text);
+            s.market.quote = Some(mandate_risk::SaneQuote {
+                bid: at,
+                ask: at,
+                at: common::at("2026-09-21T14:59:59Z"),
+            });
+        } else {
+            s.market.quote = None;
+        }
+        s.market.trailing_5m_volume = trailing.map(qty);
+        s.market.adv_20d = adv.map(qty);
+        s.agent
+            .positions
+            .insert(asset(INSTRUMENT_3), qty("10"));
+        s.proposed = proposal(
+            INSTRUMENT_3, Side::Sell, "10", "100", origin,
+        );
+
+        let d = evaluate(&s.input());
+        prop_assert!(
+            d.is_ok(),
+            "an exit is routed, never an error: {:?}",
+            d
+        );
+        prop_assert_eq!(
+            d.expect("the exit is routed").verdict,
+            Verdict::Allow,
+            "an exit is never denied"
         );
     }
 
@@ -558,12 +617,14 @@ proptest! {
     }
 
     /// §9.6: only an **opposite**-side fill starts the sixty-second interval, and "within 60
-    /// seconds after" includes its last instant, so a fill exactly 60 s ago still blocks (DEC-163
-    /// item 3).
+    /// seconds after" includes its last instant, so a fill exactly 60 s ago still blocks and one
+    /// 60 s and a nanosecond ago does not (DEC-163 item 3). The draw carries 60 and 61 explicitly,
+    /// so the boundary is pinned every run and not only when the uniform range happens to land on
+    /// it (#311 round 2, minor 2, DEC-328).
     #[test]
     fn only_an_opposite_side_fill_starts_the_interval(
         opposite in any::<bool>(),
-        elapsed in 0_i64..120,
+        elapsed in prop_oneof![Just(60_i64), Just(61), 0_i64..120],
     ) {
         let mut s = Scenario::allowing();
         let fill_at = mandate_time::UtcNanos::from_parts(s.now.secs() - elapsed, 0)

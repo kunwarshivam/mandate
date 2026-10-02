@@ -169,21 +169,22 @@ fn halt(input: &GateInput<'_>) -> Option<Stop> {
         .then_some((Verdict::Deny, ReasonCode::InstrumentHalted))
 }
 
-/// §5.1: a market order is allowed only in the regular session outside the auction windows with
+/// §5.1: a market order is allowed only in the regular session outside the closing window with
 /// current status data, so it is barred under a halt, real or presumed (§4.4: a halted instrument,
 /// a dropped status feed, or no fresh quote), for a US equity outside the regular session (§9.4:
-/// "exits in extended hours as limit orders"), and in either auction window (§4.3: "exits in them
-/// use limit orders, never market orders"; DEC-159). An allowed market-order exit where market
-/// orders are barred is sent as a marketable limit, never as a market order, and never denied
-/// (§4.4, §5.6, DEC-129 items 28 and 31); only a reduction is allowed with a market kind, since
-/// check 4 denies every market opening. A crossed quote is no fresh quote here, never an error: a
-/// reduction is not refused for it.
+/// "exits in extended hours as limit orders"), and in the close window (§4.3's closing auction;
+/// DEC-159). The opening auction carries no arm of its own (DEC-326): it is always pre-market
+/// (§4.3), where a US equity is outside the regular session already, and crypto has no auction, so
+/// the session arm bars every market order an opening-auction arm could bar and no test can tell
+/// the clause was there. An allowed market-order exit where market orders are barred is sent as a
+/// marketable limit, never as a market order, and never denied (§4.4, §5.6, DEC-129 items 28 and
+/// 31); only a reduction is allowed with a market kind, since check 4 denies every market opening.
+/// A crossed quote is no fresh quote here, never an error: a reduction is not refused for it.
 fn market_orders_barred(input: &GateInput<'_>, at: &SessionAt) -> bool {
     let i = input.instrument;
     i.halted
         || !i.status_feed_current
         || conduct::usable_quote(input).ok().flatten().is_none()
-        || at.opening_auction
         || at.close_window
         || (i.asset_class == AssetClass::UsEquity && at.session != Session::Regular)
 }
@@ -2621,7 +2622,9 @@ mod tests {
         /// an allowed exit is sent as an order the broker takes: above zero, at most what was
         /// proposed, and at least `min_order_size` unless the proposed exit is itself smaller
         /// (`AGENTS.md` rule 13, DEC-163 item 4). The bound is computed from the inputs, not from
-        /// the gate's own slice.
+        /// the gate's own slice. A risk exit and a protective order are exempt from every control
+        /// that could change the quantity, so what is sent is the whole proposal, asserted here
+        /// and not only by the slice tests' fixed rows (#311 round 2, minor 3, DEC-328).
         #[test]
         fn an_allowed_exit_is_never_below_its_minimum_or_zero(
             origin in prop::sample::select(vec![
@@ -2669,6 +2672,13 @@ mod tests {
                 proposed,
                 minimum
             );
+            if matches!(origin, Origin::RiskEngine | Origin::ProtectiveLeg) {
+                prop_assert_eq!(
+                    sent, proposed,
+                    "no participation cap slices a risk exit or a protective order: the whole \
+                     exit goes"
+                );
+            }
         }
     }
 
