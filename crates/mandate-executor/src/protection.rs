@@ -6306,6 +6306,16 @@ mod sequence_tests {
             "an order placed within the buffer at the calendar's edge is judged by its high count, \
              so it is not due the next trading day (#468 round 2, M1)"
         );
+        let edge = Date::parse("2028-12-22")?;
+        assert!(
+            !super::expiring(edge, Date::parse("2029-03-14")?, &config)?,
+            "the high count reads the weekdays past the calendar as trading days: six from \
+             2029-03-14 to the expiry, 2029-03-22"
+        );
+        assert!(
+            super::expiring(edge, Date::parse("2029-03-15")?, &config)?,
+            "and five from 2029-03-15, so it is due there"
+        );
         Ok(())
     }
 
