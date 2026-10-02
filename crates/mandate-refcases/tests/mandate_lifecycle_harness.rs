@@ -566,7 +566,7 @@ fn what_the_runtime_cannot_be_driven_to_fails() {
             "MC-E02",
             "/script/0/bound/reference_mark/seq",
             json!(1),
-            "head",
+            "bound `reference_mark`",
         ),
         (
             "MC-E02",
