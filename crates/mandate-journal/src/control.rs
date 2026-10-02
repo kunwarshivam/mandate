@@ -1533,7 +1533,9 @@ mod tests {
         }
         assert!(
             accepted.len() >= 16 && invalid.len() >= 60,
-            "the vectors may add drafts, never drop them"
+            "the vectors may add drafts, never drop them: {} valid drafts and bases, {} invalid drafts",
+            accepted.len(),
+            invalid.len()
         );
         assert!(failures.is_empty(), "{}", failures.join("\n"));
         Ok(())
@@ -1546,7 +1548,7 @@ mod tests {
     #[test]
     #[ignore = "pending E17-2"]
     fn a_required_thesis_member_is_never_null() -> Result<(), String> {
-        const THESIS_REQUIRED: [&str; 20] = [
+        const THESIS_REQUIRED: [&str; 22] = [
             "model_id",
             "model_version",
             "content_hash",
@@ -1562,6 +1564,8 @@ mod tests {
             "conviction",
             "confidence",
             "evidence_sources",
+            "evidence_sources[0]",
+            "evidence_sources[1]",
             "invalidation",
             "allowlist_version",
             "prompt_ref",
@@ -1591,7 +1595,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 40);
+        assert_eq!(checked, 44);
         Ok(())
     }
 

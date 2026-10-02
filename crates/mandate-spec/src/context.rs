@@ -1582,6 +1582,14 @@ mod thesis_tests {
     /// The test base made a research agent's mandate: unpinned, `behavior.research` set, and its one
     /// signal model admitting instruments (§8.5 checks 4 and 5 pass), `us_equity` only, admission
     /// `ask`, a revision cap of 3.
+    ///
+    /// These documents are parsed, not validated, and are not valid mandates: the admitting model
+    /// keeps the base's `quant.momentum` id, where §8.4 and V-036 want an `llm.` one. That is
+    /// acceptable here because `check_thesis_record` reads only typed fields and no V-rule; the
+    /// backlog records making them valid (#510 round 1, minor 1, as #482 round 2's m1 for
+    /// `record_tests`). The base itself, as `unresearched`, fails check 4 on both disjuncts (no
+    /// `behavior.research` and no admitting model), so no case tells them apart; V-036 makes them one
+    /// condition for a validated mandate, as `mandate-research` notes.
     const RESEARCH_PATCHES: [(&str, &str); 3] = [
         ("/universe/pinned", "false"),
         ("/behavior/research", RESEARCH),
@@ -1787,7 +1795,8 @@ mod thesis_tests {
             ("/universe/pinned", "true"),
             ("/autonomy/admission", r#""deny""#),
         ])?;
-        let (store, v) = Store::of([&open, &pinned, &denied, &both])?;
+        let unresearched = mandate(&[("/universe/pinned", "false")])?;
+        let (store, v) = Store::of([&open, &pinned, &denied, &both, &unresearched])?;
         let cases = [
             (
                 "pinned and denied, refused at 6",
@@ -1818,6 +1827,11 @@ mod thesis_tests {
                 "past the cap, refused at 17",
                 thesis(Some("universe_full"), 4, "us_equity")?,
                 &v[0],
+            ),
+            (
+                "no research agent, refused at 17",
+                thesis(Some("universe_full"), 0, "us_equity")?,
+                &v[4],
             ),
         ];
         assert_eq!(
