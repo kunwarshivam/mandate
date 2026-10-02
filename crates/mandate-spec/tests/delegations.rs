@@ -8,6 +8,7 @@
 
 mod common;
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{arr, base, edit, i, obj, s, with};
@@ -180,6 +181,31 @@ fn a_delegation_parses_member_by_member() {
         off_calendar.autonomy.delegations[0].expires_at, None,
         "an instant the schema's pattern matches and the calendar does not have parses as no instant"
     );
+    let longest_id = "d".repeat(32);
+    for (what, item) in [
+        ("one order", delegation_with(&[("max_orders", Some(i(1)))])),
+        (
+            "1,000 orders",
+            delegation_with(&[("max_orders", Some(i(1000)))]),
+        ),
+        (
+            "a 32-character id",
+            delegation_with(&[("id", Some(s(&longest_id)))]),
+        ),
+    ] {
+        assert!(
+            Mandate::parse(&delegated(vec![item])).is_ok(),
+            "{what} is inside the schema"
+        );
+    }
+    let twenty: Vec<Value> = (0..20)
+        .map(|n| delegation_with(&[("id", Some(s(&format!("d{n}"))))]))
+        .collect();
+    assert_eq!(
+        parse(&delegated(twenty)).autonomy.delegations.len(),
+        20,
+        "twenty delegations are inside the schema"
+    );
 }
 
 /// Each bound `$defs/delegation` and the autonomy block put on a delegation, refused with the code
@@ -324,6 +350,20 @@ fn v041_bounds_what_a_delegation_names_and_how_long_it_lasts() {
         "a rule lifted whose then is auto",
     );
     refused(
+        edit(
+            &delegated(vec![delegation_with(&[("lifts", Some(s("default")))])]),
+            &[("/autonomy/default", Some(s("auto")))],
+        ),
+        "the default lifted while it is auto",
+    );
+    refused(
+        edit(
+            &delegated(vec![delegation()]),
+            &[("/autonomy/rules/0/then", Some(s("deny")))],
+        ),
+        "a rule lifted whose then is deny",
+    );
+    refused(
         delegated(vec![delegation_with(&[("lifts", Some(s("rule:missing")))])]),
         "a rule lifted that the version does not have",
     );
@@ -337,6 +377,20 @@ fn v041_bounds_what_a_delegation_names_and_how_long_it_lasts() {
             Some(s("2026-02-30T00:00:00.000000000Z")),
         )])]),
         "an expiry the calendar does not have",
+    );
+    refused(
+        delegated(vec![delegation_with(&[(
+            "starts_at",
+            Some(s("2026-02-30T00:00:00.000000000Z")),
+        )])]),
+        "a start the calendar does not have",
+    );
+    refused(
+        delegated(vec![delegation_with(&[(
+            "starts_at",
+            Some(s("2026-09-24T24:00:00.000000000Z")),
+        )])]),
+        "a start whose hour the clock does not have",
     );
     allowed(
         delegated(vec![delegation_with(&[(
@@ -430,6 +484,18 @@ fn v042_carries_no_delegation_past_a_risk_increasing_version() {
         !codes_after(&previous, true, &reviewed).contains(&Violation::V042),
         "a review date set or moved is left out (DEC-188)"
     );
+    let later = edit(&previous, &[("/autonomy/review_by", Some(s("2027-06-30")))]);
+    assert_eq!(
+        classify(&parse(&reviewed), &parse(&later))
+            .expect("two parsed mandates classify")
+            .class,
+        RiskIncreasing,
+        "the review_by row alone is increasing when the date moves later",
+    );
+    assert!(
+        !codes_after(&reviewed, true, &later).contains(&Violation::V042),
+        "but V-042 reads the new version's review date in both, so d1 carries (DEC-273)",
+    );
     let narrowed = edit(
         &previous,
         &[("/autonomy/delegations/0/max_orders", Some(i(2)))],
@@ -501,6 +567,43 @@ fn a_delegation_is_the_owners_and_its_condition_is_typed() {
     assert!(
         codes(&mistyped).contains(&Violation::V023),
         "purpose is open or increase only"
+    );
+    let under = ProvenanceMap::new(BTreeMap::from([(
+        Pointer::new("/autonomy/delegations/0/max_order_usd"),
+        Provenance {
+            source: Source::PlatformProposed,
+            confirmed: true,
+        },
+    )]));
+    assert!(
+        validate(&parse(&document), &context(None, under))
+            .expect("the document is evaluable")
+            .violations
+            .contains(&Violation::V022),
+        "a proposed value under a delegation is V-022 too"
+    );
+    let unusual = delegated(vec![delegation_with(&[(
+        "when",
+        Some(obj(vec![
+            ("field", s("unusual_input")),
+            ("op", s("eq")),
+            ("value", Value::Bool(true)),
+        ])),
+    )])]);
+    assert!(
+        codes(&unusual).contains(&Violation::V018),
+        "rules and delegations do not use unusual_input (V-018)"
+    );
+    let comparison = obj(vec![
+        ("field", s("purpose")),
+        ("op", s("in")),
+        ("value", arr(vec![s("open")])),
+    ]);
+    let five_levels = (0..4).fold(comparison, |inner, _| obj(vec![("not", inner)]));
+    let deep = delegated(vec![delegation_with(&[("when", Some(five_levels))])]);
+    assert!(
+        codes(&deep).contains(&Violation::V017),
+        "a delegation's condition nests no deeper than a rule's (V-017)"
     );
 }
 
@@ -609,6 +712,32 @@ fn the_delegations_row_reduces_only_by_removing_or_narrowing() {
         "one added"
     );
     assert_eq!(class(vec![d2, d1]), RiskIncreasing, "reordered");
+    let before = parse(&delegated(vec![delegation()]));
+    let wider = parse(&delegated(vec![delegation_with(&[(
+        "max_orders",
+        Some(i(4)),
+    )])]));
+    let widened = classify(&before, &wider).expect("two parsed mandates classify");
+    assert_eq!(
+        (widened.class, widened.step_up_required),
+        (RiskIncreasing, true),
+        "a delegations-only widening needs step-up, through the whole mandate's classification"
+    );
+    assert_eq!(
+        widened.changed_paths,
+        vec![Pointer::new("/autonomy/delegations")]
+    );
+    let narrower = parse(&delegated(vec![delegation_with(&[(
+        "max_orders",
+        Some(i(2)),
+    )])]));
+    assert_eq!(
+        classify(&before, &narrower)
+            .expect("two parsed mandates classify")
+            .class,
+        RiskReducing,
+        "the row, not the autonomy row, decides a delegations-only change"
+    );
 }
 
 /// The base's autonomy block with these rules, this default, and these delegations.
@@ -792,6 +921,10 @@ fn drawn_block(rules: &Drawn, default: AutonomyDecision, lifted: &[Option<usize>
     block(&borrowed, default, delegations)
 }
 
+/// The fewest of the MI-29 property's 8,192 cases that must reach its decision assertion: about
+/// half the fewest a faithful classifier reached over 25 seeds, 771 (#516 round 1).
+const REACHED_FLOOR: u32 = 400;
+
 fn verdict() -> impl Strategy<Value = AutonomyDecision> {
     prop_oneof![Just(Auto), Just(Ask), Just(Deny)]
 }
@@ -800,9 +933,15 @@ fn verdict() -> impl Strategy<Value = AutonomyDecision> {
 /// makes any decision less strict, with each version's delegations in force. The old version is
 /// valid under V-041: each delegation names an `ask` it has. The new rules are drawn afresh, or are
 /// the old ones with one threshold moved or one rule removed (two draws in five each), the two edits
-/// DEC-353 is about; the
-/// delegations stand, or lose one, as the delegations row allows. Rule ids are positions, so a kept
-/// id may change its condition or its verdict. The oracle is [`decide`], which knows nothing of §9.2.
+/// DEC-353 is about; the delegations stand, or lose one, as the delegations row allows. Rule ids are
+/// positions, so a kept id may change its condition or its verdict, and removing the rule at position
+/// `k` reads to the classifier as the last id removed and the ids after `k` rewritten. The removal
+/// condition's later-rule arm therefore never fires here, only its default arm;
+/// `a_rule_change_that_routes_an_undelegated_ask_to_a_delegation_is_increasing` pins the other.
+/// The oracle is [`decide`], which knows nothing of §9.2.
+///
+/// A property that classified nothing reducing would check nothing, so it counts the cases that
+/// reach the decision assertion and requires at least [`REACHED_FLOOR`] of them.
 #[test]
 #[ignore = "pending E6-13"]
 fn a_reducing_rule_change_never_decides_less_strictly_with_the_delegations_in_force() {
@@ -826,6 +965,7 @@ fn a_reducing_rule_change_never_decides_less_strictly_with_the_delegations_in_fo
         prop::collection::vec(prop::option::of(0usize..4), 1..3),
         any::<bool>(),
     );
+    let reached = Cell::new(0u32);
     let outcome = runner.run(
         &draw,
         |(old, old_default, (drawn, edit, k, threshold), new_default, lifted, drop_one)| {
@@ -867,6 +1007,7 @@ fn a_reducing_rule_change_never_decides_less_strictly_with_the_delegations_in_fo
             let delegations_class = classify_delegations(&before.delegations, &after.delegations)
                 .map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
             if matches!(class.max(delegations_class), RiskReducing | Neutral) {
+                reached.set(reached.get() + 1);
                 for order in (50..=1050).step_by(50) {
                     prop_assert!(
                         decide(&new, new_default, &lifted_new, order)
@@ -889,6 +1030,11 @@ fn a_reducing_rule_change_never_decides_less_strictly_with_the_delegations_in_fo
     if let Err(failure) = outcome {
         panic!("MI-29: {failure}");
     }
+    assert!(
+        reached.get() >= REACHED_FLOOR,
+        "MI-29 reached its decision assertion in {} cases, fewer than {REACHED_FLOOR}",
+        reached.get()
+    );
 }
 
 /// [`decide`] is the oracle the MI-29 property trusts, so it is checked on its own: the first match,

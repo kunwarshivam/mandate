@@ -724,6 +724,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   the same step-up, which applies at the next safe point; the sum of a version's delegation caps
   stays within the allocation ([DEC-196](04-decision-log.md#decisions), V-045); no scope is offered for an admission, a
   two-approver ask, a live environment, or a client session.
+  Also for E8-8 ([#516](https://github.com/kunwarshivam/mandate/pull/516) round 1, minor 8): `mandate-spec`'s V-043
+  bounds each delegation on its own, so twenty delegations can each carry `max_total_usd` equal to the allocation. That is
+  the spec's reading, and the gate enforces every limit regardless (§6.5). The approval card and the MC-U family should
+  consider the aggregate, which is the V-045 the criteria above name and the mandate spec does not yet define.
 
 ### E9 Identity, tenancy, and policy
 
