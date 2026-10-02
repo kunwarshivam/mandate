@@ -643,7 +643,10 @@ fn ladder_rung(node: &Node<'_>) -> Parsed<LadderRung> {
 }
 
 fn autonomy(node: &Node<'_>) -> Parsed<Autonomy> {
-    let m = node.members("rules default admission approval review_by")?;
+    let m = node.members("rules default admission approval review_by delegations")?;
+    if m.optional("delegations").is_some() {
+        return Err(ParseError::Unimplemented);
+    }
     let approval = m.get("approval")?;
     let approval = approval.members("timeout_s on_timeout approvers two_approver_above_usd")?;
     Ok(Autonomy {
@@ -665,6 +668,7 @@ fn autonomy(node: &Node<'_>) -> Parsed<Autonomy> {
                 .dec_or_null("two_approver_above_usd", DecGrammar::PositiveDecimal)?,
         },
         review_by: m.optional("review_by").map(review_date).transpose()?,
+        delegations: Vec::new(),
     })
 }
 
