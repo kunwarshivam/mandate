@@ -5519,6 +5519,58 @@
     }
    },
    {
+    "name": "refused_stop_not_independent_without_cause",
+    "clause": "rules 28 then 27",
+    "base_draft": "refused_stop",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "not_independent"
+     },
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "stream_mismatch",
+     "path": "payload.reason",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "causation_id"
+      }
+     ]
+    }
+   },
+   {
+    "name": "refused_acknowledgment_on_the_agent_stream_not_independent",
+    "clause": "rules 26 then 28",
+    "base_draft": "refused_stop",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": "acknowledge"
+     },
+     {
+      "path": "payload.reason",
+      "value": "not_independent"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "stream_mismatch",
+     "path": "payload.command",
+     "also": [
+      {
+       "reason": "stream_mismatch",
+       "path": "payload.reason"
+      }
+     ]
+    }
+   },
+   {
     "name": "refused_stop_without_cause",
     "clause": "rule 27 (rule 16 on the agent stream)",
     "base_draft": "refused_stop",

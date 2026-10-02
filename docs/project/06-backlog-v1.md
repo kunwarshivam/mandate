@@ -304,7 +304,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   the code ([#474](https://github.com/kunwarshivam/mandate/pull/474): `mandate-journal`'s schema and rule 28), then the
   reference (the validator check in `reference/journal/control.py`, its two vectors, and its seeded bug). Also owed (#474
   round 1, m1): a test that pins every closed value list in `mandate-journal`'s §9.2 schemas against the spec's, so
-  widening one, as #474 widened `OwnerCommandRefused.reason`, fails unless the spec says so.
+  widening one, as #474 widened `OwnerCommandRefused.reason`, fails unless the spec says so. Copy `REQUIRED` in
+  `crates/mandate-journal/src/control.rs`: a list written out from the spec's tables, not read back from the schema, since a
+  bare `OneOf` checks nothing against widening ([#476](https://github.com/kunwarshivam/mandate/pull/476) round 1, m3).
+  Also owed (#476 round 1, m2), in the next `mandate-journal` code PR: raise `control::tests`' two draft-count floors
+  (`parsed >= 6`, `checked >= 49`) to the measured counts, so dropping a vector fails them as their messages say.
+  Also owed (#443 round 3, m14; #476 round 1, m4): no CI job runs `reference/journal/generate.py` or its seeded bugs, since
+  `cargo xtask ci reference` runs only `reference/mandate/`. Its first cost: rule 28's report order went unpinned on
+  the reference side until #476 round 1. Run `generate.py --check` per PR.
   **Founder question** (#443 round 2): should a mandate be refused at validation
   when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
   drawdown ladder) then cannot be lifted until a second user exists?

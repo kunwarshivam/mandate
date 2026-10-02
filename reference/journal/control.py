@@ -340,7 +340,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
 
 def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """Rules 25 and 26 (reason `stream_mismatch`)."""
+    """Rules 25, 26 and 28 (reason `stream_mismatch`), in that order: rule 28 is reported after rule 26, not
+    suppressed by it, so a draft breaking both names both."""
     p = draft["payload"]
     kind = draft["stream_id"].split(":")[0]
     out = []
@@ -354,7 +355,7 @@ def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     if refused and f"rule.26.{kind}" not in skip:
         out.append(Violation(f"rule.26.{kind}", "stream_mismatch", "payload.command"))
     independent = event_type == "OwnerCommandRefused" and p["reason"] == "not_independent" and kind != "acct"
-    if independent and not refused and "rule.28" not in skip:
+    if independent and "rule.28" not in skip:
         out.append(Violation("rule.28", "stream_mismatch", "payload.reason"))
     return out
 
@@ -1535,6 +1536,24 @@ def invalid_drafts() -> list[dict]:
             [change("payload.reason", "not_independent")],
             "stream_mismatch",
             "payload.reason",
+        ),
+        invalid(
+            "refused_stop_not_independent_without_cause",
+            "rules 28 then 27",
+            "refused_stop",
+            [change("payload.reason", "not_independent"), change("causation_id", None)],
+            "stream_mismatch",
+            "payload.reason",
+            also=[("schema", "causation_id")],
+        ),
+        invalid(
+            "refused_acknowledgment_on_the_agent_stream_not_independent",
+            "rules 26 then 28",
+            "refused_stop",
+            [change("payload.command", "acknowledge"), change("payload.reason", "not_independent")],
+            "stream_mismatch",
+            "payload.command",
+            also=[("stream_mismatch", "payload.reason")],
         ),
         invalid(
             "refused_stop_without_cause",
