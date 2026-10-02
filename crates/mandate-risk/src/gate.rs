@@ -2684,11 +2684,18 @@ mod tests {
 
     /// A decimal text to `i128` at 10^-9, by string handling alone, so the exit-routing oracle
     /// never uses `mandate-num`'s arithmetic. Text with more than nine places is not a quantity.
-    fn scaled(text: &str) -> i128 {
+    fn scaled(text: &str) -> Option<i128> {
         let (whole, part) = text.split_once('.').unwrap_or((text, ""));
-        let digits = |t: &str| t.bytes().fold(0_i128, |n, b| n * 10 + i128::from(b - b'0'));
+        let digits = |t: &str| {
+            t.bytes().try_fold(0_i128, |n, b| {
+                n.checked_mul(10)?
+                    .checked_add(i128::from(b.checked_sub(b'0')?))
+            })
+        };
         let padded = format!("{part:0<9}");
-        digits(whole) * 1_000_000_000 + digits(&padded)
+        digits(whole)?
+            .checked_mul(1_000_000_000)?
+            .checked_add(digits(&padded)?)
     }
 
     /// The quote and the configured `x` of one trigger for the exit-routing properties.
@@ -2768,40 +2775,65 @@ mod tests {
             }
 
             let unit = 1_000_000_000_i128;
-            let proposed = scaled("10");
-            let minimum = scaled(&o.instrument.min_order_size.to_string());
-            let on_increment = |cap: i128| if fractionable { cap } else { cap / unit * unit };
-            let share = |volume: &str, of: String| scaled(volume) * scaled(&of) / unit;
-            let mut expected_qty = proposed;
-            let mut expected_applied = BTreeSet::new();
-            if close_window {
-                expected_applied.insert(crate::PacingControl::CloseWindow);
-            }
-            let order_cap = trailing
-                .map(|t| on_increment(share(t, o.config.order_size_participation.to_string())));
-            let daily_left = adv.map(|a| {
-                let left = share(a, o.config.daily_participation.to_string())
-                    - today.map_or(0, scaled);
-                on_increment(left.max(0))
-            });
-            for (control, cap) in [
-                (crate::PacingControl::OrderSizeParticipation, order_cap),
-                (crate::PacingControl::DailyParticipation, daily_left),
-            ] {
-                if let Some(cap) = cap.filter(|c| *c > 0 && (*c).max(minimum) < proposed) {
-                    expected_qty = expected_qty.min(cap.max(minimum));
-                    expected_applied.insert(control);
+            let on_increment = |cap: i128| {
+                if fractionable {
+                    Some(cap)
+                } else {
+                    cap.checked_div(unit)?.checked_mul(unit)
                 }
-            }
+            };
+            let share = |volume: &str, of: String| {
+                scaled(volume)?.checked_mul(scaled(&of)?)?.checked_div(unit)
+            };
+            let order_participation = o.config.order_size_participation.to_string();
+            let daily_participation = o.config.daily_participation.to_string();
+            let minimum_text = o.instrument.min_order_size.to_string();
+            let oracle = || -> Option<(i128, i128, BTreeSet<crate::PacingControl>)> {
+                let proposed = scaled("10")?;
+                let minimum = scaled(&minimum_text)?;
+                let mut expected_qty = proposed;
+                let mut expected_applied = BTreeSet::new();
+                if close_window {
+                    expected_applied.insert(crate::PacingControl::CloseWindow);
+                }
+                let order_cap = match trailing {
+                    Some(t) => Some(on_increment(share(t, order_participation.clone())?)?),
+                    None => None,
+                };
+                let daily_left = match adv {
+                    Some(a) => {
+                        let filled = match today {
+                            Some(t) => scaled(t)?,
+                            None => 0,
+                        };
+                        let left = share(a, daily_participation.clone())?.checked_sub(filled)?;
+                        Some(on_increment(left.max(0))?)
+                    }
+                    None => None,
+                };
+                for (control, cap) in [
+                    (crate::PacingControl::OrderSizeParticipation, order_cap),
+                    (crate::PacingControl::DailyParticipation, daily_left),
+                ] {
+                    if let Some(cap) = cap.filter(|c| *c > 0 && (*c).max(minimum) < proposed) {
+                        expected_qty = expected_qty.min(cap.max(minimum));
+                        expected_applied.insert(control);
+                    }
+                }
+                Some((proposed, expected_qty, expected_applied))
+            };
+            let (proposed, expected_qty, expected_applied) =
+                oracle().ok_or_else(|| TestCaseError::fail("the oracle's figures fit an i128"))?;
 
             let d = o.decide();
             prop_assert!(d.is_ok(), "an exit is routed, never an error: {:?}", d);
             let d = d.map_err(fail)?;
             prop_assert_eq!(d.verdict, Verdict::Allow, "an exit is never denied");
             let (sent, limit, marketable, applied) = d.pacing.map_or(
-                (proposed, o.proposed.limit_price, false, BTreeSet::new()),
+                (Some(proposed), o.proposed.limit_price, false, BTreeSet::new()),
                 |p| (scaled(&p.qty.to_string()), p.limit_price, p.marketable_limit_required, p.applied),
             );
+            let sent = sent.ok_or_else(|| TestCaseError::fail("a quantity fits an i128"))?;
             prop_assert_eq!(
                 limit,
                 Price::parse("100").map_err(num)?,
