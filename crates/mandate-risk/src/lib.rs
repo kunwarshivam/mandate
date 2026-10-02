@@ -51,9 +51,10 @@
 //! report (§9.6, DEC-163). E6-10 adds §3.2 item 7's "USD pairs only" at check 2 (DEC-254,
 //! DEC-255), which makes check 2 whole for crypto and so every check whole for both asset classes:
 //! DEC-129 item 29's fail-closed refusal of an opening a missing check might have denied has
-//! nothing left to refuse, and [`evaluate`] decides every proposal itself. Every other entry point
-//! returns [`GateError::Unimplemented`] until the story named in its doc comment lands
-//! (DEC-77, DEC-83).
+//! nothing left to refuse, and [`evaluate`] decides every proposal itself. E6-4 adds
+//! [`trim_proposals`], mandate spec §5.5's `trim_to_target` (DEC-65, DEC-399), the last entry point
+//! #136 stubbed. [`GateError::Unimplemented`] stays only for DEC-129 item 27's refusal of an
+//! opening that breaks a §5.3 rule with no registered reason code.
 
 use core::fmt::Display;
 use std::collections::{BTreeMap, BTreeSet};
@@ -73,6 +74,7 @@ mod session;
 #[doc(hidden)]
 pub mod spec_types;
 mod surveillance;
+mod trim;
 
 pub use mandate_accounting::{AccountType, AssetClass, Side};
 pub use spec_types::{
@@ -885,10 +887,13 @@ pub struct TrimProposal {
 }
 
 /// §5.5's `trim_to_target` proposals, rounded **up** to the increment so a trim never leaves the
-/// position above its target.
+/// position above its target. The guards of DEC-65 and the readings of DEC-399 are in the `trim`
+/// module's doc.
 ///
 /// # Errors
-/// Returns [`GateError`] when a figure cannot be computed exactly.
+/// Returns [`GateError`] when a figure cannot be computed exactly, when the calendar does not cover
+/// `now` for an equity, and [`GateError::InstrumentUnknown`] for a position to trim with no
+/// instrument snapshot.
 pub fn trim_proposals(
     now: UtcNanos,
     config: &GateConfig,
@@ -897,8 +902,7 @@ pub fn trim_proposals(
     agent: &AgentSnapshot,
     instruments: &BTreeMap<AssetId, InstrumentSnapshot>,
 ) -> Result<Vec<TrimProposal>, GateError> {
-    let _ = (now, config, mandate, risk, agent, instruments);
-    Err(GateError::Unimplemented("trim_proposals", "E6-4"))
+    trim::proposals(now, config, mandate, risk, agent, instruments)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -23,8 +23,8 @@ use rust_decimal::Decimal;
 
 use crate::exact::Exact;
 use crate::{
-    FULL_SCALE, FeeRate, MarkPrice, NegExact, NumError, Price, QTY_SCALE, Qty, Rounding, Usd,
-    non_negative, parse,
+    FULL_SCALE, FeeRate, MarkPrice, NegExact, NumError, Price, QTY_SCALE, Qty, Ratio, Rounding,
+    Usd, non_negative, parse,
 };
 
 /// The sizing and limit fractions of a mandate hold at most 12 fractional digits (DEC-130 item 7).
@@ -300,6 +300,11 @@ impl UsdExact {
         Self(rate.exact())
     }
 
+    /// The risk state's size factor, which mandate §5.5 multiplies the position cap by.
+    pub fn of_ratio(ratio: Ratio) -> Self {
+        Self(ratio.exact())
+    }
+
     /// `self + other`, exact.
     pub fn checked_add(self, other: Self) -> Result<Self, NumError> {
         Ok(Self(self.0.add(other.0)?))
@@ -409,6 +414,24 @@ impl UsdExact {
         }
         count.mul(increment.exact())?.to_decimal(QTY_SCALE).map(Qty)
     }
+
+    /// `ceiling(self ÷ per_unit, increment)`: the fewest whole increments whose cost at `per_unit`
+    /// covers `self`, which is mandate §5.5's trim "rounded up to the increment", so a trim never
+    /// leaves a position above its target. Zero when `self` is zero or below.
+    /// `not_positive` for an increment of zero or below, and `division_by_zero` for a zero
+    /// `per_unit`.
+    pub fn ceiled_quotient(self, per_unit: Self, increment: Qty) -> Result<Qty, NumError> {
+        if !increment.exact().is_positive() {
+            return Err(NumError::NotPositive);
+        }
+        let count = self
+            .0
+            .div(per_unit.0.mul(increment.exact())?, 0, Rounding::Ceiling)?;
+        if count.sign() != Ordering::Greater {
+            return Ok(Qty::ZERO);
+        }
+        count.mul(increment.exact())?.to_decimal(QTY_SCALE).map(Qty)
+    }
 }
 
 #[cfg(test)]
@@ -462,6 +485,50 @@ mod tests {
             exact("1")?.quotient(exact("3")?, 28, Rounding::HalfEven)?,
             Usd::parse("0.3333333333333333333333333333")?
         );
+        Ok(())
+    }
+
+    fn ceiled(amount: &str, per_unit: &str, increment: &str) -> Result<Qty, NumError> {
+        exact(amount)?.ceiled_quotient(exact(per_unit)?, Qty::parse(increment)?)
+    }
+
+    /// Mandate §5.5's trim rounds **up**: 250 over at 100 a share is 2.5 shares, so 3; an exact
+    /// quotient stays as it is; a finer increment rounds up to its own grid; nothing over is zero.
+    #[test]
+    fn a_ceiled_quotient_rounds_up_to_the_increment() -> Result<(), NumError> {
+        let cases = [
+            ("250", "100", "1", "3"),
+            ("200", "100", "1", "2"),
+            ("200.000000001", "100", "1", "3"),
+            ("120", "100", "0.5", "1.5"),
+            ("1", "3", "0.000000001", "0.333333334"),
+            ("0", "100", "1", "0"),
+            ("-250", "100", "1", "0"),
+        ];
+        for (amount, per_unit, increment, expected) in cases {
+            assert_eq!(
+                ceiled(amount, per_unit, increment)?,
+                Qty::parse(expected)?,
+                "ceiling({amount} ÷ {per_unit}) on a grid of {increment}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_ceiled_quotient_refuses_a_grid_or_a_divisor_it_cannot_use() -> Result<(), NumError> {
+        assert_eq!(ceiled("250", "100", "0"), Err(NumError::NotPositive));
+        assert_eq!(ceiled("250", "0", "1"), Err(NumError::DivisionByZero));
+        Ok(())
+    }
+
+    /// The size factor enters exactly, at every one of a ratio's places.
+    #[test]
+    fn a_ratio_enters_the_chain_exactly() -> Result<(), NumError> {
+        let product = exact("1500")?.checked_mul(UsdExact::of_ratio(Ratio::parse(
+            "0.200000000000000000000001",
+        )?))?;
+        assert_eq!(product, exact("300.0000000000000000000015")?);
         Ok(())
     }
 }

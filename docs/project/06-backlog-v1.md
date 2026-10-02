@@ -1986,6 +1986,17 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`
   asserts only times inside the window, so it passes against a `close_window` that is always true
   (#228 review, round 1, minor 3; E6-6's bug list when it lands).
+- **E6-4 harness: family B's trim arm compares the trim** (DEC-250 item 11, DEC-399 item 6).
+  `mandate_risk::trim_proposals` answers since E6-4's implementation PR, but
+  `crates/mandate-refcases/src/mandate/order_builder.rs`'s `trim_first` still fails every
+  `trim_to_target` case, and its `OWED` rows pin the answer (MC-B17 a 3-share `RiskExit`, MC-B30 to
+  MC-B32 none). The arm owes the comparison: a trim's `action`, `qty`, `limit_price` at the bid,
+  `order_usd`, `purpose`, `origin: risk_engine` and `autonomy` (`builtin_risk_reducing`), and, when
+  no trim is proposed, `trim_withheld` and the builder's own answer after it (§6.2 step 1). The
+  guards are not in `trim_proposals`' answer, so naming them needs a reading in its own decision:
+  derive each guard the harness can state from the case (`scale_active_s`, `holding`, the session,
+  the minimum) and require the gate's empty answer to agree, or widen the API in a tests PR first
+  (DEC-77). MC-B17 and MC-B30 to MC-B32 then pass; their status rows follow in a status-only PR.
 
 From E6-2's builder slice (stream H; found while implementing §8.3, not by a review):
 

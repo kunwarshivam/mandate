@@ -437,7 +437,6 @@ proptest! {
     /// 75 whatever the factor. Scaling it with the target made the oracle demand a trim at 8 shares
     /// and factor 0.5, where 50 over the 750 target is inside the 75 band and no trim is correct.
     #[test]
-    #[ignore = "pending E6-4"]
     fn a_trim_never_sells_below_the_target(
         held_shares in 1_u32..=30,
         factor in prop::sample::select(vec!["1", "0.5", "0.2"]),

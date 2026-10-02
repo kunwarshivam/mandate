@@ -522,7 +522,6 @@ fn a_flatten_sells_the_sub_ledger_not_the_brokers_position() {
 /// trim would be proposed at all — so the two readings differ in whether a sell exists, not only in
 /// its size.
 #[test]
-#[ignore = "pending E6-4"]
 fn two_active_rungs_multiply() {
     let mut s = Scenario::allowing();
     s.mandate = mandate_with(common::two_trimming_rungs());
@@ -561,7 +560,6 @@ fn two_active_rungs_multiply() {
 /// A trim rounds the quantity **up** to the increment, so it never leaves the position above its
 /// target (§5.5).
 #[test]
-#[ignore = "pending E6-4"]
 fn a_trim_rounds_up_to_the_increment() {
     let mut s = Scenario::allowing();
     s.mandate = mandate_with(common::two_trimming_rungs());
@@ -596,7 +594,6 @@ fn a_trim_rounds_up_to_the_increment() {
 /// 21:00 UTC yields nothing and in the regular session yields the trim, so the session is the only
 /// thing that differs and the emptiness is the session's doing.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_trim_waits_for_the_regular_session() {
     let scenario_at = |when: &str| {
         let mut s = Scenario::allowing();
@@ -642,7 +639,6 @@ fn a_trim_waits_for_the_regular_session() {
 /// Both arms, for the reason [`a_trim_waits_for_the_regular_session`] gives: the goal state is the
 /// only difference between the empty result and the trim.
 #[test]
-#[ignore = "pending E6-4"]
 fn no_trim_while_holding() {
     let mut instruments = BTreeMap::new();
     instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
@@ -692,7 +688,6 @@ fn no_trim_while_holding() {
 /// because an empty result is also what an unimplemented `trim_proposals` returns: the identical
 /// position under `trim_to_target` is trimmed, so the action is the only thing that differs.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_limit_buys_rung_never_trims() {
     let mut instruments = BTreeMap::new();
     instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
@@ -736,7 +731,6 @@ fn a_limit_buys_rung_never_trims() {
 /// same rung at 60 s proposes the trim. The boundary is on the allowing side, like every other
 /// limit comparison in this crate (DEC-129 item 15): at exactly `breach_confirm_s` the trim runs.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_rung_trims_only_after_breach_confirm_s() {
     let mut instruments = BTreeMap::new();
     instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
