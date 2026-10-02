@@ -1968,11 +1968,11 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
-/// The six `protection` rows are #485's (DEC-408): an exit ladder between rungs over-sells beside a
+/// The seven `protection` rows are #485's (DEC-408): an exit ladder between rungs over-sells beside a
 /// new exit, which is a wrong answer from code that runs, with no stub to stop at. Each fails on
 /// the rule-13 oracle's count; the fix (DEC-409, DEC-410) deletes the rows with the `#[ignore]`
 /// lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 11] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2000,6 +2000,10 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
     (
         "crates/mandate-executor/src/protection.rs",
         "sequence_tests::a_risk_exit_held_overnight_beside_a_parked_ladder_is_sized_to_what_is_left",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_risk_exit_beside_a_parked_ladder_selling_everything_waits",
     ),
     (
         "crates/mandate-executor/src/protection.rs",

@@ -8824,6 +8824,28 @@ mod sequence_tests {
         rule_13_script(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
     }
 
+    /// DEC-410, nothing left: the parked ladder sells the whole position, so the exit held
+    /// overnight finds nothing left at the open beside its remainder. It waits
+    /// `exit_between_rungs` rather than being refused, and the ladder's rung goes alone.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_risk_exit_beside_a_parked_ladder_selling_everything_waits() -> Result<(), String> {
+        let script: Vec<Move> = [
+            Move::Quote(Some(150), None, true),
+            Move::Exit(0, 10, 150),
+            Move::Confirm,
+            Move::Ack,
+            Move::Tick(15),
+            Move::Confirm,
+            Move::Exit(0, 4, 150),
+        ]
+        .into_iter()
+        .chain(TO_THE_OPEN)
+        .chain([Move::Tick(60), Move::Ack, Move::Fill(3), Move::Tick(60)])
+        .collect();
+        rule_13_script(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
     /// DEC-410, restart between rungs: the parked remainder is folded from the journal, so a
     /// process restarted overnight, and again at the open, counts it as before.
     #[test]
