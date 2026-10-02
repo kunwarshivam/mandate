@@ -10,9 +10,9 @@ The mandate spec rewrite for [DEC-97](04-decision-log.md#decisions) to
 depends on the design choices below. `AGENTS.md` ("Separate decisions from defects") asks for them
 before drafting, so that review rounds find defects rather than open choices. The founder decides
 them; agents give the options and a recommendation. Accepted decisions stand as written, and no
-recommendation here departs from one; a departure needs its own decision-log entry first
-(`AGENTS.md` rule 9). Until a question is answered, agents continue with its most conservative
-option consistent with those decisions.
+recommendation here departs from one; a departure needs its own decision first, as a file under
+[decisions/](decisions/README.md) (`AGENTS.md` rule 9, DEC-344). Until a question is answered,
+agents continue with its most conservative option consistent with those decisions.
 
 ## 1. `universe.max_instruments` default and platform ceiling ([DEC-117](04-decision-log.md#decisions))
 
@@ -153,7 +153,7 @@ expectation for live.
 
 **Recommendation.** Keep DEC-98 as written, with `auto` available to retail on paper now, and add the
 wording on the retail profile and go-live screens. The wording is compliance text, so the founder
-accepts it (DEC-79). Restricting retail to `ask` would need a decision-log entry superseding that
+accepts it (DEC-79). Restricting retail to `ask` would need a new decision superseding that
 part of DEC-98.
 
 ## 10. How theses are shown to the user ([DEC-126](04-decision-log.md#decisions))
