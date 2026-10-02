@@ -1033,7 +1033,9 @@ struct BasketBranchCounts {
 /// every minimum, an empty basket no scoreable thesis reads leaves the scoreable set's own
 /// refusals in place, and a non-empty basket reports each row's excess over the basket's mean,
 /// which the oracle takes from its own table of the members' returns (`0` for the first member,
-/// `0.1` for the second) rather than from the crate. Every expectation is reached by at least
+/// `0.1` for the second) rather than from the crate: an excess of `0.2` over a one-member
+/// basket and `0.15` over two, and any other size fails the case rather than defaulting a figure
+/// (#455 review nit). Every expectation is reached by at least
 /// one generated scenario. A plain function over a `TestRunner`, because a pending test must not
 /// be one a macro generates.
 #[test]
@@ -1043,7 +1045,6 @@ fn no_basket_reaches_division_by_zero() {
         series("basket-1", &[(101, "100"), (999, "100")]),
         series("basket-2", &[(101, "100"), (999, "110")]),
     ];
-    let excess_by_size = ["", "0.2", "0.15"];
     let mut runner = TestRunner::new(ProptestConfig::with_cases(256));
     let outcome = runner.run(&basket_plan(), |plan| {
         let theses: Vec<ClosedThesis> = plan
@@ -1118,7 +1119,16 @@ fn no_basket_reaches_division_by_zero() {
                     )));
                 }
             };
-            let expected = r(excess_by_size.get(plan.members).copied().unwrap_or("0"));
+            let expected = match plan.members {
+                1 => r("0.2"),
+                2 => r("0.15"),
+                members => {
+                    return Err(TestCaseError::fail(format!(
+                        "the oracle has no basket mean for {members} members, and the reported \
+                         branch never reaches an empty basket"
+                    )));
+                }
+            };
             prop_assert_eq!(
                 card.theses.len(),
                 plan.scoreable

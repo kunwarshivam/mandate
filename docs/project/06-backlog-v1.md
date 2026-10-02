@@ -967,7 +967,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   *Follow-up (#455 review, nit):* `no_basket_reaches_division_by_zero`'s `excess_by_size[0]` is
   `""`, and `r("")` panics; the `reported` branch never reaches a zero-member basket today, so
   it never fires, but a later generator change would make it a fixture panic. A tests change
-  gives index 0 a real figure or removes it.
+  gives index 0 a real figure or removes it. *Done* on `agent/j3-e17-8-basket-nit`: the oracle
+  now takes the expected excess from a closed match on the basket's size (`0.2` for one member,
+  `0.15` for two). Any other size fails the case rather than defaulting a figure.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -2083,6 +2085,7 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
 - **E6-6 tests correction:** the doc comment of `properties::an_exit_over_extreme_figures_is_still_routed`
   still says "Pending E6-6" though the test is live since #452; DEC-77 item 2 kept the
   implementation PR from touching it (#452 review, m5).
+  *Done (`agent/g-e6-6-tests-pins`):* the comment says the test is live since E6-6's exit routing.
 - **E6-6:** decide a proposal of zero quantity by name. The gate allows one on every path whose
   checks pass (a zero sell is a reduction, a zero buy passes every limit), so an `Allow` can
   carry an order of nothing, which the broker refuses; only a discretionary exit over an
@@ -2094,6 +2097,14 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`
   asserts only times inside the window, so it passes against a `close_window` that is always true
   (#228 review, round 1, minor 3; E6-6's bug list when it lands).
+  *Done (`agent/g-e6-6-tests-pins`):* the auction test asserts the re-priced risk exit keeps the
+  proposal's limit with no §9.6 control applied, and the close-window test asserts a nanosecond
+  before the window, its first and last instants, and the close, on a full and an early-close day.
+- **E6-6: pin a presumed-halt exit's price and controls** (#484 review, round 1, m2).
+  `hand::a_dropped_status_feed_is_a_presumed_halt` asserts that the re-priced market risk exit is
+  allowed with `marketable_limit_required`, but not its `limit_price` or `applied`. §4.4 and §5.6
+  re-price that exit as the auction window does, so it is the same unpinned pair the auction test
+  now pins: the proposal's limit, and no §9.6 control.
 - **E6-4 harness: family B's trim arm compares the trim** (DEC-250 item 11, DEC-399 item 6).
   `mandate_risk::trim_proposals` answers since E6-4's implementation PR, but
   `crates/mandate-refcases/src/mandate/order_builder.rs`'s `trim_first` still fails every
