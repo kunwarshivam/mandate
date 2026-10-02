@@ -2101,6 +2101,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   *Tests staged (DEC-401):* `evaluate` refuses a zero proposal before any check, as
   `Unimplemented` until the implementation names it `GateError::ZeroQuantity`; two pending tests
   in `crates/mandate-risk/tests/hand.rs`.
+  *Done (DEC-401, `agent/g-e6-6-zero-qty-impl`):* the refusal is `GateError::ZeroQuantity`, both
+  tests are live, and the in-module property asserts the named refusal.
 - **E7: the gate port's adapter handles `ZeroQuantity`** (stream K, when §9.1's gate port into
   `mandate-executor` is wired; DEC-401 item 5, #486 review, m4). `mandate_risk::evaluate` refuses
   a proposal of zero quantity with `GateError::ZeroQuantity`. The port's adapter must either filter
