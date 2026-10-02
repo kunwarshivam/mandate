@@ -258,12 +258,18 @@ fn trim_first(
         stated.now,
     )
     .map_err(|e| builder_error("propose", &e))?;
-    let guards = trim_guards(document, stated, &clock, &proposal, active_s, holding)?;
+    expect_eq("cap", proposal.sizes.cap, exact(expect, "cap")?)?;
+    expect_eq(
+        "current_mv",
+        proposal.sizes.current_mv,
+        exact(expect, "current_mv")?,
+    )?;
+    let guards = trim_guards(document, stated, &clock, expect, active_s, holding)?;
     let judged = match (trims.as_slice(), guards) {
         ([trim], Some(guards)) if guards.is_empty() => {
             compare_trim(document, stated, &clock, &proposal, trim, expect)
         }
-        ([], guards) => {
+        ([], guards) if guards.as_ref().is_none_or(|guards| !guards.is_empty()) => {
             let stated_guards = match expect.get("trim_withheld") {
                 None => None,
                 Some(_) => Some(
@@ -294,13 +300,14 @@ fn trim_guards(
     document: &Mandate,
     stated: &Inputs,
     clock: &gate::SessionAt,
-    proposal: &Proposal,
+    expect: &Json,
     active_s: u64,
     holding: bool,
 ) -> Result<Option<Vec<&'static str>>, String> {
     let factor = UsdExact::of_ratio(stated.gate_size_factor);
     let one = num(UsdExact::parse("1"), "one")?;
-    let cap = proposal.sizes.cap;
+    let cap = exact(expect, "cap")?;
+    let current_mv = exact(expect, "current_mv")?;
     let band = num(
         cap.checked_mul(UsdExact::of(num(
             Usd::parse(document.behavior.sizing.rebalance_band.as_str()),
@@ -310,7 +317,7 @@ fn trim_guards(
     )?;
     let excess = num(
         cap.checked_mul(factor)
-            .and_then(|target| proposal.sizes.current_mv.checked_sub(target)),
+            .and_then(|target| current_mv.checked_sub(target)),
         "the excess",
     )?;
     if !num(factor.is_below(one), "size_factor")? || num(excess.is_below(band), "excess")? {
@@ -337,11 +344,13 @@ fn trim_guards(
     Ok(Some(guards))
 }
 
-/// MC-B17's members for a trim: the cap and market value the builder reads, then the risk exit
-/// itself, a sell at the bid by the risk engine, AUTO as every risk-reducing purpose is (§6.2 step
-/// 3). The trim reaches no dry run and no builder figure, so the case states none (DEC-400 item 3).
-/// §6.2 step 3 reads only the purpose; the other facts are the case's, and a trim sells a held
-/// position, so it is never a first trade.
+/// MC-B17's members for a trim, its cap and market value already compared: the risk exit itself,
+/// a sell at the bid by the risk engine, AUTO as every risk-reducing purpose is (§6.2 step 3). The
+/// trim reaches no dry run and no builder figure, so the case states none (DEC-400 item 3). The
+/// `limit_price` the case states is checked against the case's own bid: `TrimProposal` carries no
+/// price, so it pins the case file, not the gate. §6.2 step 3 reads only the purpose; the other
+/// facts are the case's, and a trim sells a held position, so it is never a first trade, which is
+/// also what `!has_prior_fill` gives on every trim case.
 fn compare_trim(
     document: &Mandate,
     stated: &Inputs,
@@ -356,12 +365,6 @@ fn compare_trim(
         "instrument",
         trim.instrument.clone(),
         stated.instrument_id()?,
-    )?;
-    expect_eq("cap", proposal.sizes.cap, exact(expect, "cap")?)?;
-    expect_eq(
-        "current_mv",
-        proposal.sizes.current_mv,
-        exact(expect, "current_mv")?,
     )?;
     expect_eq("action", "sell", str_at(expect, "action")?)?;
     expect_eq("origin", "risk_engine", str_at(expect, "origin")?)?;
@@ -1577,12 +1580,18 @@ mod tests {
             .collect())
     }
 
-    /// The gate and the case's own guards must agree. MC-B17 with a minimum order of 1000 dollars,
-    /// or of 299.71, a cent above its trim, has its 299.7-dollar trim withheld
-    /// `below_minimum_order` by `ref.py`'s guards, while the gate, whose minimum is the
-    /// instrument's one-share `min_order_size`, still trims, so the case fails naming both answers;
-    /// at 299.7 exactly it still passes; and MC-B30 confirmed for 60 seconds is due and unguarded, so the gate's
-    /// trim is the case's action, and the builder's figures the case states are refused.
+    /// The gate and the case's own guards must agree.
+    ///
+    /// - MC-B17 with a minimum order of 1000 dollars, or of 299.71, a cent above its trim, has
+    ///   its 299.7-dollar trim withheld `below_minimum_order` by `ref.py`'s guards, while the
+    ///   gate, whose minimum is the instrument's one-share `min_order_size`, still trims, so the
+    ///   case fails naming both answers; at 299.7 exactly it still passes.
+    /// - MC-B30 confirmed for 60 seconds is due and unguarded, so the gate's trim is the case's
+    ///   action, and the builder's figures the case states are refused.
+    /// - Each guard is judged alone, since MC-B31 states two and either would mask the other:
+    ///   MC-B30 confirmed and Holding withholds `holding` only, and MC-B31 not Holding withholds
+    ///   `regular_session_only` only; both pass, and a gate that trims through either guard fails
+    ///   naming both answers (#478 review, M1).
     #[test]
     fn a_trim_the_gate_and_the_guards_disagree_on_fails_naming_both() -> Result<(), String> {
         let fixture = fixture()?;
@@ -1614,7 +1623,18 @@ mod tests {
             run(confirmed, "MC-B30"),
             "a trim states none of: buy_conviction",
             "MC-B30 confirmed at 60 s",
-        )
+        )?;
+        let holding_alone = doctored(&fixture, "MC-B30", "", |case| {
+            case["input"]["scale_active_s"] = json!(60);
+            case["input"]["holding"] = json!(true);
+            case["expect"]["trim_withheld"] = json!(["holding"]);
+        })?;
+        run(holding_alone, "MC-B30").map_err(|e| format!("MC-B30 confirmed and Holding: {e}"))?;
+        let session_alone = doctored(&fixture, "MC-B31", "", |case| {
+            case["input"]["holding"] = json!(false);
+            case["expect"]["trim_withheld"] = json!(["regular_session_only"]);
+        })?;
+        run(session_alone, "MC-B31").map_err(|e| format!("MC-B31 not Holding: {e}"))
     }
 
     /// Whether the case's base trims (`scale_action: trim_to_target`), where the trim guards are
