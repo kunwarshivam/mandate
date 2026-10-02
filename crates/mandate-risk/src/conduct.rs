@@ -241,7 +241,7 @@ pub(crate) fn pacing(
         applied: BTreeSet::new(),
     };
     if purpose == Purpose::DiscretionaryExit {
-        price_by_collar(input, &mut pacing)?;
+        price_by_collar(input, &mut pacing).map_err(unrouted_exit)?;
         if at.close_window {
             pacing.marketable_limit_required = true;
             pacing.applied.insert(PacingControl::CloseWindow);
@@ -251,6 +251,33 @@ pub(crate) fn pacing(
         slice(input, &mut pacing)?;
     }
     Ok((pacing.marketable_limit_required || !pacing.applied.is_empty()).then_some(pacing))
+}
+
+/// The exit-routing stub (DEC-77, DEC-327): a discretionary exit whose collar cannot be computed
+/// leaves the gate with no answer today, so the executor would hold an `Err` where `AGENTS.md`
+/// rule 13 owes it a routed exit. Two figures reach it, both only for a discretionary exit, since
+/// the collar prices no other purpose:
+///
+/// - the passive end of a sell's collar, `bid × (1 + band)`, cannot be held at the 9 places a price
+///   keeps: [`Price::collar_bound`] returns `overflow`. That is not one threshold: the product
+///   overflows only where it needs nine places and has no trailing zeros to drop, so
+///   `66023468761886947994.619958614` overflows and `66023468761886947995` does not;
+/// - a US equity's passive end falls below one Reg NMS tick (a bid below about `0.0000834` at a
+///   band of 0.2), and putting it on the grid truncates it to zero: [`Price::on_tick`] returns
+///   `not_positive`.
+///
+/// The aggressive end `bid × (1 − x)` rounds up, so it fails only for a configured `x` of one,
+/// where the floor is zero (the same error, the same stub). No participation cap can fail:
+/// `Qty::portion` takes a fraction of at most one, so a slice never overflows and an owner exit
+/// always gets a decision. Until E6-6 lands its reading (a control that cannot be computed paces
+/// nothing and the exit goes as proposed, never denied) the failure is reported, never guessed:
+/// `Unimplemented("pacing", "E6-6")`. The stub widens every arithmetic error on the collar, not
+/// only these two, so a new one would also read as the unimplemented story until E6-6 narrows it.
+fn unrouted_exit(error: GateError) -> GateError {
+    match error {
+        GateError::Num(_) => GateError::Unimplemented("pacing", "E6-6"),
+        other => other,
+    }
 }
 
 /// The collar prices a discretionary exit rather than denying it: a limit below the aggressive
