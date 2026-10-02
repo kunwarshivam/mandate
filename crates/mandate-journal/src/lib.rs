@@ -153,13 +153,6 @@ pub enum InvalidReason {
     WrongStream,
     #[error("stream_id differs from the append's stream or the StreamOpened subject")]
     StreamMismatch,
-    /// The stub of the account-stream risk-state registration's tests PR (DEC-77, DEC-404):
-    /// `MandateVersionApplied` and `UniverseChanged` are routed to journal spec §9.3's checks and
-    /// refused with this until the implementation PR registers their schemas and rules 29 to 33,
-    /// which removes the variant. Both were refused as `unknown_schema` before, so this refuses
-    /// nothing that was accepted.
-    #[error("not implemented yet")]
-    Unimplemented,
     #[error("environment differs from the stream's StreamOpened")]
     EnvironmentMismatch,
     #[error("seq 1 must be StreamOpened")]
@@ -190,7 +183,6 @@ impl InvalidReason {
             Self::UnknownSchema => "unknown_schema",
             Self::WrongStream => "wrong_stream",
             Self::StreamMismatch => "stream_mismatch",
-            Self::Unimplemented => "unimplemented",
             Self::EnvironmentMismatch => "environment_mismatch",
             Self::NotStreamOpened => "not_stream_opened",
             Self::StreamAlreadyOpened => "stream_already_opened",
