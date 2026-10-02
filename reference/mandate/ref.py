@@ -1132,7 +1132,7 @@ def autonomy(m, a, st=None):
 # ------------------------------------------------------------------ tripwires (§6.7; MI-31; DEC-187, DEC-350, DEC-351)
 TRIPWIRE_ALERT_TEXT = "tripwire_fired"
 TW_AGENT_INSTRUMENT = "agent_instrument"   # the risk state's one instrument, as the tripwire fold names it
-ACK_FIELDS = ("at", "step_up", "user", "requester", "independent_approval_required")
+ACK_FIELDS = ("at", "step_up", "user", "requester", "independent_approval_required", "independent_now")
 
 def fill_net_realized(book, f):
     """The fill's net realized P&L (trading spec §8.1): its gross realized less its own fees, a buy's gross being 0.
@@ -1156,9 +1156,11 @@ class Tripwires:
     """The tripwire state the executor folds from the agent's account stream (§6.7). Inputs, in `seq` order, by
     `event`: MandateVersionApplied (`mandate` is now in effect), FillApplied or LateFillApplied (the agent's fill:
     instrument, side, qty, price, and its own fees), RiskDayStarted, and OwnerAcknowledged (naming `tripwire`, its
-    `step_up` judged at the risk clock `at` when processed, §6.1; under `independent_approval_required`, the
-    acknowledging `user` must not be the `requester` of the lift, §5.8). Each tripwire counts its metric over the
-    inputs after the one that armed it: the
+    `step_up` judged at the risk clock `at` when processed, §6.1). Independence is required when the policy
+    required it when the lift was requested (`independent_approval_required`) or requires it at processing
+    (`independent_now`), the stricter governing; then the acknowledgment must name both the acknowledging `user`
+    and the `requester`, and they must differ (§5.8), or it is refused `not_independent`. Each tripwire counts its
+    metric over the inputs after the one that armed it: the
     version that began its run under that id and metric, or the acknowledgment that last lifted it."""
 
     def __init__(self, environment="paper"):
@@ -1221,7 +1223,8 @@ class Tripwires:
             tid = inp["tripwire"]
             if verdict["result"] == "refused":
                 ev.append({"type": "OwnerCommandRefused", "command": "acknowledge", "reason": verdict["reason"]})
-            elif inp.get("independent_approval_required", False) and inp.get("user") == inp.get("requester"):
+            elif ((inp.get("independent_approval_required", False) or inp.get("independent_now", False))
+                  and (inp.get("user") is None or inp.get("requester") is None or inp.get("user") == inp.get("requester"))):
                 ev.append({"type": "OwnerCommandRefused", "command": "acknowledge", "reason": "not_independent"})
             elif tid in self.fired:
                 del self.fired[tid]

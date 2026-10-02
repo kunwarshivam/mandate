@@ -28,7 +28,8 @@ builder, versioning, change classification, and the records kept.
   `tripwire:<id>`, §5.8, §5.10) that suspends every delegation (§6.5, MI-28) and, for `exits_only`,
   adds the restriction `tripwire` (§5.9). It alerts with opaque text and lifts only by the owner's
   acknowledgment with step-up (by a user other than the requester under `independent_approval_required`),
-  which re-arms it with nothing counted (§5.8, §6.1, MI-3, MI-31). Adding or
+  which re-arms it with nothing counted (§5.8, §6.1, MI-3, MI-31); an acknowledgment refused for that
+  is journaled with the new reason `not_independent` (§6.1, journal spec rule 28). Adding or
   tightening one is risk-reducing and applies at once; removing or loosening one is risk-increasing,
   and no version lifts a fired one (§9.2). V-044 bounds the thresholds (§4.1); the platform may
   propose tripwires (§7). It only tightens, so no existing reference case changes; the MC-W cases
@@ -446,8 +447,8 @@ limits, never pre-filled as values.
   agents get `research_agent_allowed: true` only after the DEC-99 evaluation passes, and then each
   owner's envelope alone decides what may be admitted.
 - `independent_approval_required` (maker-checker): deployment, risk-increasing changes,
-  high-water-mark resets, and loosening a latched lifetime floor need approval by a user other than
-  the requester.
+  high-water-mark resets, loosening a latched lifetime floor, and lifting a fired tripwire (§6.7) need
+  approval by a user other than the requester.
 - **Policy changes** are journaled as `PolicyChanged` (level, diff, author, step-up evidence,
   affected agents). They apply to running agents at the next evaluation as an **overlay**: the
   stricter value governs, and `auto` evaluates as `ask` when `auto_allowed` becomes false, including
@@ -696,7 +697,9 @@ stream with `causation_id` and judges it there; nothing the owner's client check
   `OwnerCommandIssued`, or `OwnerAcknowledged` in the workspace's control stream, whatever that
   event's outcome; and its method is allowed for the environment. Missing or malformed evidence
   counts as missing. A refusal is journaled with `step_up_missing`, `step_up_stale`,
-  `step_up_reused`, or `step_up_method`: a refused approval as its `ApprovalResponded`, and a
+  `step_up_reused`, or `step_up_method`, and an acknowledgment that lifts a fired tripwire may also be
+  refused with `not_independent` under `independent_approval_required` (§5.8, §6.7; never a resume or
+  Stop, journal spec rule 28): a refused approval as its `ApprovalResponded`, and a
   refused resume, Stop, or acknowledgment as `OwnerCommandRefused` on the stream of whichever owner
   judged it (the agent runtime for resume and Stop, the executor for an acknowledgment), naming the
   control-stream event as `causation_id` (journal spec §9, [DEC-280](../project/04-decision-log.md#decisions)).
@@ -1114,8 +1117,13 @@ arming resets it.
 **How it ends.** Only the owner's acknowledgment of it lifts it: an `OwnerAcknowledged` naming the
 `RiskLimitTriggered`, judged with step-up when the executor processes it (§6.1). With
 `independent_approval_required`, as for the drawdown ladder (§5.8), the acknowledging user must not be
-the user who requested the lift; the acknowledgment names both, and one from the requester is refused
-with `not_independent`. A refused one is journaled as `OwnerCommandRefused` and the tripwire stays fired. A valid one journals
+the user who requested the lift. The requirement is the stricter of the policy when the lift was
+requested, which the acknowledgment carries, and the overlay when the executor processes it, as §4.3
+and §6.4 check 7 read it. Under it the acknowledgment names both users, and one that names the
+requester as the acknowledging user, or omits either name, is refused with `not_independent` (rule 3:
+a missing name never counts as a second user). With the requirement on and only one user in the
+workspace, a fired tripwire cannot be lifted until a second user exists, as for the drawdown ladder.
+A refused one is journaled as `OwnerCommandRefused` and the tripwire stays fired. A valid one journals
 `RiskLimitLifted` (reason `owner_acknowledged`), lifts the restriction it held, and, if the version in
 effect still holds the `id`, arms it afresh with nothing counted, so the owner is not asked again for
 what they have just seen. An acknowledgment of a tripwire that is not fired changes nothing. No
@@ -1519,7 +1527,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 412 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 417 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1545,7 +1553,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Thesis expiry | MC-N20 to MC-N22 | The horizon, invalidation before it, a retired lineage |
 | Stagger | MC-N23 | The deterministic per-workspace offset inside the window |
 | Review date | MC-D01 to MC-D27 | V-046's bounds and its carried and removed dates, the platform default, re-confirming with a delegation (V-042), the §9.2 row, and, as `kind: review` cases at a stated risk clock, §6.2 step 5b either side of 00:00 New York after the date: rules, default, admission, a delegation, a deny, an ask's own source, exits, and no date ([DEC-188](../project/04-decision-log.md#decisions)) |
-| Tripwires | MC-W01 to MC-W52 | Schema rejects (an unknown metric, `paused`, no threshold, 0, 21 tripwires); V-044's order, ids, and threshold bounds at and past each edge; a proposed tripwire confirmed and not; V-042 when a version removes or adds one; the §9.2 row for each change; and, as `kind: tripwire` folds of account-stream inputs, firing at and short of each metric's threshold, a winning exit and a buy in a streak, a buy's fees, the risk-day reset, re-entry, arming, a threshold lowered to the count reached, a fired tripwire removed, softened, and tightened, refused and valid acknowledgments and the fresh count after them, two firings on one fill, a metric changed, a late fill, the half-even tie, a streak across midnight, a refused acknowledgment's assertion replayed, independent approval refusing the requester and accepting a second user, the decisions with a delegation before and after a firing, and, as a `kind: risk_state` case, an allocation increase rejected while a tripwire is fired (MI-7) ([DEC-187](../project/04-decision-log.md#decisions), [DEC-350](../project/decisions/DEC-350.md) to [DEC-352](../project/decisions/DEC-352.md)) |
+| Tripwires | MC-W01 to MC-W57 | Schema rejects (an unknown metric, `paused`, no threshold, 0, 21 tripwires); V-044's order, ids, and threshold bounds at and past each edge; a proposed tripwire confirmed and not; V-042 when a version removes or adds one; the §9.2 row for each change; and, as `kind: tripwire` folds of account-stream inputs, firing at and short of each metric's threshold, a winning exit and a buy in a streak, a buy's fees, the risk-day reset, re-entry, arming, a threshold lowered to the count reached, a fired tripwire removed, softened, and tightened, refused and valid acknowledgments and the fresh count after them, two firings on one fill, a metric changed, a late fill, the half-even tie, a streak across midnight, a refused acknowledgment's assertion replayed, independent approval refusing the requester, a missing requester, and a missing user, binding at the request and at processing, and accepting a second user, the decisions with a delegation before and after a firing, and, as `kind: risk_state` cases, an allocation increase rejected while an `exits_only` and an `end_delegations` tripwire is fired (MI-7), the second across a risk day ([DEC-187](../project/04-decision-log.md#decisions), [DEC-350](../project/decisions/DEC-350.md) to [DEC-352](../project/decisions/DEC-352.md)) |
 | Escalation | MC-E01 to MC-E32 | As `kind: escalation` cases (§6.1, §6.4, MI-21 to MI-25): a timely grant acts with the bound order; a skip, the timeout, lateness at the deadline and by the folded clock; a response copied once; the content hash; every non-`user` actor and an unlisted user; step-up missing, 301 s stale, reused, and `cli_confirm` on `live`; re-validation's version, mode, `deny`, and another trigger; drift at and beyond the band, with no mark, and crypto's 200 bp; the ask budget across the DST change, a skip's and a timeout's suppression; quiet hours for `cli_inbox`, for a push in both DST states, and read as New York wall time rather than UTC; and a grant batched with a cancellation ([DEC-173](../project/04-decision-log.md#decisions), [DEC-280](../project/04-decision-log.md#decisions)) |
 | Change | MC-C01 to MC-C48 | Every classification row, including rule addition, removal, and reordering, the pinning switch, pinning a mandate that had no research agent, the research fields, and the admission ceiling |
 

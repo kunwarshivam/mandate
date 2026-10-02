@@ -567,7 +567,19 @@ w52 = [s["expect"] for s in C["MC-W52"]["steps"]]
 req("MC-W52", C["MC-W52"]["kind"] == "risk_state" and "tripwire" in w52[1]["restrictions"] and w52[1]["agent_mode"] == "exits_only"
     and w52[2].get("error") == "increase_blocked_while_latched" and w52[3]["journal"][0]["type"] == "RiskLimitLifted"
     and w52[3]["agent_mode"] == "normal" and "error" not in w52[4], "MI-7 while fired; the increase applies after the acknowledgment")
-req("MC-W", sum(c.startswith("MC-W") for c in C) == 52, "52 tripwire cases")
+for cid, who in (("MC-W53", "requester"), ("MC-W54", "user")):
+    req(cid, C[cid]["steps"][4][who] is None and C[cid]["expect"][4]["journal"][0]["reason"] == "not_independent"
+        and tw_state(cid)["fired"] != {}, f"no {who} named: refused, fail closed")
+req("MC-W55", C["MC-W55"]["steps"][4]["independent_approval_required"] and not C["MC-W55"]["steps"][4]["independent_now"]
+    and C["MC-W55"]["expect"][4]["journal"][0]["reason"] == "not_independent", "bound at the request")
+req("MC-W56", not C["MC-W56"]["steps"][4]["independent_approval_required"] and C["MC-W56"]["steps"][4]["independent_now"]
+    and C["MC-W56"]["expect"][4]["journal"][0]["reason"] == "not_independent", "raised at processing")
+w57 = [s["expect"] for s in C["MC-W57"]["steps"]]
+req("MC-W57", C["MC-W57"]["kind"] == "risk_state" and C["MC-W57"]["steps"][1]["event"] == "risk_day_started"
+    and [j for j in w57[2]["journal"] if j["type"] == "RiskLimitTriggered"][0]["action"] == "end_delegations"
+    and "tripwire" not in w57[2]["restrictions"] and w57[3].get("error") == "increase_blocked_while_latched",
+    "an end_delegations tripwire latches; the loss counts from the new risk day")
+req("MC-W", sum(c.startswith("MC-W") for c in C) == 57, "57 tripwire cases")
 
 print("cases", len(C), "title assertion failures", len(bad))
 for b in bad:

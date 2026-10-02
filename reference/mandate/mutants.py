@@ -273,6 +273,14 @@ TRIPWIRE_MUTANTS = {
     "the requester lifts a tripwire under independent approval": (
         '            elif inp.get("independent_approval_required", False) and inp.get("user") == inp.get("requester"):', '            elif False:'),
     "a fired tripwire does not latch the risk state": ('        for tid in held["fired"]:\n            self.latched[f"tripwire:{tid}"] = True\n', ''),
+    "only an exits_only tripwire latches the risk state": ('        for tid in held["fired"]:\n            self.latched[f"tripwire:{tid}"] = True\n',
+                                                           '        for tid in held["fired"]:\n            if held["fired"][tid] == "exits_only":\n                self.latched[f"tripwire:{tid}"] = True\n'),
+    "the risk state does not pass RiskDayStarted to the tripwires": ('            if self.tw is not None:\n                self._tw_input = {"event": "RiskDayStarted"}\n', ''),
+    "an acknowledgment naming no requester is independent": (
+        'and (inp.get("user") is None or inp.get("requester") is None or inp.get("user") == inp.get("requester"))):',
+        'and inp.get("user") == inp.get("requester")):'),
+    "independence is read only at processing": ('(inp.get("independent_approval_required", False) or inp.get("independent_now", False))',
+                                                'inp.get("independent_now", False)'),
     "V-044 allows unsorted ids": ('    if not sorted_unique([t["id"] for t in tws]):\n        return {"V-044"}', '    if False:\n        return {"V-044"}'),
 }
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "

@@ -1141,7 +1141,8 @@ def own_tripwires(log, env):
             ok = own_step_up_ok(e["own_ev"], e["at_s"], env, seen)
             if isinstance(e["own_ev"], dict) and isinstance(e["own_ev"].get("assertion"), str):
                 seen.add(e["own_ev"]["assertion"])
-            ok = ok and not (e.get("independent_approval_required") and e.get("user") == e.get("requester"))
+            if e.get("independent_approval_required") or e.get("independent_now"):
+                ok = ok and None not in (e.get("user"), e.get("requester")) and e["user"] != e["requester"]
             refused = not ok
             if ok and e["tripwire"] in fired:
                 del fired[e["tripwire"]]
@@ -1247,9 +1248,9 @@ def rand_tw_history(n, t0, versions=True, acks=True):
                 used.append(ev["assertion"])
             ack = {"event": "OwnerAcknowledged", "at": ts(t), "at_s": t, "tripwire": rng.choice(TW_IDS),
                    "step_up": wire(ev), "own_ev": ev}
-            if rng.random() < 0.3:
-                ack.update(independent_approval_required=True, user=rng.choice(["user:u1", "user:u2"]),
-                           requester=rng.choice(["user:u1", "user:u2", None]))
+            if rng.random() < 0.4:
+                ack.update(independent_approval_required=rng.random() < 0.6, independent_now=rng.random() < 0.6,
+                           user=rng.choice(["user:u1", "user:u2", None]), requester=rng.choice(["user:u1", "user:u2", None]))
             log.append(ack)
     return log
 
@@ -1335,18 +1336,22 @@ def fuzz_tripwire_latch(n):
                 side = "sell" if held > 1 and rng.random() < 0.7 else "buy"
                 qty = Fraction(rng.choice([1, 2])) if side == "buy" else Fraction(1)
                 held += qty if side == "buy" else -qty
-                px = rng.choice(["98", "99.5", "100", "101"])
+                px = rng.choice(["98", "99.5", "100", "101", "130"])
                 step = {"event": "fill", "at": ts(t), "side": side, "qty": str(qty), "price": px, "session": "regular"}
                 log.append({"event": "FillApplied", "instrument": TW_AGENT_INSTRUMENT, "side": side, "qty": str(qty),
                             "price": px, "fees": "0"})
-            elif r < 0.75:
+            elif r < 0.62:
+                step = {"event": "risk_day_started", "at": ts(t), "session": "regular"}
+                log.append({"event": "RiskDayStarted"})
+            elif r < 0.8:
                 ev = {"assertion": f"as-{k}-{rng.randint(0, 10 ** 6)}", "at_s": t - rng.choice([0, 60, 301]), "method": "cli_confirm"}
                 tid = rng.choice([x["id"] for x in tws])
                 step = {"event": "owner_acknowledged", "at": ts(t), "restriction": f"tripwire:{tid}", "session": "regular",
                         "step_up": wire(ev)}
                 own = {"event": "OwnerAcknowledged", "tripwire": tid, "own_ev": ev, "at_s": t}
                 if rng.random() < 0.3:
-                    extra = {"independent_approval_required": True, "user": rng.choice(["user:u1", "user:u2"]), "requester": "user:u1"}
+                    extra = {"independent_approval_required": rng.random() < 0.6, "independent_now": rng.random() < 0.6,
+                             "user": rng.choice(["user:u1", "user:u2", None]), "requester": rng.choice(["user:u1", None])}
                     step.update(extra)
                     own.update(extra)
                 log.append(own)

@@ -1335,6 +1335,18 @@ tw_case("MC-W50", "Under independent approval the user who requested the lift ca
 tw_case("MC-W51", "Under independent approval a second user's acknowledgment lifts it", TWB,
         [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
          ack_by(40, "losing_streak", "as-51", "user:u2", "user:u1")])
+tw_case("MC-W53", "Under independent approval an acknowledgment that names no requester is refused (fail closed)", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         ack_by(40, "losing_streak", "as-53", "user:u2", None)])
+tw_case("MC-W54", "Under independent approval an acknowledgment that names no acknowledging user is refused (fail closed)", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         ack_by(40, "losing_streak", "as-54", None, "user:u1")])
+tw_case("MC-W55", "Independent approval on when the lift was requested binds it though the policy is off at processing", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         dict(ack_by(40, "losing_streak", "as-55", "user:u1", "user:u1"), independent_now=False)])
+tw_case("MC-W56", "Independent approval turned on after the lift was requested binds it at processing", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         dict(ack_by(40, "losing_streak", "as-56", "user:u1", "user:u1"), independent_approval_required=False, independent_now=True)])
 TW_RISK = WIDE + FAST + [rep("/risk/max_daily_loss", "0.5"), {"op": "add", "path": "/autonomy/tripwires", "value": [TW_STREAK]}]
 risk_case("MC-W52", "A fired tripwire is a latched limit: an allocation increase is rejected until the owner acknowledges it",
           "two_stock_swing", TW_RISK, "10", "100", "us_equity", at(14, 0),
@@ -1345,6 +1357,14 @@ risk_case("MC-W52", "A fired tripwire is a latched limit: an allocation increase
             "step_up": {"assertion": "as-52", "authenticated_at": at(14, 0, 30), "method": "cli_confirm"}},
            {"event": "allocation_change", "at": at(14, 0, 50), "delta_usd": "1000", "session": "regular"}],
           note="The tripwire fold reads the risk state's one instrument; fees are 0, as in every risk-state case.")
+TW_RISK_DAY = WIDE + FAST + [rep("/risk/max_daily_loss", "0.5"), {"op": "add", "path": "/autonomy/tripwires", "value": [TW_DAY]}]
+risk_case("MC-W57", "An end_delegations tripwire latches too, and the realized loss counts from 00:00 New York, so a profitable day does not offset the next day's loss",
+          "two_stock_swing", TW_RISK_DAY, "10", "100", "us_equity", at(14, 0),
+          [{"event": "fill", "at": at(14, 0, 10), "side": "sell", "qty": "5", "price": "200", "session": "regular"},
+           {"event": "risk_day_started", "at": at(4, 0, 0, day=22), "session": "pre_market"},
+           {"event": "fill", "at": at(14, 0, 10, day=22), "side": "sell", "qty": "5", "price": "60", "session": "regular"},
+           {"event": "allocation_change", "at": at(14, 0, 20, day=22), "delta_usd": "1000", "session": "regular"}],
+          note="Day one realizes +500 and day two -200: with the risk-day reset the tripwire fires at 200; without it the day's net would be a gain.")
 
 W0 = next(i for i, c in enumerate(cases) if c["id"].startswith("MC-W"))
 assert all(c["id"].startswith("MC-W") for c in cases[W0:])

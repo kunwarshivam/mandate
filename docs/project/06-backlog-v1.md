@@ -273,7 +273,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   Owed after it: `mandate-spec` parsing the field, V-044, and the §9.2 row (DEC-77 tests then implementation), the executor's
   fold of §6.7, and the `kind: tripwire` harness arm. Also owed, from #443's round 1 (m4): run ruff over `reference/` in
   `cargo xtask ci lint`, so a duplicated definition such as a second `main()` in `reference/mandate/mutants.py` (F811) fails
-  the lint rather than reaching review.
+  the lint rather than reaching review. **Founder question** (#443 round 2): should a mandate be refused at validation
+  when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
+  drawdown ladder) then cannot be lifted until a second user exists?
   Actions are `end_delegations` or `exits_only`, never `paused` (rule 13). *Accepted when:* a fired
   tripwire acts at its next evaluation, journals the event, alerts with opaque text, and lifts only
   by the owner's acknowledgment with step-up; adding or tightening one applies at once.

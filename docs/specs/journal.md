@@ -12,6 +12,13 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.7, amended ([DEC-351](../project/decisions/DEC-351.md) item 5):** `OwnerCommandRefused` may
+  carry `not_independent`, the executor's refusal of an acknowledgment that lifts a fired tripwire
+  under `independent_approval_required` from the user who requested the lift ([mandate spec
+  §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)); rule 28 keeps the reason to the account
+  stream, and `OwnerAcknowledged` names the requesting user. The vectors gain one valid draft (an
+  acknowledgment refused as `not_independent`) and one invalid draft (a Stop refused as
+  `not_independent`), and a seeded bug that skips rule 28.
 - **v0.7, amended ([DEC-302](../project/04-decision-log.md#decisions)):** §9.2's
   `AccountSnapshotRecorded` gains `risk_clock`, which the executor writes on every account-stream
   event and folds each event at; v0.7 had missed it, so a conforming snapshot could not have been
@@ -380,7 +387,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
 | `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | gating facts, copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
 | `OwnerAcknowledged` | — | copied from the control stream (with `causation_id`); a risk input |
-| `OwnerCommandRefused` | — | An acknowledgment the executor refused for its step-up ([mandate spec §6.1](mandate.md#61-purposes)): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
+| `OwnerCommandRefused` | — | An acknowledgment the executor refused, for its step-up or, under `independent_approval_required`, because it is not independent ([mandate spec §6.1](mandate.md#61-purposes), [§6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`, `not_independent`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
 | `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N, and for a tripwire (limit `tripwire:<id>`, reason `tripwire_condition`, [mandate spec §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)) its metric, threshold, and the value reached; reset evidence; released positions; stale-mark and removed-instrument changes with the reason; goal completion |
 | `UniverseChanged` | man | The working universe changed ([mandate spec §2.3, §8.5](mandate.md#23-the-working-universe-at-runtime-dec-97)); a risk input, so it carries `risk_clock`: agent, instrument, change (`admitted`, `removed`), reason (`thesis_admitted`, `thesis_expired`, `thesis_invalidated`, `lineage_retired`, `eligibility_lost`, `operator_halt`, `version_applied`), thesis and lineage ids, working-universe size after |
 
@@ -809,7 +816,7 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 | Member | Type | Meaning |
 |---|---|---|
 | `command` | `resume` \| `stop` \| `acknowledge` | Rule 26 |
-| `reason` | `step_up_missing` \| `step_up_stale` \| `step_up_reused` \| `step_up_method` | |
+| `reason` | `step_up_missing` \| `step_up_stale` \| `step_up_reused` \| `step_up_method` \| `not_independent` | `not_independent` only on the account stream: rule 28 |
 | `effective_at` | `timestamp` | The effective time the command was judged at. A §4.7 timestamp, never risk-clock seconds (§9.1's types). This supersedes DEC-291 item 1's whole second for this member (DEC-261 item 7) |
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
@@ -839,6 +846,10 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 26. `OwnerCommandRefused`: `command` is `acknowledge` on the account stream, and `resume` or `stop` on
     the agent stream (`payload.command`). The executor refuses acknowledgments, and the runtime
     refuses resumes and Stops (§2).
+28. `OwnerCommandRefused` with reason `not_independent` is on the account stream (`payload.reason`):
+    only an acknowledgment is judged for independence, and only under `independent_approval_required`
+    ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)). A resume or Stop is
+    refused only for its step-up.
 
 **Copy rule** (reason `schema`):
 
