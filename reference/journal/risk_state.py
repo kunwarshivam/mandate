@@ -260,7 +260,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "increasing_without_step_up",
-            "rule 28",
+            "rule 29",
             "version_applied",
             [change("payload.step_up", None)],
             "schema",
@@ -268,7 +268,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "rejected_without_reason",
-            "rule 29",
+            "rule 30",
             "version_rejected",
             [change("payload.reason", None)],
             "schema",
@@ -276,7 +276,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "applied_with_a_reason",
-            "rule 29",
+            "rule 30",
             "version_applied",
             [change("payload.reason", "would_trigger_limit")],
             "schema",
@@ -284,7 +284,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "rejected_with_an_allocation_change",
-            "rule 29",
+            "rule 30",
             "version_rejected",
             [change("payload.allocation_change", "2500")],
             "schema",
@@ -292,7 +292,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "rejected_with_a_floor",
-            "rule 29",
+            "rule 30",
             "version_rejected",
             [change("payload.max_loss_from_allocation", "0.15")],
             "schema",
@@ -308,7 +308,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "rejected_without_reason_and_with_allocation",
-            "rule 29: the first offending member, reason before allocation_change",
+            "rule 30: the first offending member, reason before allocation_change",
             "version_rejected",
             [change("payload.reason", None), change("payload.allocation_change", "2500")],
             "schema",
@@ -356,7 +356,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "thesis_admission_removes",
-            "rule 30",
+            "rule 31",
             "universe_admitted",
             [change("payload.change", "removed")],
             "schema",
@@ -364,7 +364,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "expiry_admits",
-            "rule 30",
+            "rule 31",
             "universe_admitted",
             [change("payload.reason", "thesis_expired")],
             "schema",
@@ -372,7 +372,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "admitted_without_thesis",
-            "rule 31: null together, at the null one",
+            "rule 32: null together, at the null one",
             "universe_admitted",
             [change("payload.thesis_id", None)],
             "schema",
@@ -380,7 +380,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "admitted_without_lineage",
-            "rule 31: null together, at the null one",
+            "rule 32: null together, at the null one",
             "universe_admitted",
             [change("payload.lineage_id", None)],
             "schema",
@@ -388,7 +388,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "admitted_with_neither",
-            "rule 31: a thesis reason names its thesis",
+            "rule 32: a thesis reason names its thesis",
             "universe_admitted",
             [change("payload.thesis_id", None), change("payload.lineage_id", None)],
             "schema",
@@ -396,7 +396,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "halt_without_thesis",
-            "rule 31: an operator halts per thesis",
+            "rule 32: an operator halts per thesis",
             "universe_removed_pinned",
             [change("payload.reason", "operator_halt")],
             "schema",
@@ -404,7 +404,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "pinned_removal_names_a_thesis",
-            "rule 31: a pinned list names no thesis",
+            "rule 32: a pinned list names no thesis",
             "universe_removed_pinned",
             [change("payload.thesis_id", THESIS), change("payload.lineage_id", LINEAGE)],
             "schema",
@@ -425,43 +425,43 @@ def valid_drafts() -> list[dict]:
     return [
         valid(
             "neutral_without_step_up",
-            "rule 28: only a risk-increasing version needs step-up",
+            "rule 29: only a risk-increasing version needs step-up",
             "version_applied",
             [change("payload.classification", "neutral"), change("payload.step_up", None)],
         ),
         valid(
             "reducing_with_step_up",
-            "rule 28: step-up is allowed on any version",
+            "rule 29: step-up is allowed on any version",
             "version_applied",
             [change("payload.classification", "risk_reducing")],
         ),
         valid(
             "applied_changing_neither",
-            "rule 29: an applied version may change neither the allocation nor the floor",
+            "rule 30: an applied version may change neither the allocation nor the floor",
             "version_applied",
             [change("payload.allocation_change", None)],
         ),
         valid(
             "floor_loosened",
-            "rule 29: an applied floor-loosening version",
+            "rule 30: an applied floor-loosening version",
             "version_applied",
             [change("payload.allocation_change", None), change("payload.max_loss_from_allocation", "0.15")],
         ),
         valid(
             "pinned_instrument_admitted",
-            "rule 30: version_applied admits",
+            "rule 31: version_applied admits",
             "universe_removed_pinned",
             [change("payload.change", "admitted"), change("payload.universe_size_after", 1)],
         ),
         valid(
             "eligibility_lost_on_a_pinned_instrument",
-            "rule 31: eligibility_lost may name no thesis",
+            "rule 32: eligibility_lost may name no thesis",
             "universe_removed_pinned",
             [change("payload.reason", "eligibility_lost")],
         ),
         valid(
             "eligibility_lost_on_a_thesis",
-            "rule 31: eligibility_lost may name its thesis",
+            "rule 32: eligibility_lost may name its thesis",
             "universe_admitted",
             [change("payload.change", "removed"), change("payload.reason", "eligibility_lost"), change("payload.universe_size_after", 0)],
         ),
@@ -540,13 +540,13 @@ def check_section(section: dict) -> list[str]:
 # --------------------------------------------------------------------------- seeded bugs
 
 VALIDATOR_MUTANTS = (
-    "rule.28",
     "rule.29",
-    "rule.29.reason",
     "rule.30",
+    "rule.30.reason",
     "rule.31",
-    "rule.31.thesis",
-    "rule.31.pinned",
+    "rule.32",
+    "rule.32.thesis",
+    "rule.32.pinned",
     "loose.payload.old_version",
     "loose.payload.instrument",
     "loose.payload.classification",
@@ -578,7 +578,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(lambda s: s["drafts"]["universe_admitted"]["artifact_refs"].append("sha256:" + "e" * 64)),
         ),
         (
-            "a base draft breaks rule 28",
+            "a base draft breaks rule 29",
             "drafts.valid",
             mutated(lambda s: s["drafts"]["version_rejected"]["payload"].update(step_up=None)),
         ),

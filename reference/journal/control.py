@@ -77,7 +77,7 @@ POINTER = T("pointer")
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
 REFUSED_COMMANDS = {"agent": ("resume", "stop"), "acct": ("acknowledge",)}
-REFUSAL_REASONS = ("step_up_missing", "step_up_stale", "step_up_reused", "step_up_method")
+REFUSAL_REASONS = ("step_up_missing", "step_up_stale", "step_up_reused", "step_up_method", "not_independent")
 MODEL_KIND = "model_version"
 MODEL_MEMBERS = ("model_id", "model_version", "admits_instruments")
 CASH_MEMBERS = ("cash_band", "cash_in_band")
@@ -388,23 +388,23 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("24.in_band", p["cash_in_band"] == inside, "schema", "payload.cash_in_band")
     if event_type == "MandateVersionApplied":
         increasing = p["classification"] == "risk_increasing"
-        rule("28", not increasing or p["step_up"] is not None, "schema", "payload.step_up")
+        rule("29", not increasing or p["step_up"] is not None, "schema", "payload.step_up")
         rejected = p["result"] == "rejected"
         wrong = []
-        if (p["reason"] is not None) != rejected and "rule.29.reason" not in skip:
+        if (p["reason"] is not None) != rejected and "rule.30.reason" not in skip:
             wrong.append("reason")
         wrong += [m for m in ("allocation_change", "max_loss_from_allocation") if rejected and p[m] is not None]
-        rule("29", not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
+        rule("30", not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
     if event_type == "UniverseChanged":
         allowed = ADMITTING if p["change"] == "admitted" else REMOVING
-        rule("30", p["reason"] in allowed, "schema", "payload.reason")
+        rule("31", p["reason"] in allowed, "schema", "payload.reason")
         thesis, lineage = p["thesis_id"] is not None, p["lineage_id"] is not None
         if thesis != lineage:
-            rule("31", False, "schema", "payload.thesis_id" if not thesis else "payload.lineage_id")
+            rule("32", False, "schema", "payload.thesis_id" if not thesis else "payload.lineage_id")
         elif p["reason"] in FROM_A_THESIS:
-            rule("31.thesis", thesis, "schema", "payload.thesis_id")
+            rule("32.thesis", thesis, "schema", "payload.thesis_id")
         elif p["reason"] == "version_applied":
-            rule("31.pinned", not thesis, "schema", "payload.thesis_id")
+            rule("32.pinned", not thesis, "schema", "payload.thesis_id")
     return out
 
 

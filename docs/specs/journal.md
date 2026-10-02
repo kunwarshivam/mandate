@@ -16,9 +16,19 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   account-stream records `ValidationContext::from_journal` reads that v0.7 left to their own story
   (DEC-303 item 6): `MandateVersionApplied` and `UniverseChanged`. Every member comes from mandate
   spec §5.10's row, from a writer that exists (`mandate-spec`'s risk fold, `mandate-research`'s
-  admission and removal), or from §2's `risk_clock`. The new rules are 28 to 31, and §9.3 maps each
+  admission and removal), or from §2's `risk_clock`. The new rules are 29 to 32, and §9.3 maps each
   record to its `JournaledFact`. The test vectors gain a generated `risk_state` section and stay
   version 3.
+- **v0.7, amended ([DEC-351](../project/decisions/DEC-351.md) item 5):** `OwnerCommandRefused` may
+  carry `not_independent`, the executor's refusal of an acknowledgment that lifts a fired tripwire
+  under `independent_approval_required` from the user who requested the lift ([mandate spec
+  §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)); rule 28 keeps the reason to the account
+  stream, and `OwnerAcknowledged` names the requesting user and carries the independence requirement
+  as it stood when the lift was requested. The reference validator's reason list
+  gains it. Rule 28's validator check, its vectors (an acknowledgment refused as `not_independent`,
+  accepted; a Stop refused as `not_independent`, refused), its seeded bug, and `mandate-journal`'s
+  schema follow in one code PR, because `mandate-journal` already parses every §9.2 vector and code
+  cannot ship with this change (ES-22).
 - **v0.7, amended ([DEC-302](../project/04-decision-log.md#decisions)):** §9.2's
   `AccountSnapshotRecorded` gains `risk_clock`, which the executor writes on every account-stream
   event and folds each event at; v0.7 had missed it, so a conforming snapshot could not have been
@@ -387,8 +397,8 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
 | `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | gating facts, copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
 | `OwnerAcknowledged` | — | copied from the control stream (with `causation_id`); a risk input |
-| `OwnerCommandRefused` | — | An acknowledgment the executor refused for its step-up ([mandate spec §6.1](mandate.md#61-purposes)): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
-| `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N; reset evidence; released positions; stale-mark and removed-instrument changes with the reason; goal completion |
+| `OwnerCommandRefused` | — | An acknowledgment the executor refused, for its step-up or, under `independent_approval_required`, because it is not independent ([mandate spec §6.1](mandate.md#61-purposes), [§6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`, `not_independent`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
+| `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N, and for a tripwire (limit `tripwire:<id>`, reason `tripwire_condition`, [mandate spec §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)) its metric, threshold, and the value reached; reset evidence; released positions; stale-mark and removed-instrument changes with the reason; goal completion |
 | `UniverseChanged` | man | The working universe changed ([mandate spec §2.3, §8.5](mandate.md#23-the-working-universe-at-runtime-dec-97)); a risk input, so it carries `risk_clock`: agent, instrument, change (`admitted`, `removed`), reason (`thesis_admitted`, `thesis_expired`, `thesis_invalidated`, `lineage_retired`, `eligibility_lost`, `operator_halt`, `version_applied`), thesis and lineage ids, working-universe size after |
 
 **Agent stream** (owner: agent runtime)
@@ -420,7 +430,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
 | `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result |
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
-| `OwnerAlertSent`, `OwnerAcknowledged` | — | subject event, channel, delivery status; user (opaque), authentication method, step-up evidence (assertion ID, authentication time, method) |
+| `OwnerAlertSent`, `OwnerAcknowledged` | — | subject event, channel, delivery status; user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
 | `ApprovalResponseSubmitted` | — | The owner's answer to an approval ([mandate spec §6.4](mandate.md#64-approvals)): agent, approval, verdict (`approved`, `skipped`), content hash, `submitted_at`, step-up evidence (assertion ID, authentication time, method) or null, responder (opaque) and role |
 | `OwnerCommandIssued` | — | The owner's command ([mandate spec §6.1](mandate.md#61-purposes)): agent or kill-switch scope, command (`pause`, `resume`, `stop`, `kill_switch`, `owner_exit`), the release choice and warning shown for a Stop with release, the bid, bid size, and floor confirmed for an owner exit, `submitted_at`, step-up evidence or null, user (opaque) |
 | `ConfigSnapshotRegistered` | — | configuration kind (fee, calendar, instrument snapshot, rule set, mandate), content hash |
@@ -816,7 +826,7 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 | Member | Type | Meaning |
 |---|---|---|
 | `command` | `resume` \| `stop` \| `acknowledge` | Rule 26 |
-| `reason` | `step_up_missing` \| `step_up_stale` \| `step_up_reused` \| `step_up_method` | |
+| `reason` | `step_up_missing` \| `step_up_stale` \| `step_up_reused` \| `step_up_method` \| `not_independent` | `not_independent` only on the account stream: rule 28 |
 | `effective_at` | `timestamp` | The effective time the command was judged at. A §4.7 timestamp, never risk-clock seconds (§9.1's types). This supersedes DEC-291 item 1's whole second for this member (DEC-261 item 7) |
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
@@ -846,6 +856,10 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 26. `OwnerCommandRefused`: `command` is `acknowledge` on the account stream, and `resume` or `stop` on
     the agent stream (`payload.command`). The executor refuses acknowledgments, and the runtime
     refuses resumes and Stops (§2).
+28. `OwnerCommandRefused` with reason `not_independent` is on the account stream (`payload.reason`):
+    only an acknowledgment is judged for independence, and only under `independent_approval_required`
+    ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)). A resume or Stop is
+    refused only for its step-up.
 
 **Copy rule** (reason `schema`):
 
@@ -898,11 +912,11 @@ a version took effect for an agent, or was refused at application.
 | `old_version` | `ref` | The version in force before |
 | `new_version` | `ref` | The version applied, or refused |
 | `classification` | `risk_increasing` \| `risk_reducing` \| `neutral` | Mandate spec §9.2's verdict of `new_version` against `old_version`. An invalid change never validates (V-031), so it never reaches application |
-| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}?` | The owner's step-up evidence, as `DisclosureAccepted`'s: rule 28 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}?` | The owner's step-up evidence, as `DisclosureAccepted`'s: rule 29 |
 | `result` | `applied` \| `rejected` | |
-| `reason` | `increase_blocked_while_latched` \| `equity_below_exposure` \| `would_trigger_limit` \| `not_loosening` \| `waiting_period` \| `still_below_new_floor`, or `null` | Why it was refused (mandate spec §5.1, §5.7): rule 29 |
-| `allocation_change` | `decimal?` | The signed dollar change in the allocation it applied (mandate spec §5.1): rule 29 |
-| `max_loss_from_allocation` | `decimal?` | The fraction a floor-loosening version raised the floor to (mandate spec §5.7): rule 29 |
+| `reason` | `increase_blocked_while_latched` \| `equity_below_exposure` \| `would_trigger_limit` \| `not_loosening` \| `waiting_period` \| `still_below_new_floor`, or `null` | Why it was refused (mandate spec §5.1, §5.7): rule 30 |
+| `allocation_change` | `decimal?` | The signed dollar change in the allocation it applied (mandate spec §5.1): rule 30 |
+| `max_loss_from_allocation` | `decimal?` | The fraction a floor-loosening version raised the floor to (mandate spec §5.7): rule 30 |
 | `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
 
 **`UniverseChanged`** on the account stream ([mandate spec §2.3, §8.5](mandate.md#23-the-working-universe-at-runtime-dec-97)):
@@ -912,24 +926,24 @@ an instrument was admitted to, or removed from, an agent's working universe.
 |---|---|---|
 | `agent_id` | `id` | The agent whose working universe changed |
 | `instrument` | `id` | The instrument's asset ID (mandate spec §3) |
-| `change` | `admitted` \| `removed` | Rule 30 |
-| `reason` | `thesis_admitted` \| `thesis_expired` \| `thesis_invalidated` \| `lineage_retired` \| `eligibility_lost` \| `operator_halt` \| `version_applied` | Mandate spec §5.10's reasons: rule 30 |
-| `thesis_id`, `lineage_id` | `id?` | The thesis the change follows from, and its lineage: rule 31 |
+| `change` | `admitted` \| `removed` | Rule 31 |
+| `reason` | `thesis_admitted` \| `thesis_expired` \| `thesis_invalidated` \| `lineage_retired` \| `eligibility_lost` \| `operator_halt` \| `version_applied` | Mandate spec §5.10's reasons: rule 31 |
+| `thesis_id`, `lineage_id` | `id?` | The thesis the change follows from, and its lineage: rule 32 |
 | `universe_size_after` | `integer` | The working universe's size after the change |
 | `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
 
 **Consistency rules** (reason `schema`; the path is the member named):
 
-28. `MandateVersionApplied`: `step_up` is non-null when `classification` is `risk_increasing`
+29. `MandateVersionApplied`: `step_up` is non-null when `classification` is `risk_increasing`
     (`payload.step_up`). Mandate spec §9.2: a risk-increasing version requires step-up.
-29. `MandateVersionApplied`: `reason` is non-null exactly when `result` is `rejected`, and
+30. `MandateVersionApplied`: `reason` is non-null exactly when `result` is `rejected`, and
     `allocation_change` and `max_loss_from_allocation` are `null` when it is. Reported at the first
     offending member, in that order. A refused version changes nothing.
-30. `UniverseChanged`: `thesis_admitted` only admits; `thesis_expired`, `thesis_invalidated`,
+31. `UniverseChanged`: `thesis_admitted` only admits; `thesis_expired`, `thesis_invalidated`,
     `lineage_retired`, `eligibility_lost`, and `operator_halt` only remove; `version_applied` does
     either (`payload.reason`). Mandate spec §8.5 admits only through a thesis or a version, and
     removes for the rest.
-31. `UniverseChanged`: `thesis_id` and `lineage_id` are `null` together, reported at the one that is
+32. `UniverseChanged`: `thesis_id` and `lineage_id` are `null` together, reported at the one that is
     `null` (as rule 13). They are non-null for `thesis_admitted`, `thesis_expired`,
     `thesis_invalidated`, `lineage_retired`, and `operator_halt`, which each follow from a thesis
     (an operator halts per thesis, DEC-100), and `null` for `version_applied`, which follows from a

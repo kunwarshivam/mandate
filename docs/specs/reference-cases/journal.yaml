@@ -4372,7 +4372,7 @@ risk_state:
       reason: schema
       path: payload.step_up.token
   - name: increasing_without_step_up
-    clause: rule 28
+    clause: rule 29
     base_draft: version_applied
     changes:
     - path: payload.step_up
@@ -4382,7 +4382,7 @@ risk_state:
       reason: schema
       path: payload.step_up
   - name: rejected_without_reason
-    clause: rule 29
+    clause: rule 30
     base_draft: version_rejected
     changes:
     - path: payload.reason
@@ -4392,7 +4392,7 @@ risk_state:
       reason: schema
       path: payload.reason
   - name: applied_with_a_reason
-    clause: rule 29
+    clause: rule 30
     base_draft: version_applied
     changes:
     - path: payload.reason
@@ -4402,7 +4402,7 @@ risk_state:
       reason: schema
       path: payload.reason
   - name: rejected_with_an_allocation_change
-    clause: rule 29
+    clause: rule 30
     base_draft: version_rejected
     changes:
     - path: payload.allocation_change
@@ -4412,7 +4412,7 @@ risk_state:
       reason: schema
       path: payload.allocation_change
   - name: rejected_with_a_floor
-    clause: rule 29
+    clause: rule 30
     base_draft: version_rejected
     changes:
     - path: payload.max_loss_from_allocation
@@ -4432,7 +4432,7 @@ risk_state:
       reason: non_canonical
       path: payload.reason
   - name: rejected_without_reason_and_with_allocation
-    clause: 'rule 29: the first offending member, reason before allocation_change'
+    clause: 'rule 30: the first offending member, reason before allocation_change'
     base_draft: version_rejected
     changes:
     - path: payload.reason
@@ -4494,7 +4494,7 @@ risk_state:
       reason: non_canonical
       path: payload.reason
   - name: thesis_admission_removes
-    clause: rule 30
+    clause: rule 31
     base_draft: universe_admitted
     changes:
     - path: payload.change
@@ -4504,7 +4504,7 @@ risk_state:
       reason: schema
       path: payload.reason
   - name: expiry_admits
-    clause: rule 30
+    clause: rule 31
     base_draft: universe_admitted
     changes:
     - path: payload.reason
@@ -4514,7 +4514,7 @@ risk_state:
       reason: schema
       path: payload.reason
   - name: admitted_without_thesis
-    clause: 'rule 31: null together, at the null one'
+    clause: 'rule 32: null together, at the null one'
     base_draft: universe_admitted
     changes:
     - path: payload.thesis_id
@@ -4524,7 +4524,7 @@ risk_state:
       reason: schema
       path: payload.thesis_id
   - name: admitted_without_lineage
-    clause: 'rule 31: null together, at the null one'
+    clause: 'rule 32: null together, at the null one'
     base_draft: universe_admitted
     changes:
     - path: payload.lineage_id
@@ -4534,7 +4534,7 @@ risk_state:
       reason: schema
       path: payload.lineage_id
   - name: admitted_with_neither
-    clause: 'rule 31: a thesis reason names its thesis'
+    clause: 'rule 32: a thesis reason names its thesis'
     base_draft: universe_admitted
     changes:
     - path: payload.thesis_id
@@ -4546,7 +4546,7 @@ risk_state:
       reason: schema
       path: payload.thesis_id
   - name: halt_without_thesis
-    clause: 'rule 31: an operator halts per thesis'
+    clause: 'rule 32: an operator halts per thesis'
     base_draft: universe_removed_pinned
     changes:
     - path: payload.reason
@@ -4556,7 +4556,7 @@ risk_state:
       reason: schema
       path: payload.thesis_id
   - name: pinned_removal_names_a_thesis
-    clause: 'rule 31: a pinned list names no thesis'
+    clause: 'rule 32: a pinned list names no thesis'
     base_draft: universe_removed_pinned
     changes:
     - path: payload.thesis_id
@@ -4579,7 +4579,7 @@ risk_state:
       path: event_type
   valid_drafts:
   - name: neutral_without_step_up
-    clause: 'rule 28: only a risk-increasing version needs step-up'
+    clause: 'rule 29: only a risk-increasing version needs step-up'
     base_draft: version_applied
     changes:
     - path: payload.classification
@@ -4589,7 +4589,7 @@ risk_state:
     expect:
       outcome: Valid
   - name: reducing_with_step_up
-    clause: 'rule 28: step-up is allowed on any version'
+    clause: 'rule 29: step-up is allowed on any version'
     base_draft: version_applied
     changes:
     - path: payload.classification
@@ -4597,7 +4597,7 @@ risk_state:
     expect:
       outcome: Valid
   - name: applied_changing_neither
-    clause: 'rule 29: an applied version may change neither the allocation nor the floor'
+    clause: 'rule 30: an applied version may change neither the allocation nor the floor'
     base_draft: version_applied
     changes:
     - path: payload.allocation_change
@@ -4605,7 +4605,7 @@ risk_state:
     expect:
       outcome: Valid
   - name: floor_loosened
-    clause: 'rule 29: an applied floor-loosening version'
+    clause: 'rule 30: an applied floor-loosening version'
     base_draft: version_applied
     changes:
     - path: payload.allocation_change
@@ -4615,7 +4615,7 @@ risk_state:
     expect:
       outcome: Valid
   - name: pinned_instrument_admitted
-    clause: 'rule 30: version_applied admits'
+    clause: 'rule 31: version_applied admits'
     base_draft: universe_removed_pinned
     changes:
     - path: payload.change
@@ -4625,7 +4625,7 @@ risk_state:
     expect:
       outcome: Valid
   - name: eligibility_lost_on_a_pinned_instrument
-    clause: 'rule 31: eligibility_lost may name no thesis'
+    clause: 'rule 32: eligibility_lost may name no thesis'
     base_draft: universe_removed_pinned
     changes:
     - path: payload.reason
@@ -4633,7 +4633,7 @@ risk_state:
     expect:
       outcome: Valid
   - name: eligibility_lost_on_a_thesis
-    clause: 'rule 31: eligibility_lost may name its thesis'
+    clause: 'rule 32: eligibility_lost may name its thesis'
     base_draft: universe_admitted
     changes:
     - path: payload.change

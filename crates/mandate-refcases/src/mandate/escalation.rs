@@ -9,8 +9,8 @@
 //! hours, in America/New_York wall time (DEC-156 item 6). Both read the library the runtime calls,
 //! so these cases pin the rules, not yet the runtime's use of them (DEC-278 item 13).
 //!
-//! **`lifecycle`** (the other twenty-six) scripts the runtime's steps and is not interpreted yet: its
-//! cases fail naming the op, so none can pass before an arm drives `mandate-runtime` (DEC-292).
+//! **`lifecycle`** (the other twenty-six) scripts the runtime's steps, which [`lifecycle`] drives
+//! through `mandate-runtime` itself (DEC-292 item 3, DEC-317).
 //!
 //! **Every key is read (DEC-85).** The case, each ledger entry, each query, each expectation and the
 //! quiet hours are swept against the members this module reads, and a member it does not know fails
@@ -23,6 +23,8 @@ use mandate_approval::{
 use mandate_time::NewYorkTime;
 
 use super::{instant, unknown_members};
+
+mod lifecycle;
 use crate::{Json, at, ensure, expect_eq, list_at, str_at, u64_at};
 
 /// The members an `ask_permit` case carries at its top level.
@@ -42,9 +44,7 @@ pub(super) fn escalation_case(case: &Json) -> Result<(), String> {
     match str_at(case, "op")? {
         "ask_permit" => ask_permit_case(case),
         "deliver_now" => deliver_now_case(case),
-        "lifecycle" => Err(super::not_implemented(
-            "the `lifecycle` op, which drives `mandate-runtime` (DEC-292)",
-        )),
+        "lifecycle" => lifecycle::lifecycle_case(case),
         other => Err(format!(
             "escalation op `{other}` is not one the harness knows"
         )),

@@ -292,7 +292,20 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   §6.4's per-agent budget of 10; risk-limit alerts are never capped.
 - **E6-13 (Should)** As an owner, I want tripwires I set in advance to end my delegations or hold new
   openings when their condition is met, so that trust does not outlive the conditions I gave it
-  under ([DEC-187](04-decision-log.md#decisions)). Waits on the mandate spec change for `autonomy.tripwires` (MI-31, V-044).
+  under ([DEC-187](04-decision-log.md#decisions)). The spec change is MI-31, V-044, §6.7, and the MC-W cases
+  ([DEC-350](decisions/DEC-350.md) to [DEC-352](decisions/DEC-352.md); claim [#439](https://github.com/kunwarshivam/mandate/issues/439)).
+  Owed after it: `mandate-spec` parsing the field, V-044, and the §9.2 row (DEC-77 tests then implementation), the executor's
+  fold of §6.7, and the `kind: tripwire` harness arm. Also owed, from #443's round 1 (m4): run ruff over `reference/` in
+  `cargo xtask ci lint`, so a duplicated definition such as a second `main()` in `reference/mandate/mutants.py` (F811) fails
+  the lint rather than reaching review. Also (#443 round 3): the per-PR `cargo xtask ci reference` runs `fuzz.py` but not
+  `reference/mandate/mutants.py`, which only the nightly job runs, so a stale mutation anchor passed `full` on #443's round-2
+  head. Make a missing anchor fail per-PR CI, for example with an anchor-only check that runs in seconds.
+  Also owed, one code PR (#443 round 3): journal spec rule 28 and `OwnerCommandRefused.reason`'s `not_independent` in
+  `mandate-journal`'s §9.2 schema, with the validator check in `reference/journal/control.py`, its two vectors, and its
+  seeded bug.
+  **Founder question** (#443 round 2): should a mandate be refused at validation
+  when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
+  drawdown ladder) then cannot be lifted until a second user exists?
   Actions are `end_delegations` or `exits_only`, never `paused` (rule 13). *Accepted when:* a fired
   tripwire acts at its next evaluation, journals the event, alerts with opaque text, and lifts only
   by the owner's acknowledgment with step-up; adding or tightening one applies at once.
@@ -468,6 +481,22 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `mandate-approval`, and MC-E25 to MC-E28, MC-E30 and MC-E32 pass; their `status.toml` rows are the
   status PR's. Still open: the `lifecycle` op's runtime driver for the other 26 cases, which fail
   naming the op until it lands.
+  *Part done (DEC-317, DEC-366):* the `lifecycle` op drives `mandate-runtime`'s `handle` and
+  `fold` under one published map, landing in three PRs. Slice 1 interprets the `ask` step, and every
+  case still fails at its second step, naming the slice that owes it. Once all three slices land,
+  fifteen cases pass (MC-E02 to MC-E05, MC-E07 to MC-E16, MC-E31); their `status.toml` rows are the
+  status PR's.
+  *Follow-up (DEC-317 item 7, E8-3):* the runtime's `ApprovalResponded` records no `quorum`, the
+  approver count and independence check 7 applied, which journal spec §9 requires for a grant that
+  reaches check 7 (`mandate_approval::quorum` already computes it). Tests first in
+  `mandate-runtime`, then the implementation; MC-E01, MC-E06, MC-E17, MC-E19 to MC-E24 and MC-E29
+  fail on that member alone and flip in the status PR that follows.
+  *Decision needed (DEC-318, Proposed, the founder's under DEC-176):* MC-E18 re-validates a grant while
+  the mode is exits-only and expects `skip` for `mode`, but §6.4 "Cancellation" cancels every pending
+  approval in a step whose effective mode is exits-only or stricter before the step judges a
+  response, so the runtime refuses the grant as `not_pending` (both skip). Either the case is
+  restated as a cancellation (a `mandate.yaml` change) or check 9's `mode` is said to be reachable
+  only by a path the spec names; MC-E18 stays pending until then.
   *Follow-up (the #416 review, minor 3):* every `ask_permit` case asks for one instrument, so
   family E cannot see the budget counted per instrument rather than per agent (`mandate-approval`'s
   own suite does). A future MC-E case should spread its ten asks across instruments. It changes

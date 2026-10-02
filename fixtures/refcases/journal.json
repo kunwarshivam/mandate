@@ -6420,7 +6420,7 @@
    },
    {
     "name": "increasing_without_step_up",
-    "clause": "rule 28",
+    "clause": "rule 29",
     "base_draft": "version_applied",
     "changes": [
      {
@@ -6436,7 +6436,7 @@
    },
    {
     "name": "rejected_without_reason",
-    "clause": "rule 29",
+    "clause": "rule 30",
     "base_draft": "version_rejected",
     "changes": [
      {
@@ -6452,7 +6452,7 @@
    },
    {
     "name": "applied_with_a_reason",
-    "clause": "rule 29",
+    "clause": "rule 30",
     "base_draft": "version_applied",
     "changes": [
      {
@@ -6468,7 +6468,7 @@
    },
    {
     "name": "rejected_with_an_allocation_change",
-    "clause": "rule 29",
+    "clause": "rule 30",
     "base_draft": "version_rejected",
     "changes": [
      {
@@ -6484,7 +6484,7 @@
    },
    {
     "name": "rejected_with_a_floor",
-    "clause": "rule 29",
+    "clause": "rule 30",
     "base_draft": "version_rejected",
     "changes": [
      {
@@ -6516,7 +6516,7 @@
    },
    {
     "name": "rejected_without_reason_and_with_allocation",
-    "clause": "rule 29: the first offending member, reason before allocation_change",
+    "clause": "rule 30: the first offending member, reason before allocation_change",
     "base_draft": "version_rejected",
     "changes": [
      {
@@ -6616,7 +6616,7 @@
    },
    {
     "name": "thesis_admission_removes",
-    "clause": "rule 30",
+    "clause": "rule 31",
     "base_draft": "universe_admitted",
     "changes": [
      {
@@ -6632,7 +6632,7 @@
    },
    {
     "name": "expiry_admits",
-    "clause": "rule 30",
+    "clause": "rule 31",
     "base_draft": "universe_admitted",
     "changes": [
      {
@@ -6648,7 +6648,7 @@
    },
    {
     "name": "admitted_without_thesis",
-    "clause": "rule 31: null together, at the null one",
+    "clause": "rule 32: null together, at the null one",
     "base_draft": "universe_admitted",
     "changes": [
      {
@@ -6664,7 +6664,7 @@
    },
    {
     "name": "admitted_without_lineage",
-    "clause": "rule 31: null together, at the null one",
+    "clause": "rule 32: null together, at the null one",
     "base_draft": "universe_admitted",
     "changes": [
      {
@@ -6680,7 +6680,7 @@
    },
    {
     "name": "admitted_with_neither",
-    "clause": "rule 31: a thesis reason names its thesis",
+    "clause": "rule 32: a thesis reason names its thesis",
     "base_draft": "universe_admitted",
     "changes": [
      {
@@ -6700,7 +6700,7 @@
    },
    {
     "name": "halt_without_thesis",
-    "clause": "rule 31: an operator halts per thesis",
+    "clause": "rule 32: an operator halts per thesis",
     "base_draft": "universe_removed_pinned",
     "changes": [
      {
@@ -6716,7 +6716,7 @@
    },
    {
     "name": "pinned_removal_names_a_thesis",
-    "clause": "rule 31: a pinned list names no thesis",
+    "clause": "rule 32: a pinned list names no thesis",
     "base_draft": "universe_removed_pinned",
     "changes": [
      {
@@ -6754,7 +6754,7 @@
   "valid_drafts": [
    {
     "name": "neutral_without_step_up",
-    "clause": "rule 28: only a risk-increasing version needs step-up",
+    "clause": "rule 29: only a risk-increasing version needs step-up",
     "base_draft": "version_applied",
     "changes": [
      {
@@ -6772,7 +6772,7 @@
    },
    {
     "name": "reducing_with_step_up",
-    "clause": "rule 28: step-up is allowed on any version",
+    "clause": "rule 29: step-up is allowed on any version",
     "base_draft": "version_applied",
     "changes": [
      {
@@ -6786,7 +6786,7 @@
    },
    {
     "name": "applied_changing_neither",
-    "clause": "rule 29: an applied version may change neither the allocation nor the floor",
+    "clause": "rule 30: an applied version may change neither the allocation nor the floor",
     "base_draft": "version_applied",
     "changes": [
      {
@@ -6800,7 +6800,7 @@
    },
    {
     "name": "floor_loosened",
-    "clause": "rule 29: an applied floor-loosening version",
+    "clause": "rule 30: an applied floor-loosening version",
     "base_draft": "version_applied",
     "changes": [
      {
@@ -6818,7 +6818,7 @@
    },
    {
     "name": "pinned_instrument_admitted",
-    "clause": "rule 30: version_applied admits",
+    "clause": "rule 31: version_applied admits",
     "base_draft": "universe_removed_pinned",
     "changes": [
      {
@@ -6836,7 +6836,7 @@
    },
    {
     "name": "eligibility_lost_on_a_pinned_instrument",
-    "clause": "rule 31: eligibility_lost may name no thesis",
+    "clause": "rule 32: eligibility_lost may name no thesis",
     "base_draft": "universe_removed_pinned",
     "changes": [
      {
@@ -6850,7 +6850,7 @@
    },
    {
     "name": "eligibility_lost_on_a_thesis",
-    "clause": "rule 31: eligibility_lost may name its thesis",
+    "clause": "rule 32: eligibility_lost may name its thesis",
     "base_draft": "universe_admitted",
     "changes": [
      {
