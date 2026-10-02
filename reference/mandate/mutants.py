@@ -271,8 +271,9 @@ TRIPWIRE_MUTANTS = {
         '            if inp.get("step_up") is not None and isinstance(inp["step_up"], dict) and "assertion" in inp["step_up"]:',
         '            if verdict["result"] == "apply" and isinstance(inp.get("step_up"), dict) and "assertion" in inp["step_up"]:'),
     "the requester lifts a tripwire under independent approval": (
-        '            elif ((inp.get("independent_approval_required", False) or inp.get("independent_now", False))',
-        '            elif False and ((inp.get("independent_approval_required", False) or inp.get("independent_now", False))'),
+        '            elif ((inp.get("independent_approval_required", False) or inp.get("independent_now", False))\n'
+        '                  and (inp.get("user") is None or inp.get("requester") is None or inp.get("user") == inp.get("requester"))):\n',
+        '            elif False:\n'),
     "a fired tripwire does not latch the risk state": ('        for tid in held["fired"]:\n            self.latched[f"tripwire:{tid}"] = True\n', ''),
     "only an exits_only tripwire latches the risk state": ('        for tid in held["fired"]:\n            self.latched[f"tripwire:{tid}"] = True\n',
                                                            '        for tid in held["fired"]:\n            if held["fired"][tid] == "exits_only":\n                self.latched[f"tripwire:{tid}"] = True\n'),
