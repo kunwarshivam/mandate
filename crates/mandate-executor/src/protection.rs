@@ -2279,6 +2279,54 @@ mod sequence_tests {
         executor.commit_one(event_type, object(pairs)?)
     }
 
+    const LONE: &str = "md-exit-1";
+
+    /// Ten AAPL that `agent-a` bought, with [`LONE`] working beside an OCO for the other 6, the cap
+    /// DEC-346 item 6 applies (position less exits still selling), from which #468's rule-13
+    /// property found #489.
+    fn beside_a_lone_exit(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        for (id, purpose, qty) in [(LONE, "risk_exit", "4"), (OCO, "protective", "6")] {
+            let mut pairs = vec![
+                ("client_order_id", text(id)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text(qty)),
+                ("purpose", text(purpose)),
+            ];
+            if purpose == "protective" {
+                pairs.extend([
+                    ("tif", text("gtc")),
+                    ("order_class", text("oco")),
+                    ("take_profit", text("170")),
+                    ("stop", text("140")),
+                ]);
+            } else {
+                pairs.push(("limit", text("150")));
+            }
+            committed(&mut executor, "OrderSubmitted", pairs)?;
+            committed(
+                &mut executor,
+                "OrderStateChanged",
+                vec![("client_order_id", text(id)), ("state", text("accepted"))],
+            )?;
+        }
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(OCO)),
+                ("qty", text("6")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+            ],
+        )?;
+        Ok(executor)
+    }
+
     /// Ten AAPL that `agent-a` bought, protected by one GTC OCO at 170 over 140 named for the
     /// buy (§2.3).
     fn protected(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
@@ -7560,33 +7608,54 @@ mod sequence_tests {
     }
 
     fn rule_13_script(start: i64, script: &[Move]) -> Result<(), String> {
-        rule_13_script_with(start, false, script)
+        rule_13_script_with(start, false, false, script)
     }
 
     /// [`rule_13_script`] with the Σ checks ([`Desk::within_position`], DEC-408).
     fn rule_13_summed(start: i64, script: &[Move]) -> Result<(), String> {
-        rule_13_script_with(start, true, script)
+        rule_13_script_with(start, true, false, script)
     }
 
-    fn rule_13_script_with(start: i64, sums: bool, script: &[Move]) -> Result<(), String> {
+    /// [`rule_13_summed`] from [`beside_a_lone_exit`] (DEC-418).
+    fn rule_13_beside_a_lone_exit(start: i64, script: &[Move]) -> Result<(), String> {
+        rule_13_script_with(start, true, true, script)
+    }
+
+    fn rule_13_script_with(
+        start: i64,
+        sums: bool,
+        lone: bool,
+        script: &[Move],
+    ) -> Result<(), String> {
         let failed = |error: ExecutorError| format!("{error:?}");
         let (config, fees) = (executor_config(), fees().map_err(failed)?);
         let ports = tiered_ports(&config, &fees);
-        let mut executor = protected(&ports).map_err(failed)?;
+        let mut executor = if lone {
+            beside_a_lone_exit(&ports)
+        } else {
+            protected(&ports)
+        }
+        .map_err(failed)?;
+        let held = |purpose, qty| Held {
+            purpose,
+            qty,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let venue = if lone {
+            BTreeMap::from([
+                (OCO.to_owned(), held(Purpose::Protective, 6)),
+                (LONE.to_owned(), held(Purpose::RiskExit, 4)),
+            ])
+        } else {
+            BTreeMap::from([(OCO.to_owned(), held(Purpose::Protective, 10))])
+        };
         let mut desk = Desk {
             now: start,
             quotes: Vec::new(),
             position: 10,
-            venue: BTreeMap::from([(
-                OCO.to_owned(),
-                Held {
-                    purpose: Purpose::Protective,
-                    qty: 10,
-                    filled: 0,
-                    acked: true,
-                    live: true,
-                },
-            )]),
+            venue,
             asked: Vec::new(),
             exits: BTreeMap::new(),
             fills: 0,
@@ -7810,6 +7879,28 @@ mod sequence_tests {
                 |(start, script)| rule_13_summed(start, &script).map_err(TestCaseError::fail),
             )
             .map_err(|error| error.to_string())
+    }
+
+    /// #489's minimal script, from #468's rule-13 property: beside [`LONE`], a risk exit of 4 above
+    /// the bid goes passive and its sequence cancels the OCO; a risk exit of 3 allowed meanwhile
+    /// waits on that cancel. The passive exit is then placed as an OCO for 4, which beside [`LONE`]
+    /// and the exit of 3 no longer fits within 10, and nothing cancelled it, so the exit of 3
+    /// waited past `max_intent_age_s` (DEC-418). The placement that no longer fits beside a
+    /// waiting exit is cancelled for it, as for an exit that arrives after it (DEC-419).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_risk_exit_allowed_during_a_passive_sequences_cancel_is_never_stranded()
+    -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(135), None, true),
+            Move::Exit(0, 4, 141),
+            Move::Exit(0, 3, 141),
+            Move::Tick(1_800),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(1),
+        ];
+        rule_13_beside_a_lone_exit(0, &script)
     }
 
     /// #485's minimal script, from the rule-13 property: a risk exit's rung steps while the agent
