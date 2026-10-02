@@ -1997,6 +1997,23 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   derive each guard the harness can state from the case (`scale_active_s`, `holding`, the session,
   the minimum) and require the gate's empty answer to agree, or widen the API in a tests PR first
   (DEC-77). MC-B17 and MC-B30 to MC-B32 then pass; their status rows follow in a status-only PR.
+- **E6-4 reference: drop `ref.py`'s `factor < 1` trim guard and its dollar minimum** (#466 review,
+  round 1, m2; DEC-399 items 3 and 5). `reference/mandate/ref.py`'s `builder` trims only below a
+  factor of 1 and compares the sell's notional with `min_order_usd`. `mandate_risk::trim_proposals`
+  follows §5.5's text (no guard) and trading spec §5.3 rule 2's quantity minimum, `min_order_size`,
+  which the review agrees is right. Removing the guard only tightens (DEC-176). The follow-up is a
+  reference PR on its own (ES-22): `ref.py`, a regenerated `mandate.yaml` and
+  `fixtures/refcases/mandate.json` if any case changes, and `check_cases.py`, `fuzz.py` and
+  `mutants.py` passing. No trim case states a factor of 1 or a sub-minimum trim today.
+- **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
+  `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
+  `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
+  builder (increments of `0.0001` and `0.000001` exist). Once the snapshot carries the increment,
+  round the trim up on it, so a trim is never off the grid that §5.3 rule 2 refuses.
+- **E6-4 nits** (#466 review, round 1): `UsdExact::times_size_fraction`'s doc still lists "the
+  ladder size factor applied to the target" though the gate's 24-place `Ratio` factor enters
+  through `UsdExact::of_ratio`; say which number each serves (n2). `of_ratio` takes any `Ratio`,
+  and stream F's V-040 is what bounds the factor at one.
 
 From E6-2's builder slice (stream H; found while implementing §8.3, not by a review):
 
