@@ -720,7 +720,9 @@ mod draft_member_tests {
     ) -> Result<Option<String>, ExecutorError> {
         draft.insert("payload".to_owned(), Json::Object(payload));
         let bytes = serde_json::to_vec(&Json::Object(draft)).map_err(|_| non_canonical())?;
-        Ok(Draft::parse(&bytes).err().map(|refusal| format!("{refusal:?}")))
+        Ok(Draft::parse(&bytes)
+            .err()
+            .map(|refusal| format!("{refusal:?}")))
     }
 
     fn vector_text<'v>(

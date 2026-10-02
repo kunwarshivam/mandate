@@ -2328,7 +2328,11 @@ pub(crate) mod tests {
                         .push((at, draft.event_id.clone(), draft.event_type.clone()));
                     if draft.event_type == "AgentModeApplied" {
                         let member = |name: &str| {
-                            draft.payload.get(name).and_then(Value::as_str).map(str::to_owned)
+                            draft
+                                .payload
+                                .get(name)
+                                .and_then(Value::as_str)
+                                .map(str::to_owned)
                         };
                         answer
                             .paused
