@@ -569,6 +569,9 @@ fn order_state_changed(
         detail.cancel_overdue = true;
     }
     if flag(payload, "ignored") {
+        if flag(payload, "cancel_requested") {
+            order.cancel_unconfirmed = true;
+        }
         return Ok(());
     }
     if optional_text(payload, "lookup") == Some("absent") {
