@@ -1967,12 +1967,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// (DEC-346 item 7). Slice 2 deleted the other two `properties` rows, whose minimal failure is now
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
-///
-/// The eight `protection` rows are #485's (DEC-408): an exit ladder between rungs over-sells beside
-/// a new exit, which is a wrong answer from code that runs, with no stub to stop at. Each fails on
-/// the rule-13 oracle's count; the fix (DEC-409, DEC-410) deletes the rows with the `#[ignore]`
-/// lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1988,38 +1983,6 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_risk_exit_beside_a_sequence_between_rungs_never_over_sells",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_ladder_stopped_between_rungs_never_resumes_beside_a_new_exit",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_risk_exit_held_overnight_beside_a_parked_ladder_is_sized_to_what_is_left",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_risk_exit_beside_a_parked_ladder_selling_everything_waits",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_risk_exit_at_the_open_beside_a_parked_sequence_is_sized_to_what_is_left",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_restart_between_rungs_still_counts_the_parked_remainder",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_refused_rung_leaves_its_remainder_to_the_next_exit",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::rule_13_holds_over_random_scripts_from_between_rungs",
     ),
 ];
 
