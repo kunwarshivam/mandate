@@ -497,6 +497,14 @@ def invalid_drafts() -> list[dict]:
             "payload.instrument",
         ),
         invalid(
+            "admitted_instrument_with_a_trailing_newline",
+            "§9.3 asset_id: the whole string, so a trailing newline is refused (#511 round 1)",
+            "universe_admitted",
+            [change("payload.instrument", ADMITTED_ASSET + "\n")],
+            "non_canonical",
+            "payload.instrument",
+        ),
+        invalid(
             "admitted_instrument_in_capitals",
             "§9.3 asset_id: lowercase only, so one asset has one spelling",
             "universe_admitted",
@@ -855,6 +863,7 @@ VALIDATOR_MUTANTS = (
     "types.asset_id",
     "types.asset_id_case",
     "types.asset_id_ident",
+    "types.asset_id_trailing_newline",
     "order.rule_30_first",
     "order.rule_33_first",
     "order.rule_32_first",

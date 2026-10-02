@@ -78,7 +78,7 @@ DATE = T("date")
 RISK_CLOCK = T("risk_clock")
 POINTER = T("pointer")
 ASSET_ID = T("asset_id")
-ASSET_ID_FORM = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+ASSET_ID_FORM = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
 REFUSED_COMMANDS = {"agent": ("resume", "stop"), "acct": ("acknowledge",)}
@@ -336,6 +336,8 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
             ok = is_pointer(value)
         elif ty.kind == "asset_id":
             ok = bool(ASSET_ID_FORM.match(value)) or (
+                "types.asset_id_trailing_newline" in skip and bool(ASSET_ID_FORM.match(value.removesuffix("\n")))
+            ) or (
                 "types.asset_id_case" in skip and bool(ASSET_ID_FORM.match(value.lower()))
             ) or ("types.asset_id_ident" in skip and bool(IDENT_RE.match(value)))
         elif "types.date_length" in skip:
