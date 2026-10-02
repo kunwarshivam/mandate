@@ -565,7 +565,7 @@ B = [
      dict(BI, position_qty="8", size_factor="0.5", scale_active_s=120, min_order_size="1", gate_state=gst(positions_mv={XYZ: "799.2"}), outputs=TWO)),
     ("MC-B33", "trim_to_target: a trim of at least the instrument's minimum size goes under a larger dollar minimum",
      "two_stock_swing_trim",
-     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_usd="500", min_order_size="1",
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_usd="500", min_order_size="3",
           gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
     ("MC-B34", "trim_to_target withheld below the instrument's minimum order size", "two_stock_swing_trim",
      dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_size="4",

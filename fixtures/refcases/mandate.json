@@ -14459,7 +14459,7 @@
     },
     "size_factor": "0.5",
     "scale_active_s": 120,
-    "min_order_size": "1",
+    "min_order_size": "3",
     "outputs": [
      {
       "model_id": "quant.momentum",
