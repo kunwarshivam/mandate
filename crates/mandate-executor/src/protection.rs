@@ -7803,6 +7803,43 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// #508's review, m1, at the step [`overtaken`] runs: beside [`LONE`] (4), a passive exit of 4
+    /// is placed into a position of 10 while a risk exit of 1 waits on the OCO's cancel and a risk
+    /// exit of 2 the gate holds has no order. The placement's 4, the lone 4 and the waiting 1 fit;
+    /// with the held 2 they would not, and that exit cannot move, so the placement is not cancelled.
+    #[test]
+    fn a_held_exit_beside_a_waiting_one_has_no_placement_cancelled_for_it()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(0)), &ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(SECOND, "4", "141", Purpose::RiskExit)?, &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(1_800)), &ports)?;
+        let agent = AgentId("agent-a".to_owned());
+        executor.state.modes.insert(agent.clone(), Mode::Paused);
+        let held = executor.run(sell(LATER, "2", "141", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(verdicts(&held), vec!["hold"]);
+        executor.state.modes.insert(agent, Mode::Normal);
+        executor.run(sell(EXIT, "1", "141", Purpose::RiskExit)?, &ports)?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        let placement = format!("md-{SECOND}");
+        assert!(
+            submissions(&placed)
+                .iter()
+                .any(|order| order.client_order_id.as_str() == placement),
+            "the passive exit is placed: {:?}",
+            drafted(&placed)
+        );
+        assert!(
+            cancels(&placed).is_empty(),
+            "and not cancelled for the held exit: {:?}",
+            drafted(&placed)
+        );
+        Ok(())
+    }
+
     /// #400 round 2's nit: the random oracle reached the composed plant (an exit's step into the
     /// close sent as an extended-hours rung) in 7 of 9 runs, so a run could miss it. This script
     /// reaches it on every run: a risk exit at 19:59:50 ET goes after-hours once the OCO's cancel
