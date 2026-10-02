@@ -518,7 +518,8 @@ while a reducing purpose passes it.
   DEC-304. `AccountSnapshotRecorded` and rule 24 are not registered yet (DEC-261 item 7).
 - **Code:** `crates/mandate-journal/src/control.rs` (`Draft::parse` routes each §9.2 type on its
   stream; `payload`, then `subject_and_copy`), `crates/mandate-journal/src/schema.rs` (`Ty::Pointer`),
-  `crates/mandate-spec/src/context.rs` (`JournaledFact::from_record`, a stub until the mapping's PR, DEC-303 item 8).
+  `crates/mandate-spec/src/context.rs` (`JournaledFact::from_record`, the mapping, with its in-module
+  `record_tests`; DEC-303 items 10 and 15).
 - **Tests:** `crates/mandate-refcases/tests/control_stream.rs` (one test per §9.2 family, the chain,
   and the mapping over the vectors' `journaled_facts`), `crates/mandate-spec/tests/journal_record.rs`
   (the mapping from hand-written records), `crates/mandate-journal/tests/catalogue.rs` (unlisted

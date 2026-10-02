@@ -380,9 +380,13 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   #413). It maps each record to its fact, and the vectors are in `journal.yaml`'s `control_stream`
   section. `PlatformOperatorAction` stays open (DEC-261 item 9, Proposed), so its schema and the
   `ModelWithdrawn` mapping wait for the operator service's specification.
-  *Implementation* ([DEC-303](decisions/DEC-303.md) items 8 to 11), in two PRs under ES-13. The first
-  registers every §9.2 schema but `AccountSnapshotRecorded` in `mandate-journal`. The second makes the
-  `JournaledFact` mapping live in `mandate-spec`. *Tests PR*: 17 pending tests against stubs in
+  *Implementation* ([DEC-303](decisions/DEC-303.md) items 8 to 15), in two PRs under ES-13. The first
+  (#445, merged) registers every §9.2 schema but `AccountSnapshotRecorded` in `mandate-journal`. The
+  second makes the `JournaledFact` mapping live in `mandate-spec`. *Left open:* the
+  `AccountSnapshotRecorded` registration with rule 24, once stream K's fee-step writer conforms
+  (#441); `PlatformOperatorAction`; and, as a follow-up, removing `SpecError::Unimplemented` and
+  `ParseError::Unimplemented`, which no `mandate-spec` code returns any more but `mandate-shell`'s test
+  doubles still name (DEC-303 item 15). *Tests PR*: 17 pending tests against stubs in
   `mandate-journal`'s `control` module and `mandate-spec`'s `JournaledFact::from_record`. Three live
   tests keep `AccountSnapshotRecorded` unregistered until stream K's writer conforms (DEC-261 item 7).
 
