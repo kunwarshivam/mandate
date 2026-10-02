@@ -8215,6 +8215,9 @@ mod sequence_tests {
                         .unwrap_or_default()
                         .parse::<u32>()
                         .map_err(|error| format!("{id}'s qty: {error}"))?;
+                    if qty == 0 {
+                        return Err(format!("{id} sent for nothing"));
+                    }
                     let room = self.room(&intent);
                     if let Some(exit) = self.exits.get(&intent)
                         && purpose != Purpose::Protective
@@ -8843,6 +8846,38 @@ mod sequence_tests {
         .chain(TO_THE_OPEN)
         .chain([Move::Tick(60), Move::Ack, Move::Fill(3), Move::Tick(60)])
         .collect();
+        rule_13_script(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// DEC-410, a parked sequence: a risk exit's step parks at 20:00:05 beside a second exit still
+    /// working, so protection does not return and the sequence stays parked through the night.
+    /// A risk exit of 5 at the open, beside the 2 still working and the parked 4, is sized to the
+    /// 4 left.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_risk_exit_at_the_open_beside_a_parked_sequence_is_sized_to_what_is_left()
+    -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(150), None, true),
+            Move::Exit(0, 4, 150),
+            Move::Exit(1, 2, 150),
+            Move::Confirm,
+            Move::Ack,
+            Move::Ack,
+            Move::Tick(15),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(3_600),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Tick(3_600),
+            Move::Quote(Some(150), None, true),
+            Move::Exit(0, 5, 150),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Confirm,
+        ];
         rule_13_script(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
     }
 
