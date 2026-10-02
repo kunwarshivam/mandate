@@ -147,7 +147,7 @@ const CLOSED_BY_SECTION_9_2: &[(&str, &str)] = &[
 ];
 
 /// The account stream's snapshot, which §9.2 closes with rule 24 and its registration routes there
-/// (DEC-399). It is kept apart from the eleven pairs until that registration is implemented.
+/// (DEC-402). It is kept apart from the eleven pairs until that registration is implemented.
 const SNAPSHOT_ON_ACCOUNT: (&str, &str) = ("AccountSnapshotRecorded", ACCT);
 
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {
@@ -467,7 +467,7 @@ fn a_closed_control_stream_event_is_never_an_unknown_schema() {
 }
 
 /// The account stream's snapshot is routed to §9.2's checks, never refused for want of a schema
-/// (DEC-261 item 7, DEC-399). Stream K's fee-step writer conforms (#456), so its registration goes
+/// (DEC-261 item 7, DEC-402). Stream K's fee-step writer conforms (#456), so its registration goes
 /// ahead; the fee step's own snapshot is wired to §9.2's members in the same change, which the
 /// executor's `the_fee_steps_snapshot_is_never_refused_for_its_members` pins.
 #[test]

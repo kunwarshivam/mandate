@@ -3,7 +3,7 @@
 //! account streams, with consistency rules 17 to 23, subject rules 25 and 26, and copy rule 27.
 //! Every rule only refuses a draft; none changes what a writer may do.
 //!
-//! **`AccountSnapshotRecorded` is routed here, to a stub** (DEC-261 item 7, DEC-399). Stream K's
+//! **`AccountSnapshotRecorded` is routed here, to a stub** (DEC-261 item 7, DEC-402). Stream K's
 //! writer conforms (#456), so its registration's tests PR routes the account stream's snapshot to
 //! §9.2 and refuses it as `unimplemented`, as it was refused as `unknown_schema` before. The
 //! implementation PR registers its schema and rule 24 and wires the fee step's own snapshot writer
@@ -198,7 +198,7 @@ fn ascending(items: &[&str], path: &str) -> Result<(), Invalid> {
     )
 }
 
-/// The stub of the snapshot registration's tests PR (DEC-77, DEC-399): §9.2's schema and rule 24
+/// The stub of the snapshot registration's tests PR (DEC-77, DEC-402): §9.2's schema and rule 24
 /// land with its implementation.
 fn snapshot_payload() -> Result<Value, Invalid> {
     Err(Invalid::new(InvalidReason::Unimplemented, "payload"))

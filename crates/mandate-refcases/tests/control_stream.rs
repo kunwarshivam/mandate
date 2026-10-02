@@ -3,7 +3,7 @@
 //! to `JournaledFact`. Each family holds a draft the journal must accept and one it must refuse, so
 //! neither a journal that accepts every draft nor one that refuses every draft passes.
 //! `AccountSnapshotRecorded`'s cases are their own family, registered once stream K's fee-step
-//! writer conforms (DEC-261 item 7, DEC-399).
+//! writer conforms (DEC-261 item 7, DEC-402).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -308,7 +308,7 @@ fn a_refused_owner_command_is_on_its_own_stream_and_names_its_input() {
 /// The account stream's snapshot is closed, with rule 24's cash members `null` together or
 /// compared within the band, and every snapshot draft in the vectors gets its own `expect`: the
 /// fee step's (`snapshot_fees`) and a cash comparison's (`snapshot_reconciled`) are accepted, and
-/// each invalid draft is refused with its reason at its path (DEC-261 item 7, DEC-399).
+/// each invalid draft is refused with its reason at its path (DEC-261 item 7, DEC-402).
 #[test]
 #[ignore = "pending E7-10"]
 fn an_account_snapshot_is_closed_and_checked_by_rule_24() {

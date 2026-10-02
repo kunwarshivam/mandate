@@ -2565,7 +2565,7 @@ pub(crate) mod tests {
     /// be asked to: each is accepted whole. Journal spec §9.2 needs the fee step's three cash members
     /// present as `null`, so the change that registers the schema also wires
     /// [`super::fee_step_snapshot_fields`] into `fees`, or the snapshot of the step that pauses every
-    /// agent and alerts the owner would be refused (DEC-261 item 7, DEC-389 item 2, DEC-399,
+    /// agent and alerts the owner would be refused (DEC-261 item 7, DEC-389 item 2, DEC-402,
     /// `AGENTS.md` rules 3 and 13). Each payload is parsed before its members are compared, so the
     /// journal's stub answers first; once registered, the fee step's reduced form is refused at
     /// `payload.model_cash` and this fails until the writer is wired.
