@@ -25,7 +25,10 @@
 //!   names;
 //! - `protective_sell_qty`: the executor's protective sell quantity in the instrument;
 //! - `initial.open_orders` and `initial.positions`, which are **seeded** as the journal events
-//!   that would have put them there (a `FillApplied`, a `ProtectionChanged` with `placed`).
+//!   that would have put them there (the agent's own `OrderSubmitted`, its `FillApplied` and its
+//!   `filled` state, so the position has a single holder its protection belongs to; a
+//!   `ProtectionChanged` with `placed`), followed by a restart, the startup reconciliation and the
+//!   account report at `initial.account`'s cash, as a production shell starts (DEC-347).
 //!
 //! A gate `decision` is **never** asserted: it is stream I's and stream J's (`mandate-risk`), and
 //! a case whose only expectations are decisions or accounting values is not driven here at all.
@@ -66,6 +69,22 @@ use mandate_executor::{
 use mandate_num::{Bps, Qty, Rounding};
 use mandate_time::UtcNanos;
 use serde_json::Value as Json;
+
+/// `account` reporting `cash` as its cash, equity and buying power: a case's account holds cash
+/// and the positions its steps name, and no figure here is asserted beyond the cash comparison.
+fn holding(
+    cash: &str,
+    account: mandate_executor::BrokerAccount,
+) -> mandate_executor::BrokerAccount {
+    let cash = common::usd(&canonical(cash));
+    mandate_executor::BrokerAccount {
+        cash,
+        equity: cash,
+        buying_power: cash,
+        non_marginable_buying_power: cash,
+        ..account
+    }
+}
 
 /// One case as the fixture carries it, with a variant's overrides already applied.
 struct Case {
@@ -330,14 +349,36 @@ impl<'p> Drive<'p> {
                 text_of(position, "cost_basis").unwrap_or("0"),
                 text_of(position, "qty").unwrap_or("1"),
             );
+            let bought = format!("md-seed{n}");
+            self.fold(
+                "OrderSubmitted",
+                &[
+                    ("client_order_id", text(&bought)),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(name)),
+                    ("side", text("buy")),
+                    ("qty", text(&held.to_string())),
+                    ("limit", text(&each)),
+                ],
+                before,
+            );
             self.fold(
                 "FillApplied",
                 &[
                     ("fill_id", text(&format!("seed-{n}"))),
+                    ("client_order_id", text(&bought)),
                     ("instrument", text(name)),
                     ("side", text("buy")),
                     ("qty_gross", text(&held.to_string())),
                     ("price", text(&each)),
+                ],
+                before,
+            );
+            self.fold(
+                "OrderStateChanged",
+                &[
+                    ("client_order_id", text(&bought)),
+                    ("state", text("filled")),
                 ],
                 before,
             );
@@ -395,8 +436,39 @@ impl<'p> Drive<'p> {
             self.resting
                 .insert(name.to_owned(), ProtectionPrices { stop, take_profit });
         }
-        let (restarted, _) = self.shell.restart(self.ports);
+        let (mut restarted, _) = self.shell.restart(self.ports);
+        restarted.ready_with(self.ports, self.initial_account());
         self.shell = restarted;
+    }
+
+    /// The broker's account after `step`: its expected settled cash where the step names one, as
+    /// the broker would report it, else the account at the start.
+    fn account_after(&self, step: &Json) -> mandate_executor::BrokerAccount {
+        let start = self.initial_account();
+        match step
+            .get("expect")
+            .and_then(|expect| expect.get("cash"))
+            .and_then(|cash| text_of(cash, "settled"))
+        {
+            Some(cash) => holding(cash, start),
+            None => start,
+        }
+    }
+
+    /// The broker's account at the start: `initial.account`'s settled cash, or the shell's
+    /// default account where the case names none.
+    fn initial_account(&self) -> mandate_executor::BrokerAccount {
+        let reported = common::broker_account();
+        match self
+            .case
+            .initial
+            .get("account")
+            .and_then(|account| account.get("cash"))
+            .and_then(|cash| text_of(cash, "settled"))
+        {
+            Some(cash) => holding(cash, reported),
+            None => reported,
+        }
     }
 
     /// Runs one input and records what it did.
@@ -639,8 +711,17 @@ impl<'p> Drive<'p> {
         match kind.as_str() {
             "propose_order" => {
                 let body = self.intent_body(&data);
+                let intent = format!("01JREFCASE{index:016}");
+                let submits = expected_actions(step)
+                    .iter()
+                    .any(|(kind, _)| kind.starts_with("submit"));
+                if let Some(named) = text_of(&data, "name").filter(|_| !submits) {
+                    self.names
+                        .entry(named.to_owned())
+                        .or_insert_with(|| format!("md-{intent}"));
+                }
                 self.run(
-                    common::handoff(&format!("01JREFCASE{index:016}"), common::AGENT, body),
+                    common::handoff(&intent, common::AGENT, body),
                     &mut seen,
                     "the proposal",
                 );
@@ -1212,6 +1293,7 @@ impl Drive<'_> {
             Some(broker) => {
                 let mut taken = common::snapshot(self.shell.head().0, ReconcileReason::Scheduled);
                 taken.positions = vec![common::broker_position(name, &canonical(broker))];
+                taken.account = self.account_after(step);
                 (&self.shell.state, taken)
             }
             None => (before, self.snapshot(&data)),
