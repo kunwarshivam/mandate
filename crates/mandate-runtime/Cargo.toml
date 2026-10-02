@@ -20,3 +20,5 @@ thiserror.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+mandate-time.workspace = true
+serde_json.workspace = true

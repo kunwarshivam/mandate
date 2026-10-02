@@ -51,6 +51,26 @@ pub(crate) fn count(n: u64, field: &'static str) -> Result<Value, RuntimeError> 
         .ok_or_else(|| non_canonical(field))
 }
 
+/// A whole-second risk clock as journal spec §4.7's canonical timestamp, the form §9.2 types
+/// `OwnerCommandRefused`'s `effective_at` (DEC-261 item 7, DEC-308): the instant `UtcNanos` prints
+/// and `UtcNanos::parse` reads back unchanged, never the integer seconds [`seconds`] writes and
+/// the registered schema refuses (`non_canonical` at `payload.effective_at`). The runtime's one
+/// writer of the member, `escalation::refused`, stamps through here in the implementation PR
+/// (DEC-77); until then it keeps [`seconds`], so every refusal draft carries the integer form it
+/// carries today.
+///
+/// # Errors
+/// [`RuntimeError::Unimplemented`] in this tests PR; the implementation PR replaces the body and
+/// switches `refused`, and deletes the pending pins (DEC-77, DEC-310).
+#[allow(
+    dead_code,
+    reason = "the tests PR ships this stamp and its contract; `escalation::refused` calls it in the implementation PR (DEC-77, DEC-83)"
+)]
+pub(crate) fn stamp(at: RiskClock, field: &'static str) -> Result<Value, RuntimeError> {
+    let _ = (at, field);
+    Err(RuntimeError::Unimplemented { story: "E8-3" })
+}
+
 /// A risk-clock second that may be negative, which the canonical integer form cannot hold (journal
 /// spec §4.4 admits no sign), written as canonical decimal text instead.
 pub(crate) fn seconds_text(at: RiskClock) -> Value {

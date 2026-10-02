@@ -30,6 +30,7 @@ use mandate_runtime::{
     ActorKind, Autonomy, Effect, EventDraft, EventId, Initiator, Input, IntentBody, KillScope,
     Purpose, TimerId, TimerRequest,
 };
+use mandate_time::UtcNanos;
 
 fn member<'a>(draft: &'a EventDraft, key: &str) -> Option<&'a str> {
     draft.payload.get(key).and_then(Value::as_str)
@@ -892,14 +893,20 @@ fn a_resume_needs_step_up_fresh_when_processed() {
     assert_eq!(shell.state.effective_mode(), mandate_runtime::Mode::Normal);
 }
 
-/// `OwnerCommandRefused`'s members until journal spec §9.1 closes its schema (DEC-291): the
-/// command, the reason, and the effective time it was judged at.
+/// `OwnerCommandRefused`'s members, which journal spec §9.2 closes (DEC-261): the command, the
+/// reason, and the effective time it was judged at.
 const REFUSED_MEMBERS: [&str; 3] = ["command", "effective_at", "reason"];
 
 /// Journal spec §9 and rule 16, mandate spec §6.1, DEC-280 item 7: a refused resume or Stop leaves
 /// exactly one event, its `OwnerCommandRefused`, and never an `AgentModeChanged`. It names the
 /// command, the reason, and the effective time it was judged at (the later of `submitted_at` and
 /// the folded clock), copies the `OwnerCommandIssued` as `causation_id`, and has no other member.
+///
+/// The judged second is read in the form the writer carries, whatever that form is (DEC-308): the
+/// integer seconds DEC-291's writer shipped, or the §4.7 timestamp of the same instant §9.2 types
+/// (DEC-261 item 7) that the implementation PR stamps. The form itself is pinned by the pending
+/// pins in `escalation::tests`, not here, so the implementation PR changes no `tests/` file but
+/// the `#[ignore]` deletions (DEC-77 item 2, DEC-309).
 fn refused_only(ran: &Ran, source: &EventId, command: &str, reason: &str, judged_at: i64) {
     assert_eq!(
         ran.draft_types(),
@@ -910,10 +917,16 @@ fn refused_only(ran: &Ran, source: &EventId, command: &str, reason: &str, judged
     assert_eq!(draft.causation_id.as_ref(), Some(source));
     assert_eq!(member(draft, "command"), Some(command));
     assert_eq!(member(draft, "reason"), Some(reason));
+    let judged = match draft.payload.get("effective_at") {
+        Some(Value::Int(secs)) => i64::try_from(secs.get()).ok(),
+        Some(Value::Str(stamp)) => UtcNanos::parse(stamp).ok().map(UtcNanos::secs),
+        other => panic!("effective_at is {other:?}, not the judged second {judged_at}"),
+    };
     assert_eq!(
-        draft.payload.get("effective_at").and_then(Value::as_int),
-        u64::try_from(judged_at).ok(),
-        "judged at {judged_at}"
+        judged,
+        Some(judged_at),
+        "judged at {judged_at}, got {:?}",
+        draft.payload.get("effective_at")
     );
     let members: Vec<&str> = draft
         .payload
