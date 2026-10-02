@@ -190,6 +190,15 @@ def loose_date(text: str) -> bool:
     return is_date(f"{int(parts[0]):04d}-{int(parts[1]):02d}-{int(parts[2]):02d}")
 
 
+def nested_record(path: str) -> str:
+    """The seeded-bug key of a nested record: `step_up`, a `provenance` entry, or the payload itself."""
+    if path == "payload.step_up":
+        return "step_up"
+    if path.startswith("payload.provenance["):
+        return "provenance_entry"
+    return "payload"
+
+
 def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> list[Violation]:
     """`type_violations` with §9.2's two new types: `pointer` and `date` (refused as `id` is)."""
     if ty.kind == "risk_clock":
@@ -217,7 +226,8 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
     if ty.kind == "record" and isinstance(value, dict):
         names = [name for name, _ in ty.fields]
         out = []
-        if "record.extra" not in skip:
+        depth = nested_record(path)
+        if "record.extra" not in skip and f"open.{depth}" not in skip:
             out += [
                 Violation("record.extra", "schema", f"{path}.{k}".lstrip("."))
                 for k in sorted(value)
@@ -229,7 +239,7 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
                 read_as_null = inner.kind == "nullable" and "record.missing.nullable" in skip
                 if "record.missing" not in skip and not read_as_null:
                     out.append(Violation("record.missing", "schema", member))
-            else:
+            elif f"loose.{depth}.{name}" not in skip:
                 out += payload_type_violations(inner, value[name], member, skip)
         return out
     if ty.kind == "list" and isinstance(value, list):
@@ -957,6 +967,51 @@ def invalid_drafts() -> list[dict]:
             [change("payload.step_up", None)],
             "schema",
             "payload.step_up",
+        ),
+        invalid(
+            "disclosure_step_up_carries_a_token",
+            "§9.2 every schema is closed at every depth: step_up (AGENTS.md rules 6 and 7)",
+            "disclosure",
+            [change("payload.step_up.token", "reference-fixture-not-a-token")],
+            "schema",
+            "payload.step_up.token",
+        ),
+        invalid(
+            "disclosure_step_up_assertion_not_text",
+            "§9.2 step_up.assertion_id: text",
+            "disclosure",
+            [change("payload.step_up.assertion_id", 7)],
+            "schema",
+            "payload.step_up.assertion_id",
+        ),
+        invalid(
+            "disclosure_step_up_time_off_form",
+            "§9.2 step_up.authenticated_at: a §4.7 timestamp",
+            "disclosure",
+            [change("payload.step_up.authenticated_at", "2026-09-20 13:06:50")],
+            "non_canonical",
+            "payload.step_up.authenticated_at",
+        ),
+        invalid(
+            "disclosure_step_up_method_null",
+            "§9.2 step_up.method: text, never null",
+            "disclosure",
+            [change("payload.step_up.method", None)],
+            "schema",
+            "payload.step_up.method",
+        ),
+        invalid(
+            "provenance_entry_carries_a_span",
+            "§9.2 every schema is closed at every depth: a provenance entry (quoted spans are in the record)",
+            "version_created",
+            [
+                change(
+                    "payload.provenance",
+                    [{"path": "/autonomy", "source": "user_entered", "quoted_span": "buy dips"}],
+                )
+            ],
+            "schema",
+            "payload.provenance[0].quoted_span",
         ),
         invalid(
             "disclosure_version_bare_id",
@@ -1717,6 +1772,11 @@ VALIDATOR_MUTANTS = (
     "record.extra",
     "record.missing",
     "record.missing.nullable",
+    "open.step_up",
+    "open.provenance_entry",
+    "loose.step_up.assertion_id",
+    "loose.step_up.authenticated_at",
+    "loose.step_up.method",
     "types.str_nonempty",
     "types.pointer",
     "types.date",

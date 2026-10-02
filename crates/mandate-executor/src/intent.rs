@@ -13,14 +13,14 @@ use crate::gate::{
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
 use crate::protection::{
-    ExitPrice, alone, awaits_cancel, begin_exit, bracketed_add, crypto_add, exit_limit, fallback,
-    passive_exit, reprotect_unpriced, rests,
+    ExitPrice, alone, awaits_cancel, begin_exit, crypto_add, exit_limit, fallback, passive_exit,
+    reprotect_unpriced, rests,
 };
 use crate::session::{closed_hold, extended_hours};
 use crate::state::IntentOutcome;
 use crate::types::{
-    AgentId, BrokerRequest, EventId, GateVerdict, IntentBody, IntentHandoff, OrderType, Purpose,
-    SubmitOrder, TimeInForce,
+    AgentId, BracketLegs, BrokerRequest, EventId, GateVerdict, IntentBody, IntentHandoff,
+    OrderType, ProtectionPrices, Purpose, SubmitOrder, TimeInForce,
 };
 
 /// `Input::Intent`: deduplicated by the fold lookup, journaled as `IntentReceived`, then gated.
@@ -284,7 +284,7 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     {
         return Ok(());
     }
-    bracketed_add(&batch.view, &instrument, purpose, protection.is_some())?;
+    let bracket = bracket_of(batch, &instrument, purpose, protection)?;
     let lone = !batch.view.exiting.contains_key(&instrument)
         && !rests(&batch.view, &instrument)
         && alone(batch, &instrument, purpose, limit);
@@ -299,8 +299,12 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
             limit
         }
     };
-    let tif = order_tif(batch, &instrument);
-    let extended_hours = extended_hours(batch.ports, &instrument, batch.at(), purpose);
+    let tif = match bracket {
+        Some(_) => TimeInForce::Gtc,
+        None => order_tif(batch, &instrument),
+    };
+    let extended_hours =
+        bracket.is_none() && extended_hours(batch.ports, &instrument, batch.at(), purpose);
     let request = SubmitOrder {
         client_order_id: ClientOrderId::for_intent(intent)?,
         instrument,
@@ -310,7 +314,7 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         tif,
         limit_price: Some(limit),
         stop_price: None,
-        bracket: None,
+        bracket,
         oco: None,
         extended_hours,
         purpose,
@@ -322,6 +326,32 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     journal_rung(batch, &request, Some(intent), &agent, 1, laddered)?;
     batch.broker(BrokerRequest::Submit(request));
     Ok(())
+}
+
+/// §5.4's tranche model: an equity entry that carries its protective prices goes as one GTC
+/// bracket at exactly those prices, an add where protection already rests included, which is a new
+/// bracket beside it and never a replacement of it (DEC-346 item 1). An entry with no prices goes
+/// plain, and an exit never carries a bracket. A crypto entry is never a bracket (§5.4: simple
+/// orders only); its stop-limit is slice 5's. An equity entry with a stop and no take-profit has no
+/// bracket to go as, and answers slice 5's stub rather than going unprotected: an opening may
+/// always be refused (`AGENTS.md` rule 2; DEC-346 item 2).
+pub(crate) fn bracket_of(
+    batch: &Batch<'_, '_>,
+    instrument: &InstrumentId,
+    purpose: Purpose,
+    protection: Option<ProtectionPrices>,
+) -> Result<Option<BracketLegs>, ExecutorError> {
+    let crypto = batch.ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto);
+    let Some(prices) = protection.filter(|_| purpose.adds_risk() && !crypto) else {
+        return Ok(None);
+    };
+    match prices.take_profit {
+        Some(take_profit) => Ok(Some(BracketLegs {
+            take_profit,
+            stop: prices.stop,
+        })),
+        None => Err(ExecutorError::Unimplemented { story: "E7-4" }),
+    }
 }
 
 /// Journals `OrderSubmitted` with every field of the request, then describes the request. The
@@ -380,6 +410,11 @@ pub(crate) fn journal_rung(
     if let Some(stop) = request.stop_price {
         pairs.push(("stop_price", text(stop.to_string())));
     }
+    if let Some(bracket) = &request.bracket {
+        pairs.push(("order_class", text("bracket")));
+        pairs.push(("take_profit", text(bracket.take_profit.to_string())));
+        pairs.push(("stop", text(bracket.stop.to_string())));
+    }
     if let Some(oco) = &request.oco {
         pairs.push(("order_class", text("oco")));
         pairs.push(("take_profit", text(oco.take_profit.to_string())));
@@ -388,6 +423,59 @@ pub(crate) fn journal_rung(
     pairs.extend(extra);
     batch.journal("OrderSubmitted", None, pairs)?;
     Ok(())
+}
+
+/// `IntentReceived`'s payload: exactly the nine members journal spec §9.1 closes and
+/// `mandate-journal` registers (`INTENT_RECEIVED_V1`), and nothing else. Seven are
+/// `IntentProposed`'s, copied from what the agent proposed: `instrument_id`, `side`, `type`,
+/// `tif`, `qty`, `limit_price`, and `purpose`. The other two are the ones §9.1 says the executor
+/// adds: `intent_id` and `agent_id`. Never `agent`, `kind`, `instrument`, or `limit` (DEC-174
+/// item 5), and never the protective prices: `received` writes `stop` and `take_profit` beside
+/// the intent today, and the registered schema refuses that payload at `payload.stop` (DEC-307
+/// item 1). Where they are journaled instead is DEC-360's question.
+///
+/// `tif` is the one the agent proposed, never the one the submission will carry: §9.1 has
+/// `IntentReceived` copy `IntentProposed`, whose action members repeat its `DecisionMade`
+/// exactly, and the two differ in practice, since a crypto add is submitted limit `ioc` where the
+/// proposal said `day` (`protection::crypto_add`). `IntentHandoff` carries no `tif` today, so the
+/// implementation PR brings the proposed value to `received` (DEC-307 item 1).
+///
+/// # Errors
+/// [`ExecutorError::Unimplemented`] in this tests PR; `received` builds its pairs from this in
+/// the implementation PR, which deletes the pending pins (DEC-77).
+#[allow(
+    dead_code,
+    reason = "the tests PR ships this writer and its contract; `received` calls it in the implementation PR (DEC-77, DEC-83)"
+)]
+pub(crate) fn intent_received_fields(
+    intent_id: &IntentId,
+    agent: &AgentId,
+    body: &IntentBody,
+    proposed_tif: TimeInForce,
+) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
+    let _ = (intent_id, agent, body, proposed_tif);
+    Err(ExecutorError::Unimplemented { story: "E7-10" })
+}
+
+/// `OrderSubmitted`'s nullable members, present as `null` when they are empty rather than omitted
+/// (§4.2, DEC-174 item 5). The schema `mandate-journal` registers (`ORDER_SUBMITTED_V1`, the
+/// vectors' seq 4) declares one: `limit_price`, the limit a market order never has. That is the
+/// whole list: a draft that omits a schema-declared member is refused at that member, and one
+/// that writes a member the schema does not declare is refused at that member too, `null` or
+/// not, so this writes `limit_price` and nothing else (DEC-307 item 2).
+///
+/// # Errors
+/// [`ExecutorError::Unimplemented`] in this tests PR; `journal_rung` writes its limit through this
+/// in the implementation PR, which deletes the pending pins (DEC-77).
+#[allow(
+    dead_code,
+    reason = "the tests PR ships this writer and its contract; `journal_rung` calls it in the implementation PR (DEC-77, DEC-83)"
+)]
+pub(crate) fn order_submitted_optional_fields(
+    request: &SubmitOrder,
+) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
+    let _ = request;
+    Err(ExecutorError::Unimplemented { story: "E7-10" })
 }
 
 /// `OrderAbandoned`: one of §5.7's two cases — a gate re-check that does not allow, or an intent
@@ -511,19 +599,104 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
 
 #[cfg(test)]
 mod bracket_call_tests {
-    use mandate_accounting::{InstrumentId, Side};
+    use mandate_accounting::{AssetClass, InstrumentId, Side};
     use mandate_canon::Value;
-    use mandate_num::{Price, Qty};
+    use mandate_num::{Price, Qty, ShareIncrement};
 
+    use super::bracket_of;
+    use crate::batch::Batch;
     use crate::error::ExecutorError;
     use crate::ids::IntentId;
-    use crate::ports::Ports;
+    use crate::ports::{InstrumentSnapshot, Ports};
     use crate::reconcile::tests::{
-        Everything, Ids, executor_config, fees, protected_by_an_oco, submitted,
+        Everything, Executor, Ids, executor_config, fees, protected_by_an_oco, submitted,
     };
     use crate::types::{
-        AgentId, Effect, EventId, Input, IntentBody, IntentHandoff, ProtectionPrices, Purpose,
+        AgentId, BracketLegs, BrokerRequest, Effect, EventId, ExitTier, Input, IntentBody,
+        IntentHandoff, ProtectionPrices, Purpose, SubmitOrder, TimeInForce,
     };
+
+    /// §5.4: only a risk-adding equity order carrying both prices is a bracket. An exit or a
+    /// protective order never is, nor is a crypto entry (simple orders only); an equity entry with
+    /// a stop and no take-profit answers the stub rather than going bare (DEC-346 items 1, 2).
+    #[test]
+    fn only_a_risk_adding_equity_entry_with_both_prices_is_a_bracket() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let both = ProtectionPrices {
+            stop: Price::parse("140")?,
+            take_profit: Some(Price::parse("170")?),
+        };
+        let stop_only = ProtectionPrices {
+            take_profit: None,
+            ..both
+        };
+        let legs = BracketLegs {
+            take_profit: Price::parse("170")?,
+            stop: Price::parse("140")?,
+        };
+        let aapl = InstrumentId::new("AAPL")?;
+        let snapshots: [(&dyn InstrumentSnapshot, bool); 2] = [(&Everything, false), (&Coin, true)];
+        for (instruments, crypto) in snapshots {
+            let ports = Ports {
+                ids: &Ids,
+                mandates: &Everything,
+                instruments,
+                config: &config,
+                fees: &fees,
+            };
+            let executor = Executor::opened(&ports)?;
+            let batch = Batch::new(&executor.state, &ports)?;
+            for purpose in PURPOSES {
+                let case = format!("{purpose:?} crypto {crypto}");
+                let bracket = purpose.adds_risk() && !crypto;
+                assert_eq!(
+                    bracket_of(&batch, &aapl, purpose, Some(both)),
+                    Ok(bracket.then(|| legs.clone())),
+                    "{case}"
+                );
+                assert_eq!(bracket_of(&batch, &aapl, purpose, None), Ok(None), "{case}");
+                let expected = if bracket {
+                    Err(ExecutorError::Unimplemented { story: "E7-4" })
+                } else {
+                    Ok(None)
+                };
+                assert_eq!(
+                    bracket_of(&batch, &aapl, purpose, Some(stop_only)),
+                    expected,
+                    "{case}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    const PURPOSES: [Purpose; 7] = [
+        Purpose::Open,
+        Purpose::Increase,
+        Purpose::RiskExit,
+        Purpose::OwnerExit,
+        Purpose::DiscretionaryExit,
+        Purpose::Protective,
+        Purpose::Flatten,
+    ];
+
+    /// A snapshot that classifies every instrument as crypto.
+    struct Coin;
+
+    impl InstrumentSnapshot for Coin {
+        fn asset_class(&self, _instrument: &InstrumentId) -> Option<AssetClass> {
+            Some(AssetClass::Crypto)
+        }
+
+        fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Some(ShareIncrement::Fractional)
+        }
+
+        fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+            None
+        }
+    }
 
     fn add(intent: &str, protection: Option<ProtectionPrices>) -> Result<Input, ExecutorError> {
         Ok(Input::Intent(IntentHandoff {
@@ -541,10 +714,10 @@ mod bracket_call_tests {
     }
 
     /// #174 ruling (b), §5.4: where protection rests, the gate denies a plain add
-    /// (`add_blocked_by_protective_order`), and `submit` asks `bracketed_add` before a bracketed
-    /// one goes out, so it answers slice 2's stub rather than being sent beside the resting legs.
+    /// (`add_blocked_by_protective_order`), and a bracketed one goes as a new bracket beside the
+    /// resting legs, cancelling nothing (DEC-346 item 1).
     #[test]
-    fn an_add_where_protection_rests_is_denied_or_answers_slice_2s_stub()
+    fn an_add_where_protection_rests_is_denied_or_goes_as_a_new_bracket()
     -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
@@ -571,10 +744,330 @@ mod bracket_call_tests {
             stop: Price::parse("140")?,
             take_profit: Some(Price::parse("170")?),
         };
+        let bracketed = executor.run(add("01JABCDEFGHJKMNPQRSTVWXYZ2", Some(prices))?, &ports)?;
+        let sent: Vec<&SubmitOrder> = bracketed
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Broker(BrokerRequest::Submit(order)) => Some(order),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sent.len(), 1, "{bracketed:?}");
         assert_eq!(
-            executor.run(add("01JABCDEFGHJKMNPQRSTVWXYZ2", Some(prices))?, &ports),
-            Err(ExecutorError::Unimplemented { story: "E7-4" })
+            sent.first().and_then(|order| order.bracket.clone()),
+            Some(BracketLegs {
+                take_profit: Price::parse("170")?,
+                stop: Price::parse("140")?,
+            }),
+            "a bracketed add is a new GTC bracket at its own prices (§5.4)"
         );
+        assert_eq!(sent.first().map(|order| order.tif), Some(TimeInForce::Gtc));
+        assert!(
+            !bracketed
+                .iter()
+                .any(|effect| matches!(effect, Effect::Broker(BrokerRequest::Cancel { .. }))),
+            "and never a replacement of the resting protection"
+        );
+        Ok(())
+    }
+}
+
+/// The account-stream writers' member pins (DEC-174 item 5, DEC-307, journal spec §9.1): each
+/// reads its expectations from the committed vectors and hands what the writer wrote to
+/// `mandate-journal`'s own `Draft::parse`, so every pinned payload is one the journal accepts.
+#[cfg(test)]
+mod draft_member_tests {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_canon::{Value, to_canonical};
+    use mandate_journal::Draft;
+    use mandate_num::{Price, Qty};
+    use serde_json::{Map, Value as Json};
+
+    use super::{intent_received_fields, order_submitted_optional_fields};
+    use crate::error::ExecutorError;
+    use crate::ids::{ClientOrderId, IntentId};
+    use crate::types::{
+        AgentId, EventId, IntentBody, OcoLegs, OrderType, ProtectionPrices, Purpose, SubmitOrder,
+        TimeInForce,
+    };
+
+    fn non_canonical() -> ExecutorError {
+        ExecutorError::NonCanonicalPayload {
+            field: "journal fixture".to_owned(),
+        }
+    }
+
+    /// One account-stream chain event of the journal vectors (`fixtures/refcases/journal.json`,
+    /// generated from `docs/specs/reference-cases/journal.yaml`) as a draft: its body less the
+    /// members only a sealed row carries, checked to be `event_type`.
+    fn vector_draft(index: usize, event_type: &str) -> Result<Map<String, Json>, ExecutorError> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/refcases/journal.json"
+        );
+        let text = std::fs::read_to_string(path).map_err(|_| non_canonical())?;
+        let fixture: Json = serde_json::from_str(&text).map_err(|_| non_canonical())?;
+        let mut body = fixture
+            .pointer(&format!("/chain/{index}/body"))
+            .and_then(Json::as_object)
+            .cloned()
+            .ok_or_else(non_canonical)?;
+        assert_eq!(
+            body.get("event_type").and_then(Json::as_str),
+            Some(event_type),
+            "the vectors' chain event {index} is the {event_type}"
+        );
+        for sealed in ["seq", "recorded_at", "prev_hash"] {
+            body.remove(sealed);
+        }
+        Ok(body)
+    }
+
+    fn payload_of(draft: &Map<String, Json>) -> Result<Map<String, Json>, ExecutorError> {
+        draft
+            .get("payload")
+            .and_then(Json::as_object)
+            .cloned()
+            .ok_or_else(non_canonical)
+    }
+
+    fn sorted_names(payload: &Map<String, Json>) -> Vec<String> {
+        let mut names: Vec<String> = payload.keys().cloned().collect();
+        names.sort_unstable();
+        names
+    }
+
+    /// What a writer wrote, as the journal reads it: its member names in order, duplicates kept,
+    /// and each member's canonical JSON.
+    fn written(
+        pairs: Vec<(&'static str, Value)>,
+    ) -> Result<(Vec<String>, Map<String, Json>), ExecutorError> {
+        let mut names: Vec<String> = pairs.iter().map(|(name, _)| (*name).to_owned()).collect();
+        names.sort_unstable();
+        let mut members = Map::new();
+        for (name, value) in pairs {
+            let carried: Json =
+                serde_json::from_slice(&to_canonical(&value)).map_err(|_| non_canonical())?;
+            members.insert(name.to_owned(), carried);
+        }
+        Ok((names, members))
+    }
+
+    /// `draft` carrying `payload`, through `mandate-journal`'s validator: `None` when it accepts.
+    fn journal_refuses(
+        mut draft: Map<String, Json>,
+        payload: Map<String, Json>,
+    ) -> Result<Option<String>, ExecutorError> {
+        draft.insert("payload".to_owned(), Json::Object(payload));
+        let bytes = serde_json::to_vec(&Json::Object(draft)).map_err(|_| non_canonical())?;
+        Ok(Draft::parse(&bytes)
+            .err()
+            .map(|refusal| format!("{refusal:?}")))
+    }
+
+    fn vector_text<'v>(
+        payload: &'v Map<String, Json>,
+        name: &str,
+    ) -> Result<&'v str, ExecutorError> {
+        payload
+            .get(name)
+            .and_then(Json::as_str)
+            .ok_or_else(non_canonical)
+    }
+
+    /// The vectors' intent as the executor holds it, with `protection` as given.
+    fn vector_intent(
+        payload: &Map<String, Json>,
+        protection: Option<ProtectionPrices>,
+    ) -> Result<(IntentId, AgentId, IntentBody), ExecutorError> {
+        Ok((
+            IntentId(EventId(vector_text(payload, "intent_id")?.to_owned())),
+            AgentId(vector_text(payload, "agent_id")?.to_owned()),
+            IntentBody::Order {
+                instrument: InstrumentId::new(vector_text(payload, "instrument_id")?)?,
+                side: Side::Buy,
+                qty: Qty::parse(vector_text(payload, "qty")?)?,
+                limit: Price::parse(vector_text(payload, "limit_price")?)?,
+                purpose: Purpose::Open,
+                protection,
+            },
+        ))
+    }
+
+    /// `IntentReceived` is exactly the nine members §9.1 closes, each once, in the vector's own
+    /// types and values, whatever protection the intent carries: `agent_id`, `instrument_id`,
+    /// `type`, `tif`, and `limit_price` beside `intent_id`, `side`, `qty`, and `purpose`. Never
+    /// `agent`, `kind`, `instrument`, or `limit` (DEC-174 item 5), and never the protective prices,
+    /// which the registered schema refuses at `payload.stop` (DEC-307 item 1). Each payload is
+    /// accepted by `mandate-journal`.
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn intent_received_names_the_members_the_vectors_intent_carries() -> Result<(), ExecutorError> {
+        let draft = vector_draft(1, "IntentReceived")?;
+        let vector = payload_of(&draft)?;
+        let closed = sorted_names(&vector);
+        assert_eq!(closed.len(), 9, "§9.1 closes nine members: {closed:?}");
+        let (stop, take_profit) = (Price::parse("140")?, Price::parse("160")?);
+        for protection in [
+            None,
+            Some(ProtectionPrices {
+                stop,
+                take_profit: Some(take_profit),
+            }),
+            Some(ProtectionPrices {
+                stop,
+                take_profit: None,
+            }),
+        ] {
+            let (intent, agent, body) = vector_intent(&vector, protection)?;
+            let (names, members) = written(intent_received_fields(
+                &intent,
+                &agent,
+                &body,
+                TimeInForce::Day,
+            )?)?;
+            assert_eq!(
+                names, closed,
+                "exactly §9.1's nine members, each once, with protection {protection:?}"
+            );
+            assert_eq!(
+                members, vector,
+                "the vector's intent, member for member and type for type"
+            );
+            assert_eq!(
+                journal_refuses(draft.clone(), members)?,
+                None,
+                "and mandate-journal accepts it"
+            );
+        }
+        Ok(())
+    }
+
+    /// `IntentReceived`'s `tif` is the one the agent proposed, whatever it is: §9.1 has it copy
+    /// `IntentProposed`, never the TIF the submission will carry or one inferred from the body
+    /// (DEC-307 item 1).
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn intent_received_carries_the_tif_the_agent_proposed() -> Result<(), ExecutorError> {
+        let draft = vector_draft(1, "IntentReceived")?;
+        let vector = payload_of(&draft)?;
+        for (proposed, name) in [
+            (TimeInForce::Day, "day"),
+            (TimeInForce::Gtc, "gtc"),
+            (TimeInForce::Ioc, "ioc"),
+        ] {
+            let (intent, agent, body) = vector_intent(&vector, None)?;
+            let (_, members) = written(intent_received_fields(&intent, &agent, &body, proposed)?)?;
+            let mut expected = vector.clone();
+            expected.insert("tif".to_owned(), Json::String(name.to_owned()));
+            assert_eq!(members, expected, "the proposed {name} is the recorded tif");
+            assert_eq!(
+                journal_refuses(draft.clone(), members)?,
+                None,
+                "and mandate-journal accepts it"
+            );
+        }
+        Ok(())
+    }
+
+    fn vector_order(
+        order_type: OrderType,
+        limit_price: Option<Price>,
+        stop_price: Option<Price>,
+        oco: Option<OcoLegs>,
+    ) -> Result<SubmitOrder, ExecutorError> {
+        Ok(SubmitOrder {
+            client_order_id: ClientOrderId::seeded_for_tests("c-1"),
+            instrument: InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")?,
+            side: Side::Buy,
+            qty: Qty::parse("10")?,
+            order_type,
+            tif: TimeInForce::Day,
+            limit_price,
+            stop_price,
+            bracket: None,
+            oco,
+            extended_hours: false,
+            purpose: Purpose::Open,
+        })
+    }
+
+    /// A market order writes `limit_price` present as `null`, never omitted (§4.2, DEC-174 item 5),
+    /// and that is the only member this writes: `limit_price` is the one nullable member the
+    /// registered `OrderSubmitted` declares, and any other member is refused, `null` or not
+    /// (DEC-307 item 2). The vectors' `OrderSubmitted` as a market order, with it, is accepted.
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn order_submitted_writes_null_for_its_empty_members() -> Result<(), ExecutorError> {
+        let market = vector_order(OrderType::Market, None, None, None)?;
+        let (names, members) = written(order_submitted_optional_fields(&market)?)?;
+        assert_eq!(
+            names,
+            vec!["limit_price".to_owned()],
+            "the schema's one nullable member, once"
+        );
+        assert_eq!(
+            members.get("limit_price"),
+            Some(&Json::Null),
+            "a market order's limit is present as null"
+        );
+        let draft = vector_draft(3, "OrderSubmitted")?;
+        let mut payload = payload_of(&draft)?;
+        payload.insert("type".to_owned(), Json::String("market".to_owned()));
+        payload.extend(members);
+        assert_eq!(
+            journal_refuses(draft, payload)?,
+            None,
+            "and mandate-journal accepts the market order"
+        );
+        Ok(())
+    }
+
+    /// An order with a limit writes it as `limit_price`, the vector's value in the vector's type,
+    /// and still writes nothing else: a stop price and OCO legs are not members of the registered
+    /// `OrderSubmitted`, so they are never written here, with or without a value (DEC-307 item 2).
+    #[test]
+    #[ignore = "pending E7-10"]
+    fn order_submitted_carries_its_optional_members_when_they_have_values()
+    -> Result<(), ExecutorError> {
+        let draft = vector_draft(3, "OrderSubmitted")?;
+        let vector = payload_of(&draft)?;
+        let limit = Price::parse(vector_text(&vector, "limit_price")?)?;
+        let (stop, take_profit) = (Price::parse("140")?, Price::parse("160")?);
+        for order in [
+            vector_order(OrderType::Limit, Some(limit), None, None)?,
+            vector_order(OrderType::StopLimit, Some(limit), Some(stop), None)?,
+            vector_order(
+                OrderType::Limit,
+                Some(limit),
+                None,
+                Some(OcoLegs {
+                    take_profit,
+                    stop,
+                    qty: Qty::parse("10")?,
+                }),
+            )?,
+        ] {
+            let (names, members) = written(order_submitted_optional_fields(&order)?)?;
+            assert_eq!(
+                names,
+                vec!["limit_price".to_owned()],
+                "only the schema's one nullable member, for {:?}",
+                order.order_type
+            );
+            assert_eq!(
+                members.get("limit_price"),
+                vector.get("limit_price"),
+                "the limit is the vector's, as decimal text"
+            );
+            let mut payload = vector.clone();
+            payload.extend(members);
+            assert_eq!(
+                journal_refuses(draft.clone(), payload)?,
+                None,
+                "and mandate-journal accepts it"
+            );
+        }
         Ok(())
     }
 }

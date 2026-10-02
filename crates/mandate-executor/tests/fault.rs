@@ -716,7 +716,6 @@ fn crash_at_confirmation_before_exit_submit() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn crash_between_entry_fill_and_oco() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

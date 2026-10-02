@@ -125,8 +125,9 @@ agent needs the same correction twice, put the rule on the highest rung that can
    and plain comments (`cargo xtask markers`), `#[allow]` without a reason, `#[ignore]` without a
    pending story, a pending test that passes on the PR's code or fails without its stub's own
    report (`cargo xtask ci pending`), a pending test a macro generates rather than a plain
-   function, feature-map drift, and mutants on the diff of safety-critical crates, an
-   `Unimplemented` stub body in a crate whose tests are still pending aside.
+   function, a saved proptest failure seed, tracked or not (DEC-381), feature-map drift, and
+   mutants on the diff of safety-critical crates, an `Unimplemented` stub body in a crate whose
+   tests are still pending aside.
 3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
 4. **Reviewed:** the PR template and the independent review agent, the last resort, not the plan.
 
@@ -170,8 +171,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
 - **Setup:** `bash .cursor/install.sh` installs everything at the pinned versions and is idempotent;
   Cloud Agents run it automatically through `.cursor/environment.json`. Rust comes from
   `rust-toolchain.toml` (1.98.1) via rustup; Python 3.14 and uv 0.12; cargo-deny, cargo-nextest,
-  typos, and gitleaks at the versions in `.github/workflows/ci.yml` (keep the two in sync). It
-  downloads only from `github.com` (release assets redirect to
+  typos, gitleaks, shellcheck, and actionlint at the versions in `.github/workflows/ci.yml` (keep
+  the two in sync). It downloads only from `github.com` (release assets redirect to
   `release-assets.githubusercontent.com`), `static.rust-lang.org`, `index.crates.io`,
   `static.crates.io`, `pypi.org`, and `files.pythonhosted.org`, never from `astral.sh`, so it runs
   behind restrictive egress proxies. It also sets `python-install-mirror` in uv's user config
@@ -179,8 +180,9 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   (DEC-200) also needs `nodejs.org`, for the Node.js release pinned in `web/.nvmrc`,
   `registry.npmjs.org`, for `npm ci`, and `cdn.playwright.dev`, for the Chromium download that
   local end-to-end runs need; `install.sh` installs no Node.js and fetches from none of them.
-- **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint (fmt,
-  clippy `-D warnings`, crate layering, typos, ruff), test (nextest, doctests, pytest), reference-case
+- **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint
+  (shellcheck over `.github/scripts/`, actionlint over `.github/workflows/`, fmt, clippy
+  `-D warnings`, crate layering, typos, ruff), test (nextest, doctests, pytest), reference-case
   fixture drift, the reference implementation checks, supply chain (cargo-deny, the dependency
   registry, gitleaks), and the spec guard. CI runs them as two required checks: `cargo xtask ci fast`
   (lint, test, pending tests, spec guard) and `cargo xtask ci full` (fixtures, reference, supply

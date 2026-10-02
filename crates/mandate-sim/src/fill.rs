@@ -54,7 +54,8 @@ use mandate_time::UtcNanos;
 /// that starts after it; an order outside the v1 policy of spec §5.1 and §5.2 (no quantity, a
 /// quantity off the instrument's increment, `extended_hours` on anything but a limit order, crossed
 /// stop-limit or OCO prices, an OCO on a fractional instrument, a day order on a continuous
-/// instrument, or a resting bar the sequence does not hold); and any arithmetic that is not exact.
+/// instrument, or a resting bar the sequence does not hold); then a bar labelled with a session its
+/// instrument's asset class never trades (spec §4.3, DEC-377); and any arithmetic that is not exact.
 pub fn simulate(
     config: &SimConfig,
     instrument: &Instrument,
@@ -67,6 +68,7 @@ pub fn simulate(
     for order in orders {
         check_order(order, instrument, bars.len())?;
     }
+    check_sessions_of_asset_class(instrument, bars)?;
     let mut rooms = rooms(
         bars,
         config,
@@ -116,6 +118,51 @@ fn check_bars(bars: &[SimBar]) -> Result<(), SimError> {
         previous = Some(bar);
     }
     Ok(())
+}
+
+/// The session-of-asset-class check (E4-3; the gap DEC-114 item 2 discloses; DEC-377): spec §4.3
+/// gives crypto the continuous session alone and a US equity the four New York sessions alone, so a
+/// bar labelled with a session its instrument's asset class never trades contradicts the spec and
+/// is refused with [`SimError::SessionOffAssetClass`] naming the first such bar's index, rather
+/// than simulated: an equity stop must never fill on a session no equity bar can carry. An empty
+/// bar sequence carries no session and is `Ok`.
+///
+/// [`simulate`] calls it **after** the order-policy loop (`check_order` over every order), not
+/// beside `check_bars` (DEC-377 item 4): an order the v1 policy refuses keeps its own cause as the
+/// first failing cause, so a crypto order the policy refuses on a regular-session bar (an OCO on a
+/// fractional instrument, a day order on a continuous instrument) still reports that cause, as
+/// `the_model_rejects_bars_and_orders_it_cannot_simulate` pins.
+pub fn check_sessions_of_asset_class(
+    instrument: &Instrument,
+    bars: &[SimBar],
+) -> Result<(), SimError> {
+    match bars
+        .iter()
+        .position(|bar| !asset_class_trades(instrument.asset_class, bar.session))
+    {
+        Some(index) => Err(SimError::SessionOffAssetClass(index)),
+        None => Ok(()),
+    }
+}
+
+/// Spec §4.3's session table, spelled out session by session for each asset class so that a new
+/// session or asset class cannot inherit an answer without a decision: crypto trades the continuous
+/// session alone, and a US equity the overnight, pre-market, regular, and after-hours sessions.
+fn asset_class_trades(asset_class: AssetClass, session: Session) -> bool {
+    match asset_class {
+        AssetClass::Crypto => match session {
+            Session::Continuous => true,
+            Session::Overnight | Session::PreMarket | Session::Regular | Session::AfterHours => {
+                false
+            }
+        },
+        AssetClass::UsEquity => match session {
+            Session::Overnight | Session::PreMarket | Session::Regular | Session::AfterHours => {
+                true
+            }
+            Session::Continuous => false,
+        },
+    }
 }
 
 /// The v1 order policy of spec §5.1 and §5.2, checked before anything is simulated, each cause with

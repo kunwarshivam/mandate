@@ -21,6 +21,15 @@
 //! registered window: the caller selects, the evaluator re-checks, and nothing is silently
 //! included or dropped.
 //!
+//! An **empty scoreable set** is its own refusal (DEC-335): no theses at all, or every thesis
+//! unscoreable, leaves nothing to aggregate, and the mean of nothing is not a report (#410
+//! review minor 3, DEC-282 item 9). The arm's reach is the nameless refusal's own — an empty
+//! set the count refusal does not answer, a registered minimum of zero, the only minimum an
+//! empty set is not below; below a positive minimum the count refusal keeps the empty set, as
+//! #410's round-1 pins freeze it. Input integrity keeps its precedence: a thesis whose horizon
+//! closes outside the registered window is refused before the empty set is ever reached
+//! (DEC-282 item 3).
+//!
 //! **The boundary rule is no-lookahead at both edges** (R-27's whole point): the entry price is
 //! the first close *strictly after* the thesis's `as_of` **and at or before the horizon end** —
 //! the first price inside the window the thesis claims; a close at the same instant is the
@@ -326,13 +335,16 @@ pub fn buy_and_hold(
 /// returns.
 ///
 /// # Errors
-/// Returns [`ResearchError`] for a member's boundary failure, and
-/// [`ResearchError::Num`] for an empty basket, whose mean is undefined.
+/// Returns [`ResearchError::EmptyBasket`] for a basket with no members, whose mean is
+/// undefined (DEC-380), and [`ResearchError`] for a member's boundary failure.
 pub fn basket_return(
     members: &[CloseSeries],
     as_of: UtcNanos,
     horizon_end: UtcNanos,
 ) -> Result<Ratio, ResearchError> {
+    if members.is_empty() {
+        return empty_basket();
+    }
     let returns = members
         .iter()
         .map(|member| buy_and_hold(member, as_of, horizon_end))
@@ -340,15 +352,27 @@ pub fn basket_return(
     Ratio::mean(&returns).map_err(ResearchError::Num)
 }
 
+/// The empty basket's refusal, stubbed until its implementation lands (DEC-77 stage 1, DEC-380):
+/// the path that reached `Ratio::mean` of nothing and refused `Num(DivisionByZero)`, held by the
+/// follow-up's pending tests to the named arm, its code, and its reach through `evaluate`. The
+/// implementation PR replaces this body with [`ResearchError::EmptyBasket`] and deletes only
+/// their `#[ignore]` lines.
+fn empty_basket() -> Result<Ratio, ResearchError> {
+    Err(ResearchError::Unimplemented("basket_return", "E17-8"))
+}
+
 /// The evaluation itself (DEC-281 items 2 to 7): scores every thesis it can, names the ones it
 /// cannot, refuses the early run and the thesis outside the registered window, and reports the
 /// mean excess, the one-sided bound, and pass against both baselines.
 ///
 /// # Errors
-/// Returns [`ResearchError::WindowNotClosed`] when fewer than the minimum scoreable closed
-/// theses are scoreable, [`ResearchError::ThesisOutsideWindow`] for a thesis whose horizon
-/// closes outside the registered window, and [`ResearchError::Num`] for the arithmetic a
-/// figure cannot express.
+/// Returns [`ResearchError::ThesisOutsideWindow`] for a thesis whose horizon closes outside
+/// the registered window, [`ResearchError::EmptyScoreableSet`] for an evaluation whose
+/// scoreable set is empty — no theses at all, or every thesis unscoreable — where the count
+/// refusal does not answer it, a registered minimum of zero (DEC-335),
+/// [`ResearchError::EmptyBasket`] for a scoreable thesis measured against a basket with no
+/// members (DEC-380), [`ResearchError::WindowNotClosed`] when fewer than the minimum scoreable closed theses are
+/// scoreable, and [`ResearchError::Num`] for the arithmetic a figure cannot express.
 pub fn evaluate(input: &EvaluationInput<'_>) -> Result<Scorecard, ResearchError> {
     for thesis in input.theses {
         if thesis.horizon_end < input.decision.window.from
@@ -418,6 +442,9 @@ pub fn evaluate(input: &EvaluationInput<'_>) -> Result<Scorecard, ResearchError>
     let count = u32::try_from(theses.len()).map_err(|_| ResearchError::Num(NumError::Overflow))?;
     if count < input.decision.minimum_scoreable {
         return Err(ResearchError::WindowNotClosed);
+    }
+    if count == 0 {
+        return Err(ResearchError::EmptyScoreableSet);
     }
     let excesses_basket: Vec<Ratio> = theses.iter().map(|row| row.excess_over_basket).collect();
     let excesses_index: Vec<Ratio> = theses.iter().map(|row| row.excess_over_index).collect();
@@ -506,6 +533,11 @@ mod tests {
             ResearchError::ThesisOutsideWindow.code(),
             "thesis_outside_window"
         );
+        assert_eq!(
+            ResearchError::EmptyScoreableSet.code(),
+            "empty_scoreable_set"
+        );
+        assert_eq!(ResearchError::EmptyBasket.code(), "empty_basket");
     }
 
     /// The report's rounding scale, pinned live (DEC-127 item 4's, the same scale every figure

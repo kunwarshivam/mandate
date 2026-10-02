@@ -58,6 +58,15 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   than waiting for a reviewer (the #316 reviews).
   *Accepted when:* both run in `ci lint`, pinned in `.github/workflows/ci.yml` and `install.sh`,
   and a planted `SC2086` or an unknown workflow key fails the job.
+  *Follow-up* (#434's round-2 review, minor m1, backlogged under the freeze rule): three `xtask`
+  tests, each failing on the plant that review left uncaught. One fails when `lint_paths` skips a
+  missing `shellcheck` or `actionlint` binary silently (the `let Ok(out) = … else { return Ok(()) }`
+  plant), for each tool; one fails when `shellcheck_scripts` loses its empty-file-list guard; and
+  one fails when `actionlint_workflows` loses its empty-file-list guard.
+  *Follow-up (#450 review, minor 1; DEC-381):* the lint job's fixture test (the one #434 added
+  for shellcheck and actionlint) also fails when `workspace_lint` discards `proptest_seeds()`'s
+  result, or when that check's git call's error is swallowed. Today `let _ = proptest_seeds();`
+  passes every xtask test, as `let _ = markers();` and `let _ = feature_map();` do.
 - **E1-5 (Should)** As an engineer, I want the merge script's remaining gaps from #316's
   round-3 review closed, so that the only path from approval to `main` (DEC-175) is tested as
   GitHub actually answers it. The items:
@@ -114,6 +123,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   volatility, Sharpe, maximum drawdown, turnover, fees, buy-and-hold comparison) so that the
   loop is proven end to end.
   *Accepted when:* identical inputs produce identical outputs.
+- **E4-3 (Must)** As a researcher, I want the fill model to refuse a bar labelled with a session its
+  instrument's asset class never trades, so that no backtest fills on input spec §4.3 says cannot
+  exist (the gap DEC-114 item 2 discloses; [DEC-377](decisions/DEC-377.md)).
+  *Accepted when:* crypto bars carry only the continuous session and US-equity bars only the four
+  New York sessions; any other bar is refused with `session_off_asset_class` naming the first such
+  bar's index; an empty bar sequence is accepted; `simulate` runs the check after the order-policy
+  checks, so an order the v1 policy refuses keeps its own cause; and every sequence the table allows
+  fills exactly as before. Tests PR [#437](https://github.com/kunwarshivam/mandate/pull/437)
+  (merged), then the implementation PR, which replaces the stub's body, adds the call, retires the
+  stub's `SimError::Unimplemented`, deletes only the pending tests' `#[ignore]` lines, and adds one
+  assertion each on the reason code and the message ([DEC-386](decisions/DEC-386.md)).
 
 ### E5 Journal
 
@@ -366,6 +386,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   #413). It maps each record to its fact, and the vectors are in `journal.yaml`'s `control_stream`
   section. `PlatformOperatorAction` stays open (DEC-261 item 9, Proposed), so its schema and the
   `ModelWithdrawn` mapping wait for the operator service's specification.
+  *Implementation* ([DEC-303](decisions/DEC-303.md) items 8 to 11), in two PRs under ES-13. The first
+  registers every §9.2 schema but `AccountSnapshotRecorded` in `mandate-journal`. The second makes the
+  `JournaledFact` mapping live in `mandate-spec`. *Tests PR*: 17 pending tests against stubs in
+  `mandate-journal`'s `control` module and `mandate-spec`'s `JournaledFact::from_record`. Three live
+  tests keep `AccountSnapshotRecorded` unregistered until stream K's writer conforms (DEC-261 item 7).
 
 ### E8 Escalation and approvals
 
@@ -877,8 +902,26 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   *Follow-up (#410 review, minor 3; DEC-282 item 9):* an evaluation whose scoreable set is empty
   against a registered `minimum_scoreable` of zero refuses with `Num(DivisionByZero)` — fail-loud,
   but a code that tells a caller nothing. A tests PR names the refusal (a `ResearchError` arm of
-  its own; the registry's codes are add-only) so the empty report carries its reason, with the
-  frozen surface otherwise unchanged.
+  its own, `empty_scoreable_set`; the registry's codes are add-only) where the nameless code
+  answered: the named code reaches a caller only at a registered `minimum_scoreable` of zero. Below
+  a positive minimum an empty scoreable set still refuses `window_not_closed`, which does not tell
+  "no theses at all" from "theses, none scoreable" (DEC-336); the frozen surface is otherwise
+  unchanged. Tests merged in [#435](https://github.com/kunwarshivam/mandate/pull/435); the
+  implementation PR (DEC-77 stage 2) replaces the stub with the named arm and deletes only the
+  three `#[ignore]` lines.
+  *Founder question (#435 review, minor 1):* whether the named refusal should answer an empty
+  scoreable set at every minimum, ahead of the count refusal. That changes two pinned ES-09
+  refusal codes (`a_thesis_whose_closes_all_lie_outside_its_window_is_unscoreable` and
+  `a_degenerate_window_is_unscoreable_never_a_figure` pin `window_not_closed`, set by DEC-282
+  item 8), so it is a surface change for the founder, not an agent reading; until then DEC-336's
+  narrower reach holds.
+  *Follow-up (#435 review, minor 3):* `score::basket_return` over an empty `members` slice refuses
+  with the nameless `Num(DivisionByZero)`, pinned live by `an_empty_basket_is_an_error`: loud, so no
+  figure escapes, but a code that tells a caller nothing. A tests PR names it the way DEC-335 named
+  the empty scoreable set (an add-only `ResearchError` arm and code). Tests PR open on
+  `agent/j-e17-8-empty-basket-tests` (DEC-380): `ResearchError::EmptyBasket`, code
+  `empty_basket`. The live pin `an_empty_basket_is_an_error` held only `Num(_)`, so it becomes a
+  stricter pending test.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -1080,7 +1123,11 @@ From E10-1's slice-V implementation (DEC-161):
   `ConfigSnapshotRegistered`, `PlatformOperatorAction` (`model_withdrawn`), `MandateVersionCreated`, and
   `MandateConfirmed`. `AgentFlat` needs a source there too (the account ledger's flat-in-every-instrument
   signal). A record left unmapped is a fact the fold never sees, so the mapper's completeness is what
-  covers the facts that only add (DEC-169 item 2).
+  covers the facts that only add (DEC-169 item 2). **Journal spec v0.7 §9.2 leaves
+  `MandateVersionApplied` and `UniverseChanged` (account stream) to their own story** (DEC-303 item 6):
+  E7-10 maps the records §9.2 closes, and those two go with the "account-stream risk-state records" row
+  below. Until it lands they map to none, so the fold fails closed: no version change after the
+  deployment and no admitted instrument are seen.
 - **Journal spec v0.7 §9.2's follow-ups ([DEC-261](04-decision-log.md#decisions)).** Until each
   lands, the drafts it names stay refused at `append`, which adds no risk (rule 3).
   - **Stream K:** the executor's fee-step `AccountSnapshotRecorded` writes `model_cash`, `cash_band`,
@@ -1089,7 +1136,15 @@ From E10-1's slice-V implementation (DEC-161):
     account-stream event). **E7-10's implementation must not register
     `AccountSnapshotRecorded` until this lands.** The fee step pauses every agent and alerts the owner,
     and refusing its snapshot at `append` must never stop it (rules 3 and 13, DEC-261 item 7). E7-10's
-    tests PR pins that ordering with a pending test.
+    tests PR pins that ordering with three live tests (DEC-303 item 4). The registration PR must also
+    turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. Until then they are proven only
+    by `reference/journal/control.py`'s mutants, and `snapshot_drafts_stay_unregistered` reads none of
+    them.
+    The writer's pending pins are #441's (DEC-305 to DEC-307): the fee-step snapshot's payload
+    member for member and type for type, the `risk_clock` stamp, the pause and alert whether or not
+    the snapshot recorded, `IntentReceived` as §9.1's nine members, and `OrderSubmitted`'s
+    `limit_price` as `null`. What the executor's fold reads beyond the registered `IntentReceived`
+    and `OrderSubmitted` waits on DEC-360 (Proposed, the founder).
   - **Stream I / M7:** the runtime's `OwnerCommandRefused` writes `effective_at` as a §4.7 timestamp
     rather than risk-clock seconds (`escalation.rs`, `payload::seconds`). §9.2 supersedes DEC-291
     item 1's "same second" for this member. `crates/mandate-runtime/src/escalation/tests.rs`'s assertion
@@ -1101,6 +1156,10 @@ From E10-1's slice-V implementation (DEC-161):
     scope, the acceptable-use action, and the row's "approval".
   - **Proposed, item 10:** a clause binds an account stream to its connection, so that
     `AccountSnapshotRecorded`'s fact needs no argument.
+  - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** a journal spec
+    change closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with vectors.
+    The tests and implementation that follow register them and map them to `AgentVersionActive` (a
+    deployed agent's new version) and `UniverseChanged`.
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).
@@ -1419,6 +1478,26 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `an_unconfirmed_owner_exit_waits_for_the_session`) and the owner-confirmed extended-hours path:
   outside the regular session an owner exit sells equities through the ladder only on the
   confirmed bid, bid size and floor, and waits for the session otherwise (§5.5).
+- **E7-4's tests correction (stream K), from slice 2 ([DEC-346](decisions/DEC-346.md) item 7):**
+  `properties::every_unprotected_interval_has_a_journaled_start_and_end` asserts that no interval
+  is open when a script ends. A script that ends while the protected lead's partly filled entry is
+  still inside its interval (no completing fill, no timeout reached and confirmed) fails it on any
+  implementation. Judge an interval that is still open against what could have closed it, then
+  delete its `BEHAVIOUR_ONLY_TESTS` row.
+- **E7-4 (stream K), from slice 2 ([DEC-346](decisions/DEC-346.md), left open):** (1) a re-placement
+  after an exit covers every tranche at the prices of the latest `placed`, because the fold keeps
+  one price pair per instrument; decide this for tranches at different prices (coordinator). (2)
+  Bracket legs and the partial-fill OCO record no `created_on`, so slice 5's trading-day part must
+  date §5.4's re-placement before expiry from the placement's own record. (3) The slice that
+  reconciles protective legs maps `{entry}-p{record}` to the broker's leg ids, and it must land
+  before any shell path hands the executor a protected intent.
+- **E7-4 (stream K), from [#448](https://github.com/kunwarshivam/mandate/pull/448) round 1 (minor
+  2, [DEC-349](decisions/DEC-349.md)):** a crypto stop-limit is sized net of the taker fee, the
+  larger rate, because `BrokerFill` does not say maker or taker. After a maker fill the stop
+  covers `gross × (taker − maker)` less than the holding, and nothing bounds that remainder.
+  Carry `liquidity` on `BrokerFill` (the connector reads it from Alpaca's fill activity), or
+  re-size the stop when the crypto asset fee posts (`FeesCharged crypto_asset`), so it covers
+  exactly the holding.
 - **E7-4 (stream K), from [#385](https://github.com/kunwarshivam/mandate/pull/385)'s review (minor
   4):** the rule-13 oracle's waiting-exit `limit` branch
   (`protection::sequence_tests::rule_13_script`) is dormant: no script holds an exit unexcused long
@@ -1789,22 +1868,10 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   beside a resting protective sell in the same instrument is denied `conduct_limit_breached` though
   §5.3 rule 8 lets a bracket add a tranche. A stop is not in the book until triggered; deciding
   whether it counts would reopen that path.
-- **An exit's pacing can return a gate error** (#311 round 2, minor 1). `conduct::pacing` propagates
-  `NumError` from `Qty::portion` in `slice` and from `Price::collar_bound` in `price_by_collar`, so
-  an owner or discretionary exit with extreme prices or volumes gets `Err` rather than a decision.
-  Nothing exercises it, since the property's generators are small. Add a property over extreme
-  prices and volumes, or state what the executor does with a gate error on an exit (it must still
-  route the exit, rule 13).
-- **The opposite-fill property pins its boundary only by chance** (#311 round 2, minor 2).
-  `properties::only_an_opposite_side_fill_starts_the_interval` draws `elapsed in 0..120`, and
-  `ci test` fixes no proptest seed. `gate::tests::the_opposite_fill_interval_includes_its_last_instant`
-  pins the 60 s edge deterministically; add 60 to the property's draw explicitly so it is not the
-  boundary's cover by luck.
-- **Assert the whole exit for exempt purposes** (#311 round 2, minor 3).
-  `an_allowed_exit_is_never_below_its_minimum_or_zero` samples `RiskEngine` and `ProtectiveLeg` but
-  asserts only the quantity bound for them, not `sent == proposed`, which
-  `a_slice_binds_only_below_the_proposal_and_names_its_cap` covers separately. Assert it in the
-  property too.
+- **An exit's pacing can return a gate error** (#311 round 2, minor 1). The property half is done:
+  `properties::an_exit_over_extreme_figures_is_still_routed` (pending E6-6, #436, DEC-327) draws
+  both triggers. The fix is the E6-6 row "route a discretionary exit whose collar cannot be
+  computed" below; delete this row with it.
 - **E6-6 slice 2:** the account-wide fold is `mandate_risk::fold_day_trades` (DEC-259). The
   trading-domain harness reads RC-09's and RC-09B's `regime`, `prior_day_trades`, `last_equity`,
   `multiplier` and `day_trade_count` and drives the ledger through `fold_day_trades` from the
@@ -1824,12 +1891,17 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   so a short would fold as if held long and understate the day-trade count. No v1 case holds one
   (`AGENTS.md` rule 12) and `Gate::decide` refuses a short, but a `day_trade_count` expectation
   reaches the fold without that refusal. Refuse a negative `SignedQty` there instead of taking
-  its magnitude.
+  its magnitude. **Tests staged** in [#438](https://github.com/kunwarshivam/mandate/pull/438)
+  (DEC-314): the refusal is pending E6-10 behind `held_overnight`'s stub, and a flat (`0`)
+  position, which is not a short, is pinned live as folding as no shares held.
 - **Read `crypto_status` in the trading-domain harness** (DEC-285 item 5). The driver hands the gate
   a crypto-active account because no crypto-proposing case states `crypto_status`, and
   `trading_domain_gate_harness.rs` pins it as pending E6-10, initial and in an update. When a case
   needs it, a tests correction (DEC-77) drops those two assertions, and the harness reads it as
-  check 1's `crypto_active`.
+  check 1's `crypto_active`. **Tests staged** in [#438](https://github.com/kunwarshivam/mandate/pull/438)
+  (DEC-315): the two assertions are dropped, the gate carries a `crypto_active` field its
+  snapshot reads, the read is a stub pending E6-10, and two in-module tests pin the stub's report
+  live until the implementation PR replaces them.
 - **RC-09's `alpaca_intraday_margin` variant cannot pass as written** (founder; DEC-285 item 6).
   Its `expect_overrides.step_1: { decision: { verdict: allow } }` merges into a decision that
   keeps `reason_code: legacy_pdt_day_trade_budget`, so the expectation is an allow with a deny's
@@ -1871,10 +1943,13 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   promises the whole rule set is re-checked before any rule is read. Stream F's V-023-at-load in
   `mandate-spec::validate` refuses such a value up front (landed with E10-1's slice V, DEC-161 item 5),
   and the order path's `well_typed` gains the same bound so both report it by name.
-- **E6-6:** drop or pin the `at.opening_auction` clause in `mandate-risk`'s `market_orders_barred`.
-  The opening auction is always pre-market, which the clause for a US equity outside the regular
-  session already bars, and crypto never has an auction, so the clause changes no decision and no
-  test can catch its removal (#228 review, round 1, minor 2; E6-6's bug list when it lands).
+- **E6-6:** route a discretionary exit whose collar cannot be computed (`AGENTS.md` rule 13,
+  DEC-327). A sell's passive collar end `bid × (1 + band)` overflows `Price::collar_bound` at the
+  decimal's edge, or, for a US equity quoted below about `0.0000834`, truncates to zero on the Reg
+  NMS grid (`not_positive`); `conduct::pacing` reports both as `Unimplemented("pacing", "E6-6")`,
+  and the advisory path's `map::verdict_of` turns any gate error into a denial. Skip the control
+  that cannot be computed, so the whole exit goes as proposed, and delete the `#[ignore]` on
+  `an_exit_over_extreme_figures_is_still_routed` (#311 round 2, minor 1; #436 review, M2 to M4).
 - **E6-6:** pin the rest of a re-priced exit and of the close window. The tests assert
   `marketable_limit_required` and the quantity of a market exit re-priced in an auction window but
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`

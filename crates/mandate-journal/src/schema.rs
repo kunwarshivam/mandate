@@ -26,6 +26,8 @@ pub(crate) enum Ty {
     Date,
     /// `sha256:` followed by 64 lowercase hex characters.
     DigestRef,
+    /// A non-empty RFC 6901 pointer: `/`-prefixed tokens, `~` only in `~0` or `~1` (spec §9.2).
+    Pointer,
     OneOf(&'static [&'static str]),
     Nullable(&'static Ty),
     List(&'static Ty),
@@ -61,6 +63,7 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
         Ty::RiskClock => checked(UtcNanos::parse(text()?).is_ok_and(|t| t.nanos() == 0)),
         Ty::Date => checked(Date::parse(text()?).is_ok()),
         Ty::DigestRef => checked(parse_digest_ref(text()?).is_some()),
+        Ty::Pointer => checked(is_pointer(text()?)),
         Ty::OneOf(options) => checked(options.contains(&text()?)),
         Ty::Nullable(inner) => match value {
             Value::Null => Ok(Value::Null),
@@ -107,6 +110,17 @@ pub(crate) fn normalize_record(
         out.insert(key.clone(), normalize(ty, value, &join(name))?);
     }
     Ok(out)
+}
+
+pub(crate) fn is_pointer(s: &str) -> bool {
+    s.strip_prefix('/').is_some_and(|tokens| {
+        let mut escaped = false;
+        tokens.chars().all(|c| {
+            let ok = !escaped || c == '0' || c == '1';
+            escaped = c == '~' && !escaped;
+            ok
+        }) && !escaped
+    })
 }
 
 pub(crate) fn is_ident(s: &str) -> bool {

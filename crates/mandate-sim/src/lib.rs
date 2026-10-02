@@ -30,7 +30,7 @@
 
 mod fill;
 
-pub use fill::simulate;
+pub use fill::{check_sessions_of_asset_class, simulate};
 
 use mandate_accounting::{AssetClass, Liquidity, Side};
 use mandate_num::{Bps, Fraction, NumError, Price, Qty, ShareIncrement};
@@ -44,6 +44,12 @@ pub enum SimError {
     InconsistentBar(usize),
     #[error("bar {0} starts before the session it is labelled with")]
     BarBeforeItsSession(usize),
+    /// The first bar, by index, labelled with a session its instrument's asset class never trades
+    /// (spec §4.3: crypto trades the continuous session alone, a US equity the four New York
+    /// sessions alone), so a continuous bar for an equity and a regular, extended, or overnight bar
+    /// for crypto are both refused (DEC-377).
+    #[error("bar {0} is labelled with a session its instrument's asset class never trades")]
+    SessionOffAssetClass(usize),
     #[error("an order's quantity must be positive")]
     ZeroQuantity,
     #[error("an order's quantity is not a multiple of the instrument's increment")]
@@ -73,6 +79,7 @@ impl SimError {
             Self::BarsOutOfOrder(_) => "bars_out_of_order",
             Self::InconsistentBar(_) => "inconsistent_bar",
             Self::BarBeforeItsSession(_) => "bar_before_its_session",
+            Self::SessionOffAssetClass(_) => "session_off_asset_class",
             Self::ZeroQuantity => "zero_quantity",
             Self::QuantityOffIncrement => "quantity_off_increment",
             Self::ExtendedHoursNeedsALimit => "extended_hours_needs_a_limit",
