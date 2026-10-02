@@ -1479,19 +1479,6 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `session_unknown` like one after it. Among them `hand::a_risk_exit_submits_inside_the_close_window` runs at
   clock 25, so its venue is the regular session: it proves the conduct exemption, not the close
   window its name claims (#400 round 1, minor 4).
-- **E7-4 slice 5's trading-day part (stream K), from the session part ([DEC-260](04-decision-log.md#decisions)
-  (13)):** fold `TradingDayStarted` together with what the reference-case harness then reaches:
-  §5.4's GTC re-placement at the buffer day (`hand::protection_is_re_placed_at_the_buffer_day`,
-  `protection_is_not_re_placed_early`, `a_protective_order_submits_with_no_buying_power`), the
-  harness's startup reconciliation, which today holds its openings
-  `startup_reconciliation_pending` (RC-14 `add_via_bracket`, RC-15
-  `restriction_from_a_closing_only_reject`, RC-21, RC-22), RC-14's journal order
-  (`unprotected_window_start` expected after the gate), and the cases the fold alone lets pass
-  (RC-07 `unposted_crypto_fees_reconcile`, RC-14 `passive_exit_becomes_oco_take_profit`, RC-15
-  `status_not_active`, `external_order_detected`, `unexplained_403s`). RC-24 ×2 go live with it:
-  the session part already prices them (both pass with the fold, shown in its PR). Restore
-  `TradingDayStarted` to `properties::every_catalogue_event_is_interpreted_or_named`'s
-  `INTERPRETED` in the same change (#400 round 1, major 3).
 - **E7-4 slice 7 (stream K), moved from slice 5 by the coordinator's ruling D3 on
   [#174](https://github.com/kunwarshivam/mandate/pull/174) (5926142854):** the four kill-switch
   session tests (`hand::an_automated_flatten_defers_equity_sells_to_the_session`,
@@ -1603,12 +1590,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   restriction in place. Pre-existing on main; the cash slice is the first to raise it from every
   reconciliation run (#205 review, round 2, minor 3).
 - Pin or drop the two unreachable overflow sites in `ExecutorState::buying_power`: the reservations sum and the final `min(model, broker) − reserved`. `Usd` is signed, so each fails only at the decimal range, which no reservation reaches, and replacing either `None` with zero passes every test; the reachable site, the model's cash, is pinned (#198 review, round 2, finding 3).
-- **Blocks running the executor across a session boundary:** fold `TradingDayStarted` and
-  `RiskDayStarted` in `mandate-executor`. Since #194's round 1 both answer the later slice's
-  `Unimplemented` stub, so the first day rollover stops the executor, failing closed. The slice that
-  owns the day fold (protection re-placement at the GTC buffer day, §5.4) must interpret both, move
-  them back into `properties::INTERPRETED` with live tests that fail when either arm is stubbed, and
-  land before the executor runs across a session boundary (#194 review, round 2).
+- **Blocks running the executor across a session boundary:** fold `RiskDayStarted` in
+  `mandate-executor`. `TradingDayStarted` is folded since E7-4 slice 5's trading-day part
+  ([DEC-367](decisions/DEC-367.md)). `RiskDayStarted` still answers the later slice's
+  `Unimplemented` stub, so the first risk-day rollover stops the executor, failing closed. Interpret
+  it, move it back into `properties::INTERPRETED` with a live test that fails when its arm is
+  stubbed, and land that before the executor runs across a session boundary (#194 review, round 2).
 - Report a safety-critical function whose only mutants are unviable. `ci mutants` counted the one
   mutant of `mandate-executor`'s `every_agent` (a body of `Ok(Default::default())`, which does not
   compile because `EventId` has no `Default`) as unviable, so "0 missed" said nothing about the

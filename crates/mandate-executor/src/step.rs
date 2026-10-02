@@ -9,7 +9,7 @@ use crate::orders::{
 use crate::payload::optional_text;
 use crate::ports::Ports;
 use crate::protection::{
-    bound, breach, cancel_openings, ladder_steps, overdue_openings, settle, watchdog,
+    bound, breach, cancel_openings, ladder_steps, new_day, overdue_openings, settle, watchdog,
 };
 use crate::reconcile::run;
 use crate::state::{EVERY_AGENT, ExecutorState, UnresolvedAppend};
@@ -211,6 +211,9 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
 /// one of §7.4's three or a string that names no mode: cancelling openings only reduces risk
 /// (rule 3), so an unrecognised mode fails in that direction (#286 round 1, minor 4).
 fn copied(batch: &mut Batch<'_, '_>, event: &FoldedEvent) -> Result<(), ExecutorError> {
+    if event.stream == batch.view.account_stream() && event.event_type == "TradingDayStarted" {
+        return new_day(batch);
+    }
     let strict = event.stream == batch.view.account_stream()
         && event.event_type == "AgentModeApplied"
         && optional_text(&event.payload, "to").is_some_and(|to| to != "normal");
@@ -459,6 +462,13 @@ mod copied_tests {
                             if client_order_id.as_str() == "md-buy-1"
                     )),
                     "{case}"
+                );
+            } else if event_type == "TradingDayStarted" {
+                assert!(
+                    !answer?
+                        .iter()
+                        .any(|effect| matches!(effect, Effect::Broker(_))),
+                    "{case}: a new trading day with nothing to re-place cancels no opening"
                 );
             } else {
                 assert_eq!(answer, stub.clone(), "{case}");

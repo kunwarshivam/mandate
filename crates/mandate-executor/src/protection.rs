@@ -7,6 +7,7 @@ use mandate_num::{Adverse, Fraction, Price, Qty, ShareIncrement, SignedQty, Tick
 
 use mandate_accounting::Side;
 use mandate_canon::Value;
+use mandate_time::{Date, ExchangeCalendar};
 
 use crate::batch::Batch;
 use crate::error::ExecutorError;
@@ -21,11 +22,13 @@ use crate::ports::Ports;
 use crate::session::{
     Venue, closed_hold, extended_hours, same_session, stops_trigger_since, venue,
 };
-use crate::state::{EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, LoneLadder};
+use crate::state::{
+    EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, LoneLadder, Replacement,
+};
 use crate::types::{
-    AgentId, BracketLegs, BrokerRequest, EventId, ExitTier, IntentBody, IntentHandoff,
-    MarketObservation, Mode, OcoLegs, OrderState, OrderType, ProtectionPrices, Purpose, RiskClock,
-    SubmitOrder, TimeInForce,
+    AgentId, BracketLegs, BrokerRequest, EventId, ExecutorConfig, ExitTier, IntentBody,
+    IntentHandoff, MarketObservation, Mode, OcoLegs, OrderState, OrderType, Protection,
+    ProtectionPrices, Purpose, RiskClock, SubmitOrder, TimeInForce,
 };
 
 /// The triggered-stop watchdog's clock (§5.4): a sane mark at or below the instrument's resting
@@ -964,6 +967,7 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             replace(batch, &instrument, &sequence)?;
         }
     }
+    replacements(batch)?;
     brackets(batch)?;
     acknowledged(batch)
 }
@@ -1028,6 +1032,7 @@ fn bracket(
         let id = ClientOrderId::for_protection(entry, &batch.next_id())?;
         let mut placed = recorded_placement(&id, order.qty, prices);
         placed.extend(named.clone());
+        placed.extend(created(&batch.view));
         changed(batch, &instrument, "placed", placed)?;
         if detail.bracket_since.is_some() {
             changed(batch, &instrument, "unprotected_end", named)?;
@@ -1065,6 +1070,7 @@ fn bracket(
             journal_submission(batch, &oco, None, &agent, 1)?;
             let mut placed = recorded_placement(&oco.client_order_id, qty, prices);
             placed.extend(named.clone());
+            placed.extend(created(&batch.view));
             changed(batch, &instrument, "placed", placed)?;
             request = Some(oco);
         }
@@ -1098,6 +1104,136 @@ fn bracket(
         batch.broker(BrokerRequest::Cancel {
             client_order_id: entry.clone(),
         });
+    }
+    Ok(())
+}
+
+/// The `created_on` a protective order placed now records: the trading day the latest copied
+/// `TradingDayStarted` began, from which its GTC expiry is counted (§5.2, §5.4). None before the
+/// first one.
+fn created(view: &ExecutorState) -> Option<(&'static str, Value)> {
+    view.trading_day
+        .map(|day| ("created_on", text(day.to_string())))
+}
+
+/// §5.4's re-placement before expiry, at a copied `TradingDayStarted`: in every instrument where
+/// protection rests, no exit sequence runs and no re-placement is under way, protection with a GTC
+/// order on or past its buffer day ([`expiring`]) is cancelled — all of it, by id, as an exit
+/// sequence's first step is — and the start of the interval records the entry, agent and prices
+/// the new protection takes. Once the cancels are confirmed, [`settle`] re-places it for the held
+/// quantity ([`re_place`]) and the interval ends. An exit that starts meanwhile takes the
+/// instrument's sequence over, and its own re-placement ends the interval (DEC-347).
+pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let Some(today) = batch.view.trading_day else {
+        return Ok(());
+    };
+    let due: Vec<(InstrumentId, Protection)> = batch
+        .view
+        .protection
+        .iter()
+        .filter(|(instrument, protection)| {
+            !protection.resting.is_empty()
+                && !batch.view.exiting.contains_key(*instrument)
+                && !batch.view.replacing.contains_key(*instrument)
+                && protection.resting.iter().any(|id| {
+                    batch
+                        .view
+                        .orders
+                        .get(id)
+                        .and_then(|order| order.created_on)
+                        .is_some_and(|created| {
+                            expiring(created, today, batch.ports.config).unwrap_or(true)
+                        })
+                })
+        })
+        .map(|(instrument, protection)| (instrument.clone(), protection.clone()))
+        .collect();
+    for (instrument, protection) in due {
+        let Some(first) = protection.resting.first() else {
+            continue;
+        };
+        let entry = first.protected_entry().unwrap_or_else(|| first.clone());
+        let agent = batch
+            .view
+            .orders
+            .get(first)
+            .and_then(|order| order.agent.clone())
+            .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+        let mut pairs = vec![
+            ("replacing", Value::Bool(true)),
+            ("orders", text(joined(&protection.resting))),
+            ("entry", text(entry.as_str())),
+            ("agent", text(agent.0.clone())),
+        ];
+        if let Some(prices) = protection.prices {
+            pairs.push(("stop", text(prices.stop.to_string())));
+            if let Some(take_profit) = prices.take_profit {
+                pairs.push(("take_profit", text(take_profit.to_string())));
+            }
+        }
+        changed(batch, &instrument, "unprotected_start", pairs)?;
+        for id in protection.resting {
+            if ask_cancel(batch, &id)? {
+                batch.broker(BrokerRequest::Cancel {
+                    client_order_id: id,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn joined(ids: &[ClientOrderId]) -> String {
+    ids.iter()
+        .map(ClientOrderId::as_str)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Whether a GTC order created on `created` is due for re-placement on `today` (§5.4): today is on
+/// or after the trading day `protective_replace_buffer_trading_days` trading days before its expiry,
+/// `gtc_expiry_days` calendar days after its creation — that is, at most that many trading days
+/// remain from today up to the expiry. A day the calendar cannot place counts as a trading day,
+/// which can only bring the re-placement earlier (rule 3).
+fn expiring(created: Date, today: Date, config: &ExecutorConfig) -> Result<bool, ExecutorError> {
+    let mut expiry = created;
+    for _ in 0..config.gtc_expiry_days {
+        expiry = expiry.next()?;
+    }
+    let calendar = ExchangeCalendar::us_equities().ok();
+    let mut remaining: u32 = 0;
+    let mut day = today;
+    while day < expiry {
+        let trading = calendar
+            .as_ref()
+            .and_then(|calendar| calendar.is_trading_day(day).ok())
+            .unwrap_or(!day.is_weekend());
+        if trading {
+            remaining = remaining.saturating_add(1);
+        }
+        if remaining > config.protective_replace_buffer_trading_days {
+            return Ok(false);
+        }
+        day = day.next()?;
+    }
+    Ok(true)
+}
+
+/// After every step: a re-placement whose cancels are all confirmed — nothing rests any more —
+/// re-places protection for the held quantity at the recorded prices and ends its interval,
+/// unless an exit sequence has taken the instrument over ([`new_day`]).
+fn replacements(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let due: Vec<(InstrumentId, Replacement)> = batch
+        .view
+        .replacing
+        .iter()
+        .filter(|(instrument, _)| {
+            !rests(&batch.view, instrument) && !batch.view.exiting.contains_key(*instrument)
+        })
+        .map(|(instrument, recorded)| (instrument.clone(), recorded.clone()))
+        .collect();
+    for (instrument, recorded) in due {
+        re_place(batch, &instrument, &recorded)?;
     }
     Ok(())
 }
@@ -1277,6 +1413,21 @@ fn replace(
     instrument: &InstrumentId,
     sequence: &ExitSequence,
 ) -> Result<(), ExecutorError> {
+    let recorded = Replacement {
+        entry: sequence.entry.clone(),
+        agent: sequence.agent.clone(),
+        prices: sequence.prices,
+    };
+    re_place(batch, instrument, &recorded)
+}
+
+/// [`replace`] for the entry, agent and prices a sequence or a re-placement before expiry
+/// recorded.
+fn re_place(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    sequence: &Replacement,
+) -> Result<(), ExecutorError> {
     let qty = long(&batch.view, instrument)
         .checked_sub(covered(&batch.view, instrument)?)
         .unwrap_or(Qty::ZERO);
@@ -1385,7 +1536,8 @@ fn place(
     prices: ProtectionPrices,
 ) -> Result<(), ExecutorError> {
     journal_submission(batch, request, intent, agent, 1)?;
-    let placed = recorded_placement(&request.client_order_id, request.qty, prices);
+    let mut placed = recorded_placement(&request.client_order_id, request.qty, prices);
+    placed.extend(created(&batch.view));
     changed(batch, &request.instrument, "placed", placed).map(|_| ())
 }
 
