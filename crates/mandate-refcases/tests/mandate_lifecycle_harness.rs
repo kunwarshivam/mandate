@@ -261,7 +261,7 @@ fn what_the_runtime_cannot_be_driven_to_fails() {
             "MC-E02",
             "/script/0/bound/reference_mark/seq",
             json!(1),
-            "bound `reference_mark`",
+            "head",
         ),
     ] {
         fails_naming(with(&fixture, id, path, value.clone()), id, named);
