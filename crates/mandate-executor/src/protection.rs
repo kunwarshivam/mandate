@@ -7319,7 +7319,7 @@ mod sequence_tests {
             TEN_SECONDS_BEFORE_THE_NIGHT,
             SATURDAY,
             1_788_789_600,
-            1_514_739_600,
+            EVE_OF_2018,
             1_861_754_400,
             1_862_150_400,
         ]);
@@ -7353,8 +7353,30 @@ mod sequence_tests {
         rule_13_script(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
     }
 
+    /// CI's minimal input on main (reported on #445): a script from the eve of 2018, before the
+    /// calendar's first date, ticks twelve hours to 2018-01-01 00:00 ET, the New Year holiday's
+    /// overnight, and places a risk exit with no quote. The calendar covers that instant and names
+    /// no session open, so the exit is held `session_closed`, rule 13's broker hold (DEC-260 (13),
+    /// DEC-392); the oracle reads the calendar's range at each instant, not at the script's start.
+    #[test]
+    fn rule_13_holds_for_a_risk_exit_on_the_new_year_holiday_overnight() -> Result<(), String> {
+        let script = [
+            Move::Tick(7_200),
+            Move::Tick(3_600),
+            Move::Tick(3_600),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Exit(0, 1, 141),
+        ];
+        rule_13_script(EVE_OF_2018, &script)
+    }
+
     /// 2026-09-22, a Tuesday, at 19:59:50 ET: ten seconds before the after-hours session ends.
     const TEN_SECONDS_BEFORE_THE_NIGHT: i64 = 1_790_121_590;
+    /// 2017-12-31, a Sunday, at 12:00 ET: seventeen hours before the calendar's first date.
+    const EVE_OF_2018: i64 = 1_514_739_600;
     /// 2026-09-22, a Tuesday, at 17:00 ET: after-hours.
     const AFTER_HOURS: i64 = 1_790_110_800;
     /// 11:00 ET, the regular session.
