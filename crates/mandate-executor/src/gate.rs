@@ -33,9 +33,13 @@ pub struct PartialGateDecision {
     /// opening until an account has been journaled, at any time, and a reconciliation has run
     /// since this process started (#206 review; #230 review, minor 1).
     held: bool,
-    /// An allowed risk-reducing sell sized to what is left beside the rungs an exit ladder may
-    /// still send (DEC-410): journaled as `sized_qty`, and folded into the intent's quantity.
+    /// An allowed discretionary exit sized to what is left beside the rungs exit ladders will
+    /// still send (DEC-410 item 3): journaled as `sized_qty`, and folded into the intent's
+    /// quantity.
     sized: Option<Qty>,
+    /// What an allowed sell of any other exit purpose takes off those ladders' remainders so it
+    /// goes whole (DEC-410 item 2): journaled as `remainder_trimmed` before the decision.
+    trims: Option<Qty>,
 }
 
 impl PartialGateDecision {
@@ -51,6 +55,11 @@ impl PartialGateDecision {
     /// The quantity an allowed sell was sized to, if the gate sized it (DEC-410).
     pub(crate) fn sized(&self) -> Option<Qty> {
         self.sized
+    }
+
+    /// What an allowed sell trims off the ladders' remainders, if it does (DEC-410).
+    pub(crate) fn trims(&self) -> Option<Qty> {
+        self.trims
     }
 
     pub(crate) fn reason_code(&self) -> &str {
@@ -86,6 +95,8 @@ impl PartialGateDecision {
             reason_code: reason.to_owned(),
         };
         self.held = true;
+        self.sized = None;
+        self.trims = None;
         self
     }
 
@@ -110,9 +121,6 @@ pub(crate) const UNPRICED: &str = "exit_unpriced";
 /// The hold reasons of an equity exit while no v1 session is open (DEC-260 (13)).
 pub(crate) const SESSION_CLOSED: &str = "session_closed";
 pub(crate) const SESSION_UNKNOWN: &str = "session_unknown";
-/// The hold reason of a risk-reducing sell that fits beside the live sells but finds nothing left
-/// beside the rungs an exit ladder may still send (DEC-410): it waits for room, never denied.
-pub(crate) const BETWEEN_RUNGS: &str = "exit_between_rungs";
 
 /// One order a gate run is asked about.
 pub(crate) struct Proposal<'s> {
@@ -167,7 +175,15 @@ pub(crate) fn account_stream_checks(
         outside.then_some(("instrument_not_in_universe", false)),
     );
     let room = available(state, proposal.instrument)?;
-    let exceeds = proposal.side == Side::Sell && room < proposal.qty;
+    let sell = proposal.side == Side::Sell;
+    let left = if sell {
+        room.checked_sub(between_rungs(state, proposal.instrument)?)
+            .unwrap_or(Qty::ZERO)
+    } else {
+        room
+    };
+    let discretionary = proposal.purpose == Purpose::DiscretionaryExit;
+    let exceeds = sell && (room < proposal.qty || discretionary && left == Qty::ZERO);
     record(
         "sell_exceeds_available",
         exceeds.then_some(("sell_exceeds_available", false)),
@@ -196,28 +212,21 @@ pub(crate) fn account_stream_checks(
             held,
         ),
     };
-    let decision = PartialGateDecision {
+    let mut decision = PartialGateDecision {
         verdict,
         checks,
         held,
         sized: None,
+        trims: None,
     };
-    if decision.verdict != GateVerdict::Allow || proposal.side != Side::Sell {
-        return Ok(decision);
-    }
-    let left = room
-        .checked_sub(between_rungs(state, proposal.instrument)?)
-        .unwrap_or(Qty::ZERO);
-    Ok(if left >= proposal.qty {
-        decision
-    } else if left == Qty::ZERO {
-        decision.held_for("between_rungs", BETWEEN_RUNGS)
-    } else {
-        PartialGateDecision {
-            sized: Some(left),
-            ..decision
+    if decision.verdict == GateVerdict::Allow && sell && left < proposal.qty {
+        if discretionary {
+            decision.sized = Some(left);
+        } else {
+            decision.trims = Some(proposal.qty.checked_sub(left)?);
         }
-    })
+    }
+    Ok(decision)
 }
 
 /// DEC-160's leg-agent rule fails closed: a broker-created protective leg no agent can be named for
@@ -293,7 +302,18 @@ fn available(state: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Ex
     } else {
         held.abs()
     };
-    let selling = state
+    Ok(long
+        .checked_sub(open_sells(state, instrument)?)
+        .unwrap_or(Qty::ZERO))
+}
+
+/// What the open non-protective sells in `instrument` may still sell, [`available`]'s count: each
+/// past `Intent` and not yet terminal, by its unfilled quantity. DEC-410's trims count the same.
+pub(crate) fn open_sells(
+    state: &ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<Qty, ExecutorError> {
+    state
         .orders
         .values()
         .filter(|order| {
@@ -305,8 +325,8 @@ fn available(state: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Ex
         })
         .try_fold(Qty::ZERO, |total, order| {
             total.checked_add(order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO))
-        })?;
-    Ok(long.checked_sub(selling).unwrap_or(Qty::ZERO))
+        })
+        .map_err(ExecutorError::from)
 }
 
 #[cfg(test)]
@@ -465,7 +485,7 @@ mod attribution_tests {
 }
 
 #[cfg(test)]
-mod between_rungs_tests {
+mod remainder_tests {
     use mandate_accounting::{InstrumentId, Side};
     use mandate_num::{Qty, SignedQty, Usd};
 
@@ -480,11 +500,11 @@ mod between_rungs_tests {
         Seq, WorkspaceId,
     };
 
-    /// Ten AAPL held, a lone ladder parked between rungs with 4 of its rung unsold, and, where
-    /// `selling` is set, a live risk exit of that many beside it.
+    /// Ten AAPL held, `agent-b`'s lone ladder parked between rungs with 4 of its rung unsold, and,
+    /// where `selling` is set, a live risk exit of that many beside it.
     fn parked(selling: Option<&str>) -> Result<ExecutorState, ExecutorError> {
         let aapl = InstrumentId::new("AAPL")?;
-        let agent = AgentId("agent-a".to_owned());
+        let agent = AgentId("agent-b".to_owned());
         let mut state = ExecutorState::new(AccountScope {
             account: AccountRef("acct-1".to_owned()),
             workspace: WorkspaceId("ws1".to_owned()),
@@ -566,44 +586,83 @@ mod between_rungs_tests {
         )
     }
 
-    /// DEC-410 item 2: beside a parked remainder of 4, a risk exit of 8 is allowed sized to the 6
-    /// left, one of 6 goes whole, and beside a live exit of 6 as well one of 3 is held
-    /// `exit_between_rungs`, never denied.
+    /// DEC-410 item 2: beside a parked remainder of 4, a risk exit of 8 goes whole and trims the
+    /// remainder by 2, and one of 6 trims nothing (the plan gives way, never the sell). Item 3: a
+    /// discretionary exit of 8 is sized to the 6 left instead, and one with nothing left beside a
+    /// live exit of 6 is denied `sell_exceeds_available`, as an exit that does not fit beside live
+    /// sells is.
     #[test]
-    fn a_risk_exit_is_sized_to_what_the_remainder_leaves_or_waits() -> Result<(), ExecutorError> {
+    fn a_risk_exit_trims_the_remainder_and_a_discretionary_exit_is_sized_to_it()
+    -> Result<(), ExecutorError> {
         let state = parked(None)?;
-        let sized = ask(&state, Side::Sell, "8", Purpose::RiskExit)?;
+        let trims = ask(&state, Side::Sell, "8", Purpose::RiskExit)?;
         assert_eq!(
-            (sized.verdict_name(), sized.sized()),
-            ("allow", Some(Qty::parse("6")?))
+            (trims.verdict_name(), trims.trims(), trims.sized()),
+            ("allow", Some(Qty::parse("2")?), None)
         );
         let whole = ask(&state, Side::Sell, "6", Purpose::RiskExit)?;
-        assert_eq!((whole.verdict_name(), whole.sized()), ("allow", None));
-        let waits = ask(&parked(Some("6"))?, Side::Sell, "3", Purpose::RiskExit)?;
         assert_eq!(
-            (waits.verdict_name(), waits.reason_code(), waits.sized()),
-            ("hold", "exit_between_rungs", None)
+            (whole.verdict_name(), whole.trims(), whole.sized()),
+            ("allow", None, None)
+        );
+        let paced = ask(&state, Side::Sell, "8", Purpose::DiscretionaryExit)?;
+        assert_eq!(
+            (paced.verdict_name(), paced.trims(), paced.sized()),
+            ("allow", None, Some(Qty::parse("6")?))
+        );
+        let nothing = ask(
+            &parked(Some("6"))?,
+            Side::Sell,
+            "3",
+            Purpose::DiscretionaryExit,
+        )?;
+        assert_eq!(
+            (
+                nothing.verdict_name(),
+                nothing.reason_code(),
+                nothing.trims()
+            ),
+            ("deny", "sell_exceeds_available", None)
         );
         Ok(())
     }
 
-    /// DEC-410 item 2 sizes only an allowed sell: a paused agent's exit keeps its own hold, an
-    /// over-sell against the live exits alone is still denied `sell_exceeds_available` (§5.3 rule
-    /// 4), and an opening buy is never sized against a ladder's remainder.
+    /// DEC-410 item 1, two agents in one instrument, the review of #494's script: `agent-b`'s
+    /// lone ladder is parked with 4 unsold and `agent-b` is stopped, so nothing will send it. It
+    /// counts nothing, and `agent-a`'s risk exit for the whole position goes whole, trimming
+    /// nothing.
     #[test]
-    fn only_an_allowed_sell_is_sized_or_held_for_a_remainder() -> Result<(), ExecutorError> {
+    fn a_stopped_agents_parked_ladder_never_shrinks_another_agents_exit()
+    -> Result<(), ExecutorError> {
+        let mut state = parked(None)?;
+        state
+            .modes
+            .insert(AgentId("agent-b".to_owned()), Mode::Stopped);
+        let flatten = ask(&state, Side::Sell, "10", Purpose::RiskExit)?;
+        assert_eq!(
+            (flatten.verdict_name(), flatten.trims(), flatten.sized()),
+            ("allow", None, None)
+        );
+        Ok(())
+    }
+
+    /// DEC-410 sizes or trims only for an allowed sell: a paused agent's exit keeps its own hold,
+    /// an over-sell against the live exits alone is still denied `sell_exceeds_available` (§5.3
+    /// rule 4), and an opening buy is never sized or trims anything.
+    #[test]
+    fn only_an_allowed_sell_is_sized_or_trims() -> Result<(), ExecutorError> {
         let mut paused = parked(None)?;
         paused
             .modes
             .insert(AgentId("agent-a".to_owned()), Mode::Paused);
         let held = ask(&paused, Side::Sell, "8", Purpose::RiskExit)?;
         assert_eq!(
-            (held.verdict_name(), held.reason_code(), held.sized()),
+            (held.verdict_name(), held.reason_code(), held.trims()),
             ("hold", "agent_paused", None)
         );
         let over = ask(&parked(Some("8"))?, Side::Sell, "3", Purpose::RiskExit)?;
         assert_eq!(
-            (over.verdict_name(), over.reason_code(), over.sized()),
+            (over.verdict_name(), over.reason_code(), over.trims()),
             ("deny", "sell_exceeds_available", None)
         );
         let mut reconciled = parked(None)?;
@@ -620,7 +679,10 @@ mod between_rungs_tests {
         reconciled.started_at = Some(Seq(1));
         reconciled.reconciled_through = Some(Seq(2));
         let buy = ask(&reconciled, Side::Buy, "8", Purpose::Increase)?;
-        assert_eq!((buy.verdict_name(), buy.sized()), ("allow", None));
+        assert_eq!(
+            (buy.verdict_name(), buy.sized(), buy.trims()),
+            ("allow", None, None)
+        );
         Ok(())
     }
 }

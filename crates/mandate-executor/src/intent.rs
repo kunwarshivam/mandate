@@ -14,7 +14,7 @@ use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
 use crate::protection::{
     ExitPrice, alone, awaits_cancel, begin_exit, crypto_add, exit_limit, fallback, passive_exit,
-    reprotect_unpriced, rests,
+    reprotect_unpriced, rests, trim_remainders,
 };
 use crate::session::{closed_hold, extended_hours};
 use crate::state::IntentOutcome;
@@ -222,6 +222,11 @@ fn journal_decision(
     ];
     if let Some(sized) = decision.sized() {
         pairs.push(("sized_qty", text(sized.to_string())));
+    }
+    if let Some(by) = decision.trims()
+        && let (_, IntentBody::Order { instrument, .. }) = intent_of(batch, intent)?
+    {
+        trim_remainders(batch, &instrument, by)?;
     }
     pairs.append(&mut extra);
     batch.journal("GateDecided", None, pairs)

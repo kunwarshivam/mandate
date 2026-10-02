@@ -437,6 +437,7 @@ fn rung_submitted(
         floored: flag(payload, "at_floor"),
         stepping: false,
         parked: false,
+        trimmed: None,
     };
     if let Some(sequence) = state
         .exiting
@@ -965,6 +966,25 @@ fn protection_changed(
             state.watchdogged.insert(instrument.clone(), at);
         }
         "exit_unpriced" | "ladder_floor" => {}
+        "remainder_trimmed" => {
+            let intent = required_text(payload, "intent_id")?;
+            let cut = optional_qty(payload, "qty")?.ok_or_else(|| refused("qty"))?;
+            let ladders = state
+                .exiting
+                .values_mut()
+                .map(|sequence| (&sequence.intent, &mut sequence.ladder))
+                .chain(
+                    state
+                        .ladders
+                        .values_mut()
+                        .map(|lone| (&lone.intent, &mut lone.ladder)),
+                );
+            for (owner, ladder) in ladders {
+                if owner.0.0 == intent {
+                    ladder.trimmed = Some(ladder.trimmed.unwrap_or(Qty::ZERO).checked_add(cut)?);
+                }
+            }
+        }
         "unprotected_end" if flag(payload, "acknowledged") => {
             state.awaiting.remove(&instrument);
             if let Some(open) = state
@@ -988,9 +1008,13 @@ fn protection_changed(
                 let entry = ClientOrderId::parse(entry)?;
                 state.details.entry(entry).or_default().bracket_placed = true;
             }
+            let bounded = state.unprotected.iter().any(|interval| {
+                interval.instrument == instrument && interval.ended_at.is_none() && interval.alerted
+            });
             if finished
                 && let Some(sequence) = state.exiting.remove(&instrument)
                 && sequence.ladder.parked
+                && !bounded
             {
                 let lone = LoneLadder {
                     intent: sequence.intent,

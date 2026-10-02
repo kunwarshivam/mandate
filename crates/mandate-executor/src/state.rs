@@ -530,6 +530,9 @@ pub(crate) struct Ladder {
     /// The step's confirmation came while no session was open: the next rung waits for the next
     /// open, priced fresh then, and the hold was journaled (DEC-260 (18)).
     pub(crate) parked: bool,
+    /// What other sells have trimmed off the remainder the next rung would send (DEC-410): it
+    /// sends what is left after the trim, and nothing once the trim takes all of it.
+    pub(crate) trimmed: Option<Qty>,
 }
 
 /// The restriction a reconciliation places for one subject — an instrument, or external activity
