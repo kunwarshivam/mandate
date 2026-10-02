@@ -545,7 +545,8 @@ while a reducing purpose passes it.
   (`UniverseChanged`'s entry), and `crates/mandate-spec/src/context.rs` (`JournaledFact::from_record`
   with `change::classify`).
 - **Tests:** `crates/mandate-refcases/tests/risk_state.rs` (the vectors through `append`, the
-  mapping, and the classification re-derivation), `control::tests` in `control.rs`
+  mapping, and the classification re-derivation), `crates/mandate-refcases/tests/asset_id.rs` (the
+  journal's `asset_id` check and `AssetId::parse` agree over a generated corpus), `control::tests` in `control.rs`
   (`every_risk_state_draft_is_judged_as_its_vectors_say`, `a_required_risk_state_member_is_never_null`,
   `a_risk_state_record_at_another_schema_version_is_an_unknown_schema`,
   `rule_33_refuses_nothing_that_shows_no_raise`),
