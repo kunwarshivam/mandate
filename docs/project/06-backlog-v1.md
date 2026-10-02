@@ -931,16 +931,15 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   - the tests PR comes first (DEC-77), and its cases include a pinned universe (MI-20) and
     `admission: deny`.
 
-  *Registration tests PR ([DEC-414](decisions/DEC-414.md)), on
-  `agent/j3-thesis-registration-tests`:* both types catalogued and routed to §9.4, refused as
-  `unimplemented`; the re-derivation is `mandate_spec::context::check_thesis_record`, a stub, with
-  six pending tests (pinned universe, admission `deny`, asset class, revision cap, the named mandate,
-  an absent or impostor document) and four pending `mandate-journal` tests over §9.4's vectors. The
-  implementation PR (DEC-77 stage 2) registers the schema and rules 34 to 38, implements the
-  re-derivation, and deletes only the ten `#[ignore]` lines. Every reader of a thesis record (the
-  lineage fold, the writer's read-back) calls `check_thesis_record` before acting on it. It lands
-  after journal spec v0.11 ([#513](https://github.com/kunwarshivam/mandate/pull/513), DEC-414 item
-  7) and registers `instrument_id` as `Ty::AssetId`.
+  *Registration ([DEC-414](decisions/DEC-414.md)):* the tests PR merged in
+  [#510](https://github.com/kunwarshivam/mandate/pull/510); the implementation PR, on
+  `agent/j3-thesis-registration-impl`, registers the shared schema (`instrument_id` as
+  `Ty::AssetId`) and rules 34 to 38 in `mandate-journal`, implements
+  `mandate_spec::context::check_thesis_record`, removes `InvalidReason::Unimplemented`, and deletes
+  only the ten `#[ignore]` lines. It lands after journal spec v0.11
+  ([#513](https://github.com/kunwarshivam/mandate/pull/513), DEC-414 item 7). Every reader of a
+  thesis record (the lineage fold, the writer's read-back) calls `check_thesis_record` before acting
+  on it; no reader exists yet.
   *Follow-ups (#510 review round 1):*
   - Minor 1: `thesis_tests`' stored mandates are parsed, not validated, and break V-036 (the admitting
     model keeps `quant.momentum`). Make each valid with a second patched path (an `llm.` model id),
