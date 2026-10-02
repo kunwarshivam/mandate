@@ -413,7 +413,7 @@ fn fees(
         Some(recorded) => Some(recorded),
         None => {
             let before = batch.view.clone();
-            let own = account_fields(&snapshot.account)
+            let own = fee_step_snapshot_fields(&snapshot.account)
                 .and_then(|fields| batch.journal("AccountSnapshotRecorded", None, fields));
             match own {
                 Ok(recorded) => Some(recorded),
@@ -435,21 +435,13 @@ fn fees(
 /// cash and rule 24 makes all three `null` together. Each member has §9.2's type: the statuses
 /// text, the three flags booleans, `multiplier` an integer, and the five amounts decimal text. The
 /// vectors' `snapshot_fees` draft is that payload, and §9.1's absent-member rule refuses it with
-/// a member missing, so today's reduced form (`orders::account_fields` alone) stays refused at
-/// `append` once the schema registers (DEC-261 item 7, DEC-303). The batch stamps `risk_clock`
-/// beside these members (DEC-306).
-///
-/// `fees` journals [`crate::orders::account_fields`]'s reduced form until the live pair pin
-/// `the_fee_steps_snapshot_is_never_refused_for_its_members` is corrected to this form, in the
-/// change that registers the schema (DEC-389 item 2).
+/// a member missing, so the reduced form (`orders::account_fields` alone) is refused at `append`
+/// (DEC-261 item 7, DEC-303). The batch stamps `risk_clock` beside these members (DEC-306). `fees`
+/// journals this form since the change that registered the schema (DEC-389 item 2, DEC-402).
 ///
 /// # Errors
 /// [`ExecutorError::NonCanonicalPayload`] only for a member the canonical form cannot carry, as
 /// [`crate::orders::account_fields`].
-#[allow(
-    dead_code,
-    reason = "`fees` writes this form once a tests correction moves the live pair pin to it (DEC-389 item 2, DEC-77)"
-)]
 pub(crate) fn fee_step_snapshot_fields(
     account: &BrokerAccount,
 ) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
@@ -469,7 +461,10 @@ pub(crate) fn fee_step_snapshot_fields(
 /// never a reason to skip the pause, because a pause is risk reduction no validation may deny
 /// (`AGENTS.md` rules 3 and 13, DEC-261 item 7). The one exception is a batch that can journal
 /// nothing at all, a risk clock outside §4.7's range: the pause's own draft fails the same way, so
-/// the whole input fails and nothing is sent.
+/// the whole input fails and nothing is sent. The guarantee also needs the fee step's snapshot to
+/// conform to journal spec §9.2: `Batch::journal` does not validate a draft and `append` refuses a
+/// batch whole, so a snapshot refused there would take the pause with it, which is why `fees`
+/// journals [`fee_step_snapshot_fields`] (DEC-402).
 pub(crate) fn fee_step_pause_and_alert(
     batch: &mut Batch<'_, '_>,
     recorded: Option<EventId>,
@@ -2563,14 +2558,11 @@ pub(crate) mod tests {
 
     /// The executor's own `AccountSnapshotRecorded` payloads, journaled as `mandate-journal` would
     /// be asked to: each is accepted whole. Journal spec §9.2 needs the fee step's three cash members
-    /// present as `null`, so the change that registers the schema also wires
-    /// [`super::fee_step_snapshot_fields`] into `fees`, or the snapshot of the step that pauses every
-    /// agent and alerts the owner would be refused (DEC-261 item 7, DEC-389 item 2, DEC-402,
-    /// `AGENTS.md` rules 3 and 13). Each payload is parsed before its members are compared, so the
-    /// journal's stub answers first; once registered, the fee step's reduced form is refused at
-    /// `payload.model_cash` and this fails until the writer is wired.
+    /// present as `null`, so `fees` journals [`super::fee_step_snapshot_fields`], or the snapshot of
+    /// the step that pauses every agent and alerts the owner would be refused (DEC-261 item 7,
+    /// DEC-389 item 2, DEC-402, `AGENTS.md` rules 3 and 13). Each payload is parsed before its
+    /// members are compared, so a reduced form the journal refuses fails here at its member.
     #[test]
-    #[ignore = "pending E7-10"]
     fn the_fee_steps_snapshot_is_never_refused_for_its_members() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {

@@ -25,10 +25,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)); rule 28 keeps the reason to the account
   stream, and `OwnerAcknowledged` names the requesting user and carries the independence requirement
   as it stood when the lift was requested. The reference validator's reason list
-  gains it. Rule 28's validator check, its vectors (an acknowledgment refused as `not_independent`,
-  accepted; a Stop refused as `not_independent`, refused), its seeded bug, and `mandate-journal`'s
-  schema follow in one code PR, because `mandate-journal` already parses every §9.2 vector and code
-  cannot ship with this change (ES-22).
+  gains it. `mandate-journal`'s schema and rule 28 came first, in their own code PR
+  ([#474](https://github.com/kunwarshivam/mandate/pull/474)), because it parses every §9.2 vector and
+  code cannot ship with a reference change (ES-22); then rule 28's validator check, its vectors (an
+  acknowledgment refused as `not_independent`, accepted; a Stop refused as `not_independent`,
+  refused), and its seeded bug.
 - **v0.7, amended ([DEC-302](../project/04-decision-log.md#decisions)):** §9.2's
   `AccountSnapshotRecorded` gains `risk_clock`, which the executor writes on every account-stream
   event and folds each event at; v0.7 had missed it, so a conforming snapshot could not have been

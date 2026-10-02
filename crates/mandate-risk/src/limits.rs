@@ -6,7 +6,8 @@ use mandate_num::Usd;
 use mandate_time::UtcNanos;
 
 use crate::gate::Stop;
-use crate::{AssetId, Computed, GateError, GateInput, ReasonCode, Verdict};
+use crate::spec_types::RiskLimits;
+use crate::{AssetId, Computed, GateError, GateInput, ReasonCode, RiskSnapshot, Verdict};
 
 /// Check 2's mandate items after the working universe, in `ref.py`'s `gate` order:
 /// concentration (position + working + proposed against min(usd, fraction × E)), order size,
@@ -18,12 +19,7 @@ pub(crate) fn position_order_and_cooldown(
     let instrument = &input.proposed.instrument;
     let limits = input.mandate.risk();
     let order = order_usd(input)?;
-    let cap = limits.max_position_usd.min(
-        input
-            .risk
-            .agent_equity
-            .times_fraction(limits.max_position_fraction)?,
-    );
+    let cap = position_cap(limits, input.risk)?;
     let held = input
         .agent
         .market_values
@@ -43,6 +39,15 @@ pub(crate) fn position_order_and_cooldown(
         return Ok(Some((Verdict::Deny, ReasonCode::MaxOrderSize)));
     }
     reentry_cooldown(input, computed)
+}
+
+/// Mandate §5.3's per-instrument cap, `min(max_position_usd, max_position_fraction × E)`, exact:
+/// the one cap check 2's concentration and §5.5's trim both read (DEC-399 item 3).
+pub(crate) fn position_cap(limits: &RiskLimits, risk: &RiskSnapshot) -> Result<Usd, GateError> {
+    Ok(limits.max_position_usd.min(
+        risk.agent_equity
+            .times_fraction(limits.max_position_fraction)?,
+    ))
 }
 
 /// Mandate §5.3: no opening within `reentry_cooldown_s` of "the agent's last exit fill in any
