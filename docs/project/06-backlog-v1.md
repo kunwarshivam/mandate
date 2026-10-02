@@ -2091,7 +2091,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   which the review agrees is right. Removing the guard only tightens (DEC-176). The follow-up is a
   reference PR on its own (ES-22): `ref.py`, a regenerated `mandate.yaml` and
   `fixtures/refcases/mandate.json` if any case changes, and `check_cases.py`, `fuzz.py` and
-  `mutants.py` passing. No trim case states a factor of 1 or a sub-minimum trim today.
+  `mutants.py` passing, and the same two readings removed from the harness's
+  `crates/mandate-refcases/src/mandate/order_builder.rs::trim_guards` (DEC-400), which mirrors
+  `ref.py`. A rung factor of 1 cannot be written: the schema's `open_fraction` excludes it, and
+  `scaling_rung` requires a case's factor to be a rung's. So only the dollar minimum can diverge,
+  and no trim case states a sub-minimum trim today.
 - **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
