@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value};
 use mandate_domain::{AssetClass, AssetId, AutonomyDecision, Environment};
-use mandate_time::Date;
+use mandate_time::{Date, UtcNanos};
 
 use crate::condition::Condition;
 use crate::{ParseError, SchemaDec};
@@ -527,6 +527,105 @@ pub struct Autonomy {
     /// `ask` (MI-32). `None` is no review date. Until E6-14's implementation, the parse refuses a
     /// document that sets one as unimplemented, so it fails closed rather than loading without it.
     pub review_by: Option<Date>,
+    /// The owner's standing yeses (§6.5, DEC-181): each turns one kind of `ask` into `auto`, bounded
+    /// and expiring; none when the member is absent. Until E6-13's
+    /// implementation, the parse refuses a document that holds one as unimplemented, so it fails
+    /// closed rather than loading without the rules that bound it (DEC-420).
+    pub delegations: Vec<Delegation>,
+}
+
+/// One delegation (§6.5): a bounded, expiring permission that lifts one kind of `ask` to `auto`.
+/// It never touches a limit, the gate, a `deny`, a built-in decision, or the admission ceiling
+/// (MI-26), and only the owner creates it, in a confirmed version (V-022).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Delegation {
+    /// Unique among the mandate's delegations (V-041); the id the journal records.
+    pub id: DelegationId,
+    pub lifts: Lifts,
+    /// A condition in §6.3's language, typed by V-023; the order must match it too.
+    pub when: Condition,
+    /// The largest single order it lifts (V-043).
+    pub max_order_usd: SchemaDec,
+    /// How many orders it may lift in total, 1 to 1,000.
+    pub max_orders: u32,
+    /// The total order value it may lift (V-043).
+    pub max_total_usd: SchemaDec,
+    /// The window it lifts in, `[starts_at, expires_at)`, at most 30 days (V-041). The schema's
+    /// `instant` is a pattern, not a calendar, so a text it matches that names no instant parses
+    /// (ES-22), is `None` here, and V-041 refuses it, as V-015 does a date (DEC-151, DEC-420).
+    pub starts_at: Option<UtcNanos>,
+    pub expires_at: Option<UtcNanos>,
+    /// The approval request it was chosen on, or `None` when the owner created it in settings.
+    pub source_approval_id: Option<ApprovalId>,
+}
+
+/// The `ask` a delegation answers (§6.5): the default, or the rule it names, whose `then` must be
+/// `ask` (V-041).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Lifts {
+    Default,
+    Rule(RuleId),
+}
+
+impl Lifts {
+    /// The schema's `$defs/delegation/properties/lifts`: `default`, or `rule:` and a rule id.
+    pub fn parse(text: &str) -> Result<Self, ParseError> {
+        match text.strip_prefix("rule:") {
+            None if text == "default" => Ok(Self::Default),
+            Some(id) => RuleId::parse(id)
+                .map(Self::Rule)
+                .map_err(|_| ParseError::OffPattern {
+                    path: Pointer::new("/autonomy/delegations/lifts"),
+                }),
+            None => Err(ParseError::OffPattern {
+                path: Pointer::new("/autonomy/delegations/lifts"),
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DelegationId(String);
+
+impl DelegationId {
+    /// The schema's `$defs/delegation/properties/id`: `^[a-z][a-z0-9_]{0,31}$`, the rule id's grammar.
+    pub fn parse(text: &str) -> Result<Self, ParseError> {
+        RuleId::parse(text)
+            .map(|id| Self(id.as_str().to_owned()))
+            .map_err(|_| ParseError::OffPattern {
+                path: Pointer::new("/autonomy/delegations/id"),
+            })
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// An approval request's id: the schema's `$defs/uuid`, lower-case hex in 8-4-4-4-12.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ApprovalId(String);
+
+impl ApprovalId {
+    pub fn parse(text: &str) -> Result<Self, ParseError> {
+        let groups: Vec<&str> = text.split('-').collect();
+        let shaped = groups.iter().map(|g| g.len()).eq([8, 4, 4, 4, 12])
+            && groups.iter().all(|g| {
+                g.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            });
+        if shaped {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(ParseError::OffPattern {
+                path: Pointer::new("/autonomy/delegations/source_approval_id"),
+            })
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// One autonomy rule. This is the crate's `Rule`, which is why a V-code is a
