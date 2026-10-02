@@ -685,6 +685,98 @@ fn no_trim_while_holding() {
     );
 }
 
+/// The trims of one position held at `market_value` under the confirmed rung at `factor`, with
+/// `resting` of the agent's own non-protective sells working and the instrument's minimum order
+/// size `minimum`.
+fn trims_of(
+    held: &str,
+    market_value: &str,
+    factor: &str,
+    resting: &str,
+    minimum: &str,
+    crypto: bool,
+) -> Result<Vec<mandate_risk::TrimProposal>, mandate_risk::GateError> {
+    let mut s = Scenario::allowing();
+    s.mandate = mandate_with(common::two_trimming_rungs());
+    s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
+    s.risk.size_factor = common::ratio(factor);
+    s.agent.positions.insert(asset(INSTRUMENT_2), qty(held));
+    s.agent
+        .market_values
+        .insert(asset(INSTRUMENT_2), usd(market_value));
+    if resting != "0" {
+        let mut sell = open_order(s.agent.agent, INSTRUMENT_2, "0");
+        sell.side = Side::Sell;
+        sell.opening = false;
+        sell.open_qty = qty(resting);
+        s.account.working_orders.insert(ClientOrderId(77), sell);
+        s.agent.working_orders.insert(ClientOrderId(77));
+    }
+    let mut instrument = common::equity_instrument(INSTRUMENT_2);
+    if crypto {
+        instrument.asset_class = AssetClass::Crypto;
+        instrument.exchange = None;
+        instrument.fractionable = true;
+    }
+    instrument.min_order_size = qty(minimum);
+    let instruments = BTreeMap::from([(asset(INSTRUMENT_2), instrument)]);
+    mandate_risk::trim_proposals(
+        s.now,
+        &s.config,
+        &s.mandate,
+        &s.risk,
+        &s.agent,
+        &s.account,
+        &instruments,
+    )
+}
+
+/// A trim that sells everything left to sell is proposed below the instrument's minimum order
+/// size, and one that leaves some unsold is still withheld (DEC-423; trading spec §5.3 rule 2's
+/// full-close exception; #504 review, M1).
+///
+/// Each row's trim is worked out here from §5.5 on the 1500 cap: the target is `factor × 1500`,
+/// the band 75, and the sell is the excess over the target at the position's own price, rounded
+/// up to the grid and capped at what is not already on sale.
+/// - 1 share at 1000, factor 0.5: the excess 250 is a quarter share, rounded up to the 1 held.
+///   At a 2-share minimum it is proposed, and the position closes.
+/// - 2 shares at 1000 each with 1 resting, factor 0.5: the excess 1250 less the 1000 on sale is a
+///   quarter share, rounded up to the 1 not on sale. It is proposed at a 2-share minimum.
+/// - 0.0002 BTC worth 120, factor 0: the whole 120 is over the zero target, so the sell is the
+///   0.0002 held, below a 0.001 minimum, and it is proposed. A 0.0001 grid, as in the review's
+///   case, is not an input the gate has yet (the backlog's "real quantity grid" row), so the full
+///   close is reached through the target instead.
+/// - 10 shares at 100, factor 0.5: the excess 250 is 3 shares of 10, not a full close, so at a
+///   4-share minimum it is still withheld.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_trim_that_sells_everything_left_is_never_withheld_for_the_minimum() {
+    let full_closes = [
+        ("1", "1000", "0.5", "0", "2", false, "1"),
+        ("2", "2000", "0.5", "1", "2", false, "1"),
+        ("0.0002", "120", "0", "0", "0.001", true, "0.0002"),
+    ];
+    for (held, value, factor, resting, minimum, crypto, sold) in full_closes {
+        let trims = trims_of(held, value, factor, resting, minimum, crypto)
+            .unwrap_or_else(|e| panic!("{held} held, {resting} resting: the trims compute: {e}"));
+        assert_eq!(
+            trims
+                .iter()
+                .map(|t| (t.instrument.clone(), t.qty, t.purpose))
+                .collect::<Vec<_>>(),
+            vec![(asset(INSTRUMENT_2), qty(sold), Purpose::RiskExit)],
+            "{held} held with {resting} resting sells the {sold} left, below the {minimum} \
+             minimum, as a full close"
+        );
+    }
+    let partial = trims_of("10", "1000", "0.5", "0", "4", false)
+        .unwrap_or_else(|e| panic!("10 held: the trims compute: {e}"));
+    assert!(
+        partial.is_empty(),
+        "a 3-share trim of 10 is not a full close, so a 4-share minimum still withholds it"
+    );
+}
+
 /// Only `scale_action: trim_to_target` trims; `limit_buys` never proposes a sell.
 ///
 /// Mandate §5.5 gives the trim to `trim_to_target` alone — under `limit_buys` the size factor only
