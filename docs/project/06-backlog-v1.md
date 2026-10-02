@@ -2295,7 +2295,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   one increment short, and 3 of 10);
   (2) the gate change;
   (3) §5.5 gains the exemption, `ref.py` takes it, a new case states the full-close trim, and the
-  harness's `trim_guards` moves with them, as #498 did.
+  harness's `trim_guards` moves with them, as #498 did. The same PR corrects DEC-399 item 8's
+  known-defect clause, which says the #504 case's trim is the whole position: on the 1e-9 grid it
+  is not (the coordinator's ruling on #520).
+  *Done:* (1) in #520; (2) in the implementation PR, which replaces the stub with the condition
+  itself, so the exemption cannot fail.
   The #504 review's own case (0.0002 BTC, a cap of 100, factor 0.5, a 0.001 minimum) is **not**
   released by this: on the gate's 1e-9 grid its trim is 0.000116667, not the whole position. The
   "real quantity grid" row below closes it.
