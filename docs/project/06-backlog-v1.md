@@ -1167,9 +1167,12 @@ From E10-1's slice-V implementation (DEC-161):
     `AccountSnapshotRecorded` until this lands.** The fee step pauses every agent and alerts the owner,
     and refusing its snapshot at `append` must never stop it (rules 3 and 13, DEC-261 item 7). E7-10's
     tests PR pins that ordering with three live tests (DEC-303 item 4). The registration PR must also
-    turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. Until then they are proven only
-    by `reference/journal/control.py`'s mutants, and `snapshot_drafts_stay_unregistered` reads none of
-    them.
+    turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. **The writer landed in #456;
+    the registration's tests PR (DEC-402) routes the snapshot to a stub and makes the three ordering
+    pins pending**: `an_account_snapshot_is_closed_and_checked_by_rule_24` turns those drafts on,
+    `account_snapshot_recorded_refuses_an_unlisted_member` closes the schema, and
+    `the_fee_steps_snapshot_is_never_refused_for_its_members` lands the registration and the fee
+    step's writer together.
     The writer's pending pins are #441's (DEC-305 to DEC-307): the fee-step snapshot's payload
     member for member and type for type, the `risk_clock` stamp, the pause and alert whether or not
     the snapshot recorded, `IntentReceived` as §9.1's nine members, and `OrderSubmitted`'s
@@ -1205,9 +1208,17 @@ From E10-1's slice-V implementation (DEC-161):
     each of the four reasons, and the `refused_stop` vector's own form, read from the committed
     vectors. The in-module late-Stop pin goes pending with them (the coordinator-named test
     change), and `refused_only` reads the judged second in either form, so the implementation PR
-    deletes `#[ignore]` lines only (DEC-309 item 3). Until the writer's fix lands the registered
-    schema refuses the integer-form drafts at `append`, as DEC-261 item 7 has standing
-    (rule 3). This follow-up row needs its own story id: its pins and stub cite E8-3, which
+    deletes `#[ignore]` lines only (DEC-309 item 3). Tests merged (#462) and the implementation
+    merged (#469): `refused` stamps through `payload::stamp`, and the refusal drafts commit at
+    `append`; the follow-up on `agent/m7-refused-timestamp-followup` pins the stamp's §4.7 range
+    and corrects the stale doc comments. Still open from the two reviews:
+    - DEC-308 item 2 and DEC-310 item 1 name the integer form's refusal at `append` as
+      `non_canonical`; the vectors and `mandate_journal::Draft::parse` give `schema` at
+      `payload.effective_at` (the #469 review, minor 2). The code's doc comment is corrected; the
+      decisions need a note in a docs change.
+    - #462's description says three live tests read `refused_only`; there are four (its round-2
+      review, minor 7). Description wording on a merged PR, recorded here only.
+    This follow-up row needs its own story id: its pins and stub cite E8-3, which
     `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
     (HLD §8), as a new `schema_version` with its own vectors.
