@@ -37,12 +37,13 @@ use mandate_num::{Price, Qty};
 use mandate_runtime::{
     ActorKind, AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment,
     DryRunVerdict, Effect, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest,
-    FoldedEvent, GateDryRun, IdGen, Input, MandateView, Mode, OrderPlan, Ports, Proposal, Purpose,
-    RiskClock, RuntimeState, Seq, SignalInputs, WorkspaceId, WriterEpoch, fold, handle,
+    FoldedEvent, GateDryRun, IdGen, Input, IntentBody, MandateView, Mode, OrderPlan, Ports,
+    Proposal, Purpose, RiskClock, RuntimeState, Seq, SignalInputs, WorkspaceId, WriterEpoch, fold,
+    handle,
 };
 use mandate_time::NewYorkTime;
 
-use crate::mandate::{instant, not_implemented, unknown_members};
+use crate::mandate::{instant, unknown_members};
 use crate::{Json, at, ensure, list_at, str_at, to_canon, u64_at};
 
 const AGENT_STREAM: &str = "agent:w:a";
@@ -111,6 +112,19 @@ const NOW_KEYS: &[&str] = &[
     "dry_run",
     "mark",
 ];
+const REVALIDATED: &[(&str, &str, As)] = &[
+    ("result", "result", As::Canonical),
+    ("reason", "reason", As::Canonical),
+];
+const INTENDED: &[(&str, &str, As)] = &[
+    ("instrument", "instrument", As::Canonical),
+    ("side", "side", As::Canonical),
+    ("qty", "qty", As::Canonical),
+    ("limit_price", "limit", As::Canonical),
+    ("purpose", "purpose", As::Canonical),
+];
+const TIMED_OUT: &[(&str, &str, As)] = &[("on_timeout", "on_timeout", As::Canonical)];
+const CANCELED: &[(&str, &str, As)] = &[("reason", "reason", As::Canonical)];
 const DELIVERED: &[(&str, &str, As)] = &[
     ("channel", "channel", As::Canonical),
     ("status", "status", As::Canonical),
@@ -179,14 +193,25 @@ impl FlattenPlanner for Flatten {
     }
 }
 
-/// What one script step did: the drafts the case states, after the records it does not, the folded
-/// clock after it, and the ask it made, by the case's approval name and bound order.
+/// What one script step did: the drafts the case states, after the records it does not, every
+/// effect, the folded clock after it, the ask it made by the case's approval name and bound order,
+/// and the `now` its responses were judged against.
 struct Ran {
     drafts: Vec<EventDraft>,
+    effects: Vec<Effect>,
     clock: i64,
     asked: Option<(String, Json)>,
+    now: Option<Json>,
     /// The `DecisionMade` an ask set aside, which its request names as its cause.
     decision: Option<EventId>,
+}
+
+/// An approval the runtime asked for, by the case's name: the request's `event_id`, the mandate
+/// version the runtime bound, and the case's bound order.
+struct Asked {
+    id: String,
+    version: String,
+    bound: Json,
 }
 
 /// The shell around one runtime, and the names bound so far.
@@ -198,6 +223,9 @@ struct Shell {
     classified: Classified,
     verdict: DryRunVerdict,
     control_seq: u64,
+    /// The mandate's author, who commands a pause, a Stop or a kill switch.
+    author: String,
+    asked: BTreeMap<String, Asked>,
     /// The last folded mark of each instrument, in its canonical text.
     marks: BTreeMap<String, String>,
     /// The instrument of the last ask, which `now` reads.
@@ -277,6 +305,7 @@ impl Shell {
     /// A started runtime: a clean reconciliation folded at `start`, then `Input::Started`, which
     /// must journal nothing.
     fn started(approval: ApprovalSettings, start: i64) -> Result<Self, String> {
+        let author = approval.author.clone();
         let mut shell = Self {
             state: RuntimeState::new(Deployment {
                 agent: AgentId("a".to_owned()),
@@ -297,6 +326,8 @@ impl Shell {
             },
             verdict: DryRunVerdict::Allow,
             control_seq: 0,
+            author,
+            asked: BTreeMap::new(),
             marks: BTreeMap::new(),
             instrument: None,
             approval_ids: BTreeMap::new(),
@@ -320,41 +351,144 @@ impl Shell {
 
     fn run(&mut self, step: &Json) -> Result<Ran, String> {
         let kind = str_at(step, "kind")?;
-        let (drafts, asked, decision) = match kind {
-            "ask" => {
-                unknown_members(step, &["kind", "approval", "bound"])
-                    .map_err(|unknown| format!("`ask` members not interpreted: {unknown}"))?;
-                let bound = at(step, "bound")?;
-                let asked = (str_at(step, "approval")?.to_owned(), bound.clone());
-                let mut drafts = journaled(self.ask(bound)?);
-                let decision = drafts
-                    .first()
-                    .filter(|d| d.event_type == "DecisionMade")
-                    .map(|d| d.event_id.clone());
-                if decision.is_some() {
-                    drafts.remove(0);
-                }
-                (drafts, Some(asked), decision)
-            }
-            "response" => {
-                unknown_members(step, &["kind", "response", "now"])
-                    .map_err(|unknown| format!("`response` members not interpreted: {unknown}"))?;
-                self.apply_now(at(step, "now")?)?;
-                (journaled(self.respond(at(step, "response")?)?), None, None)
-            }
-            "tick" | "fold" | "cancel" | "batch" => {
-                return Err(not_implemented(&format!(
-                    "the `{kind}` step, DEC-317's slice 3,"
-                )));
-            }
+        let known: &[&str] = match kind {
+            "ask" => &["kind", "approval", "bound"],
+            "response" => &["kind", "response", "now"],
+            "tick" => &["kind", "at"],
+            "fold" => &["kind", "event"],
+            "cancel" => &["kind", "reason"],
+            "batch" => &["kind", "reason", "now", "responses"],
             other => return Err(format!("`{other}` is not a lifecycle step")),
         };
-        Ok(Ran {
-            drafts,
-            clock: self.clock()?,
-            asked,
-            decision,
-        })
+        unknown_members(step, known)
+            .map_err(|unknown| format!("`{kind}` members not interpreted: {unknown}"))?;
+        let mut ran = Ran {
+            drafts: Vec::new(),
+            effects: Vec::new(),
+            clock: 0,
+            asked: None,
+            now: step.get("now").cloned(),
+            decision: None,
+        };
+        let records: &[(&str, &str)] = match kind {
+            "ask" => {
+                let bound = at(step, "bound")?;
+                ran.effects = self.ask(bound)?;
+                ran.asked = Some((str_at(step, "approval")?.to_owned(), bound.clone()));
+                &[("DecisionMade", "")]
+            }
+            "response" => {
+                self.apply_now(at(step, "now")?)?;
+                ran.effects = self.respond(at(step, "response")?)?;
+                &[]
+            }
+            "tick" => {
+                let at = second(at(step, "at")?, "at")?;
+                ran.effects = self.step(Input::Tick(RiskClock::from_secs(at)), None)?;
+                &[]
+            }
+            "fold" => {
+                self.fold_mark(at(step, "event")?)?;
+                &[]
+            }
+            "cancel" => {
+                let reason = str_at(step, "reason")?;
+                ran.effects = self.cancel(reason)?;
+                cause_records(reason)
+            }
+            _ => {
+                let reason = str_at(step, "reason")?;
+                ensure(reason == "mode_tightened", || {
+                    format!(
+                        "a `{reason}` cancellation is applied by its own input's step, never batched with a response"
+                    )
+                })?;
+                self.apply_now(at(step, "now")?)?;
+                ensure(self.state.effective_mode() < Mode::ExitsOnly, || {
+                    "an exits-only restriction tightens nothing in a mode already as strict"
+                        .to_owned()
+                })?;
+                let clock = self.clock()?;
+                self.account("AgentModeApplied", vec![("to", text("exits_only"))], clock)?;
+                for response in list_at(step, "responses")? {
+                    ran.effects.extend(self.respond(response)?);
+                }
+                cause_records(reason)
+            }
+        };
+        ran.drafts = ran
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) => Some(draft.clone()),
+                _ => None,
+            })
+            .collect();
+        ran.decision = strip(&mut ran.drafts, records)?
+            .into_iter()
+            .find(|d| d.event_type == "DecisionMade")
+            .map(|d| d.event_id);
+        ran.clock = self.clock()?;
+        Ok(ran)
+    }
+
+    /// `fold`: a `MarkUpdated` of the asked instrument at its unchanged price, carrying the event's
+    /// clock as `risk_clock`, handed to nothing (DEC-280 item 2).
+    fn fold_mark(&mut self, event: &Json) -> Result<(), String> {
+        unknown_members(event, &["type", "clock"])
+            .map_err(|unknown| format!("`event` members not interpreted: {unknown}"))?;
+        let event_type = str_at(event, "type")?;
+        ensure(event_type == "MarkUpdated", || {
+            format!("a `fold` of `{event_type}` is not one the shell knows")
+        })?;
+        let instrument = self.instrument.clone().unwrap_or_default();
+        let price = self
+            .marks
+            .get(&instrument)
+            .cloned()
+            .ok_or_else(|| "a `fold` of a mark before any mark was folded".to_owned())?;
+        self.mark(&instrument, &price, second(at(event, "clock")?, "clock")?)
+    }
+
+    /// `cancel`: the input that cancels for `reason`, folded and handed in. The owner's commands
+    /// carry fresh `cli_confirm` evidence, so a Stop is refused only where `cli_confirm` is
+    /// (DEC-155 item 4).
+    fn cancel(&mut self, reason: &str) -> Result<Vec<Effect>, String> {
+        let clock = self.clock()?;
+        let event = match reason {
+            "version_applied" => self.account("MandateVersionApplied", Vec::new(), clock)?,
+            "mode_tightened" => {
+                self.account("AgentModeApplied", vec![("to", text("exits_only"))], clock)?
+            }
+            "owner_pause" => self.command("pause", clock)?,
+            "owner_stop" => self.command("stop", clock)?,
+            "kill_switch" => self.command("kill_switch", clock)?,
+            other => return Err(format!("`{other}` is not a cancellation reason")),
+        };
+        self.step(Input::Journal(event), None)
+    }
+
+    /// The owner's agent-scoped command, with fresh `cli_confirm` evidence, folded on the control
+    /// stream.
+    fn command(&mut self, command: &str, clock: i64) -> Result<FoldedEvent, String> {
+        let evidence = object(vec![
+            (
+                "assertion_id",
+                text(&format!("cancel-{}", self.control_seq)),
+            ),
+            ("authenticated_at", seconds(clock)?),
+            ("method", text("cli_confirm")),
+        ])?;
+        let payload = object(vec![
+            ("agent", text("a")),
+            ("command", text(command)),
+            ("scope", text("agent")),
+            ("subject", text("a")),
+            ("submitted_at", seconds(clock)?),
+            ("step_up", evidence),
+            ("user", text(&self.author)),
+        ])?;
+        self.control("OwnerCommandIssued", payload, ActorKind::User)
     }
 
     /// One `handle`, every draft folded back as the agent stream's next event.
@@ -398,7 +532,7 @@ impl Shell {
         event_type: &str,
         mut members: Vec<(&str, Value)>,
         risk_clock: i64,
-    ) -> Result<(), String> {
+    ) -> Result<FoldedEvent, String> {
         members.push(("risk_clock", seconds(risk_clock)?));
         self.account_seq = self.account_seq.saturating_add(1);
         let event = FoldedEvent {
@@ -410,7 +544,8 @@ impl Shell {
             actor: ActorKind::System,
             payload: object(members)?,
         };
-        fold(&mut self.state, &event).map_err(|e| format!("folding {event_type}: {e}"))
+        fold(&mut self.state, &event).map_err(|e| format!("folding {event_type}: {e}"))?;
+        Ok(event)
     }
 
     fn mark(&mut self, instrument: &str, price: &str, risk_clock: i64) -> Result<(), String> {
@@ -485,14 +620,9 @@ impl Shell {
     /// Each expected draft against the runtime's, in order.
     fn compare(&mut self, ran: &Ran, expected: &[Json]) -> Result<(), String> {
         let types: Vec<&str> = ran.drafts.iter().map(|d| d.event_type.as_str()).collect();
-        let owed = if types.contains(&"ApprovalRevalidated") {
-            "; re-validation is DEC-317's slice 3"
-        } else {
-            ""
-        };
         ensure(ran.drafts.len() == expected.len(), || {
             format!(
-                "{} drafts expected, the runtime wrote {types:?}{owed}",
+                "{} drafts expected, the runtime wrote {types:?}",
                 expected.len()
             )
         })?;
@@ -503,6 +633,7 @@ impl Shell {
                 faults.push(format!("draft {number} ({}): {fault}", draft.event_type));
             }
         }
+        faults.extend(handoffs(&ran.effects));
         ensure(faults.is_empty(), || faults.join("; "))
     }
 
@@ -529,11 +660,13 @@ impl Shell {
                 &["approval", "source"],
                 vec![("role", Some(text("approver")))],
             ),
-            "ApprovalRevalidated" | "IntentProposed" | "ApprovalTimedOut" | "ApprovalCanceled" => {
-                return vec![not_implemented(&format!(
-                    "the `{event_type}` map, DEC-317's slice 3,"
-                ))];
-            }
+            "ApprovalRevalidated" => match self.revalidated_values(draft, ran) {
+                Ok(values) => (REVALIDATED, &["approval"], values),
+                Err(e) => return vec![e],
+            },
+            "IntentProposed" => (INTENDED, &["approval", "mandate_version"], Vec::new()),
+            "ApprovalTimedOut" => (TIMED_OUT, &["approval"], Vec::new()),
+            "ApprovalCanceled" => (CANCELED, &["approval"], Vec::new()),
             other => return vec![format!("`{other}` is not a draft type the map knows")],
         };
         let mut faults = Vec::new();
@@ -574,8 +707,14 @@ impl Shell {
         faults.extend(match event_type {
             "ApprovalRequested" => self.requested(want, draft, ran),
             "ApprovalResponded" => self.responded(want, draft),
-            _ => self.delivered(want, draft),
+            "IntentProposed" => self.intended(want, draft, ran),
+            _ => self.names_approval(want, draft),
         });
+        let cause = draft.causation_id.as_ref().map(|cause| cause.0.as_str());
+        let approval = draft.payload.get("approval").and_then(Value::as_str);
+        if event_type == "ApprovalDelivered" && cause != approval {
+            faults.push(format!("its cause is {cause:?}, not its request"));
+        }
         for key in draft.payload.as_object().into_iter().flat_map(|o| o.keys()) {
             if !written.contains(key.as_str()) {
                 faults.push(format!(
@@ -633,17 +772,92 @@ impl Shell {
                 faults.push(format!("bound `{case}`: {e}"));
             }
         }
+        let version = draft.payload.get("mandate_version").and_then(Value::as_str);
+        let asked = Asked {
+            id: draft.event_id.0.clone(),
+            version: version.unwrap_or_default().to_owned(),
+            bound: bound.clone(),
+        };
+        self.asked.insert(approval.clone(), asked);
         faults
     }
 
-    /// An `ApprovalDelivered`: its approval, which is also its cause.
-    fn delivered(&self, want: &Json, draft: &EventDraft) -> Vec<String> {
-        let mut faults = self.names_approval(want, draft);
-        let cause = draft.causation_id.as_ref().map(|cause| cause.0.as_str());
-        if cause != draft.payload.get("approval").and_then(Value::as_str) {
-            faults.push(format!("its cause is {cause:?}, not its request"));
+    /// An `IntentProposed`: caused by this step's `ApprovalRevalidated` of the case's approval, whose
+    /// request bound the mandate version the case states. Journal spec §9.1's closed
+    /// `IntentProposed` carries neither, so both are read through its cause.
+    fn intended(&self, want: &Json, draft: &EventDraft, ran: &Ran) -> Vec<String> {
+        let cause = ran
+            .drafts
+            .iter()
+            .find(|d| Some(&d.event_id) == draft.causation_id.as_ref());
+        let Some(revalidation) = cause.filter(|d| d.event_type == "ApprovalRevalidated") else {
+            return vec![format!(
+                "its cause is no re-validation of this step: {cause:?}"
+            )];
+        };
+        let mut faults = self.names_approval(want, revalidation);
+        let named = want
+            .get("approval")
+            .and_then(Json::as_str)
+            .unwrap_or_default();
+        let version = self.asked.get(named).map(|asked| asked.version.as_str());
+        if version.is_none() || want.get("mandate_version").and_then(Json::as_str) != version {
+            faults.push(format!(
+                "`mandate_version`: the approval's request bound {version:?}"
+            ));
         }
         faults
+    }
+
+    /// What an `ApprovalRevalidated` records it compared (journal spec §9): the bound order's version,
+    /// trigger and reference mark, `now`'s version, mode, restriction, trigger, dry run and mark, and
+    /// the asset class's drift band (§6.4: 100 bp for `us_equity`, 200 bp for `crypto`). A trigger the
+    /// classifier does not name is recorded as `""`.
+    fn revalidated_values(
+        &self,
+        draft: &EventDraft,
+        ran: &Ran,
+    ) -> Result<Vec<(&'static str, Option<Value>)>, String> {
+        let approval = draft.payload.get("approval").and_then(Value::as_str);
+        let bound = &self
+            .asked
+            .values()
+            .find(|asked| Some(asked.id.as_str()) == approval)
+            .ok_or_else(|| format!("re-validation of {approval:?}, which no ask requested"))?
+            .bound;
+        let now = ran
+            .now
+            .as_ref()
+            .ok_or_else(|| "a re-validation outside a response".to_owned())?;
+        let canon = |value: &Json, path: &str| at(value, path).and_then(to_canon).map(Some);
+        let label = match at(now, "classification.by")? {
+            Json::Null => text(""),
+            by => to_canon(by)?,
+        };
+        let m_req = match at(bound, "reference_mark")? {
+            Json::Null => Value::Null,
+            mark => to_canon(at(mark, "price")?)?,
+        };
+        let band = match str_at(bound, "asset_class")? {
+            "crypto" => 200,
+            _ => 100,
+        };
+        Ok(vec![
+            ("mandate_version_bound", canon(bound, "mandate_version")?),
+            ("mandate_version_now", canon(now, "mandate_version")?),
+            ("mode", canon(now, "mode")?),
+            (
+                "instrument_restricted",
+                canon(now, "instrument_restricted")?,
+            ),
+            ("decided_by_bound", canon(bound, "decided_by")?),
+            ("decided_by_now", Some(label)),
+            ("dry_run", canon(now, "dry_run.verdict")?),
+            ("dry_run_reason", canon(now, "dry_run.reason")?),
+            ("m_req", Some(m_req)),
+            ("m_now", canon(now, "mark")?),
+            ("band_bp", Some(seconds(band)?)),
+        ])
     }
 
     /// The draft's `approval` is the runtime's id for the case's name, or the name as written when
@@ -695,12 +909,9 @@ impl Shell {
         Ok(event)
     }
 
-    /// `now`: the view, the classification and the dry run as stated, and the mode folded where it
-    /// differs from the runtime's, which must then read as stated. The mode reaches a response's own
-    /// step, which cancels first in a mode exits-only or stricter. The version, the restriction, the
-    /// universe, the classification and the dry run are re-validation's inputs, and the mark is
-    /// read here and folded by DEC-317's slice 3: no step this slice interprets consults them, so
-    /// slice 3's re-validation is where they become checkable.
+    /// `now`: the view, the classification and the dry run as stated, the mark folded as the
+    /// account stream's latest `MarkUpdated`, and the mode folded where it differs from the
+    /// runtime's, which must then read as stated.
     fn apply_now(&mut self, now: &Json) -> Result<(), String> {
         unknown_members(now, NOW_KEYS)
             .map_err(|unknown| format!("`now` members not interpreted: {unknown}"))?;
@@ -750,11 +961,12 @@ impl Shell {
             }
         };
         let clock = self.clock()?;
-        let mark = optional_text(now, "mark")?;
-        ensure(
-            mark.is_some() || !self.marks.contains_key(&instrument),
-            || "`now` has no mark, after a mark was folded".to_owned(),
-        )?;
+        match optional_text(now, "mark")? {
+            None => ensure(!self.marks.contains_key(&instrument), || {
+                "`now` has no mark, after a mark was folded".to_owned()
+            })?,
+            Some(price) => self.mark(&instrument, &price, clock)?,
+        }
         let mode = str_at(now, "mode")?;
         let wanted = match mode {
             "normal" => Mode::Normal,
@@ -821,15 +1033,84 @@ impl Shell {
     }
 }
 
-/// The drafts among a step's effects, in order.
-fn journaled(effects: Vec<Effect>) -> Vec<EventDraft> {
-    effects
-        .into_iter()
-        .filter_map(|effect| match effect {
-            Effect::Journal(draft) => Some(draft),
-            _ => None,
-        })
-        .collect()
+/// The records a cancellation writes before its `ApprovalCanceled`, which no script states: the
+/// mode it applied, and for a kill switch the owner's instruction and the switch itself.
+fn cause_records(reason: &str) -> &'static [(&'static str, &'static str)] {
+    match reason {
+        "mode_tightened" => &[("AgentModeChanged", "restriction_changed")],
+        "owner_pause" => &[("AgentModeChanged", "owner_pause")],
+        "owner_stop" => &[("AgentModeChanged", "owner_stop")],
+        "kill_switch" => &[
+            ("AgentModeChanged", "kill_switch"),
+            ("OwnerExitRequested", ""),
+            ("KillSwitchActivated", ""),
+        ],
+        _ => &[],
+    }
+}
+
+/// Sets aside the step's first drafts as `records` names them, by type and, where given, reason,
+/// and returns them.
+fn strip(
+    drafts: &mut Vec<EventDraft>,
+    records: &[(&str, &str)],
+) -> Result<Vec<EventDraft>, String> {
+    let mut removed = Vec::new();
+    for (event_type, reason) in records {
+        let Some(first) = drafts.first() else {
+            return Ok(removed);
+        };
+        let fits = first.event_type == *event_type
+            && (reason.is_empty() || first.payload.get("reason") == Some(&text(reason)));
+        ensure(fits, || {
+            format!(
+                "the step's records begin {} {:?}, not the {event_type} the map sets aside",
+                first.event_type, first.payload
+            )
+        })?;
+        removed.push(drafts.remove(0));
+    }
+    Ok(removed)
+}
+
+/// Every handoff follows the draft that records it in the same list: an order its `IntentProposed`,
+/// a flatten its `KillSwitchActivated` or `OwnerExitRequested`; and every `IntentProposed` is handed
+/// exactly once (`AGENTS.md` rule 5).
+fn handoffs(effects: &[Effect]) -> Vec<String> {
+    let mut faults = Vec::new();
+    let mut recorded: BTreeMap<&EventId, &str> = BTreeMap::new();
+    let mut handed: BTreeMap<&EventId, usize> = BTreeMap::new();
+    for effect in effects {
+        match effect {
+            Effect::Journal(draft) => {
+                recorded.insert(&draft.event_id, &draft.event_type);
+            }
+            Effect::Intent(handoff) => {
+                let by = recorded.get(&handoff.intent_id).copied();
+                let fits = match &handoff.body {
+                    IntentBody::Order { .. } => by == Some("IntentProposed"),
+                    IntentBody::Flatten(_) => {
+                        matches!(by, Some("KillSwitchActivated" | "OwnerExitRequested"))
+                    }
+                };
+                if !fits {
+                    faults.push(format!(
+                        "a handoff of {:?} follows no record of it",
+                        handoff.intent_id
+                    ));
+                }
+                let count = handed.entry(&handoff.intent_id).or_default();
+                *count = count.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    for (id, event_type) in &recorded {
+        if *event_type == "IntentProposed" && handed.get(id).copied() != Some(1) {
+            faults.push(format!("the intent {id:?} is not handed exactly once"));
+        }
+    }
+    faults
 }
 
 /// One case member against the runtime's, under `how`.
