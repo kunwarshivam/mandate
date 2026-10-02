@@ -7464,7 +7464,7 @@
    },
    {
     "name": "admitted_instrument_not_an_id",
-    "clause": "§9.1 id",
+    "clause": "§9.3 asset_id",
     "base_draft": "universe_admitted",
     "changes": [
      {
@@ -7556,6 +7556,156 @@
      "outcome": "Invalid",
      "reason": "non_canonical",
      "path": "payload.lineage_id"
+    }
+   },
+   {
+    "name": "admitted_instrument_an_id_not_an_asset_id",
+    "clause": "§9.3 asset_id: an id that is not the uuid form (#497 round 1, m3)",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "BTCUSD"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "admitted_instrument_not_a_string",
+    "clause": "§9.3 asset_id: not a string (#509 round 1, m2)",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "admitted_instrument_with_a_trailing_newline",
+    "clause": "§9.3 asset_id: the whole string, so a trailing newline is refused (#511 round 1)",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "7b4a1c2e-2222-4a2b-9c3d-000000000002\n"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "admitted_instrument_in_capitals",
+    "clause": "§9.3 asset_id: lowercase only, so one asset has one spelling",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "7B4A1C2E-2222-4A2B-9C3D-000000000002"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "order_29_before_30",
+    "clause": "rules 29 then 30: a risk-increasing applied record without step-up and with a reason",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": null
+     },
+     {
+      "path": "payload.reason",
+      "value": "would_trigger_limit"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.reason"
+      }
+     ]
+    }
+   },
+   {
+    "name": "order_30_before_33",
+    "clause": "rules 30 then 33: a rejected raise labelled neutral that also carries an allocation change",
+    "base_draft": "version_rejected",
+    "changes": [
+     {
+      "path": "payload.classification",
+      "value": "neutral"
+     },
+     {
+      "path": "payload.allocation_change",
+      "value": "2500"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.allocation_change",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.classification"
+      }
+     ]
+    }
+   },
+   {
+    "name": "order_31_before_32",
+    "clause": "rules 31 then 32: a thesis admission that removes and names no thesis",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.change",
+      "value": "removed"
+     },
+     {
+      "path": "payload.thesis_id",
+      "value": null
+     },
+     {
+      "path": "payload.lineage_id",
+      "value": null
+     },
+     {
+      "path": "payload.universe_size_after",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.thesis_id"
+      }
+     ]
     }
    },
    {

@@ -15,7 +15,7 @@ from decimal import Decimal, InvalidOperation
 
 # --------------------------------------------------------------------------- spec §4: canonical form
 
-KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}\Z")
 SHORT_ESCAPES = {'"': '\\"', "\\": "\\\\", "\b": "\\b", "\f": "\\f", "\n": "\\n", "\r": "\\r", "\t": "\\t"}
 MAX_INT = 2**53 - 1
 
@@ -68,8 +68,8 @@ def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-DECIMAL_INPUT = re.compile(r"^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$")
-DECIMAL_CANONICAL = re.compile(r"^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$")
+DECIMAL_INPUT = re.compile(r"^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?\Z")
+DECIMAL_CANONICAL = re.compile(r"^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?\Z")
 DECIMAL_BOUND = Decimal("7.9e28")
 
 
@@ -94,7 +94,7 @@ def normalize_decimal(text: str) -> str | None:
     return plain
 
 
-TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{9}Z$")
+TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{9}Z\Z")
 
 
 def is_timestamp(text: str) -> bool:
@@ -116,9 +116,9 @@ def epoch_seconds(text: str) -> int:
     return calendar.timegm(parse_instant(text)[0].timetuple())
 
 
-IDENT = re.compile(r"^[A-Za-z0-9_-]+$")
+IDENT = re.compile(r"^[A-Za-z0-9_-]+\Z")
 ULID_ALPHABET = set("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
-DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
 
 
 def is_ulid(text: str) -> bool:

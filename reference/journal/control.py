@@ -18,6 +18,7 @@ streams that write it. This module is their reference implementation, called by 
 import calendar
 import copy
 import functools
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -76,6 +77,8 @@ SPEC = "docs/specs/journal.md v0.7 §9.2 (DEC-261)"
 DATE = T("date")
 RISK_CLOCK = T("risk_clock")
 POINTER = T("pointer")
+ASSET_ID = T("asset_id")
+ASSET_ID_FORM = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
 REFUSED_COMMANDS = {"agent": ("resume", "stop"), "acct": ("acknowledge",)}
@@ -199,7 +202,7 @@ SCHEMAS[("acct", "MandateVersionApplied")] = rec(
 )
 SCHEMAS[("acct", "UniverseChanged")] = rec(
     ("agent_id", IDENT_T),
-    ("instrument", IDENT_T),
+    ("instrument", ASSET_ID),
     ("change", one_of("admitted", "removed")),
     ("reason", one_of(*UNIVERSE_REASONS)),
     ("thesis_id", opt(IDENT_T)),
@@ -326,11 +329,17 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
         if not ok and "types.risk_clock" not in skip:
             return [Violation("types", "non_canonical", path)]
         return []
-    if ty.kind in ("pointer", "date"):
+    if ty.kind in ("pointer", "date", "asset_id"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
         if ty.kind == "pointer":
             ok = is_pointer(value)
+        elif ty.kind == "asset_id":
+            ok = bool(ASSET_ID_FORM.match(value)) or (
+                "types.asset_id_trailing_newline" in skip and bool(ASSET_ID_FORM.match(value.removesuffix("\n")))
+            ) or (
+                "types.asset_id_case" in skip and bool(ASSET_ID_FORM.match(value.lower()))
+            ) or ("types.asset_id_ident" in skip and bool(IDENT_RE.match(value)))
         elif "types.date_length" in skip:
             ok = loose_date(value)
         else:
@@ -449,33 +458,54 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("24.in_band", p["cash_in_band"] == inside, "schema", "payload.cash_in_band")
     if event_type == "MandateVersionApplied":
         increasing = p["classification"] == "risk_increasing"
-        rule("29", not increasing or p["step_up"] is not None, "schema", "payload.step_up")
         rejected = p["result"] == "rejected"
-        wrong = []
-        if (p["reason"] is not None) != rejected and "rule.30.reason" not in skip:
-            wrong.append("reason")
-        wrong += [m for m in ("allocation_change", "max_loss_from_allocation") if rejected and p[m] is not None]
-        rule("30", not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
-        applied = p["result"] == "applied"
-        implied = [
-            applied
-            and p["allocation_change"] is not None
-            and Decimal(p["allocation_change"]) > 0
-            and "rule.33.allocation" not in skip,
-            applied and p["max_loss_from_allocation"] is not None and "rule.33.floor" not in skip,
-            rejected and p["reason"] in INCREASING_REJECTIONS and "rule.33.reason" not in skip,
-        ]
-        rule("33", not any(implied) or increasing, "schema", "payload.classification")
+
+        def rule_29() -> None:
+            rule("29", not increasing or p["step_up"] is not None, "schema", "payload.step_up")
+
+        def rule_30() -> None:
+            wrong = []
+            if (p["reason"] is not None) != rejected and "rule.30.reason" not in skip:
+                wrong.append("reason")
+            wrong += [m for m in ("allocation_change", "max_loss_from_allocation") if rejected and p[m] is not None]
+            rule("30", not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
+
+        def rule_33() -> None:
+            applied = p["result"] == "applied"
+            implied = [
+                applied
+                and p["allocation_change"] is not None
+                and Decimal(p["allocation_change"]) > 0
+                and "rule.33.allocation" not in skip,
+                applied and p["max_loss_from_allocation"] is not None and "rule.33.floor" not in skip,
+                rejected and p["reason"] in INCREASING_REJECTIONS and "rule.33.reason" not in skip,
+            ]
+            rule("33", not any(implied) or increasing, "schema", "payload.classification")
+
+        order = [rule_29, rule_30, rule_33]
+        if "order.rule_30_first" in skip:
+            order = [rule_30, rule_29, rule_33]
+        if "order.rule_33_first" in skip:
+            order = [rule_29, rule_33, rule_30]
+        for check in order:
+            check()
     if event_type == "UniverseChanged":
-        allowed = ADMITTING if p["change"] == "admitted" else REMOVING
-        rule("31", p["reason"] in allowed, "schema", "payload.reason")
-        thesis, lineage = p["thesis_id"] is not None, p["lineage_id"] is not None
-        if thesis != lineage:
-            rule("32", False, "schema", "payload.thesis_id" if not thesis else "payload.lineage_id")
-        elif p["reason"] in FROM_A_THESIS:
-            rule("32.thesis", thesis, "schema", "payload.thesis_id")
-        elif p["reason"] == "version_applied" and p["change"] == "admitted":
-            rule("32.pinned", not thesis, "schema", "payload.thesis_id")
+
+        def rule_31() -> None:
+            allowed = ADMITTING if p["change"] == "admitted" else REMOVING
+            rule("31", p["reason"] in allowed, "schema", "payload.reason")
+
+        def rule_32() -> None:
+            thesis, lineage = p["thesis_id"] is not None, p["lineage_id"] is not None
+            if thesis != lineage:
+                rule("32", False, "schema", "payload.thesis_id" if not thesis else "payload.lineage_id")
+            elif p["reason"] in FROM_A_THESIS:
+                rule("32.thesis", thesis, "schema", "payload.thesis_id")
+            elif p["reason"] == "version_applied" and p["change"] == "admitted":
+                rule("32.pinned", not thesis, "schema", "payload.thesis_id")
+
+        for check in [rule_32, rule_31] if "order.rule_32_first" in skip else [rule_31, rule_32]:
+            check()
     if event_type in ("ThesisProposed", "ThesisRevised"):
         out += thesis_violations(event_type, draft, skip)
     return out
