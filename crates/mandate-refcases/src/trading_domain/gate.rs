@@ -64,7 +64,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_accounting::{
     Account, AccountType, AssetClass, Config, Execution, Input, Liquidity, Reservations, Side,
 };
-use mandate_num::{Fraction, Price, Qty, Ratio, Rounding, ShareIncrement, Usd};
+use mandate_num::{Fraction, Price, Qty, Ratio, Rounding, ShareIncrement, SignedQty, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits};
 use mandate_risk::{
     AccountFill, AccountSnapshot, AccountState, AgentId, AgentMode, AgentSnapshot, AssetId,
@@ -83,14 +83,15 @@ use super::{
 use crate::{Json, at, ensure, list_at, str_at, u64_at};
 
 /// §7.3's account fields, read from `initial.account` and from `broker_account_update` data.
-/// `crypto_status` is not among them: no case that proposes crypto states one, and the account is
-/// crypto-active as the case file's header defaults it, so reading it waits for a case that needs
-/// it (DEC-285).
+/// `crypto_status` is read through [`Gate::crypto_active()`], a stub pending E6-10 (DEC-285 item 5's
+/// backlog row): no fixture case states one, so the account is crypto-active as the case file's
+/// header defaults it until a case needs the field.
 pub(super) const STATUS_FIELDS: &[&str] = &[
     "status",
     "trading_blocked",
     "account_blocked",
     "trade_suspended_by_user",
+    "crypto_status",
 ];
 
 /// `initial.account`'s §9.2 members: the regime and the figures its `legacy_pdt` budget reads.
@@ -145,6 +146,10 @@ pub(super) struct Gate {
     exchanges: BTreeMap<String, Exchange>,
     pairs: BTreeMap<String, Pair>,
     state: AccountState,
+    /// Check 1's `crypto_active`: `true` as the case file's header defaults it, and `false` once a
+    /// `crypto_status` other than `ACTIVE` is detected, which nothing in the harness lifts
+    /// (DEC-315 item 2).
+    crypto_active: bool,
     day_trades: DayTradeFigures,
     fills: Vec<AccountFill>,
     working: Option<Order>,
@@ -221,6 +226,7 @@ impl Gate {
             exchanges,
             pairs,
             state: AccountState::Active,
+            crypto_active: true,
             day_trades: day_trade_figures(case)?,
             fills: Vec::new(),
             working: None,
@@ -246,6 +252,9 @@ impl Gate {
     }
 
     fn observe(&mut self, key: &str, value: &Json) -> Result<(), String> {
+        if key == "crypto_status" {
+            return self.crypto_active(value);
+        }
         let blocks = if key == "status" {
             value
                 .as_str()
@@ -260,6 +269,19 @@ impl Gate {
             self.state = AccountState::Blocked;
         }
         Ok(())
+    }
+
+    /// §7.3's `crypto_status` as check 1's `crypto_active` (DEC-285 item 5's backlog row, DEC-315):
+    /// `ACTIVE` leaves the gate's `crypto_active` field as it is, any other status stores `false`,
+    /// which refuses crypto openings at check 1, and a stored `false` is never set back, so a later
+    /// `ACTIVE` never lifts a detected inactivity here (lifting is E7-5's). The read is pending
+    /// E6-10: until its story lands the stub refuses every read and reports itself, which
+    /// `the_initial_crypto_status_is_check_1s_crypto_active`,
+    /// `an_account_update_s_crypto_status_is_check_1s_crypto_active` and
+    /// `a_later_active_crypto_status_never_lifts_a_detected_inactivity` pin the reading against.
+    fn crypto_active(&mut self, value: &Json) -> Result<(), String> {
+        let _ = (&self.crypto_active, value);
+        Err(GateError::Unimplemented("the account's `crypto_status`", "E6-10").to_string())
     }
 
     /// A `fill` step: one fill on the account for the day-trade fold, and on the working order's
@@ -326,7 +348,7 @@ impl Gate {
         for (id, position) in account.positions() {
             let (name, _, class, _) = instrument(instruments, id.as_str())?;
             if *class == AssetClass::UsEquity {
-                held.insert(asset(name)?, position.qty().abs());
+                held.insert(asset(name)?, held_overnight(name, position.qty())?);
             }
         }
         for fill in &self.fills {
@@ -582,7 +604,7 @@ impl Gate {
         let account_snapshot = AccountSnapshot {
             account_type: account.account_type(),
             state: self.state,
-            crypto_active: true,
+            crypto_active: self.crypto_active,
             regime,
             equity,
             prior_close_equity: self.day_trades.last_equity.unwrap_or(equity),
@@ -965,6 +987,26 @@ fn asset(text: &str) -> Result<AssetId, String> {
 /// A `mandate-risk` refusal to decide, which is never a verdict.
 fn gate_error(e: &GateError) -> String {
     format!("`mandate_risk::evaluate`: {e} ({})", e.code())
+}
+
+/// The shares an equity position holds at the start of today for §9.2's fold. A negative
+/// `SignedQty` is a short: no v1 case holds one (`AGENTS.md` rule 12), and folding its magnitude
+/// would hold it long and understate the day-trade count (#412 review, nit 3, DEC-314), so the
+/// fold refuses it. [`Gate::decide`] refuses a short snapshot before it folds, so the refusal is
+/// reached from [`Gate::check_day_trade_count`] (DEC-314 item 2). A flat position, `0`, is not a
+/// short and folds as no shares held, which `only_a_negative_quantity_is_a_short_to_the_fold` pins. The
+/// refusal is pending E6-10: until its story lands the stub reports itself, which
+/// `a_short_position_is_refused_where_a_day_trade_count_is_expected` pins the refusal against.
+fn held_overnight(name: &str, qty: SignedQty) -> Result<Qty, String> {
+    let _ = name;
+    if qty.is_negative() {
+        return Err(GateError::Unimplemented(
+            "the day-trade fold's refusal of a short position",
+            "E6-10",
+        )
+        .to_string());
+    }
+    Ok(qty.abs())
 }
 
 #[cfg(test)]
