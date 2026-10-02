@@ -550,9 +550,11 @@ pub struct Delegation {
     pub max_orders: u32,
     /// The total order value it may lift (V-043).
     pub max_total_usd: SchemaDec,
-    /// The window it lifts in, `[starts_at, expires_at)`, at most 30 days (V-041).
-    pub starts_at: UtcNanos,
-    pub expires_at: UtcNanos,
+    /// The window it lifts in, `[starts_at, expires_at)`, at most 30 days (V-041). The schema's
+    /// `instant` is a pattern, not a calendar, so a text it matches that names no instant parses
+    /// (ES-22), is `None` here, and V-041 refuses it, as V-015 does a date (DEC-151, DEC-420).
+    pub starts_at: Option<UtcNanos>,
+    pub expires_at: Option<UtcNanos>,
     /// The approval request it was chosen on, or `None` when the owner created it in settings.
     pub source_approval_id: Option<ApprovalId>,
 }

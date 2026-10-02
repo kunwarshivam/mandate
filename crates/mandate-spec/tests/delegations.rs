@@ -157,8 +157,8 @@ fn a_delegation_parses_member_by_member() {
         max_order_usd: dec("1000"),
         max_orders: 3,
         max_total_usd: dec("3000"),
-        starts_at: instant(STARTS),
-        expires_at: instant(EXPIRES),
+        starts_at: Some(instant(STARTS)),
+        expires_at: Some(instant(EXPIRES)),
         source_approval_id: None,
     };
     let second = Delegation {
@@ -171,6 +171,14 @@ fn a_delegation_parses_member_by_member() {
     assert!(
         parse(&base()).autonomy.delegations.is_empty(),
         "no member is no delegation"
+    );
+    let off_calendar = parse(&delegated(vec![delegation_with(&[(
+        "expires_at",
+        Some(s("2026-02-30T00:00:00.000000000Z")),
+    )])]));
+    assert_eq!(
+        off_calendar.autonomy.delegations[0].expires_at, None,
+        "an instant the schema's pattern matches and the calendar does not have parses as no instant"
     );
 }
 
@@ -230,13 +238,6 @@ fn every_schema_bound_of_a_delegation_is_refused_where_it_fails() {
             delegation_with(&[("starts_at", Some(s("2026-09-24T00:00:00Z")))]),
             ParseError::OffPattern {
                 path: at("starts_at"),
-            },
-        ),
-        (
-            "an instant the calendar does not have",
-            delegation_with(&[("expires_at", Some(s("2026-02-30T00:00:00.000000000Z")))]),
-            ParseError::OffPattern {
-                path: at("expires_at"),
             },
         ),
         (
@@ -329,6 +330,13 @@ fn v041_bounds_what_a_delegation_names_and_how_long_it_lasts() {
     refused(
         delegated(vec![delegation_with(&[("expires_at", Some(s(STARTS)))])]),
         "an empty window",
+    );
+    refused(
+        delegated(vec![delegation_with(&[(
+            "expires_at",
+            Some(s("2026-02-30T00:00:00.000000000Z")),
+        )])]),
+        "an expiry the calendar does not have",
     );
     allowed(
         delegated(vec![delegation_with(&[(
@@ -509,8 +517,8 @@ fn typed(id: &str, lifts: Lifts) -> Delegation {
         max_order_usd: dec("1000"),
         max_orders: 3,
         max_total_usd: dec("3000"),
-        starts_at: instant(STARTS),
-        expires_at: instant(EXPIRES),
+        starts_at: Some(instant(STARTS)),
+        expires_at: Some(instant(EXPIRES)),
         source_approval_id: None,
     }
 }
@@ -543,11 +551,11 @@ fn the_delegations_row_reduces_only_by_removing_or_narrowing() {
             ..d1.clone()
         },
         Delegation {
-            starts_at: instant("2026-09-24T00:00:00.000000001Z"),
+            starts_at: Some(instant("2026-09-24T00:00:00.000000001Z")),
             ..d1.clone()
         },
         Delegation {
-            expires_at: instant("2026-10-13T23:59:59.999999999Z"),
+            expires_at: Some(instant("2026-10-13T23:59:59.999999999Z")),
             ..d1.clone()
         },
     ];
@@ -568,11 +576,11 @@ fn the_delegations_row_reduces_only_by_removing_or_narrowing() {
             ..d1.clone()
         },
         Delegation {
-            starts_at: instant("2026-09-23T23:59:59.999999999Z"),
+            starts_at: Some(instant("2026-09-23T23:59:59.999999999Z")),
             ..d1.clone()
         },
         Delegation {
-            expires_at: instant("2026-10-14T00:00:00.000000001Z"),
+            expires_at: Some(instant("2026-10-14T00:00:00.000000001Z")),
             ..d1.clone()
         },
         Delegation {
@@ -790,14 +798,16 @@ fn verdict() -> impl Strategy<Value = AutonomyDecision> {
 
 /// MI-29, as the founder worded it (DEC-353 item 3): a version classified reducing or neutral never
 /// makes any decision less strict, with each version's delegations in force. The old version is
-/// valid under V-041: each delegation names an `ask` it has. The rules change and the delegations
-/// stand, or lose one, as the delegations row allows; rule ids are positions, so a kept id may change
-/// its condition or its verdict. The oracle is [`decide`], which knows nothing of §9.2.
+/// valid under V-041: each delegation names an `ask` it has. The new rules are drawn afresh, or are
+/// the old ones with one threshold moved or one rule removed (two draws in five each), the two edits
+/// DEC-353 is about; the
+/// delegations stand, or lose one, as the delegations row allows. Rule ids are positions, so a kept
+/// id may change its condition or its verdict. The oracle is [`decide`], which knows nothing of §9.2.
 #[test]
 #[ignore = "pending E6-13"]
 fn a_reducing_rule_change_never_decides_less_strictly_with_the_delegations_in_force() {
     let mut runner = TestRunner::new(ProptestConfig {
-        cases: 2048,
+        cases: 8192,
         max_shrink_iters: 256,
         failure_persistence: None,
         ..ProptestConfig::default()
@@ -811,21 +821,33 @@ fn a_reducing_rule_change_never_decides_less_strictly_with_the_delegations_in_fo
     let draw = (
         rules(),
         verdict(),
-        rules(),
+        (rules(), 0u8..5, 0usize..4, (1u32..10).prop_map(|n| n * 100)),
         verdict(),
         prop::collection::vec(prop::option::of(0usize..4), 1..3),
         any::<bool>(),
     );
     let outcome = runner.run(
         &draw,
-        |(old, old_default, new, new_default, lifted, drop_one)| {
+        |(old, old_default, (drawn, edit, k, threshold), new_default, lifted, drop_one)| {
+            let mut new = old.clone();
+            let at = k % old.len().max(1);
+            match edit {
+                0 => new = drawn,
+                1 | 2 if at < new.len() => new[at].1 = threshold,
+                _ if at < new.len() => {
+                    new.remove(at);
+                }
+                _ => {}
+            }
             let lifted_old: Vec<Option<usize>> = lifted
                 .iter()
+                .map(|s| s.and_then(|k| (!old.is_empty()).then(|| k % old.len())))
                 .filter(|s| match s {
                     None => old_default == Ask,
                     Some(k) => old.get(*k).is_some_and(|rule| rule.2 == Ask),
                 })
-                .copied()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
                 .collect();
             if lifted_old.is_empty() {
                 return Ok(());
@@ -901,4 +923,74 @@ fn the_mi29_oracle_lifts_only_the_ask_its_delegation_names() {
         Deny,
         "a deny default is never lifted"
     );
+}
+
+/// Live, not pending: the grammar checks and the V-codes are this PR's own, so a test that reads
+/// them passes on the stubs, and the pending gate refuses a pending test that passes (DEC-110).
+#[test]
+fn the_delegation_grammars_and_codes_are_the_schemas_and_the_specs() {
+    assert_eq!(Lifts::parse("default"), Ok(Lifts::Default));
+    assert_eq!(
+        Lifts::parse("rule:large_orders"),
+        Ok(Lifts::Rule(rule_id("large_orders")))
+    );
+    for off in [
+        "",
+        "defaults",
+        "Default",
+        "rule:",
+        "rule:Large",
+        "rules:large",
+        "large_orders",
+    ] {
+        assert_eq!(
+            Lifts::parse(off),
+            Err(ParseError::OffPattern {
+                path: Pointer::new("/autonomy/delegations/lifts"),
+            }),
+            "`{off}`"
+        );
+    }
+    assert_eq!(
+        DelegationId::parse("d1").map(|id| id.as_str().to_owned()),
+        Ok("d1".to_owned())
+    );
+    for off in ["", "D1", "1d", "d-1", &"d".repeat(33)] {
+        assert_eq!(
+            DelegationId::parse(off),
+            Err(ParseError::OffPattern {
+                path: Pointer::new("/autonomy/delegations/id"),
+            }),
+            "`{off}`"
+        );
+    }
+    assert_eq!(
+        ApprovalId::parse(APPROVAL).map(|id| id.as_str().to_owned()),
+        Ok(APPROVAL.to_owned())
+    );
+    for off in [
+        "",
+        "0B3F2C1D-5E6F-4A7B-8C9D-0E1F2A3B4C5D",
+        "0b3f2c1d5e6f4a7b8c9d0e1f2a3b4c5d",
+        "0b3f2c1d-5e6f-4a7b-8c9d-0e1f2a3b4c5",
+        "0b3f2c1d-5e6f-4a7b-8c9d-0e1f2a3b4c5dd",
+        "0b3f2c1d-5e6f-4a7b-8c9d-0e1f2a3b4c5g",
+        "0b3f2c1d-5e6f4a7b-8c9d-0e1f2a3b4c5d-",
+    ] {
+        assert_eq!(
+            ApprovalId::parse(off),
+            Err(ParseError::OffPattern {
+                path: Pointer::new("/autonomy/delegations/source_approval_id"),
+            }),
+            "`{off}`"
+        );
+    }
+    for (violation, code) in [
+        (Violation::V041, "V-041"),
+        (Violation::V042, "V-042"),
+        (Violation::V043, "V-043"),
+    ] {
+        assert_eq!(violation.code(), code);
+        assert_eq!(format!("{violation}"), code);
+    }
 }

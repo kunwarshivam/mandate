@@ -147,7 +147,7 @@ pub fn pinning_switch(old: &Mandate, new: &Mandate, paths: &[Pointer]) -> Result
 /// Two identical rule sets are [`ChangeClass::Neutral`]: nothing changed, so nothing was made
 /// stricter either (DEC-172 item 3).
 pub fn classify_autonomy(old: &Autonomy, new: &Autonomy) -> Result<ChangeClass, SpecError> {
-    if !old.delegations.is_empty() || !new.delegations.is_empty() {
+    if [old, new].iter().any(|a| !a.delegations.is_empty()) {
         return Err(SpecError::Unimplemented);
     }
     if old == new {
@@ -375,9 +375,6 @@ fn row(
         ),
         "/autonomy/review_by" => {
             maximum(o.autonomy.review_by.as_ref(), n.autonomy.review_by.as_ref())
-        }
-        "/autonomy/delegations" => {
-            classify_delegations(&o.autonomy.delegations, &n.autonomy.delegations)?
         }
         autonomy if autonomy.starts_with("/autonomy/") => {
             classify_autonomy(&o.autonomy, &n.autonomy)?
