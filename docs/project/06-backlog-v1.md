@@ -1468,6 +1468,19 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `an_unconfirmed_owner_exit_waits_for_the_session`) and the owner-confirmed extended-hours path:
   outside the regular session an owner exit sells equities through the ladder only on the
   confirmed bid, bid size and floor, and waits for the session otherwise (§5.5).
+- **E7-4's tests correction (stream K), from slice 2 ([DEC-346](decisions/DEC-346.md) item 7):**
+  `properties::every_unprotected_interval_has_a_journaled_start_and_end` asserts that no interval
+  is open when a script ends. A script that ends while the protected lead's partly filled entry is
+  still inside its interval (no completing fill, no timeout reached and confirmed) fails it on any
+  implementation. Judge an interval that is still open against what could have closed it, then
+  delete its `BEHAVIOUR_ONLY_TESTS` row.
+- **E7-4 (stream K), from slice 2 ([DEC-346](decisions/DEC-346.md), left open):** (1) a re-placement
+  after an exit covers every tranche at the prices of the latest `placed`, because the fold keeps
+  one price pair per instrument; decide this for tranches at different prices (coordinator). (2)
+  Bracket legs and the partial-fill OCO record no `created_on`, so slice 5's trading-day part must
+  date §5.4's re-placement before expiry from the placement's own record. (3) The slice that
+  reconciles protective legs maps `{entry}-p{record}` to the broker's leg ids, and it must land
+  before any shell path hands the executor a protected intent.
 - **E7-4 (stream K), from [#448](https://github.com/kunwarshivam/mandate/pull/448) round 1 (minor
   2, [DEC-349](decisions/DEC-349.md)):** a crypto stop-limit is sized net of the taker fee, the
   larger rate, because `BrokerFill` does not say maker or taker. After a maker fill the stop
