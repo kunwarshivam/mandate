@@ -6176,6 +6176,94 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// Past the calendar's last date, a weekday counts as a trading day and a weekend day does
+    /// not: 2030-04-01 is a GTC order's expiry from 2030-01-01, and from Friday 2030-03-22 six
+    /// weekdays remain, one more than the buffer, while from the Monday after five do.
+    #[test]
+    fn a_day_past_the_calendar_counts_by_the_weekend() -> Result<(), ExecutorError> {
+        let config = executor_config();
+        let created = Date::parse("2030-01-01")?;
+        assert!(!super::expiring(
+            created,
+            Date::parse("2030-03-22")?,
+            &config
+        )?);
+        assert!(super::expiring(
+            created,
+            Date::parse("2030-03-25")?,
+            &config
+        )?);
+        Ok(())
+    }
+
+    /// §5.4's re-placement before expiry (DEC-367 item 3): at a copied `TradingDayStarted` past
+    /// the GTC order's buffer day, the resting protection is cancelled by id, and the interval's
+    /// start names what it cancels, so a restart knows what the re-placement waits on.
+    #[test]
+    fn a_re_placement_before_expiry_names_what_it_cancels() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(OCO)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("10")),
+                ("tif", text("gtc")),
+                ("purpose", text("protective")),
+                ("order_class", text("oco")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(OCO)), ("state", text("accepted"))],
+        )?;
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(OCO)),
+                ("qty", text("10")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+                ("created_on", text("2026-06-01")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "TradingDayStarted",
+            vec![
+                ("date", text("2026-08-31")),
+                ("originated", Value::Bool(true)),
+            ],
+        )?;
+        let day = executor
+            .journal
+            .last()
+            .cloned()
+            .ok_or_else(|| missing("the trading day"))?;
+        let started = executor.run(Input::Journal(day), &ports)?;
+        assert_eq!(cancels(&started), vec![OCO]);
+        assert_eq!(
+            protection_drafts(&started)
+                .first()
+                .and_then(|draft| draft.payload.get("orders"))
+                .and_then(Value::as_str),
+            Some(OCO),
+            "{:?}",
+            drafted(&started)
+        );
+        Ok(())
+    }
+
     /// §5.4's bound ends every exit in the instrument, not the sequence's alone: `settle`
     /// re-places protection only once none is working, so one left working would leave the
     /// position unprotected past the bound (#286 round 2, M1′ and M2′).
