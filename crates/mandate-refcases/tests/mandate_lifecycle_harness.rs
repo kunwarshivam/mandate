@@ -748,12 +748,20 @@ fn granted_with(fixture: &Json, pointer: &str, value: Json) -> Json {
     doctored
 }
 
-/// The classification and the dry run are the runtime's ports: re-classified `auto` the grant still
-/// acts (check 10), and a gate denial skips it with the gate's reason (check 11), recorded as the
-/// re-validation's `decided_by_now` and `dry_run_reason`.
+/// The view, the classification and the dry run are the runtime's ports. An instrument out of the
+/// working universe skips the grant as restricted (check 9's universe arm; its mode arm is MC-E18's,
+/// DEC-318). Re-classified `auto`, the grant still acts (check 10). A gate denial skips it with the
+/// gate's reason (check 11). Both are recorded as the re-validation's `decided_by_now` and
+/// `dry_run_reason`.
 #[test]
 fn now_reaches_the_runtime_through_its_ports() {
     let fixture = fixture();
+    let mut outside = granted_with(&fixture, "/script/1/now/in_working_universe", json!(false));
+    let drafts = &mut case_mut(&mut outside, "MC-E01")["expect"][1]["drafts"];
+    drafts[1]["result"] = json!("skip");
+    drafts[1]["reason"] = json!("instrument_restricted");
+    drafts.as_array_mut().expect("drafts").pop();
+    run(outside, "MC-E01").unwrap_or_else(|e| panic!("outside the universe: {e}"));
     let auto = granted_with(
         &fixture,
         "/script/1/now/classification",

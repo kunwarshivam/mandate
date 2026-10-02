@@ -123,6 +123,9 @@ const INTENDED: &[(&str, &str, As)] = &[
     ("limit_price", "limit", As::Canonical),
     ("purpose", "purpose", As::Canonical),
 ];
+/// The one member the runtime writes that no draft compares: the request's `content`, checked only
+/// as its hash's preimage (DEC-317 item 5). Any other member supplied without a value fails.
+const UNCOMPARED: &[&str] = &["content"];
 const TIMED_OUT: &[(&str, &str, As)] = &[("on_timeout", "on_timeout", As::Canonical)];
 const CANCELED: &[(&str, &str, As)] = &[("reason", "reason", As::Canonical)];
 const DELIVERED: &[(&str, &str, As)] = &[
@@ -700,9 +703,7 @@ impl Shell {
         }
         for (name, value) in extras {
             written.insert(name);
-            if value.is_some_and(|value| draft.payload.get(name) != Some(&value)) {
-                faults.push(format!("`{name}`: got {:?}", draft.payload.get(name)));
-            }
+            faults.extend(extra_fault(name, value.as_ref(), draft.payload.get(name)));
         }
         faults.extend(match event_type {
             "ApprovalRequested" => self.requested(want, draft, ran),
@@ -1046,6 +1047,17 @@ fn cause_records(reason: &str) -> &'static [(&'static str, &'static str)] {
             ("KillSwitchActivated", ""),
         ],
         _ => &[],
+    }
+}
+
+/// A member only the runtime writes: it must equal the value supplied, and only `UNCOMPARED`
+/// members may be supplied with none.
+fn extra_fault(name: &str, want: Option<&Value>, got: Option<&Value>) -> Option<String> {
+    match want {
+        Some(want) if got != Some(want) => Some(format!("`{name}`: got {got:?}")),
+        Some(_) => None,
+        None if UNCOMPARED.contains(&name) => None,
+        None => Some(format!("`{name}` is supplied with no value to compare")),
     }
 }
 
