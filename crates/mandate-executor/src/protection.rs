@@ -2220,7 +2220,7 @@ mod probe_tests {
 
 #[cfg(test)]
 mod sequence_tests {
-    use std::collections::{BTreeMap, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
     use mandate_accounting::{AssetClass, InstrumentId, Side};
     use mandate_canon::Value;
@@ -2263,6 +2263,55 @@ mod sequence_tests {
         let mut pairs = pairs;
         pairs.push(("risk_clock", clock(RiskClock::from_secs(0))?));
         executor.commit_one(event_type, object(pairs)?)
+    }
+
+    const LONE: &str = "md-exit-1";
+
+    /// Ten AAPL that `agent-a` bought, with [`LONE`] working beside an OCO for the other 6, the cap
+    /// DEC-346 item 6 applies (position less exits still selling): #468 round 1's B1 state, from
+    /// which #468's rule-13 property found #489.
+    fn beside_a_lone_exit(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        for (id, purpose, qty) in [(LONE, "risk_exit", "4"), (OCO, "protective", "6")] {
+            let mut pairs = vec![
+                ("client_order_id", text(id)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text(qty)),
+                ("purpose", text(purpose)),
+            ];
+            if purpose == "protective" {
+                pairs.extend([
+                    ("tif", text("gtc")),
+                    ("order_class", text("oco")),
+                    ("take_profit", text("170")),
+                    ("stop", text("140")),
+                ]);
+            } else {
+                pairs.push(("limit", text("150")));
+            }
+            committed(&mut executor, "OrderSubmitted", pairs)?;
+            committed(
+                &mut executor,
+                "OrderStateChanged",
+                vec![("client_order_id", text(id)), ("state", text("accepted"))],
+            )?;
+        }
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(OCO)),
+                ("qty", text("6")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+                ("created_on", text("2026-06-05")),
+            ],
+        )?;
+        Ok(executor)
     }
 
     /// Ten AAPL that `agent-a` bought, protected by one GTC OCO at 170 over 140 named for the
@@ -6904,6 +6953,9 @@ mod sequence_tests {
         Fill(u32),
         Confirm,
         Pause(bool),
+        /// The broker refuses the latest cancel it was asked, as for an order it holds in no
+        /// cancelable state (#508's review, M1).
+        Refuse,
     }
 
     const EXIT_PURPOSES: [Purpose; 4] = [
@@ -6962,6 +7014,9 @@ mod sequence_tests {
         fills: u32,
         paused: bool,
         quiet_since: i64,
+        /// Every order a cancel was asked for: a refusal of that cancel is the cancel's, never the
+        /// order's rejection (§5.7).
+        cancelled: BTreeSet<String>,
     }
 
     /// 2018-01-01 00:00 ET, the calendar's first date: before it (the 1970 base, the eve of 2018)
@@ -7107,6 +7162,15 @@ mod sequence_tests {
         fn saw(&mut self, draft: &EventDraft) -> Result<(), String> {
             let field = |name: &str| draft.payload.get(name).and_then(Value::as_str);
             let intent = field("intent_id").unwrap_or_default().to_owned();
+            let id = field("client_order_id").unwrap_or_default();
+            if draft.event_type == "OrderStateChanged"
+                && field("state") == Some("rejected")
+                && self.cancelled.contains(id)
+            {
+                return Err(format!(
+                    "{id}: a refusal of its cancel was read as the order's rejection (§5.7)"
+                ));
+            }
             match (draft.event_type.as_str(), field("action")) {
                 ("IntentReceived", _) if intent.starts_with("w-") => {
                     let qty = field("qty")
@@ -7266,6 +7330,7 @@ mod sequence_tests {
                         Effect::Journal(draft) => self.saw(&draft)?,
                         Effect::Broker(BrokerRequest::Cancel { client_order_id }) => {
                             self.asked.push(client_order_id.as_str().to_owned());
+                            self.cancelled.insert(client_order_id.as_str().to_owned());
                         }
                         Effect::Broker(BrokerRequest::Submit(order)) => {
                             self.sent(
@@ -7335,29 +7400,46 @@ mod sequence_tests {
     }
 
     fn rule_13_script(start: i64, script: &[Move]) -> Result<(), String> {
+        rule_13_script_from(start, false, script)
+    }
+
+    /// [`rule_13_script`], from [`beside_a_lone_exit`] where `lone` is set.
+    fn rule_13_script_from(start: i64, lone: bool, script: &[Move]) -> Result<(), String> {
         let failed = |error: ExecutorError| format!("{error:?}");
         let (config, fees) = (executor_config(), fees().map_err(failed)?);
         let ports = tiered_ports(&config, &fees);
-        let mut executor = protected(&ports).map_err(failed)?;
+        let mut executor = if lone {
+            beside_a_lone_exit(&ports)
+        } else {
+            protected(&ports)
+        }
+        .map_err(failed)?;
+        let held = |purpose, qty| Held {
+            purpose,
+            qty,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let venue = if lone {
+            BTreeMap::from([
+                (OCO.to_owned(), held(Purpose::Protective, 6)),
+                (LONE.to_owned(), held(Purpose::RiskExit, 4)),
+            ])
+        } else {
+            BTreeMap::from([(OCO.to_owned(), held(Purpose::Protective, 10))])
+        };
         let mut desk = Desk {
             now: start,
             quotes: Vec::new(),
             position: 10,
-            venue: BTreeMap::from([(
-                OCO.to_owned(),
-                Held {
-                    purpose: Purpose::Protective,
-                    qty: 10,
-                    filled: 0,
-                    acked: true,
-                    live: true,
-                },
-            )]),
+            venue,
             asked: Vec::new(),
             exits: BTreeMap::new(),
             fills: 0,
             paused: false,
             quiet_since: 0,
+            cancelled: BTreeSet::new(),
         };
         let agent = AgentId("agent-a".to_owned());
         desk.deliver(
@@ -7465,6 +7547,10 @@ mod sequence_tests {
                         }
                     }
                 }
+                Move::Refuse => desk
+                    .asked
+                    .pop()
+                    .map(|id| refused(&id, "order is not cancelable")),
                 Move::Pause(paused) => {
                     let mode = if paused { Mode::Paused } else { Mode::Normal };
                     desk.paused = paused;
@@ -7543,6 +7629,84 @@ mod sequence_tests {
                 |(start, script)| rule_13_script(start, &script).map_err(TestCaseError::fail),
             )
             .map_err(|error| error.to_string())
+    }
+
+    /// #489's minimal script, from #468's rule-13 property: beside [`LONE`], a risk exit of 4 above
+    /// the bid goes passive and its sequence cancels the OCO; a risk exit of 3 allowed meanwhile
+    /// waits on that cancel. The passive exit is then placed as an OCO for 4, which beside [`LONE`]
+    /// and the exit of 3 no longer fits within 10, and nothing cancelled it, so the exit of 3
+    /// waited past `max_intent_age_s` (DEC-418). The placement that does not fit beside a waiting
+    /// exit is cancelled for it as soon as it is placed (DEC-419).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_risk_exit_allowed_during_a_passive_sequences_cancel_is_never_stranded()
+    -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(135), None, true),
+            Move::Exit(0, 4, 141),
+            Move::Exit(0, 3, 141),
+            Move::Tick(1_800),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(1),
+            Move::Confirm,
+            Move::Tick(1),
+        ];
+        rule_13_script_from(0, true, &script)
+    }
+
+    /// #508's review, M1: the placement's cancel is asked in the step it is placed, while the
+    /// broker has not acknowledged it, and the broker refuses that cancel. The refusal is the
+    /// cancel's, not the order's: the placement is never journaled rejected, it is queried, and
+    /// the cancel is asked again once it is seen live, so the exit of 3 still goes. Today the
+    /// placement is never cancelled at all (#489), so this fails on the exit's stranding.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_refused_cancel_of_an_unacknowledged_placement_is_asked_again() -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(135), None, true),
+            Move::Exit(0, 4, 141),
+            Move::Exit(0, 3, 141),
+            Move::Tick(1_800),
+            Move::Confirm,
+            Move::Refuse,
+            Move::Tick(1),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(1),
+            Move::Confirm,
+            Move::Tick(1),
+        ];
+        rule_13_script_from(0, true, &script)
+    }
+
+    /// #508's review, m1: an exit the gate holds cannot move, so a passive exit's placement is not
+    /// cancelled for it. Beside [`LONE`] (4) and a held risk exit of 3, a passive exit of 4 placed
+    /// into a position of 10 stays, though with the held 3 counted it would not fit.
+    #[test]
+    fn a_held_exit_never_has_a_placement_cancelled_for_it() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        let agent = AgentId("agent-a".to_owned());
+        executor.state.modes.insert(agent.clone(), Mode::Paused);
+        let held = executor.run(sell(SECOND, "3", "141", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(verdicts(&held), vec!["hold"]);
+        executor.state.modes.insert(agent, Mode::Normal);
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(EXIT, "4", "141", Purpose::RiskExit)?, &ports)?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&placed).len(),
+            1,
+            "the passive exit is placed: {:?}",
+            drafted(&placed)
+        );
+        assert!(
+            cancels(&placed).is_empty(),
+            "and not cancelled for an exit that cannot go: {:?}",
+            drafted(&placed)
+        );
+        Ok(())
     }
 
     /// #400 round 2's nit: the random oracle reached the composed plant (an exit's step into the
