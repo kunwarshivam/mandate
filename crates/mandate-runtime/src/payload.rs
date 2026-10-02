@@ -11,6 +11,7 @@ use mandate_accounting::{InstrumentId, Side};
 use mandate_approval::{AssertionId, ContentHash, StepUp, StepUpMethod};
 use mandate_canon::{Digest, Int, Key, Value};
 use mandate_num::{Price, Qty};
+use mandate_time::UtcNanos;
 
 use crate::error::RuntimeError;
 use crate::types::{Initiator, Mode, ModelOutput, OwnerConfirmation, Purpose, RiskClock};
@@ -53,22 +54,18 @@ pub(crate) fn count(n: u64, field: &'static str) -> Result<Value, RuntimeError> 
 
 /// A whole-second risk clock as journal spec §4.7's canonical timestamp, the form §9.2 types
 /// `OwnerCommandRefused`'s `effective_at` (DEC-261 item 7, DEC-308): the instant `UtcNanos` prints
-/// and `UtcNanos::parse` reads back unchanged, never the integer seconds [`seconds`] writes and
-/// the registered schema refuses (`non_canonical` at `payload.effective_at`). The runtime's one
-/// writer of the member, `escalation::refused`, stamps through here in the implementation PR
-/// (DEC-77); until then it keeps [`seconds`], so every refusal draft carries the integer form it
-/// carries today.
+/// and `UtcNanos::parse` reads back unchanged, on the whole second, never the integer seconds
+/// [`seconds`] writes and the registered schema refuses (`schema` at `payload.effective_at`, as the
+/// vectors' `refused_at_risk_clock_seconds` expects). The runtime's one writer of the member, `escalation::refused`, stamps
+/// through here.
 ///
 /// # Errors
-/// [`RuntimeError::Unimplemented`] in this tests PR; the implementation PR replaces the body and
-/// switches `refused`, and deletes the pending pins (DEC-77, DEC-310).
-#[allow(
-    dead_code,
-    reason = "the tests PR ships this stamp and its contract; `escalation::refused` calls it in the implementation PR (DEC-77, DEC-83)"
-)]
+/// [`RuntimeError::NonCanonicalPayload`] naming `field` when the second lies outside the range a §4.7
+/// timestamp can hold.
 pub(crate) fn stamp(at: RiskClock, field: &'static str) -> Result<Value, RuntimeError> {
-    let _ = (at, field);
-    Err(RuntimeError::Unimplemented { story: "E8-3" })
+    UtcNanos::from_parts(at.secs(), 0)
+        .map(|instant| Value::Str(instant.to_string()))
+        .map_err(|_| non_canonical(field))
 }
 
 /// A risk-clock second that may be negative, which the canonical integer form cannot hold (journal
