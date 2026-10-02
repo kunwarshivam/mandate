@@ -21,6 +21,15 @@
 //! registered window: the caller selects, the evaluator re-checks, and nothing is silently
 //! included or dropped.
 //!
+//! An **empty scoreable set** is its own refusal (DEC-335): no theses at all, or every thesis
+//! unscoreable, leaves nothing to aggregate, and the mean of nothing is not a report (#410
+//! review minor 3, DEC-282 item 9). The arm's reach is the nameless refusal's own — an empty
+//! set the count refusal does not answer, a registered minimum of zero, the only minimum an
+//! empty set is not below; below a positive minimum the count refusal keeps the empty set, as
+//! #410's round-1 pins freeze it. Input integrity keeps its precedence: a thesis whose horizon
+//! closes outside the registered window is refused before the empty set is ever reached
+//! (DEC-282 item 3).
+//!
 //! **The boundary rule is no-lookahead at both edges** (R-27's whole point): the entry price is
 //! the first close *strictly after* the thesis's `as_of` **and at or before the horizon end** —
 //! the first price inside the window the thesis claims; a close at the same instant is the
@@ -345,10 +354,12 @@ pub fn basket_return(
 /// mean excess, the one-sided bound, and pass against both baselines.
 ///
 /// # Errors
-/// Returns [`ResearchError::WindowNotClosed`] when fewer than the minimum scoreable closed
-/// theses are scoreable, [`ResearchError::ThesisOutsideWindow`] for a thesis whose horizon
-/// closes outside the registered window, and [`ResearchError::Num`] for the arithmetic a
-/// figure cannot express.
+/// Returns [`ResearchError::ThesisOutsideWindow`] for a thesis whose horizon closes outside
+/// the registered window, [`ResearchError::EmptyScoreableSet`] for an evaluation whose
+/// scoreable set is empty — no theses at all, or every thesis unscoreable — where the count
+/// refusal does not answer it, a registered minimum of zero (DEC-335),
+/// [`ResearchError::WindowNotClosed`] when fewer than the minimum scoreable closed theses are
+/// scoreable, and [`ResearchError::Num`] for the arithmetic a figure cannot express.
 pub fn evaluate(input: &EvaluationInput<'_>) -> Result<Scorecard, ResearchError> {
     for thesis in input.theses {
         if thesis.horizon_end < input.decision.window.from
@@ -418,6 +429,9 @@ pub fn evaluate(input: &EvaluationInput<'_>) -> Result<Scorecard, ResearchError>
     let count = u32::try_from(theses.len()).map_err(|_| ResearchError::Num(NumError::Overflow))?;
     if count < input.decision.minimum_scoreable {
         return Err(ResearchError::WindowNotClosed);
+    }
+    if count == 0 {
+        return Err(ResearchError::EmptyScoreableSet);
     }
     let excesses_basket: Vec<Ratio> = theses.iter().map(|row| row.excess_over_basket).collect();
     let excesses_index: Vec<Ratio> = theses.iter().map(|row| row.excess_over_index).collect();
@@ -505,6 +519,10 @@ mod tests {
         assert_eq!(
             ResearchError::ThesisOutsideWindow.code(),
             "thesis_outside_window"
+        );
+        assert_eq!(
+            ResearchError::EmptyScoreableSet.code(),
+            "empty_scoreable_set"
         );
     }
 
