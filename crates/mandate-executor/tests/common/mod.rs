@@ -948,6 +948,12 @@ impl Shell {
     /// observed, the account snapshot when an account was already reported, and that adoption
     /// when such an order exists, so a case's own subject is never changed behind its back.
     pub fn ready(&mut self, ports: &Ports<'_>) {
+        self.ready_with(ports, broker_account());
+    }
+
+    /// [`Self::ready`] with the broker reporting `account`, both in the startup run's snapshot and
+    /// in the account report after it: a reference case starts from its own `initial.account`.
+    pub fn ready_with(&mut self, ports: &Ports<'_>, account: BrokerAccount) {
         let reported = self.state.observed_account().is_some();
         let in_doubt = self
             .state
@@ -955,6 +961,7 @@ impl Shell {
             .values()
             .any(|order| matches!(order.state, OrderState::Submitting | OrderState::Unknown));
         let mut startup = snapshot(self.head().0, ReconcileReason::Startup);
+        startup.account = account.clone();
         startup.positions = self
             .state
             .positions()
@@ -1032,7 +1039,7 @@ impl Shell {
             "the startup run of a ready shell records and adopts nothing else: {unexpected:?}"
         );
         let report = self.run(
-            Input::BrokerUpdate(mandate_executor::BrokerUpdate::Account(broker_account())),
+            Input::BrokerUpdate(mandate_executor::BrokerUpdate::Account(account)),
             ports,
         );
         assert_eq!(

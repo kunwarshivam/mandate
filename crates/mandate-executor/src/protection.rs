@@ -23,25 +23,10 @@ use crate::session::{
 };
 use crate::state::{EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, LoneLadder};
 use crate::types::{
-    AgentId, BrokerRequest, EventId, ExitTier, IntentBody, IntentHandoff, MarketObservation, Mode,
-    OcoLegs, OrderState, OrderType, ProtectionPrices, Purpose, RiskClock, SubmitOrder, TimeInForce,
+    AgentId, BracketLegs, BrokerRequest, EventId, ExitTier, IntentBody, IntentHandoff,
+    MarketObservation, Mode, OcoLegs, OrderState, OrderType, ProtectionPrices, Purpose, RiskClock,
+    SubmitOrder, TimeInForce,
 };
-
-/// Slice 2's entry: a **bracketed** add where protection rests is a new bracket (§5.4's tranche
-/// model) and answers its stub. A plain add there never gets here (the gate denies it,
-/// `add_blocked_by_protective_order`), and no exit is ever refused here (rule 13): each takes a
-/// sequence instead (#174 ruling (b), 5862934909).
-pub(crate) fn bracketed_add(
-    state: &ExecutorState,
-    instrument: &InstrumentId,
-    purpose: Purpose,
-    bracketed: bool,
-) -> Result<(), ExecutorError> {
-    if purpose.adds_risk() && bracketed && rests(state, instrument) {
-        return Err(ExecutorError::Unimplemented { story: "E7-4" });
-    }
-    Ok(())
-}
 
 /// The triggered-stop watchdog's clock (§5.4): a sane mark at or below the instrument's resting
 /// stop starts a breach, unless one is running; any other sane mark ends it, above the stop or
@@ -677,7 +662,7 @@ pub(crate) fn cancel_openings(
 /// (DEC-36) — answers slice 5's stub before anything is cancelled, so the stop keeps resting: it
 /// never becomes an OCO in a crypto instrument (§5.4, simple orders only) and never leaves part
 /// of the position unprotected (#286 round 1, M1), like [`replace`] and [`crypto_add`]. It is
-/// reachable only where protection rests, so not before slice 2 (the pin).
+/// reachable only where protection rests.
 pub(crate) fn begin_exit(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
@@ -979,7 +964,154 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             replace(batch, &instrument, &sequence)?;
         }
     }
+    brackets(batch)
+}
+
+/// §5.4's bracket entries, after every step: each entry sent as a bracket that has filled anything
+/// and is not yet protected ([`bracket`]).
+fn brackets(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let entries: Vec<(ClientOrderId, BracketLegs)> = batch
+        .view
+        .orders
+        .values()
+        .filter(|order| order.purpose.adds_risk())
+        .filter_map(|order| {
+            let detail = batch.view.details.get(&order.client_order_id)?;
+            let legs = detail.request.as_ref()?.bracket.clone()?;
+            (!detail.bracket_placed).then(|| (order.client_order_id.clone(), legs))
+        })
+        .collect();
+    for (entry, legs) in entries {
+        bracket(batch, &entry, &legs)?;
+    }
     Ok(())
+}
+
+/// One bracket entry (§5.4, DEC-346). Its legs are held until it is completely filled, so the
+/// unprotected interval starts, journaled once and naming the entry, at its first fill, by the
+/// broker's own report or an ingested fill, whichever comes first. Complete, its legs are active at
+/// the broker: they are recorded `placed` for the entry's whole quantity at its prices, named
+/// `{entry}-p{record}` (§2.3), and the interval ends. Still working at
+/// `bracket_partial_fill_timeout_s` from that start, or at `max_unprotected_s` if that bound is
+/// shorter (§5.4's bound cancels the unfilled order), or once its venue is no longer the regular
+/// session before the closing auction window, its remainder is cancelled, once. Terminal partly
+/// filled — after that cancel or by any other path — it gets one GTC OCO at its prices for the
+/// filled quantity, capped at what the position, as the broker reports it, leaves after every live
+/// protective order and every exit still selling (rule 12: Σ protective sells never exceed the
+/// position), and the interval ends; nothing left to cover places nothing and still ends it.
+/// Unlike [`crate::intent::send`], the OCO's `OrderSubmitted` is not the effect immediately before
+/// its request: the `placed` and `unprotected_end` records sit between them, so the interval's end
+/// is journaled before the send. Rule 5 needs only that the draft comes first in the same list.
+fn bracket(
+    batch: &mut Batch<'_, '_>,
+    entry: &ClientOrderId,
+    legs: &BracketLegs,
+) -> Result<(), ExecutorError> {
+    let Some(order) = batch.view.orders.get(entry).cloned() else {
+        return Ok(());
+    };
+    let detail = batch.view.details.get(entry).cloned().unwrap_or_default();
+    let filled = order
+        .filled_qty
+        .max(detail.reported_filled.unwrap_or(Qty::ZERO));
+    if filled == Qty::ZERO {
+        return Ok(());
+    }
+    let prices = ProtectionPrices {
+        stop: legs.stop,
+        take_profit: Some(legs.take_profit),
+    };
+    let named = vec![("bracket", text(entry.as_str()))];
+    let instrument = order.instrument.clone();
+    if order.state == OrderState::Filled {
+        let id = ClientOrderId::for_protection(entry, &batch.next_id())?;
+        let mut placed = recorded_placement(&id, order.qty, prices);
+        placed.extend(named.clone());
+        changed(batch, &instrument, "placed", placed)?;
+        if detail.bracket_since.is_some() {
+            changed(batch, &instrument, "unprotected_end", named)?;
+        }
+        return Ok(());
+    }
+    if detail.bracket_since.is_none() {
+        changed(batch, &instrument, "unprotected_start", named.clone())?;
+    }
+    if order.state.is_terminal() {
+        let unapplied = filled.checked_sub(order.filled_qty)?;
+        let committed = covered(&batch.view, &instrument)?
+            .checked_add(still_selling(&batch.view, &instrument)?)?;
+        let room = long(&batch.view, &instrument)
+            .checked_add(unapplied)?
+            .checked_sub(committed)
+            .unwrap_or(Qty::ZERO);
+        let qty = filled.min(room);
+        let mut request = None;
+        if qty > Qty::ZERO {
+            let id = ClientOrderId::for_protection(entry, &batch.id_after(1))?;
+            let oco = oco(
+                id,
+                &instrument,
+                OcoLegs {
+                    take_profit: legs.take_profit,
+                    stop: legs.stop,
+                    qty,
+                },
+            );
+            let agent = order
+                .agent
+                .clone()
+                .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+            journal_submission(batch, &oco, None, &agent, 1)?;
+            let mut placed = recorded_placement(&oco.client_order_id, qty, prices);
+            placed.extend(named.clone());
+            changed(batch, &instrument, "placed", placed)?;
+            request = Some(oco);
+        }
+        changed(batch, &instrument, "unprotected_end", named)?;
+        if let Some(request) = request {
+            batch.broker(BrokerRequest::Submit(request));
+        }
+        return Ok(());
+    }
+    let since = batch
+        .view
+        .details
+        .get(entry)
+        .and_then(|detail| detail.bracket_since)
+        .unwrap_or(batch.at());
+    let config = batch.ports.config;
+    let bound = config
+        .bracket_partial_fill_timeout_s
+        .min(config.max_unprotected_s);
+    let due = batch.at().secs().saturating_sub(since.secs()) >= bound
+        || venue(batch.ports, &instrument, batch.at()) != Venue::Regular;
+    let working = matches!(
+        order.state,
+        OrderState::Accepted | OrderState::PartiallyFilled
+    );
+    if due && working && ask_cancel(batch, entry)? {
+        batch.broker(BrokerRequest::Cancel {
+            client_order_id: entry.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// A `placed` record's fields for one protective order covering `qty` at `prices`.
+fn recorded_placement(
+    id: &ClientOrderId,
+    qty: Qty,
+    prices: ProtectionPrices,
+) -> Vec<(&'static str, Value)> {
+    let mut placed = vec![
+        ("orders", text(id.as_str())),
+        ("qty", text(qty.to_string())),
+        ("stop", text(prices.stop.to_string())),
+    ];
+    if let Some(take_profit) = prices.take_profit {
+        placed.push(("take_profit", text(take_profit.to_string())));
+    }
+    placed
 }
 
 /// Rule 5 and §5.4, after every step — every tick and every order-state change: each exit waiting
@@ -1202,14 +1334,7 @@ fn place(
     prices: ProtectionPrices,
 ) -> Result<(), ExecutorError> {
     journal_submission(batch, request, intent, agent, 1)?;
-    let mut placed = vec![
-        ("orders", text(request.client_order_id.as_str())),
-        ("qty", text(request.qty.to_string())),
-        ("stop", text(prices.stop.to_string())),
-    ];
-    if let Some(take_profit) = prices.take_profit {
-        placed.push(("take_profit", text(take_profit.to_string())));
-    }
+    let placed = recorded_placement(&request.client_order_id, request.qty, prices);
     changed(batch, &request.instrument, "placed", placed).map(|_| ())
 }
 
@@ -1535,12 +1660,12 @@ pub(crate) fn exit_hold(
 mod stub_tests {
     use std::fs;
     use std::io;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     use mandate_accounting::{InstrumentId, Side};
     use mandate_num::{Price, Qty};
 
-    use super::{awaits_cancel, bracketed_add, breach};
+    use super::{awaits_cancel, breach};
     use crate::error::ExecutorError;
     use crate::ids::{ClientOrderId, IntentId};
     use crate::state::{ExecutorState, ExitSequence};
@@ -1548,26 +1673,6 @@ mod stub_tests {
         AccountRef, AccountScope, AgentId, EventId, MarketObservation, Order, OrderState,
         Protection, ProtectionPrices, Purpose, RiskClock, WorkspaceId,
     };
-
-    /// Every production source under `dir`: Rust and Python files outside test directories.
-    fn sources(dir: &Path, found: &mut Vec<PathBuf>) -> io::Result<()> {
-        for entry in fs::read_dir(dir)? {
-            let path = entry?.path();
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("");
-            if path.is_dir() {
-                if !matches!(name, "tests" | "target" | ".venv" | "__pycache__") {
-                    sources(&path, found)?;
-                }
-            } else if (name.ends_with(".rs") || name.ends_with(".py")) && !name.starts_with("test_")
-            {
-                found.push(path);
-            }
-        }
-        Ok(())
-    }
 
     /// A source without its `#[cfg(test)]` items, so a pin reads production code alone and a test
     /// may name what it pins plainly (#258 round 2, minor 2). An item is a `#[cfg(test)]` line in
@@ -1651,110 +1756,6 @@ mod stub_tests {
         Ok(())
     }
 
-    /// What a source may hold of each construction, per file; any file not named holds none.
-    /// `None` is any count: the fold, which journals nothing and only reads an event back, and
-    /// this module's own writer of the protection event.
-    const ALLOWED: [(&str, &str, Option<usize>); 8] = [
-        (
-            "crates/mandate-executor/src/types.rs",
-            "BracketLegs {",
-            Some(1),
-        ),
-        ("crates/mandate-executor/src/types.rs", "OcoLegs {", Some(1)),
-        ("crates/mandate-executor/src/fold.rs", "OcoLegs {", Some(1)),
-        (
-            "crates/mandate-executor/src/protection.rs",
-            "OcoLegs {",
-            Some(3),
-        ),
-        (
-            "crates/mandate-executor/src/protection.rs",
-            "\"placed\"",
-            Some(1),
-        ),
-        ("crates/mandate-executor/src/fold.rs", "\"placed\"", None),
-        (
-            "crates/mandate-executor/src/fold.rs",
-            "\"ProtectionChanged\"",
-            None,
-        ),
-        (
-            "crates/mandate-executor/src/protection.rs",
-            "\"ProtectionChanged\"",
-            None,
-        ),
-    ];
-
-    /// The registries that name the protection event once each without writing it.
-    const REGISTRIES: [&str; 2] = [
-        "crates/mandate-journal/src/catalogue.rs",
-        "crates/mandate-runtime/src/state.rs",
-    ];
-
-    /// #174 ruling 5862180909, `AGENTS.md` rule 13: the stub [`sequenced`] still answers is
-    /// reached only in an instrument whose protection rests, and nothing creates protection on an
-    /// unprotected position before slice 2. No source anywhere in the workspace builds a
-    /// bracketed `SubmitOrder` (its only `BracketLegs` is the type's own definition), nothing
-    /// builds the OCO a partial fill takes (the one OCO built is the re-placement a running exit
-    /// sequence makes, which needs protection already resting, and the fold reads one back), and
-    /// only this module writes the protection event, one `"placed"` among it. Each file is read
-    /// without its `#[cfg(test)]` items. Slice 2 deletes this pin, landing no earlier than 3a, 3b
-    /// and 4 (DEC-160).
-    #[test]
-    fn no_protection_is_created_on_an_unprotected_position() -> io::Result<()> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let mut found = Vec::new();
-        sources(&root.join("crates"), &mut found)?;
-        sources(&root.join("python"), &mut found)?;
-        assert!(
-            found.len() > 100,
-            "the scan reached the workspace: {} files",
-            found.len()
-        );
-        let needles = [
-            "BracketLegs {",
-            "OcoLegs {",
-            "\"placed\"",
-            "\"ProtectionChanged\"",
-        ];
-        for path in found {
-            let production = read_production(&path)?;
-            let relative = path
-                .strip_prefix(&root)
-                .map_or(path.clone(), Path::to_path_buf)
-                .to_string_lossy()
-                .replace('\\', "/");
-            for needle in needles {
-                let count = if relative.ends_with(".py") {
-                    let event = needle == "\"ProtectionChanged\"";
-                    usize::from(event) * production.matches(needle.trim_matches('"')).count()
-                } else {
-                    production.matches(needle).count()
-                };
-                let allowed = ALLOWED
-                    .iter()
-                    .find(|(file, named, _)| *file == relative && *named == needle)
-                    .map_or_else(
-                        || {
-                            Some(usize::from(
-                                needle == "\"ProtectionChanged\""
-                                    && REGISTRIES.contains(&relative.as_str()),
-                            ))
-                        },
-                        |(_, _, allowed)| *allowed,
-                    );
-                assert!(
-                    allowed.is_none_or(|allowed| count == allowed),
-                    "{relative} holds `{needle}` {count} time(s), {allowed:?} allowed: protection \
-                     created on an unprotected position makes the stubs reachable, a denied \
-                     exit (AGENTS.md rule 13). Slice 2 creates it no earlier \
-                     than 3a, 3b and 4 (DEC-160)"
-                );
-            }
-        }
-        Ok(())
-    }
-
     /// #174 ruling (b), 5861764910: slice 1 reads no leg id from a `BrokerOrder`. The broker's
     /// legs carry only their broker ids until the slice that reconciles legs keeps each leg's
     /// `client_order_id` (with its own `ready()` tests correction), so until then a broker-reported
@@ -1818,39 +1819,6 @@ mod stub_tests {
         Purpose::Protective,
         Purpose::Flatten,
     ];
-
-    /// Only a bracketed add where protection rests answers slice 2's stub: never an exit or a
-    /// protective order (rule 13), never a plain add, never an instrument where nothing rests.
-    #[test]
-    fn only_a_bracketed_add_where_protection_rests_answers_slice_2s_stub()
-    -> Result<(), ExecutorError> {
-        let (state, aapl) = protected()?;
-        let stub = Err(ExecutorError::Unimplemented { story: "E7-4" });
-        for purpose in ALL {
-            for bracketed in [true, false] {
-                let expected = if purpose.adds_risk() && bracketed {
-                    stub.clone()
-                } else {
-                    Ok(())
-                };
-                let case = format!("{purpose:?} bracketed {bracketed}");
-                assert_eq!(
-                    bracketed_add(&state, &aapl, purpose, bracketed),
-                    expected,
-                    "{case}"
-                );
-                for elsewhere in ["MSFT", "TSLA"] {
-                    let there = InstrumentId::new(elsewhere)?;
-                    assert_eq!(
-                        bracketed_add(&state, &there, purpose, bracketed),
-                        Ok(()),
-                        "{case}"
-                    );
-                }
-            }
-        }
-        Ok(())
-    }
 
     /// An exit waits for its sequence's cancels only while a sequence runs in its instrument and a
     /// protective order still rests there; an add and a protective order never wait on it.
@@ -8312,6 +8280,405 @@ mod ladder_tests {
         let low = ladder_price(liquid()?, &quotes, 4, now, Some(floor))?;
         let high = ladder_price(liquid()?, &quotes, 0, now, Some(floor))?;
         assert_eq!((low.limit, high.limit), (floor, Price::parse("149.25")?));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod bracket_tests {
+    use mandate_accounting::Side;
+    use mandate_canon::Value;
+    use mandate_num::{Price, Qty};
+
+    use crate::error::ExecutorError;
+    use crate::ids::IntentId;
+    use crate::payload::{clock, object};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{
+        Everything, Executor, Ids, aapl, drafted, executor_config, fees, missing, reporting,
+        submitted,
+    };
+    use crate::types::{
+        AgentId, BrokerOrder, BrokerRequest, BrokerUpdate, Effect, EventDraft, EventId,
+        ExecutorConfig, Input, IntentBody, IntentHandoff, ProtectionPrices, Purpose, RiskClock,
+        TimeInForce,
+    };
+
+    const ENTRY: &str = "01JABCDEFGHJKMNPQRSTVWXYZ1";
+
+    fn text(raw: &str) -> Value {
+        Value::Str(raw.to_owned())
+    }
+
+    fn entry_id() -> String {
+        format!("md-{ENTRY}")
+    }
+
+    /// The broker's report of the bracket entry: `status`, with `filled` of its 10 filled.
+    fn report(status: &str, filled: &str) -> Result<Input, ExecutorError> {
+        Ok(Input::BrokerUpdate(BrokerUpdate::Order(BrokerOrder {
+            broker_order_id: "b-1".to_owned(),
+            client_order_id: Some(entry_id()),
+            instrument: aapl()?,
+            side: Side::Buy,
+            qty: Qty::parse("10")?,
+            filled_qty: Qty::parse(filled)?,
+            limit_price: Some(Price::parse("150")?),
+            stop_price: None,
+            status: status.to_owned(),
+            reject_code: None,
+            replaced_by_broker_order_id: None,
+            legs: Vec::new(),
+            created_on: None,
+        })))
+    }
+
+    fn cancels(effects: &[Effect]) -> usize {
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, Effect::Broker(BrokerRequest::Cancel { .. })))
+            .count()
+    }
+
+    /// A ready executor that has sent one bracket entry of 10 `AAPL` at 150, stop 140, take-profit
+    /// 170, at risk-clock second 10.
+    fn bracketed(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        bracketed_at(ports, 10)
+    }
+
+    /// [`bracketed`], sent at risk-clock second `at`.
+    fn bracketed_at(ports: &Ports<'_>, at: i64) -> Result<Executor, ExecutorError> {
+        let mut executor = reporting(ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(at)), ports)?;
+        let sent = executor.run(
+            Input::Intent(IntentHandoff {
+                intent_id: IntentId(EventId(ENTRY.to_owned())),
+                agent: AgentId("agent-a".to_owned()),
+                body: IntentBody::Order {
+                    instrument: aapl()?,
+                    side: Side::Buy,
+                    qty: Qty::parse("10")?,
+                    limit: Price::parse("150")?,
+                    purpose: Purpose::Open,
+                    protection: Some(ProtectionPrices {
+                        stop: Price::parse("140")?,
+                        take_profit: Some(Price::parse("170")?),
+                    }),
+                },
+            }),
+            ports,
+        )?;
+        let bracket = sent.iter().find_map(|effect| match effect {
+            Effect::Broker(BrokerRequest::Submit(order)) => order.bracket.clone(),
+            _ => None,
+        });
+        if bracket.is_none() {
+            return Err(missing("the entry sent as a bracket"));
+        }
+        Ok(executor)
+    }
+
+    /// §5.4: the first partial fill opens the interval and cancels nothing; the remainder is
+    /// cancelled at the shorter of `bracket_partial_fill_timeout_s` and `max_unprotected_s` from
+    /// it, not a second before, and once (DEC-346 item 5).
+    #[test]
+    fn a_partly_filled_entry_is_cancelled_at_the_shorter_bound_and_not_before()
+    -> Result<(), ExecutorError> {
+        let fees = fees()?;
+        for (timeout, limit, due_at) in [(60, 90, 70), (60, 30, 40), (20, 60, 30)] {
+            let config = ExecutorConfig {
+                bracket_partial_fill_timeout_s: timeout,
+                max_unprotected_s: limit,
+                ..executor_config()
+            };
+            let ports = Ports {
+                ids: &Ids,
+                mandates: &Everything,
+                instruments: &Everything,
+                config: &config,
+                fees: &fees,
+            };
+            let case = format!("timeout {timeout}, bound {limit}");
+            let mut executor = bracketed(&ports)?;
+            let partial = executor.run(report("partially_filled", "4")?, &ports)?;
+            assert!(
+                drafted(&partial).contains(&"ProtectionChanged"),
+                "{case}: {partial:?}"
+            );
+            assert_eq!(
+                cancels(&partial),
+                0,
+                "{case}: the first fill cancels nothing"
+            );
+            let early = executor.run(Input::Tick(RiskClock::from_secs(due_at - 1)), &ports)?;
+            assert_eq!(
+                cancels(&early),
+                0,
+                "{case}: a second early, the legs are held"
+            );
+            let due = executor.run(Input::Tick(RiskClock::from_secs(due_at)), &ports)?;
+            assert_eq!(cancels(&due), 1, "{case}: the remainder is cancelled");
+            let again = executor.run(Input::Tick(RiskClock::from_secs(due_at + 1)), &ports)?;
+            assert_eq!(cancels(&again), 0, "{case}: once");
+        }
+        Ok(())
+    }
+
+    fn with_ports<T>(
+        run: impl FnOnce(&Ports<'_>) -> Result<T, ExecutorError>,
+    ) -> Result<T, ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        run(&Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        })
+    }
+
+    /// Every `ProtectionChanged` draft in `effects`.
+    fn records(effects: &[Effect]) -> Vec<&EventDraft> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "ProtectionChanged" => Some(draft),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The `placed` record in `effects`, and the protective order it names.
+    fn placed(effects: &[Effect]) -> Result<(&EventDraft, String), ExecutorError> {
+        let record = records(effects)
+            .into_iter()
+            .find(|draft| draft.payload.get("action").and_then(Value::as_str) == Some("placed"))
+            .ok_or_else(|| missing("the placed record"))?;
+        let named = record
+            .payload
+            .get("orders")
+            .and_then(Value::as_str)
+            .ok_or_else(|| missing("the placed order's id"))?
+            .to_owned();
+        Ok((record, named))
+    }
+
+    /// §2.3 (DEC-346 item 4): the protective order a `placed` record names is `{entry}-p{record}`,
+    /// the record being that `ProtectionChanged` itself, on the completed entry's branch and the
+    /// OCO's alike.
+    fn assert_named_for_its_record(effects: &[Effect], case: &str) -> Result<(), ExecutorError> {
+        let (record, named) = placed(effects)?;
+        assert_eq!(
+            named,
+            format!("{}-p{}", entry_id(), record.event_id.0),
+            "{case}: the id's suffix is the placed record's own event id"
+        );
+        Ok(())
+    }
+
+    /// Rule 5 and §5.4 (DEC-346 items 4 and 6, #446 round 1 B1, M2, M3): the OCO for a partly
+    /// filled entry is a GTC order whose `OrderSubmitted` comes before its `Submit` in the same
+    /// effect list, named for its own `placed` record.
+    #[test]
+    fn the_partial_fill_oco_is_journaled_before_it_is_sent() -> Result<(), ExecutorError> {
+        with_ports(|ports| {
+            let mut executor = bracketed(ports)?;
+            executor.run(report("partially_filled", "4")?, ports)?;
+            let ended = executor.run(report("canceled", "4")?, ports)?;
+            let (_, named) = placed(&ended)?;
+            let journaled = ended.iter().position(|effect| {
+                matches!(effect, Effect::Journal(draft) if draft.event_type == "OrderSubmitted"
+                    && draft.payload.get("client_order_id").and_then(Value::as_str) == Some(named.as_str()))
+            });
+            let sent = ended.iter().position(|effect| {
+                matches!(effect, Effect::Broker(BrokerRequest::Submit(order))
+                    if order.client_order_id.as_str() == named)
+            });
+            assert!(
+                journaled.is_some() && sent.is_some() && journaled < sent,
+                "the journal names the OCO before the broker sees it (rule 5): {:?}",
+                drafted(&ended)
+            );
+            let tif = ended.iter().find_map(|effect| match effect {
+                Effect::Broker(BrokerRequest::Submit(order)) => Some(order.tif),
+                _ => None,
+            });
+            assert_eq!(tif, Some(TimeInForce::Gtc), "the OCO is GTC (§5.4)");
+            assert_named_for_its_record(&ended, "the OCO")
+        })
+    }
+
+    /// Rule 12 (DEC-346 item 4, #446 round 1 B2): an entry is protected once. After its completed
+    /// legs are recorded, or its OCO sent, later steps record and send nothing more.
+    #[test]
+    fn an_entry_is_protected_once() -> Result<(), ExecutorError> {
+        with_ports(|ports| {
+            for terminal in ["filled", "canceled"] {
+                let mut executor = bracketed(ports)?;
+                let filled = if terminal == "filled" { "10" } else { "4" };
+                if terminal == "canceled" {
+                    executor.run(report("partially_filled", "4")?, ports)?;
+                }
+                let ended = executor.run(report(terminal, filled)?, ports)?;
+                assert_named_for_its_record(&ended, terminal)?;
+                for second in 11..15 {
+                    let later = executor.run(Input::Tick(RiskClock::from_secs(second)), ports)?;
+                    assert!(
+                        records(&later).is_empty() && submitted(&later) == 0,
+                        "{terminal}, second {second}: nothing more is recorded or sent: {:?}",
+                        drafted(&later)
+                    );
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// §5.4 (DEC-346 item 5, #446 round 1 M1): an entry still working when its venue reaches the
+    /// closing auction window has its remainder cancelled at once, inside the timeout, and the OCO
+    /// for the filled quantity goes at once too: no session holds protection (rule 13).
+    #[test]
+    fn an_entry_at_the_closing_window_is_cancelled_and_oco_d_at_once() -> Result<(), ExecutorError>
+    {
+        const AT_THREE: i64 = 1_790_017_200;
+        const REGULAR: i64 = 1_790_020_190;
+        const CLOSING: i64 = 1_790_020_200;
+        with_ports(|ports| {
+            let mut executor = bracketed_at(ports, AT_THREE)?;
+            executor.run(Input::Tick(RiskClock::from_secs(REGULAR)), ports)?;
+            let partial = executor.run(report("partially_filled", "4")?, ports)?;
+            assert_eq!(cancels(&partial), 0, "the regular session holds the legs");
+            let closing = executor.run(Input::Tick(RiskClock::from_secs(CLOSING)), ports)?;
+            assert_eq!(
+                cancels(&closing),
+                1,
+                "ten seconds in, well inside the timeout, the closing window cancels the remainder"
+            );
+            let ended = executor.run(report("canceled", "4")?, ports)?;
+            assert_eq!(
+                submitted(&ended),
+                1,
+                "the OCO goes in the closing window: {:?}",
+                drafted(&ended)
+            );
+            Ok(())
+        })
+    }
+
+    /// Rule 12: the OCO for a partly filled entry never covers more than the position leaves once
+    /// every exit still selling has sold; with nothing left it places nothing, and the interval
+    /// still ends.
+    #[test]
+    fn nothing_left_to_cover_places_no_oco_and_ends_the_interval() -> Result<(), ExecutorError> {
+        with_ports(|ports| {
+            let (_, ended) = nothing_left(ports)?;
+            assert_eq!(submitted(&ended), 0, "nothing to cover: {ended:?}");
+            let actions: Vec<&str> = records(&ended)
+                .into_iter()
+                .filter_map(|draft| draft.payload.get("action").and_then(Value::as_str))
+                .collect();
+            assert!(actions.contains(&"unprotected_end"), "{actions:?}");
+            assert!(!actions.contains(&"placed"), "{actions:?}");
+            Ok(())
+        })
+    }
+
+    /// A bracket entry partly filled for 4 while `agent-b`'s exit of 4 is still selling, reported
+    /// cancelled: nothing is left to cover. Answers the executor and that report's effects.
+    fn nothing_left(ports: &Ports<'_>) -> Result<(Executor, Vec<Effect>), ExecutorError> {
+        let mut executor = bracketed(ports)?;
+        let at = || clock(RiskClock::from_secs(10));
+        executor.commit_one(
+            "FillApplied",
+            object(vec![
+                ("fill_id", text("f-1")),
+                ("client_order_id", text(&entry_id())),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty_gross", text("4")),
+                ("price", text("150")),
+                ("risk_clock", at()?),
+            ])?,
+        )?;
+        executor.commit_one(
+            "OrderSubmitted",
+            object(vec![
+                ("client_order_id", text("md-sell-b")),
+                ("agent", text("agent-b")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("4")),
+                ("limit", text("150")),
+                ("purpose", text("risk_exit")),
+                ("risk_clock", at()?),
+            ])?,
+        )?;
+        let ended = executor.run(report("canceled", "4")?, ports)?;
+        Ok((executor, ended))
+    }
+
+    /// DEC-346 item 4 (#446 round 2, M1): with nothing left to cover no `placed` record is drafted,
+    /// so the interval's `unprotected_end`, naming the entry, is all that marks it protected. Later
+    /// steps record and send nothing; and once the competing exit stops selling and room opens, no
+    /// OCO goes for an entry whose interval has already ended.
+    #[test]
+    fn an_entry_with_nothing_left_to_cover_is_protected_once() -> Result<(), ExecutorError> {
+        with_ports(|ports| {
+            let (mut executor, _) = nothing_left(ports)?;
+            for second in 11..15 {
+                let later = executor.run(Input::Tick(RiskClock::from_secs(second)), ports)?;
+                assert!(
+                    records(&later).is_empty() && submitted(&later) == 0,
+                    "second {second}: nothing more is recorded or sent: {:?}",
+                    drafted(&later)
+                );
+            }
+            executor.commit_one(
+                "OrderStateChanged",
+                object(vec![
+                    ("client_order_id", text("md-sell-b")),
+                    ("state", text("canceled")),
+                    ("risk_clock", clock(RiskClock::from_secs(15))?),
+                ])?,
+            )?;
+            let opened = executor.run(Input::Tick(RiskClock::from_secs(16)), ports)?;
+            assert!(
+                records(&opened).is_empty() && submitted(&opened) == 0,
+                "room opens, and still no late OCO for an entry whose interval ended: {:?}",
+                drafted(&opened)
+            );
+            Ok(())
+        })
+    }
+
+    /// A bracket's `OrderSubmitted` that names its class without both prices is refused on the
+    /// fold, never read back as a plain order that a resubmission would send unprotected.
+    #[test]
+    fn a_bracket_submission_without_its_prices_is_refused() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = reporting(&ports)?;
+        let refused = executor.commit_one(
+            "OrderSubmitted",
+            object(vec![
+                ("client_order_id", text("md-buy-x")),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("10")),
+                ("limit", text("150")),
+                ("order_class", text("bracket")),
+                ("stop", text("140")),
+                ("risk_clock", clock(RiskClock::from_secs(0))?),
+            ])?,
+        );
+        assert!(refused.is_err(), "{refused:?}");
         Ok(())
     }
 }

@@ -299,7 +299,7 @@ fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()
 }
 
 /// The lint job's checks over the Cargo and uv workspaces in the current directory: fmt, clippy
-/// `-D warnings`, crate layering, markers, the feature map, typos, and ruff.
+/// `-D warnings`, crate layering, markers, saved proptest seeds, the feature map, typos, and ruff.
 fn workspace_lint() -> Result<()> {
     sh("cargo", &["fmt", "--all", "--check"])?;
     sh(
@@ -316,6 +316,7 @@ fn workspace_lint() -> Result<()> {
     )?;
     layers()?;
     markers()?;
+    proptest_seeds()?;
     feature_map()?;
     sh("typos", &[])?;
     uv_tools(&["ruff", "check", "."])?;
@@ -884,6 +885,40 @@ fn refcases(write: bool) -> Result<()> {
     }
     fs::remove_dir_all(&tmp).ok();
     report(problems, "refcases")
+}
+
+/// Where proptest saves a failing case as a seed beside the test that produced it, in both
+/// shapes it writes: `proptest-regressions/<file>.txt` at the crate root, its default, and
+/// `<file>.proptest-regressions` next to the source. Git pathspecs, so `*` crosses directories.
+const PROPTEST_SEED_PATHSPECS: [&str; 2] = ["*.proptest-regressions", "*proptest-regressions/*"];
+
+/// Every proptest failure seed in the tree at `dir`, tracked or untracked, ignored or not.
+/// Proptest replays a saved seed before it draws fresh cases, so a seed left by an earlier run, on
+/// other code or under a planted bug, changes which cases every later run tries (DEC-164); a
+/// committed one does that in every checkout (#449 review, M1).
+fn proptest_seeds_in(dir: &Path) -> Result<Vec<String>> {
+    let mut args = vec!["ls-files", "--cached", "--others", "--"];
+    args.extend_from_slice(&PROPTEST_SEED_PATHSPECS);
+    Ok(output_in(dir, "git", &args)?
+        .lines()
+        .map(str::to_owned)
+        .collect())
+}
+
+/// `.gitignore` keeps a seed out of a commit made with `git add -A`; this check also fails on one
+/// that was added by name or was left in the working tree (DEC-381).
+fn proptest_seeds() -> Result<()> {
+    eprintln!("    proptest-seeds: checking for saved proptest failure seeds");
+    let problems = proptest_seeds_in(Path::new("."))?
+        .into_iter()
+        .map(|file| {
+            format!(
+                "{file}: a saved proptest failure seed; delete it, since proptest replays it \
+                 before drawing fresh cases (DEC-164, DEC-381)"
+            )
+        })
+        .collect();
+    report(problems, "proptest-seeds")
 }
 
 /// Debt markers get copied as precedent, `#[ignore]` without a pending story hides a test forever,
@@ -1918,18 +1953,21 @@ const STUB_MARKERS: [&str; 5] = [
 /// DEC-110's rule still holds for them: each must run and must fail. Each row goes when its story
 /// lands, and the gate names every row it applies (DEC-137).
 ///
-/// The 7 protective-sequence rows (6 `hand`, 1 `fault`) are E7-4's (DEC-140's addendum, the
-/// coordinator's ruling (d) on #174): the E7-2/E7-3 slices submit, hold and fill but never place
-/// protection, so these tests see no bracket, OCO or stop-limit where E7-4's protective sequence
-/// belongs, instead of a stub's report. Each still runs and fails, and E7-4's implementation PR
-/// deletes each row with its `#[ignore]` line. The stub check runs first, so a row whose test stops
-/// at a stub is reported for deletion rather than applied (#194 review, round 1, finding 4).
+/// The 3 protective-sequence rows left (all `hand`) are E7-4's (DEC-140's addendum, the
+/// coordinator's ruling (d) on #174): slice 5's crypto stop-limit and fractional position, which
+/// see no stop-limit or whole-share protection where E7-4's protective sequence belongs, instead of
+/// a stub's report. Each still runs and fails, and the slice that implements it deletes its row
+/// with its `#[ignore]` line; slice 2 deleted the four bracket and partial-fill OCO rows (DEC-346).
+/// The stub check runs first, so a row whose test stops at a stub is reported for deletion rather
+/// than applied (#194 review, round 1, finding 4).
 ///
-/// The 3 `properties` rows are E7-4's properties too. Their minimal failure has been their own E7-4
-/// assertion since #196 (the protected lead has no bracket); they passed only on a stub's report
-/// from a case shrinking moved past, which [`failure_cause`] no longer reads (DEC-164; #196 review,
-/// round 1, finding 5; #199 review, round 1, finding 4).
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
+/// The `properties` row is E7-4's too. Since slice 2 places brackets, its minimal failure is a
+/// script that ends while the protected lead's partly filled entry is still inside its interval,
+/// which no implementation can close before the script stops; it waits on a tests correction
+/// (DEC-346 item 7). Slice 2 deleted the other two `properties` rows, whose minimal failure is now
+/// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
+/// 4).
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1943,32 +1981,8 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
         "a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction",
     ),
     (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_partly_filled_bracket_becomes_an_oco_for_the_filled_quantity",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_terminal_partly_filled_entry_is_oco_d_at_once",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_entry_unfinished_at_the_timeout_is_cancelled_then_oco_d",
-    ),
-    (
-        "crates/mandate-executor/tests/fault.rs",
-        "crash_between_entry_fill_and_oco",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "protective_sell_quantity_never_exceeds_the_position",
-    ),
-    (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "no_interval_exceeds_the_limit_without_an_alert",
     ),
 ];
 
@@ -2791,7 +2805,7 @@ mod tests {
         generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function, lint,
         listed_mutant_counts, live_test_counts, mutant_verdicts, mutants, mutants_outcome,
         mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, repo_root, shellcheck_scripts, spec_guard_problems,
+        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
         status_flip_problems, test_binary, test_outcomes, unjudged_mutants, verdicts,
     };
 
@@ -4098,16 +4112,43 @@ mod tests {
                         .contains("It panicked with: Test failed: the fixture's own assertion")),
                 "run {round}: {problems:?}"
             );
-            let saved = output_in(
-                &fx.0,
-                "git",
-                &["ls-files", "--others", "--", "*.proptest-regressions"],
-            )?;
+            let saved = proptest_seeds_in(&fx.0)?;
             assert!(
-                saved.trim().is_empty(),
-                "run {round} saved failures for the next run to replay: {saved}"
+                saved.is_empty(),
+                "run {round} saved failures for the next run to replay: {saved:?}"
             );
         }
+        Ok(())
+    }
+
+    /// A seed of either shape is found whether it is committed, untracked, or ignored, and a file
+    /// that only resembles one is not (DEC-381).
+    #[test]
+    fn a_saved_proptest_seed_of_either_shape_is_found_tracked_or_not() -> Result<()> {
+        let fx = Fixture::new("proptest-seeds")?;
+        fx.write(".gitignore", "/target\nproptest-regressions/\n")?;
+        fx.write("crates/fx/src/regressions.rs", "")?;
+        fx.commit()?;
+        assert_eq!(proptest_seeds_in(&fx.0)?, Vec::<String>::new());
+        fx.write("crates/fx/proptest-regressions/props.txt", "cc 00\n")?;
+        output_in(
+            &fx.0,
+            "git",
+            &["add", "-f", "crates/fx/proptest-regressions/props.txt"],
+        )?;
+        fx.commit()?;
+        fx.write("crates/fx/proptest-regressions/score.txt", "cc 01\n")?;
+        fx.write("crates/fx/tests/props.proptest-regressions", "cc 02\n")?;
+        let mut found = proptest_seeds_in(&fx.0)?;
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                "crates/fx/proptest-regressions/props.txt",
+                "crates/fx/proptest-regressions/score.txt",
+                "crates/fx/tests/props.proptest-regressions",
+            ]
+        );
         Ok(())
     }
 

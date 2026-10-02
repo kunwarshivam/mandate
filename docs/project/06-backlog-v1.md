@@ -58,6 +58,15 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   than waiting for a reviewer (the #316 reviews).
   *Accepted when:* both run in `ci lint`, pinned in `.github/workflows/ci.yml` and `install.sh`,
   and a planted `SC2086` or an unknown workflow key fails the job.
+  *Follow-up* (#434's round-2 review, minor m1, backlogged under the freeze rule): three `xtask`
+  tests, each failing on the plant that review left uncaught. One fails when `lint_paths` skips a
+  missing `shellcheck` or `actionlint` binary silently (the `let Ok(out) = … else { return Ok(()) }`
+  plant), for each tool; one fails when `shellcheck_scripts` loses its empty-file-list guard; and
+  one fails when `actionlint_workflows` loses its empty-file-list guard.
+  *Follow-up (#450 review, minor 1; DEC-381):* the lint job's fixture test (the one #434 added
+  for shellcheck and actionlint) also fails when `workspace_lint` discards `proptest_seeds()`'s
+  result, or when that check's git call's error is swallowed. Today `let _ = proptest_seeds();`
+  passes every xtask test, as `let _ = markers();` and `let _ = feature_map();` do.
 - **E1-5 (Should)** As an engineer, I want the merge script's remaining gaps from #316's
   round-3 review closed, so that the only path from approval to `main` (DEC-175) is tested as
   GitHub actually answers it. The items:
@@ -121,9 +130,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   New York sessions; any other bar is refused with `session_off_asset_class` naming the first such
   bar's index; an empty bar sequence is accepted; `simulate` runs the check after the order-policy
   checks, so an order the v1 policy refuses keeps its own cause; and every sequence the table allows
-  fills exactly as before. Tests PR [#437](https://github.com/kunwarshivam/mandate/pull/437), then
-  an implementation PR that replaces the stub's body, adds the call, and deletes only the pending
-  tests' `#[ignore]` lines.
+  fills exactly as before. Tests PR [#437](https://github.com/kunwarshivam/mandate/pull/437)
+  (merged), then the implementation PR, which replaces the stub's body, adds the call, retires the
+  stub's `SimError::Unimplemented`, deletes only the pending tests' `#[ignore]` lines, and adds one
+  assertion each on the reason code and the message ([DEC-386](decisions/DEC-386.md)).
 
 ### E5 Journal
 
@@ -366,7 +376,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   #413). It maps each record to its fact, and the vectors are in `journal.yaml`'s `control_stream`
   section. `PlatformOperatorAction` stays open (DEC-261 item 9, Proposed), so its schema and the
   `ModelWithdrawn` mapping wait for the operator service's specification.
-  *Tests PR* ([DEC-303](04-decision-log.md#decisions)): 17 pending tests against stubs in
+  *Implementation* ([DEC-303](decisions/DEC-303.md) items 8 to 11), in two PRs under ES-13. The first
+  registers every §9.2 schema but `AccountSnapshotRecorded` in `mandate-journal`. The second makes the
+  `JournaledFact` mapping live in `mandate-spec`. *Tests PR*: 17 pending tests against stubs in
   `mandate-journal`'s `control` module and `mandate-spec`'s `JournaledFact::from_record`. Three live
   tests keep `AccountSnapshotRecorded` unregistered until stream K's writer conforms (DEC-261 item 7).
 
@@ -912,7 +924,10 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   *Follow-up (#435 review, minor 3):* `score::basket_return` over an empty `members` slice refuses
   with the nameless `Num(DivisionByZero)`, pinned live by `an_empty_basket_is_an_error`: loud, so no
   figure escapes, but a code that tells a caller nothing. A tests PR names it the way DEC-335 named
-  the empty scoreable set (an add-only `ResearchError` arm and code).
+  the empty scoreable set (an add-only `ResearchError` arm and code). Tests PR open on
+  `agent/j-e17-8-empty-basket-tests` (DEC-380): `ResearchError::EmptyBasket`, code
+  `empty_basket`. The live pin `an_empty_basket_is_an_error` held only `Num(_)`, so it becomes a
+  stricter pending test.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -1469,6 +1484,19 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `an_unconfirmed_owner_exit_waits_for_the_session`) and the owner-confirmed extended-hours path:
   outside the regular session an owner exit sells equities through the ladder only on the
   confirmed bid, bid size and floor, and waits for the session otherwise (§5.5).
+- **E7-4's tests correction (stream K), from slice 2 ([DEC-346](decisions/DEC-346.md) item 7):**
+  `properties::every_unprotected_interval_has_a_journaled_start_and_end` asserts that no interval
+  is open when a script ends. A script that ends while the protected lead's partly filled entry is
+  still inside its interval (no completing fill, no timeout reached and confirmed) fails it on any
+  implementation. Judge an interval that is still open against what could have closed it, then
+  delete its `BEHAVIOUR_ONLY_TESTS` row.
+- **E7-4 (stream K), from slice 2 ([DEC-346](decisions/DEC-346.md), left open):** (1) a re-placement
+  after an exit covers every tranche at the prices of the latest `placed`, because the fold keeps
+  one price pair per instrument; decide this for tranches at different prices (coordinator). (2)
+  Bracket legs and the partial-fill OCO record no `created_on`, so slice 5's trading-day part must
+  date §5.4's re-placement before expiry from the placement's own record. (3) The slice that
+  reconciles protective legs maps `{entry}-p{record}` to the broker's leg ids, and it must land
+  before any shell path hands the executor a protected intent.
 - **E7-4 (stream K), from [#448](https://github.com/kunwarshivam/mandate/pull/448) round 1 (minor
   2, [DEC-349](decisions/DEC-349.md)):** a crypto stop-limit is sized net of the taker fee, the
   larger rate, because `BrokerFill` does not say maker or taker. After a maker fill the stop
