@@ -496,10 +496,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   status PR's. Still open: the `lifecycle` op's runtime driver for the other 26 cases, which fail
   naming the op until it lands.
   *Part done (DEC-317, DEC-366):* the `lifecycle` op drives `mandate-runtime`'s `handle` and
-  `fold` under one published map, landing in three PRs. Slice 1 interprets the `ask` step, and every
-  case still fails at its second step, naming the slice that owes it. Once all three slices land,
-  fifteen cases pass (MC-E02 to MC-E05, MC-E07 to MC-E16, MC-E31); their `status.toml` rows are the
-  status PR's.
+  `fold` under one published map, landed in three PRs (#440, #453, #475). Fifteen cases pass
+  (MC-E02 to MC-E05, MC-E07 to MC-E16, MC-E31), and the status PR marks them passing. It lists the
+  other eleven as pending.
   *Follow-up (DEC-317 item 7, E8-3):* the runtime's `ApprovalResponded` records no `quorum`, the
   approver count and independence check 7 applied, which journal spec §9 requires for a grant that
   reaches check 7 (`mandate_approval::quorum` already computes it). Tests first in
@@ -1177,16 +1176,15 @@ From E10-1's slice-V implementation (DEC-161):
   - **Stream K:** the executor's fee-step `AccountSnapshotRecorded` writes `model_cash`, `cash_band`,
     and `cash_in_band` as `null`, not absent (§4.2), and every snapshot writes `risk_clock` as a
     whole-second timestamp, not integer seconds (DEC-302; `payload::clock` writes integers on every
-    account-stream event). **E7-10's implementation must not register
-    `AccountSnapshotRecorded` until this lands.** The fee step pauses every agent and alerts the owner,
-    and refusing its snapshot at `append` must never stop it (rules 3 and 13, DEC-261 item 7). E7-10's
-    tests PR pins that ordering with three live tests (DEC-303 item 4). The registration PR must also
-    turn on, in Rust, the 13 snapshot drafts' own `expect` in the vectors. **The writer landed in #456;
-    the registration's tests PR (DEC-402) routes the snapshot to a stub and makes the three ordering
-    pins pending**: `an_account_snapshot_is_closed_and_checked_by_rule_24` turns those drafts on,
-    `account_snapshot_recorded_refuses_an_unlisted_member` closes the schema, and
-    `the_fee_steps_snapshot_is_never_refused_for_its_members` lands the registration and the fee
-    step's writer together.
+    account-stream event). **Done: the writer landed in #456, and `AccountSnapshotRecorded` registered
+    with rule 24 together with `fees` journaling that writer, tests first (#467), then implemented
+    ([DEC-402](decisions/DEC-402.md)).** DEC-261 item 7's ordering held throughout: the fee step pauses
+    every agent and alerts the owner, and refusing its snapshot at `append` never stops it (rules 3 and
+    13). `an_account_snapshot_is_closed_and_checked_by_rule_24` turns on, in Rust, all 15 snapshot
+    drafts' own `expect` (2 valid and 13 invalid), `account_snapshot_recorded_refuses_an_unlisted_member`
+    closes the schema, and `the_fee_steps_snapshot_is_never_refused_for_its_members` pins the
+    registration and the fee step's writer together; DEC-303 item 4's three live ordering pins are
+    superseded by them.
     The writer's pending pins are #441's (DEC-305 to DEC-307): the fee-step snapshot's payload
     member for member and type for type, the `risk_clock` stamp, the pause and alert whether or not
     the snapshot recorded, `IntentReceived` as §9.1's nine members, and `OrderSubmitted`'s
@@ -1241,10 +1239,18 @@ From E10-1's slice-V implementation (DEC-161):
     scope, the acceptable-use action, and the row's "approval".
   - **Proposed, item 10:** a clause binds an account stream to its connection, so that
     `AccountSnapshotRecorded`'s fact needs no argument.
-  - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** a journal spec
-    change closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with vectors.
-    The tests and implementation that follow register them and map them to `AgentVersionActive` (a
-    deployed agent's new version) and `UniverseChanged`.
+  - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** journal spec v0.8
+    §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
+    vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
+    follow register them and map them to `AgentVersionActive` (a deployed agent's new version) and
+    `UniverseChanged`; until then both stay `unknown_schema` and map to none.
+    **Required, and blocking this registration's acceptance (#470 round 2, minor 5):** the Rust
+    registration re-derives mandate spec §9.2's classification of `new_version` against
+    `old_version` from the two stored documents and refuses a `MandateVersionApplied` whose
+    `classification` differs. Rule 33 covers only what the record itself carries (the allocation
+    change, the floor, and three rejections), so until this lands a risk-increasing version through
+    any other §9.2 row can be journaled as applied, labelled `neutral`, with no step-up (DEC-403
+    item 5).
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).
@@ -2531,3 +2537,27 @@ item 25; held back by the freeze rule, one row each):
   `a_client_opening_is_never_auto_and_every_other_request_decides_as_before` cover rules, defaults,
   admission and requester only. E8-8's tests PR adds live, spent, expired and suspended delegations
   to both and asserts that none lifts a client's order (MI-26, MI-30).
+
+From journal spec v0.8 §9.3's review (#470 round 2, DEC-403):
+
+- *Decision needed (founder, Proposed under DEC-79; the dependency registry is founder-owned):*
+  add `jsonschema` to the `python/` project, so `reference/journal/risk_state.py`'s
+  `documents.valid` can run `reference/mandate`'s full schema and semantic validators instead of
+  its narrow check (#470 round 2, minor 5). Until then the dependency is not added. The narrow
+  check holds a stored version to the proven base changed at its one listed path, with V-013's
+  order and a floor in (0, 1]. It does not stand in for the mandate schema, for any other V-rule,
+  or for a wrong entry in `VERSION_PATHS` itself, which it shares with the document builder (minor
+  4). `drafts.classification` catches the dangerous sub-case, a wrong value that changes the §9.2
+  verdict. All six of today's documents were checked against the full validators by hand.
+- **§9.3's vectors: three coverage gaps (#470 round 2, minors 1, 7 and 8).**
+  - **Report orders.** The 29-then-30 order (an applied, risk-increasing record with `step_up`
+    null and a `reason` set) and the 30-then-33 order (a rejected record with
+    `increase_blocked_while_latched`, `classification` `neutral`, and an `allocation_change` set)
+    are pinned by no draft. Each wants a draft and an `order.*` mutant, as §9.2's
+    `order.rule_21_first`. Rules 29 and 33 can never both fire, since 29 needs `risk_increasing`
+    and 33 needs anything else, so their relative order needs no pin.
+  - **`universe_size_after`** is checked against nothing, not even the fold of the section's own
+    drafts.
+  - **`risk_state.classify`** raises `ValueError` on a path it does not encode instead of reporting
+    a `drafts.classification` problem. It fails closed either way, but a reported problem reads
+    better.
