@@ -53,8 +53,10 @@
 //! DEC-129 item 29's fail-closed refusal of an opening a missing check might have denied has
 //! nothing left to refuse, and [`evaluate`] decides every proposal itself. E6-4 adds
 //! [`trim_proposals`], mandate spec §5.5's `trim_to_target` (DEC-65, DEC-399), the last entry point
-//! #136 stubbed. [`GateError::Unimplemented`] stays only for DEC-129 item 27's refusal of an
-//! opening that breaks a §5.3 rule with no registered reason code.
+//! #136 stubbed. E6-6's last row refuses a proposal of zero quantity as
+//! [`GateError::ZeroQuantity`] before any check (DEC-401). [`GateError::Unimplemented`] stays only
+//! for DEC-129 item 27's refusal of an opening that breaks a §5.3 rule with no registered reason
+//! code.
 
 use core::fmt::Display;
 use std::collections::{BTreeMap, BTreeSet};
