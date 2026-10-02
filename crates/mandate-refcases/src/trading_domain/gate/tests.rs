@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use mandate_num::{Price, Qty, Usd};
+use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_risk::{
     AccountState, AssetClass, AssetId, EtpClass, Exchange, InstrumentSnapshot, MarketSnapshot,
     QuoteCurrency, RestingSide, SaneQuote,
@@ -17,7 +17,7 @@ use mandate_risk::{
 use mandate_time::UtcNanos;
 use serde_json::{Map, json};
 
-use super::{Gate, listing, market};
+use super::{Gate, held_overnight, listing, market};
 use crate::trading_domain::{
     BrokerProfile, LATER_PROPOSAL_WAITS, config, initial, instruments, run_case, run_step,
 };
@@ -649,10 +649,13 @@ fn the_opposite_fill_interval_runs_from_the_fill_step() -> Result<(), String> {
 #[test]
 fn a_case_that_cannot_run_lists_a_later_proposal_only_after_an_unfilled_one() -> Result<(), String>
 {
-    let waiting = "initial account `crypto_status` not interpreted until E6-10";
+    let waiting = "initial `agents` not interpreted until E7-5";
     expect_eq(
         "RC-09B",
-        run_edited("RC-09B", account("crypto_status", json!("ACTIVE"))),
+        run_edited(
+            "RC-09B",
+            Box::new(|c| put(c, &["initial"], "agents", json!({}))),
+        ),
         Err(format!("{LATER_PROPOSAL_WAITS}; {waiting}")),
     )?;
     expect_eq(
@@ -660,7 +663,7 @@ fn a_case_that_cannot_run_lists_a_later_proposal_only_after_an_unfilled_one() ->
         run_edited(
             "RC-09B",
             Box::new(|c| {
-                put(c, &["initial", "account"], "crypto_status", json!("ACTIVE"))?;
+                put(c, &["initial"], "agents", json!({}))?;
                 let steps = steps_of(c)?;
                 ensure(steps.len() > 2, || "RC-09B has a step 3".to_owned())?;
                 steps.remove(2);
@@ -740,6 +743,174 @@ fn the_overnight_shares_are_the_position_less_today_s_fills() -> Result<(), Stri
         ),
         Err("step 3: decision.verdict: expected allow, got deny".to_owned()),
     )
+}
+
+/// A short equity position is refused where a `day_trade_count` expectation reaches the fold,
+/// never folded as long (#412 review, nit 3, DEC-314): `decide` refuses a short snapshot, but the
+/// expectation reaches [`Gate::fold`] without it, and folding the position's magnitude would hold
+/// 10 AAPL long, find no day trade in today's fills, and answer the prior day's one. The refusal
+/// is pending E6-10: until its story lands the stub reports itself, and this test pins the
+/// refusal's text against it.
+#[test]
+#[ignore = "pending E6-10"]
+fn a_short_position_is_refused_where_a_day_trade_count_is_expected() -> Result<(), String> {
+    expect_eq(
+        "a short position under a day_trade_count expectation",
+        run_edited(
+            "RC-09B",
+            Box::new(|c| {
+                put(
+                    c,
+                    &["initial"],
+                    "positions",
+                    json!([{ "instrument": "AAPL", "qty": "-10", "cost_basis": "-1500.00" }]),
+                )?;
+                put(
+                    c,
+                    &["initial", "account"],
+                    "prior_day_trades",
+                    json!([{ "date": "2026-09-18", "instrument": "CCC" }]),
+                )?;
+                object_at(c, &[])?.insert(
+                    "steps".to_owned(),
+                    json!([{
+                        "at": "2026-09-21T12:00:00-04:00",
+                        "event": "mark",
+                        "data": { "instrument": "AAPL", "price": "150.00", "source": "quote" },
+                        "expect": { "day_trade_count": 1 }
+                    }]),
+                );
+                Ok(())
+            }),
+        ),
+        Err(
+            "step 1: `AAPL` is held short, which the day-trade fold refuses (its magnitude would fold as long and understate the day-trade count)"
+                .to_owned(),
+        ),
+    )
+}
+
+/// DEC-314 item 1's boundary, where it turns: only a negative `SignedQty` is a short. A flat
+/// position, `0`, is held overnight as no shares and a long one as its shares, so a refusal widened
+/// to zero (`is_negative() || is_zero()`) fails here. The boundary is pinned at
+/// [`held_overnight`] because no case can hand the fold a flat position: the accounting keeps
+/// none (`Account::opening` drops a zero entry and a fill that closes a position removes it), which
+/// `a_flat_initial_position_is_no_position_to_the_fold` pins at the case level. Every negative is
+/// refused, from a ten-millionth of a share through half a share to whole shares, so a
+/// refusal narrowed to a whole share (`qty.abs() >= 1`), which would fold a sub-share short as long,
+/// fails here too (#438 review, round 2, blocker 2). Until E6-10 lands the refusal is the stub's
+/// report; the implementation PR swaps it for DEC-314's text (DEC-77's 2026-09-27 amendment).
+#[test]
+fn only_a_negative_quantity_is_a_short_to_the_fold() -> Result<(), String> {
+    for (position, held) in [("0", "0"), ("10", "10")] {
+        let qty = SignedQty::parse(position).map_err(|e| e.to_string())?;
+        let shares = Qty::parse(held).map_err(|e| e.to_string())?;
+        expect_eq(position, held_overnight("AAPL", qty), Ok(shares))?;
+    }
+    for position in ["-0.0000001", "-0.5", "-1", "-10"] {
+        let qty = SignedQty::parse(position).map_err(|e| e.to_string())?;
+        expect_eq(
+            position,
+            held_overnight("AAPL", qty),
+            Err(
+                "the day-trade fold's refusal of a short position is not implemented yet (pending E6-10)"
+                    .to_owned(),
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+/// A flat equity position stated in `initial.positions`, `qty: "0"`, is no position at all to the
+/// fold (the accounting drops it), so under the short test's `day_trade_count` expectation the case
+/// still runs and the count is the prior day's one; the count is compared, since 2 is refused.
+#[test]
+fn a_flat_initial_position_is_no_position_to_the_fold() -> Result<(), String> {
+    let flat = |count: u64| -> Edit {
+        Box::new(move |c| {
+            put(
+                c,
+                &["initial"],
+                "positions",
+                json!([{ "instrument": "AAPL", "qty": "0", "cost_basis": "0" }]),
+            )?;
+            put(
+                c,
+                &["initial", "account"],
+                "prior_day_trades",
+                json!([{ "date": "2026-09-18", "instrument": "CCC" }]),
+            )?;
+            object_at(c, &[])?.insert(
+                "steps".to_owned(),
+                json!([{
+                    "at": "2026-09-21T12:00:00-04:00",
+                    "event": "mark",
+                    "data": { "instrument": "AAPL", "price": "150.00", "source": "quote" },
+                    "expect": { "day_trade_count": count }
+                }]),
+            );
+            Ok(())
+        })
+    };
+    expect_eq(
+        "a flat AAPL position",
+        run_edited("RC-09B", flat(1)),
+        Ok(()),
+    )?;
+    expect_eq(
+        "a flat AAPL position, expecting 2",
+        run_edited("RC-09B", flat(2)),
+        Err("step 1: day_trade_count: expected 2, got 1".to_owned()),
+    )
+}
+
+/// The report a `crypto_status` read gives until E6-10 lands (DEC-315 item 3): the stub's own,
+/// where `main` before DEC-315 answered `` initial account `crypto_status` not interpreted until
+/// E6-10 ``. The implementation PR replaces the stub and these two tests (DEC-77's 2026-09-27
+/// amendment).
+const CRYPTO_STATUS_STUB: &str =
+    "the account's `crypto_status` is not implemented yet (pending E6-10)";
+
+/// An initial account stating `crypto_status` reaches the gate's read of it, which reports its
+/// stub, whatever the status: it is no longer noted as not interpreted, and never silently read as
+/// crypto-active.
+#[test]
+fn an_initial_crypto_status_reports_its_stub_until_e6_10() -> Result<(), String> {
+    for status in ["ACTIVE", "INACTIVE"] {
+        expect_eq(
+            status,
+            run_edited("RC-09", account("crypto_status", json!(status))),
+            Err(CRYPTO_STATUS_STUB.to_owned()),
+        )?;
+    }
+    Ok(())
+}
+
+/// A `broker_account_update` stating `crypto_status` reaches the gate's read of it at that step,
+/// which reports its stub: the update is no longer refused as a field not interpreted.
+#[test]
+fn an_account_update_s_crypto_status_reports_its_stub_until_e6_10() -> Result<(), String> {
+    for status in ["ACTIVE", "INACTIVE"] {
+        expect_eq(
+            status,
+            run_edited(
+                "RC-09",
+                Box::new(move |c| {
+                    steps_of(c)?.insert(
+                        0,
+                        json!({
+                            "at": "2026-09-21T09:30:00-04:00",
+                            "event": "broker_account_update",
+                            "data": { "crypto_status": status }
+                        }),
+                    );
+                    Ok(())
+                }),
+            ),
+            Err(format!("step 1: {CRYPTO_STATUS_STUB}")),
+        )?;
+    }
+    Ok(())
 }
 
 /// An equity fill on a trading day before the step's is refused rather than folded, since its day

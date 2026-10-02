@@ -299,7 +299,7 @@ fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()
 }
 
 /// The lint job's checks over the Cargo and uv workspaces in the current directory: fmt, clippy
-/// `-D warnings`, crate layering, markers, the feature map, typos, and ruff.
+/// `-D warnings`, crate layering, markers, saved proptest seeds, the feature map, typos, and ruff.
 fn workspace_lint() -> Result<()> {
     sh("cargo", &["fmt", "--all", "--check"])?;
     sh(
@@ -316,6 +316,7 @@ fn workspace_lint() -> Result<()> {
     )?;
     layers()?;
     markers()?;
+    proptest_seeds()?;
     feature_map()?;
     sh("typos", &[])?;
     uv_tools(&["ruff", "check", "."])?;
@@ -884,6 +885,40 @@ fn refcases(write: bool) -> Result<()> {
     }
     fs::remove_dir_all(&tmp).ok();
     report(problems, "refcases")
+}
+
+/// Where proptest saves a failing case as a seed beside the test that produced it, in both
+/// shapes it writes: `proptest-regressions/<file>.txt` at the crate root, its default, and
+/// `<file>.proptest-regressions` next to the source. Git pathspecs, so `*` crosses directories.
+const PROPTEST_SEED_PATHSPECS: [&str; 2] = ["*.proptest-regressions", "*proptest-regressions/*"];
+
+/// Every proptest failure seed in the tree at `dir`, tracked or untracked, ignored or not.
+/// Proptest replays a saved seed before it draws fresh cases, so a seed left by an earlier run, on
+/// other code or under a planted bug, changes which cases every later run tries (DEC-164); a
+/// committed one does that in every checkout (#449 review, M1).
+fn proptest_seeds_in(dir: &Path) -> Result<Vec<String>> {
+    let mut args = vec!["ls-files", "--cached", "--others", "--"];
+    args.extend_from_slice(&PROPTEST_SEED_PATHSPECS);
+    Ok(output_in(dir, "git", &args)?
+        .lines()
+        .map(str::to_owned)
+        .collect())
+}
+
+/// `.gitignore` keeps a seed out of a commit made with `git add -A`; this check also fails on one
+/// that was added by name or was left in the working tree (DEC-381).
+fn proptest_seeds() -> Result<()> {
+    eprintln!("    proptest-seeds: checking for saved proptest failure seeds");
+    let problems = proptest_seeds_in(Path::new("."))?
+        .into_iter()
+        .map(|file| {
+            format!(
+                "{file}: a saved proptest failure seed; delete it, since proptest replays it \
+                 before drawing fresh cases (DEC-164, DEC-381)"
+            )
+        })
+        .collect();
+    report(problems, "proptest-seeds")
 }
 
 /// Debt markers get copied as precedent, `#[ignore]` without a pending story hides a test forever,
@@ -2791,7 +2826,7 @@ mod tests {
         generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function, lint,
         listed_mutant_counts, live_test_counts, mutant_verdicts, mutants, mutants_outcome,
         mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, repo_root, shellcheck_scripts, spec_guard_problems,
+        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
         status_flip_problems, test_binary, test_outcomes, unjudged_mutants, verdicts,
     };
 
@@ -4098,16 +4133,43 @@ mod tests {
                         .contains("It panicked with: Test failed: the fixture's own assertion")),
                 "run {round}: {problems:?}"
             );
-            let saved = output_in(
-                &fx.0,
-                "git",
-                &["ls-files", "--others", "--", "*.proptest-regressions"],
-            )?;
+            let saved = proptest_seeds_in(&fx.0)?;
             assert!(
-                saved.trim().is_empty(),
-                "run {round} saved failures for the next run to replay: {saved}"
+                saved.is_empty(),
+                "run {round} saved failures for the next run to replay: {saved:?}"
             );
         }
+        Ok(())
+    }
+
+    /// A seed of either shape is found whether it is committed, untracked, or ignored, and a file
+    /// that only resembles one is not (DEC-381).
+    #[test]
+    fn a_saved_proptest_seed_of_either_shape_is_found_tracked_or_not() -> Result<()> {
+        let fx = Fixture::new("proptest-seeds")?;
+        fx.write(".gitignore", "/target\nproptest-regressions/\n")?;
+        fx.write("crates/fx/src/regressions.rs", "")?;
+        fx.commit()?;
+        assert_eq!(proptest_seeds_in(&fx.0)?, Vec::<String>::new());
+        fx.write("crates/fx/proptest-regressions/props.txt", "cc 00\n")?;
+        output_in(
+            &fx.0,
+            "git",
+            &["add", "-f", "crates/fx/proptest-regressions/props.txt"],
+        )?;
+        fx.commit()?;
+        fx.write("crates/fx/proptest-regressions/score.txt", "cc 01\n")?;
+        fx.write("crates/fx/tests/props.proptest-regressions", "cc 02\n")?;
+        let mut found = proptest_seeds_in(&fx.0)?;
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                "crates/fx/proptest-regressions/props.txt",
+                "crates/fx/proptest-regressions/score.txt",
+                "crates/fx/tests/props.proptest-regressions",
+            ]
+        );
         Ok(())
     }
 

@@ -83,14 +83,18 @@ every workspace crate and reference-case suite has an entry and that every path 
   backtest mark is the bar close); DEC-106 records the choices §6.4 leaves open.
 - **Code:** `mandate-sim`: `crates/mandate-sim/src/lib.rs` (bars with their session labels, orders,
   configuration, fills, end states, errors), `crates/mandate-sim/src/fill.rs` (the pure walk over
-  bars: timing, sessions, the shared volume cap, market, limit, stop, stop-limit, and OCO rules);
+  bars: timing, sessions, the shared volume cap, market, limit, stop, stop-limit, and OCO rules,
+  and `check_sessions_of_asset_class`, which refuses a bar on a session its instrument's asset class
+  never trades, spec §4.3, E4-3, DEC-377);
   the arithmetic is `mandate-num`'s (`Fraction`, `Qty::portion`, `Price::slipped`,
   `Bps::sqrt_impact`).
 - **Tests:** `crates/mandate-sim/tests/hand.rs` (every order of RC-10, RC-12, and RC-19 recomputed
   by hand, plus the rules those cases do not reach: latency, day-order cancellation, the shared cap,
-  the 20-session median, `sqrt` impact, adverse rounding, crypto),
+  the 20-session median, `sqrt` impact, adverse rounding, crypto, and E4-3's session-of-asset-class
+  refusal by bar index, code, and message),
   `crates/mandate-sim/tests/properties.rs` (one property per rule and per never-or-always clause,
-  against an order-major `i128` simulator as the oracle), `crates/mandate-num/tests/num.rs` (the
+  against an order-major `i128` simulator as the oracle, and E4-3's refusal against spec §4.3's
+  session table), `crates/mandate-num/tests/num.rs` (the
   fill model's arithmetic against an i128 oracle and hand-computed roots),
   `crates/mandate-refcases/tests/harness.rs` (the backtest harness reads every key the cases state).
 - **Reference cases:** `trading_domain::RC-10`, `RC-12`, and `RC-19` in
@@ -689,7 +693,8 @@ proves each pending test fails on them (DEC-110).
 - **Code:** `mandate-research`: `crates/mandate-research/src/lib.rs` (the thesis and its platform facts as typed data,
   `checks` and `admit` for the §8.5 decision, `fold_theses` for the §8.6 lineages, `expire_theses`
   for the three removals, `stagger_offset`, `stagger_release_at` and `next_proposal_at` for §8.4's
-  timing, and the `ResearchEvent` entries the crate produces) and
+  timing, and the `ResearchEvent` entries the crate produces),
+  `crates/mandate-research/src/score.rs` (E17-8's `evaluate`, the pure forward-paper scorer) and
   `crates/mandate-research/src/spec_types.rs` (the narrow stream-F views the first implementation PR
   after F's tests PR deletes). It **never calls a model:** a model output arrives as a typed value,
   and the platform boundary that produces it is E17-2's shell story. The spike that found the shape
@@ -703,6 +708,9 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-research/tests/properties.rs` (the four oracles: the universe replayed from the
   emitted events, the failing-check set computed unordered, an independent lineage counter, and the
   oracle self-checks that fail on a seeded bug),
+  `crates/mandate-research/tests/score.rs` (E17-8's forward-paper scoring: hand-calculated cases,
+  the boundary rules, and the empty scoreable set's named refusal `empty_scoreable_set` at a
+  registered minimum of zero, DEC-335 and DEC-336, with its branch-counting property),
   `crates/mandate-research/tests/refcases.rs` (25 of the 28 family-N cases loaded from
   `fixtures/refcases/mandate.json` rather than typed out; the three that state `first_order_autonomy`
   wait for stream H's `classify`), and `crates/mandate-research/tests/rules.rs` (the rule logic this

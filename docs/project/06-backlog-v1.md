@@ -58,6 +58,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   than waiting for a reviewer (the #316 reviews).
   *Accepted when:* both run in `ci lint`, pinned in `.github/workflows/ci.yml` and `install.sh`,
   and a planted `SC2086` or an unknown workflow key fails the job.
+  *Follow-up* (#434's round-2 review, minor m1, backlogged under the freeze rule): three `xtask`
+  tests, each failing on the plant that review left uncaught. One fails when `lint_paths` skips a
+  missing `shellcheck` or `actionlint` binary silently (the `let Ok(out) = … else { return Ok(()) }`
+  plant), for each tool; one fails when `shellcheck_scripts` loses its empty-file-list guard; and
+  one fails when `actionlint_workflows` loses its empty-file-list guard.
 - **E1-5 (Should)** As an engineer, I want the merge script's remaining gaps from #316's
   round-3 review closed, so that the only path from approval to `main` (DEC-175) is tested as
   GitHub actually answers it. The items:
@@ -121,9 +126,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   New York sessions; any other bar is refused with `session_off_asset_class` naming the first such
   bar's index; an empty bar sequence is accepted; `simulate` runs the check after the order-policy
   checks, so an order the v1 policy refuses keeps its own cause; and every sequence the table allows
-  fills exactly as before. Tests PR [#437](https://github.com/kunwarshivam/mandate/pull/437), then
-  an implementation PR that replaces the stub's body, adds the call, and deletes only the pending
-  tests' `#[ignore]` lines.
+  fills exactly as before. Tests PR [#437](https://github.com/kunwarshivam/mandate/pull/437)
+  (merged), then the implementation PR, which replaces the stub's body, adds the call, retires the
+  stub's `SimError::Unimplemented`, deletes only the pending tests' `#[ignore]` lines, and adds one
+  assertion each on the reason code and the message ([DEC-386](decisions/DEC-386.md)).
 
 ### E5 Journal
 
@@ -884,7 +890,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   answered: the named code reaches a caller only at a registered `minimum_scoreable` of zero. Below
   a positive minimum an empty scoreable set still refuses `window_not_closed`, which does not tell
   "no theses at all" from "theses, none scoreable" (DEC-336); the frozen surface is otherwise
-  unchanged.
+  unchanged. Tests merged in [#435](https://github.com/kunwarshivam/mandate/pull/435); the
+  implementation PR (DEC-77 stage 2) replaces the stub with the named arm and deletes only the
+  three `#[ignore]` lines.
   *Founder question (#435 review, minor 1):* whether the named refusal should answer an empty
   scoreable set at every minimum, ahead of the count refusal. That changes two pinned ES-09
   refusal codes (`a_thesis_whose_closes_all_lie_outside_its_window_is_unscoreable` and
@@ -1847,12 +1855,17 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   so a short would fold as if held long and understate the day-trade count. No v1 case holds one
   (`AGENTS.md` rule 12) and `Gate::decide` refuses a short, but a `day_trade_count` expectation
   reaches the fold without that refusal. Refuse a negative `SignedQty` there instead of taking
-  its magnitude.
+  its magnitude. **Tests staged** in [#438](https://github.com/kunwarshivam/mandate/pull/438)
+  (DEC-314): the refusal is pending E6-10 behind `held_overnight`'s stub, and a flat (`0`)
+  position, which is not a short, is pinned live as folding as no shares held.
 - **Read `crypto_status` in the trading-domain harness** (DEC-285 item 5). The driver hands the gate
   a crypto-active account because no crypto-proposing case states `crypto_status`, and
   `trading_domain_gate_harness.rs` pins it as pending E6-10, initial and in an update. When a case
   needs it, a tests correction (DEC-77) drops those two assertions, and the harness reads it as
-  check 1's `crypto_active`.
+  check 1's `crypto_active`. **Tests staged** in [#438](https://github.com/kunwarshivam/mandate/pull/438)
+  (DEC-315): the two assertions are dropped, the gate carries a `crypto_active` field its
+  snapshot reads, the read is a stub pending E6-10, and two in-module tests pin the stub's report
+  live until the implementation PR replaces them.
 - **RC-09's `alpaca_intraday_margin` variant cannot pass as written** (founder; DEC-285 item 6).
   Its `expect_overrides.step_1: { decision: { verdict: allow } }` merges into a decision that
   keeps `reason_code: legacy_pdt_day_trade_budget`, so the expectation is an allow with a deny's
