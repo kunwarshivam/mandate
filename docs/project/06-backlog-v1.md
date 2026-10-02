@@ -2203,6 +2203,33 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   write. Dropping the guard would make `ref.py` withhold a trim `rung_not_confirmed` with no rung
   active. Only the minimum's reading remains, a question to the coordinator on claim
   [#123](https://github.com/kunwarshivam/mandate/issues/123).
+  *The dollar-minimum half, harness side, closed in #498* (DEC-399 item 8, option (a) on #123).
+  `trim_guards` judges `below_minimum_order` by the instrument's `min_order_size`, and **that
+  quantity reading is the one that stays**: do not remove it. What remains is `ref.py`'s side: the
+  reference PR moves `ref.py` to the same quantity minimum, has §5.5 name it, and adds MC-B33 and
+  MC-B34.
+- **E6-4 harness cleanup: drop the transitional branches once MC-B33 and MC-B34 are on `main`**
+  (#498 review, M1). In `crates/mandate-refcases/src/mandate/order_builder.rs`:
+  (a) drop `AWAITED`, `awaited`, `counted` and the without-branch, so the case list and the sweep
+  counts state only the fixture with both cases;
+  (b) remove the `min_order_size` default (`stated.increment`) in `trim_first`, once the reference
+  PR makes the input required on a trim base.
+  Until then, the case-list pin is open: dropping both awaited cases from the fixture fails
+  nothing, because `counted` falls back to the counts without them.
+- **E6-4 harness: one scene for both gate calls on a trim base** (#498 review, m3). `trim_first`
+  sets the scene instrument's `min_order_size` from the case, but `judge` builds its own scene in
+  `Scene::read`, which takes the minimum from `qty_increment`. A case where a trim is withheld and
+  the builder then proposes would run §5.3 rule 2 against a different minimum from the trim's.
+  Unreachable today, since every withheld-trim case ends in a hold. `holding` and `scale_active_s`
+  have the same shape. Read the trim inputs in `Scene::read`, so both gate calls get one
+  instrument.
+- **E6-4: pin that the trim's minimum is judged on the remainder after open sells** (#498 review,
+  m8; DEC-399 items 5 and 7). No test combines a resting sell with a minimum above one increment,
+  so a gate that judged the whole excess passes every test in the workspace. Close it in
+  `mandate-risk`'s `trim::tests`: `Scene::new("10", "1000")` with `resting(7, "2", Side::Sell,
+  false, true)` and `min_order_size = 3` leaves a 1-share remainder, which must not be proposed,
+  while a whole-excess reading (3 shares) proposes it. Next in stream G, before the reference
+  PR's status change.
 - **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
