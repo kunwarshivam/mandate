@@ -292,7 +292,20 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   §6.4's per-agent budget of 10; risk-limit alerts are never capped.
 - **E6-13 (Should)** As an owner, I want tripwires I set in advance to end my delegations or hold new
   openings when their condition is met, so that trust does not outlive the conditions I gave it
-  under ([DEC-187](04-decision-log.md#decisions)). Waits on the mandate spec change for `autonomy.tripwires` (MI-31, V-044).
+  under ([DEC-187](04-decision-log.md#decisions)). The spec change is MI-31, V-044, §6.7, and the MC-W cases
+  ([DEC-350](decisions/DEC-350.md) to [DEC-352](decisions/DEC-352.md); claim [#439](https://github.com/kunwarshivam/mandate/issues/439)).
+  Owed after it: `mandate-spec` parsing the field, V-044, and the §9.2 row (DEC-77 tests then implementation), the executor's
+  fold of §6.7, and the `kind: tripwire` harness arm. Also owed, from #443's round 1 (m4): run ruff over `reference/` in
+  `cargo xtask ci lint`, so a duplicated definition such as a second `main()` in `reference/mandate/mutants.py` (F811) fails
+  the lint rather than reaching review. Also (#443 round 3): the per-PR `cargo xtask ci reference` runs `fuzz.py` but not
+  `reference/mandate/mutants.py`, which only the nightly job runs, so a stale mutation anchor passed `full` on #443's round-2
+  head. Make a missing anchor fail per-PR CI, for example with an anchor-only check that runs in seconds.
+  Also owed, one code PR (#443 round 3): journal spec rule 28 and `OwnerCommandRefused.reason`'s `not_independent` in
+  `mandate-journal`'s §9.2 schema, with the validator check in `reference/journal/control.py`, its two vectors, and its
+  seeded bug.
+  **Founder question** (#443 round 2): should a mandate be refused at validation
+  when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
+  drawdown ladder) then cannot be lifted until a second user exists?
   Actions are `end_delegations` or `exits_only`, never `paused` (rule 13). *Accepted when:* a fired
   tripwire acts at its next evaluation, journals the event, alerts with opaque text, and lifts only
   by the owner's acknowledgment with step-up; adding or tightening one applies at once.
