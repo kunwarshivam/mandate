@@ -2879,7 +2879,6 @@ fn a_passive_exit_never_leaves_the_position_unprotected() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_add_is_a_new_bracket_not_a_replacement() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2916,7 +2915,6 @@ fn an_add_is_a_new_bracket_not_a_replacement() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_partly_filled_bracket_becomes_an_oco_for_the_filled_quantity() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2993,7 +2991,6 @@ fn a_partly_filled_bracket_becomes_an_oco_for_the_filled_quantity() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_entry_unfinished_at_the_timeout_is_cancelled_then_oco_d() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3048,7 +3045,6 @@ fn an_entry_unfinished_at_the_timeout_is_cancelled_then_oco_d() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_terminal_partly_filled_entry_is_oco_d_at_once() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
