@@ -300,9 +300,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   the lint rather than reaching review. Also (#443 round 3): the per-PR `cargo xtask ci reference` runs `fuzz.py` but not
   `reference/mandate/mutants.py`, which only the nightly job runs, so a stale mutation anchor passed `full` on #443's round-2
   head. Make a missing anchor fail per-PR CI, for example with an anchor-only check that runs in seconds.
-  Also owed, one code PR (#443 round 3): journal spec rule 28 and `OwnerCommandRefused.reason`'s `not_independent` in
-  `mandate-journal`'s §9.2 schema, with the validator check in `reference/journal/control.py`, its two vectors, and its
-  seeded bug.
+  ~~Also owed (#443 round 3): journal spec rule 28 and `OwnerCommandRefused.reason`'s `not_independent`~~ Done in two PRs:
+  the code ([#474](https://github.com/kunwarshivam/mandate/pull/474): `mandate-journal`'s schema and rule 28), then the
+  reference (the validator check in `reference/journal/control.py`, its two vectors, and its seeded bug). Also owed (#474
+  round 1, m1): a test that pins every closed value list in `mandate-journal`'s §9.2 schemas against the spec's, so
+  widening one, as #474 widened `OwnerCommandRefused.reason`, fails unless the spec says so.
   **Founder question** (#443 round 2): should a mandate be refused at validation
   when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
   drawdown ladder) then cannot be lifted until a second user exists?
