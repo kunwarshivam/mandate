@@ -321,6 +321,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   all. `Autonomy` has no `delegations` member and `parse::autonomy`'s member list is closed, so a mandate carrying one is
   refused at parse (`unknown_member`); the type, the parser and §9.2's `autonomy.delegations` row, which the Rust
   classifier also lacks, come before the rule has anything to read (#471 round 1, m9).
+  **Founder question, when this is picked up** ([#471](https://github.com/kunwarshivam/mandate/pull/471) round 2, the
+  reviewer's note): a risk-reducing rule change can move routine orders onto a delegation granted for something else and
+  spend it. Removing an `auto` rule ahead of a delegated `ask` (MC-J06) sends the small orders the rule decided to the
+  delegation, so the orders it was granted for escalate once it is spent. Every decision is stricter, so every invariant
+  holds, but the owner is not told. Should the change's confirmation screen say which delegations the new version's
+  orders will draw on? Product wording, so the founder's (§6.4's approval card already carries delegation shapes).
   **Founder question** (#443 round 2): should a mandate be refused at validation
   when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
   drawdown ladder) then cannot be lifted until a second user exists?
