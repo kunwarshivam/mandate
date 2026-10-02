@@ -2106,6 +2106,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   allowed with `marketable_limit_required`, but not its `limit_price` or `applied`. §4.4 and §5.6
   re-price that exit as the auction window does, so it is the same unpinned pair the auction test
   now pins: the proposal's limit, and no §9.6 control.
+  *Done (`agent/g-e6-6-halt-pins`):* the test asserts the quantity, the proposal's limit and an
+  empty `applied`.
 - **E6-4 harness: family B's trim arm compares the trim** (DEC-250 item 11, DEC-399 item 6).
   `mandate_risk::trim_proposals` answers since E6-4's implementation PR, but
   `crates/mandate-refcases/src/mandate/order_builder.rs`'s `trim_first` still fails every

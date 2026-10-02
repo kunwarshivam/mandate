@@ -1339,9 +1339,16 @@ fn a_dropped_status_feed_is_a_presumed_halt() {
         "§4.4 and §5.6 re-price an exit under a presumed halt; MI-1 forbids denying it"
     );
     assert_eq!(
-        exit.pacing.map(|p| p.marketable_limit_required),
+        exit.pacing.as_ref().map(|p| p.marketable_limit_required),
         Some(true),
         "the allow carries the marketable-limit requirement the exit price ladder needs"
+    );
+    assert_eq!(
+        exit.pacing.map(|p| (p.qty, p.limit_price, p.applied)),
+        Some((qty("10"), price("100"), BTreeSet::new())),
+        "the re-priced exit keeps the proposal's quantity and limit, and no §9.6 control is \
+         applied to it: a risk exit is exempt from §9.6 entirely, so the marketable price is the \
+         exit ladder's to set (§4.4, §5.6)"
     );
 }
 
