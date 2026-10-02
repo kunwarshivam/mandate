@@ -959,7 +959,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   *Follow-up (#455 review, nit):* `no_basket_reaches_division_by_zero`'s `excess_by_size[0]` is
   `""`, and `r("")` panics; the `reported` branch never reaches a zero-member basket today, so
   it never fires, but a later generator change would make it a fixture panic. A tests change
-  gives index 0 a real figure or removes it.
+  gives index 0 a real figure or removes it. *Done* on `agent/j3-e17-8-basket-nit`: the oracle
+  now takes the expected excess from a closed match on the basket's size (`0.2` for one member,
+  `0.15` for two). Any other size fails the case rather than defaulting a figure.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
