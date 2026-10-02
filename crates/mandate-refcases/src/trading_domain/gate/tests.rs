@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use mandate_num::{Price, Qty, Usd};
+use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_risk::{
     AccountState, AssetClass, AssetId, EtpClass, Exchange, InstrumentSnapshot, MarketSnapshot,
     QuoteCurrency, RestingSide, SaneQuote,
@@ -17,7 +17,7 @@ use mandate_risk::{
 use mandate_time::UtcNanos;
 use serde_json::{Map, json};
 
-use super::{Gate, listing, market};
+use super::{Gate, held_overnight, listing, market};
 use crate::trading_domain::{
     BrokerProfile, LATER_PROPOSAL_WAITS, config, initial, instruments, run_case, run_step,
 };
@@ -790,12 +790,27 @@ fn a_short_position_is_refused_where_a_day_trade_count_is_expected() -> Result<(
     )
 }
 
-/// A flat equity position, `qty: "0"`, is not a short (DEC-314 item 1 refuses a negative
-/// `SignedQty` only): under the same `day_trade_count` expectation it folds as no shares held and
-/// the count is the prior day's one, and the count is compared, since 2 is refused. A fold that
-/// refused zero as a short would fail both.
+/// DEC-314 item 1's boundary, where it turns: only a negative `SignedQty` is a short. A flat
+/// position, `0`, is held overnight as no shares and a long one as its shares, so a refusal widened
+/// to zero (`is_negative() || is_zero()`) fails here. The boundary is pinned at
+/// [`held_overnight`] because no case can hand the fold a flat position: the accounting keeps
+/// none (`Account::opening` drops a zero entry and a fill that closes a position removes it), which
+/// `a_flat_initial_position_is_no_position_to_the_fold` pins at the case level.
 #[test]
-fn a_flat_position_folds_as_no_shares_held() -> Result<(), String> {
+fn only_a_negative_quantity_is_a_short_to_the_fold() -> Result<(), String> {
+    for (position, held) in [("0", "0"), ("10", "10")] {
+        let qty = SignedQty::parse(position).map_err(|e| e.to_string())?;
+        let shares = Qty::parse(held).map_err(|e| e.to_string())?;
+        expect_eq(position, held_overnight("AAPL", qty), Ok(shares))?;
+    }
+    Ok(())
+}
+
+/// A flat equity position stated in `initial.positions`, `qty: "0"`, is no position at all to the
+/// fold (the accounting drops it), so under the short test's `day_trade_count` expectation the case
+/// still runs and the count is the prior day's one; the count is compared, since 2 is refused.
+#[test]
+fn a_flat_initial_position_is_no_position_to_the_fold() -> Result<(), String> {
     let flat = |count: u64| -> Edit {
         Box::new(move |c| {
             put(

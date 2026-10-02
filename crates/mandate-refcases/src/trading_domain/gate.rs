@@ -994,7 +994,7 @@ fn gate_error(e: &GateError) -> String {
 /// would hold it long and understate the day-trade count (#412 review, nit 3, DEC-314), so the
 /// fold refuses it. [`Gate::decide`] refuses a short snapshot before it folds, so the refusal is
 /// reached from [`Gate::check_day_trade_count`] (DEC-314 item 2). A flat position, `0`, is not a
-/// short and folds as no shares held, which `a_flat_position_folds_as_no_shares_held` pins. The
+/// short and folds as no shares held, which `only_a_negative_quantity_is_a_short_to_the_fold` pins. The
 /// refusal is pending E6-10: until its story lands the stub reports itself, which
 /// `a_short_position_is_refused_where_a_day_trade_count_is_expected` pins the refusal against.
 fn held_overnight(name: &str, qty: SignedQty) -> Result<Qty, String> {
