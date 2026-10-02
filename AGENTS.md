@@ -125,8 +125,9 @@ agent needs the same correction twice, put the rule on the highest rung that can
    and plain comments (`cargo xtask markers`), `#[allow]` without a reason, `#[ignore]` without a
    pending story, a pending test that passes on the PR's code or fails without its stub's own
    report (`cargo xtask ci pending`), a pending test a macro generates rather than a plain
-   function, feature-map drift, and mutants on the diff of safety-critical crates, an
-   `Unimplemented` stub body in a crate whose tests are still pending aside.
+   function, a saved proptest failure seed, tracked or not (DEC-381), feature-map drift, and
+   mutants on the diff of safety-critical crates, an `Unimplemented` stub body in a crate whose
+   tests are still pending aside.
 3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
 4. **Reviewed:** the PR template and the independent review agent, the last resort, not the plan.
 
