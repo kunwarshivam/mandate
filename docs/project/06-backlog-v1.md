@@ -292,7 +292,20 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   §6.4's per-agent budget of 10; risk-limit alerts are never capped.
 - **E6-13 (Should)** As an owner, I want tripwires I set in advance to end my delegations or hold new
   openings when their condition is met, so that trust does not outlive the conditions I gave it
-  under ([DEC-187](04-decision-log.md#decisions)). Waits on the mandate spec change for `autonomy.tripwires` (MI-31, V-044).
+  under ([DEC-187](04-decision-log.md#decisions)). The spec change is MI-31, V-044, §6.7, and the MC-W cases
+  ([DEC-350](decisions/DEC-350.md) to [DEC-352](decisions/DEC-352.md); claim [#439](https://github.com/kunwarshivam/mandate/issues/439)).
+  Owed after it: `mandate-spec` parsing the field, V-044, and the §9.2 row (DEC-77 tests then implementation), the executor's
+  fold of §6.7, and the `kind: tripwire` harness arm. Also owed, from #443's round 1 (m4): run ruff over `reference/` in
+  `cargo xtask ci lint`, so a duplicated definition such as a second `main()` in `reference/mandate/mutants.py` (F811) fails
+  the lint rather than reaching review. Also (#443 round 3): the per-PR `cargo xtask ci reference` runs `fuzz.py` but not
+  `reference/mandate/mutants.py`, which only the nightly job runs, so a stale mutation anchor passed `full` on #443's round-2
+  head. Make a missing anchor fail per-PR CI, for example with an anchor-only check that runs in seconds.
+  Also owed, one code PR (#443 round 3): journal spec rule 28 and `OwnerCommandRefused.reason`'s `not_independent` in
+  `mandate-journal`'s §9.2 schema, with the validator check in `reference/journal/control.py`, its two vectors, and its
+  seeded bug.
+  **Founder question** (#443 round 2): should a mandate be refused at validation
+  when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
+  drawdown ladder) then cannot be lifted until a second user exists?
   Actions are `end_delegations` or `exits_only`, never `paused` (rule 13). *Accepted when:* a fired
   tripwire acts at its next evaluation, journals the event, alerts with opaque text, and lifts only
   by the owner's acknowledgment with step-up; adding or tightening one applies at once.
@@ -380,9 +393,13 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   #413). It maps each record to its fact, and the vectors are in `journal.yaml`'s `control_stream`
   section. `PlatformOperatorAction` stays open (DEC-261 item 9, Proposed), so its schema and the
   `ModelWithdrawn` mapping wait for the operator service's specification.
-  *Implementation* ([DEC-303](decisions/DEC-303.md) items 8 to 11), in two PRs under ES-13. The first
-  registers every §9.2 schema but `AccountSnapshotRecorded` in `mandate-journal`. The second makes the
-  `JournaledFact` mapping live in `mandate-spec`. *Tests PR*: 17 pending tests against stubs in
+  *Implementation* ([DEC-303](decisions/DEC-303.md) items 8 to 15), in two PRs under ES-13. The first
+  (#445, merged) registers every §9.2 schema but `AccountSnapshotRecorded` in `mandate-journal`. The
+  second makes the `JournaledFact` mapping live in `mandate-spec`. *Left open:* the
+  `AccountSnapshotRecorded` registration with rule 24, once stream K's fee-step writer conforms
+  (#441); `PlatformOperatorAction`; and, as a follow-up, removing `SpecError::Unimplemented` and
+  `ParseError::Unimplemented`, which no `mandate-spec` code returns any more but `mandate-shell`'s test
+  doubles still name (DEC-303 item 15). *Tests PR*: 17 pending tests against stubs in
   `mandate-journal`'s `control` module and `mandate-spec`'s `JournaledFact::from_record`. Three live
   tests keep `AccountSnapshotRecorded` unregistered until stream K's writer conforms (DEC-261 item 7).
 
@@ -1183,6 +1200,15 @@ From E10-1's slice-V implementation (DEC-161):
     rather than risk-clock seconds (`escalation.rs`, `payload::seconds`). §9.2 supersedes DEC-291
     item 1's "same second" for this member. `crates/mandate-runtime/src/escalation/tests.rs`'s assertion
     that `effective_at` is an integer changes with this writer.
+    The writer's pending pins are the M7 tests PR's (DEC-308 to DEC-310): the refusal's
+    `effective_at` the §4.7 timestamp of the judged second, for a resume refusal, a Stop refusal,
+    each of the four reasons, and the `refused_stop` vector's own form, read from the committed
+    vectors. The in-module late-Stop pin goes pending with them (the coordinator-named test
+    change), and `refused_only` reads the judged second in either form, so the implementation PR
+    deletes `#[ignore]` lines only (DEC-309 item 3). Until the writer's fix lands the registered
+    schema refuses the integer-form drafts at `append`, as DEC-261 item 7 has standing
+    (rule 3). This follow-up row needs its own story id: its pins and stub cite E8-3, which
+    `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
     (HLD §8), as a new `schema_version` with its own vectors.
   - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,
@@ -1539,6 +1565,18 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (stream K), from #463 round 1 (minor 4):** `acknowledged` journals an `unprotected_end`
   even when no interval is open for the instrument. The fold makes it a no-op, but the journal
   carries an end that ends nothing. Guard it with `interval_open`.
+- **E7-3 (stream K), from [#457](https://github.com/kunwarshivam/mandate/pull/457) round 1:** a
+  split prepared but not applied when the broker has already posted it is a real state after a
+  crash (the model at Q, the broker at Q × new). §8.5's `pending_corporate_action` window does not
+  cover it: the window runs from the application to the posting. It has two safe outcomes: the model
+  corrected to the posted quantity, or the agents holding the instrument paused with an alert
+  (§11's default). Choose one in a recorded decision before any test pins it.
+- **E7-4 slice 5 (stream K), from [#457](https://github.com/kunwarshivam/mandate/pull/457) round 1
+  (M2), a prerequisite:** add an executor-scoped reference case, or hand tests, for a reverse split
+  and for a split with a fractional result. Pin that the protective sell quantity is re-scaled and
+  never exceeds the position (rule 12). RC-04 reaches only a forward split on whole shares, and
+  RC-05 and RC-23 are accounting-only. The slice-5 corporate-actions implementation PR does not
+  merge before this pin exists.
 - **E7-4's tests correction (stream K), from the acknowledgment PR ([DEC-348](decisions/DEC-348.md)
   item 2):** the refcase harness's guard that an `unprotected_end` naming what it is `awaiting` is
   not read as the interval's end is reached by no live test, since every case that lists the end

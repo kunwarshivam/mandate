@@ -1119,6 +1119,257 @@ cases.append({"id": "MC-E32", "kind": "escalation", "op": "deliver_now",
 e_case("MC-E31", "A grant batched with a cancelling exits-only restriction is not pending and never acts (DEC-131 item 25(j))",
        [ASK1, {"kind": "batch", "reason": "mode_tightened", "responses": [e_resp("ctl1", 30, H1)], "now": E_NOW}])
 
+# =========================================================== O. tripwires (§6.7, MI-31, V-044; DEC-187, DEC-350 to DEC-352)
+# Family W. The fold's inputs are account-stream events in seq order at the risk clock `at`; a MandateVersionApplied
+# step applies `patch` to the case's base. Every mandate a case applies passes every V-rule.
+TW_DAY = {"id": "day_loss", "metric": "realized_loss_usd", "threshold": "100", "action": "end_delegations"}
+TW_STREAK = {"id": "losing_streak", "metric": "consecutive_losing_exits", "threshold": "2", "action": "exits_only"}
+TW_NEW = {"id": "new_names", "metric": "new_instruments", "threshold": "2", "action": "end_delegations"}
+derived("research_equity_tripwired", "research_equity", [{"op": "add", "path": "/autonomy/tripwires", "value": [TW_DAY, TW_STREAK, TW_NEW]}],
+        "adds three tripwires: a realized loss in the risk day, a losing streak, and new instruments")
+TWB = "research_equity_tripwired"
+TW_DELEGATION = {"id": "d1", "lifts": "rule:large_orders", "when": {"field": "purpose", "op": "in", "value": ["increase", "open"]},
+                 "max_order_usd": "1000", "max_orders": 3, "max_total_usd": "3000",
+                 "starts_at": "2026-09-20T00:00:00.000000000Z", "expires_at": "2026-10-10T00:00:00.000000000Z",
+                 "source_approval_id": None}
+
+def tws(*items):
+    return [{"op": "add", "path": "/autonomy/tripwires", "value": list(items)}]
+
+NO_TW = [{"op": "remove", "path": "/autonomy/tripwires"}]
+
+def tw_with(t, **kw):
+    return dict(t, **kw)
+
+SEM_W = [
+    ("MC-W06", "Three tripwires sorted by id with thresholds in range passes", TWB, [], {}),
+    ("MC-W07", "Tripwires out of id order are refused", TWB, tws(TW_STREAK, TW_DAY), {}),
+    ("MC-W08", "Two tripwires with one id are refused", TWB, tws(TW_STREAK, tw_with(TW_STREAK, threshold="3")), {}),
+    ("MC-W09", "A counted tripwire with a fractional threshold is refused", TWB, tws(tw_with(TW_STREAK, threshold="2.5")), {}),
+    ("MC-W10", "A counted tripwire above 1,000 is refused", TWB, tws(tw_with(TW_NEW, threshold="1001")), {}),
+    ("MC-W11", "A counted tripwire at exactly 1,000 passes", TWB, tws(tw_with(TW_NEW, threshold="1000")), {}),
+    ("MC-W12", "A realized-loss tripwire in fractions of a cent is refused", TWB, tws(tw_with(TW_DAY, threshold="0.001")), {}),
+    ("MC-W13", "A realized-loss tripwire above the allocation is refused", TWB, tws(tw_with(TW_DAY, threshold="10000.01")), {}),
+    ("MC-W14", "A realized-loss tripwire exactly equal to the allocation passes", TWB, tws(tw_with(TW_DAY, threshold="10000")), {}),
+    ("MC-W15", "A tripwire the platform proposed and the owner confirmed passes", TWB, [],
+     {"provenance": {"/autonomy/tripwires": PU("platform_proposed")}}),
+    ("MC-W16", "A tripwire the platform proposed and nobody confirmed is refused", TWB, [],
+     {"provenance": {"/autonomy/tripwires": {"source": "platform_proposed", "confirmed": False}}}),
+]
+for cid, title, base, patch, ctx in SEM_W:
+    m = apply_patch(MB[base], patch)
+    assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])
+    errs, warns = semantic(m, dict(CTX, **ctx))
+    cases.append({"id": cid, "kind": "semantic", "title": title, "base": base, "patch": patch, "context": ctx,
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+with_tw_delegation = apply_patch(MB[TWB], [{"op": "add", "path": "/autonomy/delegations", "value": [TW_DELEGATION]}])
+for cid, title, patch in [
+    ("MC-W17", "Removing a tripwire is risk-increasing, so a delegation carried with it is refused (V-042)",
+     [{"op": "add", "path": "/autonomy/delegations", "value": [TW_DELEGATION]}] + tws(TW_DAY, TW_STREAK)),
+    ("MC-W18", "Adding a tripwire is risk-reducing, so carrying the delegation with it passes",
+     [{"op": "add", "path": "/autonomy/delegations", "value": [TW_DELEGATION]}]
+     + tws(TW_DAY, TW_STREAK, TW_NEW, {"id": "streak_long", "metric": "consecutive_losing_exits", "threshold": "4", "action": "end_delegations"})),
+]:
+    m = apply_patch(MB[TWB], patch)
+    assert V.is_valid(m), cid
+    ctx = {"previous_version": with_tw_delegation}
+    errs, warns = semantic(m, dict(CTX, **ctx))
+    cases.append({"id": cid, "kind": "semantic", "title": title, "base": TWB, "patch": patch, "context": ctx,
+                  "expect": {"violations": errs, "warnings": warns, "worst_case": worst_case(m)}})
+SCH_W = [
+    ("MC-W01", "A tripwire with an unknown metric", tws(tw_with(TW_DAY, metric="unrealized_loss_usd"))),
+    ("MC-W02", "A tripwire whose action is paused (rule 13)", tws(tw_with(TW_STREAK, action="paused"))),
+    ("MC-W03", "A tripwire without a threshold", tws({k: v for k, v in TW_STREAK.items() if k != "threshold"})),
+    ("MC-W04", "A tripwire threshold of 0", tws(tw_with(TW_STREAK, threshold="0"))),
+    ("MC-W05", "Twenty-one tripwires", tws(*[dict(TW_STREAK, id=f"t{i:02d}") for i in range(21)])),
+]
+for cid, title, patch in SCH_W:
+    m = apply_patch(MB[TWB], patch)
+    cases.append({"id": cid, "kind": "schema", "title": title, "base": TWB, "patch": patch, "expect": {"schema_valid": V.is_valid(m)}})
+CH_W = [
+    ("MC-W19", "Add a tripwire", "research_equity", tws(TW_STREAK)),
+    ("MC-W20", "Lower a tripwire's threshold", TWB, tws(TW_DAY, tw_with(TW_STREAK, threshold="1"), TW_NEW)),
+    ("MC-W21", "Make a tripwire's action stricter (end_delegations to exits_only)", TWB, tws(tw_with(TW_DAY, action="exits_only"), TW_STREAK, TW_NEW)),
+    ("MC-W22", "Remove a tripwire", TWB, tws(TW_DAY, TW_NEW)),
+    ("MC-W23", "Raise a tripwire's threshold", TWB, tws(TW_DAY, tw_with(TW_STREAK, threshold="3"), TW_NEW)),
+    ("MC-W24", "Soften a tripwire's action (exits_only to end_delegations)", TWB, tws(TW_DAY, tw_with(TW_STREAK, action="end_delegations"), TW_NEW)),
+    ("MC-W25", "Change a tripwire's metric under the same id", TWB, tws(TW_DAY, tw_with(TW_STREAK, metric="new_instruments"), TW_NEW)),
+    ("MC-W26", "Lower one tripwire's threshold and remove another", TWB, tws(tw_with(TW_DAY, threshold="50"), TW_STREAK)),
+]
+for cid, title, base, patch in CH_W:
+    old = MB[base]
+    new = apply_patch(old, patch)
+    assert V.is_valid(new) and semantic(new, CTX)[0] == [], cid
+    got, paths = classify(old, new)
+    cases.append({"id": cid, "kind": "change", "title": title, "base": base, "patch": patch,
+                  "expect": {"classification": got, "changed_paths": paths, "old_version": version(old), "new_version": version(new),
+                             "step_up_required": got == "risk_increasing"}})
+
+TW_T0 = T("2026-09-22T14:00:00.000000000Z")
+
+def tw_at(s):
+    return fmt(TW_T0 + timedelta(seconds=s))
+
+def deploy(at, patch):
+    return {"event": "MandateVersionApplied", "at": tw_at(at), "patch": list(patch)}
+
+def fill(at, side, qty, price, fees="0", inst=ABC, event="FillApplied"):
+    return {"event": event, "at": tw_at(at), "instrument": inst, "side": side, "qty": qty, "price": price, "fees": fees}
+
+def day(at):
+    return {"event": "RiskDayStarted", "at": tw_at(at)}
+
+def ack(at, tid, assertion, age=60, method="cli_confirm"):
+    return {"event": "OwnerAcknowledged", "at": tw_at(at), "tripwire": tid,
+            "step_up": {"assertion": assertion, "authenticated_at": tw_at(at - age), "method": method}}
+
+NEXT_DAY = 14 * 3600   # 2026-09-23T04:00:00Z, 00:00 New York (EDT)
+BIG = dict(OPEN, order_usd="950", combined_score="0.9", instrument=ABC, asset_class="us_equity", session="regular")
+SMALL = dict(OPEN, instrument=ABC, asset_class="us_equity", session="regular")
+
+def tw_case(cid, title, base, steps, probes=()):
+    """`probes` are decisions taken after the last step under the version then in effect, at its risk clock."""
+    m, run_steps = None, []
+    for s in steps:
+        if s["event"] == "MandateVersionApplied":
+            m = apply_patch(MB[base], s["patch"])
+            assert V.is_valid(m) and semantic(m, CTX)[0] == [], (cid, semantic(m, CTX))
+            run_steps.append(dict(s, mandate=m))
+        else:
+            run_steps.append(s)
+    out = tripwire_run(run_steps)
+    st = tripwire_autonomy_state(out[-1]["state"], steps[-1]["at"])
+    pr = []
+    for a in probes:
+        e = autonomy(m, a, st)
+        pr.append({"action": a, "expect": {k: v for k, v in e.items() if k in ("decision", "by", "delegation_id", "lifted")}})
+    case = {"id": cid, "kind": "tripwire", "title": title, "base": base, "context": {"environment": "paper"}, "steps": steps,
+            "expect": out}
+    if pr:
+        case["probes"] = pr
+    cases.append(case)
+
+STREAK_ONLY = tws(TW_STREAK)
+DAY_ONLY = tws(TW_DAY)
+NEW_ONLY = tws(TW_NEW)
+DELEG = [{"op": "add", "path": "/autonomy/delegations", "value": [TW_DELEGATION]}]
+EXITS = [{"purpose": "discretionary_exit"}, {"purpose": "owner_exit"}, {"purpose": "risk_exit"}]
+tw_case("MC-W27", "Two losing exits in a row fire an exits_only tripwire at the second, not the first", TWB,
+        [deploy(0, STREAK_ONLY + DELEG), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98")],
+        [BIG] + EXITS)
+tw_case("MC-W28", "A winning exit between two losing ones resets the streak, so nothing fires", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "9", "100"), fill(20, "sell", "3", "99"), fill(30, "sell", "3", "101"),
+         fill(40, "sell", "3", "99")])
+tw_case("MC-W29", "A buy between two losing exits does not break the streak, and an exit at cost loses its fee", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "100", fees="0.01"),
+         fill(30, "buy", "5", "100"), fill(40, "sell", "10", "100", fees="0.01")])
+tw_case("MC-W30", "A realized loss in the risk day reaching its threshold ends the delegations and leaves the mode normal", TWB,
+        [deploy(0, DAY_ONLY + DELEG), fill(10, "buy", "20", "100"), fill(20, "sell", "10", "95"), fill(30, "sell", "10", "95")],
+        [BIG, SMALL] + EXITS)
+tw_case("MC-W31", "A realized loss one cent short of the threshold fires nothing, and the delegation still lifts", TWB,
+        [deploy(0, DAY_ONLY + DELEG), fill(10, "buy", "20", "100"), fill(20, "sell", "19", "95"), fill(30, "sell", "1", "95.01")],
+        [BIG])
+tw_case("MC-W32", "The realized loss counts afresh from 00:00 New York, so two days' losses do not add", TWB,
+        [deploy(0, DAY_ONLY), fill(10, "buy", "20", "100"), fill(20, "sell", "10", "94"), day(NEXT_DAY),
+         fill(NEXT_DAY + 3600, "sell", "10", "94")])
+tw_case("MC-W33", "A buy's fees are realized loss: commissions alone reach the threshold", TWB,
+        [deploy(0, DAY_ONLY), fill(10, "buy", "1", "100", fees="60"), fill(20, "buy", "1", "100", fees="40")])
+tw_case("MC-W34", "The first fill in a second never-held instrument fires new_instruments; re-entering one held before does not count", TWB,
+        [deploy(0, NEW_ONLY), fill(10, "buy", "1", "100", inst=ABC), fill(20, "sell", "1", "100", inst=ABC),
+         fill(30, "buy", "1", "100", inst=ABC), fill(40, "buy", "1", "50", inst=XYZ)])
+tw_case("MC-W35", "Fills before a tripwire is armed do not count toward it", TWB,
+        [deploy(0, NO_TW), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "4", "98"),
+         deploy(40, STREAK_ONLY), fill(50, "sell", "1", "97")])
+tw_case("MC-W36", "Lowering a threshold to the count already reached fires at the version's own input", TWB,
+        [deploy(0, tws(tw_with(TW_STREAK, threshold="3"))), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"),
+         fill(30, "sell", "4", "98"), deploy(40, STREAK_ONLY)])
+tw_case("MC-W37", "Removing a fired tripwire in a version does not lift it; the owner's acknowledgment does", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         deploy(40, NO_TW), ack(50, "losing_streak", "as-37")])
+tw_case("MC-W38", "An acknowledgment with step-up 301 s old is refused and the tripwire stays fired", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         ack(40, "losing_streak", "as-38", age=301)])
+tw_case("MC-W39", "A reused step-up assertion is refused; a fresh one lifts and the tripwire counts afresh", TWB,
+        [deploy(0, STREAK_ONLY), ack(5, "losing_streak", "as-39"), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"),
+         fill(30, "sell", "4", "98"), ack(40, "losing_streak", "as-39"), ack(50, "losing_streak", "as-39b"),
+         fill(60, "sell", "1", "97")])
+tw_case("MC-W40", "After an acknowledgment, two new losing exits fire it again", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "4", "99"), fill(30, "sell", "4", "98"),
+         ack(40, "losing_streak", "as-40"), fill(50, "sell", "1", "97"), fill(60, "sell", "1", "96")])
+tw_case("MC-W41", "Tightening a fired end_delegations tripwire to exits_only holds new openings at once", TWB,
+        [deploy(0, DAY_ONLY), fill(10, "buy", "20", "100"), fill(20, "sell", "20", "95"),
+         deploy(30, tws(tw_with(TW_DAY, action="exits_only")))])
+tw_case("MC-W42", "Softening a fired exits_only tripwire to end_delegations keeps it holding new openings until acknowledged", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         deploy(40, tws(tw_with(TW_STREAK, action="end_delegations"))), ack(50, "losing_streak", "as-42")])
+tw_case("MC-W43", "Two tripwires fire on one fill, in id order, each alerting with opaque text only", TWB,
+        [deploy(0, tws(tw_with(TW_DAY, threshold="10"), tw_with(TW_STREAK, threshold="1"))), fill(10, "buy", "10", "100"),
+         fill(20, "sell", "10", "98")])
+tw_case("MC-W44", "Changing a tripwire's metric under the same id arms it afresh", TWB,
+        [deploy(0, tws(tw_with(TW_STREAK, threshold="3"))), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"),
+         fill(30, "sell", "4", "98"), deploy(40, tws(tw_with(TW_STREAK, metric="new_instruments", threshold="1"))),
+         fill(50, "sell", "1", "97"), fill(60, "buy", "1", "50", inst=XYZ)])
+tw_case("MC-W45", "Acknowledging a tripwire that has not fired changes nothing", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), ack(30, "losing_streak", "as-45"),
+         fill(40, "sell", "5", "98")])
+tw_case("MC-W46", "A late fill counts when it is applied, like any fill", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"),
+         fill(30, "sell", "5", "98", event="LateFillApplied")])
+tw_case("MC-W47", "A partial exit removes basis rounded half-even at 12 places: a tie rounds to even, so the exit breaks even and is not a loss", TWB,
+        [deploy(0, tws(tw_with(TW_STREAK, threshold="1"))), fill(10, "buy", "1", "10"), fill(20, "buy", "1", "10.000000000001"),
+         fill(30, "sell", "1", "10")])
+
+tw_case("MC-W48", "A losing streak survives 00:00 New York: one losing exit either side of midnight fires it", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), day(NEXT_DAY),
+         fill(NEXT_DAY + 3600, "sell", "5", "98")])
+tw_case("MC-W49", "A refused acknowledgment still spends its assertion, so replaying it is refused as reused", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         ack(40, "losing_streak", "as-49", method="password"), ack(50, "losing_streak", "as-49")])
+
+def ack_by(at, tid, assertion, user, requester):
+    return dict(ack(at, tid, assertion), user=user, requester=requester, independent_approval_required=True)
+
+tw_case("MC-W50", "Under independent approval the user who requested the lift cannot acknowledge it", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         ack_by(40, "losing_streak", "as-50", "user:u1", "user:u1")])
+tw_case("MC-W51", "Under independent approval a second user's acknowledgment lifts it", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         ack_by(40, "losing_streak", "as-51", "user:u2", "user:u1")])
+tw_case("MC-W53", "Under independent approval an acknowledgment that names no requester is refused (fail closed)", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         ack_by(40, "losing_streak", "as-53", "user:u2", None)])
+tw_case("MC-W54", "Under independent approval an acknowledgment that names no acknowledging user is refused (fail closed)", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         ack_by(40, "losing_streak", "as-54", None, "user:u1")])
+tw_case("MC-W55", "Independent approval on when the lift was requested binds it though the policy is off at processing", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         dict(ack_by(40, "losing_streak", "as-55", "user:u1", "user:u1"), independent_now=False)])
+tw_case("MC-W56", "Independent approval turned on after the lift was requested binds it at processing", TWB,
+        [deploy(0, STREAK_ONLY), fill(10, "buy", "10", "100"), fill(20, "sell", "5", "99"), fill(30, "sell", "5", "98"),
+         dict(ack_by(40, "losing_streak", "as-56", "user:u1", "user:u1"), independent_approval_required=False, independent_now=True)])
+TW_RISK = WIDE + FAST + [rep("/risk/max_daily_loss", "0.5"), {"op": "add", "path": "/autonomy/tripwires", "value": [TW_STREAK]}]
+risk_case("MC-W52", "A fired tripwire is a latched limit: an allocation increase is rejected until the owner acknowledges it",
+          "two_stock_swing", TW_RISK, "10", "100", "us_equity", at(14, 0),
+          [{"event": "fill", "at": at(14, 0, 10), "side": "sell", "qty": "5", "price": "99", "session": "regular"},
+           {"event": "fill", "at": at(14, 0, 20), "side": "sell", "qty": "4", "price": "98", "session": "regular"},
+           {"event": "allocation_change", "at": at(14, 0, 30), "delta_usd": "1000", "session": "regular"},
+           {"event": "owner_acknowledged", "at": at(14, 0, 40), "restriction": "tripwire:losing_streak", "session": "regular",
+            "step_up": {"assertion": "as-52", "authenticated_at": at(14, 0, 30), "method": "cli_confirm"}},
+           {"event": "allocation_change", "at": at(14, 0, 50), "delta_usd": "1000", "session": "regular"}],
+          note="The tripwire fold reads the risk state's one instrument; fees are 0, as in every risk-state case.")
+TW_RISK_DAY = WIDE + FAST + [rep("/risk/max_daily_loss", "0.5"), {"op": "add", "path": "/autonomy/tripwires", "value": [TW_DAY]}]
+risk_case("MC-W57", "An end_delegations tripwire latches too, and the realized loss counts from 00:00 New York, so a profitable day does not offset the next day's loss",
+          "two_stock_swing", TW_RISK_DAY, "10", "100", "us_equity", at(14, 0),
+          [{"event": "fill", "at": at(14, 0, 10), "side": "sell", "qty": "5", "price": "200", "session": "regular"},
+           {"event": "risk_day_started", "at": at(4, 0, 0, day=22), "session": "pre_market"},
+           {"event": "fill", "at": at(14, 0, 10, day=22), "side": "sell", "qty": "5", "price": "60", "session": "regular"},
+           {"event": "allocation_change", "at": at(14, 0, 20, day=22), "delta_usd": "1000", "session": "regular"}],
+          note="Day one realizes +500 and day two -200: with the risk-day reset the tripwire fires at 200; without it the day's net would be a gain.")
+
+W0 = next(i for i, c in enumerate(cases) if c["id"].startswith("MC-W"))
+assert all(c["id"].startswith("MC-W") for c in cases[W0:])
+cases[W0:] = sorted(cases[W0:], key=lambda c: c["id"])
+
 # =========================================================== output
 HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
 #
@@ -1166,6 +1417,13 @@ HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
 # - agent_flatten: the agent-scoped kill-switch plan (trading spec 5.5).
 # - goal: goal completion (spec 3.1) for the given state.
 # - change: classify `base` against the patched mandate (spec 9.2).
+# - tripwire: fold spec 6.7 over `steps` (account-stream inputs at the risk clock `at`, in seq order). A
+#   MandateVersionApplied step applies `patch` to `base`; a fill carries its instrument, side, qty, price, and
+#   its own fees; OwnerAcknowledged names the tripwire and carries step-up evidence judged at `at` in
+#   `context.environment` (spec 6.1). `expect[i]` is input i's journal, in order, and the state after it:
+#   `fired` (id -> the action it holds), `restriction` (`exits_only` or null), `delegations_suspended`, and
+#   each armed tripwire's metric. `probes` are spec 6.2 decisions after the last step under the version
+#   then in effect, at that step's risk clock, with that state (no delegation used yet).
 # - escalation: the approval lifecycle of spec 6.1 and 6.4. `op: lifecycle` runs `script` from `start` under
 #   `context` (approvers, author, environment, timeout_s, cli_inbox, push channels, quiet hours): `ask` binds
 #   `bound` as approval `ap1`; `tick` is the scheduler's ClockAdvanced, then expiry; `fold` folds `event` and steps

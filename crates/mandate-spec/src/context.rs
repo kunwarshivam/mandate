@@ -138,12 +138,172 @@ impl JournaledFact {
     /// refused, never skipped, because a fact the fold never sees takes the value that refuses only
     /// for facts that add (module doc), and a dropped `ConnectionRevoked` would not.
     pub fn from_record(
-        _event_type: &str,
-        _payload: &Value,
-        _documents: &dyn Fn(&Digest) -> Option<Value>,
-        _account_connection: Option<&ConnectionId>,
+        event_type: &str,
+        payload: &Value,
+        documents: &dyn Fn(&Digest) -> Option<Value>,
+        account_connection: Option<&ConnectionId>,
     ) -> Result<Option<Self>, SpecError> {
-        Err(SpecError::Unimplemented)
+        let record = Record(payload);
+        let fact = match event_type {
+            "ConnectionEstablished" => Self::ConnectionEstablished {
+                connection_id: record.connection("connection_id")?,
+                environment: match record.text("environment")? {
+                    "paper" => Environment::Paper,
+                    "live" => Environment::Live,
+                    _ => return Err(malformed("environment")),
+                },
+            },
+            "ConnectionRevoked" => Self::ConnectionRevoked {
+                connection_id: record.connection("connection_id")?,
+            },
+            "DisclosureAccepted" => Self::DisclosureAccepted {
+                version: record.digest("version")?,
+            },
+            "ConfigSnapshotRegistered" if record.text("kind")? != MODEL_KIND => return Ok(None),
+            "ConfigSnapshotRegistered" => Self::ModelRegistered {
+                id: ModelId::parse(record.text("model_id")?).map_err(|_| malformed("model_id"))?,
+                model: RegisteredModel {
+                    version: record.text("model_version")?.to_owned(),
+                    content_hash: record.digest("content_hash")?,
+                    params: record
+                        .list("params")?
+                        .iter()
+                        .map(|p| p.as_str().map(str::to_owned).ok_or(malformed("params")))
+                        .collect::<Result<_, _>>()?,
+                    admits_instruments: match payload.get("admits_instruments") {
+                        Some(Value::Bool(admits)) => *admits,
+                        _ => return Err(malformed("admits_instruments")),
+                    },
+                },
+            },
+            "MandateVersionCreated" => Self::MandateVersionCreated {
+                version: MandateVersion::named(record.digest("mandate_version")?),
+                sources: record
+                    .list("provenance")?
+                    .iter()
+                    .map(|entry| {
+                        let entry = Record(entry);
+                        Ok((
+                            Pointer::new(entry.text("path")?),
+                            source(entry.text("source")?)?,
+                        ))
+                    })
+                    .collect::<Result<_, SpecError>>()?,
+            },
+            "MandateConfirmed" => Self::MandateConfirmed {
+                version: MandateVersion::named(record.digest("mandate_version")?),
+                confirmed_paths: record
+                    .list("confirmed_paths")?
+                    .iter()
+                    .map(|p| {
+                        p.as_str()
+                            .filter(|t| !t.is_empty())
+                            .map(Pointer::new)
+                            .ok_or(malformed("confirmed_paths"))
+                    })
+                    .collect::<Result<_, _>>()?,
+            },
+            "AgentDeployed" => {
+                let version = record.digest("mandate_version")?;
+                let stored = documents(&version).ok_or(malformed("mandate_version"))?;
+                let mandate = Mandate::parse(&stored).map_err(|_| malformed("mandate_version"))?;
+                if mandate.version()?.digest() != version {
+                    return Err(malformed("mandate_version"));
+                }
+                Self::AgentVersionActive {
+                    agent: AgentId::new(record.id("agent_id")?),
+                    connection_id: mandate.connection_id.clone(),
+                    environment: mandate.environment,
+                    allocation_usd: mandate
+                        .capital
+                        .allocation_usd
+                        .to_usd()
+                        .map_err(|_| malformed("mandate_version"))?,
+                    pinned: mandate
+                        .universe
+                        .pinned_instruments
+                        .iter()
+                        .map(|i| i.asset_id.clone())
+                        .collect(),
+                }
+            }
+            "AgentStopped" => Self::AgentStopped {
+                agent: AgentId::new(record.id("agent_id")?),
+                connection_id: record.connection("connection_id")?,
+                retired_on: Date::parse(record.text("retired_on")?)
+                    .map_err(|_| malformed("retired_on"))?,
+                loss_added_usd: record.usd("loss_added")?,
+            },
+            "AccountSnapshotRecorded" => Self::AccountSnapshot {
+                connection_id: account_connection
+                    .cloned()
+                    .ok_or(malformed("account_connection"))?,
+                equity_usd: record.usd("equity")?,
+            },
+            _ => return Ok(None),
+        };
+        Ok(Some(fact))
+    }
+}
+
+/// `ConfigSnapshotRegistered`'s kind for a signal model (journal spec §9.2).
+const MODEL_KIND: &str = "model_version";
+
+/// A member the fact needs that the payload does not hold in §9.2's form.
+fn malformed(what: &'static str) -> SpecError {
+    SpecError::InvalidInput { what }
+}
+
+fn source(text: &str) -> Result<Source, SpecError> {
+    Ok(match text {
+        "user_stated" => Source::UserStated,
+        "user_entered" => Source::UserEntered,
+        "template_structure" => Source::TemplateStructure,
+        "platform_proposed" => Source::PlatformProposed,
+        "platform_default" => Source::PlatformDefault,
+        _ => return Err(malformed("provenance")),
+    })
+}
+
+/// A record's payload, read member by member, each refused under its own name.
+struct Record<'a>(&'a Value);
+
+impl<'a> Record<'a> {
+    fn text(&self, name: &'static str) -> Result<&'a str, SpecError> {
+        self.0
+            .get(name)
+            .and_then(Value::as_str)
+            .filter(|t| !t.is_empty())
+            .ok_or(malformed(name))
+    }
+
+    fn id(&self, name: &'static str) -> Result<&'a str, SpecError> {
+        let text = self.text(name)?;
+        ConnectionId::parse(text)
+            .map(|_| text)
+            .map_err(|_| malformed(name))
+    }
+
+    fn connection(&self, name: &'static str) -> Result<ConnectionId, SpecError> {
+        ConnectionId::parse(self.text(name)?).map_err(|_| malformed(name))
+    }
+
+    fn digest(&self, name: &'static str) -> Result<Digest, SpecError> {
+        self.text(name)?
+            .strip_prefix("sha256:")
+            .and_then(Digest::from_hex)
+            .ok_or(malformed(name))
+    }
+
+    fn usd(&self, name: &'static str) -> Result<Usd, SpecError> {
+        Usd::parse(self.text(name)?).map_err(|_| malformed(name))
+    }
+
+    fn list(&self, name: &'static str) -> Result<&'a [Value], SpecError> {
+        self.0
+            .get(name)
+            .and_then(Value::as_array)
+            .ok_or(malformed(name))
     }
 }
 
@@ -817,6 +977,244 @@ mod tests {
                 "b's allocation must stand, got {:?}",
                 read.other_allocations_usd
             ));
+        }
+        Ok(())
+    }
+}
+
+/// `JournaledFact::from_record`'s label readings, each value of each closed set, judged inside this
+/// crate so the mutation gate sees them (DEC-303 item 10).
+#[cfg(test)]
+mod record_tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use mandate_canon::{Digest, Key, Value};
+    use mandate_domain::Environment;
+    use mandate_time::Date;
+
+    use super::{AgentId, ContextArgs, JournaledFact};
+    use crate::SpecError;
+    use crate::document::{ConnectionId, Pointer, Provenance, Source};
+    use crate::validate::ValidationContext;
+    use crate::validate::tests::mandate;
+
+    fn object(members: &[(&str, Value)]) -> Result<Value, SpecError> {
+        let mut out = mandate_canon::Object::new();
+        for (name, value) in members {
+            let key = Key::new(name).map_err(|_| SpecError::InvalidInput { what: "key" })?;
+            out.insert(key, value.clone());
+        }
+        Ok(Value::Object(out))
+    }
+
+    fn text(value: &str) -> Value {
+        Value::Str(value.to_owned())
+    }
+
+    fn nothing(_: &Digest) -> Option<Value> {
+        None
+    }
+
+    #[test]
+    fn each_environment_maps_to_its_own() -> Result<(), SpecError> {
+        for (label, environment) in [("paper", Environment::Paper), ("live", Environment::Live)] {
+            let established = object(&[
+                ("connection_id", text("conn_1")),
+                ("broker", text("alpaca")),
+                ("environment", text(label)),
+                ("scopes", Value::Array(vec![text("trading")])),
+            ])?;
+            assert_eq!(
+                JournaledFact::from_record("ConnectionEstablished", &established, &nothing, None)?,
+                Some(JournaledFact::ConnectionEstablished {
+                    connection_id: ConnectionId::parse("conn_1")?,
+                    environment,
+                }),
+                "{label}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn each_provenance_source_maps_to_its_own() -> Result<(), SpecError> {
+        let version = format!("sha256:{}", "a".repeat(64));
+        for (label, source) in [
+            ("user_stated", Source::UserStated),
+            ("user_entered", Source::UserEntered),
+            ("template_structure", Source::TemplateStructure),
+            ("platform_proposed", Source::PlatformProposed),
+            ("platform_default", Source::PlatformDefault),
+        ] {
+            let entry = object(&[("path", text("/risk")), ("source", text(label))])?;
+            let created = object(&[
+                ("mandate_version", text(&version)),
+                ("provenance", Value::Array(vec![entry])),
+                ("record_ref", text(&version)),
+            ])?;
+            let fact =
+                JournaledFact::from_record("MandateVersionCreated", &created, &nothing, None)?;
+            let Some(JournaledFact::MandateVersionCreated { sources, .. }) = fact else {
+                return Err(SpecError::InvalidInput { what: "the fact" });
+            };
+            assert_eq!(
+                sources,
+                BTreeMap::from([(Pointer::new("/risk"), source)]),
+                "{label}"
+            );
+        }
+        Ok(())
+    }
+    fn digest_text(byte: char) -> String {
+        format!("sha256:{}", byte.to_string().repeat(64))
+    }
+
+    fn refused(event_type: &str, payload: &Value) -> Option<&'static str> {
+        match JournaledFact::from_record(event_type, payload, &nothing, None) {
+            Err(SpecError::InvalidInput { what }) => Some(what),
+            _ => None,
+        }
+    }
+
+    /// `confirmed_paths` is a list of §9.2 pointers, never the empty one (DEC-303 item 13): `""`
+    /// would cover every path, so a `platform_default` path would read as confirmed, which V-020
+    /// and V-022 exist to stop. The record is refused, so the context built from the records that
+    /// map leaves the path unconfirmed (#461 round 1, M1).
+    #[test]
+    fn an_empty_confirmed_path_is_refused_and_confirms_nothing() -> Result<(), SpecError> {
+        let draft = mandate(&[]).map_err(|_| SpecError::InvalidInput { what: "the draft" })?;
+        let version = format!("sha256:{}", draft.version()?.digest().to_hex());
+        let entry = object(&[
+            ("path", text("/autonomy")),
+            ("source", text("platform_default")),
+        ])?;
+        let created = object(&[
+            ("mandate_version", text(&version)),
+            ("provenance", Value::Array(vec![entry])),
+            ("record_ref", text(&digest_text('b'))),
+        ])?;
+        let confirmed = object(&[
+            ("mandate_version", text(&version)),
+            ("confirmed_paths", Value::Array(vec![text("")])),
+            ("record_ref", text(&digest_text('b'))),
+        ])?;
+        assert_eq!(
+            refused("MandateConfirmed", &confirmed),
+            Some("confirmed_paths")
+        );
+        let facts: Vec<JournaledFact> = [
+            ("MandateVersionCreated", &created),
+            ("MandateConfirmed", &confirmed),
+        ]
+        .into_iter()
+        .filter_map(|(event_type, payload)| {
+            JournaledFact::from_record(event_type, payload, &nothing, None)
+                .ok()
+                .flatten()
+        })
+        .collect();
+        let args = ContextArgs {
+            agent: AgentId::new("a"),
+            connection_id: ConnectionId::parse("conn_alpaca_paper_01")?,
+            validation_date: Date::parse("2026-09-24")
+                .map_err(|_| SpecError::InvalidInput { what: "date" })?,
+            membership: None,
+            instrument_groups: BTreeMap::new(),
+            eligibility_failures: BTreeSet::new(),
+        };
+        let context = ValidationContext::from_journal(&draft, args, &facts)?;
+        assert_eq!(
+            context.provenance.entries().get(&Pointer::new("/autonomy")),
+            Some(&Provenance {
+                source: Source::PlatformDefault,
+                confirmed: false,
+            })
+        );
+        Ok(())
+    }
+
+    /// §9.2 closes neither `MandateVersionApplied` nor `UniverseChanged`, so each maps to none and
+    /// the fold fails closed, even given every member a mapped type reads (DEC-303 item 6; #461
+    /// round 1, M2).
+    #[test]
+    fn a_type_section_9_2_leaves_open_maps_to_none() -> Result<(), SpecError> {
+        let record = object(&[
+            ("agent_id", text("agent_a")),
+            ("connection_id", text("conn_1")),
+            ("mandate_version", text(&digest_text('a'))),
+            ("record_ref", text(&digest_text('b'))),
+        ])?;
+        for event_type in ["MandateVersionApplied", "UniverseChanged"] {
+            assert_eq!(
+                JournaledFact::from_record(event_type, &record, &nothing, None)?,
+                None,
+                "{event_type}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A member the mapping cannot read is refused under its own name, never skipped and never
+    /// defaulted (DEC-303 item 10): an unparsable date, a non-text `params` element, an absent
+    /// `admits_instruments`, an empty `kind`, and a bare hex digest (#461 round 1, M3, m1, m2).
+    #[test]
+    fn each_unreadable_member_is_refused_by_name() -> Result<(), SpecError> {
+        let stopped = object(&[
+            ("agent_id", text("agent_a")),
+            ("connection_id", text("conn_1")),
+            ("reason", text("owner_stop")),
+            ("retired_on", text("2026-02-30")),
+            ("loss_added", text("125.5")),
+        ])?;
+        let registration = |kind: &str, params: Vec<Value>, admits: Option<bool>| {
+            let mut members = vec![
+                ("kind", text(kind)),
+                ("content_hash", text(&digest_text('c'))),
+                ("model_id", text("quant.momentum")),
+                ("model_version", text("1.2.0")),
+                ("params", Value::Array(params)),
+            ];
+            if let Some(admits) = admits {
+                members.push(("admits_instruments", Value::Bool(admits)));
+            }
+            object(&members)
+        };
+        let accepted = registration("model_version", vec![text("lookback_bars")], Some(true))?;
+        assert!(
+            JournaledFact::from_record("ConfigSnapshotRegistered", &accepted, &nothing, None)?
+                .is_some(),
+            "the well-formed registration maps"
+        );
+        let disclosure = object(&[
+            ("document", text("terms")),
+            ("version", text(&"d".repeat(64))),
+            ("user", text("user_owner_01")),
+        ])?;
+        let cases = [
+            ("AgentStopped", stopped, "retired_on"),
+            (
+                "ConfigSnapshotRegistered",
+                registration(
+                    "model_version",
+                    vec![text("lookback_bars"), Value::Bool(true)],
+                    Some(true),
+                )?,
+                "params",
+            ),
+            (
+                "ConfigSnapshotRegistered",
+                registration("model_version", vec![text("lookback_bars")], None)?,
+                "admits_instruments",
+            ),
+            (
+                "ConfigSnapshotRegistered",
+                registration("", vec![], None)?,
+                "kind",
+            ),
+            ("DisclosureAccepted", disclosure, "version"),
+        ];
+        for (event_type, payload, member) in cases {
+            assert_eq!(refused(event_type, &payload), Some(member), "{event_type}");
         }
         Ok(())
     }
