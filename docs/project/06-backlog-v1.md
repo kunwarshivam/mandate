@@ -1514,6 +1514,18 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (stream K), from #463 round 1 (minor 4):** `acknowledged` journals an `unprotected_end`
   even when no interval is open for the instrument. The fold makes it a no-op, but the journal
   carries an end that ends nothing. Guard it with `interval_open`.
+- **E7-3 (stream K), from [#457](https://github.com/kunwarshivam/mandate/pull/457) round 1:** a
+  split prepared but not applied when the broker has already posted it is a real state after a
+  crash (the model at Q, the broker at Q × new). §8.5's `pending_corporate_action` window does not
+  cover it: the window runs from the application to the posting. It has two safe outcomes: the model
+  corrected to the posted quantity, or the agents holding the instrument paused with an alert
+  (§11's default). Choose one in a recorded decision before any test pins it.
+- **E7-4 slice 5 (stream K), from [#457](https://github.com/kunwarshivam/mandate/pull/457) round 1
+  (M2), a prerequisite:** add an executor-scoped reference case, or hand tests, for a reverse split
+  and for a split with a fractional result. Pin that the protective sell quantity is re-scaled and
+  never exceeds the position (rule 12). RC-04 reaches only a forward split on whole shares, and
+  RC-05 and RC-23 are accounting-only. The slice-5 corporate-actions implementation PR does not
+  merge before this pin exists.
 - **E7-4's tests correction (stream K), from the acknowledgment PR ([DEC-348](decisions/DEC-348.md)
   item 2):** the refcase harness's guard that an `unprotected_end` naming what it is `awaiting` is
   not read as the interval's end is reached by no live test, since every case that lists the end
