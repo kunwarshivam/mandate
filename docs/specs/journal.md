@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.9 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.10 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, and `research` section of §9.4; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -12,6 +12,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.10 ([DEC-404](../project/decisions/DEC-404.md) item 9):** §9.3 tightens two things; neither adds a member, and both only refuse more (DEC-176).
+  - **`UniverseChanged`'s `instrument` is a new `asset_id` type**: mandate spec §3's lowercase uuid form, not any `id`. An `id` that is not an asset ID appended before this and then left the stream's `ValidationContext` unbuildable, since the mapping parses it as an asset ID. A context that will not build is not a hold an exit may have (`AGENTS.md` rule 13). No conforming writer emits anything else.
+  - **§9.3's mapping table states the classification check.** A `MandateVersionApplied` whose `classification` is not mandate spec §9.2's verdict of its two stored documents is refused, whether it was applied or rejected. That is what the registration implements (#497).
+  - **The vectors gain three report-order drafts:** rules 29 then 30, 30 then 33, and 31 then 32, each with its seeded bug.
+  - **Order of the changes (ES-22).** The `asset_id` drafts and the reference validator's type follow the `mandate-journal` code change that types the member. `mandate-journal` parses every §9.3 vector, so vectors added first would turn `main` red, as #443 and #474 ordered rule 28. Until then the reference validator still types `instrument` as `id`.
 - **v0.9 ([DEC-413](../project/decisions/DEC-413.md)):** §9.4 closes the payload schemas of the
   agent stream's `ThesisProposed` and `ThesisRevised`, which v0.6 left to their own story. Both
   share one schema. Every member comes from mandate spec §8.2's output fields, §8.4's thesis table,
@@ -906,6 +911,12 @@ own story ([DEC-303](../project/decisions/DEC-303.md) item 6). For these two eve
 lists them, and the rules numbered on from §9.2's. Each schema is `schema_version` 1. Both are risk
 inputs, so each carries `risk_clock` (§2).
 
+**Types**, beyond §9.1's and §9.2's:
+
+| Type | Values | Refused as |
+|---|---|---|
+| `asset_id` | Mandate spec §3's asset ID: `8-4-4-4-12` lowercase hexadecimal with hyphens, the form `AssetId` parses. Uppercase is refused, never folded, so one asset has one spelling ([DEC-404](../project/decisions/DEC-404.md) item 9) | Not a string: `schema`; otherwise `non_canonical` |
+
 Every member comes from mandate spec §5.10's row, from a writer that exists, or from §2, and DEC-403
 traces each one: `mandate-spec`'s risk fold writes `MandateVersionApplied`'s result, rejection
 reason, allocation change, and floor fraction, and `mandate-research` writes `UniverseChanged`'s
@@ -939,7 +950,7 @@ an instrument was admitted to, or removed from, an agent's working universe.
 | Member | Type | Meaning |
 |---|---|---|
 | `agent_id` | `id` | The agent whose working universe changed |
-| `instrument` | `id` | The instrument's asset ID (mandate spec §3) |
+| `instrument` | `asset_id` | The instrument's asset ID (mandate spec §3) |
 | `change` | `admitted` \| `removed` | Rule 31 |
 | `reason` | `thesis_admitted` \| `thesis_expired` \| `thesis_invalidated` \| `lineage_retired` \| `eligibility_lost` \| `operator_halt` \| `version_applied` | Mandate spec §5.10's reasons: rule 31 |
 | `thesis_id`, `lineage_id` | `id?` | The thesis the change follows from, and its lineage: rule 32 |
@@ -979,8 +990,8 @@ an instrument was admitted to, or removed from, an agent's working universe.
 
 | Record | Fact | From |
 |---|---|---|
-| `MandateVersionApplied` with `result` `applied` | `AgentVersionActive` | `agent_id`; `connection_id`, `environment`, `capital.allocation_usd`, and `universe.pinned_instruments[].asset_id` of the stored document `new_version` names, as for `AgentDeployed`. A `new_version` whose document is not stored is refused, as malformed (`InvalidInput`) at `new_version`: the context cannot be built, and nothing is skipped |
-| `MandateVersionApplied` with `result` `rejected` | none | A refused version changes nothing: the record yields no fact and no error |
+| `MandateVersionApplied` with `result` `applied` | `AgentVersionActive` | `agent_id`; `connection_id`, `environment`, `capital.allocation_usd`, and `universe.pinned_instruments[].asset_id` of the stored document `new_version` names, as for `AgentDeployed`. A `new_version` whose document is not stored is refused, as malformed (`InvalidInput`) at `new_version`: the context cannot be built, and nothing is skipped. Whatever its `result`, a record whose `classification` is not mandate spec §9.2's verdict of its two stored documents is refused the same way, at `classification` ([DEC-404](../project/decisions/DEC-404.md)) |
+| `MandateVersionApplied` with `result` `rejected` | none | A refused version changes nothing: the record yields no fact and no error, once its classification matches its documents |
 | `UniverseChanged` | `UniverseChanged` | `agent_id`, `instrument`, and whether `change` is `admitted` |
 
 ### 9.4 Research-agent thesis records ([DEC-413](../project/decisions/DEC-413.md))
