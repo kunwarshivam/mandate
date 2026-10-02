@@ -310,6 +310,22 @@ def invalid_drafts() -> list[dict]:
     return [
         *typed,
         invalid(
+            "instrument_id_a_ticker_not_an_asset_id",
+            "§9.4 asset_id: an id that is not mandate spec §3's asset ID",
+            "proposed_admitted",
+            [change("payload.instrument_id", "BTCUSD")],
+            "non_canonical",
+            "payload.instrument_id",
+        ),
+        invalid(
+            "instrument_id_an_uppercase_asset_id",
+            "§9.4 asset_id: uppercase is refused, never folded",
+            "proposed_admitted",
+            [change("payload.instrument_id", ADMITTED_ASSET.upper())],
+            "non_canonical",
+            "payload.instrument_id",
+        ),
+        invalid(
             "a_source_cited_as_empty_text",
             "§9.1 text, inside the list",
             "proposed_admitted",
@@ -854,6 +870,7 @@ VALIDATOR_MUTANTS = (
     "rule.37.corroborated",
     "rule.38",
     *THESIS_ORDER_BUGS,
+    "types.asset_id_as_id",
     "config_refs.required",
     "open.payload",
     "record.missing",

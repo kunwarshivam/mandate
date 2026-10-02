@@ -61,6 +61,9 @@ from common import (
     DIGEST as DIGEST_REF,
 )
 from common import (
+    ASSET_ID,
+)
+from common import (
     ID as IDENT_T,
 )
 from common import (
@@ -240,7 +243,7 @@ THESIS = rec(
     ("revision", INT),
     ("predecessor_thesis_id", opt(IDENT_T)),
     ("autopsy_ref", opt(REF)),
-    ("instrument_id", IDENT_T),
+    ("instrument_id", ASSET_ID),
     ("asset_class", one_of("us_equity", "crypto")),
     ("direction", STR),
     ("as_of", TS),

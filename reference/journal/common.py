@@ -119,6 +119,8 @@ def epoch_seconds(text: str) -> int:
 IDENT = re.compile(r"^[A-Za-z0-9_-]+$")
 ULID_ALPHABET = set("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+# Mandate spec §3's asset ID, as `AssetId::parse` reads it: uppercase is refused, never folded.
+ASSET_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
 def is_ulid(text: str) -> bool:
@@ -137,8 +139,8 @@ class T:
     fields: tuple[tuple[str, T], ...] = ()
 
 
-STR, ID, ULID, DEC, INT, BOOL, TS, REF = (
-    T(k) for k in ("str", "id", "ulid", "dec", "int", "bool", "ts", "ref")
+STR, ID, ULID, DEC, INT, BOOL, TS, REF, ASSET_ID = (
+    T(k) for k in ("str", "id", "ulid", "dec", "int", "bool", "ts", "ref", "asset_id")
 )
 
 
@@ -249,6 +251,7 @@ def type_violations(ty: T, value, path: str, skip: frozenset[str]) -> list[Viola
     checks = {
         "str": lambda s: s != "" or "types.str_nonempty" in skip,
         "id": lambda s: bool(IDENT.match(s)),
+        "asset_id": lambda s: bool(ASSET_ID_RE.match(s) or ("types.asset_id_as_id" in skip and IDENT.match(s))),
         "ulid": is_ulid,
         "dec": lambda s: normalize_decimal(s) is not None,
         "ts": lambda s: is_timestamp(s) or "types.timestamp" in skip,
