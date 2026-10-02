@@ -433,8 +433,10 @@ while a reducing purpose passes it.
   account-wide from every agent's fills, DEC-259, with its in-module hand tests and a running-total
   oracle property),
   `crates/mandate-risk/src/conduct.rs` (check 5's fresh quote and collar, check 6's conduct
-  controls, the collar, participation and close-window pacing of an allowed exit, and
-  `evaluate_cancel`'s minimum resting time, trading spec §8.2 and §9.6),
+  controls, the collar, participation and close-window pacing of an allowed exit, a
+  discretionary exit whose collar cannot be computed routed whole by the other controls alone
+  (E6-6, DEC-327, DEC-383), and `evaluate_cancel`'s minimum resting time, trading spec §8.2 and
+  §9.6),
   `crates/mandate-risk/src/surveillance.rs` (§9.6's daily surveillance report: figures and flagged
   thresholds, concentration a figure only, no judgement), `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
@@ -444,14 +446,17 @@ while a reducing purpose passes it.
   spec, the mode rule, the `Unknown`-order rule, the account states, the eligibility floor, and a
   check that every reason code the gate can emit is registered in the founder-owned case file),
   `crates/mandate-risk/tests/properties.rs` (one property per invariant and per "never" or "always"
-  in §9, including MI-1 scoped to its own words, the mode rule, MI-8, and a shadow-ledger sequence
-  property), `crates/mandate-risk/tests/usd_pairs.rs` (§3.2 item 7's USD pairs for crypto, E6-10:
+  in §9, including MI-1 scoped to its own words, the mode rule, MI-8, a shadow-ledger sequence
+  property, and `an_exit_over_extreme_figures_is_still_routed`), `crates/mandate-risk/tests/usd_pairs.rs` (§3.2 item 7's USD pairs for crypto, E6-10:
   a non-USD or unstated pair denied at check 2, a USD pair passing, check 2 whole for crypto, an
   exit in any pair and a US equity never judged by the rule, and a property whose oracle is
   `opening ∧ crypto ∧ quote ≠ USD`; live since E6-10's implementation, #394),
   `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
-  oracle, which never calls the crate's arithmetic), and the in-module tests in `gate.rs` and
-  `surveillance.rs` for the boundaries the files above cannot pin. Planted bugs per test: the task
+  oracle, which never calls the crate's arithmetic), and the in-module tests in `gate.rs`,
+  `conduct.rs` and `surveillance.rs` for the boundaries the files above cannot pin (among them
+  E6-6's exit routing, DEC-383: an exit over an uncomputable collar routed at its own limit and
+  sliced as an `i128` oracle computes, an opening over one and a proposal of zero keeping the
+  collar's error, and only `overflow` and `not_positive` skipped). Planted bugs per test: the task
   brief.
 - **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
   `fixtures/refcases/mandate.json`, through `crates/mandate-refcases/src/mandate/risk_gate.rs`

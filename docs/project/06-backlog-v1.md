@@ -1873,10 +1873,6 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   beside a resting protective sell in the same instrument is denied `conduct_limit_breached` though
   §5.3 rule 8 lets a bracket add a tranche. A stop is not in the book until triggered; deciding
   whether it counts would reopen that path.
-- **An exit's pacing can return a gate error** (#311 round 2, minor 1). The property half is done:
-  `properties::an_exit_over_extreme_figures_is_still_routed` (pending E6-6, #436, DEC-327) draws
-  both triggers. The fix is the E6-6 row "route a discretionary exit whose collar cannot be
-  computed" below; delete this row with it.
 - **E6-6 slice 2:** the account-wide fold is `mandate_risk::fold_day_trades` (DEC-259). The
   trading-domain harness reads RC-09's and RC-09B's `regime`, `prior_day_trades`, `last_equity`,
   `multiplier` and `day_trade_count` and drives the ledger through `fold_day_trades` from the
@@ -1951,13 +1947,19 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   promises the whole rule set is re-checked before any rule is read. Stream F's V-023-at-load in
   `mandate-spec::validate` refuses such a value up front (landed with E10-1's slice V, DEC-161 item 5),
   and the order path's `well_typed` gains the same bound so both report it by name.
-- **E6-6:** route a discretionary exit whose collar cannot be computed (`AGENTS.md` rule 13,
-  DEC-327). A sell's passive collar end `bid × (1 + band)` overflows `Price::collar_bound` at the
-  decimal's edge, or, for a US equity quoted below about `0.0000834`, truncates to zero on the Reg
-  NMS grid (`not_positive`); `conduct::pacing` reports both as `Unimplemented("pacing", "E6-6")`,
-  and the advisory path's `map::verdict_of` turns any gate error into a denial. Skip the control
-  that cannot be computed, so the whole exit goes as proposed, and delete the `#[ignore]` on
-  `an_exit_over_extreme_figures_is_still_routed` (#311 round 2, minor 1; #436 review, M2 to M4).
+- **E6-6:** make a skipped collar countable without a replay. When DEC-383 skips a collar that
+  cannot be computed, `applied` does not name it and nothing is journaled, so the decision is
+  identical to one whose collar computed and bound nothing; a named entry in the decision or a
+  journaled fact would let the skips be counted (#452 review, m2).
+- **E6-6 tests correction:** the doc comment of `properties::an_exit_over_extreme_figures_is_still_routed`
+  still says "Pending E6-6" though the test is live since #452; DEC-77 item 2 kept the
+  implementation PR from touching it (#452 review, m5).
+- **E6-6:** decide a proposal of zero quantity by name. The gate allows one on every path whose
+  checks pass (a zero sell is a reduction, a zero buy passes every limit), so an `Allow` can
+  carry an order of nothing, which the broker refuses; only a discretionary exit over an
+  uncomputable collar keeps the collar's error for it (DEC-383 item 3). Found by the E6-6
+  exit-routing fix's differential matrix (6840 allowed zero rows on `main`); refusing it denies
+  no reduction, since a zero order reduces nothing.
 - **E6-6:** pin the rest of a re-priced exit and of the close window. The tests assert
   `marketable_limit_required` and the quantity of a market exit re-priced in an auction window but
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`
