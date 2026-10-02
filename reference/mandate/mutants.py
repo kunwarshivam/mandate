@@ -292,7 +292,7 @@ TRIPWIRE_MUTANTS = {
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
-         "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(1500); fuzz_client_ceiling(300); "
+         "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(2500); fuzz_client_ceiling(300); "
          "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
          "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
          "print(len(FAIL))")
