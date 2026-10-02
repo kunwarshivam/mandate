@@ -14,6 +14,8 @@ pub(crate) enum Ty {
     Str,
     /// `[A-Za-z0-9_-]+` (spec §2).
     Ident,
+    /// Mandate spec §3's asset ID: `8-4-4-4-12` lowercase hexadecimal with hyphens (spec §9.3).
+    AssetId,
     Ulid,
     /// A journal decimal, normalized on the way in (spec §4.6).
     Decimal,
@@ -50,6 +52,7 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
     match ty {
         Ty::Str => checked(!text()?.is_empty()),
         Ty::Ident => checked(is_ident(text()?)),
+        Ty::AssetId => checked(is_asset_id(text()?)),
         Ty::Ulid => checked(is_ulid(text()?)),
         Ty::Decimal => DecStr::parse(text()?)
             .map(|d| Value::Str(d.as_str().to_owned()))
@@ -121,6 +124,21 @@ pub(crate) fn is_pointer(s: &str) -> bool {
             ok
         }) && !escaped
     })
+}
+
+/// Mandate spec §3's asset ID, as `mandate-domain`'s `AssetId::parse` reads it: five groups of
+/// 8, 4, 4, 4 and 12 lowercase hexadecimal digits joined by hyphens. Uppercase is refused, never
+/// folded, so one asset has one spelling.
+fn is_asset_id(s: &str) -> bool {
+    const GROUPS: [usize; 5] = [8, 4, 4, 4, 12];
+    let groups: Vec<&str> = s.split('-').collect();
+    groups.len() == GROUPS.len()
+        && groups.iter().zip(GROUPS).all(|(group, width)| {
+            group.len() == width
+                && group
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
 }
 
 pub(crate) fn is_ident(s: &str) -> bool {
