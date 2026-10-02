@@ -685,6 +685,146 @@ fn no_trim_while_holding() {
     );
 }
 
+/// The trims of one position held at `market_value` under the confirmed rung at `factor`, with
+/// `resting` of the agent's own non-protective sells and `protective` of its protective sells
+/// working, and the instrument's minimum order size `minimum`.
+fn trims_of(
+    held: &str,
+    market_value: &str,
+    factor: &str,
+    (resting, protective): (&str, &str),
+    minimum: &str,
+    crypto: bool,
+) -> Result<Vec<mandate_risk::TrimProposal>, mandate_risk::GateError> {
+    let mut s = Scenario::allowing();
+    s.mandate = mandate_with(common::two_trimming_rungs());
+    s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
+    s.risk.size_factor = common::ratio(factor);
+    s.agent.positions.insert(asset(INSTRUMENT_2), qty(held));
+    s.agent
+        .market_values
+        .insert(asset(INSTRUMENT_2), usd(market_value));
+    for (id, open_qty, is_protective) in [(77, resting, false), (78, protective, true)] {
+        if open_qty != "0" {
+            let mut sell = open_order(s.agent.agent, INSTRUMENT_2, "0");
+            sell.side = Side::Sell;
+            sell.opening = false;
+            sell.protective = is_protective;
+            sell.open_qty = qty(open_qty);
+            s.account.working_orders.insert(ClientOrderId(id), sell);
+            s.agent.working_orders.insert(ClientOrderId(id));
+        }
+    }
+    let mut instrument = common::equity_instrument(INSTRUMENT_2);
+    if crypto {
+        instrument.asset_class = AssetClass::Crypto;
+        instrument.exchange = None;
+        instrument.fractionable = true;
+    }
+    instrument.min_order_size = qty(minimum);
+    let instruments = BTreeMap::from([(asset(INSTRUMENT_2), instrument)]);
+    mandate_risk::trim_proposals(
+        s.now,
+        &s.config,
+        &s.mandate,
+        &s.risk,
+        &s.agent,
+        &s.account,
+        &instruments,
+    )
+}
+
+/// A trim of the whole position held is proposed below the instrument's minimum order size, and
+/// any other sub-minimum trim is still withheld (DEC-423; trading spec §5.3 rule 2's exception for
+/// a sell closing the full position by its exact quantity; #504 review, M1; #520 review, round 1).
+///
+/// Each row's trim is worked out here from §5.5 on the 1500 cap: the target is `factor × 1500`,
+/// the band 75, and the sell is the excess over the target at the position's own price, less what
+/// the agent's own non-protective sells already have on sale, rounded up to the grid and capped at
+/// what is not on sale. Proposed:
+/// - 1 share at 1000, factor 0.5: the excess 250 is a quarter share, rounded up to the 1 held.
+///   At a 2-share minimum it closes the position. This is also the withheld row below it once its
+///   resting sell fills.
+/// - 1 share at 1000 under a resting protective stop for it: the same trim. A protective stop is
+///   not a trim in progress (DEC-399 item 7), and the trim is still the whole position.
+/// - 0.0002 BTC worth 120, factor 0: the whole 120 is over the zero target, so the sell is the
+///   0.0002 held, below a 0.001 minimum.
+/// - 0.0002 BTC worth 120, factor 1e-10: the target is 0.00000015 dollars, so the raw sell is
+///   0.00019999999975, rounded up on the 1e-9 grid to the 0.0002 held. A full close at a target
+///   above zero.
+///
+/// Withheld:
+/// - 2 shares at 1000 each with 1 resting, factor 0.5: the excess 1250 less the 1000 on sale is a
+///   quarter share, rounded up to the 1 not on sale. That order is 1 share of a 2-share position,
+///   not a full close, so the broker's 2-share minimum applies to it. Nothing is lost: if the
+///   resting sell fills, the next trim is the 1 left, the whole position (the first row); if it
+///   ends unfilled, the next trim is both shares.
+/// - 2 shares at 1000 each, factor 0.7: the excess 950 is 0.95 of a share, so the 1-share trim is
+///   one increment short of the 2 held, and a 2-share minimum withholds it.
+/// - 10 shares at 100, factor 0.5: the excess 250 is 3 shares of 10, so a 4-share minimum
+///   withholds it.
+///
+/// Every row is run before one assertion, so under the stub each row's outcome is reported.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_trim_of_the_whole_position_is_never_withheld_for_the_minimum() {
+    let rows = [
+        ("1", "1000", "0.5", ("0", "0"), "2", false, Some("1")),
+        ("1", "1000", "0.5", ("0", "1"), "2", false, Some("1")),
+        (
+            "0.0002",
+            "120",
+            "0",
+            ("0", "0"),
+            "0.001",
+            true,
+            Some("0.0002"),
+        ),
+        (
+            "0.0002",
+            "120",
+            "0.0000000001",
+            ("0", "0"),
+            "0.001",
+            true,
+            Some("0.0002"),
+        ),
+        ("2", "2000", "0.5", ("1", "0"), "2", false, None),
+        ("2", "2000", "0.7", ("0", "0"), "2", false, None),
+        ("10", "1000", "0.5", ("0", "0"), "4", false, None),
+    ];
+    let mismatches = rows
+        .into_iter()
+        .filter_map(|(held, value, factor, resting, minimum, crypto, sold)| {
+            let row = format!(
+                "{held} held at {value}, factor {factor}, {} resting and {} protective, \
+                 minimum {minimum}",
+                resting.0, resting.1
+            );
+            let expected = sold
+                .map(|sold| vec![(asset(INSTRUMENT_2), qty(sold), Purpose::RiskExit)])
+                .unwrap_or_default();
+            match trims_of(held, value, factor, resting, minimum, crypto) {
+                Ok(trims) => {
+                    let proposed = trims
+                        .iter()
+                        .map(|t| (t.instrument.clone(), t.qty, t.purpose))
+                        .collect::<Vec<_>>();
+                    (proposed != expected)
+                        .then(|| format!("{row}: proposed {proposed:?}, expected {expected:?}"))
+                }
+                Err(e) => Some(format!("{row}: the trims do not compute: {e}")),
+            }
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        mismatches.is_empty(),
+        "a trim of the whole position held is proposed below the minimum, and no other \
+         sub-minimum trim is:\n{}",
+        mismatches.join("\n")
+    );
+}
+
 /// Only `scale_action: trim_to_target` trims; `limit_buys` never proposes a sell.
 ///
 /// Mandate §5.5 gives the trim to `trim_to_target` alone — under `limit_buys` the size factor only
