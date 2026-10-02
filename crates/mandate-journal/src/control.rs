@@ -494,7 +494,8 @@ mod tests {
     /// The members §9.2 lists without `?`, at every depth, as paths below `payload`: written out
     /// from the spec's tables rather than read from this module's schemas, so a schema loosened to
     /// nullable cannot also drop its member from this list (#445 round 1, B2; round 2, C1). A list
-    /// is named by its first element.
+    /// is named by its first and second elements, so a check that stops after the first is seen
+    /// (#445 round 3, D1).
     const REQUIRED: [(&str, &[&str]); 10] = [
         ("StreamOpened", &["stream_type", "workspace_id"]),
         (
@@ -505,6 +506,7 @@ mod tests {
                 "environment",
                 "scopes",
                 "scopes[0]",
+                "scopes[1]",
             ],
         ),
         ("ConnectionRevoked", &["connection_id"]),
@@ -522,7 +524,7 @@ mod tests {
         ),
         (
             "ConfigSnapshotRegistered",
-            &["kind", "content_hash", "params", "params[0]"],
+            &["kind", "content_hash", "params", "params[0]", "params[1]"],
         ),
         (
             "MandateVersionCreated",
@@ -531,6 +533,8 @@ mod tests {
                 "provenance",
                 "provenance[0].path",
                 "provenance[0].source",
+                "provenance[1].path",
+                "provenance[1].source",
                 "record_ref",
             ],
         ),
@@ -540,6 +544,7 @@ mod tests {
                 "mandate_version",
                 "confirmed_paths",
                 "confirmed_paths[0]",
+                "confirmed_paths[1]",
                 "record_ref",
             ],
         ),
@@ -654,7 +659,24 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 39);
+        assert_eq!(checked, 44);
+        let mut body = Value::Object(base_of(&section, "MandateVersionCreated")?);
+        let Value::Object(entry) = value_at(&mut body, "payload.provenance[1]")? else {
+            return Err("a provenance entry is a record".to_owned());
+        };
+        let span = Key::new("quoted_span").map_err(|_| "key")?;
+        entry.insert(span, Value::Str("the owner's words".to_owned()));
+        let Value::Object(body) = body else {
+            return Err("the base is a record".to_owned());
+        };
+        assert_eq!(
+            refusal(body),
+            Some((
+                "schema".to_owned(),
+                "payload.provenance[1].quoted_span".to_owned()
+            )),
+            "a second provenance entry is closed too (#445 round 3, D1)"
+        );
         Ok(())
     }
 
@@ -682,7 +704,7 @@ mod tests {
     /// order, which §9.2 keeps): rule 20 before 21 on one snapshot registration, and subject rule 26
     /// before copy rule 27 on one refusal (#445 round 1, B3). Within rule 21, the first offending
     /// member in the spec's order: `model_id`, `model_version`, `admits_instruments`, then
-    /// `params` (#445 round 2, C2).
+    /// `params` (#445 round 2, C2; round 3, D2).
     #[test]
     fn the_lower_numbered_rule_is_reported_first() -> Result<(), String> {
         let section = section()?;
@@ -719,6 +741,13 @@ mod tests {
             refusal(with_params),
             Some(("schema".to_owned(), "payload.model_id".to_owned())),
             "rule 21 reports a model member before params (#445 round 2, C2)"
+        );
+        let versioned = with_payload(fee.clone(), "model_version", Value::Str("1".to_owned()))?;
+        let admitting = with_payload(versioned, "admits_instruments", Value::Bool(false))?;
+        assert_eq!(
+            refusal(admitting),
+            Some(("schema".to_owned(), "payload.model_version".to_owned())),
+            "rule 21 reports model_version before admits_instruments (#445 round 3, D2)"
         );
         let body = with_payload(fee, "params", unsorted)?;
         assert_eq!(
