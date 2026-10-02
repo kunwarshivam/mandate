@@ -316,6 +316,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   Also owed (#443 round 3, m14; #476 round 1, m4): no CI job runs `reference/journal/generate.py` or its seeded bugs, since
   `cargo xtask ci reference` runs only `reference/mandate/`. Its first cost: rule 28's report order went unpinned on
   the reference side until #476 round 1. Run `generate.py --check` per PR.
+  Also owed (#444, DEC-353; E6-13's code half, tests first): `mandate-spec`'s §9.2 classifier takes DEC-353's rule, so
+  MC-J01, MC-J03 and MC-J05 pass, with MC-J06 and MC-J09, which stay reducing. Size it with what comes first: `mandate-spec` has no delegations at
+  all. `Autonomy` has no `delegations` member and `parse::autonomy`'s member list is closed, so a mandate carrying one is
+  refused at parse (`unknown_member`); the type, the parser and §9.2's `autonomy.delegations` row, which the Rust
+  classifier also lacks, come before the rule has anything to read (#471 round 1, m9).
+  **Founder question, when this is picked up** ([#471](https://github.com/kunwarshivam/mandate/pull/471) round 2, the
+  reviewer's note): a risk-reducing rule change can move routine orders onto a delegation granted for something else and
+  spend it. Removing an `auto` rule ahead of a delegated `ask` (MC-J06) sends the small orders the rule decided to the
+  delegation, so the orders it was granted for escalate once it is spent. Every decision is stricter, so every invariant
+  holds, but the owner is not told. Should the change's confirmation screen say which delegations the new version's
+  orders will draw on? Product wording, so the founder's (§6.4's approval card already carries delegation shapes).
   **Founder question** (#443 round 2): should a mandate be refused at validation
   when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
   drawdown ladder) then cannot be lifted until a second user exists?
@@ -907,6 +918,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
     mandate document the record's `config_refs.mandate_version` names, and refuses a record whose
     verdict passes over a check that mandate fails: an `admitted: true`, or a `reason` later than
     the first check the document fails;
+  - **(#503 round 1, m3)** §9.4's `instrument_id` is typed looser than an asset ID, the latent twin
+    of §9.3's `instrument` before v0.10. No mapping parses it yet. The registration should type it as
+    v0.10's `asset_id` from the start, so it never appends a value a later mapping cannot read.
   - the `man` ref on these two records means the mandate in force when the thesis was judged, and
     the tests PR pins that;
   - the tests PR comes first (DEC-77), and its cases include a pinned universe (MI-20) and
@@ -1310,6 +1324,20 @@ From E10-1's slice-V implementation (DEC-161):
     - **Unexercised shapes (#482 round 2, m3):** no pair reaches `classify`'s `join` with more than
       one class over several rows (the only multi-path pair is the pinning switch, which returns
       first), and no pair is two identical documents.
+    - **`asset_id` (#497 round 1, m3; DEC-404 item 9):** journal spec v0.10 types `instrument` as an
+      asset ID. The `mandate-journal` code PR (test first, with `result` matched exhaustively, m2) is
+      on `agent/l-risk-state-asset-id`. Next, the reference PR with the `asset_id` vectors and seeded
+      bugs, and #503's m1 and m2 text.
+    - **Members appended under a looser type than the mapping parses (#503 round 1, m3).** Each has
+      the same shape as `instrument` had: it appends, then makes the stream's `ValidationContext`
+      unbuildable, and a context that will not build is not a hold an exit may have (rule 13).
+      - `ConfigSnapshotRegistered.model_id`: `text?` at append, but `ModelId::parse` at the mapping.
+        This is the widest of the three.
+      - `agent_id` and `connection_id`: `id` with no length bound at append, but 1 to 64 characters at
+        the mapping (DEC-303 item 16).
+
+      Take both after the DEC-360 change, as one DEC-176 tightening with the same three steps: the
+      spec, then `mandate-journal` test first, then the reference vectors.
     - **The pairs are not valid mandates (#482 round 2, m1):** six of
       `a_version_maps_only_under_the_classification_its_documents_give`'s pairs break a V-rule (V-008,
       V-013, V-034, V-036). Make each valid with a second patched path, so every fixture passes
@@ -2207,6 +2235,35 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   write. Dropping the guard would make `ref.py` withhold a trim `rung_not_confirmed` with no rung
   active. Only the minimum's reading remains, a question to the coordinator on claim
   [#123](https://github.com/kunwarshivam/mandate/issues/123).
+  *The dollar-minimum half, harness side, closed in #498* (DEC-399 item 8, option (a) on #123).
+  `trim_guards` judges `below_minimum_order` by the instrument's `min_order_size`, and **that
+  quantity reading is the one that stays**: do not remove it. What remains is `ref.py`'s side: the
+  reference PR moves `ref.py` to the same quantity minimum, has §5.5 name it, and adds MC-B33 and
+  MC-B34.
+- **E6-4 harness cleanup: drop the transitional branches once MC-B33 and MC-B34 are on `main`**
+  (#498 review, M1). In `crates/mandate-refcases/src/mandate/order_builder.rs`:
+  (a) drop `AWAITED`, `awaited`, `counted` and the without-branch, so the case list and the sweep
+  counts state only the fixture with both cases;
+  (b) remove the `min_order_size` default (`stated.increment`) in `trim_first`, once the reference
+  PR makes the input required on a trim base.
+  Until then, the case-list pin is open: dropping both awaited cases from the fixture fails
+  nothing, because `counted` falls back to the counts without them.
+- **E6-4 harness: one scene for both gate calls on a trim base** (#498 review, m3). `trim_first`
+  sets the scene instrument's `min_order_size` from the case, but `judge` builds its own scene in
+  `Scene::read`, which takes the minimum from `qty_increment`. A case where a trim is withheld and
+  the builder then proposes would run §5.3 rule 2 against a different minimum from the trim's.
+  Unreachable today, since every withheld-trim case ends in a hold. `holding` and `scale_active_s`
+  have the same shape. Read the trim inputs in `Scene::read`, so both gate calls get one
+  instrument.
+- **E6-4: pin that the trim's minimum is judged on the remainder after open sells** (#498 review,
+  m8; DEC-399 items 5 and 7). No test combines a resting sell with a minimum above one increment,
+  so a gate that judged the whole excess passes every test in the workspace. Close it in
+  `mandate-risk`'s `trim::tests`: `Scene::new("10", "1000")` with `resting(7, "2", Side::Sell,
+  false, true)` and `min_order_size = 3` leaves a 1-share remainder, which must not be proposed,
+  while a whole-excess reading (3 shares) proposes it. Next in stream G, before the reference
+  PR's status change.
+  *Done:* `trim::tests::the_minimum_is_judged_on_the_remainder_after_resting_sells`, which fails on
+  a seeded whole-excess reading.
 - **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
@@ -2649,14 +2706,9 @@ From journal spec v0.8 §9.3's review (#470 round 2, DEC-403):
   4). `drafts.classification` catches the dangerous sub-case, a wrong value that changes the §9.2
   verdict. All six of today's documents were checked against the full validators by hand.
 - **§9.3's vectors: three coverage gaps (#470 round 2, minors 1, 7 and 8).**
-  - **Report orders.** The 29-then-30 order (an applied, risk-increasing record with `step_up`
-    null and a `reason` set) and the 30-then-33 order (a rejected record with
-    `increase_blocked_while_latched`, `classification` `neutral`, and an `allocation_change` set)
-    are pinned by no draft. Each wants a draft and an `order.*` mutant, as §9.2's
-    `order.rule_21_first`. Rules 29 and 33 can never both fire, since 29 needs `risk_increasing`
-    and 33 needs anything else, so their relative order needs no pin. The 31-then-32 order is a
-    third reachable pair (a `thesis_admitted` that removes and carries no thesis breaks both), and
-    is unpinned too (#482 round 1, m3).
+  - **Report orders.** Done in journal spec v0.10: the 29-then-30, 30-then-33 and 31-then-32 orders
+    each have a draft and an `order.*` seeded bug (DEC-404 item 9). Rules 29 and 33 can never both
+    fire, since 29 needs `risk_increasing` and 33 needs anything else.
   - **`universe_size_after`** is checked against nothing, not even the fold of the section's own
     drafts.
   - **`risk_state.classify`** raises `ValueError` on a path it does not encode instead of reporting

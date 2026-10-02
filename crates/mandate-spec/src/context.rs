@@ -260,8 +260,10 @@ impl JournaledFact {
                 if record.text("classification")? != verdict.as_str() {
                     return Err(malformed("classification"));
                 }
-                if record.text("result")? != "applied" {
-                    return Ok(None);
+                match record.text("result")? {
+                    "applied" => {}
+                    "rejected" => return Ok(None),
+                    _ => return Err(malformed("result")),
                 }
                 Self::AgentVersionActive {
                     agent: AgentId::new(record.id("agent_id")?),
@@ -1465,6 +1467,35 @@ mod record_tests {
             );
             assert_eq!(got, Err(SpecError::InvalidInput { what }), "{what}");
         }
+        Ok(())
+    }
+
+    /// `result` is read exhaustively: `applied` maps, `rejected` maps to none, and any other value is
+    /// refused at `result`, never read as a rejection (#497 round 1, m2).
+    #[test]
+    fn a_version_record_with_an_unknown_result_is_refused() -> Result<(), String> {
+        let old = mandate(&[])?;
+        let new = mandate(&[("/name", r#""renamed""#)])?;
+        let canonical = |m: &crate::Mandate| m.canonical().map_err(|e| e.to_string());
+        let digest =
+            |m: &crate::Mandate| m.version().map(|v| v.digest()).map_err(|e| e.to_string());
+        let stored: BTreeMap<Digest, Value> = [
+            (digest(&old)?, canonical(&old)?),
+            (digest(&new)?, canonical(&new)?),
+        ]
+        .into_iter()
+        .collect();
+        let record = version_record(&digest(&old)?, &digest(&new)?, "neutral", "pending")
+            .map_err(|e| e.to_string())?;
+        assert_eq!(
+            JournaledFact::from_record(
+                "MandateVersionApplied",
+                &record,
+                &|d: &Digest| stored.get(d).cloned(),
+                None
+            ),
+            Err(SpecError::InvalidInput { what: "result" })
+        );
         Ok(())
     }
 
