@@ -259,10 +259,6 @@ fn an_account_update_refuses_what_it_does_not_read() {
         err("account update field `multiplier` not interpreted until E6-6")
     );
     assert_eq!(
-        status_not_active(|s| s[0]["data"]["crypto_status"] = json!("INACTIVE")),
-        err("account update field `crypto_status` not interpreted until E6-10")
-    );
-    assert_eq!(
         status_not_active(|s| s[0]["data"]["reason"] = json!("margin call")),
         err("step 1: broker_account_update data: unknown key `reason`")
     );
@@ -796,14 +792,125 @@ fn every_other_rc_15_variant_and_gate_case_names_the_story_it_waits_for() {
     for (case, wanted) in pending {
         assert_eq!(run(fixture(), case), err(wanted), "{case}");
     }
+}
+
+/// A crypto opening on RC-09's BTCUSD pair, which its own case only fills and exits.
+fn buy_btc() -> Json {
+    json!({
+        "instrument": "BTCUSD", "side": "buy", "type": "limit",
+        "qty": "0.01", "limit_price": "60000.00", "purpose": "open"
+    })
+}
+
+/// `initial.account`'s `crypto_status` is check 1's `crypto_active` (DEC-285 item 5's backlog
+/// row, DEC-315): an account whose crypto status is not `ACTIVE` has its crypto opening denied
+/// `crypto_account_inactive`, and an `ACTIVE` one is decided as before (the legacy-pdt budget,
+/// lifted at the $25,000 threshold, is the only check the pair leaves to differ). The read is
+/// pending E6-10: until its story lands the stub refuses the read and reports itself.
+#[test]
+#[ignore = "pending E6-10"]
+fn the_initial_crypto_status_is_check_1s_crypto_active() {
+    let with_status = |status: &str, decision: Json| {
+        run(
+            edited("RC-09", |c| {
+                c["initial"]["account"]["crypto_status"] = json!(status);
+                c["initial"]["account"]["last_equity"] = json!("25000.00");
+                c["steps"] = json!([proposal("2026-09-21T10:00:00-04:00", buy_btc(), decision)]);
+            }),
+            "RC-09",
+        )
+    };
     assert_eq!(
-        scene(
-            json!([proposal(TEN_AM, buy_msft(json!({})), allow())]),
-            |c| {
-                c["initial"]["account"]["crypto_status"] = json!("INACTIVE");
-            }
+        with_status("INACTIVE", stop("deny", "crypto_account_inactive")),
+        Ok(()),
+        "an inactive crypto account denies a crypto opening at check 1"
+    );
+    assert_eq!(
+        with_status("ACTIVE", allow()),
+        Ok(()),
+        "an active crypto account decides the opening as before"
+    );
+}
+
+/// RC-09 with `initial_status` as the initial account's `crypto_status`, one
+/// `broker_account_update` step per status in `updates` (at 09:30, 09:40 and 09:50), then a crypto
+/// opening at 10:00 expecting `decision`; `last_equity` lifts the legacy-pdt budget so check 1 is
+/// what decides.
+fn crypto_updates(initial_status: &str, updates: &[&str], decision: Json) -> Result<(), String> {
+    assert!(
+        updates.len() <= 3,
+        "crypto_updates times at most three updates"
+    );
+    let mut steps: Vec<Json> = updates
+        .iter()
+        .zip(["09:30", "09:40", "09:50"])
+        .map(|(status, at)| {
+            json!({
+                "at": format!("2026-09-21T{at}:00-04:00"),
+                "event": "broker_account_update",
+                "data": { "crypto_status": status }
+            })
+        })
+        .collect();
+    steps.push(proposal("2026-09-21T10:00:00-04:00", buy_btc(), decision));
+    run(
+        edited("RC-09", |c| {
+            c["initial"]["account"]["crypto_status"] = json!(initial_status);
+            c["initial"]["account"]["last_equity"] = json!("25000.00");
+            c["steps"] = Json::Array(steps);
+        }),
+        "RC-09",
+    )
+}
+
+/// A `broker_account_update`'s `crypto_status` is check 1's `crypto_active` from that step on
+/// (DEC-285 item 5's backlog row, DEC-315 item 1): an update to anything but `ACTIVE` denies the
+/// case's later crypto opening `crypto_account_inactive`, and an update to `ACTIVE` on an active
+/// account decides it as before. The read is pending E6-10: until its story lands the stub refuses
+/// the read and reports itself.
+#[test]
+#[ignore = "pending E6-10"]
+fn an_account_update_s_crypto_status_is_check_1s_crypto_active() {
+    assert_eq!(
+        crypto_updates(
+            "ACTIVE",
+            &["INACTIVE"],
+            stop("deny", "crypto_account_inactive")
         ),
-        err("initial account `crypto_status` not interpreted until E6-10")
+        Ok(()),
+        "an update to an inactive crypto status denies a later crypto opening"
+    );
+    assert_eq!(
+        crypto_updates("ACTIVE", &["ACTIVE"], allow()),
+        Ok(()),
+        "an update to ACTIVE on an active account decides the opening as before"
+    );
+}
+
+/// A later `ACTIVE` never lifts a detected crypto inactivity (DEC-315 item 2): the inactivity is
+/// stored until the owner acknowledges and the account is refreshed (E7-5), as with the account's
+/// other status fields, whether it was detected in the initial account or by an earlier update.
+/// The read is pending E6-10: until its story lands the stub refuses the read and reports itself.
+#[test]
+#[ignore = "pending E6-10"]
+fn a_later_active_crypto_status_never_lifts_a_detected_inactivity() {
+    assert_eq!(
+        crypto_updates(
+            "INACTIVE",
+            &["ACTIVE"],
+            stop("deny", "crypto_account_inactive")
+        ),
+        Ok(()),
+        "an update to ACTIVE never lifts an inactivity the initial account states"
+    );
+    assert_eq!(
+        crypto_updates(
+            "ACTIVE",
+            &["INACTIVE", "ACTIVE"],
+            stop("deny", "crypto_account_inactive")
+        ),
+        Ok(()),
+        "an update to ACTIVE never lifts an inactivity an earlier update detected"
     );
 }
 

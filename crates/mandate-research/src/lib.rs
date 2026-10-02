@@ -48,9 +48,8 @@
 //! risk (MI-19), and it is the only path by which anything here shrinks the universe: a lowered
 //! `max_instruments` refuses further admissions and never removes (DEC-132 item 14).
 //!
-//! Every entry point has its implementation and returns its own typed errors (DEC-77): the
-//! `flow` module's three were the last to land, with E17-6, so
-//! [`ResearchError::Unimplemented`] is returned by nothing and stays only as a pinned ES-09 code.
+//! Every entry point has its implementation and returns its own typed errors (DEC-77);
+//! [`ResearchError::Unimplemented`] stays only as a pinned ES-09 code.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1208,6 +1207,12 @@ pub enum ResearchError {
     /// under-state the aggregate flow the monitor exists to see (AGENTS.md rule 12)
     #[error("a research exposure is never negative")]
     NegativeExposure,
+    /// An evaluation whose scoreable set is empty — no theses at all, or every thesis
+    /// unscoreable — has nothing to aggregate, and refuses under its own name rather than the
+    /// nameless division the aggregate's mean of nothing reached (#410 review minor 3,
+    /// DEC-282 item 9, DEC-335)
+    #[error("an evaluation's scoreable set is empty, so there is nothing to aggregate")]
+    EmptyScoreableSet,
     /// Returned by no entry point of this crate since E17-6's implementation landed the last
     /// stubs; kept because ES-09's registry is add-only and the `unimplemented` code is pinned
     /// live, so a future staged story can name itself and its story again (DEC-77, DEC-294).
@@ -1244,6 +1249,7 @@ impl ResearchError {
             Self::WindowNotClosed => "window_not_closed",
             Self::ThesisOutsideWindow => "thesis_outside_window",
             Self::NegativeExposure => "negative_exposure",
+            Self::EmptyScoreableSet => "empty_scoreable_set",
             Self::Unimplemented(_, _) => "unimplemented",
             Self::SpecType(_) => "spec_type",
             Self::Num(e) => e.code(),
