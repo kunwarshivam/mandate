@@ -352,7 +352,10 @@ Lessons from this wave:
    implementation after its merged tests (#342).
 4. **Stream K:** the E7-4 protective-exit slices in DEC-160's order under umbrella PR #174, then
    E7-9 and E7-10 (the agent- and control-stream payload schemas and their `JournaledFact`
-   mapping), then the tracer slices that flip one adapter each.
+   mapping), then the tracer slices that flip one adapter each. The account-stream writers'
+   tests PR is #441 (DEC-305 to DEC-307, round 2), its implementation PR follows it, and DEC-360
+   (Proposed, the founder) holds where the fold's extra `IntentReceived` and `OrderSubmitted`
+   members go.
 5. **Journal:** the cold store's pure half is whole (E5-6 and E5-6a: #391, #404, #407) and its
    paperwork landed (the E5-6 record row and the E5-7 to E5-9 rows, DEC-296); what remains is
    E5-5 (the personal-data vault, safety-critical), the DEC-265 item 1 crypto half (Proposed,

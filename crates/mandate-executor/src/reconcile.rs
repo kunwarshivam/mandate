@@ -429,10 +429,12 @@ fn fees(
 /// The fee step's own `AccountSnapshotRecorded` payload, the one step 5 records when step 4 had no
 /// base to record one against: every member journal spec v0.7 §9.2 closes, with `model_cash`,
 /// `cash_band`, and `cash_in_band` present as `null` (§4.2), because a fee posting compares no
-/// cash and rule 24 makes all three `null` together. The vectors' `snapshot_fees` draft is that
-/// payload, and §9.1's absent-member rule refuses it with a member missing, so today's reduced
-/// form (`orders::account_fields` alone) stays refused at `append` once the schema registers
-/// (DEC-261 item 7, DEC-303). The batch stamps `risk_clock` beside these members.
+/// cash and rule 24 makes all three `null` together. Each member has §9.2's type: the statuses
+/// text, the three flags booleans, `multiplier` an integer, and the five amounts decimal text. The
+/// vectors' `snapshot_fees` draft is that payload, and §9.1's absent-member rule refuses it with
+/// a member missing, so today's reduced form (`orders::account_fields` alone) stays refused at
+/// `append` once the schema registers (DEC-261 item 7, DEC-303). The batch stamps `risk_clock`
+/// beside these members (DEC-306).
 ///
 /// # Errors
 /// [`ExecutorError::Unimplemented`] in this tests PR; `fees` journals this form in the
@@ -448,12 +450,15 @@ pub(crate) fn fee_step_snapshot_fields(
     Err(ExecutorError::Unimplemented { story: "E7-10" })
 }
 
-/// The fee step's answer to a fee difference: every agent paused under the fees restriction and
-/// the owner alerted, naming `recorded` when the snapshot recorded. It runs whatever the
-/// snapshot's own validation did: a snapshot `append` refuses is a snapshot without a name to
-/// alert about, never a reason to skip the pause, because a pause is risk reduction no
-/// validation may deny (`AGENTS.md` rules 3 and 13, DEC-261 item 7). `fees` inlines this answer
-/// today behind the snapshot's own `?`, which is the ordering this pin holds.
+/// The fee step's answer to a fee difference: every agent paused under the fees restriction, and
+/// the owner alerted once under the generic `reconciliation_fees` key. The alert names `recorded`
+/// when the snapshot recorded; when it did not, it names the `AgentModeApplied` this pause
+/// journals, so the alert always names an event already journaled and carries nothing but that
+/// opaque id and the key (`AGENTS.md` rules 5 and 6, DEC-305 item 3). It runs whatever the
+/// snapshot's own validation did: a snapshot `append` would refuse is left out of the batch, never
+/// a reason to skip the pause, because a pause is risk reduction no validation may deny
+/// (`AGENTS.md` rules 3 and 13, DEC-261 item 7). `fees` inlines this answer today behind the
+/// snapshot's own `?`, which is the ordering the pin holds against.
 ///
 /// # Errors
 /// [`ExecutorError::Unimplemented`] in this tests PR; the implementation PR wires this tail into
@@ -532,9 +537,7 @@ pub(crate) mod tests {
         Bps, FeeCap, FeePerShare, FeeRate, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd,
     };
     use mandate_time::{Date, TradingCalendar};
-
-    use serde_json::Value as Json;
-    use std::collections::BTreeSet;
+    use serde_json::{Map, Value as Json};
 
     use super::{Batch, agents, reconcile};
     use crate::error::ExecutorError;
@@ -2186,10 +2189,10 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    /// The journal vectors (`fixtures/refcases/journal.json`, generated from
-    /// `docs/specs/reference-cases/journal.yaml`): the fee-step snapshot draft's payload, whose
-    /// member list is §9.2's closed schema as the reference validator checks it.
-    fn vector_snapshot_fees() -> Result<Json, ExecutorError> {
+    /// The journal vectors' fee-step snapshot (`fixtures/refcases/journal.json`, generated from
+    /// `docs/specs/reference-cases/journal.yaml`, at `control_stream.drafts.snapshot_fees`): a draft
+    /// the reference validator accepts, whose payload is §9.2's closed schema member for member.
+    fn vector_snapshot_fees() -> Result<Map<String, Json>, ExecutorError> {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../fixtures/refcases/journal.json"
@@ -2198,6 +2201,7 @@ pub(crate) mod tests {
         let fixture: Json = serde_json::from_str(&text).map_err(|_| non_canonical())?;
         fixture
             .pointer("/control_stream/drafts/snapshot_fees/payload")
+            .and_then(Json::as_object)
             .cloned()
             .ok_or_else(non_canonical)
     }
@@ -2208,49 +2212,84 @@ pub(crate) mod tests {
         }
     }
 
-    /// The fee step's snapshot carries every member §9.2 closes, named and typed as the vectors'
-    /// `snapshot_fees` draft has them, and the three cash members are present as `null` on the fee
-    /// step, never absent (§4.2, rule 24): a fee posting compares no cash, so all three are `null`
-    /// together, and the schema refuses a member that is missing outright. `risk_clock` is the one
-    /// member this payload does not carry: the batch stamps it beside these (DEC-261 item 7).
+    /// The broker account the vectors' snapshot reads, built from the vector's own values, so the
+    /// writer is asked for exactly the payload the vector holds.
+    fn vector_account(vector: &Map<String, Json>) -> Result<BrokerAccount, ExecutorError> {
+        let text = |name: &str| {
+            vector
+                .get(name)
+                .and_then(Json::as_str)
+                .ok_or_else(non_canonical)
+        };
+        let flag = |name: &str| {
+            vector
+                .get(name)
+                .and_then(Json::as_bool)
+                .ok_or_else(non_canonical)
+        };
+        let multiplier = vector
+            .get("multiplier")
+            .and_then(Json::as_u64)
+            .ok_or_else(non_canonical)?;
+        Ok(BrokerAccount {
+            status: text("status")?.to_owned(),
+            crypto_status: text("crypto_status")?.to_owned(),
+            trading_blocked: flag("trading_blocked")?,
+            account_blocked: flag("account_blocked")?,
+            trade_suspended_by_user: flag("trade_suspended_by_user")?,
+            multiplier: u32::try_from(multiplier).map_err(|_| non_canonical())?,
+            equity: Usd::parse(text("equity")?)?,
+            cash: Usd::parse(text("cash")?)?,
+            buying_power: Usd::parse(text("buying_power")?)?,
+            non_marginable_buying_power: Usd::parse(text("non_marginable_buying_power")?)?,
+            accrued_fees: Usd::parse(text("accrued_fees")?)?,
+        })
+    }
+
+    /// The fee step's snapshot is the vectors' `snapshot_fees` payload for the account it reads,
+    /// member for member, each once, in the vector's own type and value: text as text, flags as
+    /// booleans, `multiplier` as an integer, money as canonical decimal text, and `model_cash`,
+    /// `cash_band`, and `cash_in_band` present as `null`, never absent (§4.2, rule 24: a fee
+    /// posting compares no cash, so all three are `null` together). A member typed wrong, a value
+    /// carrying anything the broker did not report, or a member written twice is refused here as
+    /// `append` would refuse it. `risk_clock` is the one member this payload does not carry: the
+    /// batch stamps it beside these (DEC-305 item 1, DEC-306).
     #[test]
     #[ignore = "pending E7-10"]
     fn the_fee_steps_snapshot_carries_the_members_the_vectors_close() -> Result<(), ExecutorError> {
         let vector = vector_snapshot_fees()?;
-        let closed: BTreeSet<String> = vector
-            .as_object()
-            .ok_or_else(non_canonical)?
-            .keys()
-            .cloned()
-            .collect();
-        let members: BTreeSet<String> = super::fee_step_snapshot_fields(&account("0")?)?
-            .into_iter()
-            .map(|(name, _)| name.to_owned())
-            .collect();
-        let fee_step: BTreeSet<String> = closed
-            .iter()
-            .filter(|name| name.as_str() != "risk_clock")
-            .cloned()
-            .collect();
-        assert_eq!(
-            members, fee_step,
-            "the fee step's snapshot is §9.2's closed member set less the batch's risk_clock"
-        );
         for name in ["model_cash", "cash_band", "cash_in_band"] {
-            let in_vector = vector.get(name).map(|value| value.is_null());
             assert_eq!(
-                in_vector,
-                Some(true),
+                vector.get(name),
+                Some(&Json::Null),
                 "the vectors carry {name} as null on the fee step (§4.2)"
             );
-            let in_draft = super::fee_step_snapshot_fields(&account("0")?)?
-                .into_iter()
-                .find(|(member, _)| *member == name)
-                .map(|(_, value)| value);
+        }
+        let mut closed: Vec<&str> = vector
+            .keys()
+            .map(String::as_str)
+            .filter(|name| *name != "risk_clock")
+            .collect();
+        closed.sort_unstable();
+        assert_eq!(
+            closed.len(),
+            14,
+            "§9.2 closes fifteen members, and the batch stamps risk_clock: {closed:?}"
+        );
+        let written = super::fee_step_snapshot_fields(&vector_account(&vector)?)?;
+        let mut names: Vec<&str> = written.iter().map(|(name, _)| *name).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names, closed,
+            "every member §9.2 closes, each once, less the batch's risk_clock"
+        );
+        for (name, value) in &written {
+            let carried: Json =
+                serde_json::from_slice(&to_canonical(value)).map_err(|_| non_canonical())?;
             assert_eq!(
-                in_draft,
-                Some(Value::Null),
-                "the fee step writes {name} present as null, never absent"
+                Some(&carried),
+                vector.get(*name),
+                "{name} carries the vector's value in the vector's type"
             );
         }
         Ok(())
@@ -2267,66 +2306,66 @@ pub(crate) mod tests {
         Batch::new(&state, ports)
     }
 
-    fn alerts_of(effects: &[Effect]) -> Vec<EventId> {
-        effects
-            .iter()
-            .filter_map(|effect| match effect {
-                Effect::Notify(alert) => Some(alert.subject_event.clone()),
-                _ => None,
-            })
-            .collect()
+    /// What the fee step's answer left in a batch: each draft's id and type in order, the
+    /// `AgentModeApplied` pauses, and each alert with its position among the effects.
+    struct Answer {
+        drafted: Vec<(usize, EventId, String)>,
+        paused: Vec<(Option<String>, Option<String>, Option<String>)>,
+        alerts: Vec<(usize, EventId, &'static str)>,
     }
 
-    /// The fee step's pause names the snapshot it recorded: every agent of the account paused
-    /// under the fees restriction, and the owner alerted about that snapshot (§11, DEC-146).
-    #[test]
-    #[ignore = "pending E7-10"]
-    fn the_fee_steps_pause_names_the_snapshot_it_recorded() -> Result<(), ExecutorError> {
-        let (config, fees) = (executor_config(), fees()?);
-        let ports = Ports {
-            ids: &Ids,
-            mandates: &Everything,
-            instruments: &Everything,
-            config: &config,
-            fees: &fees,
+    fn answer_of(effects: &[Effect]) -> Answer {
+        let mut answer = Answer {
+            drafted: Vec::new(),
+            paused: Vec::new(),
+            alerts: Vec::new(),
         };
-        let mut batch = pause_batch(&ports)?;
-        let recorded = batch.next_id();
-        super::fee_step_pause_and_alert(&mut batch, Some(recorded.clone()))?;
-        let paused: Vec<(Option<&str>, Option<&str>, Option<&str>)> = batch
-            .effects
-            .iter()
-            .filter_map(|effect| match effect {
-                Effect::Journal(draft) if draft.event_type == "AgentModeApplied" => Some((
-                    draft.payload.get("agent").and_then(Value::as_str),
-                    draft.payload.get("to").and_then(Value::as_str),
-                    draft.payload.get("restriction").and_then(Value::as_str),
-                )),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            paused,
-            vec![(Some("*"), Some("paused"), Some("reconciliation:fees"))],
-            "a fee difference pauses every agent under the fees restriction: {:?}",
-            paused
-        );
-        assert_eq!(
-            alerts_of(&batch.effects),
-            vec![recorded],
-            "and the owner is alerted, naming the recorded snapshot"
-        );
-        Ok(())
+        for (at, effect) in effects.iter().enumerate() {
+            match effect {
+                Effect::Journal(draft) => {
+                    answer
+                        .drafted
+                        .push((at, draft.event_id.clone(), draft.event_type.clone()));
+                    if draft.event_type == "AgentModeApplied" {
+                        let member = |name: &str| {
+                            draft.payload.get(name).and_then(Value::as_str).map(str::to_owned)
+                        };
+                        answer
+                            .paused
+                            .push((member("agent"), member("to"), member("restriction")));
+                    }
+                }
+                Effect::Notify(alert) => {
+                    answer
+                        .alerts
+                        .push((at, alert.subject_event.clone(), alert.message_key));
+                }
+                Effect::Broker(_) | Effect::Timer(_) => {}
+            }
+        }
+        answer
     }
 
-    /// The fee step's pause runs whatever the snapshot's own validation did: a snapshot `append`
-    /// refuses leaves the pause without a name to alert about, and the pause and the alert run
-    /// all the same, because a pause is risk reduction no validation may deny (`AGENTS.md` rules 3
-    /// and 13, DEC-261 item 7). Today `fees` journals the snapshot behind a `?`, so a refusal
-    /// there would stop the pause this pin holds.
+    /// The type of the draft `subject` names, if this batch journaled it before `before`: an alert
+    /// names only an event already journaled (`AGENTS.md` rule 5).
+    fn journaled_before(answer: &Answer, subject: &EventId, before: usize) -> Option<String> {
+        answer
+            .drafted
+            .iter()
+            .find(|(at, id, _)| id == subject && *at < before)
+            .map(|(_, _, event_type)| event_type.clone())
+    }
+
+    /// The fee step's answer to a fee difference runs whether or not its snapshot recorded: every
+    /// agent paused under the fees restriction, and the owner alerted once, under the generic
+    /// `reconciliation_fees` key, about an event this batch already journaled (`AGENTS.md` rules 3,
+    /// 5, 6 and 13; DEC-305 item 3). When the snapshot recorded, the alert names it. When the
+    /// snapshot's validation refused it, nothing recorded it, so the alert names the pause's own
+    /// `AgentModeApplied`, never an id no event carries. Today `fees` journals the snapshot behind a
+    /// `?`, so a refusal there would stop the pause this pin holds.
     #[test]
     #[ignore = "pending E7-10"]
-    fn the_fee_steps_pause_runs_when_the_snapshots_validation_refuses_it()
+    fn the_fee_steps_pause_and_alert_run_whether_or_not_the_snapshot_recorded()
     -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
@@ -2336,30 +2375,51 @@ pub(crate) mod tests {
             config: &config,
             fees: &fees,
         };
-        let mut batch = pause_batch(&ports)?;
-        super::fee_step_pause_and_alert(&mut batch, None)?;
-        let paused: Vec<(Option<&str>, Option<&str>, Option<&str>)> = batch
-            .effects
-            .iter()
-            .filter_map(|effect| match effect {
-                Effect::Journal(draft) if draft.event_type == "AgentModeApplied" => Some((
-                    draft.payload.get("agent").and_then(Value::as_str),
-                    draft.payload.get("to").and_then(Value::as_str),
-                    draft.payload.get("restriction").and_then(Value::as_str),
-                )),
-                _ => None,
-            })
-            .collect();
+        let fee_pause = vec![(
+            Some("*".to_owned()),
+            Some("paused".to_owned()),
+            Some("reconciliation:fees".to_owned()),
+        )];
+
+        let mut recorded_batch = pause_batch(&ports)?;
+        let recorded = recorded_batch.journal(
+            "AccountSnapshotRecorded",
+            None,
+            crate::orders::account_fields(&account("0")?)?,
+        )?;
+        super::fee_step_pause_and_alert(&mut recorded_batch, Some(recorded.clone()))?;
+        let answer = answer_of(&recorded_batch.effects);
         assert_eq!(
-            paused,
-            vec![(Some("*"), Some("paused"), Some("reconciliation:fees"))],
-            "a refused snapshot never blocks the pause: {:?}",
-            paused
+            answer.paused, fee_pause,
+            "a fee difference pauses every agent under the fees restriction"
         );
         assert_eq!(
-            alerts_of(&batch.effects).len(),
-            1,
-            "and the owner is still alerted, about what the snapshot refused to name"
+            answer
+                .alerts
+                .iter()
+                .map(|(_, subject, key)| (subject.clone(), *key))
+                .collect::<Vec<_>>(),
+            vec![(recorded, "reconciliation_fees")],
+            "and alerts the owner once, naming the snapshot that recorded"
+        );
+
+        let mut refused_batch = pause_batch(&ports)?;
+        super::fee_step_pause_and_alert(&mut refused_batch, None)?;
+        let answer = answer_of(&refused_batch.effects);
+        assert_eq!(
+            answer.paused, fee_pause,
+            "a refused snapshot never blocks the pause"
+        );
+        let subjects: Vec<(Option<String>, &str)> = answer
+            .alerts
+            .iter()
+            .map(|(at, subject, key)| (journaled_before(&answer, subject, *at), *key))
+            .collect();
+        assert_eq!(
+            subjects,
+            vec![(Some("AgentModeApplied".to_owned()), "reconciliation_fees")],
+            "and the owner is still alerted once, about the pause it journaled: {:?}",
+            answer.alerts
         );
         Ok(())
     }
