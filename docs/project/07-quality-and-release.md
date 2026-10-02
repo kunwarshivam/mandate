@@ -37,8 +37,8 @@ flowchart LR
    missed mutants and an adversarial review. The founder reviews after the fact and can revert;
    the decisions DEC-79 reserves still wait for the founder.
 5. **No live secrets for agents.** Agents use paper and demo credentials and fixtures only.
-6. **Decisions go through the log.** An agent that needs to deviate from an accepted decision
-   stops and proposes a decision-log entry instead.
+6. **Decisions are recorded.** An agent that needs to deviate from an accepted decision stops and
+   writes a new decision instead, as a file under `docs/project/decisions/` (DEC-344).
 
 Full agent rules: [`AGENTS.md`](../../AGENTS.md).
 
