@@ -114,6 +114,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   volatility, Sharpe, maximum drawdown, turnover, fees, buy-and-hold comparison) so that the
   loop is proven end to end.
   *Accepted when:* identical inputs produce identical outputs.
+- **E4-3 (Must)** As a researcher, I want the fill model to refuse a bar labelled with a session its
+  instrument's asset class never trades, so that no backtest fills on input spec §4.3 says cannot
+  exist (the gap DEC-114 item 2 discloses; [DEC-377](decisions/DEC-377.md)).
+  *Accepted when:* crypto bars carry only the continuous session and US-equity bars only the four
+  New York sessions; any other bar is refused with `session_off_asset_class` naming the first such
+  bar's index; an empty bar sequence is accepted; `simulate` runs the check after the order-policy
+  checks, so an order the v1 policy refuses keeps its own cause; and every sequence the table allows
+  fills exactly as before. Tests PR [#437](https://github.com/kunwarshivam/mandate/pull/437), then
+  an implementation PR that replaces the stub's body, adds the call, and deletes only the pending
+  tests' `#[ignore]` lines.
 
 ### E5 Journal
 

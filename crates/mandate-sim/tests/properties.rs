@@ -95,7 +95,7 @@
 //! the opposite direction from a stop's trigger, and an order that is already resting
 //! (`resting_since_bar`) must never take that test at all.
 //!
-//! The session-of-asset-class refusal the E4-1 follow-up adds (the gap DEC-114 item 2 discloses) has
+//! The session-of-asset-class refusal E4-3 adds (the gap DEC-114 item 2 discloses, DEC-377) has
 //! its own property and its own oracle: a table of the sessions spec §4.3 gives each asset class,
 //! read from the spec's sentence rather than from the model's check, so a check that refuses more or
 //! less than the table cannot pass.
@@ -110,11 +110,14 @@ use mandate_accounting::{AssetClass, Liquidity, Side};
 use mandate_num::{Bps, Price, Qty, ShareIncrement};
 use mandate_sim::{
     Eligibility, FirstBarVolumes, Instrument, Nanos, OcoLeg, OrderEnd, OrderKind, Session, SimBar,
-    SimConfig, SimFill, SimOrder, SimOutcome, Slippage, TimeInForce, check_sessions_of_asset_class,
+    SimConfig, SimError, SimFill, SimOrder, SimOutcome, Slippage, TimeInForce,
+    check_sessions_of_asset_class,
 };
 use mandate_time::UtcNanos;
 use proptest::collection::vec;
 use proptest::prelude::*;
+use proptest::test_runner::TestRunner;
+use std::cell::Cell;
 
 /// Prices, quantities, and volumes are integers in units of 10⁻⁹.
 const UNIT: i128 = 1_000_000_000;
@@ -1083,12 +1086,12 @@ fn a_session() -> impl Strategy<Value = Session> {
     ]
 }
 
-/// 1 to 4 consistent bars a minute apart on 2026-09-21, each labelled with a random session. The
+/// 0 to 4 consistent bars a minute apart on 2026-09-21, each labelled with a random session. The
 /// rule under test reads only a bar's session beside its instrument's asset class, so every bar
 /// carries the smallest legal rest: its session start is its own start, and one price level with a
 /// one-cent range keeps it consistent (spec §4.1).
 fn mislabellable_bars() -> impl Strategy<Value = Vec<SimBar>> {
-    (1usize..=4, vec(a_session(), 4)).prop_map(|(count, sessions)| {
+    (0usize..=4, vec(a_session(), 4)).prop_map(|(count, sessions)| {
         let base = secs("2026-09-21T00:00:00Z");
         sessions
             .into_iter()
@@ -1358,29 +1361,69 @@ proptest! {
         );
         prop_assert_eq!(outcome.ends, expected.ends, "end states");
     }
+}
 
-    /// The E4-1 follow-up (the known-issues gap DEC-114 item 2 discloses): the model refuses
-    /// exactly the bar sequences carrying a session the instrument's asset class never trades,
-    /// whatever other sessions the bars mix, and never refuses a sequence the spec's table allows.
-    /// The verdict is the stable reason code (ADR-0001 ES-09); the oracle is
-    /// `sessions_spec_43_trades`, computed from the spec's sentence, not from the check.
-    #[test]
-    #[ignore = "pending E4-1"]
-    fn the_model_refuses_exactly_the_sessions_an_asset_class_never_trades(
-        instrument in instrument_of_either_class(),
-        bars in mislabellable_bars(),
-    ) {
-        let refused = check_sessions_of_asset_class(&instrument, &bars)
-            .map(|_| "ok")
-            .map_err(|e| e.code());
-        let off_the_asset_class = bars
-            .iter()
-            .any(|bar| !sessions_spec_43_trades(instrument.asset_class).contains(&bar.session));
-        let expected = if off_the_asset_class {
-            Err("session_off_asset_class")
-        } else {
-            Ok("ok")
-        };
-        prop_assert_eq!(refused, expected, "the model's verdict on the generated bars");
+/// E4-3 (the known-issues gap DEC-114 item 2 discloses; DEC-377): the model refuses exactly the bar
+/// sequences carrying a session the instrument's asset class never trades, whatever other sessions
+/// the bars mix, naming the first such bar's index, and never refuses a sequence the spec's table
+/// allows, the empty one included. The oracle is `sessions_spec_43_trades`, computed from the spec's
+/// sentence, not from the check, and it finds the first off-class bar by its own scan. Every one of
+/// the three outcomes (an empty sequence, an allowed one, a refused one) is reached by at least one
+/// generated scenario. A plain function over a `TestRunner`, because a pending test must not be one
+/// a macro generates (DEC-137).
+#[test]
+#[ignore = "pending E4-3"]
+fn the_model_refuses_exactly_the_sessions_an_asset_class_never_trades() {
+    let empty = Cell::new(0_u32);
+    let allowed = Cell::new(0_u32);
+    let refused = Cell::new(0_u32);
+    let mut runner = TestRunner::new(ProptestConfig::with_cases(256));
+    let outcome = runner.run(
+        &(instrument_of_either_class(), mislabellable_bars()),
+        |(instrument, bars)| {
+            let verdict = check_sessions_of_asset_class(&instrument, &bars);
+            let traded = sessions_spec_43_trades(instrument.asset_class);
+            let mut first_off_class = None;
+            for (index, bar) in bars.iter().enumerate() {
+                if !traded.contains(&bar.session) {
+                    first_off_class = Some(index);
+                    break;
+                }
+            }
+            let expected = match first_off_class {
+                Some(index) => {
+                    refused.set(refused.get() + 1);
+                    Err(SimError::SessionOffAssetClass(index))
+                }
+                None if bars.is_empty() => {
+                    empty.set(empty.get() + 1);
+                    Ok(())
+                }
+                None => {
+                    allowed.set(allowed.get() + 1);
+                    Ok(())
+                }
+            };
+            prop_assert_eq!(
+                verdict,
+                expected,
+                "the model's verdict on the generated bars"
+            );
+            Ok(())
+        },
+    );
+    outcome.expect("the model refuses exactly the sessions an asset class never trades");
+    for (name, reached) in [
+        ("an empty bar sequence", &empty),
+        ("a sequence the table allows", &allowed),
+        ("a sequence the table refuses", &refused),
+    ] {
+        assert!(
+            reached.get() > 0,
+            "the generator reaches {name} at least once: empty {}, allowed {}, refused {}",
+            empty.get(),
+            allowed.get(),
+            refused.get()
+        );
     }
 }

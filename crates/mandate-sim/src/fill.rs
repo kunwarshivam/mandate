@@ -118,13 +118,20 @@ fn check_bars(bars: &[SimBar]) -> Result<(), SimError> {
     Ok(())
 }
 
-/// The session-of-asset-class check the E4-1 follow-up adds (the gap DEC-114 item 2 discloses):
-/// spec §4.3 gives crypto the continuous session alone and a US equity four sessions in New York
-/// time, so a continuous bar for any other asset class contradicts the spec and is refused with
-/// [`SimError::SessionOffAssetClass`] rather than simulated — an equity stop must never fill on a
-/// session no equity bar can carry. The implementation PR replaces this stub's body and calls it
-/// from [`simulate`] beside `check_bars`; until then it reports itself, which is what the pending
-/// gate reads (DEC-137).
+/// The session-of-asset-class check E4-3 adds (the gap DEC-114 item 2 discloses; DEC-377): spec
+/// §4.3 gives crypto the continuous session alone and a US equity the four New York sessions
+/// alone, so a bar labelled with a session its instrument's asset class never trades contradicts
+/// the spec and is refused with [`SimError::SessionOffAssetClass`] naming the first such bar's
+/// index, rather than simulated: an equity stop must never fill on a session no equity bar can
+/// carry. An empty bar sequence carries no session and is `Ok`.
+///
+/// The implementation PR replaces this stub's body and calls it from [`simulate`] **after** the
+/// order-policy loop (`check_order` over every order), not beside `check_bars`: an order the v1
+/// policy refuses keeps its own cause as the first failing cause, so a crypto order the policy
+/// refuses on a regular-session bar (an OCO on a fractional instrument, a day order on a continuous
+/// instrument) still reports that cause, as the live
+/// `the_model_rejects_bars_and_orders_it_cannot_simulate` pins. Until then it reports itself,
+/// which is what the pending gate reads (DEC-137).
 pub fn check_sessions_of_asset_class(
     instrument: &Instrument,
     bars: &[SimBar],

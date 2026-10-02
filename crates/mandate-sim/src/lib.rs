@@ -44,7 +44,11 @@ pub enum SimError {
     InconsistentBar(usize),
     #[error("bar {0} starts before the session it is labelled with")]
     BarBeforeItsSession(usize),
-    #[error("bar {0} is labelled Continuous, which only a crypto instrument trades")]
+    /// The first bar, by index, labelled with a session its instrument's asset class never trades
+    /// (spec §4.3: crypto trades the continuous session alone, a US equity the four New York
+    /// sessions alone), so a continuous bar for an equity and a regular, extended, or overnight bar
+    /// for crypto are both refused (DEC-377).
+    #[error("bar {0} is labelled with a session its instrument's asset class never trades")]
     SessionOffAssetClass(usize),
     #[error("an order's quantity must be positive")]
     ZeroQuantity,
