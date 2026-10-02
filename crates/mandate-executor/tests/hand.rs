@@ -2023,7 +2023,25 @@ fn a_pending_corporate_action_difference_is_not_a_mismatch() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = reconciling(&ports);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let bought = event(
+        ACCOUNT_STREAM,
+        2,
+        "FillApplied",
+        with_clock(
+            &[
+                ("fill_id", text("f-0")),
+                ("instrument", text(AAPL)),
+                ("side", text("buy")),
+                ("qty_gross", text("10")),
+                ("price", text("150")),
+            ],
+            0,
+        ),
+    );
+    shell.fold_one(&bought).expect("the position folds");
+    let mut shell = shell.restart_ready(&ports);
     let prepared = event(
         ACCOUNT_STREAM,
         shell.head().0.saturating_add(1),
@@ -2040,8 +2058,22 @@ fn a_pending_corporate_action_difference_is_not_a_mismatch() {
     shell
         .fold_one(&prepared)
         .expect("the prepared action folds");
+    let applied = event(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "CorporateActionApplied",
+        with_clock(
+            &[
+                ("instrument", text(AAPL)),
+                ("action", text("split")),
+                ("ratio", text("4")),
+            ],
+            51,
+        ),
+    );
+    shell.fold_one(&applied).expect("the applied action folds");
     let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
-    taken.positions = vec![broker_position(AAPL, "40")];
+    taken.positions = vec![broker_position(AAPL, "10")];
 
     let run = reconcile(&shell.state, &taken, &ports).expect("the reconciliation runs");
 
