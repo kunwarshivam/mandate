@@ -944,7 +944,6 @@ fn a_crypto_order_still_fills_its_continuous_bars() {
 /// walk will call it; on this change's stub it reports itself, which is what the pending gate reads
 /// (DEC-137), and the walk-level refusal becomes live with the implementation PR.
 #[test]
-#[ignore = "pending E4-3"]
 fn a_bar_on_a_session_its_asset_class_never_trades_is_refused_by_index() {
     let mislabelled = in_session(
         Session::Continuous,
@@ -1016,5 +1015,17 @@ fn a_bar_on_a_session_its_asset_class_never_trades_is_refused_by_index() {
         .map(|outcome| reported(&outcome)),
         Err(SimError::SessionOffAssetClass(1)),
         "the walk refuses crypto's regular-session bars too"
+    );
+    let refused = check_sessions_of_asset_class(&equity(), &equity_bars)
+        .expect_err("the equity bars hold a continuous bar");
+    assert_eq!(
+        refused.code(),
+        "session_off_asset_class",
+        "the stable reason code the runner reports (ADR-0001 ES-09)"
+    );
+    assert_eq!(
+        refused.to_string(),
+        "bar 2 is labelled with a session its instrument's asset class never trades",
+        "the message claims the rule in both directions, not only the continuous-for-equity one"
     );
 }
