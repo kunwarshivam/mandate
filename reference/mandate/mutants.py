@@ -271,7 +271,8 @@ TRIPWIRE_MUTANTS = {
         '            if inp.get("step_up") is not None and isinstance(inp["step_up"], dict) and "assertion" in inp["step_up"]:',
         '            if verdict["result"] == "apply" and isinstance(inp.get("step_up"), dict) and "assertion" in inp["step_up"]:'),
     "the requester lifts a tripwire under independent approval": (
-        '            elif inp.get("independent_approval_required", False) and inp.get("user") == inp.get("requester"):', '            elif False:'),
+        '            elif ((inp.get("independent_approval_required", False) or inp.get("independent_now", False))',
+        '            elif False and ((inp.get("independent_approval_required", False) or inp.get("independent_now", False))'),
     "a fired tripwire does not latch the risk state": ('        for tid in held["fired"]:\n            self.latched[f"tripwire:{tid}"] = True\n', ''),
     "only an exits_only tripwire latches the risk state": ('        for tid in held["fired"]:\n            self.latched[f"tripwire:{tid}"] = True\n',
                                                            '        for tid in held["fired"]:\n            if held["fired"][tid] == "exits_only":\n                self.latched[f"tripwire:{tid}"] = True\n'),
@@ -318,6 +319,9 @@ def main():
         (root / "docs").symlink_to(REPO / "docs")
         work = root / "reference" / "mandate"
         shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
+        source = (HERE / "ref.py").read_text()
+        missing = [name for name, (old, _) in (MUTANTS | TRIPWIRE_MUTANTS).items() if old not in source]
+        assert not missing, f"mutation anchors missing, checked before any run: {missing}"
         assert verdict(run(work, TW_PROBE), "0") == "missed", "the tripwire fuzz fails on the unmutated model"
         assert verdict(run(work, CASE_PROBE), "same") == "missed", "the MC-W cases differ from the unmutated model's"
         for name, (old, new) in (MUTANTS | TRIPWIRE_MUTANTS).items():
