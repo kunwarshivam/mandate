@@ -927,6 +927,25 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   - the tests PR comes first (DEC-77), and its cases include a pinned universe (MI-20) and
     `admission: deny`.
 
+  *Registration tests PR ([DEC-414](decisions/DEC-414.md)), on
+  `agent/j3-thesis-registration-tests`:* both types catalogued and routed to §9.4, refused as
+  `unimplemented`; the re-derivation is `mandate_spec::context::check_thesis_record`, a stub, with
+  six pending tests (pinned universe, admission `deny`, asset class, revision cap, the named mandate,
+  an absent or impostor document) and four pending `mandate-journal` tests over §9.4's vectors. The
+  implementation PR (DEC-77 stage 2) registers the schema and rules 34 to 38, implements the
+  re-derivation, and deletes only the ten `#[ignore]` lines. Every reader of a thesis record (the
+  lineage fold, the writer's read-back) calls `check_thesis_record` before acting on it. It lands
+  after journal spec v0.11 ([#513](https://github.com/kunwarshivam/mandate/pull/513), DEC-414 item
+  7) and registers `instrument_id` as `Ty::AssetId`.
+  *Follow-ups (#510 review round 1):*
+  - Minor 1: `thesis_tests`' stored mandates are parsed, not validated, and break V-036 (the admitting
+    model keeps `quant.momentum`). Make each valid with a second patched path (an `llm.` model id),
+    as #482 round 2's m1 asks for `record_tests`.
+  - **M1's rule, one rung up (the trust ladder):** a never-null test has missed a list's
+    elements again (#445, three rounds running, for §9.2; #510 for §9.4). Add a test helper, or an xtask
+    check, under which a never-null test derives its paths from the schema's own members, including
+    the first and second element of every list member, instead of from a hand-written array.
+
   The writer that adds the model's identity, the instants, and the artifact references to
   `ThesisEntry` is a story of its own. DEC-413 item 5 lists the readings not taken, each a later
   tightening. One is for E17-9's loop: whether a revision without an autopsy is a refusal reason,
@@ -1026,7 +1045,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   empty scorecard and is scored only by the E17-8 evaluator; it passes the eligibility floor,
   corroboration, and the autonomy rules like a new thesis and cannot loosen any envelope field; past
   `max_revisions_per_lineage` the lineage is retired and the owner is told. Depends on E17-8 and
-  on one completed DEC-99 evaluation on the DEC-103 thin slice.
+  on one completed DEC-99 evaluation on the DEC-103 thin slice. The lineage fold that reads `ThesisProposed` and
+  `ThesisRevised` calls `mandate_spec::context::check_thesis_record` on each record before acting on
+  it (DEC-414 item 3), as every reader of a thesis record must.
 
 ### E16 Kraken Derivatives US connector (Phase 3)
 
