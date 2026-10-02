@@ -1187,10 +1187,11 @@ From E10-1's slice-V implementation (DEC-161):
     scope, the acceptable-use action, and the row's "approval".
   - **Proposed, item 10:** a clause binds an account stream to its connection, so that
     `AccountSnapshotRecorded`'s fact needs no argument.
-  - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** a journal spec
-    change closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with vectors.
-    The tests and implementation that follow register them and map them to `AgentVersionActive` (a
-    deployed agent's new version) and `UniverseChanged`.
+  - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** journal spec v0.8
+    §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
+    vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
+    follow register them and map them to `AgentVersionActive` (a deployed agent's new version) and
+    `UniverseChanged`; until then both stay `unknown_schema` and map to none.
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).
