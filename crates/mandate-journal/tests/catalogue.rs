@@ -129,6 +129,27 @@ const CLOSED_ON_AGENT: &[&str] = &[
     "OwnerExitRequested",
 ];
 
+/// Payload schemas journal spec v0.7 §9.2 closes (E7-10, DEC-261), with the stream types each is
+/// closed on. On a control stream a `StreamOpened` takes the control stream's schema. Not
+/// `AccountSnapshotRecorded`, which waits for stream K's fee-step writer (DEC-261 item 7).
+const CLOSED_BY_SECTION_9_2: &[(&str, &str)] = &[
+    ("StreamOpened", CTL),
+    ("ConnectionEstablished", CTL),
+    ("ConnectionRevoked", CTL),
+    ("DisclosureAccepted", CTL),
+    ("ConfigSnapshotRegistered", CTL),
+    ("MandateVersionCreated", CTL),
+    ("MandateConfirmed", CTL),
+    ("AgentDeployed", CTL),
+    ("AgentStopped", CTL),
+    ("OwnerCommandRefused", ACCT),
+    ("OwnerCommandRefused", AGENT),
+];
+
+fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {
+    CLOSED_BY_SECTION_9_2.contains(&(event_type, kind))
+}
+
 fn stream_of(kind: &str) -> &'static str {
     match kind {
         ACCT => STREAM,
@@ -180,7 +201,9 @@ fn stream_types_and_required_config_refs_match_the_spec() {
             } else {
                 InvalidReason::UnknownSchema
             };
-            if !(kind == AGENT && CLOSED_ON_AGENT.contains(event_type)) {
+            if !(kind == AGENT && CLOSED_ON_AGENT.contains(event_type))
+                && !closed_by_section_9_2(event_type, kind)
+            {
                 assert_eq!(with_all.reason, expected, "{event_type} in {kind}");
             }
             for missing in required.iter() {
@@ -392,4 +415,164 @@ fn a_closed_agent_stream_event_is_never_an_unknown_schema() {
             .unwrap_err();
         assert_ne!(refused.reason, InvalidReason::UnknownSchema, "{event_type}");
     }
+}
+
+/// Each schema §9.2 closes is a record with exactly its listed members, so a payload with an
+/// unlisted member is refused at that member, before anything else in it is read (§9.1's order,
+/// which §9.2 keeps).
+#[test]
+#[ignore = "pending E7-10"]
+fn a_closed_control_stream_schema_refuses_an_unlisted_member() {
+    assert_eq!(
+        CLOSED_BY_SECTION_9_2.len(),
+        11,
+        "§9.2's eleven (type, stream) pairs"
+    );
+    for (event_type, kind) in CLOSED_BY_SECTION_9_2 {
+        let (_, _, required) = SPEC
+            .iter()
+            .find(|(t, _, _)| t == event_type)
+            .unwrap_or_else(|| panic!("{event_type} is in the catalogue"));
+        let refused = Draft::parse(&draft(event_type, kind, required))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(
+            (refused.reason, refused.path.as_str()),
+            (InvalidReason::Schema, "payload.unregistered"),
+            "{event_type} in {kind}"
+        );
+    }
+}
+
+/// §9.2 closes these schemas, so on their streams none of them is refused for want of one.
+#[test]
+fn a_closed_control_stream_event_is_never_an_unknown_schema() {
+    for (event_type, kind) in CLOSED_BY_SECTION_9_2 {
+        let (_, _, required) = SPEC
+            .iter()
+            .find(|(t, _, _)| t == event_type)
+            .unwrap_or_else(|| panic!("{event_type} is in the catalogue"));
+        let refused = Draft::parse(&draft(event_type, kind, required))
+            .map(|_| ())
+            .unwrap_err();
+        assert_ne!(
+            refused.reason,
+            InvalidReason::UnknownSchema,
+            "{event_type} in {kind}"
+        );
+    }
+}
+
+/// DEC-261 item 7: `AccountSnapshotRecorded` stays unregistered until stream K's fee-step writer
+/// journals the three cash members as `null`. Refusing the fee step's snapshot at `append` would
+/// stop the step that pauses every agent and alerts the owner (`AGENTS.md` rules 3 and 13). The
+/// change that registers it lands with or after that writer fix, and changes this test with it.
+#[test]
+fn account_snapshot_recorded_waits_for_the_fee_step_writer() {
+    let refused = Draft::parse(&draft("AccountSnapshotRecorded", ACCT, &[]))
+        .map(|_| ())
+        .unwrap_err();
+    assert_eq!(
+        (refused.reason, refused.path.as_str()),
+        (InvalidReason::UnknownSchema, "payload")
+    );
+}
+
+const SHA_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const SHA_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+/// A control-stream draft of `event_type` with `payload` and its sorted `artifact_refs`.
+fn control_draft(event_type: &str, payload: &str, refs: &[&str]) -> Vec<u8> {
+    let d = draft(event_type, CTL, &[]);
+    let d = edit(&d, "payload", Some(payload));
+    let listed: Vec<String> = refs.iter().map(|r| format!("\"{r}\"")).collect();
+    edit(
+        &d,
+        "artifact_refs",
+        Some(&format!("[{}]", listed.join(","))),
+    )
+}
+
+fn disclosure(step_up: &str) -> Vec<u8> {
+    control_draft(
+        "DisclosureAccepted",
+        &format!(
+            r#"{{"document":"leveraged_etp","version":"{SHA_A}","user":"user_owner_01","step_up":{step_up}}}"#
+        ),
+        &[SHA_A],
+    )
+}
+
+fn refusal_of(draft: &[u8]) -> (InvalidReason, String) {
+    let e = Draft::parse(draft).map(|_| ()).unwrap_err();
+    (e.reason, e.path)
+}
+
+/// §9.2 closes every schema at every depth: `step_up`, the one nested record that carries
+/// authentication evidence, refuses an unlisted member at that member, so a raw assertion or a
+/// token has nowhere to sit (`AGENTS.md` rules 6 and 7, #429 round 1, B1).
+#[test]
+#[ignore = "pending E7-10"]
+fn a_step_up_refuses_an_unlisted_member() {
+    let valid = r#"{"assertion_id":"assert_1","authenticated_at":"2026-09-20T13:06:50.000000000Z","method":"webauthn"}"#;
+    assert_eq!(
+        Draft::parse(&disclosure(valid)).map(|_| ()),
+        Ok(()),
+        "the control: a well-formed acceptance appends"
+    );
+    let widened = r#"{"assertion_id":"assert_1","authenticated_at":"2026-09-20T13:06:50.000000000Z","method":"webauthn","token":"reference-fixture-not-a-token"}"#;
+    assert_eq!(
+        refusal_of(&disclosure(widened)),
+        (InvalidReason::Schema, "payload.step_up.token".to_owned())
+    );
+}
+
+/// `step_up.authenticated_at` is a §4.7 timestamp, never other text (#429 round 1, B1).
+#[test]
+#[ignore = "pending E7-10"]
+fn a_step_up_time_is_a_timestamp() {
+    let valid = r#"{"assertion_id":"assert_1","authenticated_at":"2026-09-20T13:06:50.000000000Z","method":"webauthn"}"#;
+    assert_eq!(
+        Draft::parse(&disclosure(valid)).map(|_| ()),
+        Ok(()),
+        "the control"
+    );
+    let off_form = r#"{"assertion_id":"assert_1","authenticated_at":"2026-09-20 13:06:50","method":"webauthn"}"#;
+    assert_eq!(
+        refusal_of(&disclosure(off_form)),
+        (
+            InvalidReason::NonCanonical,
+            "payload.step_up.authenticated_at".to_owned()
+        )
+    );
+}
+
+/// A `provenance` entry is a closed record too: an unlisted member inside it is refused there
+/// (#429 round 1, B1).
+#[test]
+#[ignore = "pending E7-10"]
+fn a_provenance_entry_refuses_an_unlisted_member() {
+    let created = |entry: &str| {
+        control_draft(
+            "MandateVersionCreated",
+            &format!(
+                r#"{{"mandate_version":"{SHA_A}","provenance":[{entry}],"record_ref":"{SHA_B}"}}"#
+            ),
+            &[SHA_A, SHA_B],
+        )
+    };
+    assert_eq!(
+        Draft::parse(&created(r#"{"path":"/autonomy","source":"user_entered"}"#)).map(|_| ()),
+        Ok(()),
+        "the control: a well-formed entry appends"
+    );
+    assert_eq!(
+        refusal_of(&created(
+            r#"{"path":"/autonomy","source":"user_entered","quoted_span":"buy dips"}"#
+        )),
+        (
+            InvalidReason::Schema,
+            "payload.provenance[0].quoted_span".to_owned()
+        )
+    );
 }
