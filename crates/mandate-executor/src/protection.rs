@@ -2403,7 +2403,7 @@ mod sequence_tests {
     use mandate_accounting::{AssetClass, InstrumentId, Side};
     use mandate_canon::Value;
     use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
-    use mandate_time::Date;
+    use mandate_time::{Date, ExchangeCalendar};
     use proptest::prelude::{Just, ProptestConfig, Strategy, TestCaseError, any, prop};
     use proptest::prop_oneof;
     use proptest::test_runner::TestRunner;
@@ -6316,6 +6316,107 @@ mod sequence_tests {
             super::expiring(edge, Date::parse("2029-03-15")?, &config)?,
             "and five from 2029-03-15, so it is due there"
         );
+        Ok(())
+    }
+
+    /// The trading days in `[from, expiry)` the calendar places, a day it cannot place counted as
+    /// none: the property's own low count, kept apart from [`super::expiring`]'s.
+    fn placed_trading_days(
+        calendar: &ExchangeCalendar,
+        from: Date,
+        expiry: Date,
+    ) -> Result<u32, ExecutorError> {
+        let mut count = 0_u32;
+        let mut day = from;
+        while day < expiry {
+            if calendar.is_trading_day(day).unwrap_or(false) {
+                count = count.saturating_add(1);
+            }
+            day = day.next()?;
+        }
+        Ok(count)
+    }
+
+    /// The trading day after `day`: the calendar's, or past its range the next weekday.
+    fn following_trading_day(
+        calendar: &ExchangeCalendar,
+        day: Date,
+    ) -> Result<Date, ExecutorError> {
+        let mut next = day.next()?;
+        while !calendar.is_trading_day(next).unwrap_or(!next.is_weekend()) {
+            next = next.next()?;
+        }
+        Ok(next)
+    }
+
+    /// DEC-367 item 2, as #468 round 3 ruled: around the calendar's edge, no GTC order is due on
+    /// the day it is created, and an order whose low count was within the buffer on its creation
+    /// day is not due on its next trading day, so a re-placement is never re-placed in a loop. The
+    /// low count is the property's own ([`placed_trading_days`]).
+    #[test]
+    fn no_re_placement_is_due_the_day_it_is_placed_nor_the_next_when_placed_at_the_edge()
+    -> Result<(), ExecutorError> {
+        let config = executor_config();
+        let calendar =
+            ExchangeCalendar::us_equities().map_err(|_| missing("the US equities calendar"))?;
+        let mut created = Date::parse("2028-09-01")?;
+        let last = Date::parse("2029-03-01")?;
+        let mut at_the_edge = 0_u32;
+        while created <= last {
+            let mut expiry = created;
+            for _ in 0..config.gtc_expiry_days {
+                expiry = expiry.next()?;
+            }
+            assert!(
+                !super::expiring(created, created, &config)?,
+                "an order created {created:?} is due the day it is created"
+            );
+            if placed_trading_days(&calendar, created, expiry)?
+                <= config.protective_replace_buffer_trading_days
+            {
+                at_the_edge = at_the_edge.saturating_add(1);
+                let next = following_trading_day(&calendar, created)?;
+                assert!(
+                    !super::expiring(created, next, &config)?,
+                    "an order placed within the buffer on {created:?} is due again on {next:?}"
+                );
+            }
+            created = following_trading_day(&calendar, created)?;
+        }
+        assert!(
+            at_the_edge > 0,
+            "the dates reach the calendar's edge, so the second clause is exercised"
+        );
+        Ok(())
+    }
+
+    /// DEC-367 item 2: the one case outside the property above. An order placed 2028-12-21 has six
+    /// in-range trading days left (the 21st, 22nd and 26th to 29th), outside the buffer, so it is
+    /// judged by its low count and is due on 2028-12-22, its next trading day: one extra
+    /// re-placement. That re-placement, placed 2028-12-22 within the buffer, is judged by its high
+    /// count and is not due again on any trading day through 2029-03-14: then none.
+    #[test]
+    fn the_order_placed_2028_12_21_is_re_placed_once_then_never_again() -> Result<(), ExecutorError>
+    {
+        let config = executor_config();
+        let calendar =
+            ExchangeCalendar::us_equities().map_err(|_| missing("the US equities calendar"))?;
+        let placed = Date::parse("2028-12-21")?;
+        assert!(!super::expiring(placed, placed, &config)?);
+        let replaced = Date::parse("2028-12-22")?;
+        assert!(
+            super::expiring(placed, replaced, &config)?,
+            "one extra re-placement, on 2028-12-22"
+        );
+        let mut day = replaced;
+        let last = Date::parse("2029-03-14")?;
+        while day <= last {
+            assert!(
+                !super::expiring(replaced, day, &config)?,
+                "the re-placement placed 2028-12-22 is due again on {day:?}"
+            );
+            day = following_trading_day(&calendar, day)?;
+        }
         Ok(())
     }
 
