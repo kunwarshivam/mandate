@@ -481,7 +481,10 @@ mod tests {
             assert_eq!(refused, Some(wanted), "{}", text(case, "name"));
             checked += 1;
         }
-        assert_eq!(checked, 49, "the invalid drafts on a registered schema");
+        assert!(
+            checked >= 49,
+            "{checked} invalid drafts on a registered schema; a vectors change may add more, never fewer"
+        );
         Ok(())
     }
 
