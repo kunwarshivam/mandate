@@ -126,7 +126,8 @@ pub(crate) fn subject_and_copy(
     }
     let allowed: &[&str] = match stream.stream_type() {
         StreamType::Account => &["acknowledge"],
-        StreamType::Agent | StreamType::Control | StreamType::Scheduler => &["resume", "stop"],
+        StreamType::Agent => &["resume", "stop"],
+        StreamType::Control | StreamType::Scheduler => &[],
     };
     ensure(
         allowed.contains(&p.text("command")),
@@ -330,7 +331,9 @@ mod tests {
 
     use mandate_canon::{Key, Object, Value, parse, to_canonical};
 
-    use crate::Draft;
+    use crate::{Draft, StreamId};
+
+    use super::subject_and_copy;
 
     const SNAPSHOT: &str = "AccountSnapshotRecorded";
 
@@ -479,6 +482,242 @@ mod tests {
             checked += 1;
         }
         assert_eq!(checked, 49, "the invalid drafts on a registered schema");
+        Ok(())
+    }
+
+    /// The members §9.2 lists without `?`, written out from the spec's tables rather than read
+    /// from this module's schemas, so a schema loosened to nullable cannot also drop its member
+    /// from this list (#445 round 1, B2).
+    const REQUIRED: [(&str, &[&str]); 10] = [
+        ("StreamOpened", &["stream_type", "workspace_id"]),
+        (
+            "ConnectionEstablished",
+            &["connection_id", "broker", "environment", "scopes"],
+        ),
+        ("ConnectionRevoked", &["connection_id"]),
+        (
+            "DisclosureAccepted",
+            &["document", "version", "user", "step_up"],
+        ),
+        (
+            "ConfigSnapshotRegistered",
+            &["kind", "content_hash", "params"],
+        ),
+        (
+            "MandateVersionCreated",
+            &["mandate_version", "provenance", "record_ref"],
+        ),
+        (
+            "MandateConfirmed",
+            &["mandate_version", "confirmed_paths", "record_ref"],
+        ),
+        (
+            "AgentDeployed",
+            &["agent_id", "mandate_version", "record_ref"],
+        ),
+        (
+            "AgentStopped",
+            &[
+                "agent_id",
+                "connection_id",
+                "reason",
+                "retired_on",
+                "loss_added",
+            ],
+        ),
+        (
+            "OwnerCommandRefused",
+            &["command", "reason", "effective_at"],
+        ),
+    ];
+
+    /// The first base of `event_type`: a chain event, or the agent-stream refusal draft.
+    fn base_of(section: &Value, event_type: &str) -> Result<Object, String> {
+        let case = if event_type == "OwnerCommandRefused" {
+            named("base_draft", Value::Str("refused_stop".to_owned()))?
+        } else {
+            let seq = list(section, "chain")
+                .iter()
+                .find(|e| e.get("event_type").and_then(Value::as_str) == Some(event_type))
+                .and_then(|e| e.get("seq").cloned())
+                .ok_or_else(|| format!("no chain event of type {event_type}"))?;
+            named("base_seq", seq)?
+        };
+        base(section, &case)
+    }
+
+    fn named(key: &str, value: Value) -> Result<Value, String> {
+        let key = Key::new(key).map_err(|_| "key")?;
+        Ok(Value::Object([(key, value)].into_iter().collect()))
+    }
+
+    fn refusal(body: Object) -> Option<(String, String)> {
+        Draft::parse(&to_canonical(&Value::Object(body)))
+            .err()
+            .map(|e| (e.reason.code().to_owned(), e.path))
+    }
+
+    fn with_payload(mut body: Object, member: &str, value: Value) -> Result<Object, String> {
+        let key = Key::new(member).map_err(|_| "key")?;
+        match body.get_mut("payload") {
+            Some(Value::Object(payload)) => {
+                payload.insert(key, value);
+                Ok(body)
+            }
+            _ => Err("no payload".to_owned()),
+        }
+    }
+
+    /// Every member §9.2 requires is refused as `schema` at that member when it is `null`: an
+    /// absent value is never a valid one (§4.2), even on a reference a writer must also drop
+    /// from `artifact_refs` (#445 round 1, B2).
+    #[test]
+    fn a_required_member_is_never_null() -> Result<(), String> {
+        let section = section()?;
+        let mut checked = 0;
+        for (event_type, members) in REQUIRED {
+            let control = refusal(base_of(&section, event_type)?);
+            assert_eq!(control, None, "the {event_type} base appends");
+            for member in members {
+                let body = with_payload(base_of(&section, event_type)?, member, Value::Null)?;
+                assert_eq!(
+                    refusal(body),
+                    Some(("schema".to_owned(), format!("payload.{member}"))),
+                    "{event_type}.{member} = null"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 31);
+        Ok(())
+    }
+
+    /// `OwnerCommandRefused.effective_at` is a §4.7 timestamp: other text is `non_canonical`, as
+    /// its sibling `step_up.authenticated_at` is (#445 round 1, B1).
+    #[test]
+    fn a_refusal_time_is_a_timestamp() -> Result<(), String> {
+        let section = section()?;
+        let body = with_payload(
+            base_of(&section, "OwnerCommandRefused")?,
+            "effective_at",
+            Value::Str("2026-09-21 20:30:00".to_owned()),
+        )?;
+        assert_eq!(
+            refusal(body),
+            Some((
+                "non_canonical".to_owned(),
+                "payload.effective_at".to_owned()
+            ))
+        );
+        Ok(())
+    }
+
+    /// A payload that breaks two rules is refused with the lower-numbered one (§9.1's report
+    /// order, which §9.2 keeps): rule 20 before 21 on one snapshot registration, and subject rule 26
+    /// before copy rule 27 on one refusal (#445 round 1, B3).
+    #[test]
+    fn the_lower_numbered_rule_is_reported_first() -> Result<(), String> {
+        let section = section()?;
+        let fee = list(&section, "chain")
+            .iter()
+            .find(|e| {
+                e.get("body")
+                    .and_then(|b| b.get("payload"))
+                    .and_then(|p| p.get("kind"))
+                    .and_then(Value::as_str)
+                    == Some("fee_config")
+            })
+            .and_then(|e| e.get("seq").cloned())
+            .ok_or("a fee_config registration")?;
+        let unsorted = Value::Array(vec![
+            Value::Str("z_entry".to_owned()),
+            Value::Str("lookback_bars".to_owned()),
+        ]);
+        let body = with_payload(
+            base(&section, &named("base_seq", fee)?)?,
+            "params",
+            unsorted,
+        )?;
+        assert_eq!(
+            refusal(body),
+            Some(("non_canonical".to_owned(), "payload.params".to_owned())),
+            "rule 20 (order) before rule 21 (params only on a model)"
+        );
+        let mut refused = with_payload(
+            base_of(&section, "OwnerCommandRefused")?,
+            "command",
+            Value::Str("acknowledge".to_owned()),
+        )?;
+        let cause = Key::new("causation_id").map_err(|_| "key")?;
+        refused.insert(cause, Value::Null);
+        assert_eq!(
+            refusal(refused),
+            Some(("stream_mismatch".to_owned(), "payload.command".to_owned())),
+            "rule 26 (stream) before rule 27 (cause)"
+        );
+        Ok(())
+    }
+
+    /// Rule 26 names the account and agent streams only; on any other a refused command matches
+    /// nothing, so it is refused (DEC-303 item 12). No other stream routes the type today.
+    #[test]
+    fn a_refusal_off_its_two_streams_is_refused() -> Result<(), String> {
+        let payload = Value::Object(
+            [
+                ("command", "stop"),
+                ("reason", "step_up_stale"),
+                ("effective_at", "2026-09-21T20:30:00.000000000Z"),
+            ]
+            .into_iter()
+            .map(|(k, v)| Ok((Key::new(k).map_err(|_| "key")?, Value::Str(v.to_owned()))))
+            .collect::<Result<_, String>>()?,
+        );
+        let cause = Value::Str("01J8ZNB00000000000000000C6".to_owned());
+        for (stream, verdict) in [
+            ("agent:ws_1:agent_a", None),
+            ("acct:ws_1:a1", Some("payload.command")),
+            ("ctl:ws_1", Some("payload.command")),
+            ("clock:ws_1", Some("payload.command")),
+        ] {
+            let stream = StreamId::parse(stream).ok_or("a stream id")?;
+            let got = subject_and_copy("OwnerCommandRefused", &stream, &payload, Some(&cause))
+                .err()
+                .map(|e| (e.reason.code(), e.path));
+            assert_eq!(
+                got,
+                verdict.map(|path| ("stream_mismatch", path.to_owned())),
+                "{stream}"
+            );
+        }
+        Ok(())
+    }
+
+    /// `/` is one empty reference token: RFC 6901 grammar admits it, and §9.2's "one or more
+    /// `/`-prefixed reference tokens" does too, so it is accepted; only the empty pointer is not
+    /// (DEC-303 item 13).
+    #[test]
+    fn a_pointer_of_one_empty_token_is_accepted() -> Result<(), String> {
+        let section = section()?;
+        let entry = |path: &str| -> Result<Value, String> {
+            Ok(Value::Array(vec![Value::Object(
+                [("path", path), ("source", "user_entered")]
+                    .into_iter()
+                    .map(|(k, v)| Ok((Key::new(k).map_err(|_| "key")?, Value::Str(v.to_owned()))))
+                    .collect::<Result<_, String>>()?,
+            )]))
+        };
+        let created = |path: &str| -> Result<Option<(String, String)>, String> {
+            let body = base_of(&section, "MandateVersionCreated")?;
+            Ok(refusal(with_payload(body, "provenance", entry(path)?)?))
+        };
+        assert_eq!(created("/")?, None);
+        assert_eq!(
+            created("")?,
+            Some((
+                "non_canonical".to_owned(),
+                "payload.provenance[0].path".to_owned()
+            ))
+        );
         Ok(())
     }
 }
