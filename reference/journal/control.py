@@ -18,6 +18,7 @@ streams that write it. This module is their reference implementation, called by 
 import calendar
 import copy
 import functools
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -76,6 +77,8 @@ SPEC = "docs/specs/journal.md v0.7 §9.2 (DEC-261)"
 DATE = T("date")
 RISK_CLOCK = T("risk_clock")
 POINTER = T("pointer")
+ASSET_ID = T("asset_id")
+ASSET_ID_FORM = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
 REFUSED_COMMANDS = {"agent": ("resume", "stop"), "acct": ("acknowledge",)}
@@ -199,7 +202,7 @@ SCHEMAS[("acct", "MandateVersionApplied")] = rec(
 )
 SCHEMAS[("acct", "UniverseChanged")] = rec(
     ("agent_id", IDENT_T),
-    ("instrument", IDENT_T),
+    ("instrument", ASSET_ID),
     ("change", one_of("admitted", "removed")),
     ("reason", one_of(*UNIVERSE_REASONS)),
     ("thesis_id", opt(IDENT_T)),
@@ -326,11 +329,17 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
         if not ok and "types.risk_clock" not in skip:
             return [Violation("types", "non_canonical", path)]
         return []
-    if ty.kind in ("pointer", "date"):
+    if ty.kind in ("pointer", "date", "asset_id"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
         if ty.kind == "pointer":
             ok = is_pointer(value)
+        elif ty.kind == "asset_id":
+            ok = bool(ASSET_ID_FORM.match(value)) or (
+                "types.asset_id_trailing_newline" in skip and bool(ASSET_ID_FORM.match(value.removesuffix("\n")))
+            ) or (
+                "types.asset_id_case" in skip and bool(ASSET_ID_FORM.match(value.lower()))
+            ) or ("types.asset_id_ident" in skip and bool(IDENT_RE.match(value)))
         elif "types.date_length" in skip:
             ok = loose_date(value)
         else:

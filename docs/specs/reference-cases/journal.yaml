@@ -5089,7 +5089,7 @@ risk_state:
       reason: missing_config_ref
       path: config_refs.mandate_version
   - name: admitted_instrument_not_an_id
-    clause: §9.1 id
+    clause: §9.3 asset_id
     base_draft: universe_admitted
     changes:
     - path: payload.instrument
@@ -5148,6 +5148,48 @@ risk_state:
       outcome: Invalid
       reason: non_canonical
       path: payload.lineage_id
+  - name: admitted_instrument_an_id_not_an_asset_id
+    clause: '§9.3 asset_id: an id that is not the uuid form (#497 round 1, m3)'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.instrument
+      value: BTCUSD
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument
+  - name: admitted_instrument_not_a_string
+    clause: '§9.3 asset_id: not a string (#509 round 1, m2)'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.instrument
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: admitted_instrument_with_a_trailing_newline
+    clause: '§9.3 asset_id: the whole string, so a trailing newline is refused (#511 round 1)'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.instrument
+      value: '7b4a1c2e-2222-4a2b-9c3d-000000000002
+
+        '
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument
+  - name: admitted_instrument_in_capitals
+    clause: '§9.3 asset_id: lowercase only, so one asset has one spelling'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.instrument
+      value: 7B4A1C2E-2222-4A2B-9C3D-000000000002
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument
   - name: order_29_before_30
     clause: 'rules 29 then 30: a risk-increasing applied record without step-up and with a reason'
     base_draft: version_applied
