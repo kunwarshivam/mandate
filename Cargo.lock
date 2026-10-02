@@ -1488,6 +1488,7 @@ dependencies = [
  "mandate-num",
  "mandate-research",
  "mandate-risk",
+ "mandate-runtime",
  "mandate-sim",
  "mandate-spec",
  "mandate-time",
