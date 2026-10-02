@@ -381,6 +381,16 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   reviewer's three paths, and `no_exit_waits_past_the_bound_but_under_a_rule_13_hold`, a property
   over random scripts against an oracle read from the drafts. Run: `cargo nextest run -p
   mandate-executor --lib protection::sequence_tests`.
+- **Account-stream writers (E7-10, DEC-305 to DEC-307, DEC-389, DEC-390):** `risk_clock` as
+  §9.2's whole-second timestamp (`payload::risk_clock_stamp`, stamped by `Batch::journal`; the
+  fold reads it and the older integer seconds through `payload::clock_of`), the fee step's pause
+  and alert whether or not its snapshot recorded (`reconcile::fee_step_pause_and_alert`), the fee
+  step's §9.2 snapshot payload (`reconcile::fee_step_snapshot_fields`), and §9.1's
+  `IntentReceived` and `OrderSubmitted`'s `limit_price` (`intent::intent_received_fields`,
+  `intent::order_submitted_optional_fields`); the last three are not yet wired (DEC-389 items 2
+  and 3). Pins are in-module and read the journal vectors: `payload::stamp_tests`,
+  `intent::draft_member_tests`, and `reconcile::tests::the_fee_steps_*`. Run: `cargo nextest run
+  -p mandate-executor -E 'test(fee_steps) | test(draft_member_tests) | test(stamp_tests)'`.
 - **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
   `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
   `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they

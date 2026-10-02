@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use mandate_canon::{Int, Key, Value};
 use mandate_num::{Price, Qty, Usd};
+use mandate_time::UtcNanos;
 
 use crate::error::ExecutorError;
 use crate::types::RiskClock;
@@ -30,28 +31,40 @@ pub(crate) fn int(value: u64) -> Result<Value, ExecutorError> {
         .ok_or_else(|| refused("int"))
 }
 
-/// A risk-clock second as the non-negative integer the journal carries.
+/// A risk-clock second as integer seconds, the form the account stream wrote before DEC-306 and
+/// the golden journal still carries. The fold reads it ([`clock_of`]); nothing in the crate writes
+/// it any more, so only the in-crate tests' hand-built payloads use it.
+#[cfg(test)]
 pub(crate) fn clock(at: RiskClock) -> Result<Value, ExecutorError> {
     int(u64::try_from(at.secs()).map_err(|_| refused("risk_clock"))?)
 }
 
 /// The risk clock as journal spec §9.2's `risk_clock` type (DEC-302): a whole-second §4.7
 /// timestamp, the form the vectors' `snapshot_fees` draft carries and their
-/// `snapshot_risk_clock_as_seconds` draft refuses as integer seconds. The account stream's writer
-/// stamps [`clock`]'s integer form on every event today, which `append` refuses once the
-/// snapshot's schema registers, so the fee step's own snapshot could never commit (DEC-261
-/// item 7).
+/// `snapshot_risk_clock_as_seconds` draft refuses as integer seconds. [`crate::batch::Batch`]
+/// stamps it on every account-stream event (DEC-306 item 2).
 ///
 /// # Errors
-/// [`ExecutorError::Unimplemented`] in this tests PR; the implementation PR replaces
-/// [`crate::batch::Batch`]'s `clock` stamp with this form and deletes the pending pins (DEC-77).
-#[allow(
-    dead_code,
-    reason = "the tests PR ships this stamp and its contract; `batch::journal` calls it in the implementation PR (DEC-77, DEC-83)"
-)]
+/// [`ExecutorError::NonCanonicalPayload`] for a second outside §4.7's range, which a risk clock
+/// read from the journal never is.
 pub(crate) fn risk_clock_stamp(at: RiskClock) -> Result<Value, ExecutorError> {
-    let _ = at;
-    Err(ExecutorError::Unimplemented { story: "E7-10" })
+    let instant = UtcNanos::from_parts(at.secs(), 0).map_err(|_| refused("risk_clock"))?;
+    Ok(text(instant.to_string()))
+}
+
+/// The risk-clock second a payload's `field` carries, in either form the account stream has
+/// written: [`risk_clock_stamp`]'s whole-second timestamp, or the integer seconds written before
+/// it (the golden journal's). A timestamp off the second, a non-canonical one, or anything else is
+/// `None`, so an unreadable clock is refused rather than rounded (DEC-390).
+pub(crate) fn clock_of(payload: &Value, field: &str) -> Option<RiskClock> {
+    let secs = match payload.get(field)? {
+        Value::Str(stamp) => UtcNanos::parse(stamp)
+            .ok()
+            .filter(|instant| instant.nanos() == 0)
+            .map(UtcNanos::secs),
+        other => other.as_int().and_then(|secs| i64::try_from(secs).ok()),
+    };
+    secs.map(RiskClock::from_secs)
 }
 
 fn refused(field: &str) -> ExecutorError {
@@ -153,7 +166,6 @@ mod stamp_tests {
     /// they refuse are that same instant: one pin, both halves read from the fixture, so a vector
     /// change re-reads rather than passing silently.
     #[test]
-    #[ignore = "pending E7-10"]
     fn risk_clock_stamps_the_whole_second_the_vectors_refuse_as_seconds()
     -> Result<(), ExecutorError> {
         let (stamp, seconds) = vector_risk_clock()?;

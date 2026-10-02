@@ -1120,6 +1120,13 @@ From E10-1's slice-V implementation (DEC-161):
     the snapshot recorded, `IntentReceived` as §9.1's nine members, and `OrderSubmitted`'s
     `limit_price` as `null`. What the executor's fold reads beyond the registered `IntentReceived`
     and `OrderSubmitted` waits on DEC-360 (Proposed, the founder).
+    The implementation PR after #441 (DEC-389, DEC-390) makes all five writers and the seven pins
+    live, stamps `risk_clock` as the timestamp on every account-stream event (the fold reads both
+    forms), and takes the fee step's pause off its snapshot's `?`. Still to wire:
+    `fee_step_snapshot_fields` into `fees`, in the registration change that corrects the live pair
+    pin `the_fee_steps_snapshot_is_never_refused_for_its_members` with `mandate-journal`'s partner
+    (DEC-389 item 2); and the `IntentReceived` and `OrderSubmitted` writers, with DEC-360's ruling
+    and a tests PR that brings the proposed `tif` to `IntentHandoff` (DEC-389 item 3).
   - **Stream I / M7:** the runtime's `OwnerCommandRefused` writes `effective_at` as a §4.7 timestamp
     rather than risk-clock seconds (`escalation.rs`, `payload::seconds`). §9.2 supersedes DEC-291
     item 1's "same second" for this member. `crates/mandate-runtime/src/escalation/tests.rs`'s assertion

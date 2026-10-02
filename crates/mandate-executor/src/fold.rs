@@ -11,7 +11,7 @@ use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{
-    flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
+    clock_of, flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
     required_text, usd,
 };
 use crate::state::{
@@ -252,20 +252,19 @@ fn stream_opened(state: &mut ExecutorState, payload: &Value) -> Result<(), Execu
 /// Every account-stream risk input carries `risk_clock`, and it never decreases (journal spec §2,
 /// mandate spec §5.2).
 fn risk_clock(state: &ExecutorState, event: &FoldedEvent) -> Result<RiskClock, ExecutorError> {
-    let secs = optional_int(&event.payload, "risk_clock")
-        .and_then(|secs| i64::try_from(secs).ok())
-        .ok_or_else(|| ExecutorError::RiskClockMissing {
+    let at =
+        clock_of(&event.payload, "risk_clock").ok_or_else(|| ExecutorError::RiskClockMissing {
             event_type: event.event_type.clone(),
         })?;
     if let Some(last) = state.risk_clock
-        && secs < last.secs()
+        && at < last
     {
         return Err(ExecutorError::RiskClockWentBackwards {
             last: last.secs(),
-            found: secs,
+            found: at.secs(),
         });
     }
-    Ok(RiskClock::from_secs(secs))
+    Ok(at)
 }
 
 fn instrument(payload: &Value) -> Result<InstrumentId, ExecutorError> {

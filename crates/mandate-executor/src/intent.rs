@@ -402,15 +402,18 @@ pub(crate) fn journal_rung(
 /// `tif` is the one the agent proposed, never the one the submission will carry: §9.1 has
 /// `IntentReceived` copy `IntentProposed`, whose action members repeat its `DecisionMade`
 /// exactly, and the two differ in practice, since a crypto add is submitted limit `ioc` where the
-/// proposal said `day` (`protection::crypto_add`). `IntentHandoff` carries no `tif` today, so the
-/// implementation PR brings the proposed value to `received` (DEC-307 item 1).
+/// proposal said `day` (`protection::crypto_add`). `type` is `limit`: an intent's body carries a
+/// limit and nothing else, since opening orders are limit orders (`AGENTS.md` rule 12).
+///
+/// `received` still journals its own pairs: `IntentHandoff` carries no proposed `tif`, and the
+/// fold reads the protective prices and the old member names from this record, so the writer is
+/// wired in once DEC-360 is ruled and a tests change brings the proposed `tif` (DEC-389 item 3).
 ///
 /// # Errors
-/// [`ExecutorError::Unimplemented`] in this tests PR; `received` builds its pairs from this in
-/// the implementation PR, which deletes the pending pins (DEC-77).
+/// [`ExecutorError::NotInterpreted`] for a flatten plan, which is no proposed order (E7-4).
 #[allow(
     dead_code,
-    reason = "the tests PR ships this writer and its contract; `received` calls it in the implementation PR (DEC-77, DEC-83)"
+    reason = "`received` writes this form once DEC-360 is ruled and `IntentHandoff` carries the proposed tif (DEC-389 item 3)"
 )]
 pub(crate) fn intent_received_fields(
     intent_id: &IntentId,
@@ -418,8 +421,31 @@ pub(crate) fn intent_received_fields(
     body: &IntentBody,
     proposed_tif: TimeInForce,
 ) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
-    let _ = (intent_id, agent, body, proposed_tif);
-    Err(ExecutorError::Unimplemented { story: "E7-10" })
+    let IntentBody::Order {
+        instrument,
+        side,
+        qty,
+        limit,
+        purpose,
+        ..
+    } = body
+    else {
+        return Err(ExecutorError::NotInterpreted {
+            what: "a flatten plan as IntentReceived".to_owned(),
+            story: "E7-4",
+        });
+    };
+    Ok(vec![
+        ("intent_id", text(intent_id.0.0.clone())),
+        ("agent_id", text(agent.0.clone())),
+        ("instrument_id", text(instrument.as_str())),
+        ("side", text(side_name(*side))),
+        ("type", text(order_type_name(OrderType::Limit))),
+        ("tif", text(tif_name(proposed_tif))),
+        ("qty", text(qty.to_string())),
+        ("limit_price", text(limit.to_string())),
+        ("purpose", text(purpose_name(*purpose))),
+    ])
 }
 
 /// `OrderSubmitted`'s nullable members, present as `null` when they are empty rather than omitted
@@ -429,18 +455,22 @@ pub(crate) fn intent_received_fields(
 /// that writes a member the schema does not declare is refused at that member too, `null` or
 /// not, so this writes `limit_price` and nothing else (DEC-307 item 2).
 ///
+/// `journal_rung` still writes `limit` (and the members DEC-360 holds open) beside the request, so
+/// this is wired in with DEC-360's ruling (DEC-389 item 3).
+///
 /// # Errors
-/// [`ExecutorError::Unimplemented`] in this tests PR; `journal_rung` writes its limit through this
-/// in the implementation PR, which deletes the pending pins (DEC-77).
+/// None today; the result keeps the writers' one signature.
 #[allow(
     dead_code,
-    reason = "the tests PR ships this writer and its contract; `journal_rung` calls it in the implementation PR (DEC-77, DEC-83)"
+    reason = "`journal_rung` writes this form once DEC-360 is ruled (DEC-389 item 3)"
 )]
 pub(crate) fn order_submitted_optional_fields(
     request: &SubmitOrder,
 ) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
-    let _ = request;
-    Err(ExecutorError::Unimplemented { story: "E7-10" })
+    let limit_price = request
+        .limit_price
+        .map_or(Value::Null, |limit| text(limit.to_string()));
+    Ok(vec![("limit_price", limit_price)])
 }
 
 /// `OrderAbandoned`: one of §5.7's two cases — a gate re-check that does not allow, or an intent
@@ -761,7 +791,6 @@ mod draft_member_tests {
     /// which the registered schema refuses at `payload.stop` (DEC-307 item 1). Each payload is
     /// accepted by `mandate-journal`.
     #[test]
-    #[ignore = "pending E7-10"]
     fn intent_received_names_the_members_the_vectors_intent_carries() -> Result<(), ExecutorError> {
         let draft = vector_draft(1, "IntentReceived")?;
         let vector = payload_of(&draft)?;
@@ -807,7 +836,6 @@ mod draft_member_tests {
     /// `IntentProposed`, never the TIF the submission will carry or one inferred from the body
     /// (DEC-307 item 1).
     #[test]
-    #[ignore = "pending E7-10"]
     fn intent_received_carries_the_tif_the_agent_proposed() -> Result<(), ExecutorError> {
         let draft = vector_draft(1, "IntentReceived")?;
         let vector = payload_of(&draft)?;
@@ -857,7 +885,6 @@ mod draft_member_tests {
     /// registered `OrderSubmitted` declares, and any other member is refused, `null` or not
     /// (DEC-307 item 2). The vectors' `OrderSubmitted` as a market order, with it, is accepted.
     #[test]
-    #[ignore = "pending E7-10"]
     fn order_submitted_writes_null_for_its_empty_members() -> Result<(), ExecutorError> {
         let market = vector_order(OrderType::Market, None, None, None)?;
         let (names, members) = written(order_submitted_optional_fields(&market)?)?;
@@ -887,7 +914,6 @@ mod draft_member_tests {
     /// and still writes nothing else: a stop price and OCO legs are not members of the registered
     /// `OrderSubmitted`, so they are never written here, with or without a value (DEC-307 item 2).
     #[test]
-    #[ignore = "pending E7-10"]
     fn order_submitted_carries_its_optional_members_when_they_have_values()
     -> Result<(), ExecutorError> {
         let draft = vector_draft(3, "OrderSubmitted")?;
