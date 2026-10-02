@@ -446,7 +446,10 @@ mod tests {
                 parsed += 1;
             }
         }
-        assert_eq!(parsed, 6, "the valid drafts on a registered schema");
+        assert!(
+            parsed >= 6,
+            "{parsed} valid drafts on a registered schema; a vectors change may add more, never fewer"
+        );
         for name in ["refused_stop", "refused_acknowledgment"] {
             let case = Value::Object(
                 [(
@@ -488,31 +491,57 @@ mod tests {
         Ok(())
     }
 
-    /// The members §9.2 lists without `?`, written out from the spec's tables rather than read
-    /// from this module's schemas, so a schema loosened to nullable cannot also drop its member
-    /// from this list (#445 round 1, B2).
+    /// The members §9.2 lists without `?`, at every depth, as paths below `payload`: written out
+    /// from the spec's tables rather than read from this module's schemas, so a schema loosened to
+    /// nullable cannot also drop its member from this list (#445 round 1, B2; round 2, C1). A list
+    /// is named by its first element.
     const REQUIRED: [(&str, &[&str]); 10] = [
         ("StreamOpened", &["stream_type", "workspace_id"]),
         (
             "ConnectionEstablished",
-            &["connection_id", "broker", "environment", "scopes"],
+            &[
+                "connection_id",
+                "broker",
+                "environment",
+                "scopes",
+                "scopes[0]",
+            ],
         ),
         ("ConnectionRevoked", &["connection_id"]),
         (
             "DisclosureAccepted",
-            &["document", "version", "user", "step_up"],
+            &[
+                "document",
+                "version",
+                "user",
+                "step_up",
+                "step_up.assertion_id",
+                "step_up.authenticated_at",
+                "step_up.method",
+            ],
         ),
         (
             "ConfigSnapshotRegistered",
-            &["kind", "content_hash", "params"],
+            &["kind", "content_hash", "params", "params[0]"],
         ),
         (
             "MandateVersionCreated",
-            &["mandate_version", "provenance", "record_ref"],
+            &[
+                "mandate_version",
+                "provenance",
+                "provenance[0].path",
+                "provenance[0].source",
+                "record_ref",
+            ],
         ),
         (
             "MandateConfirmed",
-            &["mandate_version", "confirmed_paths", "record_ref"],
+            &[
+                "mandate_version",
+                "confirmed_paths",
+                "confirmed_paths[0]",
+                "record_ref",
+            ],
         ),
         (
             "AgentDeployed",
@@ -571,9 +600,39 @@ mod tests {
         }
     }
 
-    /// Every member §9.2 requires is refused as `schema` at that member when it is `null`: an
-    /// absent value is never a valid one (§4.2), even on a reference a writer must also drop
-    /// from `artifact_refs` (#445 round 1, B2).
+    /// The value at `path` below `at`, a `.`-separated path whose steps may end in one `[i]`.
+    fn value_at<'a>(at: &'a mut Value, path: &str) -> Result<&'a mut Value, String> {
+        let mut here = at;
+        for step in path.split('.') {
+            let (name, index) = match step.split_once('[') {
+                Some((name, rest)) => {
+                    let i = rest.trim_end_matches(']').parse::<usize>();
+                    (name, Some(i.map_err(|_| format!("index in {path}"))?))
+                }
+                None => (step, None),
+            };
+            here = match here {
+                Value::Object(members) => members
+                    .get_mut(name)
+                    .ok_or_else(|| format!("no {name} in {path}"))?,
+                _ => return Err(format!("{name} in {path} is not in a record")),
+            };
+            if let Some(i) = index {
+                here = match here {
+                    Value::Array(items) => items
+                        .get_mut(i)
+                        .ok_or_else(|| format!("no element {i} in {path}"))?,
+                    _ => return Err(format!("{name} in {path} is not a list")),
+                };
+            }
+        }
+        Ok(here)
+    }
+
+    /// Every member §9.2 requires, at every depth, is refused as `schema` at that member when it
+    /// is `null`: an absent value is never a valid one (§4.2), even on a reference a writer must
+    /// also drop from `artifact_refs` (#445 round 1, B2), and even inside the step-up evidence,
+    /// a provenance entry, or a list (#445 round 2, C1).
     #[test]
     fn a_required_member_is_never_null() -> Result<(), String> {
         let section = section()?;
@@ -582,7 +641,11 @@ mod tests {
             let control = refusal(base_of(&section, event_type)?);
             assert_eq!(control, None, "the {event_type} base appends");
             for member in members {
-                let body = with_payload(base_of(&section, event_type)?, member, Value::Null)?;
+                let mut body = Value::Object(base_of(&section, event_type)?);
+                *value_at(&mut body, &format!("payload.{member}"))? = Value::Null;
+                let Value::Object(body) = body else {
+                    return Err("the base is a record".to_owned());
+                };
                 assert_eq!(
                     refusal(body),
                     Some(("schema".to_owned(), format!("payload.{member}"))),
@@ -591,7 +654,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 31);
+        assert_eq!(checked, 39);
         Ok(())
     }
 
@@ -617,7 +680,9 @@ mod tests {
 
     /// A payload that breaks two rules is refused with the lower-numbered one (§9.1's report
     /// order, which §9.2 keeps): rule 20 before 21 on one snapshot registration, and subject rule 26
-    /// before copy rule 27 on one refusal (#445 round 1, B3).
+    /// before copy rule 27 on one refusal (#445 round 1, B3). Within rule 21, the first offending
+    /// member in the spec's order: `model_id`, `model_version`, `admits_instruments`, then
+    /// `params` (#445 round 2, C2).
     #[test]
     fn the_lower_numbered_rule_is_reported_first() -> Result<(), String> {
         let section = section()?;
@@ -632,15 +697,30 @@ mod tests {
             })
             .and_then(|e| e.get("seq").cloned())
             .ok_or("a fee_config registration")?;
+        let fee = base(&section, &named("base_seq", fee)?)?;
         let unsorted = Value::Array(vec![
             Value::Str("z_entry".to_owned()),
             Value::Str("lookback_bars".to_owned()),
         ]);
-        let body = with_payload(
-            base(&section, &named("base_seq", fee)?)?,
-            "params",
-            unsorted,
+        let named_model = with_payload(fee.clone(), "model_id", Value::Str("pairs".to_owned()))?;
+        let both = with_payload(
+            named_model.clone(),
+            "model_version",
+            Value::Str("1".to_owned()),
         )?;
+        assert_eq!(
+            refusal(both),
+            Some(("schema".to_owned(), "payload.model_id".to_owned())),
+            "rule 21 reports model_id before model_version (#445 round 2, C2)"
+        );
+        let sorted = Value::Array(vec![Value::Str("lookback_bars".to_owned())]);
+        let with_params = with_payload(named_model, "params", sorted)?;
+        assert_eq!(
+            refusal(with_params),
+            Some(("schema".to_owned(), "payload.model_id".to_owned())),
+            "rule 21 reports a model member before params (#445 round 2, C2)"
+        );
+        let body = with_payload(fee, "params", unsorted)?;
         assert_eq!(
             refusal(body),
             Some(("non_canonical".to_owned(), "payload.params".to_owned())),
