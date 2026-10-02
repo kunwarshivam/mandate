@@ -149,7 +149,60 @@ REFUSAL = rec(
 SCHEMAS[("acct", "OwnerCommandRefused")] = REFUSAL
 SCHEMAS[("agent", "OwnerCommandRefused")] = REFUSAL
 
-REQUIRED_REFS = {"AgentDeployed": ("mandate_version",), "AgentStopped": ("mandate_version",)}
+REQUIRED_REFS = {
+    "AgentDeployed": ("mandate_version",),
+    "AgentStopped": ("mandate_version",),
+    "MandateVersionApplied": ("mandate_version",),
+    "UniverseChanged": ("mandate_version",),
+}
+
+# §9.3 (DEC-403): the account stream's risk-state records.
+CLASSIFICATIONS = ("risk_increasing", "risk_reducing", "neutral")
+VERSION_REJECTIONS = (
+    "increase_blocked_while_latched",
+    "equity_below_exposure",
+    "would_trigger_limit",
+    "not_loosening",
+    "waiting_period",
+    "still_below_new_floor",
+)
+UNIVERSE_REASONS = (
+    "thesis_admitted",
+    "thesis_expired",
+    "thesis_invalidated",
+    "lineage_retired",
+    "eligibility_lost",
+    "operator_halt",
+    "version_applied",
+)
+ADMITTING = ("thesis_admitted", "version_applied")
+REMOVING = tuple(r for r in UNIVERSE_REASONS if r != "thesis_admitted")
+FROM_A_THESIS = ("thesis_admitted", "thesis_expired", "thesis_invalidated", "lineage_retired", "operator_halt")
+# Rule 33: the rejections the risk fold reaches only on a risk-increasing version (`owner.rs`):
+# a latched allocation increase, and a refused floor raise.
+INCREASING_REJECTIONS = ("increase_blocked_while_latched", "waiting_period", "still_below_new_floor")
+SCHEMAS[("acct", "MandateVersionApplied")] = rec(
+    ("agent_id", IDENT_T),
+    ("old_version", REF),
+    ("new_version", REF),
+    ("classification", one_of(*CLASSIFICATIONS)),
+    ("step_up", opt(STEP_UP)),
+    ("result", one_of("applied", "rejected")),
+    ("reason", opt(one_of(*VERSION_REJECTIONS))),
+    ("allocation_change", opt(DEC)),
+    ("max_loss_from_allocation", opt(DEC)),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "UniverseChanged")] = rec(
+    ("agent_id", IDENT_T),
+    ("instrument", IDENT_T),
+    ("change", one_of("admitted", "removed")),
+    ("reason", one_of(*UNIVERSE_REASONS)),
+    ("thesis_id", opt(IDENT_T)),
+    ("lineage_id", opt(IDENT_T)),
+    ("universe_size_after", INT),
+    ("risk_clock", RISK_CLOCK),
+)
 
 
 def is_pointer(text: str) -> bool:
@@ -275,7 +328,8 @@ def encoded(texts: list) -> list[bytes]:
 
 
 def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """The §9.2 consistency rules 17 to 24, on a well-typed payload, each reported once."""
+    """The §9.2 consistency rules 17 to 24 and §9.3's 29 to 33, on a well-typed payload, each
+    reported once."""
     p = draft["payload"]
     out: list[Violation] = []
 
@@ -336,6 +390,35 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             drift = abs(Decimal(p["cash"]) - Decimal(p["model_cash"]))
             inside = drift < band if "boundary.rule_24_strict" in skip else drift <= band
             rule("24.in_band", p["cash_in_band"] == inside, "schema", "payload.cash_in_band")
+    if event_type == "MandateVersionApplied":
+        increasing = p["classification"] == "risk_increasing"
+        rule("29", not increasing or p["step_up"] is not None, "schema", "payload.step_up")
+        rejected = p["result"] == "rejected"
+        wrong = []
+        if (p["reason"] is not None) != rejected and "rule.30.reason" not in skip:
+            wrong.append("reason")
+        wrong += [m for m in ("allocation_change", "max_loss_from_allocation") if rejected and p[m] is not None]
+        rule("30", not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
+        applied = p["result"] == "applied"
+        implied = [
+            applied
+            and p["allocation_change"] is not None
+            and Decimal(p["allocation_change"]) > 0
+            and "rule.33.allocation" not in skip,
+            applied and p["max_loss_from_allocation"] is not None and "rule.33.floor" not in skip,
+            rejected and p["reason"] in INCREASING_REJECTIONS and "rule.33.reason" not in skip,
+        ]
+        rule("33", not any(implied) or increasing, "schema", "payload.classification")
+    if event_type == "UniverseChanged":
+        allowed = ADMITTING if p["change"] == "admitted" else REMOVING
+        rule("31", p["reason"] in allowed, "schema", "payload.reason")
+        thesis, lineage = p["thesis_id"] is not None, p["lineage_id"] is not None
+        if thesis != lineage:
+            rule("32", False, "schema", "payload.thesis_id" if not thesis else "payload.lineage_id")
+        elif p["reason"] in FROM_A_THESIS:
+            rule("32.thesis", thesis, "schema", "payload.thesis_id")
+        elif p["reason"] == "version_applied" and p["change"] == "admitted":
+            rule("32.pinned", not thesis, "schema", "payload.thesis_id")
     return out
 
 

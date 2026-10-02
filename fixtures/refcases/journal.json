@@ -5804,5 +5804,2134 @@
     }
    }
   ]
+ },
+ "risk_state": {
+  "spec": "docs/specs/journal.md v0.8 §9.3 (DEC-403)",
+  "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+  "artifacts": [
+   {
+    "name": "old_document",
+    "ref": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+    "object": {
+     "mandate_schema_version": 1,
+     "name": "btc-accumulator",
+     "source_text_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "environment": "paper",
+     "connection_id": "conn_alpaca_paper_01",
+     "capital": {
+      "allocation_usd": "10000",
+      "max_loss_from_allocation": "0.1"
+     },
+     "goal": {
+      "type": "accumulate",
+      "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+      "target_qty": "0.15",
+      "max_avg_price": "58000",
+      "max_spend_usd": "9000",
+      "end_date": "2026-12-31",
+      "on_complete": "hold_protected"
+     },
+     "universe": {
+      "pinned": true,
+      "pinned_instruments": [
+       {
+        "asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+        "symbol": "BTC/USD",
+        "asset_class": "crypto"
+       }
+      ],
+      "max_instruments": 1,
+      "asset_classes": [
+       "crypto"
+      ],
+      "leveraged_etps_enabled": false,
+      "leveraged_etp_disclosure_version": null
+     },
+     "behavior": {
+      "description": "Buy dips; avoid trading 30 minutes around major macro releases.",
+      "signal_models": [
+       {
+        "id": "quant.mean_reversion",
+        "version": "1.0.0",
+        "content_hash": "sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0",
+        "params": [
+         {
+          "key": "lookback_bars",
+          "value": "20"
+         },
+         {
+          "key": "z_entry",
+          "value": "1.5"
+         }
+        ],
+        "weight": "1",
+        "max_output_age_s": 1800,
+        "admits_instruments": false
+       }
+      ],
+      "research": null,
+      "cadence": {
+       "interval_s": 900,
+       "event_sources": [
+        "news",
+        "price"
+       ]
+      },
+      "sizing": {
+       "method": "conviction_linear",
+       "entry_threshold": "0.3",
+       "exit_threshold": "0.3",
+       "rebalance_band": "0.05"
+      }
+     },
+     "protection": {
+      "enabled": true,
+      "stop_distance": "0.08",
+      "take_profit_distance": null,
+      "crypto_stop_limit_offset": "0.005"
+     },
+     "risk": {
+      "max_position_usd": "10000",
+      "max_position_fraction": "1",
+      "max_gross_exposure_usd": "10000",
+      "max_order_usd": "1000",
+      "max_orders_per_day": 50,
+      "max_daily_loss": "0.02",
+      "daily_loss_action": "exits_only",
+      "max_drawdown": "0.08",
+      "drawdown_ladder": [
+       {
+        "at": "0.03",
+        "action": "scale_sizes",
+        "factor": "0.5"
+       },
+       {
+        "at": "0.06",
+        "action": "exits_only",
+        "factor": null
+       },
+       {
+        "at": "0.08",
+        "action": "flatten_and_pause",
+        "factor": null
+       }
+      ],
+      "hysteresis": "0.01",
+      "scale_action": "limit_buys",
+      "breach_confirm_s": 60,
+      "daily_breach_min_s": 3600,
+      "scale_lift_after_s": 600,
+      "reentry_cooldown_s": 3600
+     },
+     "autonomy": {
+      "rules": [
+       {
+        "id": "large_orders",
+        "when": {
+         "field": "order_usd",
+         "op": "gt",
+         "value": "900"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "low_score",
+        "when": {
+         "field": "combined_score",
+         "op": "lt",
+         "value": "0.65"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "routine",
+        "when": {
+         "field": "purpose",
+         "op": "in",
+         "value": [
+          "increase",
+          "open"
+         ]
+        },
+        "then": "auto"
+       }
+      ],
+      "default": "ask",
+      "admission": "ask",
+      "approval": {
+       "timeout_s": 600,
+       "on_timeout": "skip",
+       "approvers": [
+        "role:approver"
+       ],
+       "two_approver_above_usd": null
+      }
+     },
+     "notifications": {
+      "channels": [
+       "email",
+       "web_push"
+      ],
+      "quiet_hours": {
+       "start": "23:00",
+       "end": "07:00",
+       "timezone": "America/New_York"
+      }
+     }
+    },
+    "canonical": "{\"autonomy\":{\"admission\":\"ask\",\"approval\":{\"approvers\":[\"role:approver\"],\"on_timeout\":\"skip\",\"timeout_s\":600,\"two_approver_above_usd\":null},\"default\":\"ask\",\"rules\":[{\"id\":\"large_orders\",\"then\":\"ask\",\"when\":{\"field\":\"order_usd\",\"op\":\"gt\",\"value\":\"900\"}},{\"id\":\"low_score\",\"then\":\"ask\",\"when\":{\"field\":\"combined_score\",\"op\":\"lt\",\"value\":\"0.65\"}},{\"id\":\"routine\",\"then\":\"auto\",\"when\":{\"field\":\"purpose\",\"op\":\"in\",\"value\":[\"increase\",\"open\"]}}]},\"behavior\":{\"cadence\":{\"event_sources\":[\"news\",\"price\"],\"interval_s\":900},\"description\":\"Buy dips; avoid trading 30 minutes around major macro releases.\",\"research\":null,\"signal_models\":[{\"admits_instruments\":false,\"content_hash\":\"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0\",\"id\":\"quant.mean_reversion\",\"max_output_age_s\":1800,\"params\":[{\"key\":\"lookback_bars\",\"value\":\"20\"},{\"key\":\"z_entry\",\"value\":\"1.5\"}],\"version\":\"1.0.0\",\"weight\":\"1\"}],\"sizing\":{\"entry_threshold\":\"0.3\",\"exit_threshold\":\"0.3\",\"method\":\"conviction_linear\",\"rebalance_band\":\"0.05\"}},\"capital\":{\"allocation_usd\":\"10000\",\"max_loss_from_allocation\":\"0.1\"},\"connection_id\":\"conn_alpaca_paper_01\",\"environment\":\"paper\",\"goal\":{\"end_date\":\"2026-12-31\",\"instrument\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"max_avg_price\":\"58000\",\"max_spend_usd\":\"9000\",\"on_complete\":\"hold_protected\",\"target_qty\":\"0.15\",\"type\":\"accumulate\"},\"mandate_schema_version\":1,\"name\":\"btc-accumulator\",\"notifications\":{\"channels\":[\"email\",\"web_push\"],\"quiet_hours\":{\"end\":\"07:00\",\"start\":\"23:00\",\"timezone\":\"America/New_York\"}},\"protection\":{\"crypto_stop_limit_offset\":\"0.005\",\"enabled\":true,\"stop_distance\":\"0.08\",\"take_profit_distance\":null},\"risk\":{\"breach_confirm_s\":60,\"daily_breach_min_s\":3600,\"daily_loss_action\":\"exits_only\",\"drawdown_ladder\":[{\"action\":\"scale_sizes\",\"at\":\"0.03\",\"factor\":\"0.5\"},{\"action\":\"exits_only\",\"at\":\"0.06\",\"factor\":null},{\"action\":\"flatten_and_pause\",\"at\":\"0.08\",\"factor\":null}],\"hysteresis\":\"0.01\",\"max_daily_loss\":\"0.02\",\"max_drawdown\":\"0.08\",\"max_gross_exposure_usd\":\"10000\",\"max_order_usd\":\"1000\",\"max_orders_per_day\":50,\"max_position_fraction\":\"1\",\"max_position_usd\":\"10000\",\"reentry_cooldown_s\":3600,\"scale_action\":\"limit_buys\",\"scale_lift_after_s\":600},\"source_text_ref\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"universe\":{\"asset_classes\":[\"crypto\"],\"leveraged_etp_disclosure_version\":null,\"leveraged_etps_enabled\":false,\"max_instruments\":1,\"pinned\":true,\"pinned_instruments\":[{\"asset_class\":\"crypto\",\"asset_id\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"symbol\":\"BTC/USD\"}]}}"
+   },
+   {
+    "name": "new_document",
+    "ref": "sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54",
+    "object": {
+     "mandate_schema_version": 1,
+     "name": "btc-accumulator",
+     "source_text_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "environment": "paper",
+     "connection_id": "conn_alpaca_paper_01",
+     "capital": {
+      "allocation_usd": "12500",
+      "max_loss_from_allocation": "0.1"
+     },
+     "goal": {
+      "type": "accumulate",
+      "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+      "target_qty": "0.15",
+      "max_avg_price": "58000",
+      "max_spend_usd": "9000",
+      "end_date": "2026-12-31",
+      "on_complete": "hold_protected"
+     },
+     "universe": {
+      "pinned": true,
+      "pinned_instruments": [
+       {
+        "asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+        "symbol": "BTC/USD",
+        "asset_class": "crypto"
+       }
+      ],
+      "max_instruments": 1,
+      "asset_classes": [
+       "crypto"
+      ],
+      "leveraged_etps_enabled": false,
+      "leveraged_etp_disclosure_version": null
+     },
+     "behavior": {
+      "description": "Buy dips; avoid trading 30 minutes around major macro releases.",
+      "signal_models": [
+       {
+        "id": "quant.mean_reversion",
+        "version": "1.0.0",
+        "content_hash": "sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0",
+        "params": [
+         {
+          "key": "lookback_bars",
+          "value": "20"
+         },
+         {
+          "key": "z_entry",
+          "value": "1.5"
+         }
+        ],
+        "weight": "1",
+        "max_output_age_s": 1800,
+        "admits_instruments": false
+       }
+      ],
+      "research": null,
+      "cadence": {
+       "interval_s": 900,
+       "event_sources": [
+        "news",
+        "price"
+       ]
+      },
+      "sizing": {
+       "method": "conviction_linear",
+       "entry_threshold": "0.3",
+       "exit_threshold": "0.3",
+       "rebalance_band": "0.05"
+      }
+     },
+     "protection": {
+      "enabled": true,
+      "stop_distance": "0.08",
+      "take_profit_distance": null,
+      "crypto_stop_limit_offset": "0.005"
+     },
+     "risk": {
+      "max_position_usd": "10000",
+      "max_position_fraction": "1",
+      "max_gross_exposure_usd": "10000",
+      "max_order_usd": "1000",
+      "max_orders_per_day": 50,
+      "max_daily_loss": "0.02",
+      "daily_loss_action": "exits_only",
+      "max_drawdown": "0.08",
+      "drawdown_ladder": [
+       {
+        "at": "0.03",
+        "action": "scale_sizes",
+        "factor": "0.5"
+       },
+       {
+        "at": "0.06",
+        "action": "exits_only",
+        "factor": null
+       },
+       {
+        "at": "0.08",
+        "action": "flatten_and_pause",
+        "factor": null
+       }
+      ],
+      "hysteresis": "0.01",
+      "scale_action": "limit_buys",
+      "breach_confirm_s": 60,
+      "daily_breach_min_s": 3600,
+      "scale_lift_after_s": 600,
+      "reentry_cooldown_s": 3600
+     },
+     "autonomy": {
+      "rules": [
+       {
+        "id": "large_orders",
+        "when": {
+         "field": "order_usd",
+         "op": "gt",
+         "value": "900"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "low_score",
+        "when": {
+         "field": "combined_score",
+         "op": "lt",
+         "value": "0.65"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "routine",
+        "when": {
+         "field": "purpose",
+         "op": "in",
+         "value": [
+          "increase",
+          "open"
+         ]
+        },
+        "then": "auto"
+       }
+      ],
+      "default": "ask",
+      "admission": "ask",
+      "approval": {
+       "timeout_s": 600,
+       "on_timeout": "skip",
+       "approvers": [
+        "role:approver"
+       ],
+       "two_approver_above_usd": null
+      }
+     },
+     "notifications": {
+      "channels": [
+       "email",
+       "web_push"
+      ],
+      "quiet_hours": {
+       "start": "23:00",
+       "end": "07:00",
+       "timezone": "America/New_York"
+      }
+     }
+    },
+    "canonical": "{\"autonomy\":{\"admission\":\"ask\",\"approval\":{\"approvers\":[\"role:approver\"],\"on_timeout\":\"skip\",\"timeout_s\":600,\"two_approver_above_usd\":null},\"default\":\"ask\",\"rules\":[{\"id\":\"large_orders\",\"then\":\"ask\",\"when\":{\"field\":\"order_usd\",\"op\":\"gt\",\"value\":\"900\"}},{\"id\":\"low_score\",\"then\":\"ask\",\"when\":{\"field\":\"combined_score\",\"op\":\"lt\",\"value\":\"0.65\"}},{\"id\":\"routine\",\"then\":\"auto\",\"when\":{\"field\":\"purpose\",\"op\":\"in\",\"value\":[\"increase\",\"open\"]}}]},\"behavior\":{\"cadence\":{\"event_sources\":[\"news\",\"price\"],\"interval_s\":900},\"description\":\"Buy dips; avoid trading 30 minutes around major macro releases.\",\"research\":null,\"signal_models\":[{\"admits_instruments\":false,\"content_hash\":\"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0\",\"id\":\"quant.mean_reversion\",\"max_output_age_s\":1800,\"params\":[{\"key\":\"lookback_bars\",\"value\":\"20\"},{\"key\":\"z_entry\",\"value\":\"1.5\"}],\"version\":\"1.0.0\",\"weight\":\"1\"}],\"sizing\":{\"entry_threshold\":\"0.3\",\"exit_threshold\":\"0.3\",\"method\":\"conviction_linear\",\"rebalance_band\":\"0.05\"}},\"capital\":{\"allocation_usd\":\"12500\",\"max_loss_from_allocation\":\"0.1\"},\"connection_id\":\"conn_alpaca_paper_01\",\"environment\":\"paper\",\"goal\":{\"end_date\":\"2026-12-31\",\"instrument\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"max_avg_price\":\"58000\",\"max_spend_usd\":\"9000\",\"on_complete\":\"hold_protected\",\"target_qty\":\"0.15\",\"type\":\"accumulate\"},\"mandate_schema_version\":1,\"name\":\"btc-accumulator\",\"notifications\":{\"channels\":[\"email\",\"web_push\"],\"quiet_hours\":{\"end\":\"07:00\",\"start\":\"23:00\",\"timezone\":\"America/New_York\"}},\"protection\":{\"crypto_stop_limit_offset\":\"0.005\",\"enabled\":true,\"stop_distance\":\"0.08\",\"take_profit_distance\":null},\"risk\":{\"breach_confirm_s\":60,\"daily_breach_min_s\":3600,\"daily_loss_action\":\"exits_only\",\"drawdown_ladder\":[{\"action\":\"scale_sizes\",\"at\":\"0.03\",\"factor\":\"0.5\"},{\"action\":\"exits_only\",\"at\":\"0.06\",\"factor\":null},{\"action\":\"flatten_and_pause\",\"at\":\"0.08\",\"factor\":null}],\"hysteresis\":\"0.01\",\"max_daily_loss\":\"0.02\",\"max_drawdown\":\"0.08\",\"max_gross_exposure_usd\":\"10000\",\"max_order_usd\":\"1000\",\"max_orders_per_day\":50,\"max_position_fraction\":\"1\",\"max_position_usd\":\"10000\",\"reentry_cooldown_s\":3600,\"scale_action\":\"limit_buys\",\"scale_lift_after_s\":600},\"source_text_ref\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"universe\":{\"asset_classes\":[\"crypto\"],\"leveraged_etp_disclosure_version\":null,\"leveraged_etps_enabled\":false,\"max_instruments\":1,\"pinned\":true,\"pinned_instruments\":[{\"asset_class\":\"crypto\",\"asset_id\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"symbol\":\"BTC/USD\"}]}}"
+   },
+   {
+    "name": "renamed_document",
+    "ref": "sha256:c0a5e0805506a7b3da92f677fe0f9c7721f39ac2b268af8f17f2422784ccf79f",
+    "object": {
+     "mandate_schema_version": 1,
+     "name": "btc-accumulator-renamed",
+     "source_text_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "environment": "paper",
+     "connection_id": "conn_alpaca_paper_01",
+     "capital": {
+      "allocation_usd": "10000",
+      "max_loss_from_allocation": "0.1"
+     },
+     "goal": {
+      "type": "accumulate",
+      "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+      "target_qty": "0.15",
+      "max_avg_price": "58000",
+      "max_spend_usd": "9000",
+      "end_date": "2026-12-31",
+      "on_complete": "hold_protected"
+     },
+     "universe": {
+      "pinned": true,
+      "pinned_instruments": [
+       {
+        "asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+        "symbol": "BTC/USD",
+        "asset_class": "crypto"
+       }
+      ],
+      "max_instruments": 1,
+      "asset_classes": [
+       "crypto"
+      ],
+      "leveraged_etps_enabled": false,
+      "leveraged_etp_disclosure_version": null
+     },
+     "behavior": {
+      "description": "Buy dips; avoid trading 30 minutes around major macro releases.",
+      "signal_models": [
+       {
+        "id": "quant.mean_reversion",
+        "version": "1.0.0",
+        "content_hash": "sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0",
+        "params": [
+         {
+          "key": "lookback_bars",
+          "value": "20"
+         },
+         {
+          "key": "z_entry",
+          "value": "1.5"
+         }
+        ],
+        "weight": "1",
+        "max_output_age_s": 1800,
+        "admits_instruments": false
+       }
+      ],
+      "research": null,
+      "cadence": {
+       "interval_s": 900,
+       "event_sources": [
+        "news",
+        "price"
+       ]
+      },
+      "sizing": {
+       "method": "conviction_linear",
+       "entry_threshold": "0.3",
+       "exit_threshold": "0.3",
+       "rebalance_band": "0.05"
+      }
+     },
+     "protection": {
+      "enabled": true,
+      "stop_distance": "0.08",
+      "take_profit_distance": null,
+      "crypto_stop_limit_offset": "0.005"
+     },
+     "risk": {
+      "max_position_usd": "10000",
+      "max_position_fraction": "1",
+      "max_gross_exposure_usd": "10000",
+      "max_order_usd": "1000",
+      "max_orders_per_day": 50,
+      "max_daily_loss": "0.02",
+      "daily_loss_action": "exits_only",
+      "max_drawdown": "0.08",
+      "drawdown_ladder": [
+       {
+        "at": "0.03",
+        "action": "scale_sizes",
+        "factor": "0.5"
+       },
+       {
+        "at": "0.06",
+        "action": "exits_only",
+        "factor": null
+       },
+       {
+        "at": "0.08",
+        "action": "flatten_and_pause",
+        "factor": null
+       }
+      ],
+      "hysteresis": "0.01",
+      "scale_action": "limit_buys",
+      "breach_confirm_s": 60,
+      "daily_breach_min_s": 3600,
+      "scale_lift_after_s": 600,
+      "reentry_cooldown_s": 3600
+     },
+     "autonomy": {
+      "rules": [
+       {
+        "id": "large_orders",
+        "when": {
+         "field": "order_usd",
+         "op": "gt",
+         "value": "900"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "low_score",
+        "when": {
+         "field": "combined_score",
+         "op": "lt",
+         "value": "0.65"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "routine",
+        "when": {
+         "field": "purpose",
+         "op": "in",
+         "value": [
+          "increase",
+          "open"
+         ]
+        },
+        "then": "auto"
+       }
+      ],
+      "default": "ask",
+      "admission": "ask",
+      "approval": {
+       "timeout_s": 600,
+       "on_timeout": "skip",
+       "approvers": [
+        "role:approver"
+       ],
+       "two_approver_above_usd": null
+      }
+     },
+     "notifications": {
+      "channels": [
+       "email",
+       "web_push"
+      ],
+      "quiet_hours": {
+       "start": "23:00",
+       "end": "07:00",
+       "timezone": "America/New_York"
+      }
+     }
+    },
+    "canonical": "{\"autonomy\":{\"admission\":\"ask\",\"approval\":{\"approvers\":[\"role:approver\"],\"on_timeout\":\"skip\",\"timeout_s\":600,\"two_approver_above_usd\":null},\"default\":\"ask\",\"rules\":[{\"id\":\"large_orders\",\"then\":\"ask\",\"when\":{\"field\":\"order_usd\",\"op\":\"gt\",\"value\":\"900\"}},{\"id\":\"low_score\",\"then\":\"ask\",\"when\":{\"field\":\"combined_score\",\"op\":\"lt\",\"value\":\"0.65\"}},{\"id\":\"routine\",\"then\":\"auto\",\"when\":{\"field\":\"purpose\",\"op\":\"in\",\"value\":[\"increase\",\"open\"]}}]},\"behavior\":{\"cadence\":{\"event_sources\":[\"news\",\"price\"],\"interval_s\":900},\"description\":\"Buy dips; avoid trading 30 minutes around major macro releases.\",\"research\":null,\"signal_models\":[{\"admits_instruments\":false,\"content_hash\":\"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0\",\"id\":\"quant.mean_reversion\",\"max_output_age_s\":1800,\"params\":[{\"key\":\"lookback_bars\",\"value\":\"20\"},{\"key\":\"z_entry\",\"value\":\"1.5\"}],\"version\":\"1.0.0\",\"weight\":\"1\"}],\"sizing\":{\"entry_threshold\":\"0.3\",\"exit_threshold\":\"0.3\",\"method\":\"conviction_linear\",\"rebalance_band\":\"0.05\"}},\"capital\":{\"allocation_usd\":\"10000\",\"max_loss_from_allocation\":\"0.1\"},\"connection_id\":\"conn_alpaca_paper_01\",\"environment\":\"paper\",\"goal\":{\"end_date\":\"2026-12-31\",\"instrument\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"max_avg_price\":\"58000\",\"max_spend_usd\":\"9000\",\"on_complete\":\"hold_protected\",\"target_qty\":\"0.15\",\"type\":\"accumulate\"},\"mandate_schema_version\":1,\"name\":\"btc-accumulator-renamed\",\"notifications\":{\"channels\":[\"email\",\"web_push\"],\"quiet_hours\":{\"end\":\"07:00\",\"start\":\"23:00\",\"timezone\":\"America/New_York\"}},\"protection\":{\"crypto_stop_limit_offset\":\"0.005\",\"enabled\":true,\"stop_distance\":\"0.08\",\"take_profit_distance\":null},\"risk\":{\"breach_confirm_s\":60,\"daily_breach_min_s\":3600,\"daily_loss_action\":\"exits_only\",\"drawdown_ladder\":[{\"action\":\"scale_sizes\",\"at\":\"0.03\",\"factor\":\"0.5\"},{\"action\":\"exits_only\",\"at\":\"0.06\",\"factor\":null},{\"action\":\"flatten_and_pause\",\"at\":\"0.08\",\"factor\":null}],\"hysteresis\":\"0.01\",\"max_daily_loss\":\"0.02\",\"max_drawdown\":\"0.08\",\"max_gross_exposure_usd\":\"10000\",\"max_order_usd\":\"1000\",\"max_orders_per_day\":50,\"max_position_fraction\":\"1\",\"max_position_usd\":\"10000\",\"reentry_cooldown_s\":3600,\"scale_action\":\"limit_buys\",\"scale_lift_after_s\":600},\"source_text_ref\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"universe\":{\"asset_classes\":[\"crypto\"],\"leveraged_etp_disclosure_version\":null,\"leveraged_etps_enabled\":false,\"max_instruments\":1,\"pinned\":true,\"pinned_instruments\":[{\"asset_class\":\"crypto\",\"asset_id\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"symbol\":\"BTC/USD\"}]}}"
+   },
+   {
+    "name": "tightened_document",
+    "ref": "sha256:139f3129f3558c6b2aec5bbb71dd1d5f9aeb0305fbb9bcbfc14a6d288c60372c",
+    "object": {
+     "mandate_schema_version": 1,
+     "name": "btc-accumulator",
+     "source_text_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "environment": "paper",
+     "connection_id": "conn_alpaca_paper_01",
+     "capital": {
+      "allocation_usd": "10000",
+      "max_loss_from_allocation": "0.08"
+     },
+     "goal": {
+      "type": "accumulate",
+      "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+      "target_qty": "0.15",
+      "max_avg_price": "58000",
+      "max_spend_usd": "9000",
+      "end_date": "2026-12-31",
+      "on_complete": "hold_protected"
+     },
+     "universe": {
+      "pinned": true,
+      "pinned_instruments": [
+       {
+        "asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+        "symbol": "BTC/USD",
+        "asset_class": "crypto"
+       }
+      ],
+      "max_instruments": 1,
+      "asset_classes": [
+       "crypto"
+      ],
+      "leveraged_etps_enabled": false,
+      "leveraged_etp_disclosure_version": null
+     },
+     "behavior": {
+      "description": "Buy dips; avoid trading 30 minutes around major macro releases.",
+      "signal_models": [
+       {
+        "id": "quant.mean_reversion",
+        "version": "1.0.0",
+        "content_hash": "sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0",
+        "params": [
+         {
+          "key": "lookback_bars",
+          "value": "20"
+         },
+         {
+          "key": "z_entry",
+          "value": "1.5"
+         }
+        ],
+        "weight": "1",
+        "max_output_age_s": 1800,
+        "admits_instruments": false
+       }
+      ],
+      "research": null,
+      "cadence": {
+       "interval_s": 900,
+       "event_sources": [
+        "news",
+        "price"
+       ]
+      },
+      "sizing": {
+       "method": "conviction_linear",
+       "entry_threshold": "0.3",
+       "exit_threshold": "0.3",
+       "rebalance_band": "0.05"
+      }
+     },
+     "protection": {
+      "enabled": true,
+      "stop_distance": "0.08",
+      "take_profit_distance": null,
+      "crypto_stop_limit_offset": "0.005"
+     },
+     "risk": {
+      "max_position_usd": "10000",
+      "max_position_fraction": "1",
+      "max_gross_exposure_usd": "10000",
+      "max_order_usd": "1000",
+      "max_orders_per_day": 50,
+      "max_daily_loss": "0.02",
+      "daily_loss_action": "exits_only",
+      "max_drawdown": "0.08",
+      "drawdown_ladder": [
+       {
+        "at": "0.03",
+        "action": "scale_sizes",
+        "factor": "0.5"
+       },
+       {
+        "at": "0.06",
+        "action": "exits_only",
+        "factor": null
+       },
+       {
+        "at": "0.08",
+        "action": "flatten_and_pause",
+        "factor": null
+       }
+      ],
+      "hysteresis": "0.01",
+      "scale_action": "limit_buys",
+      "breach_confirm_s": 60,
+      "daily_breach_min_s": 3600,
+      "scale_lift_after_s": 600,
+      "reentry_cooldown_s": 3600
+     },
+     "autonomy": {
+      "rules": [
+       {
+        "id": "large_orders",
+        "when": {
+         "field": "order_usd",
+         "op": "gt",
+         "value": "900"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "low_score",
+        "when": {
+         "field": "combined_score",
+         "op": "lt",
+         "value": "0.65"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "routine",
+        "when": {
+         "field": "purpose",
+         "op": "in",
+         "value": [
+          "increase",
+          "open"
+         ]
+        },
+        "then": "auto"
+       }
+      ],
+      "default": "ask",
+      "admission": "ask",
+      "approval": {
+       "timeout_s": 600,
+       "on_timeout": "skip",
+       "approvers": [
+        "role:approver"
+       ],
+       "two_approver_above_usd": null
+      }
+     },
+     "notifications": {
+      "channels": [
+       "email",
+       "web_push"
+      ],
+      "quiet_hours": {
+       "start": "23:00",
+       "end": "07:00",
+       "timezone": "America/New_York"
+      }
+     }
+    },
+    "canonical": "{\"autonomy\":{\"admission\":\"ask\",\"approval\":{\"approvers\":[\"role:approver\"],\"on_timeout\":\"skip\",\"timeout_s\":600,\"two_approver_above_usd\":null},\"default\":\"ask\",\"rules\":[{\"id\":\"large_orders\",\"then\":\"ask\",\"when\":{\"field\":\"order_usd\",\"op\":\"gt\",\"value\":\"900\"}},{\"id\":\"low_score\",\"then\":\"ask\",\"when\":{\"field\":\"combined_score\",\"op\":\"lt\",\"value\":\"0.65\"}},{\"id\":\"routine\",\"then\":\"auto\",\"when\":{\"field\":\"purpose\",\"op\":\"in\",\"value\":[\"increase\",\"open\"]}}]},\"behavior\":{\"cadence\":{\"event_sources\":[\"news\",\"price\"],\"interval_s\":900},\"description\":\"Buy dips; avoid trading 30 minutes around major macro releases.\",\"research\":null,\"signal_models\":[{\"admits_instruments\":false,\"content_hash\":\"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0\",\"id\":\"quant.mean_reversion\",\"max_output_age_s\":1800,\"params\":[{\"key\":\"lookback_bars\",\"value\":\"20\"},{\"key\":\"z_entry\",\"value\":\"1.5\"}],\"version\":\"1.0.0\",\"weight\":\"1\"}],\"sizing\":{\"entry_threshold\":\"0.3\",\"exit_threshold\":\"0.3\",\"method\":\"conviction_linear\",\"rebalance_band\":\"0.05\"}},\"capital\":{\"allocation_usd\":\"10000\",\"max_loss_from_allocation\":\"0.08\"},\"connection_id\":\"conn_alpaca_paper_01\",\"environment\":\"paper\",\"goal\":{\"end_date\":\"2026-12-31\",\"instrument\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"max_avg_price\":\"58000\",\"max_spend_usd\":\"9000\",\"on_complete\":\"hold_protected\",\"target_qty\":\"0.15\",\"type\":\"accumulate\"},\"mandate_schema_version\":1,\"name\":\"btc-accumulator\",\"notifications\":{\"channels\":[\"email\",\"web_push\"],\"quiet_hours\":{\"end\":\"07:00\",\"start\":\"23:00\",\"timezone\":\"America/New_York\"}},\"protection\":{\"crypto_stop_limit_offset\":\"0.005\",\"enabled\":true,\"stop_distance\":\"0.08\",\"take_profit_distance\":null},\"risk\":{\"breach_confirm_s\":60,\"daily_breach_min_s\":3600,\"daily_loss_action\":\"exits_only\",\"drawdown_ladder\":[{\"action\":\"scale_sizes\",\"at\":\"0.03\",\"factor\":\"0.5\"},{\"action\":\"exits_only\",\"at\":\"0.06\",\"factor\":null},{\"action\":\"flatten_and_pause\",\"at\":\"0.08\",\"factor\":null}],\"hysteresis\":\"0.01\",\"max_daily_loss\":\"0.02\",\"max_drawdown\":\"0.08\",\"max_gross_exposure_usd\":\"10000\",\"max_order_usd\":\"1000\",\"max_orders_per_day\":50,\"max_position_fraction\":\"1\",\"max_position_usd\":\"10000\",\"reentry_cooldown_s\":3600,\"scale_action\":\"limit_buys\",\"scale_lift_after_s\":600},\"source_text_ref\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"universe\":{\"asset_classes\":[\"crypto\"],\"leveraged_etp_disclosure_version\":null,\"leveraged_etps_enabled\":false,\"max_instruments\":1,\"pinned\":true,\"pinned_instruments\":[{\"asset_class\":\"crypto\",\"asset_id\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"symbol\":\"BTC/USD\"}]}}"
+   },
+   {
+    "name": "loosened_document",
+    "ref": "sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16",
+    "object": {
+     "mandate_schema_version": 1,
+     "name": "btc-accumulator",
+     "source_text_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "environment": "paper",
+     "connection_id": "conn_alpaca_paper_01",
+     "capital": {
+      "allocation_usd": "10000",
+      "max_loss_from_allocation": "0.15"
+     },
+     "goal": {
+      "type": "accumulate",
+      "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+      "target_qty": "0.15",
+      "max_avg_price": "58000",
+      "max_spend_usd": "9000",
+      "end_date": "2026-12-31",
+      "on_complete": "hold_protected"
+     },
+     "universe": {
+      "pinned": true,
+      "pinned_instruments": [
+       {
+        "asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+        "symbol": "BTC/USD",
+        "asset_class": "crypto"
+       }
+      ],
+      "max_instruments": 1,
+      "asset_classes": [
+       "crypto"
+      ],
+      "leveraged_etps_enabled": false,
+      "leveraged_etp_disclosure_version": null
+     },
+     "behavior": {
+      "description": "Buy dips; avoid trading 30 minutes around major macro releases.",
+      "signal_models": [
+       {
+        "id": "quant.mean_reversion",
+        "version": "1.0.0",
+        "content_hash": "sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0",
+        "params": [
+         {
+          "key": "lookback_bars",
+          "value": "20"
+         },
+         {
+          "key": "z_entry",
+          "value": "1.5"
+         }
+        ],
+        "weight": "1",
+        "max_output_age_s": 1800,
+        "admits_instruments": false
+       }
+      ],
+      "research": null,
+      "cadence": {
+       "interval_s": 900,
+       "event_sources": [
+        "news",
+        "price"
+       ]
+      },
+      "sizing": {
+       "method": "conviction_linear",
+       "entry_threshold": "0.3",
+       "exit_threshold": "0.3",
+       "rebalance_band": "0.05"
+      }
+     },
+     "protection": {
+      "enabled": true,
+      "stop_distance": "0.08",
+      "take_profit_distance": null,
+      "crypto_stop_limit_offset": "0.005"
+     },
+     "risk": {
+      "max_position_usd": "10000",
+      "max_position_fraction": "1",
+      "max_gross_exposure_usd": "10000",
+      "max_order_usd": "1000",
+      "max_orders_per_day": 50,
+      "max_daily_loss": "0.02",
+      "daily_loss_action": "exits_only",
+      "max_drawdown": "0.08",
+      "drawdown_ladder": [
+       {
+        "at": "0.03",
+        "action": "scale_sizes",
+        "factor": "0.5"
+       },
+       {
+        "at": "0.06",
+        "action": "exits_only",
+        "factor": null
+       },
+       {
+        "at": "0.08",
+        "action": "flatten_and_pause",
+        "factor": null
+       }
+      ],
+      "hysteresis": "0.01",
+      "scale_action": "limit_buys",
+      "breach_confirm_s": 60,
+      "daily_breach_min_s": 3600,
+      "scale_lift_after_s": 600,
+      "reentry_cooldown_s": 3600
+     },
+     "autonomy": {
+      "rules": [
+       {
+        "id": "large_orders",
+        "when": {
+         "field": "order_usd",
+         "op": "gt",
+         "value": "900"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "low_score",
+        "when": {
+         "field": "combined_score",
+         "op": "lt",
+         "value": "0.65"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "routine",
+        "when": {
+         "field": "purpose",
+         "op": "in",
+         "value": [
+          "increase",
+          "open"
+         ]
+        },
+        "then": "auto"
+       }
+      ],
+      "default": "ask",
+      "admission": "ask",
+      "approval": {
+       "timeout_s": 600,
+       "on_timeout": "skip",
+       "approvers": [
+        "role:approver"
+       ],
+       "two_approver_above_usd": null
+      }
+     },
+     "notifications": {
+      "channels": [
+       "email",
+       "web_push"
+      ],
+      "quiet_hours": {
+       "start": "23:00",
+       "end": "07:00",
+       "timezone": "America/New_York"
+      }
+     }
+    },
+    "canonical": "{\"autonomy\":{\"admission\":\"ask\",\"approval\":{\"approvers\":[\"role:approver\"],\"on_timeout\":\"skip\",\"timeout_s\":600,\"two_approver_above_usd\":null},\"default\":\"ask\",\"rules\":[{\"id\":\"large_orders\",\"then\":\"ask\",\"when\":{\"field\":\"order_usd\",\"op\":\"gt\",\"value\":\"900\"}},{\"id\":\"low_score\",\"then\":\"ask\",\"when\":{\"field\":\"combined_score\",\"op\":\"lt\",\"value\":\"0.65\"}},{\"id\":\"routine\",\"then\":\"auto\",\"when\":{\"field\":\"purpose\",\"op\":\"in\",\"value\":[\"increase\",\"open\"]}}]},\"behavior\":{\"cadence\":{\"event_sources\":[\"news\",\"price\"],\"interval_s\":900},\"description\":\"Buy dips; avoid trading 30 minutes around major macro releases.\",\"research\":null,\"signal_models\":[{\"admits_instruments\":false,\"content_hash\":\"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0\",\"id\":\"quant.mean_reversion\",\"max_output_age_s\":1800,\"params\":[{\"key\":\"lookback_bars\",\"value\":\"20\"},{\"key\":\"z_entry\",\"value\":\"1.5\"}],\"version\":\"1.0.0\",\"weight\":\"1\"}],\"sizing\":{\"entry_threshold\":\"0.3\",\"exit_threshold\":\"0.3\",\"method\":\"conviction_linear\",\"rebalance_band\":\"0.05\"}},\"capital\":{\"allocation_usd\":\"10000\",\"max_loss_from_allocation\":\"0.15\"},\"connection_id\":\"conn_alpaca_paper_01\",\"environment\":\"paper\",\"goal\":{\"end_date\":\"2026-12-31\",\"instrument\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"max_avg_price\":\"58000\",\"max_spend_usd\":\"9000\",\"on_complete\":\"hold_protected\",\"target_qty\":\"0.15\",\"type\":\"accumulate\"},\"mandate_schema_version\":1,\"name\":\"btc-accumulator\",\"notifications\":{\"channels\":[\"email\",\"web_push\"],\"quiet_hours\":{\"end\":\"07:00\",\"start\":\"23:00\",\"timezone\":\"America/New_York\"}},\"protection\":{\"crypto_stop_limit_offset\":\"0.005\",\"enabled\":true,\"stop_distance\":\"0.08\",\"take_profit_distance\":null},\"risk\":{\"breach_confirm_s\":60,\"daily_breach_min_s\":3600,\"daily_loss_action\":\"exits_only\",\"drawdown_ladder\":[{\"action\":\"scale_sizes\",\"at\":\"0.03\",\"factor\":\"0.5\"},{\"action\":\"exits_only\",\"at\":\"0.06\",\"factor\":null},{\"action\":\"flatten_and_pause\",\"at\":\"0.08\",\"factor\":null}],\"hysteresis\":\"0.01\",\"max_daily_loss\":\"0.02\",\"max_drawdown\":\"0.08\",\"max_gross_exposure_usd\":\"10000\",\"max_order_usd\":\"1000\",\"max_orders_per_day\":50,\"max_position_fraction\":\"1\",\"max_position_usd\":\"10000\",\"reentry_cooldown_s\":3600,\"scale_action\":\"limit_buys\",\"scale_lift_after_s\":600},\"source_text_ref\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"universe\":{\"asset_classes\":[\"crypto\"],\"leveraged_etp_disclosure_version\":null,\"leveraged_etps_enabled\":false,\"max_instruments\":1,\"pinned\":true,\"pinned_instruments\":[{\"asset_class\":\"crypto\",\"asset_id\":\"7b4a1c2e-1111-4a2b-9c3d-000000000001\",\"symbol\":\"BTC/USD\"}]}}"
+   },
+   {
+    "name": "research_document",
+    "ref": "sha256:b5c23878277c18f61c1095f6324d303a0706ae459ca83f6817617f14930e3300",
+    "object": {
+     "mandate_schema_version": 1,
+     "name": "research-equity",
+     "source_text_ref": null,
+     "environment": "paper",
+     "connection_id": "conn_alpaca_paper_01",
+     "capital": {
+      "allocation_usd": "10000",
+      "max_loss_from_allocation": "0.1"
+     },
+     "goal": {
+      "type": "continuous",
+      "end_date": null,
+      "on_complete": "hold_protected"
+     },
+     "universe": {
+      "pinned": false,
+      "pinned_instruments": [],
+      "max_instruments": 5,
+      "asset_classes": [
+       "us_equity"
+      ],
+      "leveraged_etps_enabled": false,
+      "leveraged_etp_disclosure_version": null
+     },
+     "behavior": {
+      "description": "Hold a small book of US equities on the research agent's theses.",
+      "signal_models": [
+       {
+        "id": "llm.research_agent",
+        "version": "0.1.0",
+        "content_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "params": [],
+        "weight": "0.5",
+        "max_output_age_s": 3600,
+        "admits_instruments": true
+       },
+       {
+        "id": "quant.momentum",
+        "version": "1.0.0",
+        "content_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "params": [
+         {
+          "key": "lookback_bars",
+          "value": "50"
+         }
+        ],
+        "weight": "0.5",
+        "max_output_age_s": 900,
+        "admits_instruments": false
+       }
+      ],
+      "research": {
+       "interval_s": 3600,
+       "cost_cap_usd_per_day": "5",
+       "max_revisions_per_lineage": 3
+      },
+      "cadence": {
+       "interval_s": 300,
+       "event_sources": [
+        "fills",
+        "news",
+        "price"
+       ]
+      },
+      "sizing": {
+       "method": "conviction_linear",
+       "entry_threshold": "0.3",
+       "exit_threshold": "0.3",
+       "rebalance_band": "0.05"
+      }
+     },
+     "protection": {
+      "enabled": true,
+      "stop_distance": "0.05",
+      "take_profit_distance": "0.1",
+      "crypto_stop_limit_offset": null
+     },
+     "risk": {
+      "max_position_usd": "1500",
+      "max_position_fraction": "0.2",
+      "max_gross_exposure_usd": "2000",
+      "max_order_usd": "1000",
+      "max_orders_per_day": 50,
+      "max_daily_loss": "0.02",
+      "daily_loss_action": "exits_only",
+      "max_drawdown": "0.08",
+      "drawdown_ladder": [
+       {
+        "at": "0.03",
+        "action": "scale_sizes",
+        "factor": "0.5"
+       },
+       {
+        "at": "0.06",
+        "action": "exits_only",
+        "factor": null
+       },
+       {
+        "at": "0.08",
+        "action": "flatten_and_pause",
+        "factor": null
+       }
+      ],
+      "hysteresis": "0.01",
+      "scale_action": "limit_buys",
+      "breach_confirm_s": 60,
+      "daily_breach_min_s": 3600,
+      "scale_lift_after_s": 600,
+      "reentry_cooldown_s": 3600
+     },
+     "autonomy": {
+      "rules": [
+       {
+        "id": "large_orders",
+        "when": {
+         "field": "order_usd",
+         "op": "gt",
+         "value": "900"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "low_score",
+        "when": {
+         "field": "combined_score",
+         "op": "lt",
+         "value": "0.65"
+        },
+        "then": "ask"
+       },
+       {
+        "id": "routine",
+        "when": {
+         "field": "purpose",
+         "op": "in",
+         "value": [
+          "increase",
+          "open"
+         ]
+        },
+        "then": "auto"
+       }
+      ],
+      "default": "ask",
+      "admission": "ask",
+      "approval": {
+       "timeout_s": 600,
+       "on_timeout": "skip",
+       "approvers": [
+        "role:approver"
+       ],
+       "two_approver_above_usd": null
+      }
+     },
+     "notifications": {
+      "channels": [
+       "email",
+       "web_push"
+      ],
+      "quiet_hours": {
+       "start": "23:00",
+       "end": "07:00",
+       "timezone": "America/New_York"
+      }
+     }
+    },
+    "canonical": "{\"autonomy\":{\"admission\":\"ask\",\"approval\":{\"approvers\":[\"role:approver\"],\"on_timeout\":\"skip\",\"timeout_s\":600,\"two_approver_above_usd\":null},\"default\":\"ask\",\"rules\":[{\"id\":\"large_orders\",\"then\":\"ask\",\"when\":{\"field\":\"order_usd\",\"op\":\"gt\",\"value\":\"900\"}},{\"id\":\"low_score\",\"then\":\"ask\",\"when\":{\"field\":\"combined_score\",\"op\":\"lt\",\"value\":\"0.65\"}},{\"id\":\"routine\",\"then\":\"auto\",\"when\":{\"field\":\"purpose\",\"op\":\"in\",\"value\":[\"increase\",\"open\"]}}]},\"behavior\":{\"cadence\":{\"event_sources\":[\"fills\",\"news\",\"price\"],\"interval_s\":300},\"description\":\"Hold a small book of US equities on the research agent's theses.\",\"research\":{\"cost_cap_usd_per_day\":\"5\",\"interval_s\":3600,\"max_revisions_per_lineage\":3},\"signal_models\":[{\"admits_instruments\":true,\"content_hash\":\"sha256:4444444444444444444444444444444444444444444444444444444444444444\",\"id\":\"llm.research_agent\",\"max_output_age_s\":3600,\"params\":[],\"version\":\"0.1.0\",\"weight\":\"0.5\"},{\"admits_instruments\":false,\"content_hash\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"id\":\"quant.momentum\",\"max_output_age_s\":900,\"params\":[{\"key\":\"lookback_bars\",\"value\":\"50\"}],\"version\":\"1.0.0\",\"weight\":\"0.5\"}],\"sizing\":{\"entry_threshold\":\"0.3\",\"exit_threshold\":\"0.3\",\"method\":\"conviction_linear\",\"rebalance_band\":\"0.05\"}},\"capital\":{\"allocation_usd\":\"10000\",\"max_loss_from_allocation\":\"0.1\"},\"connection_id\":\"conn_alpaca_paper_01\",\"environment\":\"paper\",\"goal\":{\"end_date\":null,\"on_complete\":\"hold_protected\",\"type\":\"continuous\"},\"mandate_schema_version\":1,\"name\":\"research-equity\",\"notifications\":{\"channels\":[\"email\",\"web_push\"],\"quiet_hours\":{\"end\":\"07:00\",\"start\":\"23:00\",\"timezone\":\"America/New_York\"}},\"protection\":{\"crypto_stop_limit_offset\":null,\"enabled\":true,\"stop_distance\":\"0.05\",\"take_profit_distance\":\"0.1\"},\"risk\":{\"breach_confirm_s\":60,\"daily_breach_min_s\":3600,\"daily_loss_action\":\"exits_only\",\"drawdown_ladder\":[{\"action\":\"scale_sizes\",\"at\":\"0.03\",\"factor\":\"0.5\"},{\"action\":\"exits_only\",\"at\":\"0.06\",\"factor\":null},{\"action\":\"flatten_and_pause\",\"at\":\"0.08\",\"factor\":null}],\"hysteresis\":\"0.01\",\"max_daily_loss\":\"0.02\",\"max_drawdown\":\"0.08\",\"max_gross_exposure_usd\":\"2000\",\"max_order_usd\":\"1000\",\"max_orders_per_day\":50,\"max_position_fraction\":\"0.2\",\"max_position_usd\":\"1500\",\"reentry_cooldown_s\":3600,\"scale_action\":\"limit_buys\",\"scale_lift_after_s\":600},\"source_text_ref\":null,\"universe\":{\"asset_classes\":[\"us_equity\"],\"leveraged_etp_disclosure_version\":null,\"leveraged_etps_enabled\":false,\"max_instruments\":5,\"pinned\":false,\"pinned_instruments\":[]}}"
+   }
+  ],
+  "drafts": {
+   "version_applied": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZRA0A000000000000000V1",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "MandateVersionApplied",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "old_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+     "new_version": "sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54",
+     "classification": "risk_increasing",
+     "step_up": {
+      "assertion_id": "assert_owner_01",
+      "authenticated_at": "2026-09-22T14:29:10.000000000Z",
+      "method": "webauthn"
+     },
+     "result": "applied",
+     "reason": null,
+     "allocation_change": "2500",
+     "max_loss_from_allocation": null,
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [
+     "sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54",
+     "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+    ],
+    "pii_refs": []
+   },
+   "version_rejected": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZRA1A000000000000000V2",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "MandateVersionApplied",
+    "schema_version": 1,
+    "event_time": "2026-09-22T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "old_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+     "new_version": "sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54",
+     "classification": "risk_increasing",
+     "step_up": {
+      "assertion_id": "assert_owner_01",
+      "authenticated_at": "2026-09-22T14:59:20.000000000Z",
+      "method": "webauthn"
+     },
+     "result": "rejected",
+     "reason": "increase_blocked_while_latched",
+     "allocation_change": null,
+     "max_loss_from_allocation": null,
+     "risk_clock": "2026-09-22T15:00:00.000000000Z"
+    },
+    "artifact_refs": [
+     "sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54",
+     "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+    ],
+    "pii_refs": []
+   },
+   "universe_admitted": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZRB0A000000000000000V3",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "UniverseChanged",
+    "schema_version": 1,
+    "event_time": "2026-09-22T16:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:b5c23878277c18f61c1095f6324d303a0706ae459ca83f6817617f14930e3300"
+    },
+    "payload": {
+     "agent_id": "agent_b",
+     "instrument": "7b4a1c2e-2222-4a2b-9c3d-000000000002",
+     "change": "admitted",
+     "reason": "thesis_admitted",
+     "thesis_id": "thesis_01J8ZT",
+     "lineage_id": "lineage_01J8ZT",
+     "universe_size_after": 1,
+     "risk_clock": "2026-09-22T16:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "universe_removed_pinned": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZRB1A000000000000000V4",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "UniverseChanged",
+    "schema_version": 1,
+    "event_time": "2026-09-22T16:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+     "change": "removed",
+     "reason": "version_applied",
+     "thesis_id": null,
+     "lineage_id": null,
+     "universe_size_after": 0,
+     "risk_clock": "2026-09-22T16:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "journaled_facts": [
+   {
+    "draft": "version_applied",
+    "fact": {
+     "kind": "AgentVersionActive",
+     "agent": "agent_a",
+     "connection_id": "conn_alpaca_paper_01",
+     "environment": "paper",
+     "allocation_usd": "12500",
+     "pinned": [
+      "7b4a1c2e-1111-4a2b-9c3d-000000000001"
+     ]
+    }
+   },
+   {
+    "draft": "version_rejected",
+    "fact": null
+   },
+   {
+    "draft": "universe_admitted",
+    "fact": {
+     "kind": "UniverseChanged",
+     "agent": "agent_b",
+     "instrument": "7b4a1c2e-2222-4a2b-9c3d-000000000002",
+     "admitted": true
+    }
+   },
+   {
+    "draft": "universe_removed_pinned",
+    "fact": {
+     "kind": "UniverseChanged",
+     "agent": "agent_a",
+     "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+     "admitted": false
+    }
+   }
+  ],
+  "invalid_drafts": [
+   {
+    "name": "applied_carries_a_comment",
+    "clause": "§9.3 closed schema",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.comment",
+      "value": "raised for the quarter"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.comment"
+    }
+   },
+   {
+    "name": "applied_without_risk_clock",
+    "clause": "§9.1 absent member",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "applied_risk_clock_off_the_second",
+    "clause": "§9.2 risk_clock",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-09-22T14:30:00.500000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "applied_agent_not_an_id",
+    "clause": "§9.1 id",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.agent_id",
+      "value": "agent a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.agent_id"
+    }
+   },
+   {
+    "name": "applied_old_version_a_bare_hash",
+    "clause": "§9.1 ref",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.old_version",
+      "value": "e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.old_version"
+    }
+   },
+   {
+    "name": "applied_new_version_null",
+    "clause": "§9.3 new_version: never null",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.new_version",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.new_version"
+    }
+   },
+   {
+    "name": "applied_classified_invalid",
+    "clause": "§9.3 classification: an invalid change never applies",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.classification",
+      "value": "invalid"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.classification"
+    }
+   },
+   {
+    "name": "applied_result_pending",
+    "clause": "§9.3 result",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "pending"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "applied_allocation_change_not_a_decimal",
+    "clause": "§9.1 decimal",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.allocation_change",
+      "value": "2,500"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.allocation_change"
+    }
+   },
+   {
+    "name": "loosened_floor_as_a_percentage",
+    "clause": "§9.1 decimal",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.old_version",
+      "value": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+     },
+     {
+      "path": "payload.new_version",
+      "value": "sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16",
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ]
+     },
+     {
+      "path": "payload.allocation_change",
+      "value": null
+     },
+     {
+      "path": "payload.max_loss_from_allocation",
+      "value": "15%"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.max_loss_from_allocation"
+    }
+   },
+   {
+    "name": "applied_step_up_carries_a_token",
+    "clause": "§9.3 step_up: closed",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.step_up.token",
+      "value": "secret"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up.token"
+    }
+   },
+   {
+    "name": "increasing_without_step_up",
+    "clause": "rule 29",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "rejected_without_reason",
+    "clause": "rule 30",
+    "base_draft": "version_rejected",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "applied_with_a_reason",
+    "clause": "rule 30",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "would_trigger_limit"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "rejected_with_an_allocation_change",
+    "clause": "rule 30",
+    "base_draft": "version_rejected",
+    "changes": [
+     {
+      "path": "payload.allocation_change",
+      "value": "2500"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.allocation_change"
+    }
+   },
+   {
+    "name": "rejected_with_a_floor",
+    "clause": "rule 30",
+    "base_draft": "version_rejected",
+    "changes": [
+     {
+      "path": "payload.max_loss_from_allocation",
+      "value": "0.15"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.max_loss_from_allocation"
+    }
+   },
+   {
+    "name": "rejected_reason_unknown",
+    "clause": "§9.3 reason",
+    "base_draft": "version_rejected",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "nothing_to_acknowledge"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "rejected_without_reason_and_with_allocation",
+    "clause": "rule 30: the first offending member, reason before allocation_change",
+    "base_draft": "version_rejected",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     },
+     {
+      "path": "payload.allocation_change",
+      "value": "2500"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "raise_classified_neutral",
+    "clause": "rule 33: an applied allocation increase is risk-increasing",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.classification",
+      "value": "neutral"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.classification"
+    }
+   },
+   {
+    "name": "floor_raise_classified_reducing",
+    "clause": "rule 33: an applied floor raise is risk-increasing",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.old_version",
+      "value": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+     },
+     {
+      "path": "payload.new_version",
+      "value": "sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16",
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ]
+     },
+     {
+      "path": "payload.classification",
+      "value": "risk_reducing"
+     },
+     {
+      "path": "payload.allocation_change",
+      "value": null
+     },
+     {
+      "path": "payload.max_loss_from_allocation",
+      "value": "0.15"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.classification"
+    }
+   },
+   {
+    "name": "latched_increase_classified_neutral",
+    "clause": "rule 33: a latched increase is refused only on a risk-increasing version",
+    "base_draft": "version_rejected",
+    "changes": [
+     {
+      "path": "payload.classification",
+      "value": "neutral"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.classification"
+    }
+   },
+   {
+    "name": "raise_classified_neutral_without_step_up",
+    "clause": "rules 29 and 33: a misclassified raise is reported at its classification",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.classification",
+      "value": "neutral"
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.classification"
+    }
+   },
+   {
+    "name": "applied_without_mandate_ref",
+    "clause": "§9 required config_refs",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "admitted_instrument_not_an_id",
+    "clause": "§9.1 id",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "BTC/USD"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "admitted_size_as_text",
+    "clause": "§9.1 integer",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.universe_size_after",
+      "value": "1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.universe_size_after"
+    }
+   },
+   {
+    "name": "admitted_change_paused",
+    "clause": "§9.3 change",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.change",
+      "value": "paused"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.change"
+    }
+   },
+   {
+    "name": "admitted_reason_unknown",
+    "clause": "§9.3 reason",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "owner_added"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "admitted_thesis_not_an_id",
+    "clause": "§9.1 id",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.thesis_id",
+      "value": "thesis 01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.thesis_id"
+    }
+   },
+   {
+    "name": "admitted_lineage_not_an_id",
+    "clause": "§9.1 id",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.lineage_id",
+      "value": "lineage/01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.lineage_id"
+    }
+   },
+   {
+    "name": "thesis_admission_removes",
+    "clause": "rule 31",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.change",
+      "value": "removed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "expiry_admits",
+    "clause": "rule 31",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "thesis_expired"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "admitted_without_thesis",
+    "clause": "rule 32: null together, at the null one",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.thesis_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.thesis_id"
+    }
+   },
+   {
+    "name": "admitted_without_lineage",
+    "clause": "rule 32: null together, at the null one",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.lineage_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.lineage_id"
+    }
+   },
+   {
+    "name": "admitted_with_neither",
+    "clause": "rule 32: a thesis reason names its thesis",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.thesis_id",
+      "value": null
+     },
+     {
+      "path": "payload.lineage_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.thesis_id"
+    }
+   },
+   {
+    "name": "halt_without_thesis",
+    "clause": "rule 32: an operator halts per thesis",
+    "base_draft": "universe_removed_pinned",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "operator_halt"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.thesis_id"
+    }
+   },
+   {
+    "name": "pinned_admission_names_a_thesis",
+    "clause": "rule 32: an instrument a pinned list admits follows from no thesis",
+    "base_draft": "universe_removed_pinned",
+    "changes": [
+     {
+      "path": "payload.change",
+      "value": "admitted"
+     },
+     {
+      "path": "payload.universe_size_after",
+      "value": 1
+     },
+     {
+      "path": "payload.thesis_id",
+      "value": "thesis_01J8ZT"
+     },
+     {
+      "path": "payload.lineage_id",
+      "value": "lineage_01J8ZT"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.thesis_id"
+    }
+   },
+   {
+    "name": "pinning_switch_removal_with_thesis_alone",
+    "clause": "rule 32: null together, at the null one",
+    "base_draft": "universe_removed_pinned",
+    "changes": [
+     {
+      "path": "payload.thesis_id",
+      "value": "thesis_01J8ZT"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.lineage_id"
+    }
+   },
+   {
+    "name": "removed_on_the_control_stream",
+    "clause": "§9 stream",
+    "base_draft": "universe_removed_pinned",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "neutral_without_step_up",
+    "clause": "rule 29: only a risk-increasing version needs step-up",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.old_version",
+      "value": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+     },
+     {
+      "path": "payload.new_version",
+      "value": "sha256:c0a5e0805506a7b3da92f677fe0f9c7721f39ac2b268af8f17f2422784ccf79f"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:c0a5e0805506a7b3da92f677fe0f9c7721f39ac2b268af8f17f2422784ccf79f",
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ]
+     },
+     {
+      "path": "payload.classification",
+      "value": "neutral"
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     },
+     {
+      "path": "payload.allocation_change",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "reducing_with_step_up",
+    "clause": "rule 29: step-up is allowed on any version",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.old_version",
+      "value": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+     },
+     {
+      "path": "payload.new_version",
+      "value": "sha256:139f3129f3558c6b2aec5bbb71dd1d5f9aeb0305fbb9bcbfc14a6d288c60372c"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:139f3129f3558c6b2aec5bbb71dd1d5f9aeb0305fbb9bcbfc14a6d288c60372c",
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ]
+     },
+     {
+      "path": "payload.classification",
+      "value": "risk_reducing"
+     },
+     {
+      "path": "payload.allocation_change",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "applied_changing_neither",
+    "clause": "rule 30: an applied version may change neither the allocation nor the floor",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.old_version",
+      "value": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+     },
+     {
+      "path": "payload.new_version",
+      "value": "sha256:c0a5e0805506a7b3da92f677fe0f9c7721f39ac2b268af8f17f2422784ccf79f"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:c0a5e0805506a7b3da92f677fe0f9c7721f39ac2b268af8f17f2422784ccf79f",
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ]
+     },
+     {
+      "path": "payload.classification",
+      "value": "neutral"
+     },
+     {
+      "path": "payload.allocation_change",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "floor_loosened",
+    "clause": "rules 30 and 33: an applied floor raise, risk-increasing with step-up",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.old_version",
+      "value": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+     },
+     {
+      "path": "payload.new_version",
+      "value": "sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16",
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ]
+     },
+     {
+      "path": "payload.allocation_change",
+      "value": null
+     },
+     {
+      "path": "payload.max_loss_from_allocation",
+      "value": "0.15"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "pinned_instrument_admitted",
+    "clause": "rule 31: version_applied admits",
+    "base_draft": "universe_removed_pinned",
+    "changes": [
+     {
+      "path": "payload.change",
+      "value": "admitted"
+     },
+     {
+      "path": "payload.universe_size_after",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "pinning_switch_removes_a_thesis_instrument",
+    "clause": "rule 32: DEC-121's pinning switch removes an admitted instrument and names its thesis",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.change",
+      "value": "removed"
+     },
+     {
+      "path": "payload.reason",
+      "value": "version_applied"
+     },
+     {
+      "path": "payload.universe_size_after",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "eligibility_lost_on_a_pinned_instrument",
+    "clause": "rule 32: eligibility_lost may name no thesis",
+    "base_draft": "universe_removed_pinned",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "eligibility_lost"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "eligibility_lost_on_a_thesis",
+    "clause": "rule 32: eligibility_lost may name its thesis",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.change",
+      "value": "removed"
+     },
+     {
+      "path": "payload.reason",
+      "value": "eligibility_lost"
+     },
+     {
+      "path": "payload.universe_size_after",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
  }
 }
