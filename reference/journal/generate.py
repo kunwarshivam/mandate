@@ -145,7 +145,7 @@ ASK_SUPPRESSED = one_of("budget", "skipped_today", "recent_timeout")
 REQUESTED_BY = one_of("agent", "owner", "client")
 BUILTIN_LABEL = "builtin_risk_reducing"
 DELEGATION_PREFIX = "delegation:"
-DECIDED_BY = re.compile(r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|(rule|delegation):[A-Za-z0-9_-]+)$")
+DECIDED_BY = re.compile(r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|(rule|delegation):[A-Za-z0-9_-]+)\Z")
 
 SCHEMAS: dict[tuple[str, str], T] = {
     ("agent", "StreamOpened"): rec(("stream_type", one_of("agent")), ("workspace_id", ID), ("agent_id", ID)),
