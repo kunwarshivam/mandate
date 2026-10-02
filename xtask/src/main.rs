@@ -1968,13 +1968,10 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
-/// The two `protection` rows #489's tests added are #489's (DEC-418): a risk exit stranded
-/// behind a placement the executor made, a wrong answer from code that runs, caught by the
-/// rule-13 oracle's bound. The fix (DEC-419) deletes them with the `#[ignore]` lines.
-///
-/// The last `protection.rs` row is the unapplied-fill over-cover's pin (DEC-421): `main` re-places
-/// protection, so it fails on the size it asserts rather than at a stub, and its fix deletes it.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
+/// The four `protection.rs` rows are the unapplied-fill over-cover's pins (#515, DEC-421): `main`
+/// sizes protection from the fold's position, so each fails on the size it asserts rather than at
+/// a stub, and the fix deletes them.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 8] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1993,15 +1990,19 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
     ),
     (
         "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_risk_exit_allowed_during_a_passive_sequences_cancel_is_never_stranded",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_refused_cancel_of_an_unacknowledged_placement_is_asked_again",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
         "sequence_tests::an_exit_ended_with_a_fill_not_yet_applied_is_re_protected_for_what_the_broker_holds",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::only_the_part_of_a_reported_fill_not_yet_applied_comes_off",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_fill_applied_after_its_report_comes_off_once",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_passive_exit_after_an_unapplied_fill_protects_only_what_the_broker_holds",
     ),
 ];
 

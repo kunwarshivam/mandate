@@ -1128,11 +1128,72 @@ fn recorded_placement(
 pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     for exit in waiting_exits(&batch.view) {
         cancel_openings(batch, Some(&exit.agent), Some(&exit.instrument))?;
+        overtaken(batch, &exit.instrument)?;
         if !awaits_cancel(&batch.view, &exit.agent, &exit.instrument, exit.purpose) {
             gate_and_submit(batch, &exit.intent)?;
         }
     }
     Ok(())
+}
+
+/// DEC-419: a handed-on placement that does not fit beside the exits still selling, and those
+/// allowed and waiting that are not held, is cancelled for them, as [`begin`] cancels it for an
+/// exit that arrives after it. An exit allowed while the placement was still to come would
+/// otherwise wait behind it with nothing to cancel it (#489). It runs at every step an exit waits,
+/// the placement's own included, and asks only where no cancel is outstanding: never for an order
+/// already `PendingCancel`, nor for one `Unknown` while a refused cancel's query is out (never
+/// cancelled blind), nor for one whose cancel was asked before the broker acknowledged it. So it
+/// asks once, and again only once that query finds the placement still live (§5.7).
+fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
+    let handed_on = batch
+        .view
+        .exiting
+        .get(instrument)
+        .is_some_and(|sequence| handed(&batch.view, sequence));
+    if !handed_on || fits_beside_movable(&batch.view, instrument)? {
+        return Ok(());
+    }
+    let resting: Vec<ClientOrderId> = batch
+        .view
+        .protection
+        .get(instrument)
+        .map(|protection| protection.resting.clone())
+        .unwrap_or_default();
+    for id in resting {
+        let outstanding = batch.view.orders.get(&id).is_none_or(|order| {
+            order.state == OrderState::PendingCancel
+                || order.state == OrderState::Unknown
+                || order.state == OrderState::Submitting && order.cancel_unconfirmed
+        });
+        if outstanding {
+            continue;
+        }
+        let requested = vec![("cancel_requested", Value::Bool(true))];
+        transition(batch, &id, OrderState::PendingCancel, requested)?;
+        batch.broker(BrokerRequest::Cancel {
+            client_order_id: id,
+        });
+    }
+    Ok(())
+}
+
+/// [`fits`], with the exits the gate holds left out: one that cannot move needs no room yet, so no
+/// placement is cancelled for it (#508's review, m1).
+fn fits_beside_movable(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<bool, ExecutorError> {
+    let live = still_selling(view, instrument)?;
+    let held = waiting(view, instrument)
+        .iter()
+        .filter(|intent| view.held.contains(*intent))
+        .filter_map(|intent| match view.bodies.get(intent) {
+            Some(IntentBody::Order { qty, .. }) => Some(*qty),
+            _ => None,
+        })
+        .try_fold(Qty::ZERO, Qty::checked_add)?;
+    let movable = live.checked_sub(held).unwrap_or(Qty::ZERO);
+    Ok(covered(view, instrument)?.checked_add(movable)? <= long(view, instrument))
 }
 
 /// One exit the gate allowed that has no order yet: it waits on its cancels.
@@ -7618,7 +7679,6 @@ mod sequence_tests {
     /// waited past `max_intent_age_s` (DEC-418). The placement that does not fit beside a waiting
     /// exit is cancelled for it as soon as it is placed (DEC-419).
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_risk_exit_allowed_during_a_passive_sequences_cancel_is_never_stranded()
     -> Result<(), String> {
         let script = [
@@ -7638,10 +7698,9 @@ mod sequence_tests {
     /// #508's review, M1: the placement's cancel is asked in the step it is placed, while the
     /// broker has not acknowledged it, and the broker refuses that cancel. The refusal is the
     /// cancel's, not the order's: the placement is never journaled rejected, it is queried, and
-    /// the cancel is asked again once it is seen live, so the exit of 3 still goes. Today the
-    /// placement is never cancelled at all (#489), so this fails on the exit's stranding.
+    /// the cancel is asked again once it is seen live, so the exit of 3 still goes. Before #508
+    /// the placement was never cancelled at all (#489), and this failed on the exit's stranding.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_refused_cancel_of_an_unacknowledged_placement_is_asked_again() -> Result<(), String> {
         let script = [
             Move::Quote(Some(135), None, true),
@@ -7658,6 +7717,80 @@ mod sequence_tests {
             Move::Tick(1),
         ];
         rule_13_script_from(0, true, &script)
+    }
+
+    /// #508's review, M1, step by step: the placement's cancel is asked before the broker has
+    /// acknowledged it; the broker refuses it; the refusal is the cancel's, so the placement is
+    /// queried, never journaled rejected; the query finds it live, so the cancel is asked again,
+    /// once; and the next step asks nothing more while that cancel is outstanding.
+    #[test]
+    fn a_refused_cancel_is_queried_then_asked_again_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(0)), &ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(SECOND, "4", "141", Purpose::RiskExit)?, &ports)?;
+        executor.run(sell(EXIT, "3", "141", Purpose::RiskExit)?, &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(1_800)), &ports)?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        let placement = format!("md-{SECOND}");
+        assert!(
+            cancels(&placed).contains(&placement.as_str()),
+            "{:?}",
+            drafted(&placed)
+        );
+        let refusal = executor.run(refused(&placement, "order is not cancelable"), &ports)?;
+        assert!(
+            !refusal.iter().any(|effect| matches!(
+                effect,
+                Effect::Journal(draft)
+                    if draft.payload.get("state").and_then(Value::as_str) == Some("rejected")
+            )),
+            "{:?}",
+            drafted(&refusal)
+        );
+        assert!(
+            refusal.iter().any(|effect| matches!(
+                effect,
+                Effect::Broker(BrokerRequest::GetOrderByClientId(id)) if id.as_str() == placement
+            )),
+            "{:?}",
+            drafted(&refusal)
+        );
+        assert!(
+            cancels(&refusal).is_empty(),
+            "nothing is cancelled blind while the query is out: {:?}",
+            drafted(&refusal)
+        );
+        let absent = executor.run(
+            Input::Broker(Ok(BrokerOutcome::Absent {
+                client_order_id: placement.clone(),
+            })),
+            &ports,
+        )?;
+        assert!(cancels(&absent).is_empty(), "{:?}", drafted(&absent));
+        let unknown = executor.run(Input::Tick(RiskClock::from_secs(1_800)), &ports)?;
+        assert!(
+            cancels(&unknown).is_empty(),
+            "nor while the order sits unknown: {:?}",
+            drafted(&unknown)
+        );
+        let live = reported(
+            &placement,
+            &Held {
+                purpose: Purpose::Protective,
+                qty: 4,
+                filled: 0,
+                acked: true,
+                live: true,
+            },
+        )?;
+        let found = executor.run(Input::Broker(Ok(BrokerOutcome::Order(live))), &ports)?;
+        assert_eq!(cancels(&found), vec![placement.as_str()]);
+        let next = executor.run(Input::Tick(RiskClock::from_secs(1_801)), &ports)?;
+        assert!(cancels(&next).is_empty(), "{:?}", drafted(&next));
+        Ok(())
     }
 
     /// #508's review, m1: an exit the gate holds cannot move, so a passive exit's placement is not
@@ -7684,6 +7817,43 @@ mod sequence_tests {
         assert!(
             cancels(&placed).is_empty(),
             "and not cancelled for an exit that cannot go: {:?}",
+            drafted(&placed)
+        );
+        Ok(())
+    }
+
+    /// #508's review, m1, at the step [`overtaken`] runs: beside [`LONE`] (4), a passive exit of 4
+    /// is placed into a position of 10 while a risk exit of 1 waits on the OCO's cancel and a risk
+    /// exit of 2 the gate holds has no order. The placement's 4, the lone 4 and the waiting 1 fit;
+    /// with the held 2 they would not, and that exit cannot move, so the placement is not cancelled.
+    #[test]
+    fn a_held_exit_beside_a_waiting_one_has_no_placement_cancelled_for_it()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(0)), &ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(SECOND, "4", "141", Purpose::RiskExit)?, &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(1_800)), &ports)?;
+        let agent = AgentId("agent-a".to_owned());
+        executor.state.modes.insert(agent.clone(), Mode::Paused);
+        let held = executor.run(sell(LATER, "2", "141", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(verdicts(&held), vec!["hold"]);
+        executor.state.modes.insert(agent, Mode::Normal);
+        executor.run(sell(EXIT, "1", "141", Purpose::RiskExit)?, &ports)?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        let placement = format!("md-{SECOND}");
+        assert!(
+            submissions(&placed)
+                .iter()
+                .any(|order| order.client_order_id.as_str() == placement),
+            "the passive exit is placed: {:?}",
+            drafted(&placed)
+        );
+        assert!(
+            cancels(&placed).is_empty(),
+            "and not cancelled for the held exit: {:?}",
             drafted(&placed)
         );
         Ok(())
@@ -8441,20 +8611,18 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// #515, `main`'s route (#468's round-3 review; DEC-421): ten held and protected, a marketable
-    /// risk exit of 4 goes once the OCO's cancel is confirmed and is acknowledged, and the broker
-    /// then reports it `canceled` with 3 filled, a fill no update has applied yet. The broker holds
-    /// 7, so protection is re-placed for at most 7. Sizing from the fold's 10 would leave ten
-    /// protective sells against seven shares (rule 12).
-    #[test]
-    #[ignore = "pending E7-4"]
-    fn an_exit_ended_with_a_fill_not_yet_applied_is_re_protected_for_what_the_broker_holds()
-    -> Result<(), ExecutorError> {
-        with_ports!(ports);
-        let mut executor = protected(&ports)?;
-        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
-        executor.run(sell(EXIT, "4", "130", Purpose::RiskExit)?, &ports)?;
-        let released = executor.run(cancel_accepted(OCO), &ports)?;
+    /// #515's script up to the broker's terminal report: ten held and protected, a marketable
+    /// risk exit of 4 goes once the OCO's cancel is confirmed and is acknowledged, `applied` of
+    /// it is filled by an update, and the broker then reports it `canceled` with 3 filled. Answers
+    /// the report's effects.
+    fn ended_with_three_reported(
+        executor: &mut Executor,
+        ports: &Ports<'_>,
+        applied: Option<&str>,
+    ) -> Result<Vec<Effect>, ExecutorError> {
+        executor.run(observation(Some(135), None, true, 0)?, ports)?;
+        executor.run(sell(EXIT, "4", "130", Purpose::RiskExit)?, ports)?;
+        let released = executor.run(cancel_accepted(OCO), ports)?;
         let exit = format!("md-{EXIT}");
         assert!(
             submissions(&released)
@@ -8463,36 +8631,152 @@ mod sequence_tests {
             "the exit goes once the cancel is confirmed: {:?}",
             drafted(&released)
         );
-        let acked = Held {
+        let held = |filled: u32, live: bool| Held {
             purpose: Purpose::RiskExit,
             qty: 4,
-            filled: 0,
+            filled,
             acked: true,
-            live: true,
+            live,
         };
         executor.run(
-            Input::Broker(Ok(BrokerOutcome::Submitted(reported(&exit, &acked)?))),
-            &ports,
+            Input::Broker(Ok(BrokerOutcome::Submitted(reported(
+                &exit,
+                &held(0, true),
+            )?))),
+            ports,
         )?;
-        let ended = reported(
-            &exit,
-            &Held {
-                purpose: Purpose::RiskExit,
-                qty: 4,
-                filled: 3,
-                acked: true,
-                live: false,
-            },
-        )?;
-        let after = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(ended)), &ports)?;
-        let protected_qty = submissions(&after)
+        if let Some(qty) = applied {
+            executor.run(filled(EXIT, qty)?, ports)?;
+        }
+        let ended = reported(&exit, &held(3, false))?;
+        executor.run(Input::BrokerUpdate(BrokerUpdate::Order(ended)), ports)
+    }
+
+    /// What every live protective order in AAPL covers, by the executor's own record.
+    fn resting_cover(state: &ExecutorState) -> Result<Qty, ExecutorError> {
+        let aapl = aapl()?;
+        state
+            .orders
+            .values()
+            .filter(|order| {
+                order.instrument == aapl
+                    && order.purpose == Purpose::Protective
+                    && !order.state.is_terminal()
+            })
+            .try_fold(Qty::ZERO, |total, order| {
+                total.checked_add(order.qty.checked_sub(order.filled_qty)?)
+            })
+            .map_err(ExecutorError::from)
+    }
+
+    /// What `effects` sent as protection.
+    fn protection_sent(effects: &[Effect]) -> Result<Qty, ExecutorError> {
+        submissions(effects)
             .iter()
             .filter(|order| order.purpose == Purpose::Protective)
-            .try_fold(Qty::ZERO, |total, order| total.checked_add(order.qty))?;
-        assert!(
-            protected_qty <= Qty::parse("7")?,
-            "protection re-placed for {protected_qty:?} while the broker holds 7: {:?}",
+            .try_fold(Qty::ZERO, |total, order| total.checked_add(order.qty))
+            .map_err(ExecutorError::from)
+    }
+
+    /// #515, `main`'s route (#468's round-3 review; DEC-421): the broker reports the exit of 4
+    /// `canceled` with 3 filled, a fill no update has applied yet. The broker holds 7, so §5.4
+    /// re-places protection for exactly the 7: no more (the Σ cap, rule 12) and no less (the
+    /// remaining quantity is protected), and the interval ends with it placed.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn an_exit_ended_with_a_fill_not_yet_applied_is_re_protected_for_what_the_broker_holds()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, None)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("7")?,
+            "protection is re-placed for the 7 the broker holds: {:?}",
             drafted(&after)
+        );
+        assert_eq!(
+            actions(&after),
+            vec!["placed", "unprotected_end"],
+            "and the interval ends with it placed: {:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
+    /// #515, the applied part: 2 of the exit's fills are applied by an update before the broker
+    /// reports 3 filled, so only the 1 not yet applied comes off the position of 8, and protection
+    /// is re-placed for exactly 7 (#517's review, blocker 2).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn only_the_part_of_a_reported_fill_not_yet_applied_comes_off() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, Some("2"))?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("7")?,
+            "{:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
+    /// #515, the fill update after the terminal report: once protection covers the 7 held, the
+    /// update applying the 3 re-places nothing, and the 3 come off once, not twice (#517's
+    /// review, item a).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_fill_applied_after_its_report_comes_off_once() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        ended_with_three_reported(&mut executor, &ports, None)?;
+        let before = resting_cover(&executor.state)?;
+        let later = executor.run(filled(EXIT, "3")?, &ports)?;
+        assert_eq!(
+            protection_sent(&later)?,
+            Qty::ZERO,
+            "the applied fill re-places nothing: {:?}",
+            drafted(&later)
+        );
+        assert_eq!(
+            (before, resting_cover(&executor.state)?),
+            (Qty::parse("7")?, Qty::parse("7")?),
+            "the 3 come off once"
+        );
+        Ok(())
+    }
+
+    /// #515 at the passive exit (#518's review, blocker 2): after the exit's 3 come off and the
+    /// re-placed OCO is acknowledged, a passive exit of 2 at 160 cancels it, and on the confirmed
+    /// cancel the passive exit and the rest of the position are protected together for exactly
+    /// the 7 the broker holds: never Σ 10 against 7 (rule 12).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_passive_exit_after_an_unapplied_fill_protects_only_what_the_broker_holds()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, None)?;
+        acknowledge_protection(&mut executor, &after, &ports)?;
+        let resting: Vec<String> = submissions(&after)
+            .iter()
+            .filter(|order| order.purpose == Purpose::Protective)
+            .map(|order| order.client_order_id.as_str().to_owned())
+            .collect();
+        let started = executor.run(sell(SECOND, "2", "160", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&started), resting, "{:?}", drafted(&started));
+        let mut placed = Qty::ZERO;
+        for id in &resting {
+            placed = placed.checked_add(protection_sent(
+                &executor.run(cancel_accepted(id), &ports)?,
+            )?)?;
+        }
+        assert_eq!(
+            placed,
+            Qty::parse("7")?,
+            "Σ protective sells against 7 held"
         );
         Ok(())
     }
