@@ -1316,7 +1316,8 @@ def builder(m, inp):
             guards.append("holding")
         if inp["asset_class"] == "us_equity" and inp.get("session", "regular") != "regular":
             guards.append("regular_session_only")
-        if sell * bid < D(inp["min_order_usd"]):
+        # §5.5's minimum is the instrument's minimum order size (trading spec §5.3 rule 2; DEC-399 item 5)
+        if sell < D(inp["min_order_size"]):
             guards.append("below_minimum_order")
         if not guards:
             out.update({"action": "sell", "purpose": "risk_exit", "origin": "risk_engine", "reason": "trim_to_target",
