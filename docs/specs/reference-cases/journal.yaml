@@ -2926,6 +2926,173 @@ control_stream:
       connection_id: conn_alpaca_paper_01
       equity_usd: '25000'
   invalid_drafts:
+  - name: disclosure_step_up_assertion_null
+    clause: '§9.2 DisclosureAccepted.step_up.assertion_id: never null'
+    base_seq: 5
+    changes:
+    - path: payload.step_up.assertion_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up.assertion_id
+  - name: disclosure_step_up_time_null
+    clause: '§9.2 DisclosureAccepted.step_up.authenticated_at: never null'
+    base_seq: 5
+    changes:
+    - path: payload.step_up.authenticated_at
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up.authenticated_at
+  - name: provenance_second_path_null
+    clause: '§9.2 MandateVersionCreated.provenance[].path: never null, in every entry'
+    base_seq: 6
+    changes:
+    - path: payload.provenance
+      value:
+      - path: /autonomy
+        source: user_entered
+      - path: null
+        source: user_entered
+      - path: /capital
+        source: user_entered
+      - path: /connection_id
+        source: user_entered
+      - path: /environment
+        source: user_entered
+      - path: /goal
+        source: user_stated
+      - path: /name
+        source: user_entered
+      - path: /notifications
+        source: user_entered
+      - path: /protection
+        source: user_entered
+      - path: /risk
+        source: user_entered
+      - path: /universe
+        source: user_entered
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.provenance[1].path
+  - name: provenance_second_entry_quoted_span
+    clause: §9.2 every schema is closed, in every provenance entry
+    base_seq: 6
+    changes:
+    - path: payload.provenance
+      value:
+      - path: /autonomy
+        source: user_entered
+      - path: /behavior
+        source: user_entered
+        quoted_span: keep it under ten percent
+      - path: /capital
+        source: user_entered
+      - path: /connection_id
+        source: user_entered
+      - path: /environment
+        source: user_entered
+      - path: /goal
+        source: user_stated
+      - path: /name
+        source: user_entered
+      - path: /notifications
+        source: user_entered
+      - path: /protection
+        source: user_entered
+      - path: /risk
+        source: user_entered
+      - path: /universe
+        source: user_entered
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.provenance[1].quoted_span
+  - name: connection_second_scope_null
+    clause: '§9.2 ConnectionEstablished.scopes: every element is text'
+    base_seq: 2
+    changes:
+    - path: payload.scopes
+      value:
+      - account:write
+      - null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.scopes[1]
+  - name: confirmed_second_path_null
+    clause: '§9.2 MandateConfirmed.confirmed_paths: every element is a pointer'
+    base_seq: 7
+    changes:
+    - path: payload.confirmed_paths
+      value:
+      - /autonomy
+      - null
+      - /capital
+      - /connection_id
+      - /environment
+      - /goal
+      - /name
+      - /notifications
+      - /protection
+      - /risk
+      - /universe
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.confirmed_paths[1]
+  - name: model_second_param_null
+    clause: '§9.2 ConfigSnapshotRegistered.params: every element is text'
+    base_seq: 3
+    changes:
+    - path: payload.params
+      value:
+      - lookback_bars
+      - null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.params[1]
+  - name: fee_named_and_versioned
+    clause: 'rule 21: the first offending member, model_id before model_version'
+    base_seq: 4
+    changes:
+    - path: payload.model_id
+      value: pairs
+    - path: payload.model_version
+      value: '1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model_id
+  - name: fee_versioned_and_admitting
+    clause: 'rule 21: the first offending member, model_version before admits_instruments'
+    base_seq: 4
+    changes:
+    - path: payload.model_version
+      value: '1'
+    - path: payload.admits_instruments
+      value: false
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model_version
+  - name: fee_named_with_params
+    clause: 'rule 21: a model member before params'
+    base_seq: 4
+    changes:
+    - path: payload.model_id
+      value: pairs
+    - path: payload.params
+      value:
+      - lookback_bars
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model_id
   - name: connection_carries_a_key
     clause: §9.2 no credential member (AGENTS.md rules 6 and 7)
     base_seq: 2
@@ -3118,6 +3285,21 @@ control_stream:
       outcome: Invalid
       reason: schema
       path: payload.params
+  - name: fee_params_unsorted
+    clause: 'rules 20 and 21: the lower-numbered rule is reported first'
+    base_seq: 4
+    changes:
+    - path: payload.params
+      value:
+      - taker_bps
+      - maker_bps
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.params
+      also:
+      - reason: schema
+        path: payload.params
   - name: model_params_unsorted
     clause: rule 20
     base_seq: 3
@@ -3142,6 +3324,19 @@ control_stream:
     expect:
       outcome: Invalid
       reason: non_canonical
+      path: payload.mandate_version
+  - name: version_created_without_version
+    clause: '§9.2 MandateVersionCreated.mandate_version: never null'
+    base_seq: 6
+    changes:
+    - path: payload.mandate_version
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:f7319b24f9d2bd6e9e7c97814dcc7636bf019a43f87235fd4d50fc40c198d6f2
+    expect:
+      outcome: Invalid
+      reason: schema
       path: payload.mandate_version
   - name: version_created_record_by_path
     clause: '§9.2 record_ref: a path is not a content address'
@@ -3583,6 +3778,16 @@ control_stream:
       outcome: Invalid
       reason: non_canonical
       path: payload.reason
+  - name: refused_at_a_date
+    clause: '§9.1 timestamp: the §4.7 form, not any text'
+    base_draft: refused_stop
+    changes:
+    - path: payload.effective_at
+      value: '2026-10-02'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.effective_at
   - name: refused_at_risk_clock_seconds
     clause: §9.1 timestamp
     base_draft: refused_stop
