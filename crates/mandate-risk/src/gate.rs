@@ -2682,6 +2682,245 @@ mod tests {
         }
     }
 
+    /// A decimal text to `i128` at 10^-9, by string handling alone, so the exit-routing oracle
+    /// never uses `mandate-num`'s arithmetic. Text with more than nine places is not a quantity.
+    fn scaled(text: &str) -> Option<i128> {
+        let (whole, part) = text.split_once('.').unwrap_or((text, ""));
+        let digits = |t: &str| {
+            t.bytes().try_fold(0_i128, |n, b| {
+                n.checked_mul(10)?
+                    .checked_add(i128::from(b.checked_sub(b'0')?))
+            })
+        };
+        let padded = format!("{part:0<9}");
+        digits(whole)?
+            .checked_mul(1_000_000_000)?
+            .checked_add(digits(&padded)?)
+    }
+
+    /// The quote and the configured `x` of one trigger for the exit-routing properties.
+    fn uncomputable(mut o: Owned, quote: &str, x_is_one: bool) -> Result<Owned, GateError> {
+        let at = Price::parse(quote)?;
+        o.market.quote = Some(crate::SaneQuote {
+            bid: at,
+            ask: at,
+            at: o.now,
+        });
+        if x_is_one {
+            let one = Fraction::parse("1")?;
+            o.config.collar_liquid_x = one;
+            o.config.collar_other_x = one;
+            o.config.collar_crypto_x = one;
+        }
+        Ok(o)
+    }
+
+    proptest! {
+        /// A discretionary exit whose collar cannot be computed is paced by the other controls
+        /// alone (DEC-327 item 3, DEC-383): the exit keeps its own limit price, never a figure the
+        /// gate made up, and `applied` never names the collar; the participation caps still slice
+        /// it and the close window still sends it as a marketable limit.
+        ///
+        /// The draw covers every way a sell's collar fails: the passive end overflows (at the
+        /// decimal's maximum, and at `66023468761886947994.619958614`, where `bid × 1.2` needs
+        /// nine places it cannot keep), it truncates to zero on the Reg NMS grid (`0.0000833` and
+        /// `0.000000001`, for a limit above that end: a market exit is priced at the aggressive
+        /// end, which rounds up onto the grid and is computable, so those two draw a limit exit
+        /// only), or a configured `x` of one puts the aggressive end at zero over an ordinary
+        /// quote. A volume of 101 makes a cap fractional (5.05), so the instrument's increment
+        /// decides the slice. The expected slice is recomputed in `i128` at 10^-9 from the draw
+        /// and the configuration's own figures, never through the crate. Moved here from
+        /// `tests/properties.rs` by the #452 ruling (DEC-77 item 2).
+        #[test]
+        fn an_exit_whose_collar_cannot_be_computed_is_paced_by_the_other_controls_alone(
+            origin in prop::sample::select(vec![
+                Origin::OrderBuilder, Origin::GoalCompletion, Origin::RemovedInstrument,
+            ]),
+            trigger in prop::sample::select(vec![
+                ("79228162514264337593.543950335", false, true),
+                ("66023468761886947994.619958614", false, true),
+                ("0.0000833", false, false),
+                ("0.000000001", false, false),
+                ("99.95", true, true),
+            ]),
+            market in any::<bool>(),
+            close_window in any::<bool>(),
+            trailing in prop::option::of(prop::sample::select(vec!["0", "100", "101", "100000"])),
+            adv in prop::option::of(prop::sample::select(vec!["0", "100", "101", "1000000"])),
+            today in prop::option::of(prop::sample::select(vec!["3", "10"])),
+            fractionable in any::<bool>(),
+        ) {
+            let fail = |e: GateError| TestCaseError::fail(e.to_string());
+            let num = |e: mandate_num::NumError| fail(e.into());
+            let (quote, x_is_one, fails_for_a_market_exit) = trigger;
+            let market = market && fails_for_a_market_exit;
+            let mut o = allowing().map_err(fail)?.selling(origin).map_err(fail)?;
+            o.now = UtcNanos::parse_rfc3339(if close_window {
+                "2026-09-21T19:55:00Z"
+            } else {
+                "2026-09-21T15:00:00Z"
+            })
+            .map_err(|e| fail(e.into()))?;
+            let mut o = uncomputable(o, quote, x_is_one).map_err(fail)?;
+            o.instrument.fractionable = fractionable;
+            o.market.trailing_5m_volume = trailing.map(Qty::parse).transpose().map_err(num)?;
+            o.market.adv_20d = adv.map(Qty::parse).transpose().map_err(num)?;
+            if let Some(filled) = today {
+                o.conduct
+                    .participation_today
+                    .insert(id("a").map_err(fail)?, Qty::parse(filled).map_err(num)?);
+            }
+            if market {
+                o.proposed.kind = ProposedKind::Market;
+            }
+
+            let unit = 1_000_000_000_i128;
+            let on_increment = |cap: i128| {
+                if fractionable {
+                    Some(cap)
+                } else {
+                    cap.checked_div(unit)?.checked_mul(unit)
+                }
+            };
+            let share = |volume: &str, of: String| {
+                scaled(volume)?.checked_mul(scaled(&of)?)?.checked_div(unit)
+            };
+            let order_participation = o.config.order_size_participation.to_string();
+            let daily_participation = o.config.daily_participation.to_string();
+            let minimum_text = o.instrument.min_order_size.to_string();
+            let oracle = || -> Option<(i128, i128, BTreeSet<crate::PacingControl>)> {
+                let proposed = scaled("10")?;
+                let minimum = scaled(&minimum_text)?;
+                let mut expected_qty = proposed;
+                let mut expected_applied = BTreeSet::new();
+                if close_window {
+                    expected_applied.insert(crate::PacingControl::CloseWindow);
+                }
+                let order_cap = match trailing {
+                    Some(t) => Some(on_increment(share(t, order_participation.clone())?)?),
+                    None => None,
+                };
+                let daily_left = match adv {
+                    Some(a) => {
+                        let filled = match today {
+                            Some(t) => scaled(t)?,
+                            None => 0,
+                        };
+                        let left = share(a, daily_participation.clone())?.checked_sub(filled)?;
+                        Some(on_increment(left.max(0))?)
+                    }
+                    None => None,
+                };
+                for (control, cap) in [
+                    (crate::PacingControl::OrderSizeParticipation, order_cap),
+                    (crate::PacingControl::DailyParticipation, daily_left),
+                ] {
+                    if let Some(cap) = cap.filter(|c| *c > 0 && (*c).max(minimum) < proposed) {
+                        expected_qty = expected_qty.min(cap.max(minimum));
+                        expected_applied.insert(control);
+                    }
+                }
+                Some((proposed, expected_qty, expected_applied))
+            };
+            let (proposed, expected_qty, expected_applied) =
+                oracle().ok_or_else(|| TestCaseError::fail("the oracle's figures fit an i128"))?;
+
+            let d = o.decide();
+            prop_assert!(d.is_ok(), "an exit is routed, never an error: {:?}", d);
+            let d = d.map_err(fail)?;
+            prop_assert_eq!(d.verdict, Verdict::Allow, "an exit is never denied");
+            let (sent, limit, marketable, applied) = d.pacing.map_or(
+                (Some(proposed), o.proposed.limit_price, false, BTreeSet::new()),
+                |p| (scaled(&p.qty.to_string()), p.limit_price, p.marketable_limit_required, p.applied),
+            );
+            let sent = sent.ok_or_else(|| TestCaseError::fail("a quantity fits an i128"))?;
+            prop_assert_eq!(
+                limit,
+                Price::parse("100").map_err(num)?,
+                "the exit keeps its own limit: no fabricated figure"
+            );
+            prop_assert_eq!(
+                marketable,
+                close_window,
+                "only the close window makes this exit a marketable limit: a usable quote in the \
+                 regular session bars no market order"
+            );
+            prop_assert_eq!(
+                applied,
+                expected_applied,
+                "the collar is never named; the caps and the close window name themselves"
+            );
+            prop_assert_eq!(sent, expected_qty, "the participation caps slice the exit as computed");
+        }
+
+        /// The fix routes a reduction only: an opening or an increase whose collar cannot be
+        /// computed is never allowed (`AGENTS.md` rules 1 and 3, DEC-383). For a buy the
+        /// aggressive end, `ask × (1 + x)`, needs nine places past the decimal's maximum at these
+        /// quotes; the gate answers with that `overflow`, as it did before E6-6, rather than let an
+        /// unpriced opening through. Moved here from `tests/properties.rs` by the #452 ruling.
+        #[test]
+        fn an_opening_whose_collar_cannot_be_computed_is_never_allowed(
+            origin in prop::sample::select(vec![
+                Origin::OrderBuilder, Origin::GoalCompletion, Origin::RiskEngine,
+                Origin::OwnerClose, Origin::ProtectiveLeg,
+            ]),
+            quote in prop::sample::select(vec![
+                "79228162514264337593.543950335", "78500000000000000000.123456789",
+            ]),
+            held in prop::sample::select(vec!["0", "10"]),
+        ) {
+            let fail = |e: GateError| TestCaseError::fail(e.to_string());
+            let num = |e: mandate_num::NumError| fail(e.into());
+            let mut o = uncomputable(allowing().map_err(fail)?, quote, false).map_err(fail)?;
+            if held != "0" {
+                o.agent
+                    .positions
+                    .insert(id("a").map_err(fail)?, Qty::parse(held).map_err(num)?);
+            }
+            o.proposed.qty = Qty::parse("1").map_err(num)?;
+            o.proposed.origin = origin;
+
+            let d = o.decide();
+            prop_assert!(
+                matches!(d, Err(GateError::Num(mandate_num::NumError::Overflow))),
+                "an opening over an uncomputable collar is the collar's error, never routed: {:?}",
+                d
+            );
+        }
+
+        /// A proposal of zero reduces nothing, so an uncomputable collar does not route it: the
+        /// gate keeps the collar's own error for it, as before E6-6, rather than allow an order of
+        /// nothing (DEC-383). The expected error per quote is the arithmetic's: the passive end
+        /// overflows at the decimal's maximum, truncates to zero on the Reg NMS grid at
+        /// `0.0000833`, and a configured `x` of one puts the aggressive end at zero. Moved here
+        /// from `tests/properties.rs` by the #452 ruling.
+        #[test]
+        fn a_zero_quantity_exit_over_an_uncomputable_collar_is_not_routed(
+            origin in prop::sample::select(vec![
+                Origin::OrderBuilder, Origin::GoalCompletion, Origin::RemovedInstrument,
+            ]),
+            trigger in prop::sample::select(vec![
+                ("79228162514264337593.543950335", false, mandate_num::NumError::Overflow),
+                ("0.0000833", false, mandate_num::NumError::NotPositive),
+                ("99.95", true, mandate_num::NumError::NotPositive),
+            ]),
+        ) {
+            let fail = |e: GateError| TestCaseError::fail(e.to_string());
+            let (quote, x_is_one, expected) = trigger;
+            let o = allowing().map_err(fail)?.selling(origin).map_err(fail)?;
+            let mut o = uncomputable(o, quote, x_is_one).map_err(fail)?;
+            o.proposed.qty = Qty::ZERO;
+
+            let d = o.decide();
+            prop_assert!(
+                matches!(&d, Err(GateError::Num(e)) if *e == expected),
+                "a zero exit keeps the collar's error {:?}: {:?}",
+                expected,
+                d
+            );
+        }
+    }
+
     /// §9.6's minimum resting time of 2 s on a cancel at 15:00:00: an opening order resting since
     /// 14:59:58 has served it; one resting a nano less is `min_resting_time`, unless it is
     /// marketable or the cancel precedes a risk-reducing order (DEC-163 item 7); an exit order and
