@@ -54,6 +54,7 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("KillSwitchActivated", &[ACCT, AGENT], &[]),
     ("OwnerCommandRefused", &[ACCT, AGENT], &[]),
     ("MandateVersionApplied", &[ACCT], &[MAN]),
+    ("UniverseChanged", &[ACCT], &[MAN]),
     ("RiskDayStarted", &[ACCT], &[MAN]),
     ("RiskLimitTriggered", &[ACCT], &[MAN]),
     ("RiskLimitLifted", &[ACCT], &[MAN]),
@@ -150,8 +151,14 @@ const CLOSED_BY_SECTION_9_2: &[(&str, &str)] = &[
 /// (DEC-402). It is kept apart from the eleven pairs until that registration is implemented.
 const SNAPSHOT_ON_ACCOUNT: (&str, &str) = ("AccountSnapshotRecorded", ACCT);
 
+/// The account stream's risk-state records journal spec §9.3 closes (DEC-403, DEC-404).
+const RISK_STATE_ON_ACCOUNT: [(&str, &str); 2] =
+    [("MandateVersionApplied", ACCT), ("UniverseChanged", ACCT)];
+
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {
-    CLOSED_BY_SECTION_9_2.contains(&(event_type, kind)) || (event_type, kind) == SNAPSHOT_ON_ACCOUNT
+    CLOSED_BY_SECTION_9_2.contains(&(event_type, kind))
+        || (event_type, kind) == SNAPSHOT_ON_ACCOUNT
+        || RISK_STATE_ON_ACCOUNT.contains(&(event_type, kind))
 }
 
 fn stream_of(kind: &str) -> &'static str {
@@ -347,6 +354,7 @@ const RISK_INPUTS: &[&str] = &[
     "CashInLieuPosted",
     "CompensatingEvent",
     "MandateVersionApplied",
+    "UniverseChanged",
     "RiskDayStarted",
     "OwnerAcknowledged",
 ];
@@ -489,6 +497,38 @@ fn account_snapshot_recorded_refuses_an_unlisted_member() {
         refused.map_err(|e| (e.reason, e.path)),
         Err((InvalidReason::Schema, "payload.unregistered".to_owned()))
     );
+}
+
+/// Each risk-state record is routed to §9.3's checks, never refused for want of a catalogue entry
+/// or a schema (DEC-403, DEC-404).
+#[test]
+fn risk_state_records_are_routed_to_section_9_3() {
+    for (event_type, kind) in RISK_STATE_ON_ACCOUNT {
+        let refused = Draft::parse(&draft(event_type, kind, &["mandate_version"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert!(
+            !matches!(
+                refused.reason,
+                InvalidReason::UnknownSchema | InvalidReason::UnknownEventType
+            ),
+            "{event_type}: {refused:?}"
+        );
+    }
+}
+
+/// §9.3 closes both schemas, so a member neither lists is refused as `schema` at that member.
+#[test]
+#[ignore = "pending E7-10"]
+fn risk_state_records_refuse_an_unlisted_member() {
+    for (event_type, kind) in RISK_STATE_ON_ACCOUNT {
+        let refused = Draft::parse(&draft(event_type, kind, &["mandate_version"])).map(|_| ());
+        assert_eq!(
+            refused.map_err(|e| (e.reason, e.path)),
+            Err((InvalidReason::Schema, "payload.unregistered".to_owned())),
+            "{event_type}"
+        );
+    }
 }
 
 const SHA_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
