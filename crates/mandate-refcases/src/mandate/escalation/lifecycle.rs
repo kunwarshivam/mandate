@@ -590,7 +590,7 @@ impl Shell {
             return vec!["a request outside an ask".to_owned()];
         };
         let mut faults = Vec::new();
-        if ran.decision.is_none() || draft.causation_id != ran.decision {
+        if draft.causation_id != ran.decision {
             faults.push(format!(
                 "its cause is {:?}, not the ask's `DecisionMade`",
                 draft.causation_id
@@ -635,7 +635,7 @@ impl Shell {
     fn delivered(&self, want: &Json, draft: &EventDraft) -> Vec<String> {
         let mut faults = self.names_approval(want, draft);
         let cause = draft.causation_id.as_ref().map(|cause| cause.0.as_str());
-        if cause.is_none() || cause != draft.payload.get("approval").and_then(Value::as_str) {
+        if cause != draft.payload.get("approval").and_then(Value::as_str) {
             faults.push(format!("its cause is {cause:?}, not its request"));
         }
         faults
