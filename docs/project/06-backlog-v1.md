@@ -1208,11 +1208,17 @@ From E10-1's slice-V implementation (DEC-161):
     each of the four reasons, and the `refused_stop` vector's own form, read from the committed
     vectors. The in-module late-Stop pin goes pending with them (the coordinator-named test
     change), and `refused_only` reads the judged second in either form, so the implementation PR
-    deletes `#[ignore]` lines only (DEC-309 item 3). Tests merged (#462); the implementation PR
-    on `agent/m7-refused-timestamp-impl` fills `payload::stamp`, switches `refused` to it, and
-    deletes the five `#[ignore]` lines, so the drafts commit again. Until it lands the registered
-    schema refuses the integer-form drafts at `append`, as DEC-261 item 7 has standing
-    (rule 3). This follow-up row needs its own story id: its pins and stub cite E8-3, which
+    deletes `#[ignore]` lines only (DEC-309 item 3). Tests merged (#462) and the implementation
+    merged (#469): `refused` stamps through `payload::stamp`, and the refusal drafts commit at
+    `append`; the follow-up on `agent/m7-refused-timestamp-followup` pins the stamp's §4.7 range
+    and corrects the stale doc comments. Still open from the two reviews:
+    - DEC-308 item 2 and DEC-310 item 1 name the integer form's refusal at `append` as
+      `non_canonical`; the vectors and `mandate_journal::Draft::parse` give `schema` at
+      `payload.effective_at` (the #469 review, minor 2). The code's doc comment is corrected; the
+      decisions need a note in a docs change.
+    - #462's description says three live tests read `refused_only`; there are four (its round-2
+      review, minor 7). Description wording on a merged PR, recorded here only.
+    This follow-up row needs its own story id: its pins and stub cite E8-3, which
     `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
     (HLD §8), as a new `schema_version` with its own vectors.
