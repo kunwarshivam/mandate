@@ -13,13 +13,13 @@
 //! `DecisionMade` records the decision the script starts from, and is set aside. The other steps land
 //! in DEC-317's later slices and fail naming theirs until then.
 //!
-//! **The map** (DEC-317 item 4). A draft's `clock` is the folded risk clock after its step; instants
-//! are whole seconds; `limit_price` is `limit`; decimals compare by value. The case's approval and
-//! content-hash names are bound one to one to the runtime's request id and hash: the reference model
-//! hashes its request as a stand-in for the content object (`reference/mandate/ref.py`,
-//! `escalation_step`), so a case's hash is a name, and the runtime's `content_hash` must be the
-//! digest of its own inline `content`. Every member the runtime writes is one the case states or one
-//! checked here.
+//! **The map** (DEC-317 item 4). A draft's `clock` is the folded risk clock after its step;
+//! instants are whole seconds; `limit_price` is `limit`; every other member compares as the
+//! runtime's canonical value, which is how the case writes it. The case's approval and content-hash
+//! names are bound one to one to the runtime's request id and hash: the reference model hashes its
+//! request as a stand-in for the content object (`reference/mandate/ref.py`, `escalation_step`), so
+//! a case's hash is a name, and the runtime's `content_hash` must be the digest of its own inline
+//! `content`. Every member the runtime writes is one the case states or one checked here.
 //!
 //! **Every member is read (DEC-85).** The case, the context, each step, the bound order, each
 //! expectation and each expected draft are swept, and a member or value this module does not know
@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Int, Key, Value, to_canonical};
 use mandate_journal::Environment;
-use mandate_num::{Price, Qty, Signed};
+use mandate_num::{Price, Qty};
 use mandate_runtime::{
     ActorKind, AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment,
     DryRunVerdict, Effect, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest,
@@ -41,7 +41,7 @@ use mandate_runtime::{
 use mandate_time::NewYorkTime;
 
 use crate::mandate::{instant, not_implemented, unknown_members};
-use crate::{Json, at, ensure, list_at, str_at, u64_at};
+use crate::{Json, at, ensure, list_at, str_at, to_canon, u64_at};
 
 const AGENT_STREAM: &str = "agent:w:a";
 const ACCOUNT_STREAM: &str = "acct:w:c";
@@ -61,39 +61,38 @@ const CONTEXT_KEYS: &[&str] = &[
 /// An expected request's members the map reads plainly, by the case's name, the runtime's, and how.
 /// A bound order has the same members but the last, the deadline.
 const REQUESTED: &[(&str, &str, As)] = &[
-    ("instrument", "instrument", As::Text),
-    ("asset_class", "asset_class", As::Text),
-    ("side", "side", As::Text),
-    ("qty", "qty", As::Decimal),
-    ("limit_price", "limit", As::Decimal),
-    ("purpose", "purpose", As::Text),
-    ("mandate_version", "mandate_version", As::Text),
-    ("decided_by", "decided_by", As::Text),
-    ("combined_score", "combined_score", As::Decimal),
-    ("reference_mark", "reference_mark", As::Mark),
-    ("approvers_required", "approvers_required", As::Count),
-    ("independent_required", "independent_required", As::Flag),
-    ("timeout_s", "timeout_s", As::Count),
+    ("instrument", "instrument", As::Canonical),
+    ("asset_class", "asset_class", As::Canonical),
+    ("side", "side", As::Canonical),
+    ("qty", "qty", As::Canonical),
+    ("limit_price", "limit", As::Canonical),
+    ("purpose", "purpose", As::Canonical),
+    ("mandate_version", "mandate_version", As::Canonical),
+    ("decided_by", "decided_by", As::Canonical),
+    ("combined_score", "combined_score", As::Canonical),
+    ("reference_mark", "reference_mark", As::Canonical),
+    ("approvers_required", "approvers_required", As::Canonical),
+    (
+        "independent_required",
+        "independent_required",
+        As::Canonical,
+    ),
+    ("timeout_s", "timeout_s", As::Canonical),
     ("deadline", "deadline", As::Seconds),
 ];
 const DELIVERED: &[(&str, &str, As)] = &[
-    ("channel", "channel", As::Text),
-    ("status", "status", As::Text),
+    ("channel", "channel", As::Canonical),
+    ("status", "status", As::Canonical),
 ];
 
 /// How a case member is read off the runtime's draft (DEC-317 item 4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum As {
-    /// A string or `null`, compared as written.
-    Text,
-    /// A decimal string, compared by value.
-    Decimal,
+    /// As the case writes it, which is the runtime's canonical form: a decimal in its canonical
+    /// text, a reference mark as `{price, seq}`, `null` as `null`.
+    Canonical,
     /// An instant, written by the runtime as its whole second.
     Seconds,
-    Count,
-    Flag,
-    /// `{price, seq}` or `null`.
-    Mark,
 }
 
 /// ULID-shaped agent-stream ids from the epoch, the head and the ordinal in decimal digits, which
@@ -161,8 +160,8 @@ struct Shell {
     view: MandateView,
     classified: Classified,
     verdict: DryRunVerdict,
-    /// The last folded mark of each instrument.
-    marks: BTreeMap<String, Signed>,
+    /// The instruments a mark has been folded for.
+    marks: BTreeSet<String>,
     approval_ids: BTreeMap<String, String>,
     hashes: BTreeMap<String, String>,
 }
@@ -255,7 +254,7 @@ impl Shell {
                 decided_by: None,
             },
             verdict: DryRunVerdict::Allow,
-            marks: BTreeMap::new(),
+            marks: BTreeSet::new(),
             approval_ids: BTreeMap::new(),
             hashes: BTreeMap::new(),
         };
@@ -368,7 +367,7 @@ impl Shell {
     fn mark(&mut self, instrument: &str, price: &str, risk_clock: i64) -> Result<(), String> {
         let members = vec![("instrument", text(instrument)), ("price", text(price))];
         self.account("MarkUpdated", members, risk_clock)?;
-        self.marks.insert(instrument.to_owned(), decimal(price)?);
+        self.marks.insert(instrument.to_owned());
         Ok(())
     }
 
@@ -381,7 +380,7 @@ impl Shell {
         let instrument = str_at(bound, "instrument")?;
         let clock = self.clock()?;
         match at(bound, "reference_mark")? {
-            Json::Null => ensure(!self.marks.contains_key(instrument), || {
+            Json::Null => ensure(!self.marks.contains(instrument), || {
                 "a request with no reference mark, after a mark was folded".to_owned()
             })?,
             mark => {
@@ -481,7 +480,7 @@ impl Shell {
         if draft.event_type != event_type {
             return vec![format!("expected a {event_type}")];
         }
-        match second_of(want, "clock") {
+        match at(want, "clock").and_then(|clock| second(clock, "clock")) {
             Ok(clock) if clock == ran.clock => {}
             Ok(clock) => faults.push(format!(
                 "clock: expected {clock}, the step is at {}",
@@ -577,36 +576,13 @@ impl Shell {
 
 /// One case member against the runtime's, under `how`.
 fn member(how: As, want: &Json, got: Option<&Value>) -> Result<(), String> {
-    let fault = || format!("expected {want}, got {got:?}");
-    let ok = match (how, want, got) {
-        (As::Text | As::Mark, Json::Null, Some(Value::Null)) => true,
-        (As::Text, Json::String(s), Some(got)) => got.as_str() == Some(s.as_str()),
-        (As::Decimal, Json::String(s), Some(got)) => {
-            decimal(s)? == decimal(got.as_str().ok_or_else(fault)?)?
-        }
-        (As::Seconds, Json::String(_), Some(got)) => {
-            let secs = u64::try_from(second(want, "instant")?).map_err(|_| fault())?;
-            got.as_int() == Some(secs)
-        }
-        (As::Count, Json::Number(n), Some(got)) => {
-            got.as_int().is_some_and(|got| n.as_u64() == Some(got))
-        }
-        (As::Flag, Json::Bool(b), Some(Value::Bool(got))) => b == got,
-        (As::Mark, Json::Object(_), Some(got)) => {
-            unknown_members(want, &["price", "seq"])?;
-            let keys: Vec<&str> = got
-                .as_object()
-                .into_iter()
-                .flat_map(|o| o.keys())
-                .map(Key::as_str)
-                .collect();
-            keys == ["price", "seq"]
-                && member(As::Decimal, at(want, "price")?, got.get("price")).is_ok()
-                && member(As::Count, at(want, "seq")?, got.get("seq")).is_ok()
-        }
-        _ => false,
+    let wanted = match how {
+        As::Seconds => seconds(second(want, "instant")?)?,
+        As::Canonical => to_canon(want)?,
     };
-    ensure(ok, fault)
+    ensure(got == Some(&wanted), || {
+        format!("expected {want}, got {got:?}")
+    })
 }
 
 /// Binds a case name to a runtime one, one to one; each must be present.
@@ -630,10 +606,6 @@ fn bind(
     Ok(())
 }
 
-fn decimal(text: &str) -> Result<Signed, String> {
-    Signed::parse(text).map_err(|e| format!("`{text}`: {e}"))
-}
-
 /// The whole risk-clock second an instant names; a fraction fails rather than being dropped
 /// (mandate spec §5.2, DEC-292 item 2).
 fn second(value: &Json, what: &str) -> Result<i64, String> {
@@ -642,10 +614,6 @@ fn second(value: &Json, what: &str) -> Result<i64, String> {
         format!("`{what}` is not a whole second")
     })?;
     Ok(when.secs())
-}
-
-fn second_of(value: &Json, key: &str) -> Result<i64, String> {
-    second(at(value, key)?, key)
 }
 
 fn text(value: &str) -> Value {

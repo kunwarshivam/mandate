@@ -40,8 +40,9 @@ fn a_reference_mark_has_exactly_its_members() -> Result<(), String> {
         }
         object(members)
     };
-    member(As::Mark, &want, Some(&mark(false)?))?;
-    ensure(member(As::Mark, &want, Some(&mark(true)?)).is_err(), || {
-        "an extra member passed".to_owned()
-    })
+    member(As::Canonical, &want, Some(&mark(false)?))?;
+    ensure(
+        member(As::Canonical, &want, Some(&mark(true)?)).is_err(),
+        || "an extra member passed".to_owned(),
+    )
 }
