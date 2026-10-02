@@ -1968,11 +1968,11 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
-/// The eight `protection` rows are #485's (DEC-408): an exit ladder between rungs over-sells beside
+/// The ten `protection` rows are #485's (DEC-408): an exit ladder between rungs over-sells beside
 /// a new exit, which is a wrong answer from code that runs, with no stub to stop at. Each fails on
 /// the rule-13 oracle's count; the fix (DEC-409, DEC-410) deletes the rows with the `#[ignore]`
 /// lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 14] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1999,15 +1999,23 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
     ),
     (
         "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_risk_exit_held_overnight_beside_a_parked_ladder_is_sized_to_what_is_left",
+        "sequence_tests::a_risk_exit_held_overnight_beside_a_parked_ladder_goes_whole_and_trims_it",
     ),
     (
         "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_risk_exit_beside_a_parked_ladder_selling_everything_waits",
+        "sequence_tests::a_risk_exit_beside_a_parked_ladder_selling_everything_goes_whole",
     ),
     (
         "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_risk_exit_at_the_open_beside_a_parked_sequence_is_sized_to_what_is_left",
+        "sequence_tests::a_parked_sequence_past_its_bound_never_sends_its_remainder",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_ladder_that_resumes_with_nothing_left_sends_nothing",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_ladder_that_resumes_after_its_position_shrank_sends_only_what_is_left",
     ),
     (
         "crates/mandate-executor/src/protection.rs",
