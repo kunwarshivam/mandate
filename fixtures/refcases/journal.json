@@ -7559,6 +7559,92 @@
     }
    },
    {
+    "name": "order_29_before_30",
+    "clause": "rules 29 then 30: a risk-increasing applied record without step-up and with a reason",
+    "base_draft": "version_applied",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": null
+     },
+     {
+      "path": "payload.reason",
+      "value": "would_trigger_limit"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.reason"
+      }
+     ]
+    }
+   },
+   {
+    "name": "order_30_before_33",
+    "clause": "rules 30 then 33: a rejected raise labelled neutral that also carries an allocation change",
+    "base_draft": "version_rejected",
+    "changes": [
+     {
+      "path": "payload.classification",
+      "value": "neutral"
+     },
+     {
+      "path": "payload.allocation_change",
+      "value": "2500"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.allocation_change",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.classification"
+      }
+     ]
+    }
+   },
+   {
+    "name": "order_31_before_32",
+    "clause": "rules 31 then 32: a thesis admission that removes and names no thesis",
+    "base_draft": "universe_admitted",
+    "changes": [
+     {
+      "path": "payload.change",
+      "value": "removed"
+     },
+     {
+      "path": "payload.thesis_id",
+      "value": null
+     },
+     {
+      "path": "payload.lineage_id",
+      "value": null
+     },
+     {
+      "path": "payload.universe_size_after",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.thesis_id"
+      }
+     ]
+    }
+   },
+   {
     "name": "thesis_admission_removes",
     "clause": "rule 31",
     "base_draft": "universe_admitted",

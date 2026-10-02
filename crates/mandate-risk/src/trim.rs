@@ -356,6 +356,20 @@ mod tests {
         Ok(())
     }
 
+    /// The minimum is judged on what is left to sell after the agent's own resting sells, not on
+    /// the whole excess (DEC-399 items 5 and 7): with 2 of the 3-share trim already resting, the
+    /// 1-share remainder is proposed at a minimum of 1 and withheld at 3, where the whole excess
+    /// of 3 shares would meet it (#498 review, m8).
+    #[test]
+    fn the_minimum_is_judged_on_the_remainder_after_resting_sells() -> Result<(), GateError> {
+        let mut scene = Scene::new("10", "1000")?;
+        scene.resting(7, "2", Side::Sell, false, true)?;
+        assert_eq!(scene.trims()?, qty("1")?);
+        scene.instrument.min_order_size = Qty::parse("3")?;
+        assert_eq!(scene.trims()?, Vec::new());
+        Ok(())
+    }
+
     /// Rounding up never sells more than is held: at a factor of 0 the whole 2.5 goes, not the 3
     /// the whole-share grid rounds 2.5 up to.
     #[test]

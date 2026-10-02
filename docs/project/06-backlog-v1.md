@@ -1306,6 +1306,9 @@ From E10-1's slice-V implementation (DEC-161):
     - **Unexercised shapes (#482 round 2, m3):** no pair reaches `classify`'s `join` with more than
       one class over several rows (the only multi-path pair is the pinning switch, which returns
       first), and no pair is two identical documents.
+    - **`asset_id` (#497 round 1, m3; DEC-404 item 9):** journal spec v0.10 types `instrument` as an
+      asset ID. Owed, in order: the `mandate-journal` code PR (test first, with `result` matched
+      exhaustively, m2), then the reference PR with the `asset_id` vectors and seeded bugs.
     - **The pairs are not valid mandates (#482 round 2, m1):** six of
       `a_version_maps_only_under_the_classification_its_documents_give`'s pairs break a V-rule (V-008,
       V-013, V-034, V-036). Make each valid with a second patched path, so every fixture passes
@@ -2230,6 +2233,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   false, true)` and `min_order_size = 3` leaves a 1-share remainder, which must not be proposed,
   while a whole-excess reading (3 shares) proposes it. Next in stream G, before the reference
   PR's status change.
+  *Done:* `trim::tests::the_minimum_is_judged_on_the_remainder_after_resting_sells`, which fails on
+  a seeded whole-excess reading.
 - **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
@@ -2672,14 +2677,9 @@ From journal spec v0.8 §9.3's review (#470 round 2, DEC-403):
   4). `drafts.classification` catches the dangerous sub-case, a wrong value that changes the §9.2
   verdict. All six of today's documents were checked against the full validators by hand.
 - **§9.3's vectors: three coverage gaps (#470 round 2, minors 1, 7 and 8).**
-  - **Report orders.** The 29-then-30 order (an applied, risk-increasing record with `step_up`
-    null and a `reason` set) and the 30-then-33 order (a rejected record with
-    `increase_blocked_while_latched`, `classification` `neutral`, and an `allocation_change` set)
-    are pinned by no draft. Each wants a draft and an `order.*` mutant, as §9.2's
-    `order.rule_21_first`. Rules 29 and 33 can never both fire, since 29 needs `risk_increasing`
-    and 33 needs anything else, so their relative order needs no pin. The 31-then-32 order is a
-    third reachable pair (a `thesis_admitted` that removes and carries no thesis breaks both), and
-    is unpinned too (#482 round 1, m3).
+  - **Report orders.** Done in journal spec v0.10: the 29-then-30, 30-then-33 and 31-then-32 orders
+    each have a draft and an `order.*` seeded bug (DEC-404 item 9). Rules 29 and 33 can never both
+    fire, since 29 needs `risk_increasing` and 33 needs anything else.
   - **`universe_size_after`** is checked against nothing, not even the fold of the section's own
     drafts.
   - **`risk_state.classify`** raises `ValueError` on a path it does not encode instead of reporting
