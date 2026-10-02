@@ -8276,6 +8276,62 @@ mod sequence_tests {
         }
         Ok(())
     }
+
+    /// #515, `main`'s route (#468's round-3 review; DEC-421): ten held and protected, a marketable
+    /// risk exit of 4 goes once the OCO's cancel is confirmed and is acknowledged, and the broker
+    /// then reports it `canceled` with 3 filled, a fill no update has applied yet. The broker holds
+    /// 7, so protection is re-placed for at most 7. Sizing from the fold's 10 would leave ten
+    /// protective sells against seven shares (rule 12).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn an_exit_ended_with_a_fill_not_yet_applied_is_re_protected_for_what_the_broker_holds()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(EXIT, "4", "130", Purpose::RiskExit)?, &ports)?;
+        let released = executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = format!("md-{EXIT}");
+        assert!(
+            submissions(&released)
+                .iter()
+                .any(|order| order.client_order_id.as_str() == exit),
+            "the exit goes once the cancel is confirmed: {:?}",
+            drafted(&released)
+        );
+        let acked = Held {
+            purpose: Purpose::RiskExit,
+            qty: 4,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        executor.run(
+            Input::Broker(Ok(BrokerOutcome::Submitted(reported(&exit, &acked)?))),
+            &ports,
+        )?;
+        let ended = reported(
+            &exit,
+            &Held {
+                purpose: Purpose::RiskExit,
+                qty: 4,
+                filled: 3,
+                acked: true,
+                live: false,
+            },
+        )?;
+        let after = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(ended)), &ports)?;
+        let protected_qty = submissions(&after)
+            .iter()
+            .filter(|order| order.purpose == Purpose::Protective)
+            .try_fold(Qty::ZERO, |total, order| total.checked_add(order.qty))?;
+        assert!(
+            protected_qty <= Qty::parse("7")?,
+            "protection re-placed for {protected_qty:?} while the broker holds 7: {:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
 }
 
 #[cfg(test)]
