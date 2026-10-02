@@ -275,6 +275,7 @@ fn autonomy_of(c: &Value) -> Autonomy {
                 .map(|t| dec(t, DecGrammar::PositiveDecimal)),
         },
         review_by: None,
+        delegations: Vec::new(),
     }
 }
 

@@ -819,6 +819,7 @@ fn each_context_rule_fires_on_its_side_of_the_boundary() -> Checked {
                     environment: Environment::Live,
                     connection_id: ConnectionId::parse("conn_alpaca_paper_01")
                         .map_err(|e| e.to_string())?,
+                    mandate: None,
                 });
                 Ok(())
             })?,
@@ -831,6 +832,7 @@ fn each_context_rule_fires_on_its_side_of_the_boundary() -> Checked {
                 c.previous_version = Some(PreviousVersion {
                     environment: Environment::Paper,
                     connection_id: ConnectionId::parse("conn_other").map_err(|e| e.to_string())?,
+                    mandate: None,
                 });
                 Ok(())
             })?,
@@ -844,6 +846,7 @@ fn each_context_rule_fires_on_its_side_of_the_boundary() -> Checked {
                     environment: Environment::Paper,
                     connection_id: ConnectionId::parse("conn_alpaca_paper_01")
                         .map_err(|e| e.to_string())?,
+                    mandate: None,
                 });
                 Ok(())
             })?,
@@ -1953,6 +1956,7 @@ const BREAKERS: [Breaker; 26] = [
                 .map(|connection_id| PreviousVersion {
                     environment: Environment::Paper,
                     connection_id,
+                    mandate: None,
                 });
     }),
     (Violation::V032, &[], |c| {
