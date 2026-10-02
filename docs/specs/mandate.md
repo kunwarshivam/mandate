@@ -25,9 +25,9 @@ builder, versioning, change classification, and the records kept.
   instrument's minimum order size (`min_order_size`, [trading spec §5.3](trading-domain.md) rule 2),
   which is the minimum the risk gate holds. §8.3 step 5's "minimum order" is named as the minimum
   order value, `min_order_usd`, with its rule unchanged. The reference model judges a trim by the
-  quantity, which only adds risk-reducing trims; no existing reference case changes, the four trim
-  cases state `min_order_size`, and MC-B33 and MC-B34 are added where the two minimums disagree
-  (§11).
+  quantity. Where the two minimums disagree, it declines only a sell that §5.3 rule 2 would refuse
+  anyway. No existing reference case changes, the four trim cases state `min_order_size`, and
+  MC-B33 and MC-B34 are added where the two minimums disagree (§11).
 - **v0.6, amended ([DEC-187](../project/04-decision-log.md#decisions), read by [DEC-350](../project/decisions/DEC-350.md) to [DEC-352](../project/decisions/DEC-352.md)):** tripwires. `autonomy.tripwires` holds
   conditions the owner sets in advance over the agent's recorded fills (a losing streak, a realized loss
   in the risk day, new instruments), each with an action, `end_delegations` or `exits_only`, never
