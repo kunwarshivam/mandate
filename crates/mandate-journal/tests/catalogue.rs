@@ -467,9 +467,9 @@ fn a_closed_control_stream_event_is_never_an_unknown_schema() {
 }
 
 /// The account stream's snapshot is routed to §9.2's checks, never refused for want of a schema
-/// (DEC-261 item 7, DEC-402). Stream K's fee-step writer conforms (#456), so its registration goes
-/// ahead; the fee step's own snapshot is wired to §9.2's members in the same change, which the
-/// executor's `the_fee_steps_snapshot_is_never_refused_for_its_members` pins.
+/// (DEC-261 item 7, DEC-402). Stream K's fee-step writer exists and conforms (#456), and `fees`
+/// journals it from the change that registers the schema, which the executor's
+/// `the_fee_steps_snapshot_is_never_refused_for_its_members` pins.
 #[test]
 fn account_snapshot_recorded_is_routed_to_section_9_2() {
     let (event_type, kind) = SNAPSHOT_ON_ACCOUNT;
@@ -482,7 +482,6 @@ fn account_snapshot_recorded_is_routed_to_section_9_2() {
 /// §9.2 closes the snapshot's schema, so a member it does not list is refused as `schema` at that
 /// member, as on the eleven other pairs.
 #[test]
-#[ignore = "pending E7-10"]
 fn account_snapshot_recorded_refuses_an_unlisted_member() {
     let (event_type, kind) = SNAPSHOT_ON_ACCOUNT;
     let refused = Draft::parse(&draft(event_type, kind, &[])).map(|_| ());
