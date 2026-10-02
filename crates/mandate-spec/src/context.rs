@@ -980,3 +980,85 @@ mod tests {
         Ok(())
     }
 }
+
+/// `JournaledFact::from_record`'s label readings, each value of each closed set, judged inside this
+/// crate so the mutation gate sees them (DEC-303 item 10).
+#[cfg(test)]
+mod record_tests {
+    use std::collections::BTreeMap;
+
+    use mandate_canon::{Digest, Key, Value};
+    use mandate_domain::Environment;
+
+    use super::JournaledFact;
+    use crate::SpecError;
+    use crate::document::{ConnectionId, Pointer, Source};
+
+    fn object(members: &[(&str, Value)]) -> Result<Value, SpecError> {
+        let mut out = mandate_canon::Object::new();
+        for (name, value) in members {
+            let key = Key::new(name).map_err(|_| SpecError::InvalidInput { what: "key" })?;
+            out.insert(key, value.clone());
+        }
+        Ok(Value::Object(out))
+    }
+
+    fn text(value: &str) -> Value {
+        Value::Str(value.to_owned())
+    }
+
+    fn nothing(_: &Digest) -> Option<Value> {
+        None
+    }
+
+    #[test]
+    fn each_environment_maps_to_its_own() -> Result<(), SpecError> {
+        for (label, environment) in [("paper", Environment::Paper), ("live", Environment::Live)] {
+            let established = object(&[
+                ("connection_id", text("conn_1")),
+                ("broker", text("alpaca")),
+                ("environment", text(label)),
+                ("scopes", Value::Array(vec![text("trading")])),
+            ])?;
+            assert_eq!(
+                JournaledFact::from_record("ConnectionEstablished", &established, &nothing, None)?,
+                Some(JournaledFact::ConnectionEstablished {
+                    connection_id: ConnectionId::parse("conn_1")?,
+                    environment,
+                }),
+                "{label}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn each_provenance_source_maps_to_its_own() -> Result<(), SpecError> {
+        let version = format!("sha256:{}", "a".repeat(64));
+        for (label, source) in [
+            ("user_stated", Source::UserStated),
+            ("user_entered", Source::UserEntered),
+            ("template_structure", Source::TemplateStructure),
+            ("platform_proposed", Source::PlatformProposed),
+            ("platform_default", Source::PlatformDefault),
+        ] {
+            let entry = object(&[("path", text("/risk")), ("source", text(label))])?;
+            let created = object(&[
+                ("mandate_version", text(&version)),
+                ("provenance", Value::Array(vec![entry])),
+                ("record_ref", text(&version)),
+            ])?;
+            let fact =
+                JournaledFact::from_record("MandateVersionCreated", &created, &nothing, None)?;
+            let Some(JournaledFact::MandateVersionCreated { sources, .. }) = fact else {
+                return Err(SpecError::InvalidInput { what: "the fact" });
+            };
+            assert_eq!(
+                sources,
+                BTreeMap::from([(Pointer::new("/risk"), source)]),
+                "{label}"
+            );
+        }
+        Ok(())
+    }
+}
