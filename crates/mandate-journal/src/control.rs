@@ -9,10 +9,8 @@
 //! for a member while it pauses every agent and alerts the owner (`AGENTS.md` rules 3 and 13,
 //! DEC-261 item 7, DEC-402).
 //!
-//! **The account stream's `MandateVersionApplied` and `UniverseChanged` are routed here, to a stub**
-//! (journal spec v0.8 §9.3, DEC-403, DEC-404). The registration's tests PR refuses both as
-//! `unimplemented`, as they were refused as `unknown_schema` before; the implementation PR
-//! registers their schemas and rules 29 to 33.
+//! The account stream's `MandateVersionApplied` and `UniverseChanged` are journal spec v0.8 §9.3's,
+//! with rules 29 to 33, routed here beside §9.2's (DEC-403, DEC-404).
 
 use mandate_canon::Value;
 use mandate_num::Usd;
@@ -62,9 +60,6 @@ pub(crate) fn payload(
     payload: &Value,
     config_refs: Option<&Value>,
 ) -> Result<Value, Invalid> {
-    if RISK_STATE.contains(&event_type) {
-        return risk_state_payload();
-    }
     let schema = schema(event_type, schema_version)
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
     let payload = crate::schema::normalize(schema, payload, "payload")?;
@@ -116,6 +111,81 @@ pub(crate) fn payload(
             InvalidReason::Schema,
             "payload.loss_added",
         )?,
+        "MandateVersionApplied" => {
+            let increasing = p.text("classification") == "risk_increasing";
+            ensure(
+                !increasing || !p.is_null("step_up"),
+                InvalidReason::Schema,
+                "payload.step_up",
+            )?;
+            let rejected = p.text("result") == "rejected";
+            ensure(
+                p.is_null("reason") != rejected,
+                InvalidReason::Schema,
+                "payload.reason",
+            )?;
+            for member in ["allocation_change", "max_loss_from_allocation"] {
+                ensure(
+                    !rejected || p.is_null(member),
+                    InvalidReason::Schema,
+                    &format!("payload.{member}"),
+                )?;
+            }
+            let raised = !p.is_null("allocation_change") && {
+                let change = p.text("allocation_change");
+                !change.starts_with('-') && change != "0"
+            };
+            let implied = (!rejected && (raised || !p.is_null("max_loss_from_allocation")))
+                || (rejected
+                    && [
+                        "increase_blocked_while_latched",
+                        "waiting_period",
+                        "still_below_new_floor",
+                    ]
+                    .contains(&p.text("reason")));
+            ensure(
+                !implied || increasing,
+                InvalidReason::Schema,
+                "payload.classification",
+            )?;
+        }
+        "UniverseChanged" => {
+            let reason = p.text("reason");
+            let admitted = p.text("change") == "admitted";
+            let allowed = if admitted {
+                reason == "thesis_admitted" || reason == "version_applied"
+            } else {
+                reason != "thesis_admitted"
+            };
+            ensure(allowed, InvalidReason::Schema, "payload.reason")?;
+            let (thesis, lineage) = (!p.is_null("thesis_id"), !p.is_null("lineage_id"));
+            if thesis != lineage {
+                let null = if thesis {
+                    "payload.lineage_id"
+                } else {
+                    "payload.thesis_id"
+                };
+                return Err(Invalid::new(InvalidReason::Schema, null));
+            }
+            let from_thesis = [
+                "thesis_admitted",
+                "thesis_expired",
+                "thesis_invalidated",
+                "lineage_retired",
+                "operator_halt",
+            ]
+            .contains(&reason);
+            ensure(
+                !from_thesis || thesis,
+                InvalidReason::Schema,
+                "payload.thesis_id",
+            )?;
+            ensure(
+                !(reason == "version_applied" && admitted && thesis),
+                InvalidReason::Schema,
+                "payload.thesis_id",
+            )?;
+        }
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
             for member in ["cash_band", "cash_in_band"] {
@@ -230,12 +300,6 @@ fn ascending(items: &[&str], path: &str) -> Result<(), Invalid> {
     )
 }
 
-/// The stub of the risk-state registration's tests PR (DEC-77, DEC-404): journal spec §9.3's
-/// schemas and rules 29 to 33 land with its implementation.
-fn risk_state_payload() -> Result<Value, Invalid> {
-    Err(Invalid::new(InvalidReason::Unimplemented, "payload"))
-}
-
 /// Rule 24 on a compared snapshot: `cash_band` ≥ 0, and `cash_in_band` is `true` exactly when
 /// |`cash` − `model_cash`| ≤ `cash_band`. The amounts are compared as exact `Usd`; one too large to
 /// compare exactly is refused as `schema` at that member, never compared approximately (DEC-402).
@@ -281,9 +345,66 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         "AgentStopped" => &AGENT_STOPPED,
         "OwnerCommandRefused" => &OWNER_COMMAND_REFUSED,
         SNAPSHOT => &ACCOUNT_SNAPSHOT_RECORDED,
+        "MandateVersionApplied" => &MANDATE_VERSION_APPLIED,
+        "UniverseChanged" => &UNIVERSE_CHANGED,
         _ => return None,
     })
 }
+
+static MANDATE_VERSION_APPLIED: Ty = Ty::Record(&[
+    ("agent_id", Ty::Ident),
+    ("old_version", Ty::DigestRef),
+    ("new_version", Ty::DigestRef),
+    (
+        "classification",
+        Ty::OneOf(&["risk_increasing", "risk_reducing", "neutral"]),
+    ),
+    (
+        "step_up",
+        Ty::Nullable(&Ty::Record(&[
+            ("assertion_id", Ty::Str),
+            ("authenticated_at", Ty::Timestamp),
+            ("method", Ty::Str),
+        ])),
+    ),
+    ("result", Ty::OneOf(&["applied", "rejected"])),
+    (
+        "reason",
+        Ty::Nullable(&Ty::OneOf(&[
+            "increase_blocked_while_latched",
+            "equity_below_exposure",
+            "would_trigger_limit",
+            "not_loosening",
+            "waiting_period",
+            "still_below_new_floor",
+        ])),
+    ),
+    ("allocation_change", Ty::Nullable(&Ty::Decimal)),
+    ("max_loss_from_allocation", Ty::Nullable(&Ty::Decimal)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+static UNIVERSE_CHANGED: Ty = Ty::Record(&[
+    ("agent_id", Ty::Ident),
+    ("instrument", Ty::Ident),
+    ("change", Ty::OneOf(&["admitted", "removed"])),
+    (
+        "reason",
+        Ty::OneOf(&[
+            "thesis_admitted",
+            "thesis_expired",
+            "thesis_invalidated",
+            "lineage_retired",
+            "eligibility_lost",
+            "operator_halt",
+            "version_applied",
+        ]),
+    ),
+    ("thesis_id", Ty::Nullable(&Ty::Ident)),
+    ("lineage_id", Ty::Nullable(&Ty::Ident)),
+    ("universe_size_after", Ty::Int),
+    ("risk_clock", Ty::RiskClock),
+]);
 
 static ACCOUNT_SNAPSHOT_RECORDED: Ty = Ty::Record(&[
     ("status", Ty::Str),
@@ -1017,7 +1138,6 @@ mod tests {
     /// to 33 here: every base and valid draft of `MandateVersionApplied` and `UniverseChanged` is
     /// accepted, and every invalid one is refused with its reason at its path (DEC-403, DEC-404).
     #[test]
-    #[ignore = "pending E7-10"]
     fn every_risk_state_draft_is_judged_as_its_vectors_say() -> Result<(), String> {
         let section = named_section("risk_state")?;
         let mut failures = Vec::new();
@@ -1135,7 +1255,6 @@ mod tests {
     /// `schema` when `null` (DEC-403, DEC-404). The vectors pin each member's type but not its
     /// nullability, so this is what keeps a schema loosened to nullable from passing.
     #[test]
-    #[ignore = "pending E7-10"]
     fn a_required_risk_state_member_is_never_null() -> Result<(), String> {
         const RISK_STATE_REQUIRED: [(&str, &[&str]); 2] = [
             (
@@ -1211,11 +1330,68 @@ mod tests {
         Ok(())
     }
 
+    /// Rule 33 reads a raise only from what the record shows: an applied decrease or a zero change,
+    /// and a rejection the fold reaches without a raise (`equity_below_exposure`,
+    /// `would_trigger_limit`, `not_loosening`), are accepted under any classification, so a
+    /// reducing or neutral version is never refused for them (DEC-403 item 4).
+    #[test]
+    fn rule_33_refuses_nothing_that_shows_no_raise() -> Result<(), String> {
+        let section = named_section("risk_state")?;
+        let text = |t: &str| Value::Str(t.to_owned());
+        let cases: [(&str, &[(&str, Value)]); 5] = [
+            (
+                "version_applied",
+                &[
+                    ("classification", text("risk_reducing")),
+                    ("step_up", Value::Null),
+                    ("allocation_change", text("-2500")),
+                ],
+            ),
+            (
+                "version_applied",
+                &[
+                    ("classification", text("neutral")),
+                    ("step_up", Value::Null),
+                    ("allocation_change", text("0")),
+                ],
+            ),
+            (
+                "version_rejected",
+                &[
+                    ("classification", text("neutral")),
+                    ("step_up", Value::Null),
+                    ("reason", text("equity_below_exposure")),
+                ],
+            ),
+            (
+                "version_rejected",
+                &[
+                    ("classification", text("risk_reducing")),
+                    ("reason", text("would_trigger_limit")),
+                ],
+            ),
+            (
+                "version_rejected",
+                &[
+                    ("classification", text("neutral")),
+                    ("reason", text("not_loosening")),
+                ],
+            ),
+        ];
+        for (name, members) in cases {
+            let mut body = base(&section, &named("base_draft", Value::Str(name.to_owned()))?)?;
+            for (member, value) in members {
+                body = with_payload(body, member, value.clone())?;
+            }
+            assert_eq!(refusal(body), None, "{name} with {members:?}");
+        }
+        Ok(())
+    }
+
     /// Either risk-state record at any `schema_version` but 1 is refused as `unknown_schema`, as
     /// every §9.2 type is: each reaches its schema through `schema`'s version gate, never around it
     /// (#482 round 1, m2; #467 round 1, m3).
     #[test]
-    #[ignore = "pending E7-10"]
     fn a_risk_state_record_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
         let section = named_section("risk_state")?;
         let two = Int::new(2).ok_or("an integer")?;

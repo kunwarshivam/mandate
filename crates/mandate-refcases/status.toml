@@ -519,3 +519,16 @@
 'MC-W55' = { status = "pending", story = "E6-13" }
 'MC-W56' = { status = "pending", story = "E6-13" }
 'MC-W57' = { status = "pending", story = "E6-13" }
+# Family J, delegation routing (stream H, E6-13, #444; DEC-353). The five controls carry no delegation and pass on
+# mandate-spec's §9.2 row today. The five with a delegation wait on E6-13's code half: `autonomy.delegations` in
+# mandate-spec's type and parser (refused today as an unknown member), then DEC-353's rule in its §9.2 classifier.
+'MC-J01' = { status = "pending", story = "E6-13" }
+'MC-J02' = { status = "passing", story = "E6-13" }
+'MC-J03' = { status = "pending", story = "E6-13" }
+'MC-J04' = { status = "passing", story = "E6-13" }
+'MC-J05' = { status = "pending", story = "E6-13" }
+'MC-J06' = { status = "pending", story = "E6-13" }
+'MC-J07' = { status = "passing", story = "E6-13" }
+'MC-J08' = { status = "passing", story = "E6-13" }
+'MC-J09' = { status = "pending", story = "E6-13" }
+'MC-J10' = { status = "passing", story = "E6-13" }

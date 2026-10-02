@@ -115,6 +115,8 @@ const REGISTERED: &[&str] = &[
     "OrderSubmitted",
     "FillApplied",
     "MarkUpdated",
+    "MandateVersionApplied",
+    "UniverseChanged",
 ];
 
 /// Payload schemas journal spec v0.6 §9.1 closes on the agent stream (E7-9). On an agent stream a
@@ -363,6 +365,16 @@ const RISK_INPUTS: &[&str] = &[
 /// fails `every_registered_risk_input_requires_risk_clock`.
 const RISK_INPUT_PAYLOADS: &[(&str, &[&str], &str)] = &[
     (
+        "MandateVersionApplied",
+        &["mandate_version"],
+        r#"{"agent_id":"agent_a","old_version":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","new_version":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","classification":"neutral","step_up":null,"result":"applied","reason":null,"allocation_change":null,"max_loss_from_allocation":null,"risk_clock":"2026-09-21T14:00:01.000000000Z"}"#,
+    ),
+    (
+        "UniverseChanged",
+        &["mandate_version"],
+        r#"{"agent_id":"agent_a","instrument":"7b4a1c2e-1111-4a2b-9c3d-000000000001","change":"removed","reason":"version_applied","thesis_id":null,"lineage_id":null,"universe_size_after":0,"risk_clock":"2026-09-21T14:00:01.000000000Z"}"#,
+    ),
+    (
         "MarkUpdated",
         &[],
         r#"{"instrument_id":"i","price":"1","source":"quote","feed":"iex","risk_clock":"2026-09-21T14:00:01.000000000Z"}"#,
@@ -382,7 +394,18 @@ fn every_registered_risk_input_requires_risk_clock() {
             .iter()
             .find(|(t, _, _)| t == event_type)
             .unwrap_or_else(|| panic!("add a valid {event_type} payload to RISK_INPUT_PAYLOADS"));
-        let draft = with_payload(event_type, refs, payload);
+        let mut named: Vec<String> = payload
+            .match_indices("\"sha256:")
+            .filter_map(|(at, _)| payload.get(at..at + 73))
+            .map(str::to_owned)
+            .collect();
+        named.sort();
+        named.dedup();
+        let draft = edit(
+            &with_payload(event_type, refs, payload),
+            "artifact_refs",
+            Some(&format!("[{}]", named.join(","))),
+        );
         assert!(
             Draft::parse(&draft).is_ok(),
             "{event_type} payload is valid"
@@ -519,7 +542,6 @@ fn risk_state_records_are_routed_to_section_9_3() {
 
 /// §9.3 closes both schemas, so a member neither lists is refused as `schema` at that member.
 #[test]
-#[ignore = "pending E7-10"]
 fn risk_state_records_refuse_an_unlisted_member() {
     for (event_type, kind) in RISK_STATE_ON_ACCOUNT {
         let refused = Draft::parse(&draft(event_type, kind, &["mandate_version"])).map(|_| ());

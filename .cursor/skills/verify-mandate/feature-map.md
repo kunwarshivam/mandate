@@ -538,12 +538,12 @@ while a reducing purpose passes it.
 ## Account-stream risk-state records (journal spec §9.3, under E7-10)
 
 - **Spec:** `docs/specs/journal.md` §9.3 (`MandateVersionApplied` and `UniverseChanged`, rules 29 to
-  33, and the mapping table); DEC-403, DEC-404. The registration is tests first: both are routed to a
-  stub and refused as `unimplemented` until the implementation PR, and the mapping must re-derive
-  §9.2's classification from the two stored documents (DEC-404 item 5).
-- **Code:** `crates/mandate-journal/src/control.rs` (`governs`, the `risk_state_payload` stub),
-  `crates/mandate-journal/src/catalogue.rs` (`UniverseChanged`'s entry), and
-  `crates/mandate-spec/src/context.rs` (`JournaledFact::from_record`, the `risk_state_fact` stub).
+  33, and the mapping table); DEC-403, DEC-404. Both are registered, and the mapping re-derives
+  §9.2's classification from the two stored documents and refuses a mismatch (DEC-404 items 5 and 8).
+- **Code:** `crates/mandate-journal/src/control.rs` (`governs`, `MANDATE_VERSION_APPLIED`,
+  `UNIVERSE_CHANGED`, and rules 29 to 33 in `payload`), `crates/mandate-journal/src/catalogue.rs`
+  (`UniverseChanged`'s entry), and `crates/mandate-spec/src/context.rs` (`JournaledFact::from_record`
+  with `change::classify`).
 - **Tests:** `crates/mandate-refcases/tests/risk_state.rs` (the vectors through `append`, the
   mapping, and the classification re-derivation), `control::tests` in `control.rs`
   (`every_risk_state_draft_is_judged_as_its_vectors_say`, `a_required_risk_state_member_is_never_null`,
@@ -553,9 +553,8 @@ while a reducing purpose passes it.
   (`a_version_maps_only_under_the_classification_its_documents_give`, over 14 §9.2 rows, and
   `a_version_document_that_is_absent_or_an_impostor_is_refused`).
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-spec -p mandate-refcases
-  --run-ignored all -E 'binary(risk_state) | test(/risk_state/) | test(/universe_change/) |
-  test(/version_maps_only/) | test(/impostor/) | test(/schema_version/)'`; until the implementation lands, `cargo xtask ci pending` proves the
-  pending ones fail at their stub.
+  -E 'binary(risk_state) | test(/risk_state/) | test(/universe_change/) |
+  test(/version_maps_only/) | test(/impostor/) | test(/schema_version/)'`.
 
 ## Append protocol
 

@@ -316,6 +316,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   Also owed (#443 round 3, m14; #476 round 1, m4): no CI job runs `reference/journal/generate.py` or its seeded bugs, since
   `cargo xtask ci reference` runs only `reference/mandate/`. Its first cost: rule 28's report order went unpinned on
   the reference side until #476 round 1. Run `generate.py --check` per PR.
+  Also owed (#444, DEC-353; E6-13's code half, tests first): `mandate-spec`'s §9.2 classifier takes DEC-353's rule, so
+  MC-J01, MC-J03 and MC-J05 pass, with MC-J06 and MC-J09, which stay reducing. Size it with what comes first: `mandate-spec` has no delegations at
+  all. `Autonomy` has no `delegations` member and `parse::autonomy`'s member list is closed, so a mandate carrying one is
+  refused at parse (`unknown_member`); the type, the parser and §9.2's `autonomy.delegations` row, which the Rust
+  classifier also lacks, come before the rule has anything to read (#471 round 1, m9).
   **Founder question** (#443 round 2): should a mandate be refused at validation
   when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
   drawdown ladder) then cannot be lifted until a second user exists?
@@ -895,6 +900,44 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
 - **E17-2 (Must)** As an owner, I want a research agent that turns market data, news, filings, and
   the agent's memory into theses (instrument, direction, horizon, evidence, invalidation), journaled
   as `ThesisProposed`, so that the agent has ideas without me.
+  *Journal half ([DEC-413](decisions/DEC-413.md)):* journal spec v0.9 §9.4 closes
+  `ThesisProposed` and `ThesisRevised` in one shared schema with rules 34 to 38, and the vectors
+  gain a generated `research` section (merged in [#490](https://github.com/kunwarshivam/mandate/pull/490),
+  stream J; #490 round 2's three minors, a `tighten.*` mutant kind with the sorted-sources rule that
+  refused MC-N07, rule 36's internal order, and the two nits, on `agent/j3-thesis-vectors-minors`). Next,
+  the registration in `mandate-journal` under DEC-77: a tests PR with stubs and pending tests, then
+  the implementation. **Required, and blocking that registration's acceptance (#490 round 1, M2;
+  as #470 round 2 minor 5 for §9.3):**
+  - the registration re-derives mandate spec §8.5 checks 4, 5, 6, 10, and 16's cap from the
+    mandate document the record's `config_refs.mandate_version` names, and refuses a record whose
+    verdict passes over a check that mandate fails: an `admitted: true`, or a `reason` later than
+    the first check the document fails;
+  - the `man` ref on these two records means the mandate in force when the thesis was judged, and
+    the tests PR pins that;
+  - the tests PR comes first (DEC-77), and its cases include a pinned universe (MI-20) and
+    `admission: deny`.
+
+  The writer that adds the model's identity, the instants, and the artifact references to
+  `ThesisEntry` is a story of its own. DEC-413 item 5 lists the readings not taken, each a later
+  tightening. One is for E17-9's loop: whether a revision without an autopsy is a refusal reason,
+  which would be a mandate spec change.
+  *Follow-ups (#490 review round 1, under the freeze rule):*
+  - Minor 1: `research.py`'s stored mandate fails V-007 against `reference/mandate/bases.py`'s
+    registry, which pins `llm.research_agent` at the placeholder hash. That is expected, since the
+    vectors store the model object, but DEC-413 item 4 should say so. Once stream L lands
+    `jsonschema` in `python/` (founder-approved 2026-10-02), `documents.valid` moves to
+    `reference/mandate`'s full validators with a registry that pins the stored content hash.
+  - Minor 3: `invalidation` is §9.1's `text` (non-empty) while `Invalidation::new` refuses blank
+    text, so `"   "` passes §9.4. Tighten to non-blank, or record why not.
+  - Minor 5: §9.4 should say the records change no envelope field (MI-16), and put that obligation
+    on the lineage fold that later reads them.
+  - Minor 6: nine reason codes appear in no base or valid draft. Checks 5 and 10, which the oracle
+    requires to fail by the document, are unrepresentable under the one stored mandate: add a second
+    stored document (`pinned: true`, or `asset_classes: [crypto]`) and a base draft for each.
+  - Nits: `test_a_hand_edited_research_vector_is_refused` asserts on the literal
+    `allowlist_version: 7`; the PR-size note (ES-13, 1,199 hand-written lines, mostly fixture tables).
+  - Two questions for a later mandate-spec change: whether §8.2's `conviction` and `confidence`
+    ranges should be §8.5 refusals, and whether journal `text` gets a maximum length.
 - **E17-3 (Must)** As an owner, I want instruments admitted into the working universe only through
   the eligibility floor, the policy's asset classes, `max_instruments`, instrument-group claims, and
   my autonomy rules (`new_instrument`, `thesis_confidence`; default `ask`), journaled as
@@ -1244,11 +1287,9 @@ From E10-1's slice-V implementation (DEC-161):
     §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
     vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
     follow register them and map them to `AgentVersionActive` (a deployed agent's new version) and
-    `UniverseChanged`; until then both are refused. **Tests first, on `agent/l-risk-state-tests`
-    ([DEC-404](decisions/DEC-404.md)):** both are routed to a stub and refused as `unimplemented`,
-    and nine pending tests (`pending E7-10`) pin the vectors, the 15 non-nullable members, the closed
-    schemas, the mapping, and the requirement below.
-    **Required, and blocking this registration's acceptance (#470 round 2, minor 5):** the Rust
+    `UniverseChanged`. **Done ([DEC-404](decisions/DEC-404.md)):** tests first in #482, then the
+    registration and the mapping on `agent/l-risk-state-impl`, with the requirement below.
+    **Required, and met by the implementation (#470 round 2, minor 5):** the Rust
     registration re-derives mandate spec §9.2's classification of `new_version` against
     `old_version` from the two stored documents and refuses a `MandateVersionApplied` whose
     `classification` differs. Rule 33 covers only what the record itself carries (the allocation
@@ -1262,6 +1303,13 @@ From E10-1's slice-V implementation (DEC-161):
       classifier can become unmappable, and a context that will not build is not a hold an exit may
       have (rule 13). So E6-13's classifier change lands before any path builds a context from a
       real journal (DEC-169's wiring). That order is a named prerequisite here and on E6-13's row.
+    - **Unexercised shapes (#482 round 2, m3):** no pair reaches `classify`'s `join` with more than
+      one class over several rows (the only multi-path pair is the pinning switch, which returns
+      first), and no pair is two identical documents.
+    - **The pairs are not valid mandates (#482 round 2, m1):** six of
+      `a_version_maps_only_under_the_classification_its_documents_give`'s pairs break a V-rule (V-008,
+      V-013, V-034, V-036). Make each valid with a second patched path, so every fixture passes
+      every rule it is not meant to fail.
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).
@@ -2153,11 +2201,35 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   active", since every rung factor is an `open_fraction` below one, and the gate trims only under
   an active `trim_to_target` rung (DEC-399 item 2), so the two agree on every input the schema can
   write. Dropping the guard would make `ref.py` withhold a trim `rung_not_confirmed` with no rung
-  active.
-  *Done (the minimum half):* the coordinator's ruling on claim
-  [#123](https://github.com/kunwarshivam/mandate/issues/123) took option (a), DEC-399 item 8.
-  `ref.py` and the harness's `trim_guards` judge `below_minimum_order` by the instrument's
-  `min_order_size`, §5.5 names that minimum, and MC-B33 and MC-B34 pin the two readings' difference.
+  active. Only the minimum's reading remains, a question to the coordinator on claim
+  [#123](https://github.com/kunwarshivam/mandate/issues/123).
+  *The dollar-minimum half, harness side, closed in #498* (DEC-399 item 8, option (a) on #123).
+  `trim_guards` judges `below_minimum_order` by the instrument's `min_order_size`, and **that
+  quantity reading is the one that stays**: do not remove it.
+  *Done (the minimum half, reference side):* #504 moves `ref.py` to the same quantity minimum, has
+  §5.5 name it, and adds MC-B33 and MC-B34, which pin the two readings' difference.
+- **E6-4 harness cleanup: drop the transitional branches once MC-B33 and MC-B34 are on `main`**
+  (#498 review, M1). In `crates/mandate-refcases/src/mandate/order_builder.rs`:
+  (a) drop `AWAITED`, `awaited`, `counted` and the without-branch, so the case list and the sweep
+  counts state only the fixture with both cases;
+  (b) remove the `min_order_size` default (`stated.increment`) in `trim_first`, once the reference
+  PR makes the input required on a trim base.
+  Until then, the case-list pin is open: dropping both awaited cases from the fixture fails
+  nothing, because `counted` falls back to the counts without them.
+- **E6-4 harness: one scene for both gate calls on a trim base** (#498 review, m3). `trim_first`
+  sets the scene instrument's `min_order_size` from the case, but `judge` builds its own scene in
+  `Scene::read`, which takes the minimum from `qty_increment`. A case where a trim is withheld and
+  the builder then proposes would run §5.3 rule 2 against a different minimum from the trim's.
+  Unreachable today, since every withheld-trim case ends in a hold. `holding` and `scale_active_s`
+  have the same shape. Read the trim inputs in `Scene::read`, so both gate calls get one
+  instrument.
+- **E6-4: pin that the trim's minimum is judged on the remainder after open sells** (#498 review,
+  m8; DEC-399 items 5 and 7). No test combines a resting sell with a minimum above one increment,
+  so a gate that judged the whole excess passes every test in the workspace. Close it in
+  `mandate-risk`'s `trim::tests`: `Scene::new("10", "1000")` with `resting(7, "2", Side::Sell,
+  false, true)` and `min_order_size = 3` leaves a 1-share remainder, which must not be proposed,
+  while a whole-excess reading (3 shares) proposes it. Next in stream G, before the reference
+  PR's status change.
 - **E6-4: read the instrument's real quantity grid for a trim** (#466 review, round 1, m3).
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
