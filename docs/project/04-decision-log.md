@@ -6,7 +6,10 @@
 | **Status** | Living document |
 
 Status values: **Accepted**, **Proposed** (recommended, awaiting confirmation), **Open**
-(not yet decided), **Superseded** (replaced by a later decision). Changing an accepted decision requires a new entry that supersedes it.
+(not yet decided), **Superseded** (replaced by a later decision). Changing an accepted decision
+requires a new decision that supersedes it, written as a file under
+[decisions/](decisions/README.md) (DEC-344). Marking a row below **Superseded**, and nothing else
+about it, is the one edit this table still takes.
 
 **This table takes no new rows.** From [DEC-344](decisions/DEC-344.md) on, each decision is its own
 file under [decisions/](decisions/README.md), so that two open PRs no longer conflict here. DEC-01 to
@@ -298,14 +301,16 @@ Reserved identifiers table.
 `decisions/DEC-<n>.md`. The table stays the registry for `OD-`, ADR, epic and story identifiers,
 and the record of the `DEC-` reservations made before DEC-344.
 
-The single registry for identifiers minted in unmerged work
-([coordination playbook](../../.cursor/skills/mandate-mode/playbooks/coordination.md) §3). Take the
-next integer after the highest here or in the rows above, whichever is larger; a block reserved
-ahead of the sequence (DEC-200 to DEC-249, for the web UI) is skipped, not counted, so the other
-numbers run on below it and jump past it. A released reservation keeps its row and its number is
-never reused. DEC-153 was skipped in the sequence: no surviving row, commit, or claim names what
-it reserved, so the number is retired rather than reused (recorded 2026-09-30 during the docs
-sync; the gap was found by counting).
+The single registry for the `OD-`, ADR, epic and story identifiers minted in unmerged work
+([coordination playbook](../../.cursor/skills/mandate-mode/playbooks/coordination.md) §3); `DEC-`
+numbers are taken by adding a file instead, as the note above says. Take the
+next integer for that prefix after the highest here or in the rows above, whichever is larger. A
+released reservation keeps its row and its number is
+never reused. The `DEC-` rows below are the record of the reservations made before DEC-344: a
+block reserved ahead of the sequence (DEC-200 to DEC-249, for the web UI) was skipped, not
+counted, so the other numbers ran on below it and jumped past it. DEC-153 was skipped in the
+sequence: no surviving row, commit, or claim names what it reserved, so the number is retired
+rather than reused (recorded 2026-09-30 during the docs sync; the gap was found by counting).
 
 | Identifier | Coordinator | Claim | Purpose | State |
 |---|---|---|---|---|
