@@ -795,13 +795,28 @@ fn a_short_position_is_refused_where_a_day_trade_count_is_expected() -> Result<(
 /// to zero (`is_negative() || is_zero()`) fails here. The boundary is pinned at
 /// [`held_overnight`] because no case can hand the fold a flat position: the accounting keeps
 /// none (`Account::opening` drops a zero entry and a fill that closes a position removes it), which
-/// `a_flat_initial_position_is_no_position_to_the_fold` pins at the case level.
+/// `a_flat_initial_position_is_no_position_to_the_fold` pins at the case level. Every negative is
+/// refused, from a ten-millionth of a share through half a share to whole shares, so a
+/// refusal narrowed to a whole share (`qty.abs() >= 1`), which would fold a sub-share short as long,
+/// fails here too (#438 review, round 2, blocker 2). Until E6-10 lands the refusal is the stub's
+/// report; the implementation PR swaps it for DEC-314's text (DEC-77's 2026-09-27 amendment).
 #[test]
 fn only_a_negative_quantity_is_a_short_to_the_fold() -> Result<(), String> {
     for (position, held) in [("0", "0"), ("10", "10")] {
         let qty = SignedQty::parse(position).map_err(|e| e.to_string())?;
         let shares = Qty::parse(held).map_err(|e| e.to_string())?;
         expect_eq(position, held_overnight("AAPL", qty), Ok(shares))?;
+    }
+    for position in ["-0.0000001", "-0.5", "-1", "-10"] {
+        let qty = SignedQty::parse(position).map_err(|e| e.to_string())?;
+        expect_eq(
+            position,
+            held_overnight("AAPL", qty),
+            Err(
+                "the day-trade fold's refusal of a short position is not implemented yet (pending E6-10)"
+                    .to_owned(),
+            ),
+        )?;
     }
     Ok(())
 }
