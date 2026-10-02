@@ -703,9 +703,13 @@ impl Shell {
             "ApprovalRequested" => self.requested(want, draft, ran),
             "ApprovalResponded" => self.responded(want, draft),
             "IntentProposed" => self.intended(want, draft, ran),
-            "ApprovalDelivered" => self.delivered(want, draft),
             _ => self.names_approval(want, draft),
         });
+        let cause = draft.causation_id.as_ref().map(|cause| cause.0.as_str());
+        let approval = draft.payload.get("approval").and_then(Value::as_str);
+        if event_type == "ApprovalDelivered" && cause != approval {
+            faults.push(format!("its cause is {cause:?}, not its request"));
+        }
         for key in draft.payload.as_object().into_iter().flat_map(|o| o.keys()) {
             if !written.contains(key.as_str()) {
                 faults.push(format!(
@@ -725,7 +729,7 @@ impl Shell {
             return vec!["a request outside an ask".to_owned()];
         };
         let mut faults = Vec::new();
-        if ran.decision.is_none() || draft.causation_id != ran.decision {
+        if draft.causation_id != ran.decision {
             faults.push(format!(
                 "its cause is {:?}, not the ask's `DecisionMade`",
                 draft.causation_id
@@ -796,16 +800,6 @@ impl Shell {
             faults.push(format!(
                 "`mandate_version`: the approval's request bound {version:?}"
             ));
-        }
-        faults
-    }
-
-    /// An `ApprovalDelivered`: its approval, which is also its cause.
-    fn delivered(&self, want: &Json, draft: &EventDraft) -> Vec<String> {
-        let mut faults = self.names_approval(want, draft);
-        let cause = draft.causation_id.as_ref().map(|cause| cause.0.as_str());
-        if cause.is_none() || cause != draft.payload.get("approval").and_then(Value::as_str) {
-            faults.push(format!("its cause is {cause:?}, not its request"));
         }
         faults
     }
