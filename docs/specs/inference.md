@@ -2,14 +2,30 @@
 
 | | |
 |---|---|
-| **Status** | v0.1, draft for review ([DEC-432](../project/decisions/DEC-432.md)). Items 1 to 12 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03 (DEC-432, "Founder decisions") |
+| **Status** | v0.2, draft ([DEC-432](../project/decisions/DEC-432.md)): v0.1 with the post-merge review's blockers and majors fixed (DEC-432 items 17 to 22). Items 1 to 12 and 17 to 22 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
-| **Caller side** | The agent harness spec (`docs/specs/agent-harness.md`, drafted in parallel) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
+| **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
 
 This spec covers every model call the platform makes and the gateway that brokers them. Today
 the only model code is the research spike's client (`python/research_spike`); the gateway itself
 is not built (§11).
+
+## Change history
+
+- **v0.2 ([DEC-432](../project/decisions/DEC-432.md) items 17 to 23):** fixes from the independent
+  review of v0.1 (PR #551). Each only tightens or clarifies.
+  - §4.1: `content_hash` covers the pinned content only. `endpoints` and `status` are outside it, so
+    a routing change never invalidates an owner's pin. Mandate spec §8.1 carries the same definition.
+  - §3.6: which stream holds the compiler's call record is open; no stream is stated as the rule.
+  - §3.6, §7.3: the meter stream has one writer per workspace; a replica that cannot reserve refuses
+    the call with `meter_unavailable` (§3.3).
+  - §3.5, INF-3: a response that completed after its deadline is never cached.
+  - From the agent harness spec's asks (§10.1 there): the retrieval plan and validation bounds are
+    inside the content hash, a caller can read its own reservations, the prompt guard can be called
+    without a call, and E15-8 gains two record members. The fifth ask, a prompt record without
+    licensed text, is Proposed (item 23, §13).
+  - The review's minors are backlog row E15-12 (freeze rule).
 
 ## Contents
 
@@ -82,7 +98,7 @@ inside it.
 |---|---|
 | INF-1 | **Pinned identity.** Every call names a registered model identity: provider, model id, and an immutable version (a dated snapshot) or a weights digest. A floating alias (for example "latest") is refused at registration and never reaches a call |
 | INF-2 | **No substitution** (DEC-67). An attempt goes only to an endpoint the registry lists as serving that exact identity. If the response reports a different identity, the call fails with `identity_mismatch`. The gateway never routes to another model, a smaller variant, or a different quantization |
-| INF-3 | **Deadline.** Every call has a finite deadline, no later than the registry entry's deadline. A response that completes after the deadline is discarded and never becomes an output, in this evaluation or any later one |
+| INF-3 | **Deadline.** Every call has a finite deadline, no later than the registry entry's deadline. A response that completes after the deadline is discarded, is never cached, and never becomes an output, in this evaluation or any later one |
 | INF-4 | **Missing is safe.** Every error kind yields no output. Under §8.3 a missing output counts as fully bearish for buys, so it never enlarges a buy (MI-10), and as 0 for exits, never as a negative view. Any exit that follows is a risk reduction. No error path produces a default output, a cached output for different input, or an output from another model |
 | INF-5 | **Opinions only** (rule 4). The gateway returns only an output validated against the model's output schema. It offers the model no tool, function, or network capability. Nothing a model returns is an order, a mandate field, or a policy value |
 | INF-6 | **Metered.** Every call produces exactly one metering record, and every attempt that reached a provider is counted in it, including failures and cache hits. The record names the workspace, the agent (when there is one), and the purpose. Cost is fixed-point USD, never floating point |
@@ -102,7 +118,7 @@ inside it.
 | Invariant | Test (independent oracle) |
 |---|---|
 | INF-1, INF-2 | Fuzz registry entries and responses. The oracle compares the response's reported identity with the pin by plain string equality on each part; seeded bugs: alias accepted, version ignored, quantization ignored |
-| INF-3 | Fuzz response arrival times against a simulated clock. The oracle derives "late" from the journaled deadline and completion time, never from the gateway's own flag |
+| INF-3 | Fuzz response arrival times against a simulated clock. The oracle derives "late" from the journaled deadline and completion time, never from the gateway's own flag. It also asserts that no cache entry exists for any call whose completion time is past its deadline, and that a later identical request is a miss; seeded bug: a late response stored in the cache |
 | INF-4 | For every error kind, assert the gateway returns no output, then feed the state to the reference order builder (`reference/mandate`) and assert the buy value is at most the value with the model's fresh output present (MI-10), and that the exit conviction equals §8.3's sum with the missing model's term set to 0 |
 | INF-5 | Assert the request body the adapter builds has no tool or function members, for every provider adapter; feed outputs with extra members and assert refusal |
 | INF-6, INF-7 | Fuzz sequences of calls, failures, cache hits, restarts, and risk-day changes. A separate accumulator over journaled records recomputes spend and asserts it equals the meter and never exceeds a cap |
@@ -155,6 +171,7 @@ prompt, sampling parameters (temperature, seed where supported), the output sche
 | `policy_denied` | Endpoint, provider, or model type not allowed by policy, or local-only (INF-12) | No | No |
 | `budget_exhausted` | A spend cap would be exceeded by the reservation (§7.3) | No | No |
 | `rate_limited_local` | The gateway's own per-agent or per-workspace rate cap | No | No |
+| `meter_unavailable` | The reservation could not be appended: the meter writer is unreachable, or this replica is fenced (§3.6) | No | No |
 | `input_rejected` | The prompt guard found forbidden content (§8.3) | No | No |
 | `model_withdrawn` | The entry is withdrawn (INF-15) | No | No |
 | `deadline_exceeded` | No complete response before the deadline | No further attempts | Maybe |
@@ -165,7 +182,7 @@ prompt, sampling parameters (temperature, seed where supported), the output sche
 | `schema_invalid` | Response does not parse, or fails the output schema | No | Yes |
 | `identity_mismatch` | Reported identity differs from the pin | No | Yes |
 
-The first five are refusals: nothing leaves the deployment.
+The first six are refusals: nothing leaves the deployment.
 
 ### 3.4 Deadlines, retries, streaming, idempotency
 
@@ -191,7 +208,8 @@ The first five are refusals: nothing leaves the deployment.
 
 - **What may be cached:** the complete response to a canonical request, stored as the response
   artifact. Key: `(workspace_id, model identity, request_digest)`.
-- **What may not be cached:** errors, outputs that failed validation, and anything keyed on
+- **What may not be cached:** errors, outputs that failed validation, a response that completed
+  after its deadline, however complete and valid (INF-3, DEC-432 item 21), and anything keyed on
   similarity (no semantic cache). A response is never served to another workspace.
 - **Freshness is unchanged.** `as_of` is part of the canonical request, so a hit carries the
   original `as_of`, and the §8.2 freshness rule applies to it as to any output. A hit cannot make an
@@ -208,22 +226,42 @@ schema to its own story. This spec needs these members when that schema closes (
 `call_id`, `purpose`, the model identity and endpoint, `request_digest`, sampling parameters and
 seed, `prompt_ref`, `response_ref`, `reported_identity`, provider request ID, `outcome`,
 `attempts`, token counts, `cost_usd`, the price table reference, `cache_hit`, `deadline`, and
-completion time.
+completion time. The agent harness spec adds two for E15-8 (its §10.1 ask 3, DEC-432 item 22): the
+retrieved context, as the event ids of the run's `ObservationRecorded`, and room for the
+candidates' verdicts. The run id rides in `correlation_id`.
 
 Every journal stream has a single writer (journal spec §2), and the gateway writes none of the
 existing ones. So:
 
 - **The caller appends the call record.** The gateway returns the record; the agent's runtime
-  appends `ModelInvocationRecorded` to its agent stream, and the workspace control services append
-  the compiler's to the control stream, since the compiler has no agent.
+  appends `ModelInvocationRecorded` to its agent stream.
+- **The compiler's record has no stream yet** (DEC-432 item 19). The journal spec and
+  `mandate-journal`'s catalogue allow `ModelInvocationRecorded` on the agent stream only, and the
+  compiler has no agent. Which stream holds its record is §13 question 1, decided by the journal
+  spec change of E15-8. Until that change names a stream, the compiler makes no call through the
+  gateway, because INF-10 could not hold for it.
 - A call with `outcome: ok` is followed by its output event (`ModelOutputRecorded` or
   `ThesisProposed`), which carries the content hash the call used.
 - A call with any other outcome writes `ModelInvocationRecorded` and no output event. The model
   simply has no fresh output.
 - **The gateway owns a meter stream.** Reservations and settlements (§7.3) go to a new
-  per-workspace stream the gateway writes alone (`meter:{workspace_id}`, a proposed journal spec
-  change, E15-8). The reservation is appended before the first attempt leaves the deployment, so a
-  crash cannot lose a cost, and spend per agent and per workspace folds from that stream.
+  per-workspace stream (`meter:{workspace_id}`, a proposed journal spec change, E15-8). The
+  reservation is appended before the first attempt leaves the deployment, so a crash cannot lose a
+  cost, and spend per agent and per workspace folds from that stream.
+- **One meter writer per workspace** (DEC-432 item 20). The gateway may run as several replicas, but
+  a stream has one writer, fenced by epoch (journal spec §2, §5). So exactly one replica holds the
+  meter writer role for a workspace, and it alone checks caps and appends. Any other replica asks
+  the holder to reserve before it sends anything. A cap is therefore checked against one ordered
+  stream, never against two replicas' separate views.
+- **A replica that cannot reserve refuses.** If the holder is unreachable inside the call's
+  deadline, or the replica's own append is fenced, the call ends `meter_unavailable` (§3.3):
+  nothing is sent and the output is missing (INF-4). Each such refusal is counted and alerts the
+  operator, so it is never a silent partial outage. It has no meter-stream entry and costs nothing;
+  the caller's `ModelInvocationRecorded` records the outcome.
+- **Hand-over.** A new holder takes the next epoch and folds the stream before it reserves. A
+  reservation the old holder left unsettled stays counted (§7.3).
+- **A caller can read its own reservations** in the meter stream (agent harness spec §10.1 ask 2),
+  and only its own agent's. Reading changes nothing.
 
 ---
 
@@ -232,24 +270,33 @@ existing ones. So:
 ### 4.1 Registry entry
 
 The registry lives in the workspace deployment; the global control plane distributes signed
-entries ([HLD §4](../HLD.md#global-control-plane-thin)). An entry is immutable once published.
+entries ([HLD §4](../HLD.md#global-control-plane-thin)). An entry has two parts:
+
+- **Pinned content,** immutable once published, and covered by `content_hash`. Any change to it is
+  a new version with a new hash, which an owner must confirm to use.
+- **Routing and status** (`endpoints`, `status`), outside the hash, versioned as journaled
+  configuration. Changing them never changes the hash, so it never invalidates an owner's pin
+  (DEC-432 item 17).
 
 | Field | Rule |
 |---|---|
 | `model_id`, `version` | The signal model's id and semantic version (mandate spec §8.1) |
-| `content_hash` | SHA-256 over the canonical JSON of everything below except `status` and `endpoints`' health. The mandate pins it (V-007) |
+| `content_hash` | SHA-256 over the canonical JSON of the pinned content: `identity`, `template`, `retrieval_plan`, `output_schema`, `validation_bounds`, `params_schema`, `deadline_ms`, `max_output_tokens`, the sampling parameters, `methodology`, and `authorship`. **`endpoints` and `status` are not in it.** The mandate pins it (V-007); [mandate spec §8.1](mandate.md#81-signal-model-contract-dec-52-dec-97) gives the same definition (DEC-432 item 18) |
 | `identity` | `provider`, `model_name`, and `snapshot` (an immutable, dated version) or `weights_digest`, plus `quantization` for self-served or third-party-served open weights |
 | `template` | The prompt template and the input contract it renders |
+| `retrieval_plan`, `validation_bounds` | For a model whose inputs are retrieved: which reads fill the input contract and their caps, and the bounds its output is checked against (agent harness spec §6.3, §6.5). Inside the hash, so the pin covers what the model is shown (rule 11, DEC-432 item 22) |
 | `output_schema` | JSON Schema of the output (mandate spec §8.2, or §8.4's thesis) |
 | `params_schema` | The user-set parameters; no defaults (DEC-52) |
 | `deadline_ms`, `max_output_tokens`, sampling parameters | Pinned with the model |
-| `endpoints` | Endpoints attested to serve exactly `identity`, each with region and locality (`hosted` or `local`) |
+| `endpoints` | Outside the hash. Endpoints attested to serve exactly `identity`, each with region and locality (`hosted` or `local`) |
 | `methodology` | Documentation of method only; no performance claims (§8.1) |
 | `authorship` | `platform` in v1 |
-| `status` | `evaluating`, `offered`, `deprecated` (with the provider's retirement date), `withdrawn` |
+| `status` | Outside the hash. `evaluating`, `offered`, `deprecated` (with the provider's retirement date), `withdrawn` |
 
-Adding or removing an endpoint changes the routing set, not the identity. An endpoint is added only
-after the attestation check of §4.3 passes on it, and the change is journaled as configuration.
+Adding or removing an endpoint changes the routing set, not the identity and not the hash. An
+endpoint is added only after the attestation check of §4.3 passes on it, and the change is journaled
+as configuration. INF-2 still holds: every listed endpoint serves exactly `identity`, quantization
+included, and the reported identity is checked on every response.
 
 ### 4.2 How a model becomes selectable
 
@@ -397,8 +444,8 @@ One record per call (INF-6), written in the workspace deployment.
 | Workspace cycle allotment | The license's `model_spend_usd_per_cycle`, from the plan ([billing design](../design/billing.md) §3.4, DEC-442 item 4) | All calls of the workspace per billing cycle; enforced alongside the per-risk-day caps, never instead of them |
 | Rate caps | Per agent: research calls only in proposal rounds no more often than `behavior.research.interval_s`; per workspace: a token bucket set by the plan | Calls per second |
 
-- **Reservation.** Before the first attempt, the gateway appends a reservation of the maximum
-  cost to its meter stream (§3.6). A call starts only if `spent + reserved + this reservation ≤ cap` for every cap that applies.
+- **Reservation.** Before the first attempt, the workspace's meter writer appends a reservation of
+  the maximum cost to the meter stream (§3.6). A call starts only if `spent + reserved + this reservation ≤ cap` for every cap that applies.
   On completion the reservation becomes the actual cost. If the process dies first, the reservation
   stays counted for that risk day (DEC-432 item 4). Spend never decreases within a risk day.
 - **Check 7 is unchanged.** Mandate spec §8.5 check 7 still refuses a thesis once the day's spend has
@@ -456,6 +503,9 @@ layer; mandate spec §8.4 and §8.5 list the others.
 - **Before sending** (deterministic, no model): the rendered prompt is scanned for the vault's
   credential formats, broker account identifiers, personal-data fields (journal spec §6.4), and any
   identifier of another workspace. A hit ends the call as `input_rejected`.
+- **The guard can be called on its own,** with no model call, no reservation, and no cost (agent
+  harness spec §10.1 ask 4), so construction can check `behavior.description` before any call. It
+  is the same deterministic check with the same verdict.
 - **Inputs are data.** Retrieved text is placed in delimited data sections of the pinned template.
   The template tells the model to treat them as untrusted, but no rule relies on the model obeying.
 - **No capabilities.** No tools, no function calls, no browsing (INF-5). Retrieval happens before the
@@ -491,6 +541,7 @@ risk-day boundary and a restart.
 | Key revoked | Provider 401 or 403, or `KeyRevoked` | `credential_invalid` on every call to that provider; operator alerted | A valid key is in the vault | Operator (managed) or customer admin (hybrid) | Vault state; survives restart |
 | Spend cap hit mid-day | A reservation would exceed a cap | `budget_exhausted`; research theses also refused by check 7; outputs missing | The next risk day | Nobody (the clock) | Resets at the risk-day boundary, never by restart or redeploy, since spend is folded from the journal by risk day |
 | Workspace quota hit | As above for the workspace | Every agent's calls refused | Next risk day, or the operator raises the quota | Clock or operator (a journaled change) | As above |
+| Meter unavailable | The meter writer is unreachable, or a replica's append is fenced | `meter_unavailable`; nothing sent; outputs missing; operator alerted | The holder is reachable, or a new holder has folded the stream | Supervisor (hand-over) | Unsettled reservations stay counted across the hand-over |
 | Prompt guard hit | Forbidden content in the prompt | `input_rejected`; nothing sent; journaled with the rule, not the content | The input source stops supplying it | Nobody; repeats alert the operator | Nothing carries over |
 | Gateway process crash | Process dies | In-flight calls lost; their reservations stay counted | Gateway restarts | Supervisor | On restart: unfinished reservations are settled as spent at their maximum; no call is re-sent under its old `call_id`; the runtime re-reads fresh outputs from the journal |
 | Agent runtime restart | Runtime restarts | No model is called during replay (INF-10) | Replay and reconciliation finish | Runtime | Outputs still fresh by §8.2 count; others are missing until the next call |
@@ -510,7 +561,7 @@ No case ends in the gateway choosing another model, holding an exit, or adding e
 | Bad model | Claims to be another model, or the provider serves another | `identity_mismatch` (INF-2) |
 | Bad model | Returns huge output to run up cost | `max_output_tokens` bounds each call; reservation bounds the day |
 | Injected filing or news item | Tells the model to name an instrument or leak data | No tools or egress (INF-5); allowlist, corroboration, eligibility floor, `max_instruments`, autonomy (§8.5); the model has no secrets to leak (INF-8) |
-| Malicious insider | Points a registry id at a different model | Entries are immutable and signed; the content hash includes identity; the mandate pins the hash (V-007) |
+| Malicious insider | Points a registry id at a different model | An entry's pinned content is immutable and signed; the content hash includes identity; the mandate pins the hash (V-007) |
 | Malicious insider | Edits a cached response | Cache entries are artifacts addressed by hash; a mismatch is a miss and an alert |
 | Malicious insider | Changes the price table to exhaust a cap or inflate a bill | Price tables are versioned configuration, journaled; each call names the version it used |
 | Malicious insider | Adds an endpoint serving a cheaper quantization | Endpoint changes are journaled configuration and need the §4.3 identity probe |
@@ -552,6 +603,10 @@ the date only; it does not suggest a replacement.
   on content failures, the cost reservation, the prompt-content restriction, the exact per-workspace
   cache, no tools, local-only by default for hybrid and on-prem, the endpoint quantization rule, the
   identity check, the `ModelInvocationRecorded` members, and the RAID R-07 wording.
+- **Items 17 to 22, agent readings from the post-merge review** (DEC-79, DEC-176): what the content
+  hash covers, the matching mandate spec §8.1 sentence, the compiler's record left open, one meter
+  writer per workspace, late responses never cached, and four of the agent harness spec's asks.
+- **Item 23, Proposed for the founder:** a prompt record that keeps no licensed text (§13 question 6).
 - **Items 13 to 16, decided by the founder on 2026-10-03** (DEC-432, "Founder decisions"): a hosted
   fast model (§5), an aggregator for every call with routing locked per pinned model (§6), provider
   data terms as recommended, and bring-your-own provider keys allowed for hybrid and on-prem, with
@@ -561,9 +616,10 @@ the date only; it does not suggest a replacement.
 
 ## 13. Open questions
 
-1. The compiler has no agent. Which stream holds its calls: the workspace's control stream (this
-   draft's reading), or a stream of its own? Decided when `ModelInvocationRecorded` closes, with
-   the meter stream's shape (§3.6).
+1. The compiler has no agent. Which stream holds its call record: the workspace's control stream,
+   or a stream of its own? The journal spec allows `ModelInvocationRecorded` on the agent stream
+   only, so either answer is a journal spec change, made in E15-8 with the meter stream's shape.
+   Until then the compiler makes no gateway call (§3.6).
 2. The policy key that lists allowed endpoints and regions does not exist in `policy.schema.json`.
    Its shape (a set of providers, endpoints, or localities; child ⊆ parent) is part of E15-10.
 3. Whether a per-model cost cap becomes an envelope field for fast and LLM signal models, or the
@@ -571,3 +627,9 @@ the date only; it does not suggest a replacement.
 4. The thresholds of the §4.3 evaluation gate (99% schema conformance) are a first value and need
    review against real probe sets.
 5. Canary probes for silent provider changes: how often, and what drift threshold alerts.
+6. **A prompt record without licensed text** (agent harness spec §10.1 ask 5; DEC-432 item 23,
+   Proposed). The ask: for a call whose inputs hold licensed text, `prompt_ref` names the rendered
+   prompt with each licensed item's text replaced by its raw-bytes digest, while `request_digest`
+   stays the digest of the full prompt. That keeps less than INF-10 says today, and whether such a
+   record meets the retention duty is for the founder and counsel. Until it is decided, INF-10
+   stands as written and research reads no licensed text.

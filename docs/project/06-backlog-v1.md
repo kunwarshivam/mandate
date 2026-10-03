@@ -1280,10 +1280,10 @@ built against a recorded provider fake.
   that creates a new confirmed mandate version, with no automatic winner-picking; and no mandate holds
   more than three variants.
 
-The stories below implement the [inference spec](../specs/inference.md) v0.1
+The stories below implement the [inference spec](../specs/inference.md) v0.2
 ([DEC-432](decisions/DEC-432.md)) once it is reviewed. **SC** marks a safety-critical story (the
 model gateway feeds the order builder, holds provider credentials, and enforces spend caps). E15-2
-waits for the founder's answer to DEC-432 item 13, whose recommendation drops the fast tier from v1.
+follows the founder's decision on DEC-432 item 13: a hosted fast model in v1, through the gateway.
 
 - **E15-6 (Must, M5; SC)** As an operator, I want a model gateway that is the only component able to
   call a model, so that every call is pinned, bounded by a deadline, and never substitutes a model.
@@ -1293,15 +1293,22 @@ waits for the founder's answer to DEC-432 item 13, whose recommendation drops th
   deadline, from another identity, or failing its schema never reaches the caller; no request body
   carries a tool or function member; the agent runtime has no direct route to a model endpoint;
   live calls run only in internal paper workspaces (DEC-432 item 14).
-- **E15-7 (Must, M5; SC)** As an owner, I want each selectable model to be an immutable registry entry
-  whose content hash covers its identity, template, output schema, deadline, and endpoints' identity,
-  so that what I pin is exactly what runs. *Accepted when:* entries with a floating alias are refused;
+- **E15-7 (Must, M5; SC)** As an owner, I want each selectable model to be a registry entry whose
+  content hash covers its pinned content (spec §4.1: identity, template, retrieval plan, output
+  schema, validation bounds, deadline, and the rest) and excludes `endpoints` and `status`, so that
+  what I pin is exactly what runs and a routing change never invalidates my pin (DEC-432 items 17
+  and 18). *Accepted when:* entries with a floating alias are refused; a test changes an entry's
+  endpoints and status and asserts the hash is unchanged, and changes each pinned member and asserts
+  it differs;
   an endpoint is added only after the spec §4.3 identity probe; deprecation and withdrawal follow
   spec §4.4 and never replace a pinned model; V-007 checks the mandate against the registry.
 - **E15-8 (Must, M5; SC; journal spec first)** As an auditor, I want every model call journaled with
   its cost and outcome, so that replay never calls a model and spend folds from the journal.
   *Accepted when:* a journal spec change closes `ModelInvocationRecorded` with DEC-432 item 11's
-  members and adds the gateway's meter stream, with test vectors; the registration lands tests first
+  members and the two the agent harness spec adds (DEC-432 item 22), names the stream that holds the
+  compiler's record (DEC-432 item 19; until then the compiler makes no gateway call), and adds the
+  gateway's meter stream with one writer per workspace and the `meter_unavailable` refusal (DEC-432
+  item 20), with test vectors; the registration lands tests first
   (DEC-77); replay of a journal with every model call failing yields the same fold (INF-10).
 - **E15-9 (Must, M5; SC)** As an owner, I want model spend metered and capped per agent and per
   workspace, so that cost is bounded and a cap never adds risk. *Accepted when:* reservations precede
@@ -1322,6 +1329,20 @@ waits for the founder's answer to DEC-432 item 13, whose recommendation drops th
   I pay for what my agents used. *Accepted when:* the billing feed of spec §7.4 sends counts and cost
   only, never content, outputs, or instruments; hybrid sends signed reports; the result appears in
   E14-3's usage view.
+- **E15-12 (Should; spec follow-ups, deferred by the freeze rule)** The minors of the independent
+  review of inference spec v0.1 (PR #551, round 1), for the spec's next revision:
+  - Minor 6: "withdrawal empties the cache" must not delete a write-once artifact a journaled record
+    names. Say withdrawal invalidates cache index entries only.
+  - Minor 7: INF-6's "exactly one metering record" against the meter stream's two appends
+    (reservation and settlement). State which the INF-6 and INF-7 oracle counts, and that a
+    `meter_unavailable` refusal has no meter-stream entry.
+  - Minor 8: spec §7.3 says a crashed call's reservation "stays counted"; §9's crash row says it is
+    "settled as spent at their maximum". Pick one fold and make the accumulator reproduce it.
+  - Minor 9: INF-15 and §4.4 rely on `PlatformOperatorAction`'s `model_withdrawn`, whose payload
+    schema the journal spec leaves open (DEC-261 item 9). Say so, so E15-7 assumes no closed schema.
+  - Minor 10: no longer a scope change. The founder chose a hosted fast model for v1 (DEC-432
+    item 13), so FR-3.7's P1 stands; update OD-02 to that decision.
+  - Nit: spec §11 places the spike's 60 s timeout in the client; it is in `http.py`.
 
 ### E17 Research agent and dynamic universe
 

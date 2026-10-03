@@ -20,6 +20,11 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-432](../project/decisions/DEC-432.md) item 18, under DEC-176):** §8.1's
+  content-hash sentence lists everything the hash covers for a model called through the gateway, as
+  inference spec §4.1 defines it, and says endpoints and status are outside it. It pins more, so it
+  only tightens; no rule, case, or fixture changes, since the reference cases carry hashes as
+  opaque values.
 - **v0.6, amended ([DEC-438](../project/decisions/DEC-438.md) item 10, under DEC-176):** §6.4's
   notification payload and §6.7's tripwire alert carry a random notice id instead of the approval's
   or the limit event's id, since a ULID's leading bits are its creation time. It only sends less to
@@ -1282,7 +1287,13 @@ until the owner confirms them, §7), because they only reduce risk.
 - A signal model is a registered component with an id (`quant.`, `fast.`, or `llm.` prefix), a
   semantic version, and a **content hash** of its code, prompt, parameter schema, and underlying
   model identity (provider, model name, and version, or weights hash); the mandate pins all three
-  (V-007). **Signal models never place orders.**
+  (V-007). For a model called through the model gateway, the hash also covers the rest of the
+  registry entry's pinned content: the retrieval plan, the output schema and validation bounds, the
+  call deadline, the output-token limit, the sampling parameters, the quantization of open weights,
+  the methodology text, and the authorship label
+  ([inference spec §4.1](inference.md#41-registry-entry), DEC-432 items 17 and 18). The entry's
+  endpoints and status are **not** in the hash: a routing or status change never changes a pin.
+  **Signal models never place orders.**
 - **The model gateway never substitutes a model** (DEC-67): a fallback may route only to another
   endpoint serving the identical pinned model; otherwise the call fails and the output counts as
   missing (§8.3). The platform withdraws a model version only through a journaled

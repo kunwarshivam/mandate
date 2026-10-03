@@ -131,7 +131,7 @@ always act directly at their broker; reconciliation then ingests that as externa
 | **Account executor** (`mandate-executor` plus a connector) | One per broker account | That account's stream (journal §2) | A vault lease for that one connection | Postgres; vault; that connection's broker hosts only |
 | **Scheduler** | One per workspace | The scheduler stream (`clock:`) | Nothing secret | Postgres; time sources |
 | **Workspace control services** (Phase 1: the founder's CLI) | One set per workspace deployment | The control stream | Session keys for the identity provider | Postgres; identity provider; users |
-| **Model gateway** (see `docs/specs/inference.md`) | One per workspace deployment, replicated | Nothing in the journal; its invocations are recorded by the calling runtime | Provider keys | Allowed model providers only |
+| **Model gateway** (see `docs/specs/inference.md`) | One per workspace deployment, replicated; one replica holds the meter writer role per workspace (inference spec §3.6) | Its meter stream (`meter:{workspace_id}`, proposed, E15-8), by the holder only; its invocations are recorded by the calling runtime | Provider keys | Allowed model providers only |
 | **Cold exporter and anchorer** | One per workspace deployment | Control stream (`SegmentExported`, `AnchorComputed`) | Object-storage write credential | Postgres; object storage; timestamping authority |
 | **Market data ingest** (see `docs/specs/data-plane.md`) | Per workspace in v1 (no redistribution, HLD §12 item 3) | Parquet datasets | The workspace's data credential | That data host |
 
