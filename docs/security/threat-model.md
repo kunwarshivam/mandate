@@ -73,7 +73,7 @@ none is new policy.
 |---|---|---|
 | SG-1 | **No text, model, or outside input can place an order outside the mandate.** The worst any input can do is propose; deterministic code sizes, the autonomy rules classify, and the gate decides | Rules 1, 4, 11; MI-9, MI-15 to MI-17; INF-5; HI-1, HI-10; DP-8 |
 | SG-2 | **Nobody but the owner, with step-up, can widen an envelope** | Rule 11; MI-12, MI-16; HLD §8 step-up |
-| SG-3 | **Risk reduction always works,** whatever is down, compromised, or under attack | Rule 13; MI-1, MI-23; OPS-4; INF-13; HI-14; DP-13 |
+| SG-3 | **Risk reduction always works,** whatever is down, compromised, or under attack. One limit is known and disclosed: while the journal is unavailable no exit can be sent, because nothing is sent unjournaled (rule 5); protection already resting at the broker stays, and the owner can act at the broker ([infrastructure design](../design/infrastructure.md) §2.1; DEC-434 item 21, Proposed for the founder) | Rule 13; MI-1, MI-23; OPS-4 (given an available journal); INF-13; HI-14; DP-13 |
 | SG-4 | **The platform can never move funds.** Trading-only scopes; keys that allow withdrawal are refused | HLD §6 A step 2; infrastructure §5.3 |
 | SG-5 | **Credentials stay in the vault** and in the memory of the one process that uses them | Rule 7; OPS-1; INF-14; HI-12 |
 | SG-6 | **One tenant can neither read nor affect another** | HLD §8; OPS-6; INF-9; DP-10; E18-8 |
