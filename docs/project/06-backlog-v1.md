@@ -697,13 +697,10 @@ after U-A1 to U-A5 are recorded.
   *Decided (DEC-318 option (a), the founder, 2026-10-02; DEC-430):* MC-E18 is restated as §6.4's
   cancellation. Its response step cancels the pending grant as `mode_tightened` and refuses it as
   `not_pending`, and the reference model, the fuzz oracle and the seeded bugs follow (reference PR,
-  #538, merged). Still open, in order:
-  1. The code PR (in review): the harness strips the response step's `AgentModeChanged` (`restriction_changed`),
-     and `the_lifecycle_cases_split_as_the_runtime_stands` expects MC-E18 to pass, tests first.
-     `a_mode_other_than_normal_skips`'s doc comment stops naming MC-E18.
-  2. The status PR moving MC-E18 to `passing`.
-  3. A §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
-     (DEC-430 item 2). It is a spec PR and changes no rule.
+  #538, merged). The harness sets the response step's `AgentModeChanged` (`restriction_changed`)
+  aside, so MC-E18 passes (#550, merged), and the status PR moves it to `passing` (in review). Still
+  open: a §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
+  (DEC-430 item 2). It is a spec PR and changes no rule.
   *Follow-up (the #550 review, minors 1 and 2):* `mc_e18_holds_only_as_the_cancellation` asserts
   only that its two plants fail. Pin each with `fails_naming` and the messages the review gives, so
   a draft that stops being well formed cannot pass it by failing for another reason. `apply_now`'s
