@@ -7331,7 +7331,7 @@ mod sequence_tests {
         /// position (rule 12); and the live exits with every rung a ladder between rungs may still
         /// send sell at most the position too (DEC-408). And no sell works beside a ladder between
         /// rungs unless that ladder is parked for the open, the only state in which a remainder
-        /// lasts: so a sell beside it cannot end unsold before its rung is due (DEC-410 item 7).
+        /// lasts: so a sell beside it overlaps the rung for one step at most (DEC-410 item 7).
         /// The oracle's own record, never the fold's.
         fn within_position(&mut self) -> Result<(), String> {
             if !self.sums {
@@ -7362,7 +7362,7 @@ mod sequence_tests {
                 if beside > 0 && !self.parked.contains(exit) {
                     return Err(format!(
                         "{beside} working beside {exit}'s remainder, which is not parked for the \
-                         open at {}: the window DEC-410 item 7 says cannot be reached",
+                         open at {}: DEC-410 item 7 bounds that overlap to one step",
                         self.now
                     ));
                 }
