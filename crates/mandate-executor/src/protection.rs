@@ -1636,8 +1636,7 @@ fn cancel_resting(
         .unwrap_or_default();
     for id in resting {
         let outstanding = batch.view.orders.get(&id).is_none_or(|order| {
-            order.state == OrderState::PendingCancel
-                || order.state == OrderState::Unknown
+            matches!(order.state, OrderState::PendingCancel | OrderState::Unknown)
                 || order.cancel_unconfirmed && !legal(order.state, OrderState::PendingCancel)
         });
         if outstanding {
