@@ -2511,18 +2511,24 @@ mod tests {
     }
 
     /// A participation slice truncates to the venue's own quantity grid, not to a grid read from
-    /// `fractionable` (DEC-427). On a 0.25 grid the owner's exit of 10 is sliced by an order cap
-    /// of 9.95 to 9.75, and by a daily cap with 9.4 left to 9.25, where the nine-place grid gives
-    /// 9.95 and 9.4.
+    /// `fractionable` (DEC-427), and never falls below the minimum rounded up onto that grid. On a
+    /// 0.25 grid, for an owner's exit of 10:
+    /// - an order cap of 9.95 slices to 9.75, and a daily cap with 9.4 left to 9.25, where the
+    ///   nine-place grid gives 9.95 and 9.4;
+    /// - an order cap of 1.0 at a 1.1 minimum slices at 1.25, the minimum rounded up onto the
+    ///   grid, never at an off-grid 1.1 (#571 review, M1);
+    /// - an order cap of 0.2, above zero but below one step of the grid, slices at the minimum of
+    ///   1 rather than releasing the exit whole (#571 review, B3).
     #[test]
     #[ignore = "pending E6-4"]
     fn a_slice_truncates_to_the_venue_s_quantity_grid() -> Result<(), GateError> {
-        let owner = |trailing: &str, today: &str| -> Result<_, GateError> {
+        let owner = |trailing: &str, today: &str, minimum: &str| -> Result<_, GateError> {
             let mut o = allowing()?.selling(Origin::OwnerClose)?;
             o.market.trailing_5m_volume = Some(Qty::parse(trailing)?);
             o.market.adv_20d = Some(Qty::parse("200")?);
             o.instrument.fractionable = true;
             o.instrument.qty_increment = Qty::parse("0.25")?;
+            o.instrument.min_order_size = Qty::parse(minimum)?;
             o.conduct
                 .participation_today
                 .insert(id("a")?, Qty::parse(today)?);
@@ -2530,19 +2536,29 @@ mod tests {
                 .pacing
                 .map(|pacing| (pacing.qty, pacing.applied)))
         };
+        let by_order_cap = |qty: &str| -> Result<_, GateError> {
+            Ok(Some((
+                Qty::parse(qty)?,
+                [crate::PacingControl::OrderSizeParticipation].into(),
+            )))
+        };
         assert_eq!(
-            [owner("199", "0")?, owner("200", "0.6")?],
             [
-                Some((
-                    Qty::parse("9.75")?,
-                    [crate::PacingControl::OrderSizeParticipation].into()
-                )),
+                owner("199", "0", "1")?,
+                owner("200", "0.6", "1")?,
+                owner("20", "0", "1.1")?,
+                owner("4", "0", "1")?,
+            ],
+            [
+                by_order_cap("9.75")?,
                 Some((
                     Qty::parse("9.25")?,
                     [crate::PacingControl::DailyParticipation].into()
                 )),
+                by_order_cap("1.25")?,
+                by_order_cap("1")?,
             ],
-            "a slice is a whole number of the venue's increment"
+            "a slice is a whole number of the venue's increment, at least the on-grid minimum"
         );
         Ok(())
     }
@@ -2601,7 +2617,7 @@ mod tests {
             o.proposed.qty = Qty::parse(qty)?;
             o.instrument.min_order_size = Qty::parse(minimum)?;
             o.instrument.fractionable = true;
-            o.instrument.qty_increment = Qty::parse(if true { "0.000000001" } else { "1" })?;
+            o.instrument.qty_increment = Qty::parse("0.000000001")?;
             o.market.trailing_5m_volume = Some(Qty::parse(trailing)?);
             o.market.adv_20d = Some(Qty::parse("200")?);
             o.conduct

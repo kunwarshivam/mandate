@@ -390,25 +390,39 @@ mod tests {
     }
 
     /// A trim rounds up on the venue's own quantity grid, not on a grid read from `fractionable`
-    /// (DEC-427; #466 review, m3; #530 review, m6). At a 600,000 price on the 1500 cap:
-    /// - 0.0002 held worth 120 at factor 0.02 is 90 over its 30 target, 0.00015. A 0.0001 grid
-    ///   rounds that up to the 0.0002 held, a full close that goes below a 0.001 minimum
-    ///   (DEC-423), where the nine-place grid would withhold 0.00015;
-    /// - 0.001 held worth 600 at factor 0.3 is 150 over its 450 target, 0.00025, rounded up to
-    ///   0.0003 on the same grid.
+    /// (DEC-427; #466 review, m3; #530 review, m6), and never proposes an order off it that is not
+    /// a full close (#571 review, B2). At a 600,000 price on a 0.0001 grid:
+    /// - the #504 review's case: 0.0002 held worth 120 under a cap of 100 at the fixture's factor
+    ///   0.5 is 70 over its 50 target, 0.000116667, rounded up to the 0.0002 held, a full close
+    ///   below a 0.001 minimum (DEC-423), where rounding to nearest or down withholds 0.0001;
+    /// - 0.002 held worth 1200 at factor 0.316 is 726 over its 474 target, 0.00121, below the
+    ///   half-way point, rounded up to 0.0013;
+    /// - 0.001 held at factor 0 with 0.00025 resting on the agent's own sell leaves 0.00075 unsold,
+    ///   off the grid and not the whole position, so the trim is truncated onto the grid, 0.0007.
     #[test]
     #[ignore = "pending E6-4"]
     fn a_trim_rounds_up_on_the_venue_s_quantity_grid() -> Result<(), GateError> {
-        let mut whole = Scene::new("0.0002", "120")?.crypto()?;
-        whole.instrument.qty_increment = Qty::parse("0.0001")?;
-        whole.instrument.min_order_size = Qty::parse("0.001")?;
-        whole.risk.size_factor = Ratio::parse("0.02")?;
-        assert_eq!(whole.trims()?, qty("0.0002")?);
-        let mut part = Scene::new("0.001", "600")?.crypto()?;
-        part.instrument.qty_increment = Qty::parse("0.0001")?;
-        part.instrument.min_order_size = Qty::parse("0.0001")?;
-        part.risk.size_factor = Ratio::parse("0.3")?;
-        assert_eq!(part.trims()?, qty("0.0003")?);
+        let on_the_grid = |held: &str, market_value: &str| -> Result<Scene, GateError> {
+            let mut scene = Scene::new(held, market_value)?.crypto()?;
+            scene.instrument.qty_increment = Qty::parse("0.0001")?;
+            scene.instrument.min_order_size = Qty::parse("0.0001")?;
+            Ok(scene)
+        };
+        let mut case_504 = on_the_grid("0.0002", "120")?;
+        case_504.limits.max_position_usd = Usd::parse("100")?;
+        case_504.instrument.min_order_size = Qty::parse("0.001")?;
+        assert_eq!(case_504.trims()?, qty("0.0002")?, "the #504 review's case");
+        let mut below_half_way = on_the_grid("0.002", "1200")?;
+        below_half_way.risk.size_factor = Ratio::parse("0.316")?;
+        assert_eq!(below_half_way.trims()?, qty("0.0013")?, "0.00121 rounds up");
+        let mut beside_a_resting_sell = on_the_grid("0.001", "600")?;
+        beside_a_resting_sell.risk.size_factor = Ratio::ZERO;
+        beside_a_resting_sell.resting(7, "0.00025", Side::Sell, false, true)?;
+        assert_eq!(
+            beside_a_resting_sell.trims()?,
+            qty("0.0007")?,
+            "an off-grid remainder is truncated onto the grid"
+        );
         Ok(())
     }
 

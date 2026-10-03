@@ -697,8 +697,7 @@ fn trims_of(
     crypto: bool,
 ) -> Result<Vec<mandate_risk::TrimProposal>, mandate_risk::GateError> {
     trims_on_grid(
-        held,
-        market_value,
+        (held, market_value, "1500"),
         factor,
         (resting, protective),
         minimum,
@@ -706,18 +705,19 @@ fn trims_of(
     )
 }
 
-/// [`trims_of`] with a crypto instrument on the venue grid `grid`, or an equity on whole shares
-/// when `grid` is `None`.
+/// [`trims_of`] with `max_position_usd` at `cap` and a crypto instrument on the venue grid `grid`,
+/// or an equity on whole shares when `grid` is `None`.
 fn trims_on_grid(
-    held: &str,
-    market_value: &str,
+    (held, market_value, cap): (&str, &str, &str),
     factor: &str,
     (resting, protective): (&str, &str),
     minimum: &str,
     grid: Option<&str>,
 ) -> Result<Vec<mandate_risk::TrimProposal>, mandate_risk::GateError> {
     let mut s = Scenario::allowing();
-    s.mandate = mandate_with(common::two_trimming_rungs());
+    let mut limits = common::two_trimming_rungs();
+    limits.max_position_usd = usd(cap);
+    s.mandate = mandate_with(limits);
     s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
     s.risk.size_factor = common::ratio(factor);
     s.agent.positions.insert(asset(INSTRUMENT_2), qty(held));
@@ -846,35 +846,99 @@ fn a_trim_of_the_whole_position_is_never_withheld_for_the_minimum() {
 }
 
 /// A trim rounds up on the venue's own quantity grid (DEC-427; #466 review, m3; #530 review, m6),
-/// and so reaches DEC-423's full close where the venue's grid makes the trim the whole position.
+/// reaches DEC-423's full close where that grid makes the trim the whole position, and never
+/// proposes an order off the grid that is not a full close (#571 review, B2).
 ///
-/// Each row is worked out here from §5.5 on the 1500 cap and a 0.0001 grid, at a 600,000 price:
-/// - 0.0002 held worth 120 at factor 0.02 is 90 over its 30 target, 0.00015 of a unit. On the
-///   grid that rounds up to the 0.0002 held, a full close, proposed below a 0.001 minimum. The
-///   nine-place grid would size it at 0.00015 and withhold it (the #504 review's case, which
-///   DEC-423's Rationale left to this row).
-/// - 0.001 held worth 600 at factor 0.3 is 150 over its 450 target, 0.00025, rounded up to
-///   0.0003 at a 0.0001 minimum.
-/// - The same with 0.0001 resting on the agent's own sell: 0.00025 less 0.0001 on sale is
-///   0.00015, rounded up to 0.0002 (DEC-399 item 7).
+/// Each row is worked out here from §5.5. The cap is `min(max_position_usd, 0.2 × 10000)`, the band
+/// 5% of it, and the excess is sold at the position's own price, less what the agent's own
+/// non-protective sells already have on sale. At a 600,000 price on a 0.0001 grid:
+/// - **The #504 review's case** (DEC-423, Rationale): 0.0002 held worth 120 under a cap of 100 at
+///   factor 0.5 is 70 over its 50 target, 0.000116667. The grid rounds that up to the 0.0002 held,
+///   a full close, proposed below a 0.001 minimum. Round-to-nearest and truncation both give
+///   0.0001, which is withheld.
+/// - 0.002 held worth 1200 at factor 0.316 on the 1500 cap is 726 over its 474 target, 0.00121,
+///   below the half-way point: rounded up to 0.0013, where round-to-nearest gives 0.0012.
+/// - 0.001 held worth 600 at factor 0.3 is 150 over its 450 target, 0.00025, rounded up to 0.0003,
+///   which meets a 0.0003 minimum the nine-place grid's 0.00025 would not.
+/// - The same with 0.0001 resting on the agent's own sell: 0.00025 less 0.0001 is 0.00015,
+///   rounded up to 0.0002 (DEC-399 item 7).
+/// - 0.001 held at factor 0 with 0.00025 resting: the whole 0.001 less 0.00025 is 0.00075, and
+///   rounding up gives 0.0008, more than the 0.00075 not on sale. The clamp leaves 0.00075, off
+///   the grid and not the whole position, so it is truncated onto the grid: 0.0007 (B2). Proposing
+///   0.00075 is an order §5.3 rule 2 refuses; 0.0008 sells more than is unsold.
+/// - 0.00105 held worth 630 at factor 0: a grid that does not divide the position. Rounding up
+///   gives 0.0011, the clamp leaves the 0.00105 held, a full close, proposed at a 0.001 minimum.
+///
+/// At a 6,000 price on a 0.25 grid, coarser than the whole position: 0.1 held worth 600 at factor
+/// 0.3 is 150 over, 0.025, rounded up to 0.25 and clamped to the 0.1 held, a full close, proposed
+/// at a 0.25 minimum and at a 0.5 minimum above the position (§5.3 rule 2's full-close exception).
 ///
 /// Every row is run before one assertion, so under the stub each row's outcome is reported.
 #[test]
 #[ignore = "pending E6-4"]
 fn a_trim_rounds_up_on_the_venue_s_quantity_grid() {
     let rows = [
-        ("0.0002", "120", "0.02", "0", "0.001", "0.0002"),
-        ("0.001", "600", "0.3", "0", "0.0001", "0.0003"),
-        ("0.001", "600", "0.3", "0.0001", "0.0001", "0.0002"),
+        (
+            ("0.0002", "120", "100"),
+            "0.5",
+            "0",
+            "0.001",
+            "0.0001",
+            "0.0002",
+        ),
+        (
+            ("0.002", "1200", "1500"),
+            "0.316",
+            "0",
+            "0.0001",
+            "0.0001",
+            "0.0013",
+        ),
+        (
+            ("0.001", "600", "1500"),
+            "0.3",
+            "0",
+            "0.0003",
+            "0.0001",
+            "0.0003",
+        ),
+        (
+            ("0.001", "600", "1500"),
+            "0.3",
+            "0.0001",
+            "0.0001",
+            "0.0001",
+            "0.0002",
+        ),
+        (
+            ("0.001", "600", "1500"),
+            "0",
+            "0.00025",
+            "0.0001",
+            "0.0001",
+            "0.0007",
+        ),
+        (
+            ("0.00105", "630", "1500"),
+            "0",
+            "0",
+            "0.001",
+            "0.0001",
+            "0.00105",
+        ),
+        (("0.1", "600", "1500"), "0.3", "0", "0.25", "0.25", "0.1"),
+        (("0.1", "600", "1500"), "0.3", "0", "0.5", "0.25", "0.1"),
     ];
     let mismatches = rows
         .into_iter()
-        .filter_map(|(held, value, factor, resting, minimum, sold)| {
+        .filter_map(|(position, factor, resting, minimum, grid, sold)| {
+            let (held, value, cap) = position;
             let row = format!(
-                "{held} held at {value}, factor {factor}, {resting} resting, minimum {minimum}"
+                "{held} held at {value} under a cap of {cap}, factor {factor}, {resting} \
+                 resting, minimum {minimum}, grid {grid}"
             );
             let expected = vec![(asset(INSTRUMENT_2), qty(sold), Purpose::RiskExit)];
-            match trims_on_grid(held, value, factor, (resting, "0"), minimum, Some("0.0001")) {
+            match trims_on_grid(position, factor, (resting, "0"), minimum, Some(grid)) {
                 Ok(trims) => {
                     let proposed = trims
                         .iter()
@@ -889,7 +953,7 @@ fn a_trim_rounds_up_on_the_venue_s_quantity_grid() {
         .collect::<Vec<_>>();
     assert!(
         mismatches.is_empty(),
-        "a trim rounds up on the venue's quantity grid:\n{}",
+        "a trim rounds up on the venue's quantity grid and never proposes an order off it:\n{}",
         mismatches.join("\n")
     );
 }
