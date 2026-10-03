@@ -3924,6 +3924,19 @@ From #559's round-1 review (#524's tests; the coordinator's ruling, 09:35Z on #5
   tests-correction row #532 started; the row added here points at the next tests correction to
   `remainder_tests`. The substance is the same, so no change is needed.
 
+From #576's round-1 review (DEC-425; the coordinator's ruling, 12:12Z on #576; freeze rule):
+
+- **E7-4: pin or remove `settle`'s `!handed` guard on the re-ask** (#576 round 1, minor 1).
+  Calling `cancel_resting` for a handed-on sequence too leaves every test green, and the diff's
+  mutants include none that drops the guard. The review found no reachable state where it
+  diverges: `protection_holds && handed` implies `!fits`, so an unheld waiting exit has already had
+  `overtaken` ask in the same step, or the instrument is over-committed, where cancelling is what
+  rule 12 wants. Either pin a state where it matters or drop the guard and say why.
+- **E7-4: a `fits` unit pin with a held exit beside the placement** (#576 round 1, minor 4).
+  `a_reported_fill_not_yet_applied_makes_protection_overhang` has no waiting intents, so it reads
+  the same under the old and the new measure. One case with a held exit beside the placement would
+  pin the subtraction DEC-425 item 5 made the one measure.
+
 From #528's round-2 review (DEC-411; the coordinator's ruling, 05:19Z on #528; freeze rule):
 
 - **The reference does not model V-002's apply-time re-check** (#528 round 2, major 1). V-002 says it is "checked at
