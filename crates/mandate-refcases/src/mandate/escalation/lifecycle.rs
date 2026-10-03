@@ -381,9 +381,13 @@ impl Shell {
                 &[("DecisionMade", "")]
             }
             "response" => {
-                self.apply_now(at(step, "now")?)?;
+                let moved = self.apply_now(at(step, "now")?)?;
                 ran.effects = self.respond(at(step, "response")?)?;
-                &[]
+                if moved {
+                    cause_records("mode_tightened")
+                } else {
+                    &[]
+                }
             }
             "tick" => {
                 let at = second(at(step, "at")?, "at")?;
@@ -912,8 +916,9 @@ impl Shell {
 
     /// `now`: the view, the classification and the dry run as stated, the mark folded as the
     /// account stream's latest `MarkUpdated`, and the mode folded where it differs from the
-    /// runtime's, which must then read as stated.
-    fn apply_now(&mut self, now: &Json) -> Result<(), String> {
+    /// runtime's, which must then read as stated. True when it folded a mode, which the next step
+    /// records as its first draft, `AgentModeChanged` (`restriction_changed`).
+    fn apply_now(&mut self, now: &Json) -> Result<bool, String> {
         unknown_members(now, NOW_KEYS)
             .map_err(|unknown| format!("`now` members not interpreted: {unknown}"))?;
         let instrument = self
@@ -976,7 +981,8 @@ impl Shell {
             "stopped" => Mode::Stopped,
             other => return Err(format!("`{other}` is not a mode")),
         };
-        if self.state.effective_mode() != wanted {
+        let moved = self.state.effective_mode() != wanted;
+        if moved {
             self.account("AgentModeApplied", vec![("to", text(mode))], clock)?;
         }
         ensure(self.state.effective_mode() == wanted, || {
@@ -984,7 +990,8 @@ impl Shell {
                 "`now` states mode `{mode}`, and the runtime's effective mode is {:?}",
                 self.state.effective_mode()
             )
-        })
+        })?;
+        Ok(moved)
     }
 
     /// A response: a new `source` is folded on the control stream and handed in; a re-tailed one

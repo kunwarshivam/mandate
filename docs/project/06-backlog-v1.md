@@ -698,14 +698,15 @@ after U-A1 to U-A5 are recorded.
   fail on that member alone and flip in the status PR that follows.
   *Decided (DEC-318 option (a), the founder, 2026-10-02; DEC-430):* MC-E18 is restated as §6.4's
   cancellation. Its response step cancels the pending grant as `mode_tightened` and refuses it as
-  `not_pending`, and the reference model, the fuzz oracle and the seeded bugs follow (reference PR).
-  Still open, in order:
-  1. The code PR: the harness strips the response step's `AgentModeChanged` (`restriction_changed`),
-     and `the_lifecycle_cases_split_as_the_runtime_stands` expects MC-E18 to pass, tests first.
-     `a_mode_other_than_normal_skips`'s doc comment stops naming MC-E18.
-  2. The status PR moving MC-E18 to `passing`.
-  3. A §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
-     (DEC-430 item 2). It is a spec PR and changes no rule.
+  `not_pending`, and the reference model, the fuzz oracle and the seeded bugs follow (reference PR,
+  #538, merged). The harness sets the response step's `AgentModeChanged` (`restriction_changed`)
+  aside, so MC-E18 passes (#550, merged), and the status PR moves it to `passing` (in review). Still
+  open: a §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
+  (DEC-430 item 2). It is a spec PR and changes no rule.
+  *Follow-up (the #550 review, minors 1 and 2):* `mc_e18_holds_only_as_the_cancellation` asserts
+  only that its two plants fail. Pin each with `fails_naming` and the messages the review gives, so
+  a draft that stops being well formed cannot pass it by failing for another reason. `apply_now`'s
+  doc comment should say it is true whenever it folded a new mode, cancelling or not.
   *Follow-up (the #416 review, minor 3):* every `ask_permit` case asks for one instrument, so
   family E cannot see the budget counted per instrument rather than per agent (`mandate-approval`'s
   own suite does). A future MC-E case should spread its ten asks across instruments. It changes
@@ -3341,6 +3342,29 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   BTC, a cap of 100, factor 0.5 and a 0.001 minimum give a trim of 0.000116667 on the 1e-9 grid,
   withheld below the minimum, but 0.0002 on the venue's 0.0001 grid, the whole position, which
   DEC-423 exempts. Add that case as a trim test when this lands.
+  *Tests (`agent/g8-e6-4-qty-grid-tests`, [DEC-427](decisions/DEC-427.md)):* `InstrumentSnapshot`
+  carries `qty_increment`; `trim::quantity_grid` is the stub, and three pending tests pin the trim
+  (the #504 case included) and the participation slice on a venue grid. The implementation PR, then
+  a harness PR stating the case's grid, follow.
+  *Round 1 of #571's review:* the #504 case's named figures, B2's truncation and B3's slice
+  ([DEC-445](decisions/DEC-445.md)), M1's on-grid minimum, M3's rows, and the property
+  `the_trim_and_the_slice_stay_on_the_venue_s_grid` are pending in the tests PR. Two live rows that
+  asserted DEC-445's superseded figures moved into pending tests.
+- **E6-4: refuse a grid that is not above zero, per instrument** (#571 review, round 1, minor 2).
+  `InstrumentSnapshot::qty_increment` is a `Qty`, so zero is representable. `ceiled_quotient` and
+  `truncated_quotient` refuse it as `NotPositive`, but that error would leave `trim::proposals`
+  whole and withhold every instrument's trim (DEC-423 item 4 forbids it), and from `slice` it errors
+  the decision, denying an exit (rule 13). Give the field a type that cannot hold zero (trust ladder
+  rung 1), or refuse it per instrument where the snapshot is built from connector data, with a test.
+  Unreachable today: no production caller builds the snapshot.
+- **E6-4: one ingest field for the quantity grid** (#571 review, round 1, minor 4).
+  `mandate-builder`'s `Market::increment` (DEC-128 item 27) and `InstrumentSnapshot::qty_increment`
+  are two grid fields that must come from the same instrument-master field. When ingest lands, read
+  both from it and add a check that they agree (DEC-427, Alternatives).
+- **E6-4: `trim::tests`' factor overrides disagree with the fixture's rung** (#571 review, round 1,
+  minor 5). Several `trim::tests` rows set `risk.size_factor` to a value no rung of the `Scene`'s
+  one-rung ladder (factor 0.5) carries, an internally inconsistent snapshot. Give `Scene` a rung
+  whose factor matches each row, or derive the factor from the rung.
 - **E6-4 nits** (#466 review, round 1): `UsdExact::times_size_fraction`'s doc still lists "the
   ladder size factor applied to the target" though the gate's 24-place `Ratio` factor enters
   through `UsdExact::of_ratio`; say which number each serves (n2). `of_ratio` takes any `Ratio`,
