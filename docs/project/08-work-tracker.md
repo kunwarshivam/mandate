@@ -85,7 +85,7 @@ the passing ones and `cargo test -p mandate-refcases -- --include-ignored` shows
 |---|---|---|
 | Journal (46) | All 46 | — |
 | Trading domain (26 cases, RC-01 to RC-25 with RC-09B, plus variants) | 13 cases: RC-01, RC-02, RC-03, RC-05, RC-06, RC-08, RC-09, RC-09B, RC-10, RC-12, RC-13, RC-19, RC-23; four variants: RC-03 `gate_rejects_zero_crossing_order`, RC-06 `short_position_generic_broker`, RC-18 `generic_cash_account`, RC-23 `forward_3_for_1_non_terminating_mark`; and `schema_version` (18 entries in `status.toml`) | RC-04 and RC-06 `protective_orders_kept_through_dividend` (E7-2 to E7-4, E6-9); RC-07, RC-11 (E7-3, E7-5, E6-9; their accounting parts are covered by hand tests); RC-09 `alpaca_intraday_margin` (a case-file defect with the founder, DEC-285 item 6); RC-14 and its variants (E7-4); RC-15 and its variants (E7-2 to E7-5, E6-9); RC-16 (DEC-129 item 25, founder); RC-17 (E17-3's harness); RC-18's main path; RC-20 to RC-22, RC-24, RC-25 (E6-8, E7-2 to E7-5). Each pending case names its owner when run |
-| Mandate (435 cases, plus the version and version-vector checks) | 353 cases: families A (16), B (35 of 37), C (48), D (18 of 27), E (21 of 32), F (4), G (16), J (10), L (5), N (28), P (22), R (26), S (31), T (5), V (68 of 71); W none | 82: MC-B36 and MC-B37 (E6-4, the resting-sell trim; status PR after the reference PR); MC-D01, MC-D05 to MC-D10 (E6-14's `mandate-spec` carry) and MC-D23, MC-D24 (E8-8); MC-E01, MC-E06, MC-E17 to MC-E24, MC-E29 (E8-3); MC-V69 to MC-V71 (V-047, E10-1, tests [#536](https://github.com/kunwarshivam/mandate/pull/536)); MC-W01 to MC-W57 (E6-13 tripwires) |
+| Mandate (440 cases, plus the version and version-vector checks) | 355 cases: families A (16), B (37), C (48), D (18 of 27), E (21 of 32), F (4), G (16), J (10), L (5), N (28), P (22), R (26), S (31), T (5), V (68 of 76); W none | 85: MC-D01, MC-D05 to MC-D10 (E6-14's `mandate-spec` carry) and MC-D23, MC-D24 (E8-8); MC-E01, MC-E06, MC-E17 to MC-E24, MC-E29 (E8-3); MC-V69 to MC-V76 (V-047 and its risk-reducing exception, DEC-444; E10-1, tests [#536](https://github.com/kunwarshivam/mandate/pull/536)); MC-W01 to MC-W57 (E6-13 tripwires) |
 
 ## Claims
 
@@ -152,11 +152,11 @@ issues are the record; this table is the summary
   - DEC-265 item 1: the timestamp token's signature check (a crypto dependency).
   - DEC-266 item 4: the input-drift detector's escalation seam and its threshold.
   - DEC-285 item 6: RC-09's `alpaca_intraday_margin` variant cannot pass as written.
-  - DEC-411: whether a risk-reducing mandate version is exempt from V-047 in a one-user
-    workspace (today it is refused).
 - **Decided, record still to land.** The founder has ruled; the PR that records each is pending:
-  DEC-360 (option (c)), DEC-410 item 3 (amend rule 13's wording), and DEC-422 (amend trading spec
-  §5.4, [#514](https://github.com/kunwarshivam/mandate/pull/514)).
+  DEC-360 (option (c)), DEC-410 item 3 (amend rule 13's wording), DEC-422 (amend trading spec
+  §5.4, [#514](https://github.com/kunwarshivam/mandate/pull/514)), and DEC-411 item 6's exemption
+  (2026-10-03: a risk-reducing version passes V-047 in a one-user workspace; a neutral one is still
+  refused), recorded as DEC-444 in [#570](https://github.com/kunwarshivam/mandate/pull/570).
 - **Robinhood**: ask Robinhood whether a paper or test path exists for agentic accounts. Agents
   never connect to a real account (rule 8).
 - **GitHub Support**: purge the closed pull requests' `refs/pull/*/head` refs, which still hold

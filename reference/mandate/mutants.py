@@ -25,14 +25,17 @@ MUTANTS = {
         '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
         '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 2) < 2:'),
     "V-047 exempts a neutral version too": (
-        '    return prev is not None and V.is_valid(prev) and classify(prev, m)[0] == "risk_reducing"',
-        '    return prev is not None and V.is_valid(prev) and classify(prev, m)[0] in ("risk_reducing", "neutral")'),
+        '            and classify(prev, m)[0] == "risk_reducing")',
+        '            and classify(prev, m)[0] in ("risk_reducing", "neutral"))'),
     "V-047 exempts every version of a running agent": (
-        '    return prev is not None and V.is_valid(prev) and classify(prev, m)[0] == "risk_reducing"',
-        '    return prev is not None and V.is_valid(prev)'),
-    "V-047 exempts a version whose previous document it does not have": (
-        '    return prev is not None and V.is_valid(prev) and classify(prev, m)[0] == "risk_reducing"',
-        '    return prev is not None and (not V.is_valid(prev) or classify(prev, m)[0] == "risk_reducing")'),
+        '            and classify(prev, m)[0] == "risk_reducing")',
+        '            and True)'),
+    "V-047 exempts a version when no current version is supplied": (
+        '    return (prev is not None and current is not None and V.is_valid(prev) and version(prev) == current\n',
+        '    return (prev is not None and V.is_valid(prev) and (current is None or version(prev) == current)\n'),
+    "V-047 exempts against a document that is not the agent's current version": (
+        '    return (prev is not None and current is not None and V.is_valid(prev) and version(prev) == current\n',
+        '    return (prev is not None and V.is_valid(prev)\n'),
     "loss carry ignores withdrawals": ("        self.net_contributed += d\n", ""),
     "release retires without a loss carry": ('                self._retire("goal_complete", ev)\n',
                                              '                self.restrictions["retired"] = "stopped"\n'),

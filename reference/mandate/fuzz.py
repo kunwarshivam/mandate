@@ -2079,11 +2079,19 @@ def fuzz_content(n):
 def fuzz_independence_floor(n):
     """V-047 (DEC-411, DEC-444): under `independent_approval_required` a workspace of fewer than two users is refused at
     validation, a user count that is absent counts as one (rule 3), and the rule touches no other verdict, except that a
-    new version §9.2 rates risk-reducing against a whole previous document passes. The oracle names the lone workspaces
-    as a set, the absent count among them; it builds each previous version so its §9.2 label is known by construction
-    (one maximum moved, a rename, or both a maximum lowered and another raised), never by calling `classify`; and the rest
-    of the verdict is the same mandate validated without the policy."""
+    new version §9.2 rates risk-reducing against the agent's current version passes: a whole schema-valid document
+    whose canonical hash is the current `mandate_version` the platform supplies. The oracle names the lone workspaces
+    as a set, the absent count among them; it builds each previous version so its §9.2 label is known by construction,
+    never by calling `classify`: one maximum raised behind the draft (reducing), the default made laxer behind it
+    (reducing, not a maximum), a rename or other quiet hours (neutral), the draft's maximum raised (increasing), and one
+    maximum raised behind it with another lowered (increasing). A forged predecessor (a reducing-looking document while
+    the current version is another) and one with no current version are not the agent's version, so they are refused.
+    Every document built is checked schema-valid, so a refusal comes from the clause under test. The rest of the
+    verdict is the same mandate validated without the policy."""
     lone_workspaces = {None, 0, 1}
+    laxer = {"deny": "ask", "ask": "auto"}
+    shapes = ["none", "identity", "reducing", "reducing", "reducing_default", "neutral", "neutral_quiet", "increasing",
+              "mixed", "forged", "unhashed"]
     for _ in range(n):
         m = copy.deepcopy(base.BASES[rng.choice(sorted(base.BASES))])
         if rng.random() < 0.3:
@@ -2098,26 +2106,41 @@ def fuzz_independence_floor(n):
             ctx["independent_approval_required"] = required
         else:
             required = False
-        shape = rng.choice(["none", "identity", "reducing", "reducing", "neutral", "increasing", "mixed"])
+        shape = rng.choice(shapes)
+        if shape == "reducing_default" and m["autonomy"]["default"] == "auto":
+            m["autonomy"]["default"] = "ask"
         if shape == "identity":
             ctx["previous_version"] = {"environment": m["environment"], "connection_id": m["connection_id"]}
+            ctx["current_mandate_version"] = version(m)
         elif shape != "none":
             prev = copy.deepcopy(m)
             orders = m["risk"]["max_orders_per_day"]
-            if shape in ("reducing", "mixed"):
+            if shape in ("reducing", "mixed", "forged", "unhashed"):
                 prev["risk"]["max_orders_per_day"] = orders + 1
+            if shape == "reducing_default":
+                prev["autonomy"]["default"] = laxer[m["autonomy"]["default"]]
             if shape == "neutral":
                 prev["name"] = m["name"] + "-before"
+            if shape == "neutral_quiet":
+                prev["notifications"]["quiet_hours"] = {"start": "21:30", "end": "06:15", "timezone": "America/New_York"}
             if shape == "increasing":
                 m["risk"]["max_orders_per_day"] = orders + 1
             if shape == "mixed":
-                prev["risk"]["max_order_usd"] = str(D(m["risk"]["max_order_usd"]) / 2)
+                prev["risk"]["max_order_usd"] = "1"
+            check(V.is_valid(prev) and prev != m, "every previous version the fuzz builds is a whole schema-valid document",
+                  (shape, prev))
             ctx["previous_version"] = prev
-        exempt = shape == "reducing"
+            if shape == "forged":
+                real = copy.deepcopy(m)
+                real["name"] = m["name"] + "-current"
+                ctx["current_mandate_version"] = version(real)
+            elif shape != "unhashed":
+                ctx["current_mandate_version"] = version(prev)
+        exempt = shape in ("reducing", "reducing_default")
         errs = semantic(m, ctx)[0]
         check(("V-047" in errs) == (required and users in lone_workspaces and not exempt),
               "V-047 refuses exactly independent approval in a workspace without a second user, an unknown count as one, "
-              "save a risk-reducing version against a whole previous document",
+              "save a risk-reducing version against the agent's current document",
               (required, users, shape, errs))
         without = semantic(m, dict(ctx, independent_approval_required=False))[0]
         check([e for e in errs if e != "V-047"] == without, "V-047 changes no other verdict",

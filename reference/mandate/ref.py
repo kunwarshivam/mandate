@@ -295,11 +295,16 @@ def without_delegations(m, review_by_of=None):
             out["autonomy"]["review_by"] = review_by_of["autonomy"]["review_by"]
     return out
 
-def reduces_previous(prev, m):
-    """V-047's one exception (DEC-444): `m` is a new version that §9.2 classifies as risk-reducing against its previous
-    version. `classify`'s own result decides it. No previous version (a deployment), or a previous version that is not a
-    whole schema-valid document (identity only, or part of one), is not reducing: validation cannot classify it (rule 3)."""
-    return prev is not None and V.is_valid(prev) and classify(prev, m)[0] == "risk_reducing"
+def reduces_previous(prev, current, m):
+    """V-047's one exception (DEC-444): `m` is a new version that §9.2 classifies as risk-reducing against the agent's
+    current version. `prev` is that version only if it is a whole schema-valid document whose canonical hash is
+    `current`, the agent's current `mandate_version`, which the platform supplies and the requester never does
+    (#570 round 1, B1): a predecessor nobody confirmed would let an increasing version pass. `classify`'s own result
+    decides the rest. No previous version (a deployment), no current version, only an identity, part of a document, or
+    a document that hashes to anything else is not reducing: validation cannot classify against the agent's version
+    (rule 3)."""
+    return (prev is not None and current is not None and V.is_valid(prev) and version(prev) == current
+            and classify(prev, m)[0] == "risk_reducing")
 
 def semantic(m, ctx):
     errs, warns = set(), set()
@@ -402,7 +407,7 @@ def semantic(m, ctx):
     if n_users < 1 or (ap["two_approver_above_usd"] is not None and n_users < 2):
         errs.add("V-024")
     if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:
-        if not reduces_previous(ctx.get("previous_version"), m):
+        if not reduces_previous(ctx.get("previous_version"), ctx.get("current_mandate_version"), m):
             errs.add("V-047")
     if g.get("end_date") is not None and valid_date(g["end_date"]) and g["end_date"] < ctx["validation_date"]:
         errs.add("V-030")
