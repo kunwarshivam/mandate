@@ -271,16 +271,10 @@ impl ValidationReport {
 /// [`ParseError::Diverged`](crate::ParseError::Diverged): three rules read that document (V-009 the
 /// order of the sets, V-015 an invalid date, V-020 a listed default's value), and a report must describe
 /// the one mandate that would be hashed and enforced.
-///
-/// Until V-047 lands (E10-1, DEC-411), a context whose policy requires independent approval cannot
-/// be evaluated and is refused as [`SpecError::Unimplemented`], never validated without the rule.
 pub fn validate(
     mandate: &Mandate,
     context: &ValidationContext,
 ) -> Result<ValidationReport, SpecError> {
-    if context.independent_approval_required {
-        return Err(SpecError::Unimplemented);
-    }
     let document = mandate.canonical()?;
     let worst_case = worst_case(mandate)?;
     let mut violations = BTreeSet::new();
@@ -336,8 +330,34 @@ pub fn recheck_at_application(
     mandate: &Mandate,
     context: &ValidationContext,
 ) -> Result<BTreeSet<Violation>, SpecError> {
-    let _ = (mandate, context);
-    Err(SpecError::Unimplemented)
+    let allocation_path = "/capital/allocation_usd";
+    let committed = context
+        .other_allocations_usd
+        .checked_add(usd(&mandate.capital.allocation_usd, allocation_path)?)
+        .map_err(|cause| out_of_range(allocation_path, cause))?;
+    let mut violations = BTreeSet::new();
+    flag(
+        &mut violations,
+        committed > context.account_equity_usd,
+        Violation::V002,
+    );
+    flag(
+        &mut violations,
+        lone_under_independent_approval(context),
+        Violation::V047,
+    );
+    Ok(violations)
+}
+
+/// V-047's condition: the policy requires independent approval and the workspace has no second
+/// active user. A count the caller did not know arrives as 0 or 1 (DEC-428 item 2), so it is here.
+///
+/// DEC-444 exempts a version §9.2 classifies as risk-reducing against the agent's current version,
+/// the document whose hash is the agent's current `mandate_version`. [`PreviousVersion`] carries no
+/// digest, so no document can be matched to that version here, and every version is refused: the
+/// refusing side DEC-444 item 3 names until the type can match one.
+fn lone_under_independent_approval(context: &ValidationContext) -> bool {
+    context.independent_approval_required && context.workspace_users < 2
 }
 
 /// The places of the size fraction the order builder multiplies its targets by (§8.3 step 2), which
@@ -425,8 +445,8 @@ fn flag(violations: &mut BTreeSet<Violation>, broken: bool, violation: Violation
     }
 }
 
-/// The rules that read the account and the connection: V-001, V-002, V-005, V-006, V-007, V-024,
-/// V-030, V-031, and V-032.
+/// The rules that read the account, the connection, and the workspace: V-001, V-002, V-005, V-006,
+/// V-007, V-024, V-030, V-031, V-032, and V-047.
 fn account_rules(
     m: &Mandate,
     ctx: &ValidationContext,
@@ -445,6 +465,7 @@ fn account_rules(
         Violation::V001,
     );
     flag(out, committed > ctx.account_equity_usd, Violation::V002);
+    flag(out, lone_under_independent_approval(ctx), Violation::V047);
     let universe = &m.universe;
     flag(
         out,

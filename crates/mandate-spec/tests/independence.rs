@@ -164,7 +164,6 @@ fn folded(
 /// the policy is on and the workspace has none or one user, and the rest of the report is the
 /// report with the policy off. MC-V69 to MC-V71 are the same three shapes on the case file's base.
 #[test]
-#[ignore = "pending E10-1"]
 fn v047_refuses_the_policy_in_a_workspace_of_fewer_than_two_users() {
     let mandate = draft();
     for users in [0, 1, 2, 3, u32::MAX] {
@@ -209,7 +208,6 @@ fn v047_refuses_the_policy_in_a_workspace_of_fewer_than_two_users() {
 /// too (V-002, V-024, V-030), it fires exactly on the lone workspaces under the policy, and every
 /// other code, warning, and figure is the report with the policy off.
 #[test]
-#[ignore = "pending E10-1"]
 fn v047_reads_the_policy_and_the_count_and_moves_no_other_verdict() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 1024,
@@ -273,7 +271,6 @@ fn v047_reads_the_policy_and_the_count_and_moves_no_other_verdict() {
 /// 3): folded with no membership, the policy is V-047, beside the V-024 no approver already gives.
 /// With two users it is not, and the fold carries the policy it was given.
 #[test]
-#[ignore = "pending E10-1"]
 fn an_absent_membership_is_no_second_user_under_the_policy() {
     let mandate = draft();
     let facts = journal(&mandate);
@@ -333,7 +330,6 @@ fn edited(changes: &[(&str, &str)]) -> Mandate {
 /// draft $10,000) is refused, at validation and at application. The exception passes once
 /// `PreviousVersion` can be matched by hash; that test lands with the digest.
 #[test]
-#[ignore = "pending E10-1"]
 fn v047_refuses_a_reducing_version_it_cannot_match_to_the_current_version() {
     let mandate = draft();
     let ctx = after(Some(edited(&[("/capital/allocation_usd", "20000")])));
@@ -355,7 +351,6 @@ fn v047_refuses_a_reducing_version_it_cannot_match_to_the_current_version() {
 /// reviewer's must-catch plant from #536 round 1, `previous_version.is_none()`, is this file's
 /// first-version case).
 #[test]
-#[ignore = "pending E10-1"]
 fn v047_refuses_every_other_version_in_a_lone_workspace() {
     let mandate = draft();
     let shapes = [
@@ -396,7 +391,6 @@ fn v047_refuses_every_other_version_in_a_lone_workspace() {
 /// recheck against the facts at application refuses it with V-047; with the second user still there,
 /// or without the policy, it applies.
 #[test]
-#[ignore = "pending E10-1"]
 fn a_second_user_deactivated_before_application_refuses_the_version() {
     let mandate = draft();
     let facts = journal(&mandate);
@@ -425,7 +419,6 @@ fn a_second_user_deactivated_before_application_refuses_the_version() {
 /// V-002's half of the recheck, atomically with the application: another agent's version applied
 /// between confirmation and application leaves the account short, so the version is refused.
 #[test]
-#[ignore = "pending E10-1"]
 fn another_allocation_applied_before_application_refuses_the_version() {
     let mandate = draft();
     let mut facts = journal(&mandate);
@@ -464,7 +457,6 @@ fn another_allocation_applied_before_application_refuses_the_version() {
 /// it is V-002 when the allocations exceed equity (summed here, apart from the rule) and V-047 on a
 /// lone workspace under the policy, and nothing else, V-024 and V-030 included.
 #[test]
-#[ignore = "pending E10-1"]
 fn the_recheck_reports_v002_and_v047_and_no_other_rule() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 1024,
