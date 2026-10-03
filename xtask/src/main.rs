@@ -1972,7 +1972,11 @@ const STUB_MARKERS: [&str; 5] = [
 /// beside a new exit, which is a wrong answer from code that runs, with no stub to stop at. Each
 /// fails on the rule-13 oracle's count or its own assertion; the fix (DEC-409, DEC-410) deletes
 /// the rows with the `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 17] = [
+///
+/// The last four `protection.rs` rows are the unapplied-fill over-cover's pins (#515, DEC-421): `main`
+/// sizes protection from the fold's position, so each fails on the size it asserts rather than at
+/// a stub, and the fix deletes them.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 21] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -2040,6 +2044,22 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 17] = [
     (
         "crates/mandate-executor/src/protection.rs",
         "sequence_tests::a_rung_sent_short_beside_a_sell_the_broker_then_refuses_is_journaled_short",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::an_exit_ended_with_a_fill_not_yet_applied_is_re_protected_for_what_the_broker_holds",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::only_the_part_of_a_reported_fill_not_yet_applied_comes_off",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_fill_applied_after_its_report_comes_off_once",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_passive_exit_after_an_unapplied_fill_protects_only_what_the_broker_holds",
     ),
 ];
 

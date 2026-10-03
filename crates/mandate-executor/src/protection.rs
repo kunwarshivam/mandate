@@ -9429,6 +9429,176 @@ mod sequence_tests {
         }
         Ok(())
     }
+
+    /// #515's script up to the broker's terminal report: ten held and protected, a marketable
+    /// risk exit of 4 goes once the OCO's cancel is confirmed and is acknowledged, `applied` of
+    /// it is filled by an update, and the broker then reports it `canceled` with 3 filled. Answers
+    /// the report's effects.
+    fn ended_with_three_reported(
+        executor: &mut Executor,
+        ports: &Ports<'_>,
+        applied: Option<&str>,
+    ) -> Result<Vec<Effect>, ExecutorError> {
+        executor.run(observation(Some(135), None, true, 0)?, ports)?;
+        executor.run(sell(EXIT, "4", "130", Purpose::RiskExit)?, ports)?;
+        let released = executor.run(cancel_accepted(OCO), ports)?;
+        let exit = format!("md-{EXIT}");
+        assert!(
+            submissions(&released)
+                .iter()
+                .any(|order| order.client_order_id.as_str() == exit),
+            "the exit goes once the cancel is confirmed: {:?}",
+            drafted(&released)
+        );
+        let held = |filled: u32, live: bool| Held {
+            purpose: Purpose::RiskExit,
+            qty: 4,
+            filled,
+            acked: true,
+            live,
+        };
+        executor.run(
+            Input::Broker(Ok(BrokerOutcome::Submitted(reported(
+                &exit,
+                &held(0, true),
+            )?))),
+            ports,
+        )?;
+        if let Some(qty) = applied {
+            executor.run(filled(EXIT, qty)?, ports)?;
+        }
+        let ended = reported(&exit, &held(3, false))?;
+        executor.run(Input::BrokerUpdate(BrokerUpdate::Order(ended)), ports)
+    }
+
+    /// What every live protective order in AAPL covers, by the executor's own record.
+    fn resting_cover(state: &ExecutorState) -> Result<Qty, ExecutorError> {
+        let aapl = aapl()?;
+        state
+            .orders
+            .values()
+            .filter(|order| {
+                order.instrument == aapl
+                    && order.purpose == Purpose::Protective
+                    && !order.state.is_terminal()
+            })
+            .try_fold(Qty::ZERO, |total, order| {
+                total.checked_add(order.qty.checked_sub(order.filled_qty)?)
+            })
+            .map_err(ExecutorError::from)
+    }
+
+    /// What `effects` sent as protection.
+    fn protection_sent(effects: &[Effect]) -> Result<Qty, ExecutorError> {
+        submissions(effects)
+            .iter()
+            .filter(|order| order.purpose == Purpose::Protective)
+            .try_fold(Qty::ZERO, |total, order| total.checked_add(order.qty))
+            .map_err(ExecutorError::from)
+    }
+
+    /// #515, `main`'s route (#468's round-3 review; DEC-421): the broker reports the exit of 4
+    /// `canceled` with 3 filled, a fill no update has applied yet. The broker holds 7, so §5.4
+    /// re-places protection for exactly the 7: no more (the Σ cap, rule 12) and no less (the
+    /// remaining quantity is protected), and the interval ends with it placed.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn an_exit_ended_with_a_fill_not_yet_applied_is_re_protected_for_what_the_broker_holds()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, None)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("7")?,
+            "protection is re-placed for the 7 the broker holds: {:?}",
+            drafted(&after)
+        );
+        assert_eq!(
+            actions(&after),
+            vec!["placed", "unprotected_end"],
+            "and the interval ends with it placed: {:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
+    /// #515, the applied part: 2 of the exit's fills are applied by an update before the broker
+    /// reports 3 filled, so only the 1 not yet applied comes off the position of 8, and protection
+    /// is re-placed for exactly 7 (#517's review, blocker 2).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn only_the_part_of_a_reported_fill_not_yet_applied_comes_off() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, Some("2"))?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("7")?,
+            "{:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
+    /// #515, the fill update after the terminal report: once protection covers the 7 held, the
+    /// update applying the 3 re-places nothing, and the 3 come off once, not twice (#517's
+    /// review, item a).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_fill_applied_after_its_report_comes_off_once() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        ended_with_three_reported(&mut executor, &ports, None)?;
+        let before = resting_cover(&executor.state)?;
+        let later = executor.run(filled(EXIT, "3")?, &ports)?;
+        assert_eq!(
+            protection_sent(&later)?,
+            Qty::ZERO,
+            "the applied fill re-places nothing: {:?}",
+            drafted(&later)
+        );
+        assert_eq!(
+            (before, resting_cover(&executor.state)?),
+            (Qty::parse("7")?, Qty::parse("7")?),
+            "the 3 come off once"
+        );
+        Ok(())
+    }
+
+    /// #515 at the passive exit (#518's review, blocker 2): after the exit's 3 come off and the
+    /// re-placed OCO is acknowledged, a passive exit of 2 at 160 cancels it, and on the confirmed
+    /// cancel the passive exit and the rest of the position are protected together for exactly
+    /// the 7 the broker holds: never Σ 10 against 7 (rule 12).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_passive_exit_after_an_unapplied_fill_protects_only_what_the_broker_holds()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, None)?;
+        acknowledge_protection(&mut executor, &after, &ports)?;
+        let resting: Vec<String> = submissions(&after)
+            .iter()
+            .filter(|order| order.purpose == Purpose::Protective)
+            .map(|order| order.client_order_id.as_str().to_owned())
+            .collect();
+        let started = executor.run(sell(SECOND, "2", "160", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&started), resting, "{:?}", drafted(&started));
+        let mut placed = Qty::ZERO;
+        for id in &resting {
+            placed = placed.checked_add(protection_sent(
+                &executor.run(cancel_accepted(id), &ports)?,
+            )?)?;
+        }
+        assert_eq!(
+            placed,
+            Qty::parse("7")?,
+            "Σ protective sells against 7 held"
+        );
+        Ok(())
+    }
 }
 
 #[cfg(test)]
