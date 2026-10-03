@@ -6707,7 +6707,7 @@
   {
    "id": "MC-V72",
    "kind": "semantic",
-   "title": "A risk-reducing version in a one-user workspace under independent approval passes V-047 (DEC-435)",
+   "title": "A risk-reducing version in a one-user workspace under independent approval passes V-047 (DEC-444)",
    "base": "btc_accumulator",
    "patch": [
     {

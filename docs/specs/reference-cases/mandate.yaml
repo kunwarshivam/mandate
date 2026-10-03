@@ -3235,7 +3235,7 @@ cases:
       lifetime_floor_loss_usd: '1000'}
 - id: MC-V72
   kind: semantic
-  title: A risk-reducing version in a one-user workspace under independent approval passes V-047 (DEC-435)
+  title: A risk-reducing version in a one-user workspace under independent approval passes V-047 (DEC-444)
   base: btc_accumulator
   patch:
   - {op: replace, path: /risk/max_orders_per_day, value: 40}

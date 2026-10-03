@@ -2077,7 +2077,7 @@ def fuzz_content(n):
         check(h[0] != h[1], "§6.4 every bound field moves the content hash", field)
 
 def fuzz_independence_floor(n):
-    """V-047 (DEC-411, DEC-435): under `independent_approval_required` a workspace of fewer than two users is refused at
+    """V-047 (DEC-411, DEC-444): under `independent_approval_required` a workspace of fewer than two users is refused at
     validation, a user count that is absent counts as one (rule 3), and the rule touches no other verdict, except that a
     new version §9.2 rates risk-reducing against a whole previous document passes. The oracle names the lone workspaces
     as a set, the absent count among them; it builds each previous version so its §9.2 label is known by construction

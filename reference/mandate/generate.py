@@ -210,7 +210,7 @@ SEM += [
 LONE_UNDER_POLICY = {"independent_approval_required": True, "workspace_users": 1}
 FEWER_ORDERS = [rep("/risk/max_orders_per_day", 40)]
 SEM += [
-    ("MC-V72", "A risk-reducing version in a one-user workspace under independent approval passes V-047 (DEC-435)",
+    ("MC-V72", "A risk-reducing version in a one-user workspace under independent approval passes V-047 (DEC-444)",
      "btc_accumulator", FEWER_ORDERS, dict(LONE_UNDER_POLICY, previous_version=MB["btc_accumulator"])),
     ("MC-V73", "A neutral version in a one-user workspace under independent approval is refused", "btc_accumulator",
      [rep("/name", "btc-accumulator-renamed")], dict(LONE_UNDER_POLICY, previous_version=MB["btc_accumulator"])),

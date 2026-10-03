@@ -81,9 +81,9 @@ for cid, patch, previous_is_document, refused in (
         and {k: v for k, v in ctx.items() if k != "previous_version"} == lone
         and (ctx["previous_version"] == d["bases"]["btc_accumulator"]["mandate"]) == previous_is_document
         and (previous_is_document or set(ctx["previous_version"]) == {"environment", "connection_id"}),
-        "V-047's exception cases differ from the base only in the patch named and the previous version (DEC-435)")
+        "V-047's exception cases differ from the base only in the patch named and the previous version (DEC-444)")
     req(cid, C[cid]["expect"]["violations"] == (["V-047"] if refused else []),
-        "only a risk-reducing version against a whole previous document passes V-047 in a lone workspace (DEC-435)")
+        "only a risk-reducing version against a whole previous document passes V-047 in a lone workspace (DEC-444)")
 
 # risk state
 s = steps("MC-R01")

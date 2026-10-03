@@ -296,7 +296,7 @@ def without_delegations(m, review_by_of=None):
     return out
 
 def reduces_previous(prev, m):
-    """V-047's one exception (DEC-435): `m` is a new version that §9.2 classifies as risk-reducing against its previous
+    """V-047's one exception (DEC-444): `m` is a new version that §9.2 classifies as risk-reducing against its previous
     version. `classify`'s own result decides it. No previous version (a deployment), or a previous version that is not a
     whole schema-valid document (identity only, or part of one), is not reducing: validation cannot classify it (rule 3)."""
     return prev is not None and V.is_valid(prev) and classify(prev, m)[0] == "risk_reducing"
