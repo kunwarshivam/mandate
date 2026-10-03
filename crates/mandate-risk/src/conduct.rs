@@ -340,10 +340,10 @@ fn on_grid(input: &GateInput<'_>, price: Price, adverse: Adverse) -> Result<Pric
 ///
 /// A slice is never an order the broker would refuse, which would deny the exit (`AGENTS.md` rule
 /// 13, DEC-163 item 4): a cap that is zero before truncation, like a volume the executor could not
-/// supply, slices nothing, and a cap above zero slices at no less than the instrument's
-/// `min_order_size` rounded up onto the grid, even where the grid truncates the cap to zero
-/// (DEC-445 item 1). A cap binds only where that slice is below the proposed quantity, so an exit
-/// smaller than that minimum goes whole.
+/// supply, slices nothing, and a cap above zero slices at no less than the larger of the
+/// instrument's `min_order_size` rounded up onto the grid and one step of the grid, even where the
+/// grid truncates the cap to zero or the minimum is zero (DEC-445 item 1). A cap binds only where
+/// that slice is below the proposed quantity, so an exit smaller than that floor goes whole.
 fn slice(input: &GateInput<'_>, pacing: &mut Pacing) -> Result<(), GateError> {
     let proposed = input.proposed.qty;
     let grid = crate::trim::quantity_grid(input.instrument);
@@ -362,7 +362,7 @@ fn slice(input: &GateInput<'_>, pacing: &mut Pacing) -> Result<(), GateError> {
         };
         caps.push((PacingControl::DailyParticipation, left));
     }
-    let minimum = crate::trim::up_onto(input.instrument.min_order_size, grid)?;
+    let minimum = crate::trim::up_onto(input.instrument.min_order_size, grid)?.max(grid);
     for (control, cap) in caps {
         let slice = crate::trim::down_onto(cap, grid)?.max(minimum);
         if cap > Qty::ZERO && slice < proposed {
