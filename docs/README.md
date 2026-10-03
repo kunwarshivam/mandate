@@ -30,6 +30,12 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Journal spec](specs/journal.md) | Streams, event envelope, canonical serialization, hash chain, storage, replay, verification, export |
 | [Journal test vectors](specs/reference-cases/journal.yaml) | Exact canonical bytes and hashes, plus tamper cases |
 
+## Design
+
+| Document | Purpose |
+|---|---|
+| [Infrastructure and operations](design/infrastructure.md) | Draft v0.1: environments, invariants, runtime topology, data stores, secrets and the vault, backups and disaster recovery, deploy and upgrade, observability and on-call, security baseline, cost model, failure walk (DEC-434) |
+
 ## Product
 
 | Document | Purpose |
