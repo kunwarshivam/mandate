@@ -470,8 +470,8 @@ holds until each is decided.
 ## 9. Backlog
 
 Epic **E20 Global control plane (proposed, DEC-440 item 11)**. E18 is the enterprise harness and
-E21 operations. Neither E19 nor E20 appears on `main` or in any open PR as of this draft; this takes
-E20 and leaves E19 to the sibling agent harness spec (#554), as infrastructure §14 intended. The rows are added to
+E21 operations, and E19 the agent harness (DEC-431). E20 was free, and is reserved in the decision
+log's Reserved identifiers table. The rows are added to
 the [backlog](../project/06-backlog-v1.md#e20-global-control-plane-proposed-dec-440).
 
 ## 10. Open questions

@@ -30,6 +30,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E15 Signal models: LLM and fast models, scorecards | M5 (LLM research, scorecards); Phase 3 (fast models) | 6.3, 6.5 | Must (E15-1, E15-3, E15-6 to E15-10); Should |
 | E16 Kraken Derivatives US connector | Phase 3 | 6.2 (FR-2.5) | Should |
 | E17 Research agent and dynamic universe | M5 | 6.3 (FR-3.9), 6.5 | Must |
+| E19 Agent harness | M5 (construction, the research loop, the bench); before live trading (E19-8) | 6.3 (FR-3.9), 6.5 (FR-5.1) | Must (E19-1 to E19-6, E19-8, E19-10); Should |
 
 ## Stories
 
@@ -1219,6 +1220,137 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   margin, liquidation thresholds) so that perpetual P&L and risk are correct.
 - **E16-3 (Should)** As an operator, I want a funding/carry signal model for perpetuals.
 
+### E19 Agent harness (DEC-431)
+
+Design: the [agent harness spec](../specs/agent-harness.md) v0.1 ([DEC-431](decisions/DEC-431.md)):
+how a confirmed mandate version becomes a running agent process, and the research loop inside it.
+It is the caller side of the [inference spec](../specs/inference.md) and assumes its INF-1 to INF-16.
+These stories cover only what E6-1, E15-1, E15-3, E15-6 to E15-10, E17-2, E17-5, E17-7, and E17-8 do
+not. **SC** marks a story on a safety-critical path (`AGENTS.md`): tests against approved reference
+cases first, property tests for its invariants (spec §3), an independent review by an agent on a
+different model, zero missed mutants, and green CI. No live model call runs outside the team's
+internal paper workspaces (DEC-432 item 14). The founder set the internal paper phase's budgets on
+2026-10-03: $5 per agent per risk day and $20 per internal workspace per day (DEC-431 item 15). No
+research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
+
+- **E19-1 (Must, M5; SC)** As an operator, I want an agent process built from a confirmed mandate
+  version, so that it runs exactly what the owner confirmed. *Accepted when:* spec §5.1's eight steps
+  are implemented with a test per failure row; the mandate's hash, the pinned models, and the
+  research entry are re-checked before the writer is taken; a research-only failure disables
+  research and leaves the agent running; a guard hit on the description disables research and sends
+  an opaque owner alert; the process states and exits of spec §5.2 are covered by a state-machine
+  property test, including a crash in every state and a kill switch arriving in every state the
+  process is up (HI-20); HI-12 holds with the vault and provider keys absent from the environment.
+- **E19-2 (Must, M5)** As an owner, I want the research agent to read only what its pinned retrieval
+  plan names, so that what the model is shown is fixed and bounded. *Accepted when:* spec §6.3's
+  readers run in `mandate-research-run` (layer 5, DEC-431 item 20) against a data-plane double at a
+  cut-off; the core journals every item as `ObservationRecorded` before it emits the call effect
+  (HI-2, data-plane spec §4.6); every cap is enforced, oldest items dropped first, and the drop
+  recorded; a test shows every data port only reads (HI-4); every read filters on knowledge time
+  (HI-13, DP-1); E17-5's `DriftState` folds the typed per-item observation the shell builds, by knowledge time, with each item observed once, never text (spec §6.3); a licensed item's text is
+  kept only when a thesis cites it (HI-23, spec §6.6); the retrieval plan is inside the research
+  entry's content hash (DEC-431 item 5), with the matching inference spec revision first.
+- **E19-3 (Must, M5; SC)** As an owner, I want research runs scheduled, gated, and cancelled by the
+  runtime core, so that research never blocks or outlives the trading loop. *Accepted when:* the
+  core's new start, cancel, and result inputs and effects (spec §10.3) are added tests first
+  (DEC-77); spec §5.3 and §5.4's run states and boundaries are property-tested over random schedules,
+  mode changes, version changes, crashes, and midnight; HI-7 (research latency never changes the
+  non-research drafts), HI-8, HI-15, HI-16, and HI-17 hold, each oracle shown to catch a seeded bug;
+  the schedule counts from the later of the last call and the last reservation; the call's deadline
+  is measured from its dispatch (DEC-431 item 24); `mandate-research-run` gets its `xtask/layers.toml`
+  entry, and an xtask check that it depends on no journal crate (HI-16), in the change that creates
+  it; no run starts before spec §6.2's preconditions hold.
+- **E19-4 (Must, M5; SC)** As an owner, I want every model output checked and its facts filled by the
+  platform before admission, so that a model cannot decide an admission check for itself.
+  *Accepted when:* spec §6.5's field split and six harness checks are implemented with a case per
+  check; the judging batch journals the candidates' verdicts, the thesis records (journal spec
+  §9.4), and `ModelOutputRecorded` all-or-nothing; HI-2, HI-3 (replay with a gateway that fails the
+  test on any call), HI-6, HI-18, and HI-22 hold against a compromised model.
+- **E19-5 (Must, M5, before the first research run; SC; journal spec first)** As an owner, I want
+  an invalidated thesis to remove its instrument at once, so that a position whose reason is gone is
+  exited. *Accepted when:* a journal spec change adds the agent-stream invalidation verdict and the
+  executor's `UniverseChanged` (`thesis_invalidated`) copy from it, with vectors, covering DEC-433
+  item 19's revoked source too; `exits_only` runs are review-only; an invalidation never admits,
+  never adds risk, and is journaled before the removal; MI-19 and HI-19 hold under a fuzz of random
+  invalidations and renewals. Until it lands no research run starts (DEC-431 items 13 and 23).
+- **E19-6 (Must, M5)** As the founder, I want an adversarial bench for the research loop, so that a
+  fully compromised model is shown to breach nothing. *Accepted when:* injection fixtures exist for
+  every reader and source (news, filings, screens, the description, memory); with a compromised
+  model, zero limit breaches and zero orders without a dry-run allow (HI-10); the canary scan of HI-11
+  finds nothing in any prompt artifact. It is the v1 subset of E18-7 and feeds E17-3's and E17-7's
+  injection clauses.
+- **E19-7 (Should, M5)** As the founder, I want regression evaluations for research entries, so that a
+  template, plan, or model change is checked for mechanics before it is offered. *Accepted when:* spec
+  §8.3's measures run on a fixed set of recorded runs in the internal paper workspaces; the report
+  states each pass condition; it is never shown to owners and never stands in for E17-8 (DEC-99).
+- **E19-8 (Must before live trading; SC)** As an owner, I want my agent's kill switch to work while
+  its process is down, so that rule 13 holds without the runtime. *Accepted when:* spec §13 item 1 is
+  decided in a DEC (the executor flattens from the control stream after a deadline, or the
+  deployment manager guarantees a restart that handles the kill switch first); a fault-injection test
+  kills the agent process, pulls the agent kill switch, and shows the agent-scoped flatten completes
+  with no cancel-all or close-position (trading spec §5.5).
+- **E19-9 (Should)** As a maintainer, I want `mandate-research`'s doc comments to say that the runtime
+  core appends thesis records and the executor copies `UniverseChanged`, so that the next agent copies
+  the single-writer rule (DEC-431 item 2). *Accepted when:* the comments on the crate and on
+  `ResearchEvent` match journal spec §2, with no code change.
+- **E19-10 (Must before any fast-tier model runs; SC)** As an owner, I want the hosted fast tier's
+  call kept off the trading tick, so that no exit waits on a model provider (DEC-432 item 13; DEC-431
+  item 18, Proposed, whose conservative reading is in force). *Accepted when:* a fast worker calls
+  the gateway off the tick and the output enters the core as `Input::ModelOutput` after its record
+  commits; a missing or late output is missing (rule 3, MI-10); HI-21 holds with a gateway double
+  that stalls for ever: the decide step stays within ES-24's budget and every exit, protective-order,
+  and kill-switch draft is unchanged. Beside E15-2, which defines the model.
+
+*Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
+
+- Minor 1: say which clock each research field uses. The cut-off comes from the risk clock, which is
+  whole-second and can lag; the call's `deadline` is wall-clock from dispatch (the M1 fix covers the
+  deadline; spec §6.2 step 1 still needs the clock named for the cut-off).
+- Minor 2: a refused call (`policy_denied`, `input_rejected`, `credential_invalid`,
+  `rate_limited_local`, `model_withdrawn`) leaves no reservation, so a crash before its record
+  commits lets the next start call again at once. Say a refusal advances the schedule, or journal the
+  due-time advance before the call effect (spec §5.3).
+- Minor 3: `mandate_research::next_proposal_at`'s parameter is `last_proposal` and its doc comment
+  says "propose"; the spec reads it as the last call. Add that doc comment to E19-9's scope.
+- Minor 4: HI-3 is circular as stated; restate it as its test does (replaying through the core with a
+  failing gateway re-derives identical drafts and verdicts).
+- Minor 5: HI-7's carve-out nearly vacates it; restate over instruments with no research output in
+  the window, plus ES-24's bound on tick latency.
+- Minor 6: spec §6.5's closing list of §8.5 checks omits checks 4, 6, 8, 10, 11, and 13; say "every
+  §8.5 check, in order".
+- Minor 7: qualify bare cross-spec section numbers (HI-10's "§6.2 step 5" is the mandate spec's;
+  likewise the `exits_only` row and other bare "§8.5"/"§8.3").
+- Minor 8: the drop rule ("oldest items go first") is not deterministic; order by knowledge time,
+  then item id.
+- Minor 9: an `exits_only` run spends and, before E19-5, can do nothing; say no run starts in
+  `exits_only` until E19-5 lands (the round-1 preconditions now hold every run until then).
+- Minor 10: construction step 5 needs the gateway's guard callable without a call (spec §10.1 ask 4);
+  state the interim: research disabled until it is.
+- Minor 11: post-merge staleness: `DEC-431.md` item 14's "(DEC-434, in review)" and item 17's "data-plane
+  spec, in draft"; and E21 is missing from the epic overview table. The spec's own references to the
+  data-plane spec were updated with B2.
+
+*Follow-ups (#554 review round 2, minors, deferred by the freeze rule):*
+
+- Round-2 minor 1: §6.2 precondition 3 allows "market data and public filings" while §6.3's news row
+  says only "licensed news waits". Say whether an allowlisted news source whose terms permit full
+  retention may be read before §10.1 ask 5 lands.
+- Round-2 minor 2: §6.2 step 1 does not check the preconditions. Put the check there and on §5.3's
+  `Due --> Idle` edge, which is what HI-19's and HI-22's "a start attempted before the record exists
+  emits no call" tests.
+- Round-2 minor 3: HI-15 bars calls only in `paused` and `stopped`, while §5.2 and DEC-431 item 9 say
+  Holding makes no call, and Holding's effective mode is `exits_only`. Name Holding in HI-15.
+- Round-2 minor 4: decide `mandate-research-run`'s `xtask/layers.toml` entry now: `pure = true` (layer
+  5 holds only pure crates, and the core names its result types, so its ports pull in no
+  `impure_crates`) and `safety_critical = true`, with the lint header, a CODEOWNERS line, and mutants
+  on its diff. DEC-431 item 20 says "if safety-critical" without deciding.
+- Round-2 minor 5: DEC-431 item 17 cites "journal spec §6.3, six years" for retention; retention is
+  §6.2.
+- Round-2 cross-document: data-plane spec §4.6 says the drift detector folds `ObservationRecorded`;
+  correct it to the typed per-item observation the observation's artifact holds (agent harness spec
+  §6.3), in the data-plane spec's next change. Add `mandate-research`'s drift doc comment ("the shell
+  records") to E19-9's scope with the same reading.
+
 ### E20 Global control plane (proposed, DEC-440)
 
 From the [control-plane design](../design/control-plane.md) (v0.1 draft). The epic joins the
@@ -1372,6 +1504,7 @@ items 13 to 20); no story here buys a service or touches live money.
   (agent-hours, events, artifacts, model tokens) against the cost model's variables (design §10),
   so that budgets and pricing rest on measured numbers. *Accepted when:* counts reach metering
   without content, and a workspace's monthly counts reproduce from its journal.
+- **E21-24 (Proposed, M8)** As the founder, I want the cost model (`docs/product/12-cost-model.md`, DEC-443) kept current. *Accepted when:* `T_in` and `T_out` are measured from the research spike's call records and replace the assumptions; `active_seconds_per_day` is one explicit row per use (research around the clock, the equities session); §2.4's storage notation matches §3.2 and the hot-store term is carried or shown to be negligible; scenario C's storage row names its year; DEC-443 item 7's lean-workspace design moves to an infrastructure row, leaving only the pricing dependency with the founder; and a staleness check (vendor price or pinned model changed) is considered for `cargo xtask`. From #566's round-1 review, minors 1, 2, 3, 7 and 8 (freeze rule). Numbered after #557's E21-13 to E21-23.
 
 ## Won't (v1)
 
