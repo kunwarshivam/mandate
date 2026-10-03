@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | v0.1, draft for review ([DEC-431](../project/decisions/DEC-431.md)). Items 1 to 14 of DEC-431 are agent readings; items 15 to 17 are Proposed and wait for the founder. Where this spec needs a rule in another spec, it says so, and that rule lands in that spec's own change |
+| **Status** | v0.1, draft for review ([DEC-431](../project/decisions/DEC-431.md)). Items 1 to 14 and 20 to 25 of DEC-431 are agent readings; items 15 to 17 were decided by the founder on 2026-10-03; items 18 and 19 are Proposed for the founder, and the spec proceeds on the conservative option of each. Where this spec needs a rule in another spec, it says so, and that rule lands in that spec's own change |
 | **Implements** | [HLD §5](../HLD.md#5-agent-runtime), [§6 flows B to D](../HLD.md#6-key-flows), [§9](../HLD.md#9-intelligence-layer); PRD FR-3.9, FR-5.1; backlog E19 (new), and the harness halves of E6-1, E15-1, E15-3, E17-2, E17-5, E17-7, E17-8 |
-| **Depends on** | [Mandate spec](mandate.md) §2, §6, §8; [journal spec](journal.md) §2, §5, §8, §9; [trading domain spec](trading-domain.md) §5.5, §7.4, §11; [inference spec](inference.md) (the callee: what happens to a model call); the data-plane spec (`data-plane.md`, in draft, PR #553) |
+| **Depends on** | [Mandate spec](mandate.md) §2, §6, §8; [journal spec](journal.md) §2, §5, §8, §9; [trading domain spec](trading-domain.md) §5.5, §7.4, §11; [inference spec](inference.md) (the callee: what happens to a model call); [data-plane spec](data-plane.md) (market data, news, filings; its §4.6 owns the capture of retrieved items, DP-3) |
 | **Related** | [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), [ADR-0003](../adr/0003-earned-autonomy.md), [harness engineering note](../product/11-harness-engineering.md), [DEC-432](../project/decisions/DEC-432.md) |
 
 The **agent harness** is the code that turns a confirmed mandate version into a running agent
@@ -74,11 +74,11 @@ else.
 |---|---|
 | Runtime core | `mandate-runtime`: the pure state machine. `fold` replays an event; `handle` is the only producer of effects |
 | Shell | `mandate-shell`: the process that runs the core's effects, tails streams, and binds the stages |
-| Research worker | The part of the shell that runs research. It gathers data, calls the gateway, and hands results to the core. It never appends to the journal |
+| Research worker | The research-run logic, in its own crate `mandate-research-run` (planned, layer 5, below `mandate-runtime`), with every I/O behind a port the shell implements (§4). It gathers data, calls the gateway, and hands results to the core. It never appends to the journal |
 | Research run | One bounded pass of the research loop: a cut-off instant, one retrieval, one model call, and one set of candidate theses and invalidations |
 | Research entry | The research agent's registry entry ([inference spec §4.1](inference.md#41-registry-entry)): identity, template, output schema, deadline, and token limit. This spec adds its **retrieval plan** and **validation bounds** to what the entry's content hash covers (§10.1). The mandate pins that hash ([§8.1](mandate.md#81-signal-model-contract-dec-52-dec-97)) |
 | Retrieval plan | The fixed, deterministic list of reads a run makes before its call: which data, for which instruments, over which window, with which caps |
-| Cut-off (`as_of`) | The instant a run reads data up to. No read returns anything later. It is the call's `as_of` (inference spec §3.1) |
+| Cut-off (`as_of`) | The instant a run reads data up to. No read returns a record whose knowledge time ([data-plane spec §5.2](data-plane.md#52-two-time-axes)) is after it (DP-1). It is the call's `as_of` (inference spec §3.1) |
 | Data universe | The instruments research may read about: the profile's pinned data universe where one exists (the research basket in the thin slice, DEC-103), otherwise the instruments in `universe.asset_classes` |
 
 ## 2. Principles
@@ -87,8 +87,9 @@ else.
    invalidation. It is never an order, an approval, a mandate change, or a request for an action.
 2. **Code gathers; the model reads.** All retrieval happens before the call, in deterministic code,
    from allowlisted sources (inference spec §8.3). The model is given no tools (INF-5).
-3. **Journal before use.** A model response is committed to the agent stream before anything reads
-   it to decide.
+3. **Journal before use.** Every retrieved item is journaled as `ObservationRecorded` before the
+   model reads it ([data-plane spec §4.6](data-plane.md#46-the-research-query-interface), DP-3), and
+   a model response is committed to the agent stream before anything reads it to decide.
 4. **Replay never calls a model** (INF-10). Every decision is rebuilt from the journal and its
    artifacts.
 5. **Missing means safe** (INF-4). An error, a spent budget, or a refusal is a missing output. A
@@ -113,24 +114,29 @@ names it; the gateway's own tests prove the INF side, and these prove the caller
 
 | ID | Invariant | How it is tested |
 |---|---|---|
-| HI-1 | **Opinions only.** No model output or research run produces an `IntentProposed`, an `ApprovalResponded`, an owner command, or any other order or owner input. Model output reaches the order path only as a research-agent output that §8.3 combines | Property: with a compromised model, every `IntentProposed` follows a `DecisionMade` from the order builder whose dry run allowed it. The research worker's crate cannot name `IntentSink` (`xtask/layers.toml`) |
-| HI-2 | **Journal before use.** Every model output any decision reads is in a committed `ModelInvocationRecorded` (response as artifact) earlier in `seq` than the first event that depends on it (INF-10, caller side) | Property over random append failures, including `Ambiguous` and `Unavailable`: no thesis record, `ModelOutputRecorded`, or `DecisionMade` cites a response without an earlier committed record |
+| HI-1 | **Opinions only.** No model output or research run produces an `IntentProposed`, an `ApprovalResponded`, an owner command, or any other order or owner input. Model output reaches the order path only as a research-agent output that §8.3 combines | Property: with a compromised model, every `IntentProposed` follows a `DecisionMade` from the order builder whose dry run allowed it. `mandate-research-run` sits at layer 5, below `mandate-runtime` (layer 6), so it cannot name `IntentSink` (rung 1, `xtask/layers.toml`) |
+| HI-2 | **Journal before use.** Every item a call's inputs hold is in a committed `ObservationRecorded` before the core emits the call effect (data-plane spec §4.6, DP-3). Every model output any decision reads is in a committed `ModelInvocationRecorded` earlier in `seq` than the first event that depends on it (INF-10, caller side) | Property over random append failures, including `Ambiguous` and `Unavailable`, and crashes between retrieval and the reply: no call effect precedes its observations' commit; no thesis record, `ModelOutputRecorded`, or `DecisionMade` cites a response without an earlier committed record; a crash after retrieval leaves every item on the stream (DP-3's replay test) |
 | HI-3 | **Replay without a model.** Folding the agent stream reproduces every thesis record, `ModelOutputRecorded`, and `DecisionMade` byte for byte | Replay with a gateway port that fails the test on any call; compare drafts with stored bodies |
-| HI-4 | **Reads only, and no tools.** The retrieval plan's readers can only read. No reader, and nothing in the model's output, can place, cancel, or change an order; approve; append to any stream; change a mandate, policy, allowlist, or universe; read the vault; or reach a host other than the data plane. The model names no read (INF-5) | The reader crate depends on read ports only (layer rule). A test enumerates every reader and asserts its port type. The output schema has no member the harness executes |
+| HI-4 | **Reads only, and no tools.** The retrieval plan's readers can only read. No reader, and nothing in the model's output, can place, cancel, or change an order; approve; append to any stream; change a mandate, policy, allowlist, or universe; read the vault; or reach a host other than the data plane. The model names no read (INF-5) | A test enumerates every data port `mandate-research-run` declares and asserts each only returns data (rung 2). The layer rule does not hold this: a layer-5 crate could still declare a write port, so review keeps it out (rung 3). The output schema has no member the harness executes |
 | HI-5 | **The envelope does not move.** No research run, under any model output, changes an envelope field or the policy (MI-16, INF-16) | Property: the mandate version and the policy digest are equal before and after any sequence of research runs with a compromised model |
 | HI-6 | **Missing is safe.** Every error kind of [inference spec §3.3](inference.md#33-error-kinds), and every harness rejection of §6.5, yields no output for that run. The order builder then counts the model as missing: 0 for exits, fully bearish for buys (§8.3, MI-10, INF-4) | Property: for each error kind and each rejection, the builder's buy value is at most its value with the model removed, and no sell is proposed that is not proposed without it |
 | HI-7 | **Research never blocks trading.** For any input sequence, the trading loop's drafts are the same whatever the research worker's latency, failure, or crash, apart from the research outputs that arrive as inputs (INF-13, caller side) | Property: replay one input sequence with research latency drawn at random, including never finishing; the drafts not caused by research are identical |
 | HI-8 | **Runs are bounded.** At most one run is in flight per agent. No run starts before `next_proposal_at` (§5.3). No run reads more than its retrieval plan's caps or makes more than one model call. Spend caps are the gateway's (INF-7) | Property over random schedules and crashes, with an independent count of runs and calls from the journal and the meter stream |
-| HI-9 | **A spent budget means fewer ideas, never more risk.** When any cap or budget binds, the only effect is fewer calls and fewer theses. Exits, protection, kill switches, and the management of held positions are unchanged (DEC-120, INF-7) | Property: one input sequence with and without a binding cap gives the same drafts for held instruments, apart from admissions |
+| HI-9 | **A spent budget means fewer ideas, never more risk.** With a binding cap or budget, no buy draft is larger than without it, no opening or increase exists that does not exist without it, no sell is proposed that is not proposed without it, and every risk-exit, protective-order, and kill-switch draft is byte-identical (DEC-120, INF-7, rule 2). Stale research outputs may shrink or withhold buys (§7.3 step 3), and a discretionary exit that waited on a research verdict may be absent, as under any model outage (MI-10); both are the intended effect | Property: one input sequence run with and without a binding cap; compare every draft pairwise by an independent oracle on size and side |
 | HI-10 | **Injected text is bounded.** Whatever a news item or filing says, it can at most yield a thesis or an invalidation. A thesis enters the working universe only through §8.5, and its first order is decided by the autonomy rules with the admission ceiling (§6.2 step 5). An invalidation only removes (MI-19). With a compromised model, no limit is breached | The adversarial bench (E19-6): injection fixtures for every source, and a compromised model; zero limit breaches, zero orders without a dry-run allow |
 | HI-11 | **Inputs hold only what they may.** A call's inputs contain only: data from the data plane at or before the cut-off, the agent's own memory (§6.4), the owner's `behavior.description`, and the working-universe facts §6.4 lists. Never a credential, a vault reference, personal data, a dollar figure of the agent or account, or another agent's or workspace's data (INF-8, caller side) | Canary test: plant canary values in the vault, in another agent's memory, in another workspace, and in the agent's equity; scan every prompt artifact of a run for them |
 | HI-12 | **No credentials in the harness.** The harness process holds no broker credential, no vault access, and no provider key (INF-14, caller side) | The process starts and runs with the vault and every provider key absent from its environment; a static check that the research path names no vault port |
-| HI-13 | **No look-ahead.** No read returns data timestamped after the run's cut-off, and a thesis's `as_of` is the cut-off, never a time the model states | Property: a data-plane double holding data after the cut-off; no artifact of the run contains it |
+| HI-13 | **No look-ahead.** Every read filters on knowledge time at or before the run's cut-off (DP-1); published or event time is a displayed field only. A thesis's `as_of` is the cut-off, never a time the model states | Property: a data-plane double holding records whose event time is before the cut-off and knowledge time after it; no observation or artifact of the run contains them |
 | HI-14 | **Risk reduction does not depend on research.** With the gateway and the research worker removed, every exit, protective order, and kill switch still runs (rule 13, INF-13) | Run the trading loop with no research worker and a failing gateway; the kill switch, owner exits, and the family-F flatten cases still pass |
 | HI-15 | **Mode gates research.** No run proposes while the effective mode is not `normal`. No call is made while the mode is `paused` or `stopped` | Property over random mode changes, including during a run |
-| HI-16 | **One writer.** Only the runtime core appends to the agent stream (journal spec §1, principle 3). The research worker hands results to the core as inputs | Type test: the research worker holds no stream writer; a fenced-writer test |
+| HI-16 | **One writer.** Only the runtime core appends to the agent stream (journal spec §1, principle 3). The research worker hands results to the core as inputs | An xtask check, added by E19-3, that `mandate-research-run` depends on no journal crate (rung 2); a fenced-writer test |
 | HI-17 | **The version in effect judges.** An output whose model identity differs from the pin of the version in effect when it is judged is ignored (`not_pinned`). Admission is judged under the version in effect, never the one the run started under | Property over random version changes during runs |
 | HI-18 | **The platform decides the facts.** A thesis's identity, timing, asset class, sources, and corroboration come from platform data, never from the model's text (MI-16, DEC-132 items 6 and 7) | Property: a compromised model that states false facts for each of these fields; the journaled record carries the platform's values |
+| HI-19 | **An invalidation removes at once** ([mandate spec §8.6](mandate.md#86-thesis-lifetime-and-revision-lineages-dec-118-dec-111), MI-19). No research run starts while the journal cannot record an invalidation verdict (§6.2 preconditions). Once a verdict is accepted, the instrument is removed in the same fold step, and no opening or increasing draft in it follows | Property over random theses, invalidations, and renewals: an independent oracle replays the verdicts and asserts the instrument is exits-only from the step after each; a start attempted before the record exists emits no call |
+| HI-20 | **The kill switch is accepted in every state the process is up.** In `Recovering`, `Running`, `Paused`, and `Holding`, a kill switch or owner Stop is applied before any other input, and the agent goes to `Stopping` (rule 13). While no process is up, §13 item 1 applies | Extends E19-1's crash-in-every-state property: a kill switch arriving in every state, including during reconciliation, ends in `Stopping` with the agent-scoped plan and no cancel-all or close-position |
+| HI-21 | **No model call inside the tick.** The decide step never calls or waits on the gateway. Every model output, fast tier included, enters the core as an input after its record commits, and a missing or late output is missing (§6.8, rule 3, MI-10). No exit's latency depends on a model provider | A gateway double that stalls for ever on every call: the decide step stays within ES-24's budget, and every exit, protective-order, and kill-switch draft is identical to a run with no gateway at all |
+| HI-22 | **Every candidate has a journaled verdict.** Every candidate thesis and invalidation of a judged run is journaled with its verdict, a harness check's reason or the admission's (§6.5). No run is judged while no record can hold a harness verdict (§6.2 preconditions) | Property with a compromised model: the count of journaled verdicts equals the count of candidates in the committed responses, by an oracle that parses the response artifacts itself |
+| HI-23 | **Only cited licensed text is kept** (DEC-431 item 17). Licensed text a thesis did not cite is never written to the journal's artifact store, in an observation, a prompt, or anything else (§6.6) | Plant a canary phrase in an uncited licensed item; scan every artifact the run wrote. The same phrase in a cited item is found only in the thesis's evidence artifact |
 
 ## 4. Components
 
@@ -163,7 +169,9 @@ flowchart LR
   It stays pure: no clock, no randomness, no I/O.
 - **The research worker** runs on its own task, scheduled apart from the core, so a slow or hung
   call cannot delay a tick (HI-7). The core tells it when to start and when to cancel. It hands every
-  result back as an input.
+  result back as an input. Its logic lives in `mandate-research-run` (layer 5): below
+  `mandate-runtime`, so it cannot name `IntentSink` (HI-1), and with no journal dependency (HI-16).
+  The shell (layer 8) implements its gateway, data-plane, and artifact ports.
 - **The readers** run the retrieval plan against the data plane and the folded journal. They have
   read ports only (HI-4).
 - **The executor** owns the account stream, the binding gate, risk exits, protection, and
@@ -211,6 +219,8 @@ stateDiagram-v2
     Paused --> Running: owner resume with step-up, or the limit lifts
     Running --> Stopping: kill switch or owner Stop
     Paused --> Stopping: kill switch or owner Stop
+    Recovering --> Stopping: kill switch or owner Stop, applied first
+    Holding --> Stopping: kill switch or owner Stop
     Stopping --> Stopped: flatten confirmed or handed off
     Running --> Holding: goal complete, on_complete hold_protected or disarm_ladder
     Holding --> Retired: owner releases or closes
@@ -226,13 +236,13 @@ A crash in any state returns to `Constructing`.
 
 | State | Entered by | What it blocks | How it ends, and who ends it |
 |---|---|---|---|
-| Constructing | The deployment manager (or the CLI) | Everything: no process exists to act | The steps pass (the process), or a check fails (the process exits; the deployment manager retries with back-off and alerts the owner) |
-| Recovering | Step 8; mode `paused` through the local hold `awaiting_reconciliation` | Openings, increases, and research. An exit already handed off is re-handed only if the fold allows | The account stream records a `ReconciliationRun` at or after the last observed submission with nothing outstanding (the core lifts the hold). A mismatch pauses the agent until the owner acknowledges with step-up ([trading spec §11](trading-domain.md#11-reconciliation)) |
+| Constructing | The deployment manager (or the CLI) | Everything: no process exists to act | The steps pass (the process), or a check fails (the process exits; the deployment manager retries with back-off and alerts the owner). A kill switch or Stop committed while no process is up is §13 item 1 (DEC-431 item 19); once the process is up, §5.1 step 8 handles it first |
+| Recovering | Step 8; mode `paused` through the local hold `awaiting_reconciliation` | Openings, increases, and research. An exit already handed off is re-handed only if the fold allows | The account stream records a `ReconciliationRun` at or after the last observed submission with nothing outstanding (the core lifts the hold). A mismatch pauses the agent until the owner acknowledges with step-up ([trading spec §11](trading-domain.md#11-reconciliation)). A kill switch or owner Stop is accepted here and applied first, ahead of the hold: the agent goes to `Stopping`, and an `Unknown` order holds exits only in its own instrument (rule 13, HI-20) |
 | Running, `normal` | Recovery, resume, or a lifted limit | Nothing beyond the mandate and the gate | A mode change, Stop, a kill switch, goal completion, or a crash |
 | Running, `exits_only` | A restriction of [mandate spec §5.9](mandate.md#59-restrictions-and-the-effective-mode) | Openings and increases. Research runs review-only: it may invalidate, never propose (§6.7) | The restriction lifts by its own path (MI-3) |
-| Paused | Owner pause, `flatten_and_pause`, a reconciliation mismatch | New orders except re-placing protection; research and model calls (HI-15). Resting protection stays; the kill switch works | Owner resume with step-up for an owner pause; the owner's acknowledgment for a latched limit. A resume never lifts a latched limit |
+| Paused | Owner pause, `flatten_and_pause`, a reconciliation mismatch | New orders except re-placing protection; research and model calls (HI-15). Resting protection stays; the kill switch works | Owner resume with step-up for an owner pause; the owner's acknowledgment for a latched limit. A resume never lifts a latched limit. A kill switch or Stop goes to `Stopping` |
 | Stopping | Kill switch or owner Stop | Everything except the flatten and protection re-placement. A run in flight is cancelled | The executor confirms the flatten, or it is handed off whole ([trading spec §5.5](trading-domain.md#55-kill-switch)) |
-| Holding | `GoalCompleted` with `hold_protected` or `disarm_ladder` | Openings (the `goal_complete` restriction). No research: the goal is done | The owner releases or closes, with step-up |
+| Holding | `GoalCompleted` with `hold_protected` or `disarm_ladder` | Openings (the `goal_complete` restriction). No research: the goal is done | The owner releases or closes, with step-up. A kill switch or Stop goes to `Stopping` (HI-20) |
 | Stopped, Retired | Stop completes; `AgentStopped` | Everything | Terminal. The process exits after `AgentStopped` is committed |
 
 ### 5.3 Research run states
@@ -243,7 +253,7 @@ stateDiagram-v2
     Idle --> Due: risk clock reaches next_proposal_at, and the mode allows
     Due --> Retrieving: the core starts the run
     Due --> Idle: mode, version, or a disabled research agent; nothing is called
-    Retrieving --> Calling: the retrieval plan is done; reads stored as artifacts
+    Retrieving --> Calling: ObservationRecorded batch committed (§6.2 step 2)
     Calling --> Judging: ModelInvocationRecorded committed with outcome ok
     Calling --> Idle: ModelInvocationRecorded committed with an error outcome
     Retrieving --> Cancelled: mode tightens, kill switch, Stop, or a version change (§5.4)
@@ -303,21 +313,40 @@ missing: no new buys and no forced sells. That fails safe, so no extra rule is n
 
 ### 6.2 The research loop
 
+**Preconditions.** No research run starts until all three hold. Each keeps a mandate or journal
+rule whole rather than reading around it:
+
+- **An invalidation can be journaled** (E19-5). Mandate spec §8.6 removes an instrument at once when
+  its thesis is invalidated, and a removal needs a journaled cause. Until E19-5 adds the record, no
+  run starts, so no thesis exists that could need one (§6.7, HI-19).
+- **A harness verdict can be journaled** (E15-8). `ModelInvocationRecorded` must be closed with a
+  member for the candidates' verdicts, or a verdict event must exist, so that no candidate is
+  refused in silence (§6.5, HI-22).
+- **Licensed text can be sent without being kept.** Until the inference spec's prompt record keeps
+  licensed text out of the artifact store (§10.1 ask 5), the retrieval plan reads only sources whose
+  text may be kept in full: market data and public filings. Licensed news waits (§6.6, HI-23).
+
 One run, in order:
 
 1. **Start.** The core checks the mode (HI-15), that research is configured and not disabled or
    withdrawn, and that the run is due (§5.3). It assigns a run id from `IdGen` and a cut-off: the
    risk-clock instant at which it starts the run. It emits a start effect; nothing is journaled yet.
-2. **Retrieve.** The readers run the research entry's retrieval plan (§6.3) at the cut-off and store
-   each result as an artifact (journal spec §6.3).
+2. **Retrieve and capture.** The readers run the research entry's retrieval plan (§6.3) at the
+   cut-off. The worker hands the items to the core, which journals each as `ObservationRecorded`
+   ([journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177)) in one batch, **before**
+   it emits the call effect. That is the data-plane spec's capture-at-use rule (§4.6, DP-3): the
+   data-plane spec owns the duty, the journal spec owns the event, and this spec places it in the
+   loop with the core as its writer (HI-2, HI-16). Each observation's `data_ref` is the item's
+   record as §6.6 says, and these observations are what E17-5's drift detector folds.
 3. **Call.** The worker sends one call to the gateway: purpose `research`, the pinned model
-   reference, the typed inputs (§6.4), the cut-off as `as_of`, and a deadline of the entry's
-   `deadline_ms` (inference spec §3.1). The gateway renders the prompt from its pinned template,
+   reference, the typed inputs (§6.4), the cut-off as `as_of`, and a `deadline` of the call's
+   dispatch instant plus the entry's `deadline_ms`, on the wall clock (inference spec §3.1). The
+   retrieval time is not taken from the model's budget; the run's own wall-clock bound is §7.1's. The gateway renders the prompt from its pinned template,
    reserves the cost, guards the prompt, calls, and validates the output against the entry's output
    schema.
 4. **Record.** The worker hands the gateway's result to the core, which journals
-   `ModelInvocationRecorded` with the run id as `correlation_id` and the retrieved artifacts as the
-   retrieved context. On any error outcome the run ends here (HI-6).
+   `ModelInvocationRecorded` with the run id as `correlation_id` and, as its retrieved context, the
+   event ids of step 2's observations rather than the items again. On any error outcome the run ends here (HI-6).
 5. **Judge.** The core checks each candidate (§6.5), runs `mandate_research::admit` on each that
    passes, against its folded facts, and journals in one batch: the candidates' verdicts, a
    `ThesisProposed` or `ThesisRevised` for each thesis admission judged
@@ -345,8 +374,8 @@ model never names a read.
 | `bars` | Daily bars for each data-universe instrument, ending at or before the cut-off | 20 bars per instrument | Data universe |
 | `quote` | The last quote at or before the cut-off, with its time and sanity flag | 1 per instrument | Data universe |
 | `screens` | The results of each screen the plan names: registered, versioned, deterministic screens over the data universe | 50 instruments per screen | Data universe |
-| `news` | Items from allowlisted news sources about data-universe instruments, published in the window before the cut-off: item id, source id, published time, headline, summary, link, content hash | 48 hours; 50 items; 2,000 bytes per item | Allowlisted sources (DEC-101) |
-| `filings` | Entries from allowlisted filing sources for held and screened instruments: id, source id, form, filed time, an excerpt, content hash | 7 days; 20 entries; 4,000 bytes per excerpt | Allowlisted sources |
+| `news` | Items from allowlisted news sources about data-universe instruments with knowledge time in the window before the cut-off (DP-1): item id, source id, published time (displayed only), headline, summary, link, content hash | 48 hours of knowledge time; 50 items; 2,000 bytes per item | Allowlisted sources (DEC-101). Licensed news waits for the third precondition of §6.2 |
+| `filings` | Entries from allowlisted filing sources for held and screened instruments with knowledge time in the window before the cut-off: id, source id, form, filed time (displayed only), an excerpt, content hash | 7 days of knowledge time; 20 entries; 4,000 bytes per excerpt | Allowlisted sources |
 | `instruments` | Reference facts for every instrument above: asset id, symbol, asset class, eligibility verdict, instrument group, leveraged-ETP flag | — | Instrument snapshot |
 | `positions` | This agent's held instruments: held since, whether removed, the current thesis id. No quantities or dollar amounts | — | This agent only |
 | `theses` | This agent's active theses, and its closed theses of the last 90 days with their E17-8 scores: the [§9.4](journal.md#94-research-agent-thesis-records-dec-413) members, without prompt or response | 50 | This agent only |
@@ -355,10 +384,10 @@ model never names a read.
 workspace's data, or reads any stream other than the folds above. When a cap cuts a read, the oldest
 items go first, and the artifact records what was dropped.
 
-**Every retrieved item is metered for drift.** For each news or filing item, the reader records the
-source, class, published time, content hash, and byte length. These go into the retrieved-context
-list of the run's `ModelInvocationRecorded`, and the core folds them into E17-5's `DriftState`. Text
-never reaches the detector (DEC-266 item 1).
+**Every retrieved item is metered for drift.** Each news or filing item's `ObservationRecorded`
+(§6.2 step 2) names a record holding its source, class, knowledge time, content hash, and byte
+length, and the core folds those observations into E17-5's `DriftState`, as data-plane spec §4.6
+says. Text never reaches the detector (DEC-266 item 1).
 
 ### 6.4 Inputs
 
@@ -423,17 +452,32 @@ corroboration, the lineage cap, and a full universe.
 
 | Event | Stream | When | Status |
 |---|---|---|---|
+| `ObservationRecorded` | agent | Every retrieved item, before the call effect (§6.2 step 2) | Closed in [journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177). The duty is the [data-plane spec's §4.6](data-plane.md#46-the-research-query-interface) (DP-3) |
 | Meter reservation and settlement | `meter:{workspace_id}` (gateway) | Before the call leaves, and on completion | Proposed by the inference spec (§3.6), journal spec change in E15-8 |
-| `ModelInvocationRecorded` | agent | After every call, whatever the outcome, including a late one | In journal spec §9, not closed. E15-8 closes it with DEC-432 item 11's members. This spec adds two: the run id as `correlation_id`, and the retrieved-context list of §6.3 |
-| Candidate verdicts | agent | With the judging batch | A member of the record that closes `ModelInvocationRecorded`, or its own event: decided in E15-8 |
+| `ModelInvocationRecorded` | agent | After every call, whatever the outcome, including a late one | In journal spec §9, not closed. E15-8 closes it with DEC-432 item 11's members. This spec adds two: the run id as `correlation_id`, and the retrieved context as the event ids of the run's `ObservationRecorded` |
+| Candidate verdicts | agent | With the judging batch | A member of the record that closes `ModelInvocationRecorded`, or its own event: decided in E15-8. Until one exists, no run is judged (§6.2 preconditions, HI-22) |
 | `ThesisProposed`, `ThesisRevised` | agent | Every thesis admission judged | Closed in [journal spec §9.4](journal.md#94-research-agent-thesis-records-dec-413) |
 | `ModelOutputRecorded` | agent | Each judged thesis, `ignored` null only when admitted | Closed in [journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177) |
 | `UniverseChanged` | account | The executor's copy of an admission or removal | Closed in journal spec §9.3 |
-| Invalidation verdict | agent | Each accepted invalidation (§6.7) | **Missing.** E19-5 adds it to the journal spec first |
+| Invalidation verdict | agent | Each accepted invalidation (§6.7) | **Missing.** E19-5 adds it to the journal spec first. Until then no research run starts (§6.2 preconditions) |
 | `OwnerAlertSent` | control | A guard hit on the description, a lineage retirement, a construction failure | In journal spec §9 |
 
-The retrieved data, the rendered prompt, and the response are artifacts. Events hold their hashes.
-Notifications about any of this carry only opaque ids (rule 6).
+**What is kept, and for how long** (DEC-431 item 17, the founder's: keep only what a thesis cited).
+Journal artifacts are kept for the retention period, six years at least (journal spec §6.2), so
+the journal holds no licensed text that no thesis cited:
+
+| Content | What the journal keeps |
+|---|---|
+| Market data, public filings and XBRL facts | The data itself, as the observation's artifact. It is public or ours to keep (data-plane spec §4.5) |
+| A licensed news item, cited or not | Its record without text, as the observation's artifact: source, item id, allowlist version, knowledge and published times, raw-bytes digest, byte length, class |
+| A licensed news item a thesis cited | Its text too, as the thesis's `evidence_ref` artifact, captured when the thesis is judged (data-plane spec §4.5's "captured at use") |
+| The rendered prompt | The gateway's `request_digest`, and a prompt artifact in which each licensed item's text is replaced by its raw-bytes digest (§10.1 ask 5) |
+| The model's response | In full. It is the model's text, not a vendor's |
+
+Replay of decisions (HI-3) needs none of the dropped text: it reads the responses, the observations,
+and the verdicts. A byte-exact prompt can be rebuilt only while the point-in-time store still holds
+every item's text, which is the licence's horizon; regression evaluations (§8.3) therefore use only
+runs inside it. Notifications about any of this carry only opaque ids (rule 6).
 
 ### 6.7 Invalidation
 
@@ -444,21 +488,36 @@ caller (DEC-132 item 13). The harness supplies it like this:
 
 - Every run's inputs include the agent's active theses. The output may list a thesis id in
   `invalidations`, with the item ids that show the condition holds.
-- An invalidation only removes an instrument, which is exits-only and adds no risk (MI-19). So it is
-  taken on the model's word, with no corroboration and no approval (rule 2).
+- An accepted invalidation removes the instrument at once, exactly as §8.6 says: the verdict is
+  journaled, the executor copies `UniverseChanged` (`thesis_invalidated`), and the instrument is
+  exits-only from then on (MI-19, HI-19). Removal adds no risk, so the verdict is taken on the
+  model's word, with no corroboration and no approval (rule 2).
 - In `exits_only`, a run is review-only: its theses are discarded unjudged and only its
   invalidations count.
-- **The record does not exist yet.** No agent-stream event carries an invalidation verdict for
-  `UniverseChanged` (`thesis_invalidated`) to name as its cause. E19-5 adds one to the journal spec
-  first. Until it lands, the harness removes nothing by invalidation, and theses end at their
-  horizon. That holds a position longer than §8.6 intends, but adds no risk, and the entry's horizon
-  bound caps how long. Research leaves the internal thin slice only after E19-5.
+- **The record does not exist yet, so research does not run yet.** No agent-stream event carries an
+  invalidation verdict for `UniverseChanged` to name as its cause. E19-5 adds one to the journal
+  spec first. Until it lands, no research run starts (§6.2 preconditions): with no thesis, there is
+  nothing to invalidate, and §8.6 holds unchanged. The same record serves the founder's DEC-433
+  item 19, under which revoking a source invalidates every live thesis that cites it.
 
 ### 6.8 Fast decision models
 
-Fast models (E15-2) are not part of v1 if the founder accepts DEC-432 item 13's recommendation. If
-they come, they use the same gateway contract with a deadline inside the tick's decide step, the same
-record, and the same missing-means-safe rule, and they have no retrieval plan of their own.
+The founder put a hosted fast tier in v1 (DEC-432 item 13, decided 2026-10-03), served through the
+gateway under the same pinning, deadline, metering, and evaluation-gate rules as any model. Where its
+call runs is a safety-path question, so it is DEC-431 item 18, Proposed for the founder. Until the
+founder decides, this spec takes the conservative reading, and it is the only one consistent with
+HI-7, HI-14, INF-13, and ES-24's 1 ms budget for the decide step:
+
+- **The fast call never runs inside the trading tick** (HI-21). A fast worker, built like the
+  research worker, calls the gateway off the tick at the cadence the mandate sets, and the result
+  enters the core as `Input::ModelOutput` after its `ModelInvocationRecorded` commits.
+- **A missing or late output is missing.** The tick uses the model's latest fresh output (§8.2);
+  with none, §8.3 counts the model as missing: 0 for exits, fully bearish for buys (rule 3, MI-10).
+- **No exit's latency depends on a model provider.** Exits, protective orders, risk exits, and kill
+  switches never wait for a fast output; a stalled provider only makes outputs stale.
+- The fast tier has no retrieval plan of its own: its inputs are observations the tick already
+  journaled. The retail profile still excludes `fast` until counsel answers question 33 (mandate
+  spec §4.3). The work is E19-10, beside E15-2.
 
 ## 7. Budgets, deadlines, and degradation
 
@@ -466,7 +525,7 @@ record, and the same missing-means-safe rule, and they have no retrieval plan of
 
 | Budget | Value | Set by | Enforced by |
 |---|---|---|---|
-| Model spend per risk day | `behavior.research.cost_cap_usd_per_day` | The owner, in the envelope (DEC-120), at most the policy's `research_cost_cap_usd_per_day` | The gateway's reservation (inference spec §7.3) and §8.5 check 7 at admission |
+| Model spend per risk day | `behavior.research.cost_cap_usd_per_day`; **$5** for each agent in the internal paper phase (DEC-431 item 15) | The owner, in the envelope (DEC-120), at most the policy's `research_cost_cap_usd_per_day`; the founder for the internal agents | The gateway's reservation (inference spec §7.3) and §8.5 check 7 at admission |
 | Proposal interval | `behavior.research.interval_s` | The owner, at least the policy's `research_interval_s` | The run schedule (§5.3) |
 | Runs in flight | 1 | Fixed | The core |
 | Calls per run | 1 | Fixed in v0.1 (§6.2) | The core |
@@ -474,17 +533,19 @@ record, and the same missing-means-safe rule, and they have no retrieval plan of
 | Output tokens | The entry's `max_output_tokens` | Pinned with the model | The gateway |
 | Retrieval caps | §6.3's table | The research entry | The readers |
 | Theses per run, horizon | 4; 30 days | The research entry's output schema | The gateway's schema check |
-| Run wall time | Retrieval timeout (60 s) plus the call deadline | The research entry | The worker; the run is cancelled |
+| Run wall time | Retrieval timeout (60 s) plus the call deadline. The only bound on a run's total time; the call's own deadline is measured from its dispatch (§6.2 step 3) | The research entry | The worker; the run is cancelled |
 
 The defaults in the table are engineering values (DEC-431 item 7). They are inside the content hash,
 so changing one is a new research-agent version that the owner confirms (§8.4). The dollar figures
-for the internal thin slice are the founder's (DEC-431 item 15).
+are the founder's, decided 2026-10-03 (DEC-431 item 15): hard caps that degrade to fewer ideas, never
+to more risk, revisited after the spike's paper runs.
 
 ### 7.2 Per workspace
 
 | Budget | Enforced by |
 |---|---|
-| Daily model-spend quota ([HLD §8](../HLD.md#8-multi-tenancy-and-security), "Quotas") | The gateway (`budget_exhausted`, inference spec §7.3) |
+| Daily model-spend quota ([HLD §8](../HLD.md#8-multi-tenancy-and-security), "Quotas"): **$20** for each internal workspace in the paper phase (DEC-431 item 15) | The gateway (`budget_exhausted`, inference spec §7.3) |
+| Monthly inference spend | Alerts at 50%, 80%, and 100% of the monthly cap ([DEC-434](../project/decisions/DEC-434.md) item 18) |
 | Calls per second | The gateway's per-workspace bucket (`rate_limited_local`) |
 | Allowed endpoints and regions | The workspace policy (`policy_denied`, INF-12) |
 
@@ -512,7 +573,7 @@ Exits, protection, kill switches, pending approvals, and quant models are untouc
 | `budget_exhausted`, `rate_limited_local` | Missing. The next run waits for its due time |
 | `input_rejected` | Missing. Repeated hits on retrieved data alert the operator with the rule, not the content |
 | `model_withdrawn` | Missing; research is disabled for this version |
-| `deadline_exceeded`, `provider_unavailable`, `rate_limited_provider` | Missing. The gateway has already retried what it may; the harness does not retry within the run |
+| `deadline_exceeded`, `provider_unavailable`, `rate_limited_provider` | Missing. The gateway has already retried what it may; the harness does not retry within the run. Three runs in a row ending `deadline_exceeded` alert the operator with opaque text, since they may still cost money (inference spec §3.3) |
 | `content_refused`, `schema_invalid`, `identity_mismatch` | Missing. Never retried within the run, because sampling again until something parses would select outputs (DEC-432 item 3) |
 
 ## 8. Evaluation and change control
@@ -561,8 +622,10 @@ evaluation gate before a model is offered ([inference spec §4.3](inference.md#4
 | A model withdrawn | `PlatformOperatorAction` `model_withdrawn`; outputs count as missing (§8.1, INF-15) | The operator |
 
 So the platform cannot change what a running research agent is shown, how it is asked, or which
-model answers without the owner confirming a new version. Whether a new entry must pass its own §8.1
-evaluation before users' agents may pin it is DEC-431 item 16.
+model answers without the owner confirming a new version. And a DEC-99 pass belongs to the content
+hash evaluated (DEC-431 item 16, decided by the founder 2026-10-03): every change to the research
+entry (template, retrieval plan, bounds, or model) needs its own forward paper evaluation (§8.1,
+E17-8) before users' agents may pin it.
 
 ## 9. Adversaries
 
@@ -581,7 +644,7 @@ evaluation before users' agents may pin it is DEC-431 item 16.
 | Malicious content | Injection that tries to exfiltrate data | No outbound path exists, and the inputs hold only public data and the agent's own memory (HI-11) |
 | Malicious content | Injection that forces invalidations to churn the book | An invalidation only removes; exits are paced by the conduct controls; re-entry waits for `reentry_cooldown_s` ([§5.3](mandate.md#53-position-exposure-order-size-count-and-cooldown)) |
 | Malicious content | Text aimed at the approver ("approve now") | The approval card shows model text as quoted research-agent text with links to its sources (DEC-126). Disclosed, not blocked |
-| Malicious insider | Changes the template or swaps the model | A new content hash needs the owner's confirmation (§8.4); the gateway never substitutes (DEC-67) |
+| Malicious insider | Changes the template or swaps the model | A new content hash needs the owner's confirmation (§8.4); the gateway never substitutes (DEC-67). With one aggregator in front of every call (DEC-432 item 14), that rests on INF-2 with DEC-432 item 9's locked routing and item 10's reported-identity check |
 | Malicious insider | Adds a planted source to the allowlist | Corroboration needs an independent source or market data; every thesis records the allowlist version, so the change is visible; allowlist changes are reviewed like code |
 | Malicious insider | Reads another workspace's prompts | Artifacts live in the workspace deployment, encrypted per workspace (journal spec §6.5); break-glass access only, journaled (journal spec §7) |
 | Bad tick | A bad bar or quote makes a thesis look corroborated | Admission is `ask` by default; the gate uses sane marks and the collar; the thesis does not size the order |
@@ -596,7 +659,10 @@ evaluation before users' agents may pin it is DEC-431 item 16.
 of a schema-valid output from the pinned model or a typed error (§3.3); no call outlives its
 deadline; reservations before the call and spend that never decreases within a risk day (INF-7,
 DEC-432 item 4); the caller appends `ModelInvocationRecorded` (§3.6); no tools (INF-5); the prompt
-guard (§8.3).
+guard (§8.3). Because the founder chose one aggregator for every call (DEC-432 item 14), DEC-67 on
+this path rests on two of DEC-432's readings by name: item 9 (routing locked to endpoints serving
+the identical weights) and item 10 (a reported identity that differs from the pin is
+`identity_mismatch`, so missing).
 
 **How a research call fills the request** (inference spec §3.1):
 
@@ -608,7 +674,7 @@ guard (§8.3).
 | `model` | The research agent's pinned id, version, and content hash |
 | `inputs` | §6.4's typed inputs |
 | `as_of` | The run's cut-off |
-| `deadline` | The run's start plus the entry's `deadline_ms` |
+| `deadline` | The call's dispatch instant plus the entry's `deadline_ms`, on the wall clock (§6.2 step 3) |
 | `max_output_tokens` | The entry's |
 
 **What this spec asks of the inference spec**, for its next revision:
@@ -622,29 +688,35 @@ guard (§8.3).
    (§6.3) and room for the candidates' verdicts (§6.6). The run id rides in `correlation_id`.
 4. **The guard is callable without a call**, so construction can check the description (§5.1 step
    5) and spend nothing.
+5. **The prompt record keeps no licensed text** (DEC-431 item 17, §6.6). For a call whose inputs
+   hold licensed text, `prompt_ref` names the rendered prompt with each licensed item's text
+   replaced by its raw-bytes digest, and `request_digest` stays the digest of the full prompt. Until
+   that lands, research reads no licensed text (§6.2 preconditions).
 
-### 10.2 The data plane (`data-plane.md`, in draft)
+### 10.2 The data plane ([data-plane spec](data-plane.md))
 
 | Need | Contract |
 |---|---|
-| Point-in-time reads | Every query takes a cut-off and returns nothing recorded or published after it (HI-13) |
+| Point-in-time reads | Every query takes a cut-off and returns only records whose knowledge time is at or before it (DP-1, [§5.2](data-plane.md#52-two-time-axes)). Published time is a displayed field only (HI-13) |
 | Bars and quotes | For the data universe; each quote carries its time and the sanity flag of [trading spec §4](trading-domain.md#4-market-data) |
 | News and filings | Only from sources on the allowlist version the query names. Each item carries an item id, a source id, a published time, a content hash, and its byte length |
 | Reference data | The instrument snapshot by hash: asset id, symbol, asset class, eligibility verdict, instrument group, leveraged-ETP flag |
 | Screens | Registered, versioned, deterministic screens over the data universe |
 | Scope | A query is scoped to one workspace. The shared plane carries facts only, never directional views (DEC-62) |
-| Licence | Whether an item's text may be kept as an artifact for the retention period (DEC-431 item 17) |
+| Licence | Whether an item is licensed text, so that only a cited item's text is kept (DEC-431 item 17, DEC-433 item 20, §6.6) |
+| Capture | The data plane's capture-at-use rule: every item the model reads is journaled as `ObservationRecorded` first (§4.6, DP-3). The harness's core is the writer (§6.2 step 2) |
 
 ### 10.3 The runtime core, the executor, and the journal
 
 - **New core inputs:** a run's retrieval result, a gateway result, and a cancellation
   acknowledgment. `handle` applies each, and the core journals what it must. The existing
-  `Input::ModelOutput` stays the path for quant models.
+  `Input::ModelOutput` stays the path for quant models and becomes the path for fast-tier outputs
+  (§6.8).
 - **New core effects:** start a run; cancel a run.
 - **The executor** copies `UniverseChanged` from thesis records, and later from invalidation
   verdicts (E19-5). It is unchanged otherwise.
 - **The journal** gains the closed `ModelInvocationRecorded` and the meter stream (E15-8) and an
-  invalidation verdict (E19-5).
+  invalidation verdict (E19-5). `ObservationRecorded` exists and is closed (journal spec §9.1).
 
 ## 11. What exists today
 
@@ -660,22 +732,31 @@ As of 2026-10-03.
 | Model gateway | **Specified as a draft:** [inference spec](inference.md) v0.1; no code (E15-6 to E15-10) |
 | LLM research loop | **Spike only:** `python/research_spike` (E17-0) gathers bars and news, makes one call per UTC day through an aggregator, parses strictly, sizes by a fixed rule, and keeps its own JSONL journal. It is not product code and has no gate; its paper runs await the founder's go |
 | Retrieval plan, readers, checks, run scheduler in Rust | **Planned** (E19-2, E19-3) |
-| News, filings, screens, allowlist | **Planned** (the data-plane spec, in draft). `mandate-marketdata` downloads Alpaca historical bars into Parquet; there is no news or filings store and no allowlist file |
+| News, filings, screens, allowlist | **Specified as a draft** ([data-plane spec](data-plane.md) v0.1); no code. `mandate-marketdata` downloads Alpaca historical bars into Parquet; there is no news or filings store and no allowlist file |
 | Deployment manager | **Planned** (M8). The CLI starts processes in Phase 1 |
 | Regression evaluations, adversarial bench | **Planned** (E19-6, E19-7) |
+| Fast tier | **Decided, not specified:** a hosted model in v1 (DEC-432 item 13); where its call runs is DEC-431 item 18 (§6.8, E19-10) |
 
 ## 12. Decisions
 
-[DEC-431](../project/decisions/DEC-431.md) records this spec's choices. Items 1 to 14 are agent
-readings under DEC-79 and DEC-176: each is a reversible engineering choice, tightens a rule, or
-closes a gap by the reading that adds no risk. Items 15 to 17 are reserved for the founder and stay
-**Proposed**; the spec proceeds on the most conservative option:
+[DEC-431](../project/decisions/DEC-431.md) records this spec's choices. Items 1 to 14 and 20 to 25
+are agent readings under DEC-79 and DEC-176: each is a reversible engineering choice, tightens a
+rule, or closes a gap by the reading that adds no risk.
 
-| Item | Question | Conservative option in force |
+**Decided by the founder on 2026-10-03:**
+
+| Item | Decision | Where this spec carries it |
 |---|---|---|
-| 15 | The dollar figures for the internal thin slice: its agents' `cost_cap_usd_per_day` and the workspace's daily model-spend quota | No product research runs until the founder sets them |
-| 16 | Whether a DEC-99 pass belongs to one content hash, so that any change to the research entry is evaluated again before users' agents may pin it | Yes: a pass belongs to the content hash evaluated |
-| 17 | Whether licensed news and filing text may be kept as artifacts for the retention period | Only sources whose terms allow it are allowlisted |
+| 15 | $5 per agent per risk day and $20 per internal workspace per day for the internal paper phase, as hard caps that degrade to fewer ideas and never to more risk; revisited after the spike's paper runs | §7.1, §7.2 |
+| 16 | A DEC-99 pass belongs to one content hash: every change to the research entry needs its own forward paper evaluation before users' agents may pin it | §8.4 |
+| 17 | Keep only what a thesis cited, as journal artifacts; allowlist only sources whose terms allow that; counsel confirms per vendor | §6.2 preconditions, §6.6, HI-23 |
+
+**Proposed for the founder**, with the conservative option in force:
+
+| Item | Question | Recommendation, and the option in force meanwhile |
+|---|---|---|
+| 18 | Where the hosted fast tier's call runs (DEC-432 item 13) | Off the trading tick, its output arriving as an input, missing or late meaning missing, and no exit's latency depending on a provider (§6.8, HI-21). In force now |
+| 19 | Who makes the agent-scoped kill switch work while the agent process is down (§13 item 1) | The executor flattens the agent from the control stream after a deadline, with the deployment manager's restart as the second line. Meanwhile it is disclosed, and E19-8 is Must before live trading |
 
 Provider and vendor choice, and provider data terms, are DEC-432 items 14 and 15, not repeated here.
 
@@ -686,7 +767,8 @@ Provider and vendor choice, and provider data terms, are DEC-432 items 14 and 15
    cannot start, an owner's agent kill switch waits for it. Either the executor plans and runs the
    agent-scoped flatten from the control stream after a deadline, or the deployment manager
    guarantees a restart that handles the kill switch first. Rule 13 says the kill switch is always
-   available, so one of these must hold before live trading (E19-8).
+   available, so one of these must hold before live trading (E19-8). The choice is DEC-431 item 19,
+   Proposed for the founder. Once the process is up, HI-20 covers every state.
 2. **Admission against a moving account.** The core judges §8.5 checks 13 and 17 on its folded view
    of the account stream, and the executor's copy comes later. Whether the executor checks again
    before copying, and what the thesis record says if it refuses, belongs to E17-3. Until then the
@@ -695,7 +777,8 @@ Provider and vendor choice, and provider data terms, are DEC-432 items 14 and 15
    says how the platform derives it from retrieved items and market data (E17-7). The harness
    supplies the inputs; the rule is E17-7's.
 4. **The invalidation record** (§6.7, E19-5): its event type, its members, and whether the executor
-   copies `UniverseChanged` from it directly.
+   copies `UniverseChanged` from it directly. It must also carry DEC-433 item 19's case, a revoked
+   source.
 5. **Drift escalation** is DEC-266 item 4, the founder's. Until then the detector computes and
    reports, and every thin-slice admission is `ask` under the internal research profile.
 6. **Multi-call runs.** Whether a run may make a second call with reads the first call's output
