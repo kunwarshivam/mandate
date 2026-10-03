@@ -725,6 +725,20 @@ fn decimal(units: i128) -> String {
     }
 }
 
+/// One draw of [`the_trim_and_the_slice_stay_on_the_venue_s_grid`]: the grid at 10^-9 and whether
+/// the instrument is fractionable, the price, the position in whole steps and tenths of a step, the
+/// tenths of it resting, the factor in thousandths, the minimum as a ratio of the grid, and the
+/// trailing volume in tenths.
+type GridCase = (
+    (i128, bool),
+    i128,
+    (i128, i128),
+    i128,
+    i128,
+    (i128, i128),
+    i128,
+);
+
 /// `numerator / denominator` rounded up, for positive figures.
 fn ceil_div(numerator: i128, denominator: i128) -> i128 {
     (numerator + denominator - 1).div_euclid(denominator)
@@ -788,15 +802,7 @@ fn the_trim_and_the_slice_stay_on_the_venue_s_grid() {
         factor_milli,
         minimum_ratio,
         volume_tenths,
-    ): (
-        (i128, bool),
-        i128,
-        (i128, i128),
-        i128,
-        i128,
-        (i128, i128),
-        i128,
-    )|
+    ): GridCase|
      -> Result<(), TestCaseError> {
         let held = steps * grid + tenths * grid / 10;
         let on_sale = held * sale_tenths / 10;
