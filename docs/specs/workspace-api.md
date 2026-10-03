@@ -5,7 +5,7 @@
 | **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Items 1 to 16 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
-| **Siblings** | Identity, roles, sessions, and step-up ceremonies: `docs/specs/identity.md` (gap 6, drafted in parallel). Notification delivery: `docs/specs/notifications.md` (gap 7). Broker connection flows: `docs/specs/connections.md` (gap 9) |
+| **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556), gap 6. Notification delivery and approval deep links: the [notifications spec](https://github.com/kunwarshivam/mandate/pull/558) (`docs/specs/notifications.md`, #558), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
 
 This spec is the contract between the backend and everything that takes the owner's input or shows
 the owner their workspace: the web app, the CLI, and owner-connected agents over MCP. It adds no
@@ -161,7 +161,7 @@ the journal is the only channel (DEC-17).
 
 ### 3.3 Authentication and sessions
 
-Owned by the identity spec. What the API requires of it:
+Owned by the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556). What the API requires of it:
 
 1. **Browser sessions** in a `Secure`, `HttpOnly`, `SameSite=Strict` cookie, with a CSRF defence on
    every mutating call: the `Origin` header must be the app's own origin, and the call must carry a
@@ -227,7 +227,7 @@ Errors are RFC 9457 problem documents with these members:
 
 ### 3.6 Step-up
 
-The ceremony is the identity spec's (E9-4). The API's part:
+The ceremony belongs to the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556) (E9-4). The API's part:
 
 - `POST /v1/workspaces/{ws}/step-up/challenges` with `{action: {kind, digest}}` returns a challenge
   for that one action. `kind` is `approve`, `confirm_version`, `deploy`, `command`, `acknowledge`,
@@ -243,7 +243,7 @@ The ceremony is the identity spec's (E9-4). The API's part:
 
 ### 3.7 Roles
 
-Roles and separation of duties are the identity spec's. This is the API's reading of HLD §8, PRD
+Roles and separation of duties belong to the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556). This is the API's reading of HLD §8, PRD
 FR-1.3, PX-11 (b), and journal spec §7, for its route matrix; the identity spec wins where they
 differ. "Owner" in the specs means a workspace admin or operator acting on the agent.
 
@@ -286,7 +286,7 @@ its next call; revocation needs no step-up because it only removes access.
 
 ### 3.9 Approval links
 
-A notification carries a random **notice id**, generic text, and nothing else (rule 6, mandate spec
+Deep-link delivery belongs to the [notifications spec](https://github.com/kunwarshivam/mandate/pull/558) (`docs/specs/notifications.md`, #558); this section states what the API serves. A notification carries a random **notice id**, generic text, and nothing else (rule 6, mandate spec
 §6.4). The link is `/n/{notice_id}`. Opening it shows sign-in only (brief G4); after sign-in the API
 resolves the notice to its approval for that user, if the user may see it, and otherwise returns
 404. The notice id is not the approval's event id, so a link reveals no creation time and no event
@@ -659,7 +659,7 @@ risk-reducing call never consults one (API-7, API-8).
 | The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10) |
 | Drafts, compile, versions, confirm endpoints | **Planned** (E10-11) |
 | Deployment manager endpoints and the reserved kill-switch path | **Planned** (E10-12) |
-| Approval service endpoints and delegation previews | **Planned** (E8-9) |
+| Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
 | Read-model projections | **Planned** (E11-9) |
@@ -686,7 +686,7 @@ Items 17 and 18 stay **Proposed** for the founder:
 
 ## 11. Backlog
 
-Stories continue the existing epics (DEC-436 item 15): E8-9, E10-10 to E10-15, E11-9, and E12-6 in
+Stories continue the existing epics (DEC-436 item 15): E8-15, E10-10 to E10-15, E11-9, and E12-6 in
 the [backlog](../project/06-backlog-v1.md). **SC** marks a safety-critical story.
 
 ---

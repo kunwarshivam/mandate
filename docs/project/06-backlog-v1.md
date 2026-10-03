@@ -812,7 +812,7 @@ the spec invariants (DP-n) its tests cover.
   bounds each delegation on its own, so twenty delegations can each carry `max_total_usd` equal to the allocation. That is
   the spec's reading, and the gate enforces every limit regardless (§6.5). The approval card and the MC-U family should
   consider the aggregate, which is the V-045 the criteria above name and the mandate spec does not yet define.
-- **E8-9 (Must, M8, after E10-10; SC)** As an approver, I want to see and answer approval requests
+- **E8-15 (Must, M8, after E10-10; SC)** As an approver, I want to see and answer approval requests
   through the workspace API, so that the web app and the CLI share one approval service
   ([workspace API spec](../specs/workspace-api.md) §4.3, §5.2, §5.3; [DEC-436](decisions/DEC-436.md)).
   *Accepted when:* `GET /approvals/{id}` returns the content object and `content_hash` exactly as
