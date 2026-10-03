@@ -163,12 +163,35 @@ the spec invariants (DP-n) its tests cover.
   row of spec §7 to its exit, so that feed failures are proven safe, not assumed.
   *Accepted when:* each row of §7 is a named test; with the shared plane and every news source down
   the exit suites still pass (DP-13); one outlier quote anywhere in a random sequence changes no
-  latched limit, trim, or flatten (DP-6), with the H and E₀ cases pending on DEC-433 item 17.
-- **E2-14 (Must, after DEC-433 item 17; SC)** As an owner, I want one wrong high print never to set
-  my high-water mark or my day's starting equity, so that later real prices cannot confirm a loss
-  that did not happen.
-  *Accepted when:* the founder decides item 17; the mandate spec and its reference cases change in
-  their own PR first; DP-6's H and E₀ cases pass.
+  latched limit, trim, flatten, or lifted restriction, and no admitted opening order's value, each
+  compared by an oracle with its own equity ledger (DP-6). The H and E₀ cases are pending tests on
+  DEC-433 items 17 and 21, and the admitted-value case on item 22; none is left out.
+- **E2-14 (Must, after DEC-433 items 17, 21, and 22; SC)** As an owner, I want one wrong high print
+  never to set my high-water mark or my day's starting equity, or to enlarge a buy, so that later
+  real prices cannot confirm a loss that did not happen and no order is sized on a wrong price.
+  *Accepted when:* the founder rules on items 21 and 22; the mandate spec and its reference cases
+  change in their own PR first; DP-6's pending cases pass. *Note (#553 review, finding 3 and minor
+  10):* item 17's E₀ mechanism cannot work as drafted. If the founder takes item 21's official-close
+  option, the E₀ criterion becomes "E₀ is set from the official close, with the last confirmed mark
+  as the fallback", and the H criterion follows whichever H option is chosen.
+- **E2-15 (Must, M5, before E2-10 is accepted; SC)** As an owner, I want mandate spec §8.5 check 15
+  to count syndicated copies of one story as one source, so that a planted story repeated by several
+  vetted outlets cannot corroborate itself at admission (DEC-433 item 14; #553 review, finding 6).
+  *Accepted when:* a mandate spec and reference-case PR states the rule (a tightening, DEC-176);
+  then tests first; then `crates/mandate-research`'s check 15 counts story groups, not raw cited
+  sources; a fixture with one story under five vetted sources is refused `no_corroboration`.
+
+*Data plane spec follow-ups* (minors of the post-merge review on
+[#553](https://github.com/kunwarshivam/mandate/pull/553), deferred by the freeze rule):
+
+- **E2-16 (Should)** Minor 7: spec §3.2's overflow report and §7's owner alerts say they go through
+  the notification path under rule 6 (opaque IDs and generic text; details load in the workspace).
+- **E2-17 (Should)** Minor 8: make DEC-433 item 6 visible from the trading spec: amend §4.4 so a
+  presumed halt also blocks openings, or extend the data plane spec's §11 question 4 to cover it.
+- **E2-18 (Should)** Minor 9: name the backlog story per invariant in spec §2 (DP-11, DP-12, and
+  DP-14 name a test kind but no story).
+- **E2-19 (Should)** Minor 11: name the story that holds the allowlist's contents (E17-7 or E2-9);
+  nothing holds them today.
 
 ### E3 Accounting
 
@@ -1484,9 +1507,9 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   on its diff. DEC-431 item 20 says "if safety-critical" without deciding.
 - Round-2 minor 5: DEC-431 item 17 cites "journal spec §6.3, six years" for retention; retention is
   §6.2.
-- Round-2 cross-document: data-plane spec §4.6 says the drift detector folds `ObservationRecorded`;
-  correct it to the typed per-item observation the observation's artifact holds (agent harness spec
-  §6.3), in the data-plane spec's next change. Add `mandate-research`'s drift doc comment ("the shell
+- Round-2 cross-document: data-plane spec §4.6 said the drift detector folds `ObservationRecorded`;
+  corrected in data-plane spec v0.2 to the typed per-item observation the observation's artifact
+  holds (agent harness spec §6.3). Still open: add `mandate-research`'s drift doc comment ("the shell
   records") to E19-9's scope with the same reading.
 
 ### E21 Operations and infrastructure (proposed, DEC-434)
