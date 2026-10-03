@@ -11256,7 +11256,7 @@ mod remainder_pins {
             },
         );
         state.ladders.insert(
-            aapl,
+            (aapl, intent(LONE)),
             LoneLadder {
                 intent: intent(LONE),
                 agent: AgentId(lone_agent.to_owned()),
