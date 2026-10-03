@@ -234,10 +234,10 @@ stateDiagram-v2
     Compiled --> Reviewed: user enters or confirms every envelope field
     Reviewed --> Validated: schema + V-rules + policy hierarchy pass; warnings acknowledged
     Validated --> Versioned: canonical hash = mandate_version
-    Versioned --> Deployed: backtest and paper requirements met; owner approves (step-up)
+    Versioned --> Deployed: backtest and paper requirements met, then the owner approves (step-up)
     Deployed --> Deployed: new version applied (§2.2)
     Deployed --> Holding: goal complete or end date, on_complete = hold_protected or disarm_ladder
-    Deployed --> Retired: on_complete = release; profit_stop reached and flat; agent stopped
+    Deployed --> Retired: on_complete = release, profit_stop reached and flat, or agent stopped
     Holding --> Retired: owner releases or closes positions
     Retired --> [*]
 ```
