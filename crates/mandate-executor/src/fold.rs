@@ -1059,11 +1059,12 @@ fn protection_changed(
                 );
             }
             if !passive {
-                if state.awaiting.remove(&instrument).is_some()
-                    && let Some(waiting) = state.unprotected.iter_mut().find(|interval| {
-                        interval.instrument == instrument && interval.ended_at.is_none()
-                    })
-                {
+                let awaited = state.awaiting.remove(&instrument).is_some();
+                if let Some(waiting) = state.unprotected.iter_mut().find(|interval| {
+                    interval.instrument == instrument
+                        && interval.ended_at.is_none()
+                        && (awaited || interval.uncovered)
+                }) {
                     waiting.ended_at = Some(at);
                 }
                 state.unprotected.push(UnprotectedInterval {
@@ -1071,6 +1072,7 @@ fn protection_changed(
                     started_at: at,
                     ended_at: None,
                     alerted: false,
+                    uncovered: false,
                 });
             }
         }
@@ -1104,7 +1106,8 @@ fn protection_changed(
         }
         "interval_limit" | "unprotected_end" => {
             let awaiting = protective_orders_named(payload, "awaiting")?;
-            let ends = action == "unprotected_end" && awaiting.is_empty();
+            let uncovered = flag(payload, "uncovered");
+            let ends = action == "unprotected_end" && awaiting.is_empty() && !uncovered;
             if !awaiting.is_empty() {
                 state
                     .awaiting
@@ -1142,6 +1145,8 @@ fn protection_changed(
             {
                 if ends {
                     open.ended_at = Some(at);
+                } else if uncovered {
+                    open.uncovered = true;
                 } else if !finished {
                     open.alerted = true;
                 }
@@ -2899,6 +2904,45 @@ mod interval_tests {
 
     fn action(name: &str) -> (&'static str, Value) {
         ("action", Value::Str(name.to_owned()))
+    }
+
+    /// DEC-367 item 4 (#468's round-4 review, m2): a sequence that ends with no prices to place
+    /// protection at leaves its interval open, bounded and alerted, since nothing covers the
+    /// position; the next start in the instrument ends it there, as it ends one waiting on an
+    /// acknowledgment, so it never stays open beside a new interval.
+    #[test]
+    fn an_uncovered_end_leaves_the_interval_open_until_the_next_start() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        protection_changed(&mut executor, 1, vec![action("unprotected_start")])?;
+        let uncovered = ("uncovered", Value::Bool(true));
+        protection_changed(&mut executor, 2, vec![action("unprotected_end"), uncovered])?;
+        let spans = |executor: &Executor| -> Vec<(i64, Option<i64>, bool)> {
+            executor
+                .state
+                .unprotected
+                .iter()
+                .map(|interval| {
+                    (
+                        interval.started_at.secs(),
+                        interval.ended_at.map(RiskClock::secs),
+                        interval.uncovered,
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(spans(&executor), vec![(1, None, true)]);
+        protection_changed(&mut executor, 3, vec![action("unprotected_start")])?;
+        assert_eq!(spans(&executor), vec![(1, Some(3), true), (3, None, false)]);
+        Ok(())
     }
 
     /// DEC-348 item 2: an interval waiting on the broker's acknowledgment of new protection is

@@ -1224,8 +1224,9 @@ fn created(view: &ExecutorState) -> Option<(&'static str, Value)> {
 }
 
 /// §5.4's re-placement before expiry, at a copied `TradingDayStarted`: in every instrument where
-/// protection rests at known prices, no exit sequence runs, no other exit is working and no
-/// re-placement is under way, protection with a GTC order on or past its buffer day ([`expiring`]),
+/// protection rests at known prices, no exit sequence runs and no re-placement is under way (an
+/// exit working there does not stop it: [`re_place`] sizes around it, DEC-367 item 4(a)),
+/// protection with a GTC order on or past its buffer day ([`expiring`]),
 /// or with no recorded creation date, is cancelled — all of it, by id, as an exit
 /// sequence's first step is — and the start of the interval records the entry, agent and prices
 /// the new protection takes. Once the cancels are confirmed, [`settle`] re-places it for the held
@@ -1814,7 +1815,10 @@ fn replace(
 }
 
 /// [`replace`] for the entry, agent and prices a sequence or a re-placement before expiry
-/// recorded.
+/// recorded. With shares left to cover and no prices to place at, the shortfall is journaled and
+/// alerted ([`unprotectable`]), and the `unprotected_end` that ends the sequence is marked
+/// `uncovered`: the interval stays open and bounded, since nothing covers the shares (DEC-367
+/// item 4, #468's round-4 review, m2).
 fn re_place(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
@@ -1831,7 +1835,8 @@ fn re_place(
     }
     let Some(prices) = sequence.prices else {
         unprotectable(batch, instrument)?;
-        changed(batch, instrument, "unprotected_end", Vec::new())?;
+        let uncovered = vec![("uncovered", Value::Bool(true))];
+        changed(batch, instrument, "unprotected_end", uncovered)?;
         return Ok(());
     };
     let crypto = batch.ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto);
@@ -7344,8 +7349,9 @@ mod sequence_tests {
 
     /// The round-3 review of #468, M1, through a sequence: an exit over unpriced protection
     /// cancels it and is then cancelled by the broker unfilled, so the sequence returns protection
-    /// for the 10 with no prices to place it at. That is journaled and alerted, then the interval
-    /// ends, never silently.
+    /// for the 10 with no prices to place it at. That is journaled and alerted, never silent, and
+    /// the sequence ends; but the interval stays open, since nothing covers the 10, so §5.4's bound
+    /// still governs it and alerts it at `max_unprotected_s` (the round-4 review, m2; rule 3).
     #[test]
     fn an_unpriced_sequence_that_ends_with_shares_left_is_alerted() -> Result<(), ExecutorError> {
         with_ports!(ports);
@@ -7370,6 +7376,20 @@ mod sequence_tests {
             drafted(&ended)
         );
         assert_eq!(alerts(&ended), vec!["protection_expiring"]);
+        assert!(executor.state.exiting.is_empty(), "the sequence ends");
+        let open: Vec<_> = executor
+            .state
+            .unprotected
+            .iter()
+            .filter(|interval| interval.ended_at.is_none())
+            .collect();
+        assert_eq!(open.len(), 1, "the 10 are still uncovered: {open:?}");
+        let bound = executor.run(Input::Tick(RiskClock::from_secs(31)), &ports)?;
+        assert!(
+            alerts(&bound).contains(&"unprotected_interval_limit"),
+            "the bound still governs the uncovered interval: {:?}",
+            alerts(&bound)
+        );
         Ok(())
     }
 

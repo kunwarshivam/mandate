@@ -664,6 +664,7 @@ mod tests {
             started_at: RiskClock::from_secs(40),
             ended_at: None,
             alerted: false,
+            uncovered: false,
         });
         state
             .positions
