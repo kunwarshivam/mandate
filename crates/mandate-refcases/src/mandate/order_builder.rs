@@ -22,7 +22,8 @@
 //! **The gate's other inputs** are DEC-178's "every other check passes" environment, as for family
 //! G: a healthy risk state at the case's equity, a margin account at the fixture's
 //! `account_equity_usd`, and a liquid, tradable, unhalted listing of the pinned instrument, quoted at
-//! the case's own bid and ask at `now`, whose minimum order size is the case's `qty_increment`.
+//! the case's own bid and ask at `now`, whose minimum order size and quantity grid are the case's
+//! `qty_increment` (DEC-427 item 6).
 //! A `trim_to_target` base's trim inputs make one scene for both of its gate calls, the trim and
 //! the builder's dry run: the instrument's minimum is the case's `min_order_size`, which such a
 //! case must state, as `ref.py` requires (DEC-399 item 8), the confirmed `scale_sizes` rung has
@@ -1395,14 +1396,7 @@ fn listing(
         median_dollar_volume_20d: Some(liquid),
         median_dollar_volume_30d: Some(liquid),
         min_order_size: stated.increment,
-        qty_increment: num(
-            Qty::parse(if stated.increment < one {
-                "0.000000001"
-            } else {
-                "1"
-            }),
-            "qty_increment",
-        )?,
+        qty_increment: stated.increment,
         halted: false,
         status_feed_current: true,
     })
@@ -1714,6 +1708,13 @@ mod tests {
             *v = json!("3");
         })?;
         run(on_the_grid, "MC-B17").map_err(|e| format!("MC-B17 on a 3-share grid: {e}"))?;
+        let on_a_two_share_grid = doctored(&fixture, "MC-B17", "", |case| {
+            put(case, "input", "qty_increment", json!("2"));
+            put(case, "expect", "qty", json!("4"));
+            put(case, "expect", "order_usd", json!("399.6"));
+        })?;
+        run(on_a_two_share_grid, "MC-B17")
+            .map_err(|e| format!("MC-B17 on a 2-share grid, the gate on the case's grid: {e}"))?;
         let unstated = doctored(&fixture, "MC-B17", "/input", remove("min_order_size"))?;
         fails_naming(
             run(unstated, "MC-B17"),
