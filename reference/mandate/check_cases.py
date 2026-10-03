@@ -1,4 +1,6 @@
 """Asserts that every reference case demonstrates what its title claims (AGENTS.md: validate fixtures)."""
+import hashlib
+import json
 import pathlib
 import re
 import sys
@@ -69,6 +71,35 @@ for cid, required, users in (("MC-V69", True, 1), ("MC-V70", True, 2), ("MC-V71"
         "V-047's trio differs only in the policy and the workspace's users (DEC-411)")
 for cid in ("MC-V70", "MC-V71"):
     req(cid, C[cid]["expect"]["violations"] == [], "a second user, or no independence, passes V-047")
+lone = {"independent_approval_required": True, "workspace_users": 1}
+current = d["bases"]["btc_accumulator"]["mandate"]
+current_version = d["bases"]["btc_accumulator"]["canonical_sha256"]
+fewer_orders = [{"op": "replace", "path": "/risk/max_orders_per_day", "value": 40}]
+for cid, patch, previous, refused in (
+        ("MC-V72", fewer_orders, "current", False),
+        ("MC-V73", [{"op": "replace", "path": "/name", "value": "btc-accumulator-renamed"}], "current", True),
+        ("MC-V74", fewer_orders + [{"op": "replace", "path": "/risk/max_order_usd", "value": "1500"}], "current", True),
+        ("MC-V75", fewer_orders, "identity", True),
+        ("MC-V76", [{"op": "replace", "path": "/risk/max_order_usd", "value": "5000"}], "forged", True),
+        ("MC-V77", fewer_orders, "over_schema", True)):
+    ctx = C[cid]["context"]
+    prev = ctx["previous_version"]
+    shape = {"current": lambda: prev == current,
+             "identity": lambda: set(prev) == {"environment", "connection_id"},
+             "forged": lambda: prev != current
+             and dict(prev, risk=dict(prev["risk"], max_order_usd=None))
+             == dict(current, risk=dict(current["risk"], max_order_usd=None))
+             and Decimal(prev["risk"]["max_order_usd"]) > Decimal(patch[0]["value"])
+             > Decimal(current["risk"]["max_order_usd"]),
+             "over_schema": lambda: prev == dict(current, risk=dict(current["risk"], max_orders_per_day=10001))}[previous]()
+    own_hash = "sha256:" + hashlib.sha256(json.dumps(prev, sort_keys=True, separators=(",", ":"),
+                                                     ensure_ascii=False).encode()).hexdigest()
+    hash_named = own_hash if previous in ("identity", "over_schema") else current_version
+    req(cid, C[cid]["base"] == "btc_accumulator" and C[cid]["patch"] == patch and shape
+        and {k: v for k, v in ctx.items() if k != "previous_version"} == dict(lone, current_mandate_version=hash_named),
+        "V-047's exception cases differ from the base only in the patch named and the previous version (DEC-444)")
+    req(cid, C[cid]["expect"]["violations"] == (["V-047"] if refused else []),
+        "only a risk-reducing version against the agent's current document passes V-047 in a lone workspace (DEC-444)")
 
 # risk state
 s = steps("MC-R01")

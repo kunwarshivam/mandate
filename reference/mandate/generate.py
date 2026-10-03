@@ -207,7 +207,30 @@ SEM += [
     ("MC-V71", "A one-user workspace without independent approval is fine", "btc_accumulator", [],
      {"independent_approval_required": False, "workspace_users": 1}),
 ]
-
+LONE_UNDER_POLICY = {"independent_approval_required": True, "workspace_users": 1}
+FEWER_ORDERS = [rep("/risk/max_orders_per_day", 40)]
+CURRENT = {"previous_version": MB["btc_accumulator"], "current_mandate_version": version(MB["btc_accumulator"])}
+IDENTITY_ONLY = {"environment": "paper", "connection_id": "conn_alpaca_paper_01"}
+OVER_SCHEMA = apply_patch(MB["btc_accumulator"], [rep("/risk/max_orders_per_day", 10001)])
+assert not V.is_valid(OVER_SCHEMA)
+FORGED = apply_patch(MB["btc_accumulator"], [rep("/risk/max_order_usd", "9000")])
+SEM += [
+    ("MC-V72", "A risk-reducing version in a one-user workspace under independent approval passes V-047 (DEC-444)",
+     "btc_accumulator", FEWER_ORDERS, dict(LONE_UNDER_POLICY, **CURRENT)),
+    ("MC-V73", "A neutral version in a one-user workspace under independent approval is refused", "btc_accumulator",
+     [rep("/name", "btc-accumulator-renamed")], dict(LONE_UNDER_POLICY, **CURRENT)),
+    ("MC-V74", "A version that reduces one limit and raises another, in a one-user workspace, is refused",
+     "btc_accumulator", FEWER_ORDERS + [rep("/risk/max_order_usd", "1500")], dict(LONE_UNDER_POLICY, **CURRENT)),
+    ("MC-V75", "A reducing version whose previous document validation lacks, in a one-user workspace, is refused",
+     "btc_accumulator", FEWER_ORDERS,
+     dict(LONE_UNDER_POLICY, previous_version=IDENTITY_ONLY, current_mandate_version=version(IDENTITY_ONLY))),
+    ("MC-V76", "A raise against a forged previous document, not the agent's current version, is refused",
+     "btc_accumulator", [rep("/risk/max_order_usd", "5000")],
+     dict(LONE_UNDER_POLICY, previous_version=FORGED, current_mandate_version=version(MB["btc_accumulator"]))),
+    ("MC-V77", "A reducing version against a previous document the schema refuses, matching its own hash, is refused",
+     "btc_accumulator", FEWER_ORDERS,
+     dict(LONE_UNDER_POLICY, previous_version=OVER_SCHEMA, current_mandate_version=version(OVER_SCHEMA))),
+]
 for cid, title, base, patch, ctx in SEM:
     m = apply_patch(MB[base], patch)
     assert V.is_valid(m), (cid, [e.message for e in V.iter_errors(m)])

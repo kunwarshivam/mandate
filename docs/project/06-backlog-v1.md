@@ -428,9 +428,11 @@ the spec invariants (DP-n) its tests cover.
   spec V-047 and MC-V69 to MC-V71 ([DEC-411](decisions/DEC-411.md)); the code is owed on E10-1's row.
   **Founder question** (DEC-411 item 6): a workspace that loses its second user, or turns
   `independent_approval_required` on with one user, after a version is confirmed keeps its agents running with nothing
-  they latched liftable, and no new version validates there, a reducing one and §4.3's conforming version included
-  (V-047 refuses every version; the exits are adding a user or stopping the agent). Should removing the second user be
-  refused, or flag the agents `policy_nonconforming`, and should a reducing version be exempt from V-047?
+  they latched liftable, and no new version validates there but a risk-reducing one (DEC-444, below; §4.3's conforming
+  version passes when it classifies as reducing). Should removing the second user be
+  refused, or flag the agents `policy_nonconforming`? ~~And should a reducing version be exempt from V-047?~~ Decided
+  yes, reducing only (the founder, 2026-10-03; [DEC-444](decisions/DEC-444.md)): a version §9.2 rates risk-reducing
+  passes V-047 there; a neutral one is still refused.
   Recorded beside it (DEC-411 item 2; #528 round 1, M3): two users of whom only the author is an approver pass V-047
   and V-024, but an ask needing an independent approver times out (§6.4). Not decided: it would extend V-047 past the
   founder's decision to approvers, which validation does not read independently of the author.
@@ -1091,6 +1093,10 @@ story buys a service, and none uses a real identity-provider account in tests (s
   harness reads the cases' new context member, so MC-V69 to MC-V71 pass. V-047 also refuses again when a version is
   applied, as V-002 does, and a case covers a second user deactivated between confirmation and application (#528
   round 2, major 1; the reference models V-047 at validation only, DEC-411 item 5).
+  The founder's DEC-444 (2026-10-03) lets a version §9.2 rates risk-reducing through V-047; the spec, `ref.py` and
+  MC-V72 to MC-V77 carry it first (ES-22), then the tests PR (#536) follows. The exception reads the agent's current
+  version matched by hash (DEC-444 item 3); `PreviousVersion` has no digest yet, so the Rust side refuses every version
+  under V-047 until it does, and the test that a reducing version passes lands with the digest.
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
   increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C48 pass.
@@ -3344,13 +3350,30 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   ([DEC-445](decisions/DEC-445.md)), M1's on-grid minimum, M3's rows, and the property
   `the_trim_and_the_slice_stay_on_the_venue_s_grid` are pending in the tests PR. Two live rows that
   asserted DEC-445's superseded figures moved into pending tests.
+  *Implementation (`agent/g8-e6-4-qty-grid-impl`):* `quantity_grid` is the field read; the trim
+  truncates an off-grid remainder that is not the whole position (`down_onto`), and `slice` tests
+  the untruncated cap for zero, truncates it onto the grid and floors it at the minimum rounded up
+  onto the grid (`up_onto`). The six pending tests are live. The harness PR stating the case's grid
+  follows.
 - **E6-4: refuse a grid that is not above zero, per instrument** (#571 review, round 1, minor 2).
   `InstrumentSnapshot::qty_increment` is a `Qty`, so zero is representable. `ceiled_quotient` and
   `truncated_quotient` refuse it as `NotPositive`, but that error would leave `trim::proposals`
   whole and withhold every instrument's trim (DEC-423 item 4 forbids it), and from `slice` it errors
   the decision, denying an exit (rule 13). Give the field a type that cannot hold zero (trust ladder
   rung 1), or refuse it per instrument where the snapshot is built from connector data, with a test.
-  Unreachable today: no production caller builds the snapshot.
+  Unreachable today: no production caller builds the snapshot. Also: `conduct::slice` computes the
+  on-grid minimum even when there is no cap to truncate, so a non-positive grid errors a decision
+  nothing would have paced; compute it only where a cap exists (#578 review, round 1, minor 1).
+- **E6-4: the reference and the family-B driver carry DEC-445 item 2 before the harness states the
+  case's grid** (#578 review, round 1, minor 2). `ref.py` and `order_builder.rs`' `trim_guards`
+  clamp to what is unsold without truncating an off-grid remainder onto the grid, and `ref.py`
+  rounds up before subtracting the resting sells where the gate subtracts first. The harness PR
+  that states each case's own grid (DEC-427 item 6) brings both: §5.5's sentence and `ref.py`
+  first, with a case whose remainder is off a coarse grid, then the harness.
+- **E6-4: draw the daily cap in the grid property** (#578 review, round 1, minor 3).
+  `properties::the_trim_and_the_slice_stay_on_the_venue_s_grid` sets `adv_20d` to `None`, so the
+  daily cap's grid behaviour rests on `a_slice_truncates_to_the_venue_s_quantity_grid`'s M4 row.
+  Draw `adv_20d` and today's participation too.
 - **E6-4: one ingest field for the quantity grid** (#571 review, round 1, minor 4).
   `mandate-builder`'s `Market::increment` (DEC-128 item 27) and `InstrumentSnapshot::qty_increment`
   are two grid fields that must come from the same instrument-master field. When ingest lands, read
@@ -3901,6 +3924,19 @@ From #559's round-1 review (#524's tests; the coordinator's ruling, 09:35Z on #5
   tests-correction row #532 started; the row added here points at the next tests correction to
   `remainder_tests`. The substance is the same, so no change is needed.
 
+From #576's round-1 review (DEC-425; the coordinator's ruling, 12:12Z on #576; freeze rule):
+
+- **E7-4: pin or remove `settle`'s `!handed` guard on the re-ask** (#576 round 1, minor 1).
+  Calling `cancel_resting` for a handed-on sequence too leaves every test green, and the diff's
+  mutants include none that drops the guard. The review found no reachable state where it
+  diverges: `protection_holds && handed` implies `!fits`, so an unheld waiting exit has already had
+  `overtaken` ask in the same step, or the instrument is over-committed, where cancelling is what
+  rule 12 wants. Either pin a state where it matters or drop the guard and say why.
+- **E7-4: a `fits` unit pin with a held exit beside the placement** (#576 round 1, minor 4).
+  `a_reported_fill_not_yet_applied_makes_protection_overhang` has no waiting intents, so it reads
+  the same under the old and the new measure. One case with a held exit beside the placement would
+  pin the subtraction DEC-425 item 5 made the one measure.
+
 From #528's round-2 review (DEC-411; the coordinator's ruling, 05:19Z on #528; freeze rule):
 
 - **The reference does not model V-002's apply-time re-check** (#528 round 2, major 1). V-002 says it is "checked at
@@ -3920,6 +3956,9 @@ From #528's round-2 review (DEC-411; the coordinator's ruling, 05:19Z on #528; f
 - ~~**`mutants.py` cannot carry two natural V-047 bugs** (#528 round 2, minor 4).~~ Done ([DEC-429](decisions/DEC-429.md)). Inverting the policy, or ignoring it,
   makes V-047 fire on the base mandates, so `bases.py`'s import-time assertion crashes the probe and `verdict()`
   scores it `ERROR`, not caught. Say so in the module docstring, so nobody adds one and reads the `ERROR` as a catch.
+- **The README's mandate case counts lag `main`** (#570 round 1, minor 2). `README.md`'s mandate row and its spec
+  table give 433 cases where the file holds 441 after #570, and were already two behind before it. Update them, or
+  derive them from the case file as the §11 row below asks for the spec.
 - **§11's case count is unchecked prose** (#528 round 2, minor 5). `main` said 427 where the file held 429. Add a
   `cargo xtask` assertion that §11's count matches `docs/specs/reference-cases/mandate.yaml`.
 

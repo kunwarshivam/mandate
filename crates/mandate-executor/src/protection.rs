@@ -17,7 +17,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::orders::transition;
+use crate::orders::{legal, transition};
 use crate::payload::{int, text};
 use crate::ports::Ports;
 use crate::session::{
@@ -630,8 +630,10 @@ pub(crate) fn rests(state: &ExecutorState, instrument: &InstrumentId) -> bool {
 /// (§5.4): any of it, in a sequence that cancelled it. A handed-on one's placement
 /// ([`passive_exit`]) was sized net of every exit selling beside it and rests by design, so it
 /// holds them only once its stop and their sells no longer fit within the position ([`fits`]),
-/// which is when [`begin_exit`] cancels it; an exit it was sized around goes rather than waiting
-/// on a cancel nobody asked, and a failed count holds (#286 round 2, M1′).
+/// which is when [`begin_exit`] or [`overtaken`] cancels it; an exit it was sized around goes
+/// rather than waiting on a cancel nobody asked, and a failed count holds (#286 round 2, M1′).
+/// The exits the gate holds are left out of that fit, as they are of `overtaken`'s, so the wait
+/// and the cancel always agree (DEC-425 item 1).
 fn protection_holds(state: &ExecutorState, instrument: &InstrumentId) -> bool {
     state.exiting.get(instrument).is_some_and(|sequence| {
         rests(state, instrument)
@@ -1015,6 +1017,12 @@ fn park(
 /// sequence on ([`passive_exit`]): the protection it placed rests by design, so the sequence
 /// waits on it only once a later exit did not fit beside it ([`protection_holds`]), and on the
 /// other exits, and [`replace`] then covers what they left unsold (#286 round 2, M1′).
+///
+/// While a sequence that is not handed on waits on the protection it cancelled, every resting
+/// order of it has a cancel asked or outstanding ([`cancel_resting`]): one the broker refused is
+/// asked again once its query finds the order still live, so the exit never waits out the bound
+/// on a cancel nothing will confirm (DEC-425 item 1; #524's pin (d)). A handed-on placement is
+/// [`overtaken`]'s.
 pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     release_waiting(batch)?;
     lone_steps(batch)?;
@@ -1026,6 +1034,9 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .collect();
     for (instrument, sequence) in sequences {
         if protection_holds(&batch.view, &instrument) {
+            if !handed(&batch.view, &sequence) {
+                cancel_resting(batch, &instrument)?;
+            }
             continue;
         }
         let exit = ClientOrderId::for_intent(&sequence.intent)?.rung(sequence.ladder.rung)?;
@@ -1598,9 +1609,25 @@ fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(),
         .exiting
         .get(instrument)
         .is_some_and(|sequence| handed(&batch.view, sequence));
-    if !handed_on || fits_beside_movable(&batch.view, instrument)? {
+    if !handed_on || fits(&batch.view, instrument)? {
         return Ok(());
     }
+    cancel_resting(batch, instrument)
+}
+
+/// Asks a cancel of every protective order resting in `instrument`, whoever placed it (§5.4),
+/// that has none outstanding: never for one already `PendingCancel`, nor for one `Unknown` while
+/// a refused cancel's query is out (never cancelled blind), nor for one whose cancel was asked in
+/// a state that cannot record it, because §5.7 has no edge from there to `PendingCancel` (before
+/// the broker acknowledged it, or while the broker holds it `pending_replace`): that cancel stays
+/// outstanding until the broker reports the order in a state that can. So an exit waiting on that
+/// protection always waits on a cancel asked or outstanding, a refused cancel is asked again once
+/// its query finds the order still live, and a cancel is never asked again at every step (§5.7;
+/// DEC-425 item 1; #576's review, B1).
+fn cancel_resting(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+) -> Result<(), ExecutorError> {
     let resting: Vec<ClientOrderId> = batch
         .view
         .protection
@@ -1609,9 +1636,8 @@ fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(),
         .unwrap_or_default();
     for id in resting {
         let outstanding = batch.view.orders.get(&id).is_none_or(|order| {
-            order.state == OrderState::PendingCancel
-                || order.state == OrderState::Unknown
-                || order.state == OrderState::Submitting && order.cancel_unconfirmed
+            matches!(order.state, OrderState::PendingCancel | OrderState::Unknown)
+                || order.cancel_unconfirmed && !legal(order.state, OrderState::PendingCancel)
         });
         if outstanding {
             continue;
@@ -1625,12 +1651,14 @@ fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(),
     Ok(())
 }
 
-/// [`fits`], with the exits the gate holds left out: one that cannot move needs no room yet, so no
-/// placement is cancelled for it (#508's review, m1).
-fn fits_beside_movable(
-    view: &ExecutorState,
-    instrument: &InstrumentId,
-) -> Result<bool, ExecutorError> {
+/// Whether what protective orders cover in `instrument` and what its exits may still sell fit
+/// within the long position together, so no stop outlasts the position once they fill. The exits
+/// the gate holds are left out: one that cannot move needs no room yet, so no placement is
+/// cancelled for it (#508's review, m1), and none holds the others back. This is the one measure
+/// that whether a handed-on placement holds its exits back ([`protection_holds`]), whether it is
+/// cancelled for them ([`overtaken`]), and whether an arriving exit leaves it resting ([`begin`])
+/// all read, so an exit never waits on a placement that nothing will cancel (DEC-425 item 1).
+fn fits(view: &ExecutorState, instrument: &InstrumentId) -> Result<bool, ExecutorError> {
     let live = still_selling(view, instrument)?;
     let held = waiting(view, instrument)
         .iter()
@@ -1718,13 +1746,6 @@ fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty,
         })
         .try_fold(live, Qty::checked_add)
         .map_err(ExecutorError::from)
-}
-
-/// Whether what protective orders cover in `instrument` and what its exits may still sell fit
-/// within the long position together, so no stop outlasts the position once they fill.
-fn fits(view: &ExecutorState, instrument: &InstrumentId) -> Result<bool, ExecutorError> {
-    let committed = covered(view, instrument)?.checked_add(still_selling(view, instrument)?)?;
-    Ok(committed <= long(view, instrument)?)
 }
 
 /// The long position in `instrument` as the broker holds it (DEC-421, #515): the folded position
@@ -9740,7 +9761,6 @@ mod sequence_tests {
     /// Under the summed oracle no exit may wait past the bound, and every allowed exit is sent for
     /// its quantity (rule 13: a wait that never ends is a denial).
     #[test]
-    #[ignore = "pending E7-4"]
     fn seed_15_sends_every_allowed_risk_exit_within_the_bound() -> Result<(), String> {
         rule_13_summed(0, &SEED_15)
     }
@@ -9756,7 +9776,6 @@ mod sequence_tests {
     /// held and none is owed a cancel, so it passes there; then of seed 15, where it fails on
     /// `main`.
     #[test]
-    #[ignore = "pending E7-4"]
     fn an_exit_waiting_on_protection_always_has_its_cancel_asked() -> Result<(), String> {
         let asked = |state: &ExecutorState| -> Result<(), String> {
             for instrument in state.exiting.keys() {
@@ -9830,9 +9849,10 @@ mod sequence_tests {
     /// sequence asks the OCO cancelled, the broker refuses the cancel, and the query (§5.7)
     /// answers the OCO still live with nothing pending. Nothing outstanding is left for the exit
     /// to wait on, so the cancel is asked again before §5.4's bound rather than the exit waiting
-    /// it out.
+    /// it out, and only once: every step to the bound runs, and none asks again while that cancel
+    /// is outstanding (`settle`'s path, as `a_refused_cancel_is_queried_then_asked_again_once` pins
+    /// `overtaken`'s).
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_refused_protective_cancel_found_live_is_asked_again() -> Result<(), ExecutorError> {
         with_ports!(ports);
         let mut executor = protected(&ports)?;
@@ -9858,14 +9878,187 @@ mod sequence_tests {
         .collect::<Vec<_>>();
         let bound = ports.config.max_unprotected_s;
         for at in 1..bound {
-            if !asked.is_empty() {
-                break;
-            }
             let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
             asked.extend(cancels(&tick).into_iter().map(str::to_owned));
         }
-        assert_eq!(asked, vec![OCO.to_owned()], "asked again before the bound");
+        assert_eq!(
+            asked,
+            vec![OCO.to_owned()],
+            "asked again before the bound, and once: never again while it is outstanding \
+             (#576's review, minor 2)"
+        );
         Ok(())
+    }
+
+    /// The OCO reported `pending_replace`, from ten protected AAPL, before a marketable risk exit
+    /// for all ten starts its sequence: the step's cancel is asked once and cannot be recorded,
+    /// since `pending_replace` has no edge to `PendingCancel` (§5.7), so the order keeps its state
+    /// with the cancel unconfirmed.
+    fn pending_replace_beside_an_exit(
+        ports: &Ports<'_>,
+    ) -> Result<(Executor, Vec<Effect>), ExecutorError> {
+        let mut executor = protected(ports)?;
+        let live = Held {
+            purpose: Purpose::Protective,
+            qty: 10,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let mut replacing = reported(OCO, &live)?;
+        "pending_replace".clone_into(&mut replacing.status);
+        executor.run(Input::BrokerUpdate(BrokerUpdate::Order(replacing)), ports)?;
+        let first = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, ports)?;
+        Ok((executor, first))
+    }
+
+    /// #576's review, B1 (DEC-425 item 1): a protective order whose cancel was asked and cannot
+    /// be recorded is not asked again at every step. Past §5.4's bound the OCO has had exactly one
+    /// cancel asked, no step journals anything but the bound's own records, and the bound alerts
+    /// once.
+    #[test]
+    fn a_protective_cancel_that_cannot_be_recorded_is_asked_once() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let (mut executor, first) = pending_replace_beside_an_exit(&ports)?;
+        assert_eq!(cancels(&first), vec![OCO]);
+        let bound = ports.config.max_unprotected_s;
+        let (mut asked, mut busy, mut alerted) = (0, 0, Vec::new());
+        for at in 1..=bound.saturating_mul(4) {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            asked += cancels(&tick).iter().filter(|id| **id == OCO).count();
+            busy += usize::from(!drafted(&tick).is_empty());
+            alerted.extend(alerts(&tick).into_iter().map(str::to_owned));
+        }
+        assert_eq!(asked, 0, "the OCO's cancel is asked once, not once a step");
+        assert!(busy <= 2, "{busy} steps journaled; only the bound's may");
+        assert_eq!(alerted, vec!["unprotected_interval_limit".to_owned()]);
+        Ok(())
+    }
+
+    /// What ends that state, the first way: the broker reports the OCO back to a state its cancel
+    /// can be recorded in (`new`). The cancel is asked again, once, and once it is confirmed the
+    /// exit goes.
+    #[test]
+    fn a_protective_order_back_from_pending_replace_is_cancelled_and_the_exit_goes()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let (mut executor, _) = pending_replace_beside_an_exit(&ports)?;
+        let waiting = executor.run(Input::Tick(RiskClock::from_secs(1)), &ports)?;
+        let mut asked: Vec<String> = cancels(&waiting).into_iter().map(str::to_owned).collect();
+        let live = Held {
+            purpose: Purpose::Protective,
+            qty: 10,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let back = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(reported(OCO, &live)?)),
+            &ports,
+        )?;
+        asked.extend(cancels(&back).into_iter().map(str::to_owned));
+        for at in 2..5 {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            asked.extend(cancels(&tick).into_iter().map(str::to_owned));
+        }
+        assert_eq!(
+            asked,
+            vec![OCO.to_owned()],
+            "nothing while it is pending_replace, then asked again once"
+        );
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = format!("md-{EXIT}");
+        assert!(
+            submissions(&confirmed)
+                .iter()
+                .any(|order| order.client_order_id.as_str() == exit),
+            "the exit goes: {:?}",
+            drafted(&confirmed)
+        );
+        Ok(())
+    }
+
+    /// What ends that state, the second way: the OCO ends at the broker while it is
+    /// `pending_replace` (here cancelled by the owner there). Nothing rests, so the sequence goes
+    /// on and the exit is sent.
+    #[test]
+    fn a_protective_order_that_ends_while_pending_replace_lets_the_exit_go()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let (mut executor, _) = pending_replace_beside_an_exit(&ports)?;
+        let waiting = executor.run(Input::Tick(RiskClock::from_secs(1)), &ports)?;
+        assert!(
+            cancels(&waiting).is_empty(),
+            "nothing asked while it is pending_replace"
+        );
+        let gone = Held {
+            purpose: Purpose::Protective,
+            qty: 10,
+            filled: 0,
+            acked: true,
+            live: false,
+        };
+        let ended = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(reported(OCO, &gone)?)),
+            &ports,
+        )?;
+        let exit = format!("md-{EXIT}");
+        assert!(
+            submissions(&ended)
+                .iter()
+                .any(|order| order.client_order_id.as_str() == exit),
+            "the exit goes: {:?}",
+            drafted(&ended)
+        );
+        Ok(())
+    }
+
+    /// DEC-425 constraint 4 (#576's review, minor 3; #559's review's script): protection is removed
+    /// only where §5.4 already removes it, and §5.4 cancels **all** of an instrument's protective
+    /// orders as an exit sequence's step 1. A passive exit of 1 leaves two placements resting, the
+    /// handed-on OCO for 1 and the cover for 9; a second exit of 1 that does not fit beside them
+    /// has every resting protective order's cancel asked, as on `main`, not some of them.
+    #[test]
+    fn an_exit_beside_two_placements_has_every_resting_one_cancelled() -> Result<(), String> {
+        let script = [
+            Move::Tick(1),
+            Move::Tick(1),
+            Move::Tick(1),
+            Move::Tick(1),
+            Move::Ack,
+            Move::Quote(Some(135), None, true),
+            Move::Exit(0, 1, 141),
+            Move::Confirm,
+            Move::Exit(0, 1, 141),
+            Move::Tick(1),
+        ];
+        let last = RefCell::new((0, 0));
+        let seen = |state: &ExecutorState| -> Result<(), String> {
+            let resting: Vec<&ClientOrderId> = state
+                .protection
+                .values()
+                .flat_map(|protection| protection.resting.iter())
+                .collect();
+            let cancelling = resting
+                .iter()
+                .filter(|id| {
+                    state.orders.get(**id).is_some_and(|order| {
+                        order.cancel_unconfirmed || order.state == OrderState::PendingCancel
+                    })
+                })
+                .count();
+            *last.borrow_mut() = (resting.len(), cancelling);
+            Ok(())
+        };
+        rule_13_script_checked(0, From::Protected, true, &script, &seen)?;
+        let (resting, cancelling) = last.into_inner();
+        if (resting, cancelling) == (2, 2) {
+            Ok(())
+        } else {
+            Err(format!(
+                "{cancelling} of {resting} resting protective orders cancelled"
+            ))
+        }
     }
 
     /// DEC-425 constraint 3, which already holds on `main`, in a shape neither direction of the fix

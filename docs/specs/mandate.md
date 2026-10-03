@@ -29,6 +29,15 @@ builder, versioning, change classification, and the records kept.
   held at 999 are 4.25 shares over target; less 2 resting, rounded up on a 2-share grid to 4, more
   than the 3 unsold, so the trim is the 3 truncated onto the grid, 2) and MC-B39 (2.49 shares less 1 resting is 1.49, rounded
   up on a 2-share grid to 2, where rounding first gives 3) are added (§11).
+- **v0.6, amended ([DEC-444](../project/decisions/DEC-444.md), the founder's decision of 2026-10-03
+  on DEC-411 item 6):** V-047 no longer refuses a new version of a running agent that §9.2
+  classifies as risk-reducing against its previous version, in a workspace of fewer than two users
+  under `independent_approval_required`. A neutral version, a risk-increasing one (including one
+  that reduces some fields and adds risk on another), a first version, and a version whose previous
+  document validation does not have are still refused. The previous version is the agent's current
+  one: the document whose canonical hash is its current `mandate_version`, supplied by the platform,
+  never by the requester; a document that does not match it is refused (#570 round 1, B1). The
+  exemption reads §9.2's own result, not a second classifier. MC-V72 to MC-V77 are added (§11).
 - **v0.6, amended ([DEC-432](../project/decisions/DEC-432.md) item 18, under DEC-176):** §8.1's
   content-hash sentence lists everything the hash covers for a model called through the gateway, as
   inference spec §4.1 defines it, and says endpoints and status are outside it. It pins more, so it
@@ -425,8 +434,9 @@ A mandate is valid when it passes the JSON Schema, every V-rule, and the policy 
 Besides the document, validation reads: the account's equity and the other active agents' allocations
 on it, the validation date, the signal-model registry, each field's provenance, the workspace's users
 and approvers, the disclosures accepted, the instrument groups and other agents' claims, the
-connection's environment and loss carry, the eligibility failures, the previous version, and the
-effective policy values (§4.3), `independent_approval_required` among them.
+connection's environment and loss carry, the eligibility failures, the previous version and the
+agent's current `mandate_version` (V-047), and the effective policy values (§4.3),
+`independent_approval_required` among them.
 Failures return all violated codes. Warnings (§4.2) do not block, but each must be acknowledged
 and is recorded in `MandateConfirmed`.
 
@@ -471,7 +481,7 @@ and is recorded in `MandateConfirmed`.
 | V-043 | Each delegation's caps fit inside the envelope: `max_order_usd` ≤ `risk.max_order_usd`, `max_order_usd` ≤ `max_total_usd`, and `max_total_usd` ≤ `capital.allocation_usd`; and when `two_approver_above_usd` is set, `max_order_usd` ≤ it, so a delegation never stands in for a second approver. The gate enforces every limit regardless (§6.5); this keeps a delegation from even appearing to widen one |
 | V-044 | Tripwire ids are sorted and unique. A `consecutive_losing_exits` or `new_instruments` threshold is a whole number from 1 to 1,000; a `realized_loss_usd` threshold is in whole cents and at most `capital.allocation_usd`, so a tripwire never appears to guard what it cannot reach ([DEC-187](../project/04-decision-log.md#decisions), [DEC-352](../project/decisions/DEC-352.md)) |
 | V-046 | An `autonomy.review_by` the version sets or moves (absent from, or different from, the previous version's) is not before the validation date and at most 180 days after it; one carried unchanged is not checked again, so a lapsed date stays lapsed through a version that changes something else. A version whose previous version set a review date sets one too ([DEC-188](../project/04-decision-log.md#decisions), [DEC-272](../project/04-decision-log.md#decisions)) |
-| V-047 | When the workspace's policy requires independent approval (`independent_approval_required`, §4.3, its effective value), the workspace has at least two users. Users are the workspace's active members: a pending invitation or a deactivated account is not one, and a user count that is absent or not known counts as one user (rule 3, as §6.7 says of a missing name). Under that policy, deployment, a risk-increasing change, a high-water-mark reset, and lifting a fired tripwire each need a user other than the requester (§4.3, §5.8, §6.7). A one-user workspace could not deploy the mandate, make a risk-increasing change to it, acknowledge its drawdown ladder, or lift a tripwire it fired, so it is refused here, where the owner sees why, rather than at deployment or at the first latch. Checked at validation and again when a version is applied, as V-002 is ([DEC-411](../project/decisions/DEC-411.md)) |
+| V-047 | When the workspace's policy requires independent approval (`independent_approval_required`, §4.3, its effective value), the workspace has at least two users. Users are the workspace's active members: a pending invitation or a deactivated account is not one, and a user count that is absent or not known counts as one user (rule 3, as §6.7 says of a missing name). Under that policy, deployment, a risk-increasing change, a high-water-mark reset, and lifting a fired tripwire each need a user other than the requester (§4.3, §5.8, §6.7). A one-user workspace could not deploy the mandate, make a risk-increasing change to it, acknowledge its drawdown ladder, or lift a tripwire it fired, so it is refused here, where the owner sees why, rather than at deployment or at the first latch. **One exception** ([DEC-444](../project/decisions/DEC-444.md), the founder's decision of 2026-10-03 on DEC-411 item 6): a new version of a running agent that §9.2 classifies as **risk-reducing** against its previous version is not refused by V-047. The classification is §9.2's own result for the two documents, as change classification computes it, and no other reading of "reducing" counts. The previous version is the agent's **current** version: the document whose canonical hash (§9.1) is the agent's current `mandate_version`, which the platform supplies from the journal and the requester never does. A document validation cannot match to that hash is not a previous version for this purpose. A version with any risk-increasing path is risk-increasing (§9.2), so one that reduces some fields and adds risk on another is refused, and so is a **neutral** version, a first version (no previous version: a deployment), and a version whose previous document validation does not have or cannot match to the agent's current `mandate_version` (rule 3). At application the current version is read again: a version validated against a predecessor that is no longer current when it applies is refused. Checked at validation and again when a version is applied, as V-002 is ([DEC-411](../project/decisions/DEC-411.md)) |
 
 ### 4.2 Warnings and the confirmation screen
 
@@ -1633,7 +1643,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 437 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 443 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1645,7 +1655,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Family | IDs | Covers |
 |---|---|---|
 | Schema | MC-S01 to MC-S31 | Structural rejects, including `on_complete`, the 300 s confirmation cap, per-model output age, `max_instruments` bounds, the research object, `autonomy.admission` |
-| Semantic | MC-V01 to MC-V71 | Every V-rule and warning, independent approval in a one-user workspace (V-047), the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
+| Semantic | MC-V01 to MC-V77 | Every V-rule and warning, independent approval in a one-user workspace (V-047) and its risk-reducing exception, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
 | Policy | MC-P01 to MC-P22 | Nearest-level reporting, each key kind, the retail profile (DEC-98), the internal research profile (DEC-103), paper-only environments, the research keys, platform maximums |
 | Risk state | MC-R01 to MC-R26 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |
