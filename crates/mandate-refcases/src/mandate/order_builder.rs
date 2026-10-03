@@ -1766,6 +1766,12 @@ mod tests {
         })?;
         run(on_a_two_share_grid, "MC-B17")
             .map_err(|e| format!("MC-B17 on a 2-share grid, the gate on the case's grid: {e}"))?;
+        let past_the_position = doctored(&fixture, "MC-B35", "/input/qty_increment", |v| {
+            *v = json!("2");
+        })?;
+        run(past_the_position, "MC-B35").map_err(|e| {
+            format!("MC-B35 on a 2-share grid, its trim rounded up past the 1 held: {e}")
+        })?;
         let unstated = doctored(&fixture, "MC-B17", "/input", remove("min_order_size"))?;
         fails_naming(
             run(unstated, "MC-B17"),
