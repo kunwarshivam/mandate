@@ -12974,3 +12974,81 @@ mod remainder_pins {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod stepping_alone_pins {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_num::Qty;
+
+    use super::stepping_alone;
+    use crate::error::ExecutorError;
+    use crate::ids::{ClientOrderId, IntentId};
+    use crate::state::{ExecutorState, Ladder, LoneLadder};
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, EventId, Order, OrderState, Purpose, WorkspaceId,
+    };
+
+    const LONE: &str = "01JABCDEFGHJKMNPQRSTV00020";
+
+    fn intent() -> IntentId {
+        IntentId(EventId(LONE.to_owned()))
+    }
+
+    /// AAPL's one lone ladder ([`LONE`]), between rungs where `stepping` is set, and its rung of 4
+    /// that ended this step.
+    fn lone(stepping: bool) -> Result<(ExecutorState, Vec<Order>), ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.ladders.insert(
+            (aapl.clone(), intent()),
+            LoneLadder {
+                intent: intent(),
+                agent: AgentId("agent-b".to_owned()),
+                ladder: Ladder {
+                    stepping,
+                    ..Ladder::default()
+                },
+            },
+        );
+        let rung = Order {
+            client_order_id: ClientOrderId::for_intent(&intent())?,
+            intent_id: Some(intent()),
+            agent: Some(AgentId("agent-b".to_owned())),
+            instrument: aapl,
+            side: Side::Sell,
+            qty: Qty::parse("4")?,
+            filled_qty: Qty::ZERO,
+            state: OrderState::Canceled,
+            attempt: 1,
+            purpose: Purpose::RiskExit,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        };
+        Ok((state, vec![rung]))
+    }
+
+    /// DEC-260 (14), (18) with DEC-424: a rung that ended counts as its ladder stepping only while
+    /// that ladder's cancel was a step's. A lone ladder in the instrument whose cancel was not a
+    /// step's is not stepping, so its ended rung leaves the protection to the usual path.
+    #[test]
+    fn only_a_stepping_lone_ladder_counts_its_ended_rung_as_stepping_alone()
+    -> Result<(), ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        let (stepping, ended) = lone(true)?;
+        assert!(stepping_alone(&stepping, &aapl, &ended));
+        let (resting, ended) = lone(false)?;
+        assert!(!stepping_alone(&resting, &aapl, &ended));
+        assert!(!stepping_alone(
+            &resting,
+            &InstrumentId::new("MSFT")?,
+            &ended
+        ));
+        Ok(())
+    }
+}
