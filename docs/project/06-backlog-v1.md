@@ -318,8 +318,8 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   the reference side until #476 round 1. Run `generate.py --check` per PR.
   ~~Also owed (#444, DEC-353; E6-13's code half, tests first)~~ Done ([#516](https://github.com/kunwarshivam/mandate/pull/516),
   [#523](https://github.com/kunwarshivam/mandate/pull/523), [#527](https://github.com/kunwarshivam/mandate/pull/527);
-  [DEC-420](decisions/DEC-420.md)). Owed from #523's review: the next stream H tests PR pins that the delegations row
-  matches by `id`, not position (`[d1, d2]` to `[d2]` is reducing); and `reference/mandate/ref.py` gets three fixes,
+  [DEC-420](decisions/DEC-420.md)). Owed from #523's review: ~~the next stream H tests PR pins that the delegations row
+  matches by `id`, not position (`[d1, d2]` to `[d2]` is reducing)~~ (pinned with V-047's tests PR, DEC-428); and `reference/mandate/ref.py` gets three fixes,
   none of which the Rust shares: `T()` drops fractional seconds and raises on a calendar-less instant where V-041 should
   refuse; V-042's withheld previous document (identity only) is not modelled, where DEC-420 item 4 refuses every
   delegation; and an absent list against `[]` classifies reducing where the Rust says neutral.
@@ -768,7 +768,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   the effective `independent_approval_required`, V-047 refuses it in a workspace of fewer than two users, and the
   harness reads the cases' new context member, so MC-V69 to MC-V71 pass. V-047 also refuses again when a version is
   applied, as V-002 does, and a case covers a second user deactivated between confirmation and application (#528
-  round 2, major 1; the reference models V-047 at validation only, DEC-411 item 5).
+  round 2, major 1; the reference models V-047 at validation only, DEC-411 item 5). In progress (claim #124, stream
+  H4; [DEC-428](decisions/DEC-428.md)): the tests PR, then the implementation, then the status PR; the apply-time case
+  is a Rust test through `from_journal` (DEC-428 item 4), and `validate::recheck_at_application` rechecks V-002 and V-047.
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
   increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C48 pass.

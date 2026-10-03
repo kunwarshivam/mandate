@@ -77,6 +77,10 @@ pub enum Violation {
     V042,
     /// A delegation's caps do not fit inside the envelope, or stand in for a second approver.
     V043,
+    /// The workspace's policy requires independent approval and the workspace has fewer than two
+    /// active users, so nothing the policy reserves for a second user could ever happen (DEC-411).
+    /// Checked at validation and again when a version is applied ([`recheck_at_application`]).
+    V047,
 }
 
 impl Violation {
@@ -118,6 +122,7 @@ impl Violation {
             Self::V041 => "V-041",
             Self::V042 => "V-042",
             Self::V043 => "V-043",
+            Self::V047 => "V-047",
         }
     }
 }
@@ -180,8 +185,15 @@ pub struct ValidationContext {
     pub validation_date: Date,
     pub registry: Option<BTreeMap<ModelId, RegisteredModel>>,
     pub provenance: ProvenanceMap,
+    /// The workspace's active members (V-020, V-047): a pending invitation or a deactivated account
+    /// is not one. A caller with no count passes 1 or 0, never more, because a count that is absent or
+    /// not known counts as one user (§4.1 V-047, rule 3); [`ContextArgs`](crate::context::ContextArgs)
+    /// with no membership folds to 0.
     pub workspace_users: u32,
     pub approver_users: u32,
+    /// The effective `independent_approval_required` (§4.3: once `true` at a level, every child is
+    /// `true`), which V-047 reads. An absent policy key is `false`, as the hierarchy reads it.
+    pub independent_approval_required: bool,
     pub disclosures_accepted: BTreeSet<mandate_canon::Digest>,
     /// Which instrument group each instrument belongs to (trading spec §7.1); an instrument absent
     /// from the map is its own group.
@@ -259,10 +271,16 @@ impl ValidationReport {
 /// [`ParseError::Diverged`](crate::ParseError::Diverged): three rules read that document (V-009 the
 /// order of the sets, V-015 an invalid date, V-020 a listed default's value), and a report must describe
 /// the one mandate that would be hashed and enforced.
+///
+/// Until V-047 lands (E10-1, DEC-411), a context whose policy requires independent approval cannot
+/// be evaluated and is refused as [`SpecError::Unimplemented`], never validated without the rule.
 pub fn validate(
     mandate: &Mandate,
     context: &ValidationContext,
 ) -> Result<ValidationReport, SpecError> {
+    if context.independent_approval_required {
+        return Err(SpecError::Unimplemented);
+    }
     let document = mandate.canonical()?;
     let worst_case = worst_case(mandate)?;
     let mut violations = BTreeSet::new();
@@ -304,6 +322,22 @@ pub fn validate(
         warnings,
         worst_case,
     })
+}
+
+/// The rules §4.1 checks again when a version is applied, against the facts at application: V-002,
+/// atomically with the application, and V-047 (DEC-411, DEC-428). `context` is folded at the moment of
+/// application, never the one the version was confirmed under, so a second user deactivated, or
+/// another agent's allocation applied, between confirmation and application refuses it.
+///
+/// Returns the violated codes among those two and no others; an empty set lets the version apply. A
+/// version that would fail any other rule never reached application, because it was refused at
+/// validation, and the rules that read only the document cannot change in between.
+pub fn recheck_at_application(
+    mandate: &Mandate,
+    context: &ValidationContext,
+) -> Result<BTreeSet<Violation>, SpecError> {
+    let _ = (mandate, context);
+    Err(SpecError::Unimplemented)
 }
 
 /// The places of the size fraction the order builder multiplies its targets by (§8.3 step 2), which

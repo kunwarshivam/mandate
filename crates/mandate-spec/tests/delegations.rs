@@ -92,6 +92,7 @@ fn context(
         provenance,
         workspace_users: 1,
         approver_users: 1,
+        independent_approval_required: false,
         disclosures_accepted: BTreeSet::new(),
         instrument_groups: BTreeMap::new(),
         claimed_by_other_agents: BTreeSet::new(),
@@ -632,6 +633,11 @@ fn the_delegations_row_reduces_only_by_removing_or_narrowing() {
     };
     assert_eq!(class(both.clone()), Neutral, "unchanged");
     assert_eq!(class(vec![d1.clone()]), RiskReducing, "one removed");
+    assert_eq!(
+        class(vec![d2.clone()]),
+        RiskReducing,
+        "the first removed: the row matches the one left by its id, not by its position (#523 review)"
+    );
     assert_eq!(class(Vec::new()), RiskReducing, "both removed");
     let narrowed = [
         Delegation {

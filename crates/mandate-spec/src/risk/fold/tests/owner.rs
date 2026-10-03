@@ -544,6 +544,7 @@ fn a_release_retires_with_its_loss_carry_and_a_redeploy_opens_at_it() -> Result<
         connection_id: connection,
         validation_date: date,
         membership: None,
+        independent_approval_required: false,
         instrument_groups: BTreeMap::new(),
         eligibility_failures: BTreeSet::new(),
     };

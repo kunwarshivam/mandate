@@ -1588,6 +1588,7 @@ fn context_defaults(fixture: &Json) -> Result<ValidationContext, String> {
         provenance: ProvenanceMap::default(),
         workspace_users: u32_of(defaults, "workspace_users")?,
         approver_users: u32_of(defaults, "approver_users")?,
+        independent_approval_required: false,
         disclosures_accepted: BTreeSet::new(),
         instrument_groups: BTreeMap::new(),
         claimed_by_other_agents: BTreeSet::new(),

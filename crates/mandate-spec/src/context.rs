@@ -471,8 +471,12 @@ pub struct ContextArgs {
     /// the environment, and the loss carry.
     pub connection_id: ConnectionId,
     pub validation_date: Date,
-    /// `None` when the identity service supplied nothing, which counts zero users.
+    /// `None` when the identity service supplied nothing, which counts zero users: an absent count is
+    /// never more than one (V-047, rule 3).
     pub membership: Option<Membership>,
+    /// The effective `independent_approval_required` after the policy hierarchy (§4.3), which the
+    /// policy owner computes; V-047 reads it.
+    pub independent_approval_required: bool,
     pub instrument_groups: BTreeMap<AssetId, GroupId>,
     pub eligibility_failures: BTreeSet<AssetId>,
 }
@@ -695,6 +699,7 @@ impl Fold {
             provenance: ProvenanceMap::default(),
             workspace_users: membership.workspace_users,
             approver_users: membership.approver_users,
+            independent_approval_required: args.independent_approval_required,
             disclosures_accepted: self.disclosures,
             instrument_groups: args.instrument_groups,
             claimed_by_other_agents,
@@ -835,6 +840,7 @@ mod tests {
             connection_id,
             validation_date: Date::parse("2026-09-24").map_err(|e| e.to_string())?,
             membership: None,
+            independent_approval_required: false,
             instrument_groups: BTreeMap::new(),
             eligibility_failures: BTreeSet::new(),
         })
@@ -1110,6 +1116,7 @@ mod tests {
             connection_id: ours,
             validation_date: date,
             membership: None,
+            independent_approval_required: false,
             instrument_groups: BTreeMap::new(),
             eligibility_failures: BTreeSet::new(),
         };
@@ -1268,6 +1275,7 @@ mod record_tests {
             validation_date: Date::parse("2026-09-24")
                 .map_err(|_| SpecError::InvalidInput { what: "date" })?,
             membership: None,
+            independent_approval_required: false,
             instrument_groups: BTreeMap::new(),
             eligibility_failures: BTreeSet::new(),
         };
