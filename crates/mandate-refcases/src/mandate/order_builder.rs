@@ -22,7 +22,8 @@
 //! **The gate's other inputs** are DEC-178's "every other check passes" environment, as for family
 //! G: a healthy risk state at the case's equity, a margin account at the fixture's
 //! `account_equity_usd`, and a liquid, tradable, unhalted listing of the pinned instrument, quoted at
-//! the case's own bid and ask at `now`, whose minimum order size is the case's `qty_increment`.
+//! the case's own bid and ask at `now`, whose minimum order size and quantity grid are the case's
+//! `qty_increment` (DEC-427 item 6).
 //! A `trim_to_target` base's trim inputs make one scene for both of its gate calls, the trim and
 //! the builder's dry run: the instrument's minimum is the case's `min_order_size`, which such a
 //! case must state, as `ref.py` requires (DEC-399 item 8), the confirmed `scale_sizes` rung has
@@ -293,7 +294,9 @@ fn trim_first(
 /// `reference/mandate/ref.py`'s guards, in its order, on the case's own figures, with
 /// `below_minimum_order` exempting a trim of the whole position as `ref.py` does (DEC-423):
 /// `None` when no trim is due (no factor below one, or an excess under the band), else every guard
-/// that withholds it, empty when none does. Read from the case, not from `trim_proposals`, which names no guard,
+/// that withholds it, empty when none does. The trim is the excess less the agent's resting sells,
+/// rounded up on the case's grid, and a remainder beside them that is off the grid and is not the
+/// whole position is truncated onto it (DEC-399 item 7, DEC-445 item 2). Read from the case, not from `trim_proposals`, which names no guard,
 /// so the gate's answer is judged against them rather than explained by them (DEC-400 item 2).
 fn trim_guards(
     document: &Mandate,
@@ -321,12 +324,26 @@ fn trim_guards(
     if !num(factor.is_below(one), "size_factor")? || num(excess.is_below(band), "excess")? {
         return Ok(None);
     }
-    let whole_excess = num(
-        excess.ceiled_quotient(UsdExact::of_price(stated.bid), stated.increment),
+    let on_sale = trim.open_sell_qty;
+    let bid = UsdExact::of_price(stated.bid);
+    let rounded = num(
+        UsdExact::of_qty(on_sale)
+            .checked_mul(bid)
+            .and_then(|on_sale_usd| excess.checked_sub(on_sale_usd))
+            .and_then(|owed| owed.ceiled_quotient(bid, stated.increment)),
         "the trim's quantity",
     )?;
-    let on_sale = trim.open_sell_qty;
-    let sell = less_or_zero(whole_excess, on_sale)?.min(less_or_zero(stated.position, on_sale)?);
+    let unsold = less_or_zero(stated.position, on_sale)?;
+    let sell = if rounded <= unsold {
+        rounded
+    } else if unsold == stated.position {
+        stated.position
+    } else {
+        num(
+            UsdExact::of_qty(unsold).truncated_quotient(UsdExact::one(), stated.increment),
+            "the remainder on the grid",
+        )?
+    };
     if sell.is_zero() {
         return Ok(None);
     }
@@ -347,8 +364,8 @@ fn trim_guards(
     Ok(Some(guards))
 }
 
-/// `from` less `taken`, or none when `taken` covers it: what resting sells leave of the excess and
-/// of the position (DEC-399 item 7).
+/// `from` less `taken`, or none when `taken` covers it: what resting sells leave of the position
+/// (DEC-399 item 7).
 fn less_or_zero(from: Qty, taken: Qty) -> Result<Qty, String> {
     match from.checked_sub(taken) {
         Err(NumError::Negative) => Ok(Qty::ZERO),
@@ -1395,14 +1412,7 @@ fn listing(
         median_dollar_volume_20d: Some(liquid),
         median_dollar_volume_30d: Some(liquid),
         min_order_size: stated.increment,
-        qty_increment: num(
-            Qty::parse(if stated.increment < one {
-                "0.000000001"
-            } else {
-                "1"
-            }),
-            "qty_increment",
-        )?,
+        qty_increment: stated.increment,
         halted: false,
         status_feed_current: true,
     })
@@ -1649,20 +1659,55 @@ mod tests {
         read_fixture(&dir, "mandate.json").map(Arc::unwrap_or_clone)
     }
 
+    /// MC-B38 and MC-B39, the trim on a coarse grid beside a resting sell (DEC-445 item 2), which
+    /// the reference PR after this harness adds. Until it lands the fixture holds them or not; if
+    /// present they must pass, and the counts below are stated for both fixtures. A cleanup drops
+    /// the fixture without them once they land.
+    const AWAITED: [&str; 2] = ["MC-B38", "MC-B39"];
+    const DOCTORINGS_WITH: usize = 1140;
+    /// Four objects in each of 39 cases, 73 outputs, and two working orders.
+    const PLANTS_WITH: usize = 231;
+    const REFUSED_WITH: usize = 1573;
+
+    /// Whether the fixture already holds the [`AWAITED`] cases.
+    fn awaited(fixture: &Json) -> Result<bool, String> {
+        let present = crate::list_at(fixture, "cases")?
+            .iter()
+            .filter(|c| c["id"].as_str().is_some_and(|id| AWAITED.contains(&id)))
+            .count();
+        crate::ensure(present == 0 || present == AWAITED.len(), || {
+            format!(
+                "the fixture holds {present} of the {} awaited cases, not none or all",
+                AWAITED.len()
+            )
+        })?;
+        Ok(present == AWAITED.len())
+    }
+
+    /// `without` on today's fixture, `with` once the awaited cases land.
+    fn counted(fixture: &Json, without: usize, with: usize) -> Result<usize, String> {
+        Ok(if awaited(fixture)? { with } else { without })
+    }
+
     fn family_b(fixture: &Json) -> Result<Vec<Json>, String> {
         let cases: Vec<Json> = crate::list_at(fixture, "cases")?
             .iter()
             .filter(|c| c["kind"] == "builder")
             .cloned()
             .collect();
-        crate::ensure(cases.len() == PASSING.len(), || {
-            format!("family B is {} cases, found {}", PASSING.len(), cases.len())
+        let expected = counted(
+            fixture,
+            PASSING.len(),
+            PASSING.len().saturating_add(AWAITED.len()),
+        )?;
+        crate::ensure(cases.len() == expected, || {
+            format!("family B is {expected} cases, found {}", cases.len())
         })?;
         Ok(cases)
     }
 
     fn listed(id: &str) -> bool {
-        PASSING.contains(&id)
+        PASSING.contains(&id) || AWAITED.contains(&id)
     }
 
     fn passing(fixture: &Json) -> Result<Vec<Json>, String> {
@@ -1714,6 +1759,19 @@ mod tests {
             *v = json!("3");
         })?;
         run(on_the_grid, "MC-B17").map_err(|e| format!("MC-B17 on a 3-share grid: {e}"))?;
+        let on_a_two_share_grid = doctored(&fixture, "MC-B17", "", |case| {
+            put(case, "input", "qty_increment", json!("2"));
+            put(case, "expect", "qty", json!("4"));
+            put(case, "expect", "order_usd", json!("399.6"));
+        })?;
+        run(on_a_two_share_grid, "MC-B17")
+            .map_err(|e| format!("MC-B17 on a 2-share grid, the gate on the case's grid: {e}"))?;
+        let past_the_position = doctored(&fixture, "MC-B35", "/input/qty_increment", |v| {
+            *v = json!("2");
+        })?;
+        run(past_the_position, "MC-B35").map_err(|e| {
+            format!("MC-B35 on a 2-share grid, its trim rounded up past the 1 held: {e}")
+        })?;
         let unstated = doctored(&fixture, "MC-B17", "/input", remove("min_order_size"))?;
         fails_naming(
             run(unstated, "MC-B17"),
@@ -1775,10 +1833,29 @@ mod tests {
     ///   `below_minimum_order`, which the whole excess would meet, so a reading that ignored the
     ///   resting sell fails naming both answers;
     /// - with 3 or more resting, no trim is due at all, and the case states no `trim_withheld`;
+    /// - MC-B30 confirmed on a 2-share grid with 1 resting: the 2.49-share excess less the 1 on sale
+    ///   is 1.49, rounded up on the grid to 2, below a 3-share minimum, so it is withheld. Rounding
+    ///   up first (4) and then subtracting (3) would meet the minimum, so guards in that order
+    ///   disagree with the gate (DEC-445 item 2; #579 review, M1);
     /// - a trim case that states no `open_sell_qty` is refused naming it, never given a default.
+    ///
+    /// Once MC-B38 is in the fixture: its 3-share remainder beside 2 resting is off a 2-share grid
+    /// and is truncated onto it, 2 (DEC-445 item 2), so at a 3-share minimum both the gate and the
+    /// guards withhold it and the case, which states the sell, fails naming `trim_withheld`. Guards
+    /// that kept the off-grid 3 would let it go and disagree with the gate instead.
     #[test]
     fn a_trim_is_sized_after_the_agent_s_resting_sells() -> Result<(), String> {
         let fixture = fixture()?;
+        if awaited(&fixture)? {
+            let below = doctored(&fixture, "MC-B38", "/input/min_order_size", |v| {
+                *v = json!("3");
+            })?;
+            fails_naming(
+                run(below, "MC-B38"),
+                "trim_withheld",
+                "MC-B38 at a 3-share minimum, its remainder truncated to 2 below it",
+            )?;
+        }
         let remainder = doctored(&fixture, "MC-B17", "", |case| {
             put(case, "input", "open_sell_qty", json!("2"));
             put(case, "expect", "qty", json!("1"));
@@ -1799,6 +1876,23 @@ mod tests {
             "qty",
             "MC-B17 beside 2 resting shares, stating the whole excess",
         )?;
+        let rounded_after_the_resting_sell = doctored(&fixture, "MC-B30", "", |case| {
+            put(case, "input", "scale_active_s", json!(120));
+            put(case, "input", "qty_increment", json!("2"));
+            put(case, "input", "open_sell_qty", json!("1"));
+            put(case, "input", "min_order_size", json!("3"));
+            put(
+                case,
+                "expect",
+                "trim_withheld",
+                json!(["below_minimum_order"]),
+            );
+        })?;
+        run(rounded_after_the_resting_sell, "MC-B30").map_err(|e| {
+            format!(
+                "MC-B30 confirmed on a 2-share grid beside 1 resting, at a 3-share minimum: {e}"
+            )
+        })?;
         let below = doctored(&fixture, "MC-B30", "", |case| {
             put(case, "input", "scale_active_s", json!(120));
             put(case, "input", "open_sell_qty", json!("2"));
@@ -2156,7 +2250,15 @@ mod tests {
             run(fixture.clone(), &id).map_err(|e| format!("{id}: {e}"))?;
             seen = seen.saturating_add(1);
         }
-        crate::expect_eq("cases listed", PASSING.len(), seen)
+        crate::expect_eq(
+            "cases listed",
+            counted(
+                &fixture,
+                PASSING.len(),
+                PASSING.len().saturating_add(AWAITED.len()),
+            )?,
+            seen,
+        )
     }
 
     /// MC-B26's pinned pair is read from its base's `symbol` (DEC-285): `BTC/USD` passes, and a
@@ -2223,7 +2325,11 @@ mod tests {
                 )?;
             }
         }
-        crate::expect_eq("doctorings, counted from the fixture", doctorings, 1092)
+        crate::expect_eq(
+            "doctorings, counted from the fixture",
+            doctorings,
+            counted(&fixture, 1092, DOCTORINGS_WITH)?,
+        )
     }
 
     /// A hold reaches neither the gate nor approval, so a hold that states either fails naming it,
@@ -2266,7 +2372,7 @@ mod tests {
                 fails_naming(run(stated, &id), member, &format!("{id}: {member} stated"))?;
             }
         }
-        crate::expect_eq("holds", holds, 15)
+        crate::expect_eq("holds", holds, counted(&fixture, 15, 15)?)
     }
 
     /// Every member of a case is read: a plant at the top level, in `input`, its `quote`, its
@@ -2329,7 +2435,7 @@ mod tests {
         crate::expect_eq(
             "plants: four objects per case, every output and two working orders",
             plants,
-            37 * 4 + 69 + 2,
+            counted(&fixture, 37 * 4 + 69 + 2, PLANTS_WITH)?,
         )
     }
 
@@ -2440,7 +2546,11 @@ mod tests {
                 }
             }
         }
-        crate::expect_eq("inputs refused, counted from the fixture", refused, 1485)
+        crate::expect_eq(
+            "inputs refused, counted from the fixture",
+            refused,
+            counted(&fixture, 1485, REFUSED_WITH)?,
+        )
     }
 
     /// The builder and the gate see one account: the gate state's equity, the instrument's market
