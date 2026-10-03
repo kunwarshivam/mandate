@@ -3358,8 +3358,10 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   *Harness (`agent/g8-e6-4-qty-grid-harness`):* family B's listing states the case's
   `qty_increment` as the grid, and the trading-domain gate driver a crypto pair's
   `min_trade_increment` (an equity's stays whole or fractional shares), so the reference, the
-  harness and the gate share one grid (#530 review, m6). DEC-427 item 6's ordering constraint on
-  fractionable family-B trim cases no longer binds.
+  harness and the gate share one grid (#530 review, m6), and `trim_guards` sizes the trim in the
+  gate's order and truncates an off-grid remainder (DEC-445 item 2). It awaits MC-B38 and MC-B39
+  (`AWAITED`), which the reference PR adds (`agent/g8-e6-4-grid-ref`); then the status rows and a
+  cleanup. DEC-427 item 6's ordering constraint on fractionable family-B trim cases no longer binds.
 - **E6-4: refuse a grid that is not above zero, per instrument** (#571 review, round 1, minor 2).
   `InstrumentSnapshot::qty_increment` is a `Qty`, so zero is representable. `ceiled_quotient` and
   `truncated_quotient` refuse it as `NotPositive`, but that error would leave `trim::proposals`
