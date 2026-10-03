@@ -766,7 +766,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   field activates unconfirmed ([DEC-97](04-decision-log.md#decisions)).
   Owed ([DEC-411](decisions/DEC-411.md), stream H, DEC-77 tests then code): `mandate-spec`'s `ValidationContext` gains
   the effective `independent_approval_required`, V-047 refuses it in a workspace of fewer than two users, and the
-  harness reads the cases' new context member, so MC-V69 to MC-V71 pass.
+  harness reads the cases' new context member, so MC-V69 to MC-V71 pass. V-047 also refuses again when a version is
+  applied, as V-002 does, and a case covers a second user deactivated between confirmation and application (#528
+  round 2, major 1; the reference models V-047 at validation only, DEC-411 item 5).
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
   increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C48 pass.
@@ -2845,3 +2847,25 @@ From #518's round-2 review (the coordinator's ruling, 00:28Z on #518; freeze rul
   `fill_applied` pools only when the payload names no order, so a `FillApplied` naming an order the
   fold does not know takes shares off the position and joins neither. `orders::fill` never writes
   that payload today; keying the pool on "no order found" makes the fold total over it.
+
+From #528's round-2 review (DEC-411; the coordinator's ruling, 05:19Z on #528; freeze rule):
+
+- **The reference does not model V-002's apply-time re-check** (#528 round 2, major 1). V-002 says it is "checked at
+  validation and again atomically when a version is applied", but `reference/mandate/ref.py` checks it in `semantic()`
+  only, and no case or fuzz covers a version that validated and then fails V-002 when applied. V-047 has the same gap,
+  owed on E10-1's row; this row is V-002's.
+- **§5.7's parenthetical says a workspace, where V-047 refuses a version** (#528 round 2, minor 1).
+  `docs/specs/mandate.md`'s §5.7 says "a single-user workspace (never one under `independent_approval_required`, which
+  V-047 refuses at validation)", but such a workspace exists after confirmation (DEC-411 item 6). Reword to "a
+  loosening version is refused there under `independent_approval_required` (V-047)".
+- **"Pin" for cases that are pending** (#528 round 2, minor 2). §6.7 and DEC-411 item 6 say MC-W50, MC-W53, MC-W54
+  and MC-W56 pin the item-6 state, but all MC-W cases are `pending` on E6-13 and enforce nothing yet. Say "specify",
+  or name E6-13 as the story that makes them bind.
+- **V-047's reason list drops risk-increasing changes** (#528 round 2, minor 3). The row rests on deployment, the
+  high-water-mark reset and the tripwire lift; §4.3 also lists a risk-increasing change, which a lone user cannot
+  make either. Restore that clause (the latched-floor reason stays out, per round 1's M1).
+- **`mutants.py` cannot carry two natural V-047 bugs** (#528 round 2, minor 4). Inverting the policy, or ignoring it,
+  makes V-047 fire on the base mandates, so `bases.py`'s import-time assertion crashes the probe and `verdict()`
+  scores it `ERROR`, not caught. Say so in the module docstring, so nobody adds one and reads the `ERROR` as a catch.
+- **§11's case count is unchecked prose** (#528 round 2, minor 5). `main` said 427 where the file held 429. Add a
+  `cargo xtask` assertion that §11's count matches `docs/specs/reference-cases/mandate.yaml`.
