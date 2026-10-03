@@ -853,6 +853,10 @@ fn listing(
         median_dollar_volume_20d: median_20d,
         median_dollar_volume_30d: median_30d,
         min_order_size,
+        qty_increment: num(
+            Qty::parse(if fractionable { "0.000000001" } else { "1" }),
+            "qty_increment",
+        )?,
         halted: false,
         status_feed_current: true,
     })
