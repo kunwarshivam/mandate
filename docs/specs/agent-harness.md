@@ -136,7 +136,7 @@ names it; the gateway's own tests prove the INF side, and these prove the caller
 | HI-20 | **The kill switch is accepted in every state the process is up.** In `Recovering`, `Running`, `Paused`, and `Holding`, a kill switch or owner Stop is applied before any other input, and the agent goes to `Stopping` (rule 13). While no process is up, §13 item 1 applies | Extends E19-1's crash-in-every-state property: a kill switch arriving in every state, including during reconciliation, ends in `Stopping` with the agent-scoped plan and no cancel-all or close-position |
 | HI-21 | **No model call inside the tick.** The decide step never calls or waits on the gateway. Every model output, fast tier included, enters the core as an input after its record commits, and a missing or late output is missing (§6.8, rule 3, MI-10). No exit's latency depends on a model provider | A gateway double that stalls for ever on every call: the decide step stays within ES-24's budget, and every exit, protective-order, and kill-switch draft is identical to a run with no gateway at all |
 | HI-22 | **Every candidate has a journaled verdict.** Every candidate thesis and invalidation of a judged run is journaled with its verdict, a harness check's reason or the admission's (§6.5). No run is judged while no record can hold a harness verdict (§6.2 preconditions) | Property with a compromised model: the count of journaled verdicts equals the count of candidates in the committed responses, by an oracle that parses the response artifacts itself |
-| HI-23 | **Only cited licensed text is kept** (DEC-431 item 17). Licensed text a thesis did not cite is never written to the journal's artifact store, in an observation, a prompt, or anything else (§6.6) | Plant a canary phrase in an uncited licensed item; scan every artifact the run wrote. The same phrase in a cited item is found only in the thesis's evidence artifact |
+| HI-23 | **Only cited licensed text is kept, in what the harness writes** (DEC-431 item 17). The harness never writes licensed text a thesis did not cite to the journal's artifact store: not in an observation, a prompt artifact, or an evidence artifact (§6.6). The model's response is outside this invariant: it may echo licensed text, a disclosed residual (§6.6) | Plant a canary phrase in an uncited licensed item; scan every observation, prompt, and evidence artifact the run wrote. The same phrase in a cited item is found, among those, only in the thesis's evidence artifact. The response artifact is not scanned |
 
 ## 4. Components
 
@@ -325,6 +325,9 @@ rule whole rather than reading around it:
 - **Licensed text can be sent without being kept.** Until the inference spec's prompt record keeps
   licensed text out of the artifact store (§10.1 ask 5), the retrieval plan reads only sources whose
   text may be kept in full: market data and public filings. Licensed news waits (§6.6, HI-23).
+  When it is read, the model's response may echo it (§6.6's residual), so a source is allowlisted
+  only if its terms allow keeping that echo in the response for the retention period too; counsel's
+  per-vendor answer covers it.
 
 One run, in order:
 
@@ -337,7 +340,9 @@ One run, in order:
    it emits the call effect. That is the data-plane spec's capture-at-use rule (§4.6, DP-3): the
    data-plane spec owns the duty, the journal spec owns the event, and this spec places it in the
    loop with the core as its writer (HI-2, HI-16). Each observation's `data_ref` is the item's
-   record as §6.6 says, and these observations are what E17-5's drift detector folds.
+   record as §6.6 says. For each news or filing item the shell also builds the typed observation
+   E17-5's drift detector folds (§6.3), and that record is what the observation's artifact holds, so
+   replay rebuilds the fold from the journal.
 3. **Call.** The worker sends one call to the gateway: purpose `research`, the pinned model
    reference, the typed inputs (§6.4), the cut-off as `as_of`, and a `deadline` of the call's
    dispatch instant plus the entry's `deadline_ms`, on the wall clock (inference spec §3.1). The
@@ -384,10 +389,22 @@ model never names a read.
 workspace's data, or reads any stream other than the folds above. When a cap cuts a read, the oldest
 items go first, and the artifact records what was dropped.
 
-**Every retrieved item is metered for drift.** Each news or filing item's `ObservationRecorded`
-(§6.2 step 2) names a record holding its source, class, knowledge time, content hash, and byte
-length, and the core folds those observations into E17-5's `DriftState`, as data-plane spec §4.6
-says. Text never reaches the detector (DEC-266 item 1).
+**Every retrieved item is metered for drift.** The drift fold does not read `ObservationRecorded`'s
+members: the event is closed with `source`, `instrument_id`, `as_of`, and `data_ref` (journal spec
+§9.1), and `as_of` is the run's cut-off, shared by every item of the run. Instead, at retrieval the
+shell builds for each news or filing item the typed observation `mandate-research`'s detector takes
+(`InputObservation`): the source, the class, the observation instant, the content hash, and the
+byte length. That same record is the artifact the item's `ObservationRecorded` names, so the fold
+replays from the journal and its artifacts. The core folds each item once: an item id already
+observed in an earlier run is not observed again, so re-reading it cannot fake `DuplicateContent`.
+Text never reaches the detector (DEC-266 item 1).
+
+**Which instant.** The observation instant is the item's knowledge time as the data plane reports
+it ([data-plane spec §5.2](data-plane.md#52-two-time-axes)), never the retrieval instant. For a
+live capture that is the platform's receipt time; for a backfill it is the source's own publication
+time. The detector measures the source's traffic, and a backfill's arrival burst is ours, not the
+source's: read by the retrieval instant, every item of a run would share one instant and the
+baseline would be degenerate for ever.
 
 ### 6.4 Inputs
 
@@ -472,7 +489,7 @@ the journal holds no licensed text that no thesis cited:
 | A licensed news item, cited or not | Its record without text, as the observation's artifact: source, item id, allowlist version, knowledge and published times, raw-bytes digest, byte length, class |
 | A licensed news item a thesis cited | Its text too, as the thesis's `evidence_ref` artifact, captured when the thesis is judged (data-plane spec §4.5's "captured at use") |
 | The rendered prompt | The gateway's `request_digest`, and a prompt artifact in which each licensed item's text is replaced by its raw-bytes digest (§10.1 ask 5) |
-| The model's response | In full. It is the model's text, not a vendor's |
+| The model's response | In full, as the model's output of record. **Disclosed residual:** a response may quote licensed text, cited or not, and the harness cannot strip it without changing the record. So a source whose terms do not allow that echo to be kept for the retention period is not allowlisted (DEC-431 item 17's rule; §6.2 precondition 3) |
 
 Replay of decisions (HI-3) needs none of the dropped text: it reads the responses, the observations,
 and the verdicts. A byte-exact prompt can be rebuilt only while the point-in-time store still holds
@@ -716,7 +733,9 @@ the identical weights) and item 10 (a reported identity that differs from the pi
 - **The executor** copies `UniverseChanged` from thesis records, and later from invalidation
   verdicts (E19-5). It is unchanged otherwise.
 - **The journal** gains the closed `ModelInvocationRecorded` and the meter stream (E15-8) and an
-  invalidation verdict (E19-5). `ObservationRecorded` exists and is closed (journal spec §9.1).
+  invalidation verdict (E19-5). `ObservationRecorded` exists and is closed (journal spec §9.1); it
+  needs no new member, because the drift detector's typed observation is the artifact it names
+  (§6.3).
 
 ## 11. What exists today
 

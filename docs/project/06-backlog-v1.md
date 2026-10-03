@@ -1247,7 +1247,7 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   cut-off; the core journals every item as `ObservationRecorded` before it emits the call effect
   (HI-2, data-plane spec §4.6); every cap is enforced, oldest items dropped first, and the drop
   recorded; a test shows every data port only reads (HI-4); every read filters on knowledge time
-  (HI-13, DP-1); E17-5's `DriftState` folds the observations, never text; a licensed item's text is
+  (HI-13, DP-1); E17-5's `DriftState` folds the typed per-item observation the shell builds, by knowledge time, with each item observed once, never text (spec §6.3); a licensed item's text is
   kept only when a thesis cites it (HI-23, spec §6.6); the retrieval plan is inside the research
   entry's content hash (DEC-431 item 5), with the matching inference spec revision first.
 - **E19-3 (Must, M5; SC)** As an owner, I want research runs scheduled, gated, and cancelled by the
@@ -1329,6 +1329,27 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
 - Minor 11: post-merge staleness: `DEC-431.md` item 14's "(DEC-434, in review)" and item 17's "data-plane
   spec, in draft"; and E21 is missing from the epic overview table. The spec's own references to the
   data-plane spec were updated with B2.
+
+*Follow-ups (#554 review round 2, minors, deferred by the freeze rule):*
+
+- Round-2 minor 1: §6.2 precondition 3 allows "market data and public filings" while §6.3's news row
+  says only "licensed news waits". Say whether an allowlisted news source whose terms permit full
+  retention may be read before §10.1 ask 5 lands.
+- Round-2 minor 2: §6.2 step 1 does not check the preconditions. Put the check there and on §5.3's
+  `Due --> Idle` edge, which is what HI-19's and HI-22's "a start attempted before the record exists
+  emits no call" tests.
+- Round-2 minor 3: HI-15 bars calls only in `paused` and `stopped`, while §5.2 and DEC-431 item 9 say
+  Holding makes no call, and Holding's effective mode is `exits_only`. Name Holding in HI-15.
+- Round-2 minor 4: decide `mandate-research-run`'s `xtask/layers.toml` entry now: `pure = true` (layer
+  5 holds only pure crates, and the core names its result types, so its ports pull in no
+  `impure_crates`) and `safety_critical = true`, with the lint header, a CODEOWNERS line, and mutants
+  on its diff. DEC-431 item 20 says "if safety-critical" without deciding.
+- Round-2 minor 5: DEC-431 item 17 cites "journal spec §6.3, six years" for retention; retention is
+  §6.2.
+- Round-2 cross-document: data-plane spec §4.6 says the drift detector folds `ObservationRecorded`;
+  correct it to the typed per-item observation the observation's artifact holds (agent harness spec
+  §6.3), in the data-plane spec's next change. Add `mandate-research`'s drift doc comment ("the shell
+  records") to E19-9's scope with the same reading.
 
 ### E21 Operations and infrastructure (proposed, DEC-434)
 
