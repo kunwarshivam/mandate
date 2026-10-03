@@ -45,7 +45,7 @@ house method ([AGENTS.md](../../AGENTS.md), "Getting it right the first time"):
 | 9 | **Broker connections beyond Alpaca paper:** OAuth with Alpaca (M8); Robinhood Agentic Trading over MCP (E7-6, second connector, [DEC-98](04-decision-log.md#decisions)); per-user key and permission checks | E7-6 backlog row; ADR-0002; the Alpaca connector | `docs/specs/connections.md` (DEC-441) | M8; E7-6 | Robinhood beta terms (ADR-0002, "Monitor") | Drafted (#563) |
 | 10 | **Threat model:** assets, trust boundaries, attackers, and mitigations across every plane, covering prompt injection (RAID R-05), credential theft, tenant breakout, a malicious insider, and supply chain | Mentioned in [07-quality-and-release](07-quality-and-release.md); RAID R-05 | `docs/security/threat-model.md` | M13; informs 1 to 9 | None expected | Open |
 | 11 | **Billing:** metering, plans, licenses, and the usage feed | HLD §10; [07-pricing-and-packaging](../product/07-pricing-and-packaging.md) | `docs/design/billing.md` | M12 | Billing provider; prices | Open |
-| 12 | **Cost model:** inference, data, and hosting per agent and per workspace, against pricing | None | `docs/product/12-cost-model.md` | Pricing, the Phase 2 exit | Every number in it (DEC-79: spending) | Open |
+| 12 | **Cost model:** inference, data, and hosting per agent and per workspace, against pricing | None | `docs/product/12-cost-model.md` | Pricing, the Phase 2 exit | Every number in it (DEC-79: spending) | Drafted (#566) |
 
 ## Founder decisions still open in the HLD
 
