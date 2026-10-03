@@ -13065,4 +13065,38 @@ mod stepping_alone_pins {
         ));
         Ok(())
     }
+
+    /// #468's seed 18 and DEC-424. A rung that ended beside another exit's stepping lone ladder is
+    /// not that ladder's, so the instrument is not stepping alone; once that other exit has a
+    /// stepping lone ladder of its own, it is.
+    #[test]
+    fn a_rung_of_another_exit_beside_a_stepping_ladder_is_not_stepping_alone()
+    -> Result<(), ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        let other = IntentId(EventId("01JABCDEFGHJKMNPQRSTV00021".to_owned()));
+        let (one, mut ended) = lone(true)?;
+        ended.push(rung(aapl.clone(), other.clone())?);
+        assert!(
+            !stepping_alone(&one, &aapl, &ended),
+            "seed 18: the other exit's rung is no stepping ladder's, so the shares it would have \
+             sold are topped up or alerted"
+        );
+        let mut two = one;
+        two.ladders.insert(
+            (aapl.clone(), other.clone()),
+            LoneLadder {
+                intent: other,
+                agent: AgentId("agent-b".to_owned()),
+                ladder: Ladder {
+                    stepping: true,
+                    ..Ladder::default()
+                },
+            },
+        );
+        assert!(
+            stepping_alone(&two, &aapl, &ended),
+            "DEC-424: each exit has its own lone ladder, and every ended rung is one of theirs"
+        );
+        Ok(())
+    }
 }
