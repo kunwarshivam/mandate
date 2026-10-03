@@ -3160,7 +3160,6 @@ fn an_unprotected_interval_at_the_limit_cancels_re_places_and_alerts() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn protection_is_re_placed_at_the_buffer_day() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3190,7 +3189,6 @@ fn protection_is_re_placed_at_the_buffer_day() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn protection_is_not_re_placed_early() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4292,7 +4290,6 @@ fn a_risk_exit_submits_inside_the_close_window() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_protective_order_submits_with_no_buying_power() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
