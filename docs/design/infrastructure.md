@@ -329,8 +329,10 @@ At connection time and at every executor start:
 
 1. **Scope:** an OAuth grant must contain only trading and account-read scopes (E7-1). An API key
    whose venue exposes its permissions must not allow withdrawals or transfers; one that does is
-   refused. Where a venue cannot report a key's permissions, the limit is recorded and disclosed
-   to the owner, and the venue's own setting is the control.
+   refused. Where a venue cannot report a key's permissions, a live key is refused; a paper or
+   demo key is accepted with the limit recorded and disclosed to the owner
+   ([connections spec](../specs/connections.md) CN-2, [DEC-441](../project/decisions/DEC-441.md)
+   item 4).
 2. **Environment:** the credential must work against the environment the stream records and only
    that one. In non-production builds only paper hosts exist (ES-23); in production a paper stream
    refuses a live credential and the reverse.

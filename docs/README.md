@@ -32,6 +32,7 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Journal test vectors](specs/reference-cases/journal.yaml) | Exact canonical bytes and hashes, plus tamper cases |
 | [Data plane spec](specs/data-plane.md) (draft v0.1) | Live market data, reference data, news, filings, fundamentals, the point-in-time store, fan-out to workspaces, failure walk, and adversaries |
 | [Inference and model gateway spec](specs/inference.md) | Draft v0.1: every model call, the model gateway, pinning and no substitution, deadlines, caching, the registry, metering and spend caps, security, failure walk, and the fast-tier and provider decisions ([DEC-432](project/decisions/DEC-432.md)) |
+| [Broker connections spec](specs/connections.md) | Draft v0.1: the connection object (references, never secrets), connector capabilities, Alpaca keys and OAuth, Robinhood Agentic Trading over MCP, permission and health checks, lifecycle walk, and adversaries ([DEC-441](project/decisions/DEC-441.md)) |
 
 ## Design
 
