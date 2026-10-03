@@ -60,11 +60,18 @@ pub(crate) fn proposals(
             Err(NumError::Negative) => Qty::ZERO,
             Err(other) => return Err(other.into()),
         };
-        let qty = excess
+        let grid = quantity_grid(instrument);
+        let rounded = excess
             .checked_mul(UsdExact::of_qty(held))?
             .checked_sub(UsdExact::of_qty(on_sale).checked_mul(market_value)?)?
-            .ceiled_quotient(market_value, quantity_grid(instrument)?)?
-            .min(unsold);
+            .ceiled_quotient(market_value, grid)?;
+        let qty = if rounded <= unsold {
+            rounded
+        } else if unsold == held {
+            held
+        } else {
+            down_onto(unsold, grid)?
+        };
         if qty.is_zero() {
             continue;
         }
@@ -117,25 +124,23 @@ fn a_trimming_rung_is_confirmed(limits: &RiskLimits, risk: &RiskSnapshot) -> boo
 }
 
 /// The instrument's quantity grid, which a trim rounds up on and a participation slice truncates
-/// to (trading-domain spec §2.1, DEC-427): the venue's own `qty_increment`.
-///
-/// Until the implementation PR reads that field, the grid is read from `fractionable`, whole
-/// shares or nine places, and a `qty_increment` that differs from that reading is refused as
-/// unimplemented rather than sized on the wrong grid (DEC-77). Every snapshot on `main` states the
-/// reading it already had, so only the pending tests reach the refusal.
-pub(crate) fn quantity_grid(instrument: &InstrumentSnapshot) -> Result<Qty, GateError> {
-    let read_from_fractionable = Qty::parse(if instrument.fractionable {
-        "0.000000001"
-    } else {
-        "1"
-    })?;
-    if instrument.qty_increment != read_from_fractionable {
-        return Err(GateError::Unimplemented(
-            "the venue's quantity grid",
-            "E6-4",
-        ));
-    }
-    Ok(read_from_fractionable)
+/// to (trading-domain spec §2.1, DEC-427): the venue's own `qty_increment`, never a grid read from
+/// `fractionable`. A grid that is not above zero is refused by the arithmetic that divides by it.
+pub(crate) fn quantity_grid(instrument: &InstrumentSnapshot) -> Qty {
+    instrument.qty_increment
+}
+
+/// `qty` truncated to a whole number of `grid`: the largest quantity on the grid at or below it.
+/// What the agent's resting sells leave unsold, when it is off the grid and not the whole position,
+/// is sold as this rather than as an order §5.3 rule 2 refuses (DEC-445 item 2).
+pub(crate) fn down_onto(qty: Qty, grid: Qty) -> Result<Qty, NumError> {
+    UsdExact::of_qty(qty).truncated_quotient(UsdExact::one(), grid)
+}
+
+/// `qty` rounded up to a whole number of `grid`, the floor of a participation slice: the
+/// instrument's minimum, on the grid (DEC-445 item 1).
+pub(crate) fn up_onto(qty: Qty, grid: Qty) -> Result<Qty, NumError> {
+    UsdExact::of_qty(qty).ceiled_quotient(UsdExact::one(), grid)
 }
 
 #[cfg(test)]
@@ -400,7 +405,6 @@ mod tests {
     /// - 0.001 held at factor 0 with 0.00025 resting on the agent's own sell leaves 0.00075 unsold,
     ///   off the grid and not the whole position, so the trim is truncated onto the grid, 0.0007.
     #[test]
-    #[ignore = "pending E6-4"]
     fn a_trim_rounds_up_on_the_venue_s_quantity_grid() -> Result<(), GateError> {
         let on_the_grid = |held: &str, market_value: &str| -> Result<Scene, GateError> {
             let mut scene = Scene::new(held, market_value)?.crypto()?;
@@ -528,7 +532,6 @@ mod tests {
     /// whole-share instrument that is not fractionable, so that an implementation keying the
     /// reading on `fractionable` fails here (#571 review, round 2, B4).
     #[test]
-    #[ignore = "pending E6-4"]
     fn an_off_grid_remainder_beside_a_resting_sell_is_truncated_onto_the_grid()
     -> Result<(), GateError> {
         let scene = || -> Result<Scene, GateError> {

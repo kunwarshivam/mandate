@@ -875,7 +875,6 @@ fn a_trim_of_the_whole_position_is_never_withheld_for_the_minimum() {
 ///
 /// Every row is run before one assertion, so under the stub each row's outcome is reported.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_trim_rounds_up_on_the_venue_s_quantity_grid() {
     let rows = [
         (
