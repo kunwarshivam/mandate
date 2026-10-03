@@ -4,7 +4,7 @@ import json
 import pathlib
 import re
 import sys
-from decimal import ROUND_CEILING, Decimal
+from decimal import ROUND_CEILING, ROUND_DOWN, Decimal
 from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 import yaml
@@ -261,12 +261,23 @@ BIN = {cid: C[cid]["input"] for cid in C if cid.startswith("MC-B")}
 req("MC-B33", B["MC-B33"].get("purpose") == "risk_exit" and Decimal(B["MC-B33"]["qty"]) >= Decimal(BIN["MC-B33"]["min_order_size"])
     and Decimal(B["MC-B33"]["order_usd"]) < Decimal(BIN["MC-B33"]["min_order_usd"]), "a trim at least the minimum size goes under a larger dollar minimum")
 def trim_sell(cid):
+    """The trim the gate sizes (§5.5, DEC-399 item 7, DEC-445 item 2): the agent's resting sells come
+    off the excess before it is rounded up on the instrument's quantity grid, a remainder beside them
+    that is off the grid and is not the whole position is truncated onto it, and with none resting a
+    trim past the position is the whole position, the full close DEC-423 exempts from the minimum."""
     inp, exp = BIN[cid], B[cid]
     inc, bid = Decimal(inp["qty_increment"]), Decimal(inp["quote"]["bid"])
     excess = Decimal(exp["current_mv"]) - Decimal(inp["size_factor"]) * Decimal(exp["cap"])
     on_sale = Decimal(inp["open_sell_qty"])
-    whole = (excess / bid / inc).to_integral_value(rounding=ROUND_CEILING) * inc
-    return max(Decimal(0), min(Decimal(inp["position_qty"]) - on_sale, whole - on_sale))
+    held = Decimal(inp["position_qty"])
+    unsold = max(Decimal(0), held - on_sale)
+    owed = max(Decimal(0), excess - on_sale * bid)
+    rounded = (owed / bid / inc).to_integral_value(rounding=ROUND_CEILING) * inc
+    if rounded <= unsold:
+        return rounded
+    if unsold == held:
+        return held
+    return (unsold / inc).to_integral_value(rounding=ROUND_DOWN) * inc
 req("MC-B34", B["MC-B34"].get("trim_withheld") == ["below_minimum_order"]
     and trim_sell("MC-B34") < Decimal(BIN["MC-B34"]["min_order_size"])
     and trim_sell("MC-B34") * Decimal(BIN["MC-B34"]["quote"]["bid"]) >= Decimal(BIN["MC-B34"]["min_order_usd"]),
@@ -282,6 +293,29 @@ req("MC-B36", B["MC-B36"].get("trim_withheld") == ["below_minimum_order"] and De
 req("MC-B37", B["MC-B37"].get("purpose") == "risk_exit" and Decimal(BIN["MC-B37"]["open_sell_qty"]) > 0
     and Decimal(B["MC-B37"]["qty"]) == trim_sell("MC-B37") < trim_sell("MC-B37") + Decimal(BIN["MC-B37"]["open_sell_qty"]),
     "the trim is the remainder a resting sell leaves, not the whole excess")
+b38g = Decimal(BIN["MC-B38"]["qty_increment"])
+b38_unsold = Decimal(BIN["MC-B38"]["position_qty"]) - Decimal(BIN["MC-B38"]["open_sell_qty"])
+b38_owed = max(Decimal(0), Decimal(B["MC-B38"]["current_mv"]) - Decimal(BIN["MC-B38"]["size_factor"]) * Decimal(B["MC-B38"]["cap"])
+               - Decimal(BIN["MC-B38"]["open_sell_qty"]) * Decimal(BIN["MC-B38"]["quote"]["bid"]))
+b38_up = (b38_owed / Decimal(BIN["MC-B38"]["quote"]["bid"]) / b38g).to_integral_value(rounding=ROUND_CEILING) * b38g
+req("MC-B38", B["MC-B38"].get("purpose") == "risk_exit" and Decimal(BIN["MC-B38"]["open_sell_qty"]) > 0
+    and b38_unsold % b38g != 0 and b38_up > b38_unsold
+    and Decimal(B["MC-B38"]["qty"]) == (b38_unsold / b38g).to_integral_value(rounding=ROUND_DOWN) * b38g < b38_unsold
+    and Decimal(B["MC-B38"]["qty"]) >= Decimal(BIN["MC-B38"]["min_order_size"]),
+    "the unsold remainder is off the grid, the trim rounded up on it would sell more than it leaves, "
+    "and the trim is the largest quantity on the grid at or below it")
+b39g = Decimal(BIN["MC-B39"]["qty_increment"])
+b39_bid = Decimal(BIN["MC-B39"]["quote"]["bid"])
+b39_excess = Decimal(B["MC-B39"]["current_mv"]) - Decimal(BIN["MC-B39"]["size_factor"]) * Decimal(B["MC-B39"]["cap"])
+b39_on_sale = Decimal(BIN["MC-B39"]["open_sell_qty"])
+b39_after = (max(Decimal(0), b39_excess - b39_on_sale * b39_bid) / b39_bid / b39g).to_integral_value(rounding=ROUND_CEILING) * b39g
+b39_first = (b39_excess / b39_bid / b39g).to_integral_value(rounding=ROUND_CEILING) * b39g - b39_on_sale
+req("MC-B39", B["MC-B39"].get("purpose") == "risk_exit" and b39_on_sale > 0
+    and Decimal(B["MC-B39"]["qty"]) == b39_after < b39_first
+    and Decimal(B["MC-B39"]["qty"]) <= Decimal(BIN["MC-B39"]["position_qty"]) - b39_on_sale
+    and Decimal(B["MC-B39"]["qty"]) >= Decimal(BIN["MC-B39"]["min_order_size"]),
+    "the trim rounds up what the resting sells leave of the excess, which rounding the whole excess up "
+    "first would size larger, and sells no more of the position than they leave unsold")
 req("MC-B18", B["MC-B18"]["reason"] == "within_rebalance_band", "band")
 req("MC-B19", B["MC-B19"]["reason"] == "below_band_after_clipping", "band after clipping")
 req("MC-B20", B["MC-B20"]["reason"] == "no_fresh_outputs", "none")

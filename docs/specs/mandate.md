@@ -20,6 +20,16 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-445](../project/decisions/DEC-445.md) item 2):** §5.5's `trim_to_target`
+  states the gate's order of operations: the agent's own non-protective sells resting in the
+  instrument come off the excess before it is rounded up on the instrument's quantity grid
+  (`qty_increment`, [DEC-427](../project/decisions/DEC-427.md)), and a remainder beside them that is
+  off the grid and is not the whole position is truncated onto it, the largest quantity on the grid
+  at or below what they leave unsold. Zero, or below the minimum, is withheld as
+  [DEC-423](../project/decisions/DEC-423.md) item 2 withholds it. The reference model takes the same
+  order. MC-B38 (the 3 shares 2 resting leave, off a 2-share grid, trim 2) and MC-B39 (1.49 shares
+  rounds up to 2 on a 2-share grid, where rounding the whole excess up first gives 3) are added
+  (§11).
 - **v0.6, amended ([DEC-444](../project/decisions/DEC-444.md), the founder's decision of 2026-10-03
   on DEC-411 item 6):** V-047 no longer refuses a new version of a running agent that §9.2
   classifies as risk-reducing against its previous version, in a workspace of fewer than two users
@@ -643,7 +653,7 @@ exits, and the kill switch are never denied by them (MI-1).
 
 | Action | Trigger | Effect | Lifts when |
 |---|---|---|---|
-| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, a position with MV − factor × cap ≥ `rebalance_band` × cap is sold down to factor × cap as a `risk_exit` (quantity rounded up to the increment, less the agent's own non-protective sells already resting in the instrument, [DEC-399](../project/decisions/DEC-399.md) item 7; none when they cover the excess) at the next evaluation, only once the rung has been active for `breach_confirm_s`, only if its quantity is at least the instrument's minimum order size (`min_order_size`, the minimum the risk gate holds; not §8.3 step 5's minimum order value) or is the whole position held, a full close trading spec §5.3 rule 2 exempts ([DEC-423](../project/decisions/DEC-423.md)), which matches the gate; any other trim below the minimum is an order the broker would refuse for size, for equities only in the regular session, and never while Holding (DEC-65) | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
+| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, a position with MV − factor × cap ≥ `rebalance_band` × cap is sold down to factor × cap as a `risk_exit` (the excess less the agent's own non-protective sells already resting in the instrument, [DEC-399](../project/decisions/DEC-399.md) item 7, rounded up on the instrument's quantity grid, `qty_increment` ([DEC-427](../project/decisions/DEC-427.md)); none when they cover the excess; a remainder beside them that is off the grid and is not the whole position is truncated onto it, the largest quantity on the grid at or below what they leave unsold, [DEC-445](../project/decisions/DEC-445.md) item 2) at the next evaluation, only once the rung has been active for `breach_confirm_s`, only if its quantity is at least the instrument's minimum order size (`min_order_size`, the minimum the risk gate holds; not §8.3 step 5's minimum order value) or is the whole position held, a full close trading spec §5.3 rule 2 exempts ([DEC-423](../project/decisions/DEC-423.md)), which matches the gate; any other trim below the minimum is an order the broker would refuse for size, for equities only in the regular session, and never while Holding (DEC-65) | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
 | `exits_only` | Confirmed (§5.6) | Restriction `drawdown_exits_only` (mode `exits_only`) | Owner acknowledgment (§5.8) |
 | `flatten_and_pause` | Confirmed (§5.6) | Agent-scoped kill switch; restriction `drawdown_flatten` (mode `paused`) | Owner acknowledgment once flat (§5.8) |
 
@@ -1634,7 +1644,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 441 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 443 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1651,7 +1661,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Risk state | MC-R01 to MC-R26 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |
 | Gate | MC-G01 to MC-G16 | Position cap, order size, group cooldown, orders per day, gross exposure, exits exempt, the working universe (including an empty one, which denies every opening) |
-| Order builder | MC-B01 to MC-B37 | Exit and buy conviction, freshness, clipping, band, trim and its guards and its full-close exemption, the trim after a resting sell, deferral, averaging down, accumulate clips with fees |
+| Order builder | MC-B01 to MC-B39 | Exit and buy conviction, freshness, clipping, band, trim and its guards and its full-close exemption, the trim after a resting sell and on the venue's quantity grid (DEC-445 item 2), deferral, averaging down, accumulate clips with fees |
 | Autonomy | MC-A01 to MC-A16 | Built-in AUTO including `owner_exit`, rule order, thresholds, default, two approvers, the admission ceiling, `new_instrument`, `thesis_confidence` |
 | Agent flatten | MC-F01 to MC-F04 | Shared account, session deferral, owner kill switch with a floor price, and without confirmation |
 | Goal | MC-L01 to MC-L05 | `accumulate` completion, `on_complete`, end date (`profit_stop` is in the risk-state family) |

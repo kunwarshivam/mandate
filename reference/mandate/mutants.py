@@ -333,7 +333,9 @@ TRIPWIRE_MUTANTS = {
 # The trim's minimum (§5.5, DEC-399 item 5) is judged by the family-B cases rather than by a fuzz:
 # MC-B33 and MC-B34 sit where the instrument's minimum order size and the dollar minimum disagree,
 # MC-B33 also sits on the boundary, a trim exactly at the minimum, MC-B35 is the full close the
-# minimum exempts (DEC-423), and MC-B36 and MC-B37 size the trim after a resting sell (DEC-399 item 7).
+# minimum exempts (DEC-423), MC-B36 and MC-B37 size the trim after a resting sell (DEC-399 item 7),
+# and MC-B38 and MC-B39 carry DEC-445 item 2: the resting sells come off the excess before it is
+# rounded up on the grid, and an off-grid remainder beside them is truncated onto it.
 TRIM_MUTANTS = {
     "the trim's minimum is the dollar minimum order": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
                                                       '        if sell * bid < D(inp["min_order_usd"]) and sell != qty:'),
@@ -342,8 +344,14 @@ TRIM_MUTANTS = {
                                                    '        if sell < D(inp["min_order_size"]):'),
     "a trim at the minimum is withheld": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
                                           '        if sell <= D(inp["min_order_size"]) and sell != qty:'),
-    "a trim ignores the agent's resting sells": ('        sell = max(D(0), min(qty - on_sale, ceil_inc((mv - factor * cap) / bid, inc) - on_sale))',
-                                                 '        sell = max(D(0), min(qty, ceil_inc((mv - factor * cap) / bid, inc)))'),
+    "a trim ignores the agent's resting sells": ('''        owed = max(D(0), mv - factor * cap - on_sale * bid)\n        rounded = ceil_inc(owed / bid, inc)\n        unsold = max(D(0), qty - on_sale)''',
+                                                 '''        owed = max(D(0), mv - factor * cap)\n        rounded = ceil_inc(owed / bid, inc)\n        unsold = qty'''),
+    "the trim rounds up before it takes the resting sells off the excess": (
+        '        owed = max(D(0), mv - factor * cap - on_sale * bid)\n        rounded = ceil_inc(owed / bid, inc)',
+        '        owed = mv - factor * cap\n        rounded = max(D(0), ceil_inc(owed / bid, inc) - on_sale)'),
+    "an off-grid remainder beside a resting sell is rounded up past what is unsold": (
+        '            sell = trunc(unsold, inc)',
+        '            sell = ceil_inc(unsold, inc)'),
 }
 
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
