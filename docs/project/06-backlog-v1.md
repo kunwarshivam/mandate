@@ -818,7 +818,7 @@ the spec invariants (DP-n) its tests cover.
 The [identity spec](../specs/identity.md) (v0.1 draft, [DEC-437](decisions/DEC-437.md)) defines these
 stories. Rows marked **SC** are safety-critical: tests first under
 DEC-77, an independent review on a different model, and zero missed mutants. The identity provider
-for managed mode, SAML, and organization recovery stay with the founder (DEC-437 items 15 to 19); no
+for managed mode, SAML, and organization recovery stay with the founder (DEC-437 items 15 to 21); no
 story buys a service, and none uses a real identity-provider account in tests (spec §1.3).
 
 - **E9-1 (Must; SC)** As a user, I want to sign in with passkey or OIDC SSO.
@@ -827,7 +827,10 @@ story buys a service, and none uses a real identity-provider account in tests (s
   each refusal tested against an in-memory issuer and a software authenticator; sessions meet spec
   §6.2 (5-minute access tokens, uncached membership re-check, refresh rotation with reuse revoking the
   family, idle and absolute limits an org can only shorten); the risk-reduction path of §6.4 pauses and
-  engages a kill switch with the identity provider unreachable (ID-10); and the log scan finds no
+  engages a kill switch with the identity provider unreachable (ID-10), while a refusal from the
+  provider (`invalid_grant`, a disabled subject, a back-channel logout) ends the session with every
+  permission and blocks the local passkey route (§6.4, §11.1); the host CLI commits only as its
+  registered principal (`HostCliRegistered`, ID-1); and the log scan finds no
   canary token from any path (ID-9).
 - **E9-2 (Must; SC)** As an admin, I want organizations, workspaces, and roles.
   *Accepted when:* `authorize` matches spec §4.2's matrix exactly, checked by an exhaustive test over
@@ -866,9 +869,11 @@ story buys a service, and none uses a real identity-provider account in tests (s
   sender-constrained, revocable token (DEC-141). *Accepted when:* clients connect through OAuth 2.1
   with PKCE and DPoP (spec §6.6); the ID-2 test passes for the client column; a client cannot approve,
   confirm, present step-up, pause, resume, stop, release, make an owner exit, or change a connection or
-  membership (ID-11); the tests PR adds `client_id` to control-stream payloads and check 3's refusal of
-  it to journal §9.2 and mandate §6.4 (DEC-437 item 10); and revocation applies to every request
-  authorized after it commits.
+  membership (ID-11); the tests PR adds the `client` actor kind with `on_behalf_of` to journal §3 and
+  makes the mandate spec's independence checks compare `human(…)` (spec §8.2, §12.2; DEC-437 item 10),
+  with a case showing check 3 refuses a `client` actor's approval from the record alone; no client
+  token is issued before those edits land; and revocation applies to every request authorized after it
+  commits.
 - **E9-10 (Should, M8; SC)** As a user, I want account recovery and, in managed mode, audited
   break-glass. *Accepted when:* recovery codes are stored only as salted slow hashes and shown once; a
   passkey enrolled through recovery cannot present step-up for 24 hours and its owner is notified
@@ -879,6 +884,18 @@ story buys a service, and none uses a real identity-provider account in tests (s
   a property test with an independent oracle. *Accepted when:* each oracle is shown to fail on a
   seeded bug (for example, a cached membership read, a role inherited from the org, a challenge not
   bound to its digest, a client counted as a second user, an unprefixed cache key) before it is trusted.
+- **E9-12 (Should, M8)** Round-1 minors of the identity spec's review ([#556](https://github.com/kunwarshivam/mandate/pull/556),
+  freeze rule). *Accepted when the spec settles each:* (1) the workspace admin holds the kill switch's
+  privileges beyond the stop (mandate §6.1, selling equities outside the session) but not the owner
+  exit; make the two rows agree; (2) ID-2's exhaustive test needs a matrix row for every operation the
+  workspace API spec defines (owner request, dry run, chat thread, saving a draft, backtest, resolving
+  a notice), or ID-2 is scoped to the rows the matrix names; (3) a row for lifting a hold an operator
+  set, with its step-up; (4) ID-15's carve-out for the notification relay's envelope
+  (`{relay_id, endpoint, ciphertext}`, a capability URL) as HLD "Where data lives" lists it; (5) "release"
+  names both Stop with release (DEC-136) and re-enabling a halted scope, so one is renamed (round 2
+  renamed the second; confirm no other use remains); (6) the Status row matches DEC-437 after round 2.
+  ID-13's founding-grant exception and ID-10's note on item 15 were taken in round 2 because the
+  blocker fixes touched those lines.
 
 ### E10 Mandate authoring
 
