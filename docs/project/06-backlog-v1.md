@@ -963,6 +963,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
     that the three read, or an xtask check that they agree. The same change should also give check
     numbers one form: `control.rs` compares a 0-based index with `CORROBORATION_CHECK` (15), where
     `context.rs` uses the 1-based check number.
+    *Under way* ([DEC-415](decisions/DEC-415.md)): the type is `mandate_domain::ThesisRefusal`, live
+    with its tests on `agent/j3-refusal-home-tests`; the implementation PR moves the three readers onto
+    it, names every check by its number from 1, and changes no test file.
   - Minor 5: `control::horizon_agrees` fails closed (check 2 fails) on an instant or horizon it
     cannot read, where the reference validator skips the comparison. The schema guarantees both
     types today, so no record reaches the difference; if the schema ever stops guaranteeing them,
