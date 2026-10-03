@@ -395,6 +395,8 @@ def semantic(m, ctx):
     n_users = ctx.get("approver_users", 1)
     if n_users < 1 or (ap["two_approver_above_usd"] is not None and n_users < 2):
         errs.add("V-024")
+    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:
+        errs.add("V-047")
     if g.get("end_date") is not None and valid_date(g["end_date"]) and g["end_date"] < ctx["validation_date"]:
         errs.add("V-030")
     prev = ctx.get("previous_version")

@@ -1967,12 +1967,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// (DEC-346 item 7). Slice 2 deleted the other two `properties` rows, whose minimal failure is now
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
-///
-/// The five `protection.rs` rows are #533's (DEC-424): a second exit laddered in the same
-/// instrument replaces the first one's lone ladder, which is a wrong answer from code that runs,
-/// with no stub to stop at. Each fails on its own assertion; the fix deletes the rows with the
-/// `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1988,26 +1983,6 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_second_laddered_exit_never_drops_the_first_exits_remainder",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::two_laddered_exits_parked_overnight_both_count_in_their_exits_id_order",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_short_rung_that_sends_nothing_ends_only_its_own_exits_lone_ladder",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::an_abandoned_exits_lone_ladder_counts_nothing_beside_another",
-    ),
-    (
-        "crates/mandate-executor/src/protection.rs",
-        "sequence_tests::a_sequence_for_one_laddered_exit_takes_only_that_exits_lone_ladder",
     ),
 ];
 

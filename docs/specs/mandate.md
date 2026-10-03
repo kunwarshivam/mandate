@@ -31,6 +31,14 @@ builder, versioning, change classification, and the records kept.
   the entry below is not released by this: on the gate's 1e-9 quantity grid its trim is
   0.000116667, not the whole position, and it waits for the instrument's real quantity grid
   (DEC-423, Rationale).
+- **v0.6, amended ([DEC-411](../project/decisions/DEC-411.md), the founder's decision of 2026-10-02):**
+  V-047 refuses a mandate at validation, and again at application, when the workspace's policy
+  requires independent approval and the workspace has fewer than two active users (an unknown count
+  is one). Under that policy deployment, a high-water-mark reset, and lifting a fired tripwire each
+  need a second user, so a single user could neither deploy the mandate nor acknowledge its ladder or
+  its tripwires; §5.7's single-user path is therefore never reached under that policy. §4 lists
+  what validation reads. A workspace that loses its second user after a version is confirmed is not
+  covered: see DEC-411. MC-V69 to MC-V71 are added (§11).
 - **v0.6, amended ([DEC-399](../project/decisions/DEC-399.md) item 8):** §5.5's
   `trim_to_target` minimum is named: a trim is sent only if its quantity is at least the
   instrument's minimum order size (`min_order_size`, [trading spec §5.3](trading-domain.md) rule 2),
@@ -376,6 +384,11 @@ Bring-your-own-strategy is the exception: a **pinned** universe is an envelope f
 ## 4. Validation
 
 A mandate is valid when it passes the JSON Schema, every V-rule, and the policy hierarchy (§4.3).
+Besides the document, validation reads: the account's equity and the other active agents' allocations
+on it, the validation date, the signal-model registry, each field's provenance, the workspace's users
+and approvers, the disclosures accepted, the instrument groups and other agents' claims, the
+connection's environment and loss carry, the eligibility failures, the previous version, and the
+effective policy values (§4.3), `independent_approval_required` among them.
 Failures return all violated codes. Warnings (§4.2) do not block, but each must be acknowledged
 and is recorded in `MandateConfirmed`.
 
@@ -420,6 +433,7 @@ and is recorded in `MandateConfirmed`.
 | V-043 | Each delegation's caps fit inside the envelope: `max_order_usd` ≤ `risk.max_order_usd`, `max_order_usd` ≤ `max_total_usd`, and `max_total_usd` ≤ `capital.allocation_usd`; and when `two_approver_above_usd` is set, `max_order_usd` ≤ it, so a delegation never stands in for a second approver. The gate enforces every limit regardless (§6.5); this keeps a delegation from even appearing to widen one |
 | V-044 | Tripwire ids are sorted and unique. A `consecutive_losing_exits` or `new_instruments` threshold is a whole number from 1 to 1,000; a `realized_loss_usd` threshold is in whole cents and at most `capital.allocation_usd`, so a tripwire never appears to guard what it cannot reach ([DEC-187](../project/04-decision-log.md#decisions), [DEC-352](../project/decisions/DEC-352.md)) |
 | V-046 | An `autonomy.review_by` the version sets or moves (absent from, or different from, the previous version's) is not before the validation date and at most 180 days after it; one carried unchanged is not checked again, so a lapsed date stays lapsed through a version that changes something else. A version whose previous version set a review date sets one too ([DEC-188](../project/04-decision-log.md#decisions), [DEC-272](../project/04-decision-log.md#decisions)) |
+| V-047 | When the workspace's policy requires independent approval (`independent_approval_required`, §4.3, its effective value), the workspace has at least two users. Users are the workspace's active members: a pending invitation or a deactivated account is not one, and a user count that is absent or not known counts as one user (rule 3, as §6.7 says of a missing name). Under that policy, deployment, a high-water-mark reset, and lifting a fired tripwire each need a user other than the requester (§4.3, §5.8, §6.7). A one-user workspace could not deploy the mandate, acknowledge its drawdown ladder, or lift a tripwire it fired, so it is refused here, where the owner sees why, rather than at deployment or at the first latch. Checked at validation and again when a version is applied, as V-002 is ([DEC-411](../project/decisions/DEC-411.md)) |
 
 ### 4.2 Warnings and the confirmation screen
 
@@ -632,6 +646,7 @@ Applies to `exits_only` and `flatten_and_pause` rungs, daily loss, the lifetime 
   `max_loss_from_allocation` to f′ applies with E > C × (1 − f′) + L (strictly), journaled as
   `RiskLimitLifted` with reason `version_loosened`; confirmation then starts afresh. While the floor
   is latched, that version needs independent approval (a second user). In a single-user workspace
+  (never one under `independent_approval_required`, which V-047 refuses at validation)
   it applies only once the first full risk day after the confirmation day has ended; earlier it is
   rejected (`waiting_period`), as is a version that leaves E at or below the new floor
   (`still_below_new_floor`) or does not loosen (`not_loosening`).
@@ -954,7 +969,10 @@ for E9-4's step-up methods.
 the policy overlay lowers it while the approval is pending, needs two distinct approvers; when the
 request bound `independent_approval_required` or the overlay now requires it, neither may be the
 mandate's author (check 7). Each approver counts once. In a one-person workspace such an approval
-cannot reach its quorum, so it times out and is skipped. `deny` is never overridden.
+cannot reach its quorum, so it times out and is skipped. Under `independent_approval_required` V-047
+refuses a one-user workspace at validation, so there this describes a workspace that fell to one user,
+or turned the requirement on, after its version was confirmed
+([DEC-411](../project/decisions/DEC-411.md) item 6). `deny` is never overridden.
 
 **Delegation scopes** ([DEC-181](../project/04-decision-log.md#decisions)): an approval card may
 offer, beside Approve and Skip, the delegation shapes of §6.5, listed in `choices`. "Approve just
@@ -1158,7 +1176,11 @@ requested, which the acknowledgment carries, and the overlay when the executor p
 and §6.4 check 7 read it. Under it the acknowledgment names both users, and one that names the
 requester as the acknowledging user, or omits either name, is refused with `not_independent` (rule 3:
 a missing name never counts as a second user). With the requirement on and only one user in the
-workspace, a fired tripwire cannot be lifted until a second user exists, as for the drawdown ladder.
+workspace, a fired tripwire could not be lifted until a second user exists, as for the drawdown ladder,
+so V-047 refuses such a mandate at validation. What stays reachable is a workspace that falls to one
+user, or turns the requirement on, after its version was confirmed
+([DEC-411](../project/decisions/DEC-411.md) item 6): the tripwire then stays fired until a second user
+acknowledges it, as MC-W50, MC-W53, MC-W54 and MC-W56 pin.
 A refused one is journaled as `OwnerCommandRefused` and the tripwire stays fired. A valid one journals
 `RiskLimitLifted` (reason `owner_acknowledged`), lifts the restriction it held, and, if the version in
 effect still holds the `id`, arms it afresh with nothing counted, so the owner is not asked again for
@@ -1564,7 +1586,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 427 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 432 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1576,7 +1598,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Family | IDs | Covers |
 |---|---|---|
 | Schema | MC-S01 to MC-S31 | Structural rejects, including `on_complete`, the 300 s confirmation cap, per-model output age, `max_instruments` bounds, the research object, `autonomy.admission` |
-| Semantic | MC-V01 to MC-V68 | Every V-rule and warning, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
+| Semantic | MC-V01 to MC-V71 | Every V-rule and warning, independent approval in a one-user workspace (V-047), the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
 | Policy | MC-P01 to MC-P22 | Nearest-level reporting, each key kind, the retail profile (DEC-98), the internal research profile (DEC-103), paper-only environments, the research keys, platform maximums |
 | Risk state | MC-R01 to MC-R26 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |

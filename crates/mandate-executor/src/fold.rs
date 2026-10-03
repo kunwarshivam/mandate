@@ -469,7 +469,9 @@ fn rung_submitted(
             agent: AgentId(required_text(payload, "agent")?.to_owned()),
             ladder,
         };
-        state.ladders.insert(instrument, lone);
+        state
+            .ladders
+            .insert((instrument, lone.intent.clone()), lone);
     }
     Ok(())
 }
@@ -1009,14 +1011,10 @@ fn protection_changed(
             ) {
                 let prices = prices_of(payload)?;
                 let intent = IntentId(EventId(intent.to_owned()));
-                let ladder = match state.ladders.get(&instrument) {
-                    Some(lone) if lone.intent == intent => {
-                        let resumed = lone.ladder;
-                        state.ladders.remove(&instrument);
-                        resumed
-                    }
-                    _ => Ladder::default(),
-                };
+                let ladder = state
+                    .ladders
+                    .remove(&(instrument.clone(), intent.clone()))
+                    .map_or_else(Ladder::default, |lone| lone.ladder);
                 state.exiting.insert(
                     instrument.clone(),
                     ExitSequence {
@@ -1058,13 +1056,9 @@ fn protection_changed(
             {
                 sequence.ladder.stepping = false;
             }
-            if state
+            state
                 .ladders
-                .get(&instrument)
-                .is_some_and(|lone| lone.intent.0.0 == intent)
-            {
-                state.ladders.remove(&instrument);
-            }
+                .remove(&(instrument.clone(), IntentId(EventId(intent.to_owned()))));
         }
         "rung_short" => {}
         "unprotected_end" if flag(payload, "acknowledged") => {
@@ -1103,7 +1097,9 @@ fn protection_changed(
                     agent: sequence.agent,
                     ladder: sequence.ladder,
                 };
-                state.ladders.insert(instrument.clone(), lone);
+                state
+                    .ladders
+                    .insert((instrument.clone(), lone.intent.clone()), lone);
             }
             if let Some(open) = state
                 .unprotected
