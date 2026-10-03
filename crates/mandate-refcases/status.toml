@@ -435,7 +435,7 @@
 # Family E, escalation (stream M7, E8-3; DEC-77 item 3, DEC-292). The ask_permit and deliver_now
 # cases, through mandate-approval (#416), and the lifecycle cases, through mandate-runtime's driver
 # (DEC-317, DEC-366). Ten lifecycle cases wait only on `ApprovalResponded.quorum`, which the runtime
-# does not write yet (E8-3); MC-E18 waits on DEC-318, which the founder decides.
+# does not write yet (E8-3). MC-E18 passes as DEC-318 option (a) restated it (#538, #550; DEC-430).
 'MC-E01' = { status = "pending", story = "E8-3" }
 'MC-E02' = { status = "passing", story = "E8-3" }
 'MC-E03' = { status = "passing", story = "E8-3" }
@@ -453,7 +453,7 @@
 'MC-E15' = { status = "passing", story = "E8-3" }
 'MC-E16' = { status = "passing", story = "E8-3" }
 'MC-E17' = { status = "pending", story = "E8-3" }
-'MC-E18' = { status = "pending", story = "E8-3" }
+'MC-E18' = { status = "passing", story = "E8-3" }
 'MC-E19' = { status = "pending", story = "E8-3" }
 'MC-E20' = { status = "pending", story = "E8-3" }
 'MC-E21' = { status = "pending", story = "E8-3" }
