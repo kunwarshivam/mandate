@@ -104,6 +104,71 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E2-3 (Should)** As a researcher, I want order-book top-of-book data so that slippage models
   can use spreads.
 
+*The live data plane* ([data plane spec](../specs/data-plane.md), [DEC-433](decisions/DEC-433.md)).
+Stories marked SC are safety-critical (connectors, and anything the risk gate reads). Each names
+the spec invariants (DP-n) its tests cover.
+
+- **E2-5 (Must, M6; SC)** As an owner, I want my agents to receive live quotes, trades, bars,
+  trading statuses, and LULD bands from my own Alpaca connection, so that marks and halt checks are
+  current (PRD FR-2.7).
+  *Accepted when:* the stream client connects, authenticates, subscribes, and reconnects with
+  capped backoff against recorded fixtures with no network; the connection states of spec §3.2 hold,
+  with openings blocked outside `live`; every gap window is recorded and backfilled; duplicates,
+  out-of-order quotes, and corrections follow §3.3; the channels each feed carries are verified
+  first (spec §11 question 1); DP-4, DP-5, DP-7 pass under fault injection.
+- **E2-6 (Must, M6; SC)** As an owner, I want one workspace data service that normalizes market
+  data, stamps receive times, and keeps a bounded hot cache, so that every runtime and the executor
+  read the same current prices.
+  *Accepted when:* records are spec §3.1's types with `vendor_time` and `received_at`; quote age and
+  skew follow DEC-433 item 5; instrument status follows §3.5; conflation never drops status, LULD,
+  or correction messages; the subscription set and its overflow follow §3.2; a journal spec PR adds
+  the quote's vendor and receive times to `MarkUpdated` (spec §11 question 2); DP-3 and DP-10 pass.
+- **E2-7 (Must, M5)** As a researcher, I want the point-in-time store to answer "as of" queries by
+  knowledge time, with corrections and revised history as new versions, so that no backtest or
+  research query sees the future.
+  *Accepted when:* every new dataset kind has a knowledge time (spec §5.2); revised history is a new
+  dataset version and the old one stays readable; corrections are records naming the original; a
+  property test against an independent oracle shows DP-1 and DP-2; a backtest records its snapshot
+  digest and reruns bit for bit (DP-14).
+- **E2-8 (Must, M6)** As an owner, I want the eligibility floor's inputs (prior close, 20-day median
+  dollar volume, ETP classification) computed point in time and versioned, so that the floor decides
+  on data it could have known.
+  *Accepted when:* the statistics come from daily bars with knowledge time before the decision and
+  appear in the gate's `checks` inputs; the ETP list's source is decided (trading spec §15 items 5
+  and 8) and an over-age list denies ETP openings; the calendar end alert fires 90 days ahead.
+- **E2-9 (Must, M5)** As the research agent's owner, I want SEC filings and XBRL facts ingested from
+  EDGAR with deterministic tagging, so that the agent reads primary documents without a paid vendor.
+  *Accepted when:* fetches reach only allowlisted endpoints and respect the SEC's fair-access rules;
+  raw bytes are stored by digest before parsing; tags come from filer CIK through a versioned table,
+  resolved as of knowledge time; amended filings and restated facts are new records (DP-1, DP-2,
+  DP-8, DP-9, DP-12).
+- **E2-10 (Must, M5)** As an owner, I want news read through my own Alpaca connection, de-duplicated
+  and grouped by story, so that one story repeated by many outlets counts once.
+  *Accepted when:* vendor updates are linked versions; syndicated copies share a group key (spec
+  §4.4) and the corroboration check counts a group once (DEC-433 item 14, with mandate spec §8.5
+  check 15); prompt-injection fixtures in news text never reach an order (DP-8, E17-7).
+- **E2-11 (Must, M5)** As an owner, I want the research agent to read data only through one as-of
+  query interface that journals what it returns, so that every thesis's inputs are on the record.
+  *Accepted when:* spec §4.6's parameters are enforced; every returned item is journaled as
+  `ObservationRecorded` before the model reads it; the same observations feed the E17-5 drift
+  detector; a query never returns an item from outside the allowlist version (DP-1, DP-3, DP-9).
+- **E2-12 (Should, M11)** As an operator, I want the shared plane to publish signed whole-dataset
+  bundles that cells and hybrid sites pull, and an offline bundle for air-gapped sites, so that
+  public data is computed once without learning any workspace's interests.
+  *Accepted when:* bundles carry a manifest and signature verified before use; nothing
+  workspace-specific reaches the shared plane in a two-workspace test (DP-10); a dataset without a
+  recorded redistribution grant cannot publish (DP-11); no record has a directional field (DP-12).
+- **E2-13 (Must, M7; SC)** As the founder, I want a data-plane fault-injection suite that walks every
+  row of spec §7 to its exit, so that feed failures are proven safe, not assumed.
+  *Accepted when:* each row of §7 is a named test; with the shared plane and every news source down
+  the exit suites still pass (DP-13); one outlier quote anywhere in a random sequence changes no
+  latched limit, trim, or flatten (DP-6), with the H and E₀ cases pending on DEC-433 item 17.
+- **E2-14 (Must, after DEC-433 item 17; SC)** As an owner, I want one wrong high print never to set
+  my high-water mark or my day's starting equity, so that later real prices cannot confirm a loss
+  that did not happen.
+  *Accepted when:* the founder decides item 17; the mandate spec and its reference cases change in
+  their own PR first; DP-6's H and E₀ cases pass.
+
 ### E3 Accounting
 
 - **E3-1 (Must)** As a trader, I want positions, cash, fees, and realized and unrealized P&L

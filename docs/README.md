@@ -29,6 +29,7 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Mandate reference cases](specs/reference-cases/mandate.yaml) | Computed cases for validation, policy, risk state, gate limits, the order builder, autonomy, flatten, goals, and change classification |
 | [Journal spec](specs/journal.md) | Streams, event envelope, canonical serialization, hash chain, storage, replay, verification, export |
 | [Journal test vectors](specs/reference-cases/journal.yaml) | Exact canonical bytes and hashes, plus tamper cases |
+| [Data plane spec](specs/data-plane.md) (draft v0.1) | Live market data, reference data, news, filings, fundamentals, the point-in-time store, fan-out to workspaces, failure walk, and adversaries |
 
 ## Product
 
