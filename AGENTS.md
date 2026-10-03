@@ -170,23 +170,28 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
 
 - **Setup:** `bash .cursor/install.sh` installs everything at the pinned versions and is idempotent;
   Cloud Agents run it automatically through `.cursor/environment.json`. Rust comes from
-  `rust-toolchain.toml` (1.98.1) via rustup; Python 3.14 and uv 0.12; cargo-deny, cargo-nextest,
-  typos, gitleaks, shellcheck, and actionlint at the versions in `.github/workflows/ci.yml` (keep
-  the two in sync). It downloads only from `github.com` (release assets redirect to
+  `rust-toolchain.toml` (1.98.1) via rustup, which must already be installed; Python 3.14 and uv
+  0.12; cargo-deny, cargo-nextest, cargo-mutants, typos, gitleaks, shellcheck, and actionlint at
+  the versions in `.github/workflows/ci.yml` (keep the two in sync). The binaries it downloads are
+  x86_64 Linux builds. It downloads only from `github.com` (release assets redirect to
   `release-assets.githubusercontent.com`), `static.rust-lang.org`, `index.crates.io`,
   `static.crates.io`, `pypi.org`, and `files.pythonhosted.org`, never from `astral.sh`, so it runs
-  behind restrictive egress proxies. It also sets `python-install-mirror` in uv's user config
+  behind restrictive egress proxies. The one exception is PostgreSQL 18 for the Postgres journal
+  tests: it tries the system package manager and `apt.postgresql.org`, and if that fails those
+  tests skip. It also sets `python-install-mirror` in uv's user config
   (`~/.config/uv/uv.toml`) so later `uv` calls fetch Python from GitHub too. Work under `web/`
   (DEC-200) also needs `nodejs.org`, for the Node.js release pinned in `web/.nvmrc`,
   `registry.npmjs.org`, for `npm ci`, and `cdn.playwright.dev`, for the Chromium download that
   local end-to-end runs need; `install.sh` installs no Node.js and fetches from none of them.
 - **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint
   (shellcheck over `.github/scripts/`, actionlint over `.github/workflows/`, fmt, clippy
-  `-D warnings`, crate layering, typos, ruff), test (nextest, doctests, pytest), reference-case
-  fixture drift, the reference implementation checks, supply chain (cargo-deny, the dependency
-  registry, gitleaks), and the spec guard. CI runs them as two required checks: `cargo xtask ci fast`
-  (lint, test, pending tests, spec guard) and `cargo xtask ci full` (fixtures, reference, supply
-  chain).
+  `-D warnings`, crate layering, markers, saved proptest seeds, the feature map, typos, ruff), test
+  (nextest, doctests, pytest), pending tests, reference-case fixture drift, the reference
+  implementation checks, supply chain (cargo-deny, the dependency registry, gitleaks), the spec
+  guard, the Postgres journal tests (skipped unless `MANDATE_PG_URL` is set), and mutants on the
+  diff of safety-critical crates. CI runs them as two required checks: `cargo xtask ci fast` (lint,
+  test, pending tests, spec guard) and `cargo xtask ci full` (fixtures, reference, supply chain,
+  Postgres, mutants).
 - **New crates** get an entry in `xtask/layers.toml` in the same change; safety-critical crates also
   get a CODEOWNERS line and start `src/lib.rs` with the lint header `cargo xtask layers` checks.
 - **New dependencies** need a row in `docs/dependencies.md` in the same change (none by default).

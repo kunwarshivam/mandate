@@ -593,8 +593,8 @@ the founder's order (2026-09-27):
 
 1. **The provable, pre-registered track record.** Every decision is journaled before acting in a
    hash chain that `journal verify` checks (E5-1 to E5-4). Journal spec §10 specifies the anchoring
-   that makes its existence at a time provable to within the anchor interval; the RFC 3161 token
-   check is an E5 follow-up, not yet built. A monthly breach record for each owner is proposed
+   that makes its existence at a time provable to within the anchor interval; the RFC 3161 token's
+   imprint check is built (E5-6), and its signature check is the Proposed half of DEC-265 item 1. A monthly breach record for each owner is proposed
    (story E12-4, not yet planned); publishing it beyond the owner needs counsel's answer and the
    founder (DEC-79).
 2. **Mandate experiments** (option 16), which make the first one per-user.

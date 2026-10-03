@@ -2,8 +2,9 @@
 
 | Term | Meaning |
 |---|---|
-| **Mandate** (product) | Working name of the platform |
-| **mandate** (object) | An agent's binding specification: goal, instruments, capital, connection, signal models, sizing, cadence, protection, risk limits, autonomy rules, notifications ([mandate spec](../specs/mandate.md)). Called the "agent spec" in the HLD |
+| **Owlhead** | The product's public name, at owlhead.ai. Anything public-facing uses it ([DEC-171](../project/04-decision-log.md#decisions)) |
+| **Mandate** (product) | The internal name of the platform. The repository, the crates (`mandate-*`), and the working documents keep it; nothing is renamed ([DEC-171](../project/04-decision-log.md#decisions)) |
+| **mandate** (object) | An agent's binding specification: goal, allowed asset classes and `max_instruments`, capital, connection, signal models, sizing, cadence, protection, risk limits, autonomy rules, notifications ([mandate spec](../specs/mandate.md)). Called the "agent spec" in the HLD |
 | **Harness** | Mandate's enterprise layer: the gate, autonomy rules, journal, executor, connectors, conformance suite, and MCP channel, sold to brokers, fintechs, and teams building agents ([DEC-149](../project/04-decision-log.md#decisions)). Not the same as a test harness |
 | **Platform (Mandate)** | Mandate's retail layer for owners; it runs through the harness and has no private path around it ([DEC-149](../project/04-decision-log.md#decisions)) |
 | **Inner harness / outer harness** | The inner harness is the code around a model: loop, tools, context, sandbox, permissions, and hooks. The outer harness is what a team builds so agents do reliable work: the repository as system of record, mechanical invariants, evals, and feedback ([harness engineering §1](11-harness-engineering.md#1-what-harness-engineering-means)) |
@@ -24,7 +25,7 @@
 | **Research agent** | The LLM-driven runtime component that turns allowlisted market data, news, filings, and the agent's own memory into theses and admits instruments into the working universe through the eligibility floor and the autonomy rules. One signal model with a user-confirmed weight ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), [mandate spec §8.4](../specs/mandate.md#84-the-research-agent-dec-97-adr-0002)) |
 | **Thesis** | A research-agent output naming one instrument, direction, horizon, evidence, corroboration, and invalidation conditions, with conviction and self-reported confidence; journaled as `ThesisProposed`. It expires at its horizon, when the instrument becomes exits-only and the thesis is scored ([DEC-118](../project/04-decision-log.md#decisions)) |
 | **Thesis revision** | A thesis the research agent re-proposes after its predecessor failed on forward paper, naming the failure it addresses; journaled as `ThesisRevised` with its lineage, scored from zero, capped per lineage by `max_revisions_per_lineage` ([DEC-111](../project/04-decision-log.md#decisions)) |
-| **Risk exit / discretionary exit / owner exit** | An exit from the risk engine (limits, automated flatten, trim, stop watchdog), exempt from all controls; an owner's close or kill switch, paced only by participation caps; an exit from the order builder or goal, paced by conduct controls but never denied |
+| **Risk exit / owner exit / discretionary exit** | An exit from the risk engine (limits, automated flatten, trim, stop watchdog), exempt from all controls; an owner's close or kill switch, paced only by participation caps; an exit from the order builder or goal, paced by conduct controls but never denied |
 | **Lifetime loss floor** | Equity level (contributed capital × (1 − `max_loss_from_allocation`)) at which an agent flattens and pauses permanently unless the owner loosens the mandate |
 | **Autonomy policy** | Rules that classify each proposed action as AUTO, ASK, or DENY |
 | **Risk gate** | Independent code on the order path that enforces limits regardless of agent logic |
@@ -32,7 +33,8 @@
 | **Drawdown ladder** | Automatic de-risking steps at increasing losses (for example, halve sizes, exits only, flatten) |
 | **Kill switch** | Immediate stop at agent, connection, workspace, organization, or global level |
 | **Escalation** | Asking a human to approve an action |
-| **Approval request** | The escalation record: proposed action, alternatives, evidence, risk impact, deadline, default |
+| **Approval request** | The escalation record: proposed action, the rule that triggered it, evidence, risk impact, deadline, default. It never shows a platform-authored alternative trade ([mandate spec §6.4](../specs/mandate.md#64-approvals)) |
+| **Delegation** | An owner-picked, bounded, expiring permission that turns an `ask` into `auto` inside the envelope. It never lifts a `deny` or a limit, and lasts at most 30 days (`autonomy.delegations`; [DEC-181](../project/04-decision-log.md#decisions), [ADR-0003](../adr/0003-earned-autonomy.md), [mandate spec §6.5](../specs/mandate.md#65-delegations-dec-181-adr-0003)) |
 | **Safe default** | The action applied when an approval times out; never adds risk |
 | **Drift re-validation** | Re-checking price and risk before executing an approved action |
 | **Step-up authentication** | Extra authentication (passkey or biometrics) for sensitive actions |

@@ -199,6 +199,14 @@ RELEASE_CARRY = release_carry()
 SEM.append(("MC-V68", "A released agent's loss carry counts against a redeploy on the same connection", "btc_accumulator",
             [rep("/capital/allocation_usd", "1500"), rep("/risk/max_position_usd", "1500"), rep("/risk/max_gross_exposure_usd", "1500")],
             {"connection_loss_carry_usd": RELEASE_CARRY}))
+SEM += [
+    ("MC-V69", "Independent approval required in a one-user workspace", "btc_accumulator", [],
+     {"independent_approval_required": True, "workspace_users": 1}),
+    ("MC-V70", "Independent approval required in a two-user workspace passes V-047", "btc_accumulator", [],
+     {"independent_approval_required": True, "workspace_users": 2}),
+    ("MC-V71", "A one-user workspace without independent approval is fine", "btc_accumulator", [],
+     {"independent_approval_required": False, "workspace_users": 1}),
+]
 
 for cid, title, base, patch, ctx in SEM:
     m = apply_patch(MB[base], patch)
@@ -555,20 +563,32 @@ B = [
     ("MC-B16", "Above target with positive conviction and limit_buys: hold", "two_stock_swing",
      dict(BI, position_qty="10", size_factor="0.5", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
     ("MC-B17", "trim_to_target: confirmed rung reduces the position as a risk exit", "two_stock_swing_trim",
-     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_size="1", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_size="1", open_sell_qty="0", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
     ("MC-B30", "trim_to_target withheld until the rung is confirmed", "two_stock_swing_trim",
-     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=10, min_order_size="1", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=10, min_order_size="1", open_sell_qty="0", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
     ("MC-B31", "trim_to_target withheld outside the regular session and while holding", "two_stock_swing_trim",
      at_now(dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, session="after_hours", holding=True,
-                 min_order_size="1", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO), AFTER_HOURS)),
+                 min_order_size="1", open_sell_qty="0", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO), AFTER_HOURS)),
     ("MC-B32", "No trim when the excess is below the rebalance band", "two_stock_swing_trim",
-     dict(BI, position_qty="8", size_factor="0.5", scale_active_s=120, min_order_size="1", gate_state=gst(positions_mv={XYZ: "799.2"}), outputs=TWO)),
+     dict(BI, position_qty="8", size_factor="0.5", scale_active_s=120, min_order_size="1", open_sell_qty="0", gate_state=gst(positions_mv={XYZ: "799.2"}), outputs=TWO)),
     ("MC-B33", "trim_to_target: a trim of at least the instrument's minimum size goes under a larger dollar minimum",
      "two_stock_swing_trim",
-     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_usd="500", min_order_size="3",
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_usd="500", min_order_size="3", open_sell_qty="0",
           gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
     ("MC-B34", "trim_to_target withheld below the instrument's minimum order size", "two_stock_swing_trim",
-     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_size="4",
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_size="4", open_sell_qty="0",
+          gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+    ("MC-B35", "trim_to_target: a trim of the whole position goes below the instrument's minimum order size",
+     "two_stock_swing_trim",
+     dict(BI, position_qty="1", quote={"bid": "999", "ask": "1000"}, size_factor="0.5", scale_active_s=120,
+          min_order_size="2", open_sell_qty="0", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+    ("MC-B36", "trim_to_target: a resting sell leaves a remainder below the minimum size, which is withheld",
+     "two_stock_swing_trim",
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_size="3", open_sell_qty="2",
+          gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+    ("MC-B37", "trim_to_target: a resting sell leaves a remainder, which is the trim",
+     "two_stock_swing_trim",
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_size="1", open_sell_qty="2",
           gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
     ("MC-B18", "Delta within the rebalance band: hold", "two_stock_swing", dict(BI, position_qty="7", gate_state=gst(positions_mv={XYZ: "699.3"}), outputs=TWO)),
     ("MC-B19", "Value after limit clips below the band: hold", "two_stock_swing",
@@ -1073,7 +1093,8 @@ E_LIVE = dict(E_CTX, environment="live")
 e_grant_case("MC-E16", "cli_confirm on a live connection is refused as step_up_method", ctx=E_LIVE)
 e_grant_case("MC-E17", "Re-validation skips a grant whose mandate version changed (version_changed)",
              now=dict(E_NOW, mandate_version="sha256:v2"))
-e_grant_case("MC-E18", "Re-validation skips a grant while the mode is exits_only (mode)", now=dict(E_NOW, mode="exits_only"))
+e_grant_case("MC-E18", "An exits_only step cancels a pending grant first (mode_tightened), so it is refused as not pending and never acts",
+             now=dict(E_NOW, mode="exits_only"))
 e_grant_case("MC-E19", "Re-validation skips a grant re-classified deny (reclassified_deny)",
              now=dict(E_NOW, classification={"decision": "deny", "by": "rule:no_more"}))
 e_grant_case("MC-E20", "Re-validation skips a grant re-classified ask by another rule (reclassified_other_trigger)",

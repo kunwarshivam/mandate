@@ -1,4 +1,4 @@
-//! Family B of the `mandate` suite: the thirty-two `builder` cases (spec §6.2, §8.1 to §8.3), run
+//! Family B of the `mandate` suite: the thirty-seven `builder` cases (spec §6.2, §8.1 to §8.3), run
 //! through `mandate_builder::propose`, `mandate_risk::evaluate` as §6.2 step 2's dry run, and
 //! `mandate_builder::decide` (E6-2, DEC-130, DEC-250).
 //!
@@ -22,8 +22,11 @@
 //! **The gate's other inputs** are DEC-178's "every other check passes" environment, as for family
 //! G: a healthy risk state at the case's equity, a margin account at the fixture's
 //! `account_equity_usd`, and a liquid, tradable, unhalted listing of the pinned instrument, quoted at
-//! the case's own bid and ask at `now`, whose minimum order size is the case's `qty_increment`;
-//! on a `trim_to_target` base, the trim call reads the case's `min_order_size` instead, when stated.
+//! the case's own bid and ask at `now`, whose minimum order size is the case's `qty_increment`.
+//! A `trim_to_target` base's trim inputs make one scene for both of its gate calls, the trim and
+//! the builder's dry run: the instrument's minimum is the case's `min_order_size`, which such a
+//! case must state, as `ref.py` requires (DEC-399 item 8), the confirmed `scale_sizes` rung has
+//! been active for `scale_active_s`, and the goal is Holding when `holding` says so.
 //!
 //! **What the harness fills.** The fixture header's four defaults (`session` regular,
 //! `in_close_window` false, fee rates 0, `has_prior_fill` = position above zero) and `ref.py`'s
@@ -57,8 +60,8 @@ use mandate_builder::{
 };
 use mandate_domain::{AssetClass, AssetId, MarketSession, Purpose};
 use mandate_num::{
-    Conviction, CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, Ratio, Rounding, Signed,
-    SizeFraction, Unit, Usd, UsdExact,
+    Conviction, CostBasis, FeeRate, Fraction, MarkPrice, NumError, Price, Qty, Ratio, Rounding,
+    Signed, SizeFraction, Unit, Usd, UsdExact,
 };
 use mandate_risk as gate;
 use mandate_risk::spec_types::{GoalState, RiskLimits, Rung, RungAction, ScaleAction};
@@ -99,9 +102,15 @@ const INPUT_KEYS: &[&str] = &[
     "scale_active_s",
     "holding",
     "min_order_size",
+    "open_sell_qty",
 ];
-/// §5.5's trim guards, which only a `trim_to_target` mandate reads.
-const TRIM_INPUT_KEYS: [&str; 3] = ["scale_active_s", "holding", "min_order_size"];
+/// §5.5's trim inputs, which only a `trim_to_target` mandate reads.
+const TRIM_INPUT_KEYS: [&str; 4] = [
+    "scale_active_s",
+    "holding",
+    "min_order_size",
+    "open_sell_qty",
+];
 const TRIM_EXPECT_KEYS: [&str; 2] = ["origin", "trim_withheld"];
 /// Every member a trim's expectation may state (MC-B17).
 const TRIM_KEYS: [&str; 10] = [
@@ -180,7 +189,7 @@ pub(super) fn builder_case(fixture: &Json, case: &Json) -> Result<(), String> {
     let stated = Inputs::read(document, input)?;
     let config = test_default_gate_config()?;
     if document.risk.scale_action == spec_doc::ScaleAction::TrimToTarget {
-        return trim_first(fixture, document, &stated, &config, input, expect);
+        return trim_first(fixture, document, &stated, &config, expect);
     }
     for key in TRIM_INPUT_KEYS {
         ensure(input.get(key).is_none(), || {
@@ -216,33 +225,13 @@ fn trim_first(
     document: &Mandate,
     stated: &Inputs,
     config: &gate::GateConfig,
-    input: &Json,
     expect: &Json,
 ) -> Result<(), String> {
-    let active_s = match input.get("scale_active_s") {
-        None => 0,
-        Some(value) => value
-            .as_u64()
-            .ok_or("`scale_active_s` is not a whole number of seconds")?,
-    };
-    let holding = flag_or(input, "holding", false)?;
-    let min_order_size = match input.get("min_order_size") {
-        None => stated.increment,
-        Some(_) => num(
-            Qty::parse(str_at(input, "min_order_size")?),
-            "min_order_size",
-        )?,
-    };
-    let goal_state = if holding {
-        GoalState::Holding
-    } else {
-        GoalState::Running
-    };
-    let mut scene = Scene::read(fixture, document, stated, config, goal_state)?;
-    if let Some(rung) = scaling_rung(document, stated.gate_size_factor)? {
-        scene.risk.active_rungs.insert(rung, active_s);
-    }
-    scene.instrument.min_order_size = min_order_size;
+    let trim = stated
+        .trim
+        .as_ref()
+        .ok_or("a `trim_to_target` base read no trim inputs")?;
+    let scene = Scene::read(fixture, document, stated, config)?;
     let instruments = BTreeMap::from([(
         scene.instrument.instrument.clone(),
         scene.instrument.clone(),
@@ -274,13 +263,7 @@ fn trim_first(
         proposal.sizes.current_mv,
         exact(expect, "current_mv")?,
     )?;
-    let guards = trim_guards(
-        document,
-        stated,
-        &clock,
-        expect,
-        (active_s, holding, min_order_size),
-    )?;
+    let guards = trim_guards(document, stated, &clock, expect, trim)?;
     let unguarded = guards.as_ref().is_some_and(Vec::is_empty);
     let judged = match (trims.as_slice(), unguarded) {
         ([trim], true) => compare_trim(document, stated, &clock, &proposal, trim, expect),
@@ -307,17 +290,17 @@ fn trim_first(
     stated.agrees_with_clock(&clock, judged)
 }
 
-/// `reference/mandate/ref.py`'s guards, in its order, on the case's own figures, except that
-/// `below_minimum_order` exempts a trim of the whole position (DEC-423), which `ref.py` takes up in
-/// the reference PR after this harness: `None` when no trim is due (no factor below one, or an excess under the band), else every guard that withholds
-/// it, empty when none does. Read from the case, not from `trim_proposals`, which names no guard,
+/// `reference/mandate/ref.py`'s guards, in its order, on the case's own figures, with
+/// `below_minimum_order` exempting a trim of the whole position as `ref.py` does (DEC-423):
+/// `None` when no trim is due (no factor below one, or an excess under the band), else every guard
+/// that withholds it, empty when none does. Read from the case, not from `trim_proposals`, which names no guard,
 /// so the gate's answer is judged against them rather than explained by them (DEC-400 item 2).
 fn trim_guards(
     document: &Mandate,
     stated: &Inputs,
     clock: &gate::SessionAt,
     expect: &Json,
-    (active_s, holding, min_order_size): (u64, bool, Qty),
+    trim: &TrimInputs,
 ) -> Result<Option<Vec<&'static str>>, String> {
     let factor = UsdExact::of_ratio(stated.gate_size_factor);
     let one = num(UsdExact::parse("1"), "one")?;
@@ -338,26 +321,39 @@ fn trim_guards(
     if !num(factor.is_below(one), "size_factor")? || num(excess.is_below(band), "excess")? {
         return Ok(None);
     }
-    let sell = num(
+    let whole_excess = num(
         excess.ceiled_quotient(UsdExact::of_price(stated.bid), stated.increment),
         "the trim's quantity",
-    )?
-    .min(stated.position);
+    )?;
+    let on_sale = trim.open_sell_qty;
+    let sell = less_or_zero(whole_excess, on_sale)?.min(less_or_zero(stated.position, on_sale)?);
+    if sell.is_zero() {
+        return Ok(None);
+    }
     let mut guards = Vec::new();
-    if active_s < u64::from(document.risk.breach_confirm_s) {
+    if trim.active_s < u64::from(document.risk.breach_confirm_s) {
         guards.push("rung_not_confirmed");
     }
-    if holding {
+    if trim.holding {
         guards.push("holding");
     }
     if stated.asset_class == AssetClass::UsEquity && clock.session != gate::Session::Regular {
         guards.push("regular_session_only");
     }
     let closes_the_position = sell == stated.position;
-    if sell < min_order_size && !closes_the_position {
+    if sell < trim.min_order_size && !closes_the_position {
         guards.push("below_minimum_order");
     }
     Ok(Some(guards))
+}
+
+/// `from` less `taken`, or none when `taken` covers it: what resting sells leave of the excess and
+/// of the position (DEC-399 item 7).
+fn less_or_zero(from: Qty, taken: Qty) -> Result<Qty, String> {
+    match from.checked_sub(taken) {
+        Err(NumError::Negative) => Ok(Qty::ZERO),
+        left => num(left, "a quantity less the resting sells"),
+    }
 }
 
 /// MC-B17's members for a trim, its cap and market value already compared: the risk exit itself,
@@ -473,7 +469,7 @@ fn judge(
             )),
         };
     };
-    let scene = Scene::read(fixture, document, stated, config, GoalState::Running)?;
+    let scene = Scene::read(fixture, document, stated, config)?;
     let proposed = order.proposed(stated.instrument_id()?, scene.next_order_id);
     let decision = gate::evaluate(&scene.input(stated.now, &proposed))
         .map_err(|e| gate_error("evaluate", &e))?;
@@ -768,6 +764,40 @@ struct Inputs {
     state: GateState,
     stated_session: MarketSession,
     stated_close_window: bool,
+    /// §5.5's trim inputs, read on a `trim_to_target` base only. Both gate calls on such a base,
+    /// the trim and the builder's dry run, see them through one [`Scene`] (#498 review, m3).
+    trim: Option<TrimInputs>,
+}
+
+/// What a `trim_to_target` case states for §5.5's guards: how long the rung has been active, whether
+/// the goal is Holding, the instrument's minimum order size, which `ref.py` requires, and the
+/// quantity of the agent's own non-protective sells already resting in the instrument, which the
+/// trim is sized after (DEC-399 item 7). `ref.py` requires both of the last two on a trim base.
+struct TrimInputs {
+    active_s: u64,
+    holding: bool,
+    min_order_size: Qty,
+    open_sell_qty: Qty,
+}
+
+impl TrimInputs {
+    fn read(input: &Json) -> Result<Self, String> {
+        let active_s = match input.get("scale_active_s") {
+            None => 0,
+            Some(value) => value
+                .as_u64()
+                .ok_or("`scale_active_s` is not a whole number of seconds")?,
+        };
+        Ok(Self {
+            active_s,
+            holding: flag_or(input, "holding", false)?,
+            min_order_size: num(
+                Qty::parse(str_at(input, "min_order_size")?),
+                "min_order_size",
+            )?,
+            open_sell_qty: num(Qty::parse(str_at(input, "open_sell_qty")?), "open_sell_qty")?,
+        })
+    }
 }
 
 impl Inputs {
@@ -922,6 +952,10 @@ impl Inputs {
             )?)
             .map_err(|e| format!("`session`: {}", e.code()))?,
             stated_close_window: flag_or(input, "in_close_window", false)?,
+            trim: match document.risk.scale_action {
+                spec_doc::ScaleAction::TrimToTarget => Some(TrimInputs::read(input)?),
+                spec_doc::ScaleAction::LimitBuys => None,
+            },
         })
     }
 
@@ -1174,7 +1208,6 @@ impl Scene {
         document: &Mandate,
         stated: &Inputs,
         config: &gate::GateConfig,
-        goal_state: GoalState,
     ) -> Result<Self, String> {
         let account_equity = num(
             Usd::parse(str_at(
@@ -1217,7 +1250,35 @@ impl Scene {
             );
             next_id = next_id.saturating_add(1);
         }
+        if let Some(trim) = stated.trim.as_ref().filter(|t| !t.open_sell_qty.is_zero()) {
+            working_orders.insert(
+                gate::ClientOrderId(next_id),
+                gate::WorkingOrder {
+                    agent: THE_AGENT,
+                    instrument: instrument.clone(),
+                    side: gate::Side::Sell,
+                    max_cost: Usd::ZERO,
+                    open_qty: trim.open_sell_qty,
+                    protective: false,
+                    opening: false,
+                    submitted_on: today,
+                },
+            );
+            next_id = next_id.saturating_add(1);
+        }
         let agent_equity = stated.account.agent_equity;
+        let mut instrument_snapshot = listing(stated, instrument, one)?;
+        let mut active_rungs = BTreeMap::new();
+        let mut goal_state = GoalState::Running;
+        if let Some(trim) = &stated.trim {
+            instrument_snapshot.min_order_size = trim.min_order_size;
+            if let Some(rung) = scaling_rung(document, stated.gate_size_factor)? {
+                active_rungs.insert(rung, trim.active_s);
+            }
+            if trim.holding {
+                goal_state = GoalState::Holding;
+            }
+        }
         Ok(Self {
             mandate: gate_mandate(document, goal_state)?,
             config: config.clone(),
@@ -1228,7 +1289,7 @@ impl Scene {
                 capital_base: agent_equity,
                 inherited_loss: Usd::ZERO,
                 latched: BTreeSet::new(),
-                active_rungs: BTreeMap::new(),
+                active_rungs,
                 size_factor: stated.gate_size_factor,
                 agent_mode: gate::AgentMode::Normal,
             },
@@ -1262,7 +1323,7 @@ impl Scene {
                 orders_today: state.orders_today,
                 day_trades: gate::DayTradeLedger::default(),
             },
-            instrument: listing(stated, instrument, one)?,
+            instrument: instrument_snapshot,
             market: gate::MarketSnapshot {
                 quote: Some(gate::SaneQuote {
                     bid: stated.bid,
@@ -1563,43 +1624,17 @@ mod tests {
 
     const PLANTED: &str = "zz_planted";
 
-    /// The cases that pass against the merged `mandate-builder` and `mandate-risk`: all thirty-four
-    /// since the trim arm compares MC-B17 and MC-B30 to MC-B32 (DEC-400), and MC-B33 and MC-B34
-    /// landed in #504 (DEC-399 item 8).
-    const PASSING: [&str; 34] = [
+    /// The cases that pass against the merged `mandate-builder` and `mandate-risk`: all thirty-seven
+    /// since the trim arm compares MC-B17 and MC-B30 to MC-B32 (DEC-400), MC-B33 and MC-B34 landed
+    /// in #504 (DEC-399 item 8), MC-B35, the whole-position trim below the minimum, in #530
+    /// (DEC-423), and MC-B36 and MC-B37, the trim after a resting sell, in #567 (DEC-399 item 7).
+    const PASSING: [&str; 37] = [
         "MC-B01", "MC-B02", "MC-B03", "MC-B04", "MC-B05", "MC-B06", "MC-B07", "MC-B08", "MC-B09",
         "MC-B10", "MC-B11", "MC-B12", "MC-B13", "MC-B14", "MC-B15", "MC-B16", "MC-B17", "MC-B18",
         "MC-B19", "MC-B20", "MC-B21", "MC-B22", "MC-B23", "MC-B24", "MC-B25", "MC-B26", "MC-B27",
-        "MC-B28", "MC-B29", "MC-B30", "MC-B31", "MC-B32", "MC-B33", "MC-B34",
+        "MC-B28", "MC-B29", "MC-B30", "MC-B31", "MC-B32", "MC-B33", "MC-B34", "MC-B35", "MC-B36",
+        "MC-B37",
     ];
-
-    /// MC-B35, the trim of the whole position below the instrument's minimum order size that
-    /// DEC-423 exempts. The reference PR that adds it lands after this harness, so the fixture
-    /// holds it or not; if present it must pass, and the counts below are stated for both fixtures.
-    /// A cleanup drops the fixture without it once it lands.
-    const AWAITED: [&str; 1] = ["MC-B35"];
-    const DOCTORINGS_WITH: usize = 1046;
-    const REFUSED_WITH: usize = 1390;
-
-    /// Whether the fixture already holds the [`AWAITED`] cases.
-    fn awaited(fixture: &Json) -> Result<bool, String> {
-        let present = crate::list_at(fixture, "cases")?
-            .iter()
-            .filter(|c| c["id"].as_str().is_some_and(|id| AWAITED.contains(&id)))
-            .count();
-        crate::ensure(present == 0 || present == AWAITED.len(), || {
-            format!(
-                "the fixture holds {present} of the {} awaited cases, not none or all",
-                AWAITED.len()
-            )
-        })?;
-        Ok(present == AWAITED.len())
-    }
-
-    /// `without` on today's fixture, `with` once the awaited cases land.
-    fn counted(fixture: &Json, without: usize, with: usize) -> Result<usize, String> {
-        Ok(if awaited(fixture)? { with } else { without })
-    }
 
     fn fixture() -> Result<Json, String> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
@@ -1612,15 +1647,14 @@ mod tests {
             .filter(|c| c["kind"] == "builder")
             .cloned()
             .collect();
-        let expected = counted(fixture, 34, 35)?;
-        crate::ensure(cases.len() == expected, || {
-            format!("family B is {expected} cases, found {}", cases.len())
+        crate::ensure(cases.len() == PASSING.len(), || {
+            format!("family B is {} cases, found {}", PASSING.len(), cases.len())
         })?;
         Ok(cases)
     }
 
     fn listed(id: &str) -> bool {
-        PASSING.contains(&id) || AWAITED.contains(&id)
+        PASSING.contains(&id)
     }
 
     fn passing(fixture: &Json) -> Result<Vec<Json>, String> {
@@ -1635,8 +1669,8 @@ mod tests {
     /// - A trim's minimum is the instrument's minimum order size, not the dollar minimum (§5.5,
     ///   DEC-399 item 8): MC-B17 under a 1000-dollar minimum still trims its 3 shares, and at a
     ///   `min_order_size` of 3 it still does, while at 4 the trim is withheld and the case fails
-    ///   naming `below_minimum_order`. With no `min_order_size` stated, the minimum is one
-    ///   increment: on a 3-share grid MC-B17 still trims (#498 review, m1).
+    ///   naming `below_minimum_order`. On a 3-share grid MC-B17 still trims (#498 review, m1). A
+    ///   trim case that states no `min_order_size` is refused naming it, never given a default.
     /// - A trim of the whole position is a full close, which the minimum exempts (DEC-423):
     ///   MC-B17 reshaped as 1 share at a 999 bid trims that share at a 2-share minimum. Under the
     ///   guard without the exemption, the gate's trim and the case's guards disagree, and the case
@@ -1672,6 +1706,12 @@ mod tests {
             *v = json!("3");
         })?;
         run(on_the_grid, "MC-B17").map_err(|e| format!("MC-B17 on a 3-share grid: {e}"))?;
+        let unstated = doctored(&fixture, "MC-B17", "/input", remove("min_order_size"))?;
+        fails_naming(
+            run(unstated, "MC-B17"),
+            "min_order_size",
+            "MC-B17 with no minimum order size",
+        )?;
         let confirmed = doctored(&fixture, "MC-B30", "/input/scale_active_s", |v| {
             *v = json!(60);
         })?;
@@ -1717,6 +1757,102 @@ mod tests {
         })?;
         run(whole_position, "MC-B17")
             .map_err(|e| format!("MC-B17 as 1 share below a 2-share minimum: {e}"))
+    }
+
+    /// A trim is sized after the agent's own resting sells (DEC-399 item 7), in the gate's scene and
+    /// in the case's guards alike. MC-B17's excess is 3 shares of its 10:
+    /// - with 2 shares resting, the trim is the 1-share remainder, and a case that states the
+    ///   whole excess's 3 fails naming `qty`;
+    /// - MC-B30 confirmed, with 2 resting and a 3-share minimum, withholds that remainder as
+    ///   `below_minimum_order`, which the whole excess would meet, so a reading that ignored the
+    ///   resting sell fails naming both answers;
+    /// - with 3 or more resting, no trim is due at all, and the case states no `trim_withheld`;
+    /// - a trim case that states no `open_sell_qty` is refused naming it, never given a default.
+    #[test]
+    fn a_trim_is_sized_after_the_agent_s_resting_sells() -> Result<(), String> {
+        let fixture = fixture()?;
+        let remainder = doctored(&fixture, "MC-B17", "", |case| {
+            put(case, "input", "open_sell_qty", json!("2"));
+            put(case, "expect", "qty", json!("1"));
+            put(case, "expect", "order_usd", json!("99.9"));
+        })?;
+        run(remainder, "MC-B17").map_err(|e| format!("MC-B17 beside 2 resting shares: {e}"))?;
+        let unstated = doctored(&fixture, "MC-B17", "/input", remove("open_sell_qty"))?;
+        fails_naming(
+            run(unstated, "MC-B17"),
+            "open_sell_qty",
+            "MC-B17 with no resting-sell quantity",
+        )?;
+        let whole_excess = doctored(&fixture, "MC-B17", "", |case| {
+            put(case, "input", "open_sell_qty", json!("2"));
+        })?;
+        fails_naming(
+            run(whole_excess, "MC-B17"),
+            "qty",
+            "MC-B17 beside 2 resting shares, stating the whole excess",
+        )?;
+        let below = doctored(&fixture, "MC-B30", "", |case| {
+            put(case, "input", "scale_active_s", json!(120));
+            put(case, "input", "open_sell_qty", json!("2"));
+            put(case, "input", "min_order_size", json!("3"));
+            put(
+                case,
+                "expect",
+                "trim_withheld",
+                json!(["below_minimum_order"]),
+            );
+        })?;
+        run(below, "MC-B30").map_err(|e| {
+            format!("MC-B30 confirmed, a 1-share remainder at a 3-share minimum: {e}")
+        })?;
+        for resting in ["3", "10"] {
+            let covered = doctored(&fixture, "MC-B30", "", |case| {
+                put(case, "input", "scale_active_s", json!(120));
+                put(case, "input", "open_sell_qty", json!(resting));
+                case.get_mut("expect")
+                    .and_then(Json::as_object_mut)
+                    .map(|members| members.remove("trim_withheld"));
+            })?;
+            run(covered, "MC-B30")
+                .map_err(|e| format!("MC-B30 confirmed with {resting} shares resting: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// Both gate calls on a `trim_to_target` base see one scene (#498 review, m3). MC-B01, a
+    /// 7-share opening buy, moved onto the trim base, where no trim is due at a factor of one, so
+    /// its order reaches the builder's dry run:
+    /// - at a `min_order_size` of 7 it passes as stated;
+    /// - at 8 the dry run reads that minimum too, so the gate meets trading spec §5.3 rule 2 for the
+    ///   opening, where a dry run on `qty_increment` would allow it. Until DEC-129 item 27 gives
+    ///   rule 2 its reason code the gate refuses to decide, naming the rule; after it, the case
+    ///   fails at `gate_dry_run`. Either names the minimum's rule or the dry run.
+    ///
+    /// The scene's Holding goal and active rung reach the dry run too, but only `trim_proposals`
+    /// reads either, so no dry run can show them.
+    #[test]
+    fn both_gate_calls_on_a_trim_base_see_one_scene() -> Result<(), String> {
+        let fixture = fixture()?;
+        let on_the_trim_base = |minimum: &str| {
+            doctored(&fixture, "MC-B01", "", |case| {
+                if let Some(members) = case.as_object_mut() {
+                    members.insert("base".to_owned(), json!("two_stock_swing_trim"));
+                }
+                put(case, "input", "min_order_size", json!(minimum));
+                put(case, "input", "open_sell_qty", json!("0"));
+            })
+        };
+        run(on_the_trim_base("7")?, "MC-B01")
+            .map_err(|e| format!("MC-B01 on the trim base at a 7-share minimum: {e}"))?;
+        match run(on_the_trim_base("8")?, "MC-B01") {
+            Ok(()) => Err("MC-B01 on the trim base at an 8-share minimum: the case still passed")?,
+            Err(e) if e.contains("gate_dry_run") || e.contains("§5.3 rule 2") => {}
+            Err(e) => Err(format!(
+                "MC-B01 on the trim base at an 8-share minimum: the failure names neither \
+                 `gate_dry_run` nor §5.3 rule 2: {e}"
+            ))?,
+        }
+        Ok(())
     }
 
     /// Sets `key` in the case's `object` member, adding it if the case does not state it.
@@ -2012,11 +2148,7 @@ mod tests {
             run(fixture.clone(), &id).map_err(|e| format!("{id}: {e}"))?;
             seen = seen.saturating_add(1);
         }
-        crate::expect_eq(
-            "cases listed",
-            counted(&fixture, PASSING.len(), PASSING.len() + AWAITED.len())?,
-            seen,
-        )
+        crate::expect_eq("cases listed", PASSING.len(), seen)
     }
 
     /// MC-B26's pinned pair is read from its base's `symbol` (DEC-285): `BTC/USD` passes, and a
@@ -2083,11 +2215,7 @@ mod tests {
                 )?;
             }
         }
-        crate::expect_eq(
-            "doctorings, counted from the fixture",
-            doctorings,
-            counted(&fixture, 1022, DOCTORINGS_WITH)?,
-        )
+        crate::expect_eq("doctorings, counted from the fixture", doctorings, 1092)
     }
 
     /// A hold reaches neither the gate nor approval, so a hold that states either fails naming it,
@@ -2130,7 +2258,7 @@ mod tests {
                 fails_naming(run(stated, &id), member, &format!("{id}: {member} stated"))?;
             }
         }
-        crate::expect_eq("holds", holds, 14)
+        crate::expect_eq("holds", holds, 15)
     }
 
     /// Every member of a case is read: a plant at the top level, in `input`, its `quote`, its
@@ -2177,6 +2305,7 @@ mod tests {
                 ("scale_active_s", json!(0)),
                 ("holding", json!(false)),
                 ("min_order_size", json!("1")),
+                ("open_sell_qty", json!("0")),
             ] {
                 if trims(&fixture, &case)? {
                     break;
@@ -2192,7 +2321,7 @@ mod tests {
         crate::expect_eq(
             "plants: four objects per case, every output and two working orders",
             plants,
-            counted(&fixture, 34 * 4 + 63 + 2, 35 * 4 + 65 + 2)?,
+            37 * 4 + 69 + 2,
         )
     }
 
@@ -2303,11 +2432,7 @@ mod tests {
                 }
             }
         }
-        crate::expect_eq(
-            "inputs refused, counted from the fixture",
-            refused,
-            counted(&fixture, 1347, REFUSED_WITH)?,
-        )
+        crate::expect_eq("inputs refused, counted from the fixture", refused, 1485)
     }
 
     /// The builder and the gate see one account: the gate state's equity, the instrument's market

@@ -299,12 +299,17 @@ be restricted to local models only.
 
 ### Shared data plane
 
-Market data ingestion and factual classification of public events (filing type, entity tagging)
-are computed once and fanned out to subscribed workspaces. It emits no directional views: any
+Public data (SEC filings and XBRL facts, calendars, reference lists whose terms allow sharing) and
+its factual classification (filing type, entity tagging) are computed once and published as whole
+datasets that workspaces pull. It carries **no exchange market data and no licensed vendor text in
+v1**: each workspace reads market data and news through its own broker connection (§12 risk 3;
+[DEC-433](project/decisions/DEC-433.md) items 3, 9, and 15). It emits no directional views: any
 directional output is a signal model the user selects and pins
 ([mandate spec §8.1](specs/mandate.md#81-signal-model-contract-dec-52-dec-97);
 [DEC-62](project/04-decision-log.md#decisions)). This is the main cost lever for the managed
-offering. Hybrid and on-prem deployments can subscribe to it or run their own.
+offering. Hybrid and on-prem deployments can subscribe to it or run their own. The
+[data plane spec](specs/data-plane.md) (draft) defines it, the workspace data service, and the
+point-in-time store.
 
 ---
 
@@ -493,8 +498,9 @@ sequenceDiagram
 3. The agent keeps managing everything else while it waits. **Risk-reducing actions stay automatic.**
 4. The **approval service**, which runs in the workspace deployment, sends notifications
    according to user preferences and an escalation chain (push → SMS → phone call), respecting
-   quiet hours. **Notifications carry only an opaque ID and generic text** ("Agent
-   btc-accumulator needs approval"), never the trade itself. Push goes through our relay; SMS,
+   quiet hours. **Notifications carry only an opaque ID and generic text** ("An agent in your
+   workspace needs your approval"), never the trade itself or the agent's name
+   ([notifications spec](specs/notifications.md)). Push goes through our relay; SMS,
    email, and chat can go through the customer's own gateways. Large actions can require
    **two approvers**.
 5. The approver opens the request. The app fetches the details **directly from the approval
@@ -636,7 +642,9 @@ own monitor and halt from the same installer.
   user's review. They never change weights or approval routing; in v1 weights are fixed by the
   user and there is no calibration ([DEC-47](project/04-decision-log.md#decisions)).
 - **Market data service:** normalized live streams plus a point-in-time historical store.
-  Managed deployments ingest once and share; hybrid and on-prem deployments connect directly to venues.
+  In every mode each workspace reads market data through its own broker connection; nothing is
+  ingested once and shared in v1, because that would be redistribution (§12 risk 3;
+  [data plane spec](specs/data-plane.md), DEC-433 items 3 and 15).
 
 Speed tiers:
 
@@ -676,6 +684,34 @@ Speed tiers:
 | Sandboxing | WebAssembly plug-ins; Firecracker for heavier workloads |
 | Observability | OpenTelemetry API with a Prometheus pull exporter (M6); the journal is the audit record, never telemetry ([DEC-73](project/04-decision-log.md#decisions)) |
 
+### Where the code stands (2026-10-03)
+
+This document describes the target design. Most of it is not built yet. The Rust crates in
+`crates/` cover these components today; `xtask/layers.toml` records each crate's layer, and
+[ADR-0001](adr/0001-engineering-setup.md) gives the crate rules.
+
+| Component in this document | Crates today |
+|---|---|
+| Agent runtime | `mandate-runtime` (the pure state machine and kill switches); `mandate-shell` (the process shell and the `mandate-tracer` binary) |
+| Risk engine | `mandate-risk` (the gate); `mandate-spec` (the mandate, its validation, policy, risk state, change classification); `mandate-builder` (autonomy and the order builder) |
+| Execution gateway and connectors | `mandate-executor` (the idempotent executor, reconciliation, protective exits); `mandate-alpaca` (the Alpaca paper connector) |
+| Journal and state | `mandate-journal`, `mandate-journal-pg` (the Postgres hot store), `mandate-journal-cold` (the cold store and export), `mandate-artifacts-fs` (the artifact store), `mandate-accounting` (the account fold) |
+| Approval service | `mandate-approval` (the pure approval core only) |
+| Research agent (§9) | `mandate-research` (the thesis contract and its admission checks) |
+| Market data | `mandate-marketdata` (Alpaca historical data into Parquet) |
+| Backtesting | `mandate-sim` (the fill model), `mandate-backtest` (the loop and its report) |
+| Shared foundations | `mandate-num`, `mandate-time`, `mandate-canon`, `mandate-domain`; `mandate-refcases` is the reference-case test harness |
+| Command line | `mandate-cli` |
+| Web app | `web/` (Next.js, DEC-200); there is no mobile app |
+
+Planned, with no code yet: the whole global control plane (directory, licensing and billing,
+fleet health, notification relay, connector catalog and model registry); the agent registry and
+spec compiler, policy service, deployment manager, audit explorer backend, and connection manager
+as services; the secrets vault; the model gateway; the shared data plane; the Python SDK and PyO3
+bindings; object storage and ClickHouse; Kubernetes, Helm, and the installer; and WebAssembly and
+Firecracker sandboxing. Python today is repository tooling (`python/mandate_tools`) and a research
+spike (`python/research_spike`).
+
 ---
 
 ## 12. Risks and open decisions
@@ -691,11 +727,15 @@ Speed tiers:
    and exchange licenses. In v1, each user's market data comes through their own Alpaca
    account, so Mandate does not redistribute it; any shared data offering needs licensing first.
 4. **Custom code in v1.** Declarative specs only, or also WebAssembly plug-ins?
-5. **First connectors (decided, [DEC-23](project/04-decision-log.md#decisions)).** Alpaca
-   first (US stocks, ETFs, crypto spot; paper trading; OAuth), Kraken Derivatives US second
-   (CFTC-regulated crypto perpetuals), then Interactive Brokers and Coinbase US futures. The
-   platform serves the United States first.
-6. **Approval channels in v1.** A native mobile app for push, or SMS, email, and Slack / Telegram first.
+5. **First connectors (decided, [DEC-23](project/04-decision-log.md#decisions), reordered by
+   [DEC-98](project/04-decision-log.md#decisions)).** Alpaca first (US stocks, ETFs, crypto spot;
+   paper trading; OAuth), Robinhood Agentic Trading second (retail US equities and crypto spot over
+   MCP into the customer's dedicated agentic account), Kraken Derivatives US third (CFTC-regulated
+   crypto perpetuals), then Interactive Brokers and Coinbase US futures. The platform serves the
+   United States first.
+6. **Approval channels in v1 (decided, [DEC-19](project/04-decision-log.md#decisions)).** Web push,
+   email, and one chat channel; SMS and phone next; a native mobile app later. The staging by
+   milestone is Proposed in [DEC-438](project/decisions/DEC-438.md).
 7. **Mobile access to on-site approval services.** Whether approvers reach the customer's
    approval service through the customer's VPN, through our relay with end-to-end encryption,
    or both; and how the mobile app is distributed to firms that require device management.

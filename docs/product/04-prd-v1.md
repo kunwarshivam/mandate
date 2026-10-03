@@ -97,7 +97,7 @@ instructions for creating a trading-only key; rejections are journaled without s
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-3.1 | Describe an agent in plain language; the system compiles a structured mandate (goal, instruments, capital, connection, behavior, signal models, sizing, cadence, protection, risk, autonomy, notifications), extracting values the user stated and proposing envelope values, each shown as proposed and confirmed by the user; the working universe comes from the research agent at runtime ([DEC-97](../project/04-decision-log.md#decisions); [mandate spec §7](../specs/mandate.md#7-compiler-and-platform-proposals-dec-97), pending its rewrite) | P0 |
+| FR-3.1 | Describe an agent in plain language; the system compiles a structured mandate (goal, allowed asset classes and `max_instruments`, capital, connection, behavior, signal models, sizing, cadence, protection, risk, autonomy, notifications), extracting values the user stated and proposing envelope values, each shown as proposed and confirmed by the user; the working universe comes from the research agent at runtime ([DEC-97](../project/04-decision-log.md#decisions); [mandate spec §7](../specs/mandate.md#7-compiler-and-platform-proposals-dec-97)) | P0 |
 | FR-3.2 | Edit the mandate in a form and as YAML; both stay in sync | P0 |
 | FR-3.3 | Validate against platform, org, and workspace policy before saving | P0 |
 | FR-3.4 | Show a plain-language summary of the compiled mandate for confirmation | P0 |
@@ -156,7 +156,7 @@ step of order submission, no order is ever duplicated and every position is reco
 | ID | Requirement | Priority |
 |---|---|---|
 | FR-6.1 | Triggers are the user's autonomy rules (for example, combined score below a threshold, order or daily buying above a size, unusual market input); orders the gate would deny are never sent for approval | P0 |
-| FR-6.2 | Approval request contains the agent's proposed action, the mandate rule that triggered it, model outputs with authorship, the combined score labeled as not a probability of profit, the deadline, and the default (skip); never platform-authored alternatives or profit estimates ([DEC-33](../project/04-decision-log.md#decisions)) | P0 |
+| FR-6.2 | Approval request contains the agent's proposed action, the mandate rule that triggered it, model outputs with authorship, the combined score labeled as not a probability of profit, the deadline, and the default (skip); never platform-authored alternatives or profit estimates ([DEC-126](../project/04-decision-log.md#decisions); [mandate spec §6.4](../specs/mandate.md#64-approvals)) | P0 |
 | FR-6.3 | Channels: web push, email, SMS, Slack or Telegram; escalation chain with quiet hours | P0 (web push, email, one chat), P1 (SMS, phone call) |
 | FR-6.4 | Notifications carry only an opaque ID and generic text; details load from the workspace deployment | P0 |
 | FR-6.5 | An approval binds quantity, limit price, and mandate version; the gate re-runs before executing and skips on deny | P0 |
@@ -246,4 +246,4 @@ See [Quality and release plan](../project/07-quality-and-release.md).
 1. ~~Whether options join v1 or wait~~: they wait ([DEC-24](../project/04-decision-log.md#decisions), accepted 2026-09-27).
 2. Which fast decision model ships first: Laya (self-hosted) or Jev (hosted, early access).
 3. Minimum paper-trading duration before live.
-4. Whether LLM research is P0 for design partners or can follow.
+4. ~~Whether LLM research is P0 for design partners or can follow~~: it is P0, as the research agent (FR-3.9, [DEC-97](../project/04-decision-log.md#decisions)).

@@ -1661,7 +1661,8 @@ def transition_label(e):
 
 def fuzz_escalation(n):
     """MI-21 to MI-25 (EI-1 to EI-7, EI-10, EI-11, EI-13 to EI-16) over random asks, ticks, responses, re-tailed
-    responses, cancellations, a cancellation batched with responses, and workspace `PolicyChanged` events between a
+    responses (some read in a step whose mode is exits-only or stricter, which cancels first), cancellations, a
+    cancellation batched with responses, and workspace `PolicyChanged` events between a
     request and its responses. Every response the oracle judges timely, human, listed, delivered, matching, freshly
     and singly stepped-up, in the quorum of the stricter of the bound requirement and the oracle's own record of the
     current policy, and passing every re-validation value must act, and no other may; every grant that reaches check 7,
@@ -1754,7 +1755,8 @@ def fuzz_escalation(n):
                 own["clock"] = max(own["clock"], int(T(inp["at"]).timestamp()))
                 for a in [a for a in own["pending"] if deadline_of[a] <= own["clock"]]:
                     del own["pending"][a]
-            if inp["kind"] in ("cancel", "batch"):
+            tightened = inp["kind"] == "response" and inp["now"]["mode"] != "normal"
+            if inp["kind"] in ("cancel", "batch") or tightened:
                 own["pending"].clear()
             for r in ([inp["response"]] if inp["kind"] == "response" else inp.get("responses", [])):
                 if r["source"] in own["sources"]:
@@ -1812,7 +1814,7 @@ def fuzz_escalation(n):
                 else:
                     check(produced.get(src, False) == want, "MI-21 a response acts exactly when every check passes",
                           (inp["kind"], src, want, produced.get(src), [d for d in drafts if d["type"] != "ApprovalDelivered"]))
-            if inp["kind"] in ("cancel", "batch"):
+            if inp["kind"] in ("cancel", "batch") or tightened:
                 check(not st["pending"], "MI-21 no approval outlives the tightening or version that cancelled it", st["pending"])
             check(proposal_route(st["pending"], rng.choice(sorted(REDUCING))) == "handed",
                   "MI-23 no exit waits on an approval", st["pending"])
@@ -2074,6 +2076,33 @@ def fuzz_content(n):
         h = [escalation_step(st, {"kind": "ask", "approval": "ap1", "bound": b}, ctx)[0]["content_hash"] for b in (bound, other)]
         check(h[0] != h[1], "§6.4 every bound field moves the content hash", field)
 
+def fuzz_independence_floor(n):
+    """V-047 (DEC-411): under `independent_approval_required` a workspace of fewer than two users is refused at validation,
+    a user count that is absent counts as one (rule 3), and the rule touches no other verdict. The oracle names the lone
+    workspaces as a set, the absent count among them, and the rest of the verdict is the same mandate validated without
+    the policy."""
+    lone_workspaces = {None, 0, 1}
+    for _ in range(n):
+        m = copy.deepcopy(base.BASES[rng.choice(sorted(base.BASES))])
+        if rng.random() < 0.3:
+            m["autonomy"]["approval"]["two_approver_above_usd"] = rng.choice(["500", "5000"])
+        required, users = rng.random() < 0.5, rng.choice([None, 0, 1, 1, 2, 3, 5])
+        ctx = {k: v for k, v in base.CTX.items() if k != "workspace_users"}
+        ctx["disclosures_accepted"] = ["sha256:" + "b" * 64]
+        if users is not None:
+            ctx["workspace_users"] = users
+        ctx["approver_users"] = min(rng.choice([1, 2]), 1 if users is None else users)
+        if rng.random() < 0.9:
+            ctx["independent_approval_required"] = required
+        else:
+            required = False
+        errs = semantic(m, ctx)[0]
+        check(("V-047" in errs) == (required and users in lone_workspaces),
+              "V-047 refuses exactly independent approval in a workspace without a second user, an unknown count as one",
+              (required, users, errs))
+        without = semantic(m, dict(ctx, independent_approval_required=False))[0]
+        check([e for e in errs if e != "V-047"] == without, "V-047 changes no other verdict", (required, users, errs, without))
+
 if __name__ == "__main__":
     fuzz_ladder_precision(300)
     fuzz_risk(400)
@@ -2100,6 +2129,7 @@ if __name__ == "__main__":
     fuzz_tripwire_latch(300)
     fuzz_escalation(3000)
     fuzz_policy_quorum(1000)
+    fuzz_independence_floor(400)
     fuzz_drift(600)
     fuzz_ask_budget(600)
     fuzz_quiet_hours(600)

@@ -5,10 +5,13 @@
 # only people and apps with triage access or above apply it. The description line
 # `Coordinator-approved-head: <40-hex sha>` binds that approval to the head the independent review
 # passed, so a push moves the head off it and withdraws the approval with nothing to cancel. The
-# line's integrity rests on convention, not on a GitHub permission: a pull request's author can
-# edit its description. In this repository the builders have no pull request tool and the
-# coordinator writes the descriptions, so a builder's tooling can at worst drop the line or leave
-# a stale sha, and both refuse the merge.
+# line's integrity does not rest on a GitHub permission alone: anyone with write access can apply
+# the label and edit a description. So the script also requires that the label's most recent
+# application, and the description's most recent edit (or, if it was never edited, its author),
+# came from an approver: a login in MERGE_APPROVERS (space-separated), by default the repository's
+# owner, whose account the coordinator acts through. A collaborator who labels a pull request, or
+# moves its approved head by editing the description, therefore withdraws the approval rather than
+# granting one.
 #
 # A pull request merges only when all of these hold, read here from GitHub and never from the event:
 # it is open, not a draft, targets `main`, and carries the label; its description names exactly one
@@ -28,6 +31,7 @@ set -euo pipefail
 pr=${1:?pull request number}
 repo=${GITHUB_REPOSITORY:?}
 label=coordinator-approved
+approvers=" ${MERGE_APPROVERS:-${repo%%/*}} "
 
 skip() {
   echo "#$pr $1; not merging"
@@ -56,6 +60,23 @@ count=$(grep -c . <<<"$approvals" || true)
 [ "$count" -gt 0 ] || skip "names no Coordinator-approved-head"
 [ "$count" -eq 1 ] || skip "names more than one Coordinator-approved-head"
 [ "$approvals" = "$sha" ] || skip "was approved at $approvals, but its head is $sha"
+
+labeled_by=$(gh api "repos/$repo/issues/$pr/events?per_page=100" --paginate \
+  --jq ".[] | select(.event == \"labeled\" and .label.name == \"$label\") | .actor.login" | tail -n 1)
+[[ "$approvers" == *" $labeled_by "* ]] ||
+  skip "carries $label applied by ${labeled_by:-nobody}, who is not an approver"
+owner=${repo%%/*}
+name=${repo#*/}
+# The GraphQL variables are GitHub's, not the shell's, so the query stays in single quotes.
+# shellcheck disable=SC2016
+written_by=$(gh api graphql -F owner="$owner" -F name="$name" -F number="$pr" -f query='
+  query($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) { author { login } editor { login } }
+    }
+  }' --jq '.data.repository.pullRequest | (.editor.login // .author.login // "")')
+[[ "$approvers" == *" $written_by "* ]] ||
+  skip "has its description last written by ${written_by:-nobody}, who is not an approver"
 
 mergeable=$(jq -r .mergeable <<<"$view")
 [ "$mergeable" = MERGEABLE ] || skip "is not mergeable yet ($mergeable)"

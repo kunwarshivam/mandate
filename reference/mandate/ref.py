@@ -395,6 +395,8 @@ def semantic(m, ctx):
     n_users = ctx.get("approver_users", 1)
     if n_users < 1 or (ap["two_approver_above_usd"] is not None and n_users < 2):
         errs.add("V-024")
+    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:
+        errs.add("V-047")
     if g.get("end_date") is not None and valid_date(g["end_date"]) and g["end_date"] < ctx["validation_date"]:
         errs.add("V-030")
     prev = ctx.get("previous_version")
@@ -1307,8 +1309,14 @@ def builder(m, inp):
     out = {"cap": norm(cap), "current_mv": norm(mv)}
     # risk engine first: trim_to_target (§5.5, DEC-65)
     band_usd = D(beh["sizing"]["rebalance_band"]) * cap
+    # The agent's own non-protective sells already resting in the instrument are a trim in progress: the
+    # trim is what they leave of the excess and of the position, and the minimum is judged on that
+    # (DEC-399 item 7). When they cover the excess, no trim is due.
+    on_sale = D(inp["open_sell_qty"]) if r["scale_action"] == "trim_to_target" else D(0)
+    sell = D(0)
     if r["scale_action"] == "trim_to_target" and factor < 1 and mv - factor * cap >= band_usd:
-        sell = min(qty, ceil_inc((mv - factor * cap) / bid, inc))
+        sell = max(D(0), min(qty - on_sale, ceil_inc((mv - factor * cap) / bid, inc) - on_sale))
+    if sell > 0:
         guards = []
         if inp.get("scale_active_s", 0) < r["breach_confirm_s"]:
             guards.append("rung_not_confirmed")
@@ -1316,8 +1324,10 @@ def builder(m, inp):
             guards.append("holding")
         if inp["asset_class"] == "us_equity" and inp.get("session", "regular") != "regular":
             guards.append("regular_session_only")
-        # §5.5's minimum is the instrument's minimum order size (trading spec §5.3 rule 2; DEC-399 item 5)
-        if sell < D(inp["min_order_size"]):
+        # §5.5's minimum is the instrument's minimum order size (trading spec §5.3 rule 2; DEC-399 item 5),
+        # except for a trim of the whole position, a full close rule 2 exempts (DEC-423). Beside a resting
+        # sell the trim is never the whole position, so the exemption does not reach it.
+        if sell < D(inp["min_order_size"]) and sell != qty:
             guards.append("below_minimum_order")
         if not guards:
             out.update({"action": "sell", "purpose": "risk_exit", "origin": "risk_engine", "reason": "trim_to_target",
@@ -1937,7 +1947,8 @@ def within_drift(m_req, m_now, asset_class):
 
 def approval_revalidate(req, now):
     """§6.4 re-validation, checks 8 to 12 in order, for a grant admitted in the same step. It only skips: the act
-    carries the bound fields unchanged."""
+    carries the bound fields unchanged. Check 9's `mode` arm is reached by no step the spec names: a step whose
+    mode is exits-only or stricter cancels every pending approval before it judges a response (DEC-318, DEC-430)."""
     skip = lambda reason: {"result": "skip", "reason": reason}
     if now["mandate_version"] != req["mandate_version"]:
         return skip("version_changed")
@@ -2047,6 +2058,9 @@ def escalation_fold(journal, t0):
 
 def escalation_step(st, inp, ctx):
     """One runtime step over the approval lifecycle (§6.4). Returns the drafts, in order; the caller folds them.
+    A response read in a step whose mode is exits-only or stricter first cancels every pending approval as
+    `mode_tightened` (§6.4 "Cancellation", DEC-318 option (a)); the runtime's `AgentModeChanged` before it is the
+    mode's record, which the model does not draft.
     Every draft carries the step's risk clock. The reference hashes the canonical request as a stand-in for the
     content object, which `approval_content` builds and `fuzz_content` checks on its own."""
     kind = inp["kind"]
@@ -2079,6 +2093,12 @@ def escalation_step(st, inp, ctx):
             drafts += out
     elif kind == "response":
         resp = inp["response"]
+        if inp["now"]["mode"] != "normal" and st["pending"]:
+            for a in sorted(st["pending"]):
+                drafts.append({"type": "ApprovalCanceled", "approval": a, "reason": "mode_tightened", "clock": c})
+            st = copy.deepcopy(st)
+            for d in drafts:
+                escalation_apply(st, d)
         if resp["source"] in st["copied"]:
             return drafts
         req = st["pending"].get(resp["approval"])

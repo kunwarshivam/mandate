@@ -1,4 +1,11 @@
-"""Seeds known bugs into a copy of ref.py and checks that fuzz.py catches every one (AGENTS.md: independent oracles)."""
+"""Seeds known bugs into a copy of ref.py and checks that fuzz.py catches every one (AGENTS.md: independent oracles).
+
+A bug that makes a base mandate invalid cannot be carried here. `bases.py` asserts at import that
+every base passes `semantic()`, so such a probe crashes before any check runs, and `verdict()` scores
+the crash `ERROR`, which is neither a catch nor a survival. V-047 has two such bugs, an inverted
+policy and an ignored one: each fires V-047 on the bases. Do not add them, and do not read an
+`ERROR` as a catch (#528 round 2, minor 4).
+"""
 import pathlib, shutil, subprocess, sys, tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -8,6 +15,15 @@ MUTANTS = {
                                              "        if not breached:\n            self.acc = 0.0"),
     "additive capital base": ("self.C, self.L = H1, E01, C1, L1", "self.C, self.L = H1, E01, self.C + d, L1"),
     "hard trigger latches on one quote": ("        if quote and (t - self.hard_first[key]).total_seconds() >= self.hard_wait():", "        if True:"),
+    "V-047 reads a stated policy's presence, not its value": (
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
+        '    if "independent_approval_required" in ctx and ctx.get("workspace_users", 1) < 2:'),
+    "V-047 counts a one-user workspace as independent": (
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 1:'),
+    "V-047 counts an unknown workspace as two users": (
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 2) < 2:'),
     "loss carry ignores withdrawals": ("        self.net_contributed += d\n", ""),
     "release retires without a loss carry": ('                self._retire("goal_complete", ev)\n',
                                              '                self.restrictions["retired"] = "stopped"\n'),
@@ -121,7 +137,8 @@ MUTANTS = {
                                        '    if False:\n        return skip("reclassified_deny")'),
     "re-validation accepts an ask by another trigger": ('    if c["decision"] == "ask" and c["by"] != req["decided_by"]:', '    if False:'),
     "re-validation skips the gate dry run": ('    if now["dry_run"]["verdict"] != "allow":', '    if False:'),
-    "re-validation ignores the mode": ('    if now["mode"] != "normal":\n        return skip("mode")', '    if False:\n        return skip("mode")'),
+    "a response step judges before an exits-only mode cancels": ('        if inp["now"]["mode"] != "normal" and st["pending"]:',
+                                                                 '        if False:'),
     "drift without the absolute value": ('abs(D(m_now) - D(m_req)) * 10000', '(D(m_now) - D(m_req)) * 10000'),
     "drift uses the crypto band for equities": ('<= DRIFT_BAND_BP[asset_class] * D(m_req)', '<= 200 * D(m_req)'),
     "no mark is inside the band": ('    if m_req is None or m_now is None:\n        return False\n    return abs(',
@@ -290,11 +307,19 @@ TRIPWIRE_MUTANTS = {
     "V-044 allows unsorted ids": ('    if not sorted_unique([t["id"] for t in tws]):\n        return {"V-044"}', '    if False:\n        return {"V-044"}'),
 }
 # The trim's minimum (§5.5, DEC-399 item 5) is judged by the family-B cases rather than by a fuzz:
-# MC-B33 and MC-B34 sit where the instrument's minimum order size and the dollar minimum disagree.
+# MC-B33 and MC-B34 sit where the instrument's minimum order size and the dollar minimum disagree,
+# MC-B33 also sits on the boundary, a trim exactly at the minimum, MC-B35 is the full close the
+# minimum exempts (DEC-423), and MC-B36 and MC-B37 size the trim after a resting sell (DEC-399 item 7).
 TRIM_MUTANTS = {
-    "the trim's minimum is the dollar minimum order": ('        if sell < D(inp["min_order_size"]):',
-                                                      '        if sell * bid < D(inp["min_order_usd"]):'),
-    "the trim's minimum is ignored": ('        if sell < D(inp["min_order_size"]):', '        if False:'),
+    "the trim's minimum is the dollar minimum order": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
+                                                      '        if sell * bid < D(inp["min_order_usd"]) and sell != qty:'),
+    "the trim's minimum is ignored": ('        if sell < D(inp["min_order_size"]) and sell != qty:', '        if False:'),
+    "a full close is withheld below the minimum": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
+                                                   '        if sell < D(inp["min_order_size"]):'),
+    "a trim at the minimum is withheld": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
+                                          '        if sell <= D(inp["min_order_size"]) and sell != qty:'),
+    "a trim ignores the agent's resting sells": ('        sell = max(D(0), min(qty - on_sale, ceil_inc((mv - factor * cap) / bid, inc) - on_sale))',
+                                                 '        sell = max(D(0), min(qty, ceil_inc((mv - factor * cap) / bid, inc)))'),
 }
 
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
@@ -302,7 +327,7 @@ PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if 
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
          "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(2500); fuzz_client_ceiling(300); "
          "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
-         "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
+         "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_independence_floor(300); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
          "print(len(FAIL))")
 
 TW_PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "

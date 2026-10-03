@@ -122,6 +122,11 @@
 'MC-B30' = { status = "passing", story = "E6-4" }
 'MC-B31' = { status = "passing", story = "E6-4" }
 'MC-B32' = { status = "passing", story = "E6-4" }
+'MC-B33' = { status = "passing", story = "E6-4" }
+'MC-B34' = { status = "passing", story = "E6-4" }
+'MC-B35' = { status = "passing", story = "E6-4" }
+'MC-B36' = { status = "passing", story = "E6-4" }
+'MC-B37' = { status = "passing", story = "E6-4" }
 'MC-N01' = { status = "passing", story = "E6-2" }
 'MC-N02' = { status = "passing", story = "E17-3" }
 'MC-N03' = { status = "passing", story = "E17-3" }
@@ -254,6 +259,9 @@
 'MC-V66' = { status = "passing", story = "E10-1" }
 'MC-V67' = { status = "passing", story = "E10-1" }
 'MC-V68' = { status = "passing", story = "E10-1" }
+'MC-V69' = { status = "pending", story = "E10-1" }
+'MC-V70' = { status = "pending", story = "E10-1" }
+'MC-V71' = { status = "pending", story = "E10-1" }
 'MC-T01' = { status = "passing", story = "E6-4" }
 'MC-T02' = { status = "passing", story = "E6-4" }
 'MC-T03' = { status = "passing", story = "E6-4" }
