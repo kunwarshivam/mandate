@@ -9615,6 +9615,18 @@ mod sequence_tests {
             &ports,
         )?;
         executor.run(unattributed("3")?, &ports)?;
+        let pooled = executor
+            .state
+            .unattributed
+            .get(&aapl()?)
+            .into_iter()
+            .flatten()
+            .try_fold(Qty::ZERO, |total, (_, left)| total.checked_add(*left))?;
+        assert_eq!(
+            pooled,
+            Qty::parse("3")?,
+            "one entry of 3 joins the pool for one fill of 3"
+        );
         let ended = reported(&exit, &held(3, false))?;
         let after = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(ended)), &ports)?;
         assert_eq!(
@@ -9634,6 +9646,52 @@ mod sequence_tests {
             vec![("risk_exit".to_owned(), "7".to_owned())],
             "a breached stop exits all 7: {:?}",
             drafted(&fired)
+        );
+        Ok(())
+    }
+
+    /// #518's round-2 review, blocker 1: the exit's live report says 3 filled, the same 3 arrive
+    /// as a fill that names no order, and the exit then ends by `OrderAbandoned` rather than by a
+    /// broker update. The netting runs after every event that ends an order, so they come off once
+    /// and the next step re-places protection for the 7 the broker holds, not 4 (DEC-421 item 5).
+    #[test]
+    fn an_exit_abandoned_after_its_report_and_its_unattributed_fill_is_re_protected_for_what_is_held()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(EXIT, "4", "130", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = format!("md-{EXIT}");
+        let held = |filled: u32| Held {
+            purpose: Purpose::RiskExit,
+            qty: 4,
+            filled,
+            acked: true,
+            live: true,
+        };
+        executor.run(
+            Input::Broker(Ok(BrokerOutcome::Submitted(reported(&exit, &held(0))?))),
+            &ports,
+        )?;
+        let live = reported(&exit, &held(3))?;
+        executor.run(Input::BrokerUpdate(BrokerUpdate::Order(live)), &ports)?;
+        executor.run(unattributed("3")?, &ports)?;
+        committed(
+            &mut executor,
+            "OrderAbandoned",
+            vec![
+                ("client_order_id", text(&exit)),
+                ("intent_id", text(EXIT)),
+                ("reason", text("gate_recheck")),
+            ],
+        )?;
+        let after = executor.run(quote("139")?, &ports)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("7")?,
+            "the abandoned exit's 3 come off once, so the 7 held are re-protected: {:?}",
+            drafted(&after)
         );
         Ok(())
     }

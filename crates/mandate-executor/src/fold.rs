@@ -95,7 +95,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         state.copied.insert(event.event_id.clone(), origin.clone());
     }
     state.risk_clock = Some(at);
-    match kind {
+    let interpreted = match kind {
         "IntentReceived" => intent_received(state, payload, at),
         "GateDecided" => gate_decided(state, payload, at),
         "OrderSubmitted" => {
@@ -105,13 +105,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "OrderStateChanged" => {
             adoption(state, event)?;
             rung_stepped(state, payload)?;
-            order_state_changed(state, payload, at)?;
-            let id = client_order_id(payload)?;
-            let instrument = state.orders.get(&id).map(|order| order.instrument.clone());
-            match instrument {
-                Some(instrument) => net_unattributed(state, &instrument),
-                None => Ok(()),
-            }
+            order_state_changed(state, payload, at)
         }
         "CompensatingEvent" => {
             if let Some(Value::Array(corrected)) = payload.get("corrected_event_ids") {
@@ -166,6 +160,25 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             Ok(())
         }
         _ => later_slice(),
+    };
+    interpreted?;
+    net_after(state, payload)
+}
+
+/// DEC-421 item 5's netting runs after every account event, for the instrument of the order the
+/// event names or, when it names none the fold knows, the instrument it names. Every way an order
+/// becomes terminal (`OrderStateChanged`, `OrderAbandoned`) and every sell fill that names no
+/// order (`FillApplied`) passes through here, so a state that ends an order cannot skip the
+/// netting and leave held shares bare. The netting is idempotent, so an event that ends nothing
+/// and pools nothing changes nothing.
+fn net_after(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let ordered = optional_text(payload, "client_order_id")
+        .and_then(|raw| ClientOrderId::parse(raw).ok())
+        .and_then(|id| state.orders.get(&id))
+        .map(|order| order.instrument.clone());
+    match ordered.or_else(|| instrument(payload).ok()) {
+        Some(instrument) => net_unattributed(state, &instrument),
+        None => Ok(()),
     }
 }
 
@@ -727,7 +740,6 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value, seq: Seq) -> Result<
             .push((seq, quantity));
     }
     state.fills.insert(fill);
-    net_unattributed(state, &position_of)?;
     reattribute(state, &position_of);
     Ok(())
 }

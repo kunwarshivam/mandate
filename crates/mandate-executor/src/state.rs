@@ -83,7 +83,9 @@ pub struct ExecutorState {
     /// Sell fills applied with no order named (`FillApplied` with no `client_order_id`), by the
     /// journal position that applied them and what of each is not yet netted against an ended
     /// sell's reported fill that no update has applied: the same shares may be both, so they come
-    /// off the held position once (DEC-421 item 5).
+    /// off the held position once (DEC-421 item 5). Entries shrink only by netting: one that never
+    /// meets an ended sell's unapplied report stays for the life of the journal, bounded by how much
+    /// the owner trades the instrument outside the platform, not by anything in this crate.
     pub(crate) unattributed: BTreeMap<InstrumentId, Vec<(Seq, Qty)>>,
     pub(crate) modes: BTreeMap<AgentId, Mode>,
     pub(crate) account_state: AccountState,
