@@ -2574,9 +2574,10 @@ mod tests {
     ];
 
     /// A cap that works out to zero slices nothing and names nothing, exactly as a missing volume
-    /// does, for every paced exit (DEC-163 item 4): an order cap of `0.05 × 0`, one of `0.05 × 19`
-    /// truncated to 0 whole shares, and a daily cap of 10 used up or overdrawn today. The exit of 10
-    /// goes whole at its own limit, never as an order of 0.
+    /// does, for every paced exit (DEC-163 item 4): an order cap of `0.05 × 0`, and a daily cap of
+    /// 10 used up or overdrawn today. The exit of 10 goes whole at its own limit, never as an order
+    /// of 0. A cap above zero that truncates to zero is
+    /// [`a_positive_cap_below_one_step_slices_at_the_minimum`] (DEC-445).
     #[test]
     fn a_zero_cap_slices_no_exit_of_any_kind() -> Result<(), GateError> {
         let exit = |origin: Origin, trailing: &str, today: &str| -> Result<_, GateError> {
@@ -2593,13 +2594,46 @@ mod tests {
             assert_eq!(
                 vec![
                     exit(origin, "0", "0")?,
-                    exit(origin, "19", "0")?,
                     exit(origin, "200", "10")?,
                     exit(origin, "200", "12")?,
                 ],
-                vec![(origin, Verdict::Allow, None); 4],
-                "a zero order cap, one truncated to zero, and a used-up or overdrawn daily cap \
-                 slice nothing"
+                vec![(origin, Verdict::Allow, None); 3],
+                "a zero order cap and a used-up or overdrawn daily cap slice nothing"
+            );
+        }
+        Ok(())
+    }
+
+    /// An order cap of `0.05 × 19` = 0.95, above zero but truncated to 0 on a grid of 1, slices
+    /// every paced exit of 10 at the minimum of 1, under `OrderSizeParticipation`, rather than
+    /// releasing it whole (DEC-445, superseding DEC-163 item 4's clause that a cap truncated to zero
+    /// slices nothing, which this row asserted on `main`; #571 review, B3). The exit leaves at 1
+    /// share an interval, over ten intervals, instead of at once.
+    ///
+    /// The instrument is marked fractionable with a grid of 1, so that until the implementation PR
+    /// the row stops at the grid stub's own report (DEC-77); the implementation reads only the grid.
+    #[test]
+    #[ignore = "pending E6-4"]
+    fn a_positive_cap_below_one_step_slices_at_the_minimum() -> Result<(), GateError> {
+        for origin in PACED_EXITS {
+            let mut o = allowing()?.selling(origin)?;
+            o.market.trailing_5m_volume = Some(Qty::parse("19")?);
+            o.market.adv_20d = Some(Qty::parse("200")?);
+            o.instrument.fractionable = true;
+            let d = o.decide()?;
+            assert_eq!(
+                (
+                    d.verdict,
+                    d.pacing.map(|pacing| (pacing.qty, pacing.applied))
+                ),
+                (
+                    Verdict::Allow,
+                    Some((
+                        Qty::parse("1")?,
+                        [crate::PacingControl::OrderSizeParticipation].into()
+                    ))
+                ),
+                "{origin:?}: a positive cap below one step slices at the on-grid minimum"
             );
         }
         Ok(())

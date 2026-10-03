@@ -506,17 +506,34 @@ mod tests {
     }
 
     /// A resting partial trim leaves only the remainder: with 1 of the 2.5 shares' excess on sale,
-    /// 1.5 rounds up to 2. At a factor of 0 the remainder is capped at what is not yet on sale:
-    /// 2.5 held with 1 on sale leaves 1.5, not the 2 the whole-share ceiling of 1.5 asks for.
+    /// 1.5 rounds up to 2. The row where what is unsold is off the grid is
+    /// [`an_off_grid_remainder_beside_a_resting_sell_is_truncated_onto_the_grid`] (DEC-445).
     #[test]
     fn a_resting_partial_trim_proposes_only_the_remainder() -> Result<(), GateError> {
         let mut scene = Scene::new("10", "1000")?;
         scene.resting(7, "1", Side::Sell, false, true)?;
         assert_eq!(scene.trims()?, qty("2")?);
+        Ok(())
+    }
+
+    /// At a factor of 0, 2.5 held with 1 share resting on the agent's own sell leaves 1.5 unsold.
+    /// Rounding up on a grid of 1 gives 2, more than is unsold, and the 1.5 left is off the grid
+    /// and not the whole position, an order §5.3 rule 2 refuses. The trim is the largest quantity
+    /// on the grid at or below it, 1 (DEC-445, superseding the 1.5 this row asserted on `main`;
+    /// #571 review, B2). Half a share stays above target until the resting sell ends, and the trim
+    /// is evaluated again then.
+    ///
+    /// The instrument is marked fractionable with a grid of 1, so that until the implementation PR
+    /// the row stops at the grid stub's own report (DEC-77); the implementation reads only the grid.
+    #[test]
+    #[ignore = "pending E6-4"]
+    fn an_off_grid_remainder_beside_a_resting_sell_is_truncated_onto_the_grid()
+    -> Result<(), GateError> {
         let mut whole = Scene::new("2.5", "250")?;
         whole.risk.size_factor = Ratio::ZERO;
+        whole.instrument.fractionable = true;
         whole.resting(7, "1", Side::Sell, false, true)?;
-        assert_eq!(whole.trims()?, qty("1.5")?);
+        assert_eq!(whole.trims()?, qty("1")?);
         Ok(())
     }
 

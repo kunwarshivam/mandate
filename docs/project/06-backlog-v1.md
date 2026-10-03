@@ -2734,6 +2734,25 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   carries `qty_increment`; `trim::quantity_grid` is the stub, and three pending tests pin the trim
   (the #504 case included) and the participation slice on a venue grid. The implementation PR, then
   a harness PR stating the case's grid, follow.
+  *Round 1 of #571's review:* the #504 case's named figures, B2's truncation and B3's slice
+  ([DEC-445](decisions/DEC-445.md)), M1's on-grid minimum, M3's rows, and the property
+  `the_trim_and_the_slice_stay_on_the_venue_s_grid` are pending in the tests PR. Two live rows that
+  asserted DEC-445's superseded figures moved into pending tests.
+- **E6-4: refuse a grid that is not above zero, per instrument** (#571 review, round 1, minor 2).
+  `InstrumentSnapshot::qty_increment` is a `Qty`, so zero is representable. `ceiled_quotient` and
+  `truncated_quotient` refuse it as `NotPositive`, but that error would leave `trim::proposals`
+  whole and withhold every instrument's trim (DEC-423 item 4 forbids it), and from `slice` it errors
+  the decision, denying an exit (rule 13). Give the field a type that cannot hold zero (trust ladder
+  rung 1), or refuse it per instrument where the snapshot is built from connector data, with a test.
+  Unreachable today: no production caller builds the snapshot.
+- **E6-4: one ingest field for the quantity grid** (#571 review, round 1, minor 4).
+  `mandate-builder`'s `Market::increment` (DEC-128 item 27) and `InstrumentSnapshot::qty_increment`
+  are two grid fields that must come from the same instrument-master field. When ingest lands, read
+  both from it and add a check that they agree (DEC-427, Alternatives).
+- **E6-4: `trim::tests`' factor overrides disagree with the fixture's rung** (#571 review, round 1,
+  minor 5). Several `trim::tests` rows set `risk.size_factor` to a value no rung of the `Scene`'s
+  one-rung ladder (factor 0.5) carries, an internally inconsistent snapshot. Give `Scene` a rung
+  whose factor matches each row, or derive the factor from the rung.
 - **E6-4 nits** (#466 review, round 1): `UsdExact::times_size_fraction`'s doc still lists "the
   ladder size factor applied to the target" though the gate's 24-place `Ratio` factor enters
   through `UsdExact::of_ratio`; say which number each serves (n2). `of_ratio` takes any `Ratio`,
