@@ -13013,11 +13013,16 @@ mod stepping_alone_pins {
                 },
             },
         );
-        let rung = Order {
-            client_order_id: ClientOrderId::for_intent(&intent())?,
-            intent_id: Some(intent()),
+        Ok((state, vec![rung(aapl, intent())?]))
+    }
+
+    /// A rung of 4 by `exit` in `instrument`, cancelled this step.
+    fn rung(instrument: InstrumentId, exit: IntentId) -> Result<Order, ExecutorError> {
+        Ok(Order {
+            client_order_id: ClientOrderId::for_intent(&exit)?,
+            intent_id: Some(exit),
             agent: Some(AgentId("agent-b".to_owned())),
-            instrument: aapl,
+            instrument,
             side: Side::Sell,
             qty: Qty::parse("4")?,
             filled_qty: Qty::ZERO,
@@ -13029,19 +13034,28 @@ mod stepping_alone_pins {
             cancel_unconfirmed: false,
             replaced_by: None,
             created_on: None,
-        };
-        Ok((state, vec![rung]))
+        })
     }
 
     /// DEC-260 (14), (18) with DEC-424: a rung that ended counts as its ladder stepping only while
     /// that ladder's cancel was a step's. A lone ladder in the instrument whose cancel was not a
     /// step's is not stepping, so its ended rung leaves the protection to the usual path.
+    /// Only orders that ended in the instrument asked about count: one that ended elsewhere, for
+    /// another exit, leaves AAPL's stepping ladder stepping alone.
     #[test]
     fn only_a_stepping_lone_ladder_counts_its_ended_rung_as_stepping_alone()
     -> Result<(), ExecutorError> {
         let aapl = InstrumentId::new("AAPL")?;
-        let (stepping, ended) = lone(true)?;
+        let (stepping, mut ended) = lone(true)?;
         assert!(stepping_alone(&stepping, &aapl, &ended));
+        ended.push(rung(
+            InstrumentId::new("MSFT")?,
+            IntentId(EventId("01JABCDEFGHJKMNPQRSTV00099".to_owned())),
+        )?);
+        assert!(
+            stepping_alone(&stepping, &aapl, &ended),
+            "an order that ended in another instrument says nothing of AAPL's ladder"
+        );
         let (resting, ended) = lone(false)?;
         assert!(!stepping_alone(&resting, &aapl, &ended));
         assert!(!stepping_alone(
