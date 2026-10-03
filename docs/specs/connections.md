@@ -454,7 +454,7 @@ transient. A restriction that lifts with no acknowledgment would be a separate s
 | MCP client with allowlist and pinning | Planned: E7-16 |
 | Robinhood connector | Planned: E7-6 (M8), blocked on E7-15 |
 | Connection state event schemas | Planned: E7-17 (journal spec change) |
-| Vault, leases | Planned (infrastructure §5; DEC-434 item 14 Proposed) |
+| Vault, leases | Planned (infrastructure §5; DEC-434 item 14, accepted by the founder on 2026-10-03) |
 | API routes | Planned: E10-13 (#560) |
 | Kraken connector | Planned: E16-1 |
 
