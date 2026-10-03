@@ -7909,6 +7909,17 @@ mod sequence_tests {
         sums: bool,
         script: &[Move],
     ) -> Result<Desk, String> {
+        rule_13_script_checked(start, lone, sums, script, &|_| Ok(()))
+    }
+
+    /// [`rule_13_script_with`], with `check` asked of the executor's state after every move.
+    fn rule_13_script_checked(
+        start: i64,
+        lone: bool,
+        sums: bool,
+        script: &[Move],
+        check: &dyn Fn(&ExecutorState) -> Result<(), String>,
+    ) -> Result<Desk, String> {
         let failed = |error: ExecutorError| format!("{error:?}");
         let (config, fees) = (executor_config(), fees().map_err(failed)?);
         let ports = tiered_ports(&config, &fees);
@@ -8158,6 +8169,7 @@ mod sequence_tests {
                 desk.deliver(&mut executor, &ports, input)?;
             }
             desk.within_position()?;
+            check(&executor.state).map_err(|error| format!("after move {step}: {error}"))?;
             if matches!(next, Move::Tick(_)) {
                 desk.bounded(&config)?;
             }
@@ -8216,6 +8228,111 @@ mod sequence_tests {
                 |(start, script)| rule_13_summed(start, &script).map_err(TestCaseError::fail),
             )
             .map_err(|error| error.to_string())
+    }
+
+    /// #524, seed 15's minimal script on `main`, from ten protected AAPL: a passive risk exit of 3
+    /// is handed on as the take-profit of an OCO for 3; then, the quote 30 minutes old, risk exits
+    /// of 2 and 2 are allowed and a discretionary exit of 4 is held `exit_unpriced`. The gate
+    /// allows 3 + 2 + 2 = 7 of 10.
+    const SEED_15: [Move; 11] = [
+        Move::Quote(Some(135), None, true),
+        Move::Exit(0, 3, 141),
+        Move::Tick(1_800),
+        Move::Exit(0, 2, 141),
+        Move::Exit(2, 4, 141),
+        Move::Exit(0, 2, 141),
+        Move::Tick(1_800),
+        Move::Confirm,
+        Move::Confirm,
+        Move::Confirm,
+        Move::Tick(1),
+    ];
+
+    /// #524 (the coordinator's ruling (A)): on seed 15 the gate never over-allows, but the risk
+    /// exits of 2 wait behind the handed-on placement for a cancel nothing asks, past the bound.
+    /// Under the summed oracle no exit may wait past the bound, and every allowed exit is sent for
+    /// its quantity (rule 13: a wait that never ends is a denial).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn seed_15_sends_every_allowed_risk_exit_within_the_bound() -> Result<(), String> {
+        rule_13_summed(0, &SEED_15)
+    }
+
+    /// #524's invariant at the step, which does not decide how the fix keeps it: while resting
+    /// protection holds an instrument's exits back, every resting protective order there has a
+    /// cancel asked or outstanding. So an exit waiting on protection always waits on a cancel
+    /// that is coming, or is released to go beside it.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn an_exit_waiting_on_protection_always_has_its_cancel_asked() -> Result<(), String> {
+        let asked = |state: &ExecutorState| -> Result<(), String> {
+            for instrument in state.exiting.keys() {
+                if !super::protection_holds(state, instrument) {
+                    continue;
+                }
+                let resting = state
+                    .protection
+                    .get(instrument)
+                    .map(|protection| protection.resting.clone())
+                    .unwrap_or_default();
+                for id in resting {
+                    let outstanding = state.orders.get(&id).is_none_or(|order| {
+                        order.cancel_unconfirmed
+                            || matches!(
+                                order.state,
+                                OrderState::PendingCancel | OrderState::Unknown
+                            )
+                    });
+                    if !outstanding {
+                        return Err(format!(
+                            "{} holds {instrument}'s exits back with no cancel asked",
+                            id.as_str()
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        };
+        rule_13_script_checked(0, false, true, &SEED_15, &asked).map(|_| ())
+    }
+
+    /// #524's claim 2, which already holds on `main`: an exit the gate holds counts nothing
+    /// toward the room later exits are allowed in. Seed 15's discretionary exit of 4 is held
+    /// `exit_unpriced`, and the two risk exits of 2 beside it are both allowed, 3 + 2 + 2 within 10.
+    #[test]
+    fn a_held_exit_counts_nothing_toward_the_gates_room() -> Result<(), String> {
+        let prefix = SEED_15.get(..6).ok_or("seed 15's arrivals")?;
+        let desk = rule_13_script_with(0, false, true, prefix)?;
+        let mut decided: Vec<(Purpose, u32, &str, &str)> = desk
+            .exits
+            .values()
+            .map(|exit| {
+                (
+                    exit.purpose,
+                    exit.qty,
+                    exit.verdict.as_str(),
+                    exit.reason.as_str(),
+                )
+            })
+            .collect();
+        decided.sort_by_key(|(purpose, qty, _, _)| (format!("{purpose:?}"), *qty));
+        let held = decided
+            .iter()
+            .filter(|(purpose, _, verdict, _)| {
+                *purpose == Purpose::DiscretionaryExit && *verdict == "hold"
+            })
+            .count();
+        let allowed_twos = decided
+            .iter()
+            .filter(|(purpose, qty, verdict, _)| {
+                *purpose == Purpose::RiskExit && *qty == 2 && *verdict == "allow"
+            })
+            .count();
+        if held == 1 && allowed_twos == 2 {
+            Ok(())
+        } else {
+            Err(format!("{decided:?}"))
+        }
     }
 
     /// #485's minimal script, from the rule-13 property: a risk exit's rung steps while the agent
