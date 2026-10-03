@@ -984,8 +984,9 @@ built against a recorded provider fake.
   format; the ladder of design §6.2 runs on a simulated clock with no early step and a notice
   before each; only an API-confirmed non-payment withholds renewal and a provider outage renews
   (BL-5, BL-14); and through every state, paper agents' exits, protective orders, owner exits, and
-  kill switches pass, while after lapse an opening is refused with `license_lapsed` by the risk gate
-  and no other component (design §3.4, BL-4); and every billing notice Mandate sends is `{notice,
+  kill switches pass, while after lapse every covered agent takes the `license_lapsed` restriction
+  (`exits_only`, #562 CP-6), an opening is refused by the gate's existing mode check, and no new gate
+  reason exists (design §3.4, BL-4); and every billing notice Mandate sends is `{notice,
   text}` through the dispatcher, with no canary or amount in any captured byte (BL-15).
 - **E14-9 (Must, M12; SC)** As a billing admin, I want quotas and an organization spend cap enforced
   before any spend, so that the bill never exceeds the cap. *Accepted when:* workspace, deployment,
