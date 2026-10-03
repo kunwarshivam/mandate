@@ -32,6 +32,7 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Journal test vectors](specs/reference-cases/journal.yaml) | Exact canonical bytes and hashes, plus tamper cases |
 | [Data plane spec](specs/data-plane.md) (draft v0.1) | Live market data, reference data, news, filings, fundamentals, the point-in-time store, fan-out to workspaces, failure walk, and adversaries |
 | [Inference and model gateway spec](specs/inference.md) | Draft v0.1: every model call, the model gateway, pinning and no substitution, deadlines, caching, the registry, metering and spend caps, security, failure walk, and the fast-tier and provider decisions ([DEC-432](project/decisions/DEC-432.md)) |
+| [Agent harness spec](specs/agent-harness.md) | Draft v0.1: how a confirmed mandate version becomes a running agent process; construction and lifecycle, the trading and research loops, retrieval, model inputs and output checks, budgets, evaluation and change control, adversaries, and the founder's budget, evaluation, and licence decisions ([DEC-431](project/decisions/DEC-431.md)) |
 
 ## Design
 
@@ -55,6 +56,7 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Product experience](product/09-product-experience.md) | Web v1 experience brief: principles, journeys, screen inventory and states, UX rules from the safety rules, open product decisions |
 | [Strategy options](product/10-strategy-options.md) | Market and regulatory evidence, strategy options ranked, the recommendation as decided in DEC-141 (the complete product leads; the owner's own agent is an optional channel), broker, demo, and discovery plans |
 | [Harness engineering](product/11-harness-engineering.md) | Research note: what harness engineering means, the open-source landscape, what trading agents and MCP gateways do and do not do, what enterprises appear to require, and the recommendations behind DEC-149's enterprise harness |
+| [Cost model](product/12-cost-model.md) (draft v0.1) | Inference, data, compute, storage, and fixed costs per agent and per workspace, as formulas with labelled assumptions; three illustrative scenarios, sensitivity, price floors per plan, and the budget guardrails (DEC-443, Proposed) |
 | [Glossary](product/glossary.md) | Shared vocabulary |
 
 ## Project
