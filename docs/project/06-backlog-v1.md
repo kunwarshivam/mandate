@@ -2829,6 +2829,17 @@ From the #485 chain's round-3 review (#494 and #496; the coordinator's ruling, 2
   once per waiting exit, not once per instrument; with the `Unknown` arm in its guard the repeats ask
   nothing, so this is wasted work only.
 
+From #468's round-5 review (the coordinator's ruling, 09:34Z on #468; freeze rule):
+
+- **E7-4: the oracle checks the park alert its exemption relies on** (#468 round 5, m2).
+  `Desk::within_position` accepts a parked remainder held by a paused or stopped agent because rule
+  13 permits the hold and the park alerts it, but `Desk::alerted` is set only by
+  `expiry_unreplaceable`, so the alert half is asserted, not checked. Record the park's
+  `GateDecided … parked` and its notification in the oracle and require it, or drop the clause
+  from the doc. The park's single alert is pinned elsewhere today.
+- **E7-4: wrap `within_position`'s long doc line** (#468 round 5, m5). A sentence spliced onto an
+  existing line left a line of about 190 characters; `fmt` does not wrap doc comments.
+
 From #518's round-2 review (the coordinator's ruling, 00:28Z on #518; freeze rule):
 
 - **E7-4: bound DEC-421's correction to the reconciliation the report asked for** (#518 round 2,
