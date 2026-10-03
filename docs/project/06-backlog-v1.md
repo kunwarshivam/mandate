@@ -821,16 +821,21 @@ the spec invariants (DP-n) its tests cover.
 - **E8-9 (Must, M7; SC)** As an owner, I want every notice, alerts included, built from one closed
   payload type so that nothing about my trading can reach a provider
   ([notifications spec §3, §4.2, §5.5](../specs/notifications.md), DEC-438 items 1, 2, 5, 17).
-  Tests first. *Accepted when:* `GenericText` holds `approval_needed`, `attention_needed`, and
-  `brief_ready`; a closed kind enum replaces `NotificationRef.message_key` in `mandate-runtime` and
-  `mandate-executor`, and every kind in spec §3.2 maps to its class and text key; the type has no
-  constructor from free text (NT-1); the journal spec's `OwnerAlertSent` gains spec §5.5's fields
-  in the same tests PR; a wording test holds NT-12.
+  Tests first. *Accepted when:* `GenericText` holds `approval_needed`, `attention_needed`,
+  `account_changed`, and `brief_ready`; the payload is `{"notice", "text"}` with a minted
+  `NoticeId` that has no constructor from an event id (NT-1, NT-4); a closed kind enum replaces
+  `NotificationRef.message_key` in `mandate-runtime` and `mandate-executor`, and every kind in spec
+  §3.2 maps to its class and text key; each stream owner writes `OwnerAlertSent` with the kind in
+  the subject's batch, and none for a `KillSwitchActivated` caused by an owner command (spec §3.4);
+  the payload schemas of journal v0.12's `OwnerAlertSent`, `NoticeIssued`, and `NoticeAttempted`
+  are closed in the same tests PR; a wording test holds NT-12.
 - **E8-10 (Must, M7; SC)** As an owner, I want a dispatcher that turns committed events into sends,
   retries them, and records every outcome, so that no alert is lost and none adds risk
-  (spec §5.1 to §5.8, DEC-438 items 4, 6 to 9, 15, 16). Tests first, against a fixture channel.
-  *Accepted when:* the dispatcher sends only about committed events and journals every attempt
-  (NT-8, crash injection at every step); quiet hours act by class (NT-7, the DST cases); safety
+  (spec §5.1 to §5.8, DEC-438 items 4 to 9, 15, 16, 27 to 29). Tests first, against a fixture
+  channel. *Accepted when:* the dispatcher runs as its own process, writes only the notice stream,
+  sends only about committed causes, and journals every attempt (NT-8, crash injection at every
+  step, and a second dispatcher fenced by epoch); one user kill switch is one notice (spec §3.4);
+  recipients match the identity spec's receive column read as data (NT-10); quiet hours act by class (NT-7, the DST cases); safety
   storms are coalesced and never dropped, with the journal-derived oracle of NT-6 seeded with a
   dropping bug first to show it fails; with every channel failing, a soak's intents and modes match
   perfect delivery except asks that skip (NT-5); the kill-switch and exit suites pass with the
@@ -853,6 +858,19 @@ the spec invariants (DP-n) its tests cover.
   egress requires it (spec §4.6, DEC-438 item 13). *Accepted when:* payloads are encrypted to the
   subscription; the relay refuses ciphertext over 512 bytes and stores none; NT-1's canary test
   passes on relay and push-service captures; a relay outage changes no trading state (NT-9).
+- **E8-16 (Should, M7)** As a reviewer, I want the minors of the notifications spec's round 1
+  ([#558](https://github.com/kunwarshivam/mandate/pull/558); freeze rule) fixed in the spec:
+  - HLD §6 flow C step 4 still says "an escalation chain (push → SMS → phone call)"; align it with
+    DEC-438 item 6's fan-out.
+  - The Telegram linking code: state its lifetime, entropy, and single use, and add the residual to
+    §9 (whoever obtains the code binds their own chat and receives the opaque notices).
+  - NT-1's wording against the relay envelope: the `urgency` and TTL the relay and push service see
+    are fixed per class, and the push endpoint is an address under NT-2.
+  - A rung-2 guard that no mail adapter ships while `[[EMAIL-FOOTER]]` is unresolved.
+  - NT-5: state why check 4 is the only effect (no exit, protective order, or risk exit is ever
+    gated by an approval, rule 13), so the claim survives a later autonomy change.
+  - NT-6: say that a notice joining a coalescing window meets the 60-second bound at the window's
+    end.
 
 ### E9 Identity, tenancy, and policy
 

@@ -4,8 +4,8 @@
 |---|---|
 | **Status** | Draft v0.1, not yet reviewed |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 Accepted; items 19 to 26 Proposed for the founder) |
-| **Backlog** | E8-4, E8-5, E8-7, and E8-9 to E8-14 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
+| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 19 to 26 Proposed for the founder) |
+| **Backlog** | E8-4, E8-5, E8-7, E8-9 to E8-14, and E8-16 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
 | **Safety-critical** | Yes: notification payloads and the approval flow (`AGENTS.md`, "Safety-critical paths") |
 
 This spec covers everything the platform sends to a person outside the workspace app: approval
@@ -46,7 +46,7 @@ cross-plane attacker list. §8 lists the contracts this spec needs from each.
 
 | Area | What this spec decides |
 |---|---|
-| Notices | Every outbound notice: approval requests and reminders; alerts for risk limits and tripwires, kill switches, unprotected intervals and stalled exits, reconciliation mismatches, account restrictions, faults that pause an agent; spend caps and other information; the daily brief |
+| Notices | Every outbound notice: approval requests and reminders; alerts for risk limits and tripwires, kill switches, unprotected intervals and stalled exits, reconciliation mismatches, account restrictions, faults that pause an agent; identity and account-security notices (a new credential, a recovery, a role grant, a deactivation, break-glass, a risk-increasing version, a new connection, going live, a new delegation, a newly connected client); spend caps and other information; the daily brief |
 | Channels | Pull channels (`cli_inbox`, `web_inbox`); push channels (email and one chat channel at M7, web push at M10, SMS and phone later under E8-7); native mobile push later ([DEC-19](../project/04-decision-log.md#decisions)) |
 | Payloads | The exact bytes that may leave the workspace deployment, and how that is enforced |
 | Delivery | The dispatcher, the provider interface, retries, bounces, receipts, coalescing, rate limits, quiet hours, unsubscribe |
@@ -69,14 +69,16 @@ cross-plane attacker list. §8 lists the contracts this spec needs from each.
 
 | Term | Meaning |
 |---|---|
-| **Notice** | One thing the platform tells one recipient: a kind, a subject event, and a class |
+| **Notice** | One thing the platform tells its recipients about one cause: a kind, a class, and a cause (§3.4) |
+| **Notice id** | A random 128-bit id the dispatcher mints for each notice. It is the only id that leaves the workspace, and it is never derived from, or equal to, any journal event id (§4.2) |
+| **Cause** | The one committed event a notice answers: an `ApprovalRequested`, an `OwnerAlertSent`, or for a user's kill switch the `OwnerCommandIssued` (§3.4) |
 | **Subject event** | The committed journal event a notice is about, named by its `event_id` (a ULID) |
-| **Class** | `action` (an approval waits on the recipient), `safety` (something that holds, restricts, or protects money happened), or `info` (nothing the agent may do has changed) |
+| **Class** | `action` (an approval waits on the recipient), `safety` (something that holds, restricts, or protects money happened, or who and what can act on the account changed), or `info` (nothing the agent may do has changed) |
 | **Pull channel** | A list the recipient reads inside the workspace: `cli_inbox` (the founder's CLI) and `web_inbox` (the web app's inbox and alerts center). The list is the journal itself, so it is delivered when the subject event commits |
 | **Push channel** | Anything that sends a message out of the workspace deployment: email, chat, web push, SMS, phone |
 | **Payload** | The bytes a push channel carries to a provider, relay, or device |
 | **Address** | Where a push channel sends: an email address, a chat destination, a push subscription. Personal data, held in the vault ([journal spec §6.4](journal.md#64-personal-data-and-identity)) |
-| **Dispatcher** | The workspace service that turns committed subject events into sends |
+| **Dispatcher** | The workspace service that turns committed causes into sends, and the single writer of the workspace's notice stream `ntf:{workspace_id}` (§5.1) |
 
 ---
 
@@ -88,16 +90,16 @@ the dispatcher's own predicate (`AGENTS.md`, "Getting it right the first time").
 
 | ID | Invariant | How it is tested |
 |---|---|---|
-| NT-1 | **Payloads are opaque.** Anything that leaves the workspace deployment as a notice carries exactly the subject event's id and one text key from a closed set (§4.2), rendered through fixed templates. Never an instrument, side, quantity, price, order value, P&L, score, thesis, rule, deadline, agent name, mandate content, broker account, or personal data, the recipient's name included (`AGENTS.md` rule 6, [DEC-11](../project/04-decision-log.md#decisions), PX-6). The payload type has no field and no constructor that takes free text from domain data (rung 1) | Type test: the payload and every channel's rendered message are built only from `Notification`; a captured-payload test seeds a workspace whose instruments, agent names, rule ids, prices, and user names are unique canary strings, drives every notice kind through every channel adapter and the relay, and scans every captured byte for every canary (E8-5's acceptance) |
+| NT-1 | **Payloads are opaque.** Anything that leaves the workspace deployment as a notice carries exactly a notice id (random, never a journal event id) and one text key from a closed set (§4.2), rendered through fixed templates. Never an instrument, side, quantity, price, order value, P&L, score, thesis, rule, deadline, agent name, mandate content, broker account, or personal data, the recipient's name included (`AGENTS.md` rule 6, [DEC-11](../project/04-decision-log.md#decisions), PX-6). The payload type has no field and no constructor that takes free text from domain data (rung 1) | Type test: the payload and every channel's rendered message are built only from `Notification`, whose id type has no constructor from an event id; a captured-payload test seeds a workspace whose instruments, agent names, rule ids, prices, and user names are unique canary strings, drives every notice kind through every channel adapter and the relay, and scans every captured byte for every canary (E8-5's acceptance) |
 | NT-2 | **Addresses stay minimal and private.** A recipient is journaled and logged only as an opaque user id and a channel. The address is read from the vault at send time, passed to the one provider that needs it, and never journaled, logged, or put in a metric | Log, metric, and journal scans for canary addresses after a full run; a test that the dispatcher's only path to an address is the vault client |
 | NT-3 | **Approval happens only inside the workspace.** A grant, a skip, an acknowledgment, or any owner command reaches the runtime only as a control-stream event that workspace services write after authenticating the user in the workspace deployment ([mandate spec §6.4](mandate.md#64-approvals) "Responses"). No channel adapter, relay, provider webhook, email reply, or chat message can write one | Layering: the notification crates cannot depend on the control-stream writer (`xtask/layers.toml`); a fuzz test feeds every inbound path (replies, chat messages, button callbacks, provider webhooks) and asserts the control stream is unchanged |
-| NT-4 | **Links carry no authority.** A link holds the workspace app's fixed origin and the subject id, nothing else: no session, token, one-time code, or sign-in. Opening it requires sign-in; a grant requires step-up as mandate spec §6.1 and §6.4 require | Template test: every link matches `<origin>/n/<ULID>`; an end-to-end test opens a captured link with no session and reaches only the sign-in screen |
+| NT-4 | **Links carry no authority.** A link holds the workspace app's fixed origin and the notice id, nothing else, so it reveals neither an event reference nor a creation time: no session, token, one-time code, or sign-in. Opening it requires sign-in; a grant requires step-up as mandate spec §6.1 and §6.4 require | Template test: every link matches `<origin>/n/<notice id>`; a property test that two notices about one cause get different ids and no id parses as a ULID of any journaled event; an end-to-end test opens a captured link with no session and reaches only the sign-in screen |
 | NT-5 | **Delivery never adds risk** (rule 3). Failure, delay, duplication, or loss of any notice changes no order, intent, limit, or mode. Its only effect on trading state is check 4 (`not_delivered`), which can only refuse a response. An approval nobody could see times out to `skip` | Fault injection: with every push channel failing, hung, or duplicating, a soak run's intents, gate decisions, and modes are identical to a run with perfect delivery, except asks that time out to `skip` |
-| NT-6 | **Nothing suppresses a safety notice.** Retry de-duplication, rate limits, coalescing, quiet hours, unsubscribe, and provider quotas never drop a `safety` notice. Every `safety` subject event produces, within 60 seconds of its commit while the dispatcher runs, a send attempt on every configured push channel the recipient has not lost (§5.6) and an entry in the pull channels | Property test: random storms of safety events across quiet hours, rate limits, and provider 429s; an oracle derived from the journal's subject events counts the attempts per subject, recipient, and channel and requires every one within the bound |
+| NT-6 | **Nothing suppresses a safety notice.** Retry de-duplication, rate limits, coalescing, quiet hours, unsubscribe, and provider quotas never drop a `safety` notice. Every `safety` cause (§3.4) produces, within 60 seconds of its commit while the dispatcher runs, a send attempt on every configured push channel the recipient has not lost (§5.6) and an entry in the pull channels | Property test: random storms of safety events across quiet hours, rate limits, and provider 429s; an oracle that derives the causes from the subject streams on its own (one per `OwnerAlertSent`, one per kill-switch command however many streams journal `KillSwitchActivated`) counts the attempts per cause, recipient, and channel and requires every one within the bound |
 | NT-7 | **Quiet hours never delay a safety notice.** Quiet hours apply only to `action` push sends (suppressed, as mandate spec §6.4 says) and `info` push sends (deferred to the window's end). Pull channels are never affected, so a request stays listed and grantable | Property test over random quiet-hour windows, including ones spanning midnight and the DST changes (`mandate_approval::deliver_now`'s DST cases extended per class) |
-| NT-8 | **Every send is journaled, and only after its subject.** The dispatcher sends nothing about an event that is not committed. Every attempt's outcome is journaled: kind, subject, recipient (opaque), channel, attempt, status, provider message id, and time. A crash between a send and its record re-sends the notice (at least once); it never loses one | Crash injection at every step of a send; an oracle that reads only the journal finds, for every subject event with a notice kind, a terminal outcome per recipient and channel |
+| NT-8 | **Every send is journaled, and only after its cause.** The dispatcher sends nothing about an event that is not committed, journals `NoticeIssued` before the first send, and journals every attempt's outcome as `NoticeAttempted` (recipient (opaque), channel, attempt, status, provider message id, time), all on the notice stream, of which it is the only writer (journal spec §2). A crash between a send and its record re-sends the notice (at least once); it never loses one | Crash injection at every step of a send, and a second dispatcher started for the same workspace (the older is `Fenced`, journal spec §5.1, and the newer re-sends); an oracle that reads only the journal finds, for every cause, a terminal outcome per recipient and channel |
 | NT-9 | **The notification path is never in the trade path.** No exit, protective order, risk exit, kill switch, owner exit, or gate decision waits on, is ordered after, or fails because of the dispatcher, a provider, or the relay (rule 13; [OPS-4](../design/infrastructure.md), [OPS-12](../design/infrastructure.md)) | Fault injection: the kill-switch and exit suites pass with the dispatcher hung and the relay unreachable |
-| NT-10 | **Notices stay in their workspace.** A notice goes only to users of the subject's workspace whose role may see that kind (§3.3); its link resolves only for such a user, and to anyone else it looks the same as a missing subject | Two-workspace test: a user of workspace B opening workspace A's link gets the same response as for a random ULID |
+| NT-10 | **Notices stay in their workspace.** A notice goes only to users of the cause's workspace whose roles may receive its class under the identity spec's **receive** column (§3.3); its link resolves only for such a user, and to anyone else it looks the same as a missing notice | Two-workspace test: a user of workspace B opening workspace A's link gets the same response as for a random notice id; a role test drives every class to a workspace holding every role and checks the recipients against the receive column, read as data, not through the dispatcher's own routing |
 | NT-11 | **Being notified is not being allowed.** Receiving a notice gives no right to act. A response is still judged by checks 1 to 7 (mandate spec §6.4): a notice sent to someone outside `autonomy.approval.approvers` changes nothing, and a removed approver is refused `not_an_approver` | Admission test: responses from every recipient class that is not a current approver are refused |
 | NT-12 | **Notices never advise or persuade.** The text set has no trade, no urgency beyond "needs your approval", no outcome, and no count of profit or loss (rule 6; mandate spec §6.4 "Never persuasive language") | A wording test over the closed text set, against the advice-wording list `the_content_never_carries_advice_wording` uses |
 
@@ -119,21 +121,28 @@ and an unanswered approval is a skip.
 
 PX-16 (DEC-198) fixed what may interrupt: asks with a deadline, risk-limit alerts, restrictions and
 reconciliation holds that need an acknowledgment, a fired tripwire, and a kill switch. The `safety`
-class is that list plus the protection alerts the alerts center (G5) already treats as safety.
+class is that list, plus the protection alerts the alerts center (G5) already treats as safety, plus
+the identity and account-security notices: each tells a person that who or what can act on their
+money changed, which is the only out-of-band signal of an account takeover or a sock-puppet grant
+(identity spec ID-14, §8.3, §10.1; threat model DEC-439 item 5).
 
 ### 3.2 Catalogue
 
 The kind is an internal key. It is journaled and shown inside the workspace, and **never sent**: the
 payload carries only the text key (§4.2), so a provider learns at most whether a notice is an
-approval, an alert, or the brief.
+approval, an alert, an account change, or the brief.
+
+For every kind except the two approval kinds, the trigger is the **subject**: the owner of the
+subject's stream writes an `OwnerAlertSent` naming it, with the kind, in the subject's own batch
+(§5.5), and that record is the notice's cause. The approval kinds' cause is the `ApprovalRequested`.
 
 | Kind | Trigger (committed subject event) | Class | Text key | Recipients |
 |---|---|---|---|---|
 | `approval_requested` | `ApprovalRequested` (agent stream) | action | `approval_needed` | The approval's approvers |
 | `approval_reminder` | The approval is still pending when a quarter of `timeout_s` remains and at least 60 seconds remain; the subject is the `ApprovalRequested` | action | `approval_needed` | Approvers who have not responded |
 | `risk_limit` | `RiskLimitTriggered`, any limit, a tripwire included ([mandate spec §5.10](mandate.md#510-journal-events), §6.7) | safety | `attention_needed` | Owners |
-| `kill_switch` | `KillSwitchActivated` on any stream, whoever initiated it (owner, automated limit, or `PlatformOperatorAction`) ([trading spec §5.5](trading-domain.md#55-kill-switch)) | safety | `attention_needed` | Owners, and every workspace admin for an account-wide or operator switch |
-| `agent_held` | `AgentModeApplied` or `AgentModeChanged` to `paused` or `exits_only` that the owner did not command: faults, an instrument that became non-tradable, an out-of-scope corporate action, an unmapped broker status ([trading spec §7.4](trading-domain.md#74-agent-modes)) | safety | `attention_needed` | Owners |
+| `kill_switch` | A user's kill switch: the control stream's `OwnerCommandIssued` (`kill_switch`), once, however many stream owners then journal `KillSwitchActivated` for it (§3.4). An automated switch (a mandate limit): the account stream's `KillSwitchActivated`. An operator's: `PlatformOperatorAction` ([trading spec §5.5](trading-domain.md#55-kill-switch)) | safety | `attention_needed` | Owners, and every workspace admin for an account-wide or operator switch |
+| `agent_held` | `AgentModeApplied` or `AgentModeChanged` to `paused` or `exits_only` that the owner did not command: faults, an instrument that became non-tradable, an out-of-scope corporate action, an unmapped broker status ([trading spec §7.4](trading-domain.md#74-agent-modes)); executor key `broker_status_unmapped` | safety | `attention_needed` | Owners |
 | `account_restriction` | `AccountRestrictionChanged` (trading spec §7.3) | safety | `attention_needed` | Owners of every agent on the account |
 | `protection` | `ProtectionChanged` for an unprotected interval that reached `max_unprotected_s`, or the triggered-stop watchdog ([trading spec §5.4](trading-domain.md#54-protective-exits-dec-28-dec-36)); executor keys `unprotected_interval_limit`, `stop_watchdog` | safety | `attention_needed` | Owners |
 | `exit_stalled` | An exit resting at the ladder's floor, held past its bound, or with nothing to price from, and the owner-exit remainder at its floor ([trading spec §5.6](trading-domain.md#56-exit-pricing)); executor keys `exit_ladder_floor`, `exit_held_long`, `exit_unpriced` | safety | `attention_needed` | Owners |
@@ -142,6 +151,17 @@ approval, an alert, or the brief.
 | `account_state` | Allocations exceeding account equity ([mandate spec §5.1](mandate.md#51-capital-equity-and-allocation-changes-dec-39-dec-50-dec-53)), a policy that makes a version nonconforming, the Holding state starting (mandate spec §3.1) | safety | `attention_needed` | Owners |
 | `data_feed_down` | The market-data connection `down` past the data plane's threshold (data plane spec §3.2) | safety | `attention_needed` | Owners |
 | `integrity_incident` | `IntegrityIncidentRecorded` (journal spec §11) | safety | `attention_needed` | Owners and workspace admins |
+| `credential_added` | `CredentialEnrolled` (identity spec §12.1): a new passkey or device | safety | `account_changed` | The member, on every push channel |
+| `recovery_used` | A sign-in by OIDC or a recovery code that starts an enrolment cool-off (identity spec §10.1) | safety | `account_changed` | The member, on every push channel |
+| `role_granted` | `MemberActivated` or `MemberRoleChanged` adding a role (identity spec §8.3) | safety | `account_changed` | Every other workspace admin and org owner, and the member |
+| `member_deactivated` | `MemberDeactivated` or `MemberRemoved` (identity spec §5.2) | safety | `account_changed` | The remaining workspace admins |
+| `break_glass` | `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` (identity spec §10.3) | safety | `account_changed` | Every workspace admin and org owner |
+| `version_risk_increasing` | `MandateConfirmed` whose classification is risk-increasing ([mandate spec §9.2](mandate.md#92-classification)), a delegation's included | safety | `account_changed` | Owners and workspace admins |
+| `delegation_added` | `MandateConfirmed` that adds a delegation (mandate spec §6.5) and is not already `version_risk_increasing` | safety | `account_changed` | Owners |
+| `connection_added` | `ConnectionEstablished` | safety | `account_changed` | Owners and workspace admins |
+| `went_live` | `AgentDeployed` in a live environment | safety | `account_changed` | Owners and workspace admins |
+| `client_connected` | `ClientConnected` (identity spec §12.1, DEC-141) | safety | `account_changed` | The member and workspace admins |
+| `channel_lost` | A `NoticeAttempted` that marks the member's address `unreachable` (§5.6); the dispatcher's own record, so no other stream is written | safety | `account_changed` | The member, on their other channels |
 | `daily_brief` | The brief for the risk day is built (D13, DEC-184) | info | `brief_ready` | Owners |
 | `delegation_ended` | A delegation expires, is spent, or is suspended (mandate spec §6.5) | info | none (pull and brief only) | Owners |
 | `model_status` | A pinned model deprecated or withdrawn (inference spec; mandate spec §8.1) | info | none | Owners |
@@ -154,13 +174,37 @@ users the workspace's alert routing names (§3.3).
 
 ### 3.3 Recipients
 
-- An `action` notice goes to each user in the approval's `autonomy.approval.approvers`, resolved at
-  the request.
-- `safety` and `info` notices go to the agent's approvers and to the users the workspace's alert
-  routing adds. Until roles exist (E9-2), that is the founder. With roles, the identity spec says
-  which roles may receive which class; a viewer may receive `info` but never `action` (§8).
-- A recipient is an opaque user id. A user with no address on any push channel still has the pull
-  channels.
+The identity spec's permission matrix has a **receive** column (identity spec §4.2; the
+coordinator's settlement X1 on #556 and #558): which roles may receive which class. It is
+authoritative, and the dispatcher reads it as data. The Recipients column above narrows it and never
+widens it: a recipient must both be named by the row and hold a role the receive column allows.
+
+Until the column merges, this interim reading holds, and it is the stricter one:
+
+| Class | Roles that may receive it |
+|---|---|
+| `action` | Approver, and only users listed in the approval's `autonomy.approval.approvers`, resolved at the request |
+| `safety` | Operator, approver of the agent, workspace admin; org owner for the account-security kinds the rows name |
+| `info` | Operator, approver, workspace admin, viewer |
+
+Viewers never receive `action` or `safety`; auditors and billing admins receive nothing pushed.
+Before roles exist (E9-2) every row resolves to the founder. A recipient is an opaque user id; a
+user with no address on any push channel still has the pull channels.
+
+### 3.4 One notice per cause
+
+- A notice answers exactly one cause, and the dispatcher's key for it is the cause's event id. The
+  causes are `ApprovalRequested`, `OwnerAlertSent`, and the dispatcher's own `NoticeAttempted`
+  that loses an address (`channel_lost`).
+- **A user's kill switch is one cause.** Journal spec §2 makes it a command that each stream owner
+  journals as `KillSwitchActivated` in its own stream. The command's `OwnerCommandIssued` is the
+  cause: the API writes `OwnerAlertSent` (`kill_switch`) with it on the control stream, and the
+  runtime and executor write none for a `KillSwitchActivated` whose `causation_id` is an owner
+  command. If a stream owner's record ever names an owner command as its cause, the dispatcher
+  de-duplicates it on the command's event id.
+- **One subject, one kind.** Where a subject fits two rows (a confirmed version that both increases
+  risk and adds a delegation), the first row in §3.2's order wins.
+- Coalescing (§5.4) only merges messages; it never merges causes.
 
 ---
 
@@ -184,23 +228,35 @@ channel is a risk-increasing change and adding one is neutral ([mandate spec §9
 
 ### 4.2 The payload
 
-The payload is today's `mandate_approval::notification_payload`, generalized:
+The payload is today's `mandate_approval::notification_payload`, generalized, with the subject
+replaced by a notice id:
 
 ```
-{"subject": "<26-character ULID of the subject event>", "text": "<text key>"}
+{"notice": "<notice id: 32 lowercase hex digits>", "text": "<text key>"}
 ```
 
 | Text key | Rendered text (English) |
 |---|---|
 | `approval_needed` | "An agent in your workspace needs your approval" (fixed by mandate spec §6.4 and PX-6) |
 | `attention_needed` | "Your workspace has a new alert" |
+| `account_changed` | "There was a change to your account or workspace access" |
 | `brief_ready` | "Your daily brief is ready" (D13) |
 
-- `subject` is built only by `ApprovalRef::of_requested_event`-style constructors that accept a
-  ULID-shaped event id and nothing else (DEC-165 item 13). The kind, the class, the agent, and the
-  workspace are not in the payload.
+- **The notice id** is 128 bits from the operating system's secure random source, minted by the
+  dispatcher when it issues the notice and journaled on `NoticeIssued` beside the cause. It is
+  never a journal event id: a ULID's leading 48 bits are its creation time to the millisecond, so
+  an event id in a payload would hand every provider the exact time of an approval or a limit
+  breach. Inside the workspace the API resolves the notice id to its cause for an authorized user
+  (workspace API spec §3.9, `GET /notices/{notice_id}`).
+- **What changes in code** (E8-9): `ApprovalRef::of_requested_event` stays as the in-workspace
+  reference to the request, and stops being what a payload carries; the payload's id type becomes a
+  minted `NoticeId` with no constructor from an event id. M7 v0 sends nothing out of the workspace
+  (`cli_inbox` only), so nothing has leaked a timestamp so far.
+- The kind, the class, the agent, the workspace, and the cause are not in the payload.
 - The text set is a closed enum. Adding a key is a spec change; no key may name a kind more
-  precisely than "approval", "alert", or "brief".
+  precisely than "approval", "alert", "account change", or "brief". `account_changed` was added in
+  round 1 so that an account-security notice reads differently from a trading alert, and a person
+  who did not make the change knows to look.
 - PX-6's option (c), a platform-assigned label such as "Agent 7" that the owner can turn on, would
   add one optional field holding a label from a fixed platform pattern. It is not in v0.1: it needs
   its own decision on whether a stable label lets a provider link notices over time (§12 item 3).
@@ -208,7 +264,7 @@ The payload is today's `mandate_approval::notification_payload`, generalized:
 ### 4.3 Rendering and links
 
 Every channel renders from the payload and fixed templates only. The **link** is
-`<origin>/n/<subject>`, where `<origin>` is the workspace app's fixed origin from the deployment's
+`<origin>/n/<notice id>`, where `<origin>` is the workspace app's fixed origin from the deployment's
 configuration: the managed app's origin, or in hybrid and on-prem the customer's own workspace app
 origin, which may be reachable only on their network. The link never holds a token, a session, a
 one-time code, a query string, or a tracking parameter (NT-4). The product name in copy is Owlhead
@@ -266,26 +322,43 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
 
 ### 5.1 The dispatcher
 
-The dispatcher is a workspace service that **tails the journal**, which is its outbox:
+**One writer per stream** (journal spec §2). Every stream has exactly one owner, and cross-stream
+facts are copied by the consuming stream's owner. So the work is split by stream:
 
-1. It reads committed events on the agent, account, and control streams of its workspace and maps
-   each subject event to zero or more notices (§3.2). It never receives a notice from anywhere
-   else, so a notice can never name an uncommitted event (NT-8, rule 5).
-2. For each notice, recipient, and push channel it reads the address from the vault and sends
-   through the channel's adapter (§5.2).
-3. It journals each attempt's outcome (§5.5).
-4. On restart it replays from its last recorded outcome: any notice with no terminal outcome is due
-   again, as are reminders whose time has passed while the approval is still pending.
+| Who | Writes | On |
+|---|---|---|
+| The runtime | `ApprovalRequested`, and `ApprovalDelivered` for the pull channels in the request's own batch | Its agent stream |
+| The runtime, the executor, workspace services | `OwnerAlertSent` naming the subject, with its kind, in the subject's own batch (§3.2) | Each on its own stream: agent, account, or control |
+| The dispatcher | `NoticeIssued` and `NoticeAttempted` | The notice stream `ntf:{workspace_id}`, which only it writes |
 
-**M7 shape.** At M7 there is no separate service: the runtime's and executor's shells host the
-dispatcher. The runtime still emits `Effect::NotifyApproval` after the `ApprovalRequested` draft in
-the same effect list, and journals `ApprovalDelivered` for each channel (M7 brief). The executor's
-`Effect::Notify` alerts reach the same dispatcher. From M8 the dispatcher moves into workspace
-control services and reads the streams instead of effects; the records do not change.
+The dispatcher **never writes the agent, account, or control stream**, and no other process writes
+the notice stream. One dispatcher runs per workspace; a second is fenced by the writer epoch
+(journal spec §5.1) before it can append, and a send it made after it was fenced has no record, so
+the live dispatcher re-sends it (a duplicate at most).
 
-**Idempotency key:** `(subject event id, kind, recipient, channel)`. A retry reuses it; a provider
-that supports idempotency keys is given it, so a resend after a crash is a duplicate at most once
-per channel.
+The dispatcher **tails the journal**, which is its outbox:
+
+1. It reads committed `ApprovalRequested` and `OwnerAlertSent` events on its workspace's agent,
+   account, and control streams. With its own `channel_lost` records, these are the only causes
+   (§3.4); it receives nothing from
+   anywhere else, so a notice can never name an uncommitted event (NT-8, rule 5).
+2. For each new cause it mints a notice id, resolves the recipients (§3.3), and journals
+   `NoticeIssued` before any send.
+3. For each recipient and push channel it reads the address from the vault and sends through the
+   channel's adapter (§5.2), then journals the outcome as `NoticeAttempted`.
+4. On restart it replays its own stream and the subject streams: a cause with no `NoticeIssued` is
+   issued, a notice with no terminal attempt is due again, as are reminders whose time has passed
+   while the approval is still pending.
+
+**A process of its own, from M7.** The dispatcher runs in its own process, not inside the runtime or
+the executor, so no trading process does provider I/O or waits on it (NT-9). At M7 that is one more
+process on the founder's host; from M8 it runs beside workspace control services, still with its own
+stream. The runtime's `Effect::NotifyApproval` and the executor's `Effect::Notify` become the
+`OwnerAlertSent` drafts above (E8-9); the shell no longer delivers anything itself.
+
+**Idempotency key:** `(notice id, recipient, channel)`. A retry reuses it; a provider that supports
+idempotency keys is given it, so a resend after a crash is a duplicate at most once per channel. A
+cause is issued once: `NoticeIssued` names its cause, and a cause that already has one is skipped.
 
 ### 5.2 Provider interface
 
@@ -319,8 +392,8 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 
 - **Safety notices are coalesced, never dropped.** The first `safety` notice to a recipient on a
   channel goes at once. Further `safety` notices to the same recipient and channel within the next
-  60 seconds are combined into one message sent at the window's end, whose subject is the first of
-  them and whose link opens the alerts center. Every combined notice gets its own outcome record
+  60 seconds are combined into one message sent at the window's end, whose notice id is the first's
+  and whose link opens the alerts center. Every combined notice gets its own outcome record
   pointing to the combined message's provider id, so the oracle of NT-6 counts it. No `safety`
   notice waits more than 60 seconds.
 - **Action notices** are bounded by the ask budget (10 `ApprovalRequested` per agent per risk day,
@@ -333,19 +406,22 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 
 | Record | Stream | When | Fields |
 |---|---|---|---|
-| `ApprovalDelivered` | Agent (runtime) | Each channel's outcome for an approval at M7, and the pull channel's `delivered` in the request's own batch at every stage | As journal spec §9: approval, channel, status, message id |
-| `OwnerAlertSent` | Control (workspace services) | Each attempt's outcome for every other notice, and from M8 for approval push sends too | Today: subject event, channel, delivery status. Added by E8-9: `kind`, `recipient` (opaque), `attempt`, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason`, `provider_message_id`, `coalesced_into` |
+| `ApprovalDelivered` | Agent (the runtime) | The pull channels' `delivered`, in the request's own batch, at every stage. Push outcomes are not copied here: check 4 is met by the pull channel | As journal spec §9: approval, channel, status, message id |
+| `OwnerAlertSent` | The subject's own stream (its owner) | With the subject, in the same batch | Subject event, kind, and for a kill switch the owner command it carries out (journal spec v0.12) |
+| `NoticeIssued` | Notice (the dispatcher) | Before the first send | Notice id, kind, class, cause and its stream, recipients (opaque) |
+| `NoticeAttempted` | Notice (the dispatcher) | Each attempt's outcome | Notice id, recipient (opaque), channel, attempt, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason`, `provider_message_id`, `coalesced_into` |
 
 `delivered` means the provider accepted the message, not that a person read it. A later bounce is a
 new record for the same provider message id with `failed` and reason `bounced`; it never retracts an
-earlier `delivered`, and check 4 is satisfied by the pull channel in any case. The journal-spec
-change for the added fields lands in E8-9's tests PR, under the journal spec's own change rule.
+earlier `delivered`, and check 4 is satisfied by the pull channel in any case. Journal spec v0.12
+adds the notice stream and these records; E8-9's tests PR closes their payload schemas.
 
 ### 5.6 Bounces, complaints, and lost addresses
 
 - A hard bounce, `address_rejected`, or a complaint marks that user's address on that channel
-  `unreachable`. The dispatcher stops sending to it and raises an `account_state`-style alert on the
-  user's other channels and the pull channels, saying a notification channel stopped working.
+  `unreachable` on its `NoticeAttempted`. The dispatcher stops sending to it and issues a
+  `channel_lost` notice, whose cause is that record on its own stream, to the user's other channels
+  and the pull channels.
 - `auth_failed` (a revoked Slack webhook, a removed Telegram bot) does the same, and also raises an
   operator alert when the credential is the platform's (the Telegram bot token).
 - An address comes back only when the signed-in user re-verifies it in the workspace.
@@ -381,13 +457,14 @@ never make a request ungrantable; they only mean nobody was interrupted.
 
 ## 6. Acting on a notification
 
-1. **Open.** The link opens `<origin>/n/<subject>`. The page title is generic and the page shows only
+1. **Open.** The link opens `<origin>/n/<notice id>`. The page title is generic and the page shows only
    a sign-in until the user is authenticated (G4).
 2. **Sign in.** Passkey or OIDC against the workspace deployment's identity configuration (identity
    spec). In hybrid and on-prem, against the customer's identity provider, from the customer's own
    app origin; off their network, the screen says "Cannot reach your workspace" and caches nothing.
-3. **Resolve.** The app asks the workspace API for the subject among the workspaces the user belongs
-   to. A subject the user may not see answers exactly as a missing one does (NT-10).
+3. **Resolve.** The app asks the workspace API to resolve the notice id among the workspaces the
+   user belongs to (workspace API spec §3.9). A notice the user may not see answers exactly as a
+   missing one does (NT-10).
 4. **Show.** For an approval, the content object from the approval service (mandate spec §6.4
    "Content"), with the deadline and the default. For an alert, the screen that resolves it.
    A subject that is no longer pending shows its terminal state: "skipped" with the time, or
@@ -410,7 +487,7 @@ convenience; opening the app directly reaches the same inbox.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Due: subject event committed and mapped (§5.1)
+    [*] --> Due: cause committed, NoticeIssued (§5.1)
     Due --> Suppressed: action push in quiet hours
     Due --> Deferred: info push in quiet hours
     Deferred --> Due: window ends
@@ -431,10 +508,13 @@ stateDiagram-v2
 
 | Situation | What happens | Effect on trading | Recorded as |
 |---|---|---|---|
-| **A provider is down** | Retries per §5.3; other channels unaffected; after the window, `failed` | None. An approval stays grantable through the pull channels and otherwise times out to `skip` | `OwnerAlertSent` or `ApprovalDelivered`, `failed`, per attempt |
+| **A provider is down** | Retries per §5.3; other channels unaffected; after the window, `failed` | None. An approval stays grantable through the pull channels and otherwise times out to `skip` | `NoticeAttempted`, `failed`, per attempt |
 | **The relay is down** | Relayed web push fails and retries; email and chat leave the deployment directly and are unaffected; managed web push does not use the relay | None (NT-9, OPS-12). The status strip says relay push is unavailable (09-product-experience §7) | `failed`, reason `provider_error` |
 | **The dispatcher is down** | Nothing is sent; on restart it replays from the journal and sends what is still due; an operator alert fires when its lag passes 60 seconds | None. Approvals stay listed in the pull channels; any that expire meanwhile are skipped | Outcomes appear late; the lag is an operator metric |
 | **A crash between send and record** | The notice is re-sent with the same idempotency key | None | Two attempts, one possibly a duplicate the recipient sees |
+| **Two dispatchers for one workspace** (a slow termination, an orchestrator restart) | The older is `Fenced` at its next append (journal spec §5.1); the newer replays and re-sends what has no record | None: no other stream is written by either, so no trading writer is fenced (NT-9) | `NoticeAttempted` from the live dispatcher only |
+| **A stream owner commits an alert while the dispatcher lags** | `OwnerAlertSent` waits in the subject stream until the dispatcher reads it | None | `NoticeIssued` late; the lag alert fires past 60 seconds |
+| **A user's kill switch reaches two stream owners** | One notice for the command (§3.4); each `KillSwitchActivated` is an effect, not a cause | None | One `NoticeIssued`, cause the `OwnerCommandIssued` |
 | **The user is unreachable on every push channel** | Pull channels only; §5.6 alerts on any channel still working | None. Asks time out to `skip`; limits hold regardless | `failed` and the lost-address alert |
 | **The deadline passes** | Retries stop; the reminder is not sent if under 60 seconds would remain; the runtime journals `ApprovalTimedOut` at the first tick at or after the deadline | `skip` (mandate spec §6.4) | `abandoned`, `not_pending`; `ApprovalTimedOut` |
 | **The approver acts after cancellation or timeout** | The screen shows the terminal state. A response already in flight is committed and refused `not_pending` or `late` | None | `ApprovalResponded`, `refused` |
@@ -446,7 +526,7 @@ stateDiagram-v2
 | **The same notice arrives twice** | The landing screen shows the subject's current state either time | None | Two attempts |
 | **The workspace deployment is unreachable from the phone** (hybrid, off VPN) | "Cannot reach your workspace", no content cached | None; the approval times out to `skip` if nobody reaches it | Nothing, since nothing reached the deployment |
 | **The global control plane is down** | Only relay push is lost; hybrid customers' email and chat go through their own gateways (HLD §4) | None (OPS-12) | Relayed attempts `failed` |
-| **A safety storm** (hundreds of reconciliation alerts) | Coalesced per recipient and channel per 60-second window; every subject recorded | None | One `OwnerAlertSent` per subject, with `coalesced_into` |
+| **A safety storm** (hundreds of reconciliation alerts) | Coalesced per recipient and channel per 60-second window; every subject recorded | None | One `NoticeIssued` per cause; `NoticeAttempted` with `coalesced_into` |
 | **Restart with approvals pending** | Pending approvals survive with their deadlines (mandate spec §6.4); the dispatcher resumes due reminders | None | As before the restart |
 
 ---
@@ -455,12 +535,12 @@ stateDiagram-v2
 
 | Needed from | Contract | Status |
 |---|---|---|
-| Mandate spec §6.4 | Payload is exactly the approval id and one generic text; quiet hours suppress push only; a request is grantable once delivered on one channel; risk-limit alerts ignore quiet hours | Consistent. This spec adds `web_inbox` as a second pull channel under the same reading as `cli_inbox` (DEC-438 item 3) |
-| Mandate spec §6.5, §6.7 | Delegation ends and fired tripwires produce `OwnerAlertSent` with opaque text; a fired tripwire is a risk-limit alert | Consistent: `delegation_ended` is `info`, a tripwire is `risk_limit` (`safety`) |
-| Journal spec §9 | `ApprovalDelivered` and `OwnerAlertSent` carry the outcome fields of §5.5 | `OwnerAlertSent` lacks `kind`, `recipient`, `attempt`, `reason`, `provider_message_id`, `coalesced_into`, and two statuses. Added by E8-9's tests PR |
-| Identity spec (DEC-437) | Sign-in from a deep link; step-up per grant within 300 seconds for live; **account recovery for an approver never relies on email or chat alone**, since those are the channels this spec sends to; which roles may receive each class | Required of the sibling; listed here so it is not lost |
-| Workspace API spec (DEC-436) | Resolve a subject id across the user's workspaces with no existence oracle; serve approval content; commit `ApprovalResponseSubmitted`; list the pull channels | Required of the sibling |
-| Threat model (DEC-439) | Includes §9's attackers for the notification path | Required of the sibling |
+| Mandate spec §6.4 | Payload is exactly a random notice id and one generic text; quiet hours suppress push only; a request is grantable once delivered on one channel; risk-limit alerts ignore quiet hours | Amended in this change (notice id for approval id, DEC-438 item 10, a tightening under DEC-176). This spec adds `web_inbox` as a second pull channel under the same reading as `cli_inbox` (DEC-438 item 3) |
+| Mandate spec §6.5, §6.7 | Delegation ends and fired tripwires produce `OwnerAlertSent` (written by the stream owner) with opaque text; a fired tripwire is a risk-limit alert | Consistent: `delegation_ended` is `info`, a tripwire is `risk_limit` (`safety`); §6.7's sentence amended for the notice id |
+| Journal spec §2, §9 | One writer per stream; the notice stream `ntf:{workspace_id}` with `NoticeIssued` and `NoticeAttempted`; `OwnerAlertSent` written by the subject stream's owner | Amended in this change (journal v0.12); E8-9's tests PR closes the payload schemas |
+| Identity spec (DEC-437) | Sign-in from a deep link; step-up per grant within 300 seconds for live; **account recovery for an approver never relies on email or chat alone** (identity spec §10.1 meets it with passkeys, OIDC, recovery codes, and a 24-hour enrolment cool-off); the **receive** column of the permission matrix (§4.2, settlement X1); the membership and credential events §3.2's account-security rows read (§12.1) | The receive column is owed by #556 under X1; §3.3's interim reading holds until it merges |
+| Workspace API spec (DEC-436) | Resolve a notice id across the user's workspaces with no existence oracle (§3.9, `GET /notices/{notice_id}`); serve approval content; commit `ApprovalResponseSubmitted`; write `OwnerAlertSent` with an owner kill-switch command (§3.4); list the pull channels | Consistent with #560 §3.9 (settlement X3) |
+| Threat model (DEC-439) | Includes §9's attackers; item 5's out-of-band notices for a risk-increasing version, a new connection, going live, a new delegation, and a newly connected client are §3.2's rows | §3.2 now carries the list (settlement X4) |
 | Infrastructure design | OPS-10 opaque operator alerts; the "approval notification delivered, p95 under 30 seconds" SLO; vault for addresses and webhook URLs | Consistent |
 | 09-product-experience | P5, PX-6 (b), PX-7 (b), PX-16 (b), G4, G5, X3, D13 | Consistent. The HLD's flow C example that names an agent is corrected in this change |
 
@@ -489,12 +569,13 @@ stateDiagram-v2
 
 | Piece | Exists today | Planned |
 |---|---|---|
-| Approval payload | `mandate_approval::Notification` with `ApprovalRef` (ULID only) and `GenericText::ApprovalNeeded`; `notification_payload` gives `{"subject", "text"}` | E8-9 adds `attention_needed` and `brief_ready` |
+| Approval payload | `mandate_approval::Notification` with `ApprovalRef` (ULID only) and `GenericText::ApprovalNeeded`; `notification_payload` gives `{"subject", "text"}`, with the event's ULID as subject | E8-9 replaces the subject with a minted notice id (`{"notice", "text"}`) and adds `attention_needed`, `account_changed`, and `brief_ready` |
 | Alert payload | `NotificationRef { subject_event, message_key: &'static str }` in `mandate-runtime` and `mandate-executor`, emitted as `Effect::Notify` with nine executor keys and one runtime key | E8-9 replaces `message_key` with the closed kind enum (rung 1: a `&'static str` can be any literal) and maps each kind to a text key |
 | Quiet hours | `mandate_approval::deliver_now` (push vs `cli_inbox`, DST-tested) | E8-10 judges by class (§5.8) |
 | Pull channel | `cli_inbox`: `ApprovalDelivered` in the request's own batch; `mandate approvals list` and `show` | `web_inbox` with the web app (E8-13) |
-| Delivery records | `ApprovalDelivered` written by the runtime; `OwnerAlertSent` catalogued but **not written by anything**: executor alerts reach only the tracer's report today | E8-10 writes every outcome (NT-8) |
-| Dispatcher | None. The shell collects alerts into the tracer report | E8-10 |
+| Delivery records | `ApprovalDelivered` written by the runtime; `OwnerAlertSent` catalogued but **not written by anything**: executor alerts reach only the tracer's report today; no notice stream | E8-9 has each stream owner write `OwnerAlertSent`; E8-10 adds the notice stream and writes every outcome (NT-8) |
+| Dispatcher | None. The shell collects alerts into the tracer report | E8-10, as its own process with its own stream |
+| Identity and account-security notices | None; the identity events are proposed in #556 | E8-10 issues them once E9-7 journals the events |
 | Email, chat | None | E8-11, E8-12 (M7) |
 | Web push, relay | None; the relay is an HLD box | E8-14 (M10) |
 | Deep-link landing | None; the web app renders fixtures (DEC-200) | E8-13 (M9/M10), with the workspace API and identity specs |
@@ -505,7 +586,7 @@ stateDiagram-v2
 
 ## 11. Decisions
 
-[DEC-438](../project/decisions/DEC-438.md) records them. Items 1 to 18 are reversible engineering
+[DEC-438](../project/decisions/DEC-438.md) records them. Items 1 to 18 and 27 to 29 are reversible engineering
 readings the agent accepted; most only tighten what the specs already say. Items 19 to 26 are the
 founder's (DEC-79: spending, vendors, legal wording, or a new restriction); until each is decided,
 the most conservative option holds: `cli_inbox` only, no vendor, no spend.
@@ -514,8 +595,8 @@ the most conservative option holds: `cli_inbox` only, no vendor, no spend.
 
 ## 12. Open questions
 
-1. **Who receives alerts in a multi-user workspace.** §3.3 sends to approvers plus an alert routing
-   list; the identity spec decides which roles may be on it.
+1. **Who receives alerts in a multi-user workspace.** Settled in principle by X1: the identity spec's
+   receive column. §3.3's interim reading holds until it merges.
 2. **Teams and other customer chat tools.** The schema enum has `slack` and `telegram` only; a
    hybrid customer's Teams webhook needs an enum value and a decision.
 3. **PX-6 (c), the opaque agent label.** A stable label lets a provider link notices about one agent

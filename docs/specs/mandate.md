@@ -20,6 +20,11 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-438](../project/decisions/DEC-438.md) item 10, under DEC-176):** §6.4's
+  notification payload and §6.7's tripwire alert carry a random notice id instead of the approval's
+  or the limit event's id, since a ULID's leading bits are its creation time. It only sends less to
+  providers; no rule, case, or fixture changes. Until E8-9, nothing leaves the workspace: v0's only
+  channel is `cli_inbox`.
 - **v0.6, amended ([DEC-429](../project/decisions/DEC-429.md), wording only; #528 round 2, minors 1 to
   3):** V-047's reasons name a risk-increasing change again, which §4.3 lists and a lone user cannot
   make either (the latched-floor reason stays out). §5.7's single-user sentence says what V-047
@@ -879,9 +884,11 @@ own text, shown as theirs and never as the platform's.
   changed (DEC-111). No price targets, no profit estimates, and **no scorecard** until counsel
   answers [question 35](../product/08-compliance-and-regulatory.md), because a scorecard may count
   as hypothetical performance.
-- Notification payloads are exactly the request's opaque approval id and one generic text
-  (`AGENTS.md` rule 6): no instrument, side, quantity, price, order value, score, thesis, agent
-  name, rule, or deadline ever reaches them.
+- Notification payloads are exactly a random notice id, which resolves to the request only inside
+  the workspace and is never the request's event id, and one generic text (`AGENTS.md` rule 6;
+  [notifications spec §4.2](notifications.md#42-the-payload), DEC-438): no instrument, side,
+  quantity, price, order value, score, thesis, agent name, rule, deadline, or event timestamp ever
+  reaches them.
 - Never persuasive language or profit estimates.
 
 **Lifecycle.** An approval is **pending** from its `ApprovalRequested` until exactly one terminal
@@ -1160,8 +1167,9 @@ Fills before the arming input never count.
 **Firing.** The executor evaluates every tripwire of the version in effect, in `id` order, after the
 lifetime floor at each input (§5.2). One that is not fired and whose metric has reached its threshold
 fires at that input: `RiskLimitTriggered` (limit `tripwire:<id>`, its action, reason
-`tripwire_condition`, the metric, the threshold, and the value reached), then an `OwnerAlertSent` whose
-payload is the opaque id of that event and one generic text (`AGENTS.md` rule 6); it is a risk-limit
+`tripwire_condition`, the metric, the threshold, and the value reached), then an `OwnerAlertSent` naming
+that event, whose notice carries only a random notice id and one generic text (`AGENTS.md` rule 6;
+notifications spec §4.2); it is a risk-limit
 alert, so quiet hours never suppress it (§6.4). A version input is evaluated too, so a version that
 adds a tripwire, or lowers a threshold to a count already reached, applies at once (§2.2).
 
