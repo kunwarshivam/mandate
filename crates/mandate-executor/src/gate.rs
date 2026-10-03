@@ -561,7 +561,7 @@ mod remainder_tests {
             ..Ladder::default()
         };
         state.ladders.insert(
-            aapl,
+            (aapl, intent.clone()),
             LoneLadder {
                 intent,
                 agent,
@@ -597,6 +597,28 @@ mod remainder_tests {
             },
             &ports,
         )
+    }
+
+    /// #499's review, minor 2: a cancelled rung whose applied fills ran past its quantity (5 of
+    /// 4, which no writer of `filled_qty` produces today) leaves nothing, as `available` reads
+    /// it, so the gate still decides: a risk exit of 10 is allowed whole rather than answered
+    /// with an error, and nothing between rungs counts.
+    #[test]
+    fn an_over_filled_rung_counts_nothing_and_the_gate_still_decides() -> Result<(), ExecutorError>
+    {
+        let mut state = parked(None)?;
+        let rung =
+            ClientOrderId::for_intent(&IntentId(EventId("01JABCDEFGHJKMNPQRSTV00001".to_owned())))?;
+        if let Some(order) = state.orders.get_mut(&rung) {
+            order.filled_qty = Qty::parse("5")?;
+        }
+        let whole = ask(&state, Side::Sell, "10", Purpose::RiskExit)?;
+        assert_eq!((whole.verdict_name(), whole.sized()), ("allow", None));
+        assert_eq!(
+            crate::protection::between_rungs(&state, &InstrumentId::new("AAPL")?)?,
+            Qty::ZERO
+        );
+        Ok(())
     }
 
     /// DEC-410 item 2: beside a parked remainder of 4, a risk exit of 8 goes whole and is not

@@ -354,8 +354,8 @@ pub(crate) fn climbs(view: &ExecutorState, sequence: &ExitSequence) -> bool {
 /// agent is paused or stopped, or its exit's intent is abandoned. What it counts is never
 /// stored: it is the unfilled quantity capped at the position less the open sells less what the
 /// ladders ahead of it count, so a sell beside it takes its room as it goes and gives it back if
-/// it ends unsold. One instrument holds at most a sequence's ladder and a lone one; id order is
-/// for determinism alone. A sequence's ladder that no longer climbed at the confirmation has
+/// it ends unsold. One instrument holds at most a sequence's ladder and one lone ladder for each
+/// exit laddered in it (DEC-424), and they share the room in their exits' id order. A sequence's ladder that no longer climbed at the confirmation has
 /// already ended (DEC-409), and a refused rung or a passive sequence counts nothing.
 pub(crate) fn remainders(
     state: &ExecutorState,
@@ -368,7 +368,9 @@ pub(crate) fn remainders(
         .map(|sequence| (&sequence.intent, sequence.ladder));
     let lone = state
         .ladders
-        .get(instrument)
+        .iter()
+        .filter(|((held, _), _)| held == instrument)
+        .map(|(_, lone)| lone)
         .filter(|lone| !lone.ladder.parked || state.effective_mode(&lone.agent) < Mode::Paused)
         .filter(|lone| {
             state
@@ -407,12 +409,15 @@ pub(crate) fn between_rungs(
 }
 
 /// What a ladder's current rung left unsold once that rung's cancel is confirmed: what its next
-/// rung would send with nothing beside it (DEC-410).
+/// rung would send with nothing beside it (DEC-410). A rung whose applied fills ran past its
+/// quantity left nothing, as [`crate::gate::available`] reads it: the gate reaches this through
+/// [`remainders`], so an error here would stop every decision in the instrument, risk exits
+/// included (#499's review, minor 2).
 fn unsent(state: &ExecutorState, intent: &IntentId, ladder: Ladder) -> Result<Qty, ExecutorError> {
     let rung = ClientOrderId::for_intent(intent)?.rung(ladder.rung)?;
     Ok(match state.orders.get(&rung) {
         Some(order) if order.state == OrderState::Canceled => {
-            order.qty.checked_sub(order.filled_qty)?
+            order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO)
         }
         _ => Qty::ZERO,
     })
@@ -466,7 +471,7 @@ pub(crate) fn ladder_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
                 .view
                 .ladders
                 .iter()
-                .filter(|(instrument, lone)| {
+                .filter(|((instrument, _), lone)| {
                     batch.ports.instruments.exit_tier(instrument).is_some()
                         && batch.view.effective_mode(&lone.agent) < Mode::Paused
                 })
@@ -937,7 +942,7 @@ fn lone_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .view
         .ladders
         .iter()
-        .map(|(instrument, lone)| (instrument.clone(), lone.clone()))
+        .map(|((instrument, _), lone)| (instrument.clone(), lone.clone()))
         .collect();
     for (instrument, lone) in ladders.into_iter().filter(|(_, lone)| lone.ladder.stepping) {
         let left = unsent(&batch.view, &lone.intent, lone.ladder)?;
@@ -8438,7 +8443,7 @@ mod sequence_tests {
             },
         );
         executor.state.ladders.insert(
-            instrument.clone(),
+            (instrument.clone(), IntentId(EventId(second.to_owned()))),
             crate::state::LoneLadder {
                 intent: IntentId(EventId(second.to_owned())),
                 agent: agent.clone(),
@@ -8510,7 +8515,7 @@ mod sequence_tests {
             },
         );
         executor.state.ladders.insert(
-            instrument.clone(),
+            (instrument.clone(), IntentId(EventId(second.to_owned()))),
             crate::state::LoneLadder {
                 intent: IntentId(EventId(second.to_owned())),
                 agent,
@@ -8529,7 +8534,11 @@ mod sequence_tests {
         };
         committed(&mut executor, "ProtectionChanged", short(second, "2"))?;
         assert!(
-            executor.state.ladders.contains_key(&instrument),
+            executor
+                .state
+                .ladders
+                .keys()
+                .any(|(held, _)| held == &instrument),
             "2 still sent"
         );
         committed(&mut executor, "ProtectionChanged", short(first, "0"))?;
@@ -8540,13 +8549,23 @@ mod sequence_tests {
                     .exiting
                     .get(&instrument)
                     .map(|sequence| sequence.ladder.stepping),
-                executor.state.ladders.contains_key(&instrument)
+                executor
+                    .state
+                    .ladders
+                    .keys()
+                    .any(|(held, _)| held == &instrument)
             ),
             (Some(false), true),
             "the sequence's ladder ends, the lone one stays"
         );
         committed(&mut executor, "ProtectionChanged", short(second, "0"))?;
-        assert!(!executor.state.ladders.contains_key(&instrument));
+        assert!(
+            !executor
+                .state
+                .ladders
+                .keys()
+                .any(|(held, _)| held == &instrument)
+        );
         Ok(())
     }
 
@@ -8624,7 +8643,6 @@ mod sequence_tests {
     /// second exit's ladder steps and sends its own: each lone ladder is its own exit's, so the
     /// second never replaces the first. Σ stays within the position: 2 live sells against 10.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_second_laddered_exit_never_drops_the_first_exits_remainder() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = tiered_ports(&config, &fees);
@@ -8711,7 +8729,6 @@ mod sequence_tests {
     }
 
     #[test]
-    #[ignore = "pending E7-4"]
     fn two_laddered_exits_parked_overnight_both_count_in_their_exits_id_order()
     -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -8730,7 +8747,6 @@ mod sequence_tests {
     /// DEC-410 item 4 with two lone ladders (DEC-424): a short rung that sends nothing ends the
     /// ladder of the exit it names and no other.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_short_rung_that_sends_nothing_ends_only_its_own_exits_lone_ladder()
     -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -8758,7 +8774,6 @@ mod sequence_tests {
     /// DEC-410 item 1's guard with two lone ladders (DEC-424): the ladder of an abandoned exit
     /// counts nothing, and the other exit's still counts.
     #[test]
-    #[ignore = "pending E7-4"]
     fn an_abandoned_exits_lone_ladder_counts_nothing_beside_another() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = tiered_ports(&config, &fees);
@@ -8783,7 +8798,6 @@ mod sequence_tests {
     /// exit takes that exit's lone ladder in, stepping and parked as it was, and leaves the other
     /// exit's lone ladder where it is, so both still count.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_sequence_for_one_laddered_exit_takes_only_that_exits_lone_ladder()
     -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -9659,7 +9673,7 @@ mod sequence_tests {
         for (intent, takes) in [(SECOND, false), (EXIT, true)] {
             let mut executor = held(&ports)?;
             executor.state.ladders.insert(
-                aapl()?,
+                (aapl()?, IntentId(EventId(EXIT.to_owned()))),
                 crate::state::LoneLadder {
                     intent: IntentId(EventId(EXIT.to_owned())),
                     agent: AgentId("agent-a".to_owned()),
