@@ -41,6 +41,12 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Infrastructure and operations](design/infrastructure.md) | Draft v0.1: environments, invariants, runtime topology, data stores, secrets and the vault, backups and disaster recovery, deploy and upgrade, observability and on-call, security baseline, cost model, failure walk (DEC-434) |
 | [Global control plane](design/control-plane.md) | Draft v0.1: what the thin global plane holds and never holds, invariants CP-1 to CP-12, directory, licenses, fleet, relay, metering, distribution, anchor witness, the closed message set, the unavailability walk, adversaries (DEC-440) |
 
+## Security
+
+| Document | Purpose |
+|---|---|
+| [Threat model](security/threat-model.md) | Draft v0.1: assets, trust boundaries and data flows per deployment mode, attackers, threats and controls per boundary (prompt injection, credentials, tenant isolation, journal tampering, the agent-driven development process, supply chain), and residual risks ranked ([DEC-439](project/decisions/DEC-439.md)) |
+
 ## Product
 
 | Document | Purpose |

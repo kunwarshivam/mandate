@@ -623,7 +623,7 @@ are authoritative; a few come from metrics.
   provenance at M11 (ES-14, ES-17).
 - **Host hardening:** distroless images, a read-only root filesystem, no shell in production images,
   and non-root users (ES-17 at M11).
-- **Threat model, to write (E21-10):** per process type and per deployment mode, with the
+- **Threat model ([draft v0.1](../security/threat-model.md), E21-10, DEC-439):** per process type and per deployment mode, with the
   attackers `AGENTS.md` names (a careless user, a bad model, a malicious insider, a bad market
   tick), plus a compromised dependency, a compromised operator laptop, a malicious tenant in a
   shared cell, and a stolen backup. It feeds the M13 penetration test.
