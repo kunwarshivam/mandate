@@ -15,7 +15,7 @@ use proptest::prelude::*;
 
 use super::{
     GroupId, PreviousVersion, RegisteredModel, ValidationContext, ValidationReport, Violation,
-    Warning, covers, pointer, validate,
+    Warning, covers, pointer, recheck_at_application, validate,
 };
 use crate::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
 use crate::{Mandate, ParseError, SpecError};
@@ -2144,21 +2144,53 @@ proptest! {
     }
 }
 
-/// Until V-047 lands (E10-1), the policy on is refused as `unimplemented` at every user count, and
-/// the policy off validates as before: the stub never answers for a rule it does not check.
+/// V-047 at each count around its boundary, at validation and at application: refused exactly when
+/// the policy is on with none or one user, as its own code beside the others the context breaks, and
+/// the recheck reports V-002 and V-047 and nothing else.
 #[test]
-fn the_policy_is_refused_until_v047_lands_and_off_it_validates_as_before() -> Checked {
+fn v047_refuses_the_policy_below_two_users_at_validation_and_at_application() -> Checked {
     let base = mandate(&[])?;
-    for users in [0, 1, 2, u32::MAX] {
+    for (users, required, refused) in [
+        (0, true, true),
+        (1, true, true),
+        (2, true, false),
+        (u32::MAX, true, false),
+        (0, false, false),
+        (1, false, false),
+    ] {
         let mut ctx = context()?;
         ctx.workspace_users = users;
-        let off = validate(&base, &ctx).map_err(|e| format!("{users} users, policy off: {e}"))?;
-        if !off.is_valid() {
-            return Err(format!("{users} users, policy off: {:?}", off.violations));
+        ctx.independent_approval_required = required;
+        let expected = if refused {
+            BTreeSet::from([Violation::V047])
+        } else {
+            BTreeSet::new()
+        };
+        let row = format!("{users} users, policy {required}");
+        let found = validate(&base, &ctx).map_err(|e| format!("{row}: {e}"))?;
+        if found.violations != expected {
+            return Err(format!("{row}: validation gave {:?}", found.violations));
         }
-        ctx.independent_approval_required = true;
-        if validate(&base, &ctx) != Err(SpecError::Unimplemented) {
-            return Err(format!("{users} users under the policy was evaluated"));
+        let rechecked = recheck_at_application(&base, &ctx).map_err(|e| format!("{row}: {e}"))?;
+        if rechecked != expected {
+            return Err(format!("{row}: the recheck gave {rechecked:?}"));
+        }
+        ctx.approver_users = 0;
+        ctx.other_allocations_usd = usd("15000.01")?;
+        let mut both = expected.clone();
+        both.insert(Violation::V002);
+        let rechecked = recheck_at_application(&base, &ctx).map_err(|e| format!("{row}: {e}"))?;
+        if rechecked != both {
+            return Err(format!(
+                "{row}, short of equity: the recheck gave {rechecked:?}"
+            ));
+        }
+        ctx.other_allocations_usd = usd("15000")?;
+        let rechecked = recheck_at_application(&base, &ctx).map_err(|e| format!("{row}: {e}"))?;
+        if rechecked != expected {
+            return Err(format!(
+                "{row}, equity exactly met: the recheck gave {rechecked:?}"
+            ));
         }
     }
     Ok(())

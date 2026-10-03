@@ -1101,6 +1101,13 @@ story buys a service, and none uses a real identity-provider account in tests (s
   MC-V72 to MC-V77 carry it first (ES-22), then the tests PR (#536) follows. The exception reads the agent's current
   version matched by hash (DEC-444 item 3); `PreviousVersion` has no digest yet, so the Rust side refuses every version
   under V-047 until it does, and the test that a reducing version passes lands with the digest.
+  When the digest lands (#536 round 2, minor 1), `v047_refuses_a_reducing_version_it_cannot_match_to_the_current_version`
+  is re-aimed, never inverted: its context builder `after()` supplies a digest that does not match the agent's current
+  `mandate_version` (or no current version), so it keeps stating that an unmatched document is refused, beside the new
+  test in which a matched reducing version passes. Also owed then (#536 round 2, minor 3): the two V-047 property tests
+  draw `previous_version` (absent, identity only, matched, unmatched, reducing, neutral, increasing), so the DEC-444
+  surface does not rest on five hand-written shapes. #536's description listed its "DEC-444 without a digest" plant as
+  caught by both new tests; only the reducing one catches it, by design (#536 round 2, minor 2).
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
   increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C48 pass.

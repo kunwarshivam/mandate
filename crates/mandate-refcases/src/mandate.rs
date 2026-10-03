@@ -578,6 +578,7 @@ const CONTEXT_KEYS: &[&str] = &[
     "claimed_by_other_agents",
     "workspace_users",
     "approver_users",
+    "independent_approval_required",
     "previous_version",
     "eligibility_failures",
 ];
@@ -622,6 +623,11 @@ fn semantic_context(fixture: &Json, stated: &Json) -> Result<ValidationContext, 
             "eligibility_failures" => context.eligibility_failures = assets(key)?,
             "workspace_users" => context.workspace_users = u32_of(stated, key)?,
             "approver_users" => context.approver_users = u32_of(stated, key)?,
+            "independent_approval_required" => {
+                context.independent_approval_required = at(stated, key)?
+                    .as_bool()
+                    .ok_or("`independent_approval_required` is not a boolean")?;
+            }
             "previous_version" => {
                 let previous = at_of(stated, key)?;
                 let identity_only =
@@ -1570,7 +1576,8 @@ fn goal_case(fixture: &Json, case: &Json) -> Result<(), String> {
 /// It now reads all six: account equity, other allocations, the validation date, the signal-model
 /// registry, and the workspace and approver user counts. Every field is owner-entered and confirmed,
 /// which is what an absent [`ProvenanceMap`] entry means (§2.1), and the remaining fields are the "not
-/// stated" of the cases — no group map, nothing claimed elsewhere, no disclosure, no previous version.
+/// stated" of the cases — no group map, nothing claimed elsewhere, no disclosure, no previous version,
+/// and no `independent_approval_required` (an absent policy key is `false` under §4.3, DEC-428).
 fn context_defaults(fixture: &Json) -> Result<ValidationContext, String> {
     let defaults = at_of(fixture, "validation_context_defaults")?;
     Ok(ValidationContext {
