@@ -1371,12 +1371,15 @@ with the founder (DEC-440 items 13 to 17); no story here buys a service or touch
 - **E20-3 (Proposed, M8; SC; journal spec change first)** As an engineer, I want the closed message
   set of design §3.8 and its journal events (`ControlPlaneEnrolled`, `LicenseApplied`,
   `LicenseStateChanged`, `ReleaseOffered`, `ReleaseInstalled`, `ReleaseWithdrawnNoticed`,
-  `DataBundleImported`, `UsageReportSealed`, `ControlPlaneMessageRefused`) registered in the journal
+  `CatalogEntryRegistered` (kind, content hash, sequence), `DataBundleImported`, `UsageReportSealed`,
+  `ControlPlaneMessageRefused`) registered in the journal
   spec with vectors, then implemented: verification in `cp-agent`, appends by workspace control
   services, the control stream's single writer.
   *Accepted when:* CP-1's type test and canary scan pass; CP-4's layering check and fuzz test pass;
   CP-5's per-type tests show an unsigned, wrongly signed, replayed, or out-of-list instruction
-  refused and journaled, and a valid one journaled before its effect; a test shows `cp-agent` never
+  refused and journaled, and a valid one journaled before its effect; CP-9's replay test passes for
+  all four kinds (license, release manifest, catalog entry, data bundle); `cp-agent` reaches the site
+  only through a port it declares and workspace services implement; a test shows `cp-agent` never
   takes a writer epoch, and the kill switch commits with `cp-agent` hung.
 - **E20-4 (Proposed, M8; SC; mandate spec change first)** As an org owner, I want licenses
   verified on site, with states `valid`, `renewal_due`, `grace`, and `lapsed`, where after grace a
