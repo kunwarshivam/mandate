@@ -1309,8 +1309,14 @@ def builder(m, inp):
     out = {"cap": norm(cap), "current_mv": norm(mv)}
     # risk engine first: trim_to_target (§5.5, DEC-65)
     band_usd = D(beh["sizing"]["rebalance_band"]) * cap
+    # The agent's own non-protective sells already resting in the instrument are a trim in progress: the
+    # trim is what they leave of the excess and of the position, and the minimum is judged on that
+    # (DEC-399 item 7). When they cover the excess, no trim is due.
+    on_sale = D(inp["open_sell_qty"]) if r["scale_action"] == "trim_to_target" else D(0)
+    sell = D(0)
     if r["scale_action"] == "trim_to_target" and factor < 1 and mv - factor * cap >= band_usd:
-        sell = min(qty, ceil_inc((mv - factor * cap) / bid, inc))
+        sell = max(D(0), min(qty - on_sale, ceil_inc((mv - factor * cap) / bid, inc) - on_sale))
+    if sell > 0:
         guards = []
         if inp.get("scale_active_s", 0) < r["breach_confirm_s"]:
             guards.append("rung_not_confirmed")
@@ -1319,8 +1325,8 @@ def builder(m, inp):
         if inp["asset_class"] == "us_equity" and inp.get("session", "regular") != "regular":
             guards.append("regular_session_only")
         # §5.5's minimum is the instrument's minimum order size (trading spec §5.3 rule 2; DEC-399 item 5),
-        # except for a trim of the whole position, a full close rule 2 exempts (DEC-423). The model has
-        # no resting sell, so the whole position is the quantity held.
+        # except for a trim of the whole position, a full close rule 2 exempts (DEC-423). Beside a resting
+        # sell the trim is never the whole position, so the exemption does not reach it.
         if sell < D(inp["min_order_size"]) and sell != qty:
             guards.append("below_minimum_order")
         if not guards:

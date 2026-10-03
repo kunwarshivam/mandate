@@ -233,7 +233,9 @@ def trim_sell(cid):
     inp, exp = BIN[cid], B[cid]
     inc, bid = Decimal(inp["qty_increment"]), Decimal(inp["quote"]["bid"])
     excess = Decimal(exp["current_mv"]) - Decimal(inp["size_factor"]) * Decimal(exp["cap"])
-    return min(Decimal(inp["position_qty"]), (excess / bid / inc).to_integral_value(rounding=ROUND_CEILING) * inc)
+    on_sale = Decimal(inp["open_sell_qty"])
+    whole = (excess / bid / inc).to_integral_value(rounding=ROUND_CEILING) * inc
+    return max(Decimal(0), min(Decimal(inp["position_qty"]) - on_sale, whole - on_sale))
 req("MC-B34", B["MC-B34"].get("trim_withheld") == ["below_minimum_order"]
     and trim_sell("MC-B34") < Decimal(BIN["MC-B34"]["min_order_size"])
     and trim_sell("MC-B34") * Decimal(BIN["MC-B34"]["quote"]["bid"]) >= Decimal(BIN["MC-B34"]["min_order_usd"]),
@@ -242,6 +244,13 @@ req("MC-B35", B["MC-B35"].get("purpose") == "risk_exit" and B["MC-B35"]["qty"] =
     and trim_sell("MC-B35") == Decimal(BIN["MC-B35"]["position_qty"])
     and Decimal(B["MC-B35"]["qty"]) < Decimal(BIN["MC-B35"]["min_order_size"]),
     "a trim of the whole position below the minimum size is a full close, and goes")
+req("MC-B36", B["MC-B36"].get("trim_withheld") == ["below_minimum_order"] and Decimal(BIN["MC-B36"]["open_sell_qty"]) > 0
+    and 0 < trim_sell("MC-B36") < Decimal(BIN["MC-B36"]["min_order_size"])
+    and trim_sell("MC-B36") + Decimal(BIN["MC-B36"]["open_sell_qty"]) >= Decimal(BIN["MC-B36"]["min_order_size"]),
+    "the remainder a resting sell leaves is below the minimum size, though the whole excess is not, and is withheld")
+req("MC-B37", B["MC-B37"].get("purpose") == "risk_exit" and Decimal(BIN["MC-B37"]["open_sell_qty"]) > 0
+    and Decimal(B["MC-B37"]["qty"]) == trim_sell("MC-B37") < trim_sell("MC-B37") + Decimal(BIN["MC-B37"]["open_sell_qty"]),
+    "the trim is the remainder a resting sell leaves, not the whole excess")
 req("MC-B18", B["MC-B18"]["reason"] == "within_rebalance_band", "band")
 req("MC-B19", B["MC-B19"]["reason"] == "below_band_after_clipping", "band after clipping")
 req("MC-B20", B["MC-B20"]["reason"] == "no_fresh_outputs", "none")
