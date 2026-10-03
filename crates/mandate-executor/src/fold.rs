@@ -14,6 +14,7 @@ use crate::payload::{
     clock_of, flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
     required_text, usd,
 };
+use crate::protection::climbs;
 use crate::state::{
     Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
     ObservedAccount, OrderDetail,
@@ -105,6 +106,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "OrderStateChanged" => {
             adoption(state, event)?;
             rung_stepped(state, payload)?;
+            rung_ended(state, payload)?;
             order_state_changed(state, payload, at)
         }
         "CompensatingEvent" => {
@@ -342,6 +344,12 @@ fn gate_decided(
             if let Some(record) = state.intents.get_mut(&id) {
                 record.allowed_at = Some(at);
             }
+            if let (Some(sized), Some(IntentBody::Order { qty, .. })) = (
+                optional_qty(payload, "sized_qty")?,
+                state.bodies.get_mut(&id),
+            ) {
+                *qty = sized;
+            }
         }
         "deny" => {
             if let Some(record) = state.intents.get_mut(&id) {
@@ -486,6 +494,31 @@ fn rung_stepped(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
     for (intent, ladder) in ladders {
         if ClientOrderId::for_intent(intent)?.rung(ladder.rung)? == id {
             ladder.stepping = true;
+        }
+    }
+    Ok(())
+}
+
+/// DEC-409: a sequence's stepped rung whose cancel is confirmed while its ladder no longer climbs
+/// (its agent paused or stopped, or its interval past its bound) ends the ladder there. The
+/// remainder is never sent as a next rung, so a later resumption cannot send it beside an exit
+/// allowed meanwhile, and protection returns for what is left (§5.4). The mode and the bound are
+/// both folded, so a restart ends the same ladders.
+fn rung_ended(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    if optional_text(payload, "state") != Some("canceled") {
+        return Ok(());
+    }
+    let id = client_order_id(payload)?;
+    let mut ended = Vec::new();
+    for (instrument, sequence) in &state.exiting {
+        let rung = ClientOrderId::for_intent(&sequence.intent)?.rung(sequence.ladder.rung)?;
+        if rung == id && sequence.ladder.stepping && !climbs(state, sequence) {
+            ended.push(instrument.clone());
+        }
+    }
+    for instrument in ended {
+        if let Some(sequence) = state.exiting.get_mut(&instrument) {
+            sequence.ladder.stepping = false;
         }
     }
     Ok(())
@@ -1016,6 +1049,24 @@ fn protection_changed(
             state.watchdogged.insert(instrument.clone(), at);
         }
         "exit_unpriced" | "ladder_floor" => {}
+        "rung_short" if optional_qty(payload, "sent")? == Some(Qty::ZERO) => {
+            let intent = required_text(payload, "intent_id")?;
+            if let Some(sequence) = state
+                .exiting
+                .get_mut(&instrument)
+                .filter(|sequence| sequence.intent.0.0 == intent)
+            {
+                sequence.ladder.stepping = false;
+            }
+            if state
+                .ladders
+                .get(&instrument)
+                .is_some_and(|lone| lone.intent.0.0 == intent)
+            {
+                state.ladders.remove(&instrument);
+            }
+        }
+        "rung_short" => {}
         "unprotected_end" if flag(payload, "acknowledged") => {
             state.awaiting.remove(&instrument);
             if let Some(open) = state
@@ -1039,9 +1090,13 @@ fn protection_changed(
                 let entry = ClientOrderId::parse(entry)?;
                 state.details.entry(entry).or_default().bracket_placed = true;
             }
+            let bounded = state.unprotected.iter().any(|interval| {
+                interval.instrument == instrument && interval.ended_at.is_none() && interval.alerted
+            });
             if finished
                 && let Some(sequence) = state.exiting.remove(&instrument)
                 && sequence.ladder.parked
+                && !bounded
             {
                 let lone = LoneLadder {
                     intent: sequence.intent,
