@@ -1465,7 +1465,11 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
 /// What the exit orders working in `instrument` may still sell: the broker holds them, so
 /// protection re-placed beside them covers only the rest (rule 12, §5.4's `fits`). Unlike
 /// [`still_selling`], an exit intent with no order yet — held, parked or waiting on its cancels —
-/// counts nothing here: its sequence re-protects around it (#468 round 1, B1).
+/// counts nothing here: its sequence re-protects around it (#468 round 1, B1). A lone ladder
+/// between rungs counts nothing either, though it has no sequence: its next rung goes only
+/// through a sequence that first cancels this protection ([`lone_steps`] calls `begin` where
+/// protection rests), so the two are never live together and the rung's shares stay covered
+/// meanwhile (DEC-260 (18); DEC-367 item 4; #468's round-4 ruling, M1).
 fn working_exits(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
     view.orders
         .values()
@@ -8734,9 +8738,11 @@ mod sequence_tests {
         /// §5.4's Σ protective sell quantity ≤ position, counted as `fits` counts it: every
         /// protective order the broker holds live, with every exit it holds live, sells at most the
         /// position (rule 12). The under-cover arm (the founder's decision on #468): while no
-        /// sequence, re-placement or ladder is under way, they sell at least the position, so no
-        /// held share is left without a protective order or an exit, unless the executor journaled
-        /// and alerted it. With the Σ checks on, the live exits with every rung a ladder between
+        /// sequence or re-placement is under way, they and the rungs ladders between rungs will
+        /// still send sell at least the position, so no held share is left without a protective
+        /// order, an exit or a rung to come, unless the executor journaled and alerted it. A
+        /// ladder's rungs count as cover for their own shares only, so an order that ends beside
+        /// a stepping ladder is still seen (#468's seed 18; the round-4 review, B2). With the Σ checks on, the live exits with every rung a ladder between
         /// rungs may still send sell at most the position too (DEC-408). And no sell works beside a ladder between
         /// rungs unless that ladder is parked for the open, the only state in which a remainder
         /// lasts: so a sell beside it overlaps the rung for one step at most (DEC-410 item 7).
@@ -8754,13 +8760,15 @@ mod sequence_tests {
                     self.position, self.now
                 ));
             }
+            let rungs = self.counted();
             if selling >= self.position {
                 self.alerted = false;
-            } else if !self.open && self.between.is_empty() && !self.alerted {
+            } else if !self.open && selling.saturating_add(rungs) < self.position && !self.alerted {
                 return Err(format!(
-                    "{selling} protective and exit orders cover a position of {} at {}, with no \
-                     sequence, re-placement or ladder under way, and no alert",
-                    self.position, self.now
+                    "{selling} protective and exit orders and {rungs} of rungs still to send cover \
+                     a position of {} at {}, with no sequence or re-placement under way, and no \
+                     alert: {:?} between rungs",
+                    self.position, self.now, self.between
                 ));
             }
             if !self.sums {
@@ -8997,6 +9005,22 @@ mod sequence_tests {
                         return Err(format!("{id} sent for nothing"));
                     }
                     let later = id != format!("md-{intent}");
+                    let protected = self
+                        .venue
+                        .values()
+                        .any(|held| held.live && held.purpose == Purpose::Protective);
+                    if purpose != Purpose::Protective
+                        && later
+                        && self.lone.contains(&intent)
+                        && protected
+                    {
+                        return Err(format!(
+                            "{id}: a lone ladder's rung sent while protection is live at {}, \
+                             where its next rung must first cancel it (DEC-367 item 4, DEC-260 \
+                             (18))",
+                            self.now
+                        ));
+                    }
                     if self.sums && self.ended.contains(&intent) && later {
                         return Err(format!(
                             "{id}: a rung of a ladder that ended between rungs (DEC-409, DEC-410)"
@@ -9668,6 +9692,27 @@ mod sequence_tests {
             .map_err(|error| error.to_string())
     }
 
+    /// #468's seed 18, end to end (the round-4 review, B2), found by the random property once the
+    /// under-cover arm counts a ladder's rungs as cover rather than exempting every ladder: with
+    /// nothing protecting ten AAPL after-hours, the broker cancels a lone exit while another
+    /// exit's lone ladder steps. The cancelled exit's shares are no rung's, so they are topped up
+    /// or alerted; reading the instrument as stepping alone would leave them silent.
+    #[test]
+    fn an_exit_cancelled_beside_another_exits_stepping_ladder_is_covered_or_alerted()
+    -> Result<(), String> {
+        let script = [
+            Move::BrokerCancel,
+            Move::Exit(1, 4, 141),
+            Move::Exit(0, 3, 141),
+            Move::Ack,
+            Move::Tick(10),
+            Move::Exit(0, 2, 141),
+            Move::Exit(0, 1, 141),
+            Move::BrokerCancel,
+        ];
+        rule_13_script_with(AFTER_HOURS, From::Unprotected, true, &script).map(|_| ())
+    }
+
     /// #468 round 1, M5: the Σ oracle's first catch beside an exit with no sequence of its own. A
     /// risk exit held at the night's start re-protects at once (DEC-160 (12)), and that protection
     /// covers only what [`LONE`] cannot still sell: 6, never the held 10.
@@ -9789,6 +9834,65 @@ mod sequence_tests {
         Move::Confirm,
         Move::Exit(0, 8, 150),
     ];
+
+    /// A risk exit of 6 at 19:59:50 ET goes after-hours from ten protected AAPL; its step at
+    /// 20:00:05 is confirmed with no session open, so it parks for the next open and protection
+    /// returns for the held 10 beside its remainder of 6 (DEC-260 (18)), acknowledged.
+    const PARKED_BESIDE_PROTECTION: [Move; 7] = [
+        Move::Quote(Some(150), None, true),
+        Move::Exit(0, 6, 150),
+        Move::Confirm,
+        Move::Ack,
+        Move::Tick(15),
+        Move::Confirm,
+        Move::Ack,
+    ];
+
+    /// The night after [`PARKED_BESIDE_PROTECTION`], to 04:00 ET with a fresh quote; then the
+    /// protection's cancel at the open is confirmed, the rung acknowledged, and its step's
+    /// cancel confirmed in turn.
+    const NIGHT_TO_THE_OPEN: [Move; 11] = [
+        Move::Tick(3_600),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(3_600),
+        Move::Quote(Some(150), None, true),
+        Move::Confirm,
+        Move::Ack,
+        Move::Tick(30),
+        Move::Confirm,
+        Move::Ack,
+    ];
+
+    /// #468's round-4 ruling, pin 3: the protection's stop triggers overnight beside a parked
+    /// ladder and sells all 10. The rung is sized when it is sent (#485), so at the open it sends
+    /// nothing and the ladder ends; under the summed oracle no sell exceeds the position and no
+    /// rung goes for nothing.
+    #[test]
+    fn a_stop_that_fills_overnight_beside_a_parked_ladder_leaves_its_rung_nothing()
+    -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_PROTECTION
+            .into_iter()
+            .chain([Move::Triggered(10)])
+            .chain(NIGHT_TO_THE_OPEN)
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// Pin 3's partial variant: the stop sells 6 of the 10 overnight, so the parked ladder's rung,
+    /// with 6 unsold, sends at the open at most the 4 left, sized by its remainder's count
+    /// (DEC-410 item 4).
+    #[test]
+    fn a_stop_that_fills_six_overnight_leaves_the_parked_ladder_at_most_four() -> Result<(), String>
+    {
+        let script: Vec<Move> = PARKED_BESIDE_PROTECTION
+            .into_iter()
+            .chain([Move::Triggered(6)])
+            .chain(NIGHT_TO_THE_OPEN)
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
 
     /// The night, to 04:00 ET, the pre-market open, with a fresh quote and both cancels confirmed.
     const TO_THE_OPEN: [Move; 8] = [
@@ -11097,6 +11201,67 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// #468's round-4 ruling, pin 4: at the open the parked ladder's sequence asks the night's
+    /// protection cancelled, and the broker refuses the cancel. The refusal is not read as the
+    /// cancel's confirmation: the order is queried (§5.7), the cancel stays outstanding, and no
+    /// rung is sent while the protection is live, even once the query answers it still live. The
+    /// ladder is never left without a cancel outstanding until §5.4's bound, which alerts the
+    /// owner with the position still covered by its protection. (That the answer does not ask the
+    /// cancel again is `main`'s, the invariant #524's fix takes up, DEC-425.)
+    #[test]
+    fn a_refused_cancel_at_the_open_sends_no_rung_beside_live_protection()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let late = 1_790_121_595;
+        let open = 1_790_150_400;
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(late)), &ports)?;
+        executor.run(observation(Some(150), None, true, late)?, &ports)?;
+        executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = format!("md-{EXIT}");
+        executor.run(Input::Tick(RiskClock::from_secs(late + 10)), &ports)?;
+        executor.run(cancel_accepted(&exit), &ports)?;
+        executor.run(observation(Some(151), None, true, open)?, &ports)?;
+        let opened = executor.run(Input::Tick(RiskClock::from_secs(open)), &ports)?;
+        assert!(
+            submissions(&opened).is_empty(),
+            "the cancel goes before any rung"
+        );
+        let night = cancels(&opened)
+            .first()
+            .map(|id| (*id).to_owned())
+            .ok_or_else(|| missing("the night's protection cancelled at the open"))?;
+        let refusal = executor.run(refused(&night, "order is not cancelable"), &ports)?;
+        assert_eq!(queried(&refusal), vec![night.as_str()]);
+        assert!(submissions(&refusal).is_empty());
+        let live = Held {
+            purpose: Purpose::Protective,
+            qty: 10,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let answered = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(reported(&night, &live)?)),
+            &ports,
+        )?;
+        assert!(submissions(&answered).is_empty());
+        let mut bounded = Vec::new();
+        for after in [1, 10, 31] {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(open + after)), &ports)?;
+            assert!(
+                submissions(&tick).is_empty(),
+                "no rung beside live protection"
+            );
+            bounded.extend(alerts(&tick).into_iter().map(str::to_owned));
+        }
+        assert_eq!(bounded, vec!["unprotected_interval_limit".to_owned()]);
+        assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        Ok(())
+    }
+
     /// The coordinator's ruling on #400 round 2 (5930410998) for a sequence's ladder: the step
     /// confirmed in the overnight session parks it and re-protects the position, and the park
     /// alerts the owner **once**, `session_closed`, naming the park's own record; nothing else is
@@ -11522,6 +11687,44 @@ mod sequence_tests {
                 total.checked_add(order.qty.checked_sub(order.filled_qty)?)
             })
             .map_err(ExecutorError::from)
+    }
+
+    /// #468's round-4 review, M1, as ruled (option 2): two lone laddered risk exits of 6 and 4 in
+    /// AAPL, with nothing protecting it, park for the open with their rungs' 10 unsold. They
+    /// count 10 between rungs, and at the open each rung goes for its own remainder, 6 and 4,
+    /// never more than the position between them; no protection goes beside them meanwhile.
+    #[test]
+    fn two_parked_lone_ladders_resume_at_the_open_within_the_position() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        let at = TEN_SECONDS_BEFORE_THE_NIGHT;
+        executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+        executor.run(observation(None, None, false, at)?, &ports)?;
+        let first = "01JABCDEFGHJKMNPQRSTV00001";
+        let second = "01JABCDEFGHJKMNPQRSTV00002";
+        let mut night = Vec::new();
+        night.extend(executor.run(sell(first, "6", "141", Purpose::RiskExit)?, &ports)?);
+        night.extend(executor.run(Input::Tick(RiskClock::from_secs(at + 5)), &ports)?);
+        night.extend(executor.run(sell(second, "4", "141", Purpose::RiskExit)?, &ports)?);
+        night.extend(executor.run(Input::Tick(RiskClock::from_secs(at + 10)), &ports)?);
+        night.extend(executor.run(cancel_accepted(&format!("md-{first}")), &ports)?);
+        night.extend(executor.run(Input::Tick(RiskClock::from_secs(at + 15)), &ports)?);
+        night.extend(executor.run(cancel_accepted(&format!("md-{second}")), &ports)?);
+        assert_eq!(
+            super::between_rungs(&executor.state, &aapl()?)?,
+            Qty::parse("10")?
+        );
+        let open = 1_790_150_400;
+        night.extend(executor.run(Input::Tick(RiskClock::from_secs(open - 60)), &ports)?);
+        assert_eq!(protection_sent(&night)?, Qty::ZERO);
+        executor.run(observation(Some(150), None, true, open)?, &ports)?;
+        let resumed = executor.run(Input::Tick(RiskClock::from_secs(open)), &ports)?;
+        assert_eq!(later_rungs(&resumed, first), vec![Qty::parse("6")?]);
+        assert_eq!(later_rungs(&resumed, second), vec![Qty::parse("4")?]);
+        assert_eq!(protection_sent(&resumed)?, Qty::ZERO);
+        Ok(())
     }
 
     /// What `effects` sent as protection.
