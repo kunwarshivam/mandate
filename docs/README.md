@@ -25,10 +25,19 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Trading domain reference cases](specs/reference-cases/trading-domain.yaml) | Machine-readable worked examples that implementations must reproduce |
 | [Mandate spec](specs/mandate.md) | Mandate structure, validation, policy hierarchy, risk state and limits, autonomy rules, signal models and the order builder, versioning, records |
 | [Mandate JSON Schema](../schemas/mandate.schema.json) | Structural rules for mandate documents (JSON Schema 2020-12) |
+| [Policy JSON Schema](../schemas/policy.schema.json) | Structural rules for platform, organization, and workspace policy documents (JSON Schema 2020-12) |
 | [Mandate reference implementation](../reference/mandate/ref.py) | Generator, invariant fuzz, and case checks for the mandate spec |
-| [Mandate reference cases](specs/reference-cases/mandate.yaml) | Computed cases for validation, policy, risk state, gate limits, the order builder, autonomy, flatten, goals, and change classification |
+| [Mandate reference cases](specs/reference-cases/mandate.yaml) | Computed cases for validation, policy, risk state, gate limits, the order builder, autonomy, flatten, goals, change classification, admission, approvals, delegations, the review date, and tripwires |
 | [Journal spec](specs/journal.md) | Streams, event envelope, canonical serialization, hash chain, storage, replay, verification, export |
 | [Journal test vectors](specs/reference-cases/journal.yaml) | Exact canonical bytes and hashes, plus tamper cases |
+| [Data plane spec](specs/data-plane.md) (draft v0.1) | Live market data, reference data, news, filings, fundamentals, the point-in-time store, fan-out to workspaces, failure walk, and adversaries |
+| [Inference and model gateway spec](specs/inference.md) | Draft v0.1: every model call, the model gateway, pinning and no substitution, deadlines, caching, the registry, metering and spend caps, security, failure walk, and the fast-tier and provider decisions ([DEC-432](project/decisions/DEC-432.md)) |
+
+## Design
+
+| Document | Purpose |
+|---|---|
+| [Infrastructure and operations](design/infrastructure.md) | Draft v0.1: environments, invariants, runtime topology, data stores, secrets and the vault, backups and disaster recovery, deploy and upgrade, observability and on-call, security baseline, cost model, failure walk (DEC-434) |
 
 ## Product
 
@@ -54,9 +63,20 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Project charter](project/01-project-charter.md) | Objectives, scope, deliverables, stakeholders, governance |
 | [Milestones and WBS](project/02-milestones-and-wbs.md) | Milestone map, work packages, critical path, phase gates |
 | [RAID log](project/03-raid-log.md) | Risks, assumptions, issues, dependencies |
-| [Decision log](project/04-decision-log.md) | Accepted, proposed, and open decisions, DEC-01 to DEC-302 |
-| [Decisions](project/decisions/README.md) | One file per decision from DEC-344 on, and how to write one |
+| [Decision log](project/04-decision-log.md) | Decisions DEC-01 to DEC-302, and the registry of other reserved identifiers; it takes no new decision rows (DEC-344) |
+| [Decisions](project/decisions/README.md) | One file per decision, DEC-303 onward (DEC-430 is the highest on `main` today), and how to write one |
 | [Roles and RACI](project/05-raci.md) | Roles to fill and responsibilities |
-| [Backlog: v1](project/06-backlog-v1.md) | Epics and user stories with acceptance criteria |
+| [Backlog: v1](project/06-backlog-v1.md) | Epics and user stories with acceptance criteria, and the known follow-ups |
 | [Quality and release plan](project/07-quality-and-release.md) | Definitions of ready and done, test strategy, release gates, incidents |
-| [Design questions before the mandate spec rewrite](project/09-mandate-rewrite-questions.md) | Choices the founder makes before the rewrite for DEC-97 to DEC-103, with options and recommendations |
+| [Work tracker](project/08-work-tracker.md) | Where each milestone and story stands, reference-case counts, what waits on the founder, and what comes next |
+| [Design questions before the mandate spec rewrite](project/09-mandate-rewrite-questions.md) | Choices put to the founder before the rewrite for DEC-97 to DEC-103, with options and recommendations; historical, since the rewrite merged as mandate spec v0.6 |
+| [Task briefs](project/tasks/) | Agent task briefs for stories and streams, each written before its code |
+| [Task template](project/templates/task.md) | The template every task brief starts from |
+
+## Engineering
+
+| Document | Purpose |
+|---|---|
+| [Dependency registry](dependencies.md) | Every direct Rust, Python and npm dependency, with why it is allowed |
+| [ADR template](adr/template.md) | The template for an architecture decision record |
+| [Web app](../web/README.md) | The `web/` app (DEC-200): how to run it, with its product, design and colour notes beside it |

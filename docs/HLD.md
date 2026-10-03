@@ -304,7 +304,9 @@ are computed once and fanned out to subscribed workspaces. It emits no direction
 directional output is a signal model the user selects and pins
 ([mandate spec §8.1](specs/mandate.md#81-signal-model-contract-dec-52-dec-97);
 [DEC-62](project/04-decision-log.md#decisions)). This is the main cost lever for the managed
-offering. Hybrid and on-prem deployments can subscribe to it or run their own.
+offering. Hybrid and on-prem deployments can subscribe to it or run their own. The
+[data plane spec](specs/data-plane.md) (draft) defines it, the workspace data service, and the
+point-in-time store.
 
 ---
 
@@ -719,10 +721,12 @@ spike (`python/research_spike`).
    and exchange licenses. In v1, each user's market data comes through their own Alpaca
    account, so Mandate does not redistribute it; any shared data offering needs licensing first.
 4. **Custom code in v1.** Declarative specs only, or also WebAssembly plug-ins?
-5. **First connectors (decided, [DEC-23](project/04-decision-log.md#decisions)).** Alpaca
-   first (US stocks, ETFs, crypto spot; paper trading; OAuth), Kraken Derivatives US second
-   (CFTC-regulated crypto perpetuals), then Interactive Brokers and Coinbase US futures. The
-   platform serves the United States first.
+5. **First connectors (decided, [DEC-23](project/04-decision-log.md#decisions), reordered by
+   [DEC-98](project/04-decision-log.md#decisions)).** Alpaca first (US stocks, ETFs, crypto spot;
+   paper trading; OAuth), Robinhood Agentic Trading second (retail US equities and crypto spot over
+   MCP into the customer's dedicated agentic account), Kraken Derivatives US third (CFTC-regulated
+   crypto perpetuals), then Interactive Brokers and Coinbase US futures. The platform serves the
+   United States first.
 6. **Approval channels in v1.** A native mobile app for push, or SMS, email, and Slack / Telegram first.
 7. **Mobile access to on-site approval services.** Whether approvers reach the customer's
    approval service through the customer's VPN, through our relay with end-to-end encryption,
