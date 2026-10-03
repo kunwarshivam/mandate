@@ -2792,12 +2792,13 @@ mod tests {
                 Origin::GoalCompletion, Origin::RemovedInstrument, Origin::RiskEngine,
                 Origin::ProtectiveLeg,
             ]),
-            trailing in prop::option::of(0_u32..400),
+            (trailing, minimum_tenths, fractionable) in prop_oneof![
+                (prop::option::of(0_u32..400), 0_u32..60, any::<bool>()),
+                ((1_u32..20).prop_map(Some), Just(0_u32), Just(false)),
+            ],
             adv in prop::option::of(0_u32..400),
             today in 0_u32..30,
-            minimum_tenths in prop_oneof![Just(0_u32), 0_u32..60],
             qty_tenths in 1_u32..=100,
-            fractionable in any::<bool>(),
         ) {
             let fail = |e: GateError| TestCaseError::fail(e.to_string());
             let tenths = |n: u32| match n % 10 {
