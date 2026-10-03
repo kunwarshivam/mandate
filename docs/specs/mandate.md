@@ -55,8 +55,9 @@ builder, versioning, change classification, and the records kept.
   broker would refuse for size. **Known defect:** a trim that would close the whole position is, on
   this version, still withheld below `min_order_size`, though trading spec §5.3 rule 2 exempts a
   full close. For example, 0.0002 BTC at a 600,000 bid (120 dollars) with a cap of 100, a confirmed
-  factor of 0.5 and a `min_order_size` of 0.001: the trim is the whole position, and it is withheld
-  at every evaluation. [DEC-423](../project/decisions/DEC-423.md) fixes it, in the gate first and
+  factor of 0.5 and a `min_order_size` of 0.001: the trim is the whole position on the venue's
+  0.0001 grid (on the gate's 1e-9 grid it is 0.000116667, as the entry above says), and it is
+  withheld at every evaluation. [DEC-423](../project/decisions/DEC-423.md) fixes it, in the gate first and
   then here. No existing reference case changes, the four trim cases state `min_order_size`, and
   MC-B33 and MC-B34 are added where the two minimums disagree; MC-B33 sits on the boundary (§11).
 - **v0.6, amended ([DEC-353](../project/decisions/DEC-353.md), [#444](https://github.com/kunwarshivam/mandate/issues/444)):**
@@ -233,10 +234,10 @@ stateDiagram-v2
     Compiled --> Reviewed: user enters or confirms every envelope field
     Reviewed --> Validated: schema + V-rules + policy hierarchy pass; warnings acknowledged
     Validated --> Versioned: canonical hash = mandate_version
-    Versioned --> Deployed: backtest and paper requirements met; owner approves (step-up)
+    Versioned --> Deployed: backtest and paper requirements met, then the owner approves (step-up)
     Deployed --> Deployed: new version applied (§2.2)
     Deployed --> Holding: goal complete or end date, on_complete = hold_protected or disarm_ladder
-    Deployed --> Retired: on_complete = release; profit_stop reached and flat; agent stopped
+    Deployed --> Retired: on_complete = release, profit_stop reached and flat, or agent stopped
     Holding --> Retired: owner releases or closes positions
     Retired --> [*]
 ```
@@ -1592,7 +1593,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 432 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 433 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
