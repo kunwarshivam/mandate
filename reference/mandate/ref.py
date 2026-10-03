@@ -1310,12 +1310,21 @@ def builder(m, inp):
     # risk engine first: trim_to_target (§5.5, DEC-65)
     band_usd = D(beh["sizing"]["rebalance_band"]) * cap
     # The agent's own non-protective sells already resting in the instrument are a trim in progress: the
-    # trim is what they leave of the excess and of the position, and the minimum is judged on that
-    # (DEC-399 item 7). When they cover the excess, no trim is due.
+    # trim is what they leave of the excess, rounded up on the grid, and the minimum is judged on that
+    # (DEC-399 item 7). When they cover the excess, no trim is due. Where the rounded trim is more than
+    # they leave unsold and that remainder is not the whole position, the trim is the remainder
+    # truncated onto the grid, an order the broker accepts (DEC-445 item 2).
     on_sale = D(inp["open_sell_qty"]) if r["scale_action"] == "trim_to_target" else D(0)
     sell = D(0)
     if r["scale_action"] == "trim_to_target" and factor < 1 and mv - factor * cap >= band_usd:
-        sell = max(D(0), min(qty - on_sale, ceil_inc((mv - factor * cap) / bid, inc) - on_sale))
+        unsold = max(D(0), qty - on_sale)
+        rounded = ceil_inc(max(D(0), (mv - factor * cap) / bid - on_sale), inc)
+        if rounded <= unsold:
+            sell = rounded
+        elif unsold == qty:
+            sell = qty
+        else:
+            sell = trunc(unsold, inc)
     if sell > 0:
         guards = []
         if inp.get("scale_active_s", 0) < r["breach_confirm_s"]:

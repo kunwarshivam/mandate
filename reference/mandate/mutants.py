@@ -309,7 +309,8 @@ TRIPWIRE_MUTANTS = {
 # The trim's minimum (§5.5, DEC-399 item 5) is judged by the family-B cases rather than by a fuzz:
 # MC-B33 and MC-B34 sit where the instrument's minimum order size and the dollar minimum disagree,
 # MC-B33 also sits on the boundary, a trim exactly at the minimum, MC-B35 is the full close the
-# minimum exempts (DEC-423), and MC-B36 and MC-B37 size the trim after a resting sell (DEC-399 item 7).
+# minimum exempts (DEC-423), and MC-B36 and MC-B37 size the trim after a resting sell (DEC-399 item 7),
+# and MC-B38 and MC-B39 put it on a coarse grid (DEC-445 item 2).
 TRIM_MUTANTS = {
     "the trim's minimum is the dollar minimum order": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
                                                       '        if sell * bid < D(inp["min_order_usd"]) and sell != qty:'),
@@ -318,8 +319,12 @@ TRIM_MUTANTS = {
                                                    '        if sell < D(inp["min_order_size"]):'),
     "a trim at the minimum is withheld": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
                                           '        if sell <= D(inp["min_order_size"]) and sell != qty:'),
-    "a trim ignores the agent's resting sells": ('        sell = max(D(0), min(qty - on_sale, ceil_inc((mv - factor * cap) / bid, inc) - on_sale))',
-                                                 '        sell = max(D(0), min(qty, ceil_inc((mv - factor * cap) / bid, inc)))'),
+    "a trim ignores the agent's resting sells": ('        rounded = ceil_inc(max(D(0), (mv - factor * cap) / bid - on_sale), inc)',
+                                                 '        rounded = ceil_inc(max(D(0), (mv - factor * cap) / bid), inc)'),
+    "a trim rounds up before subtracting the resting sells": ('        rounded = ceil_inc(max(D(0), (mv - factor * cap) / bid - on_sale), inc)',
+                                                             '        rounded = max(D(0), ceil_inc((mv - factor * cap) / bid, inc) - on_sale)'),
+    "an off-grid remainder beside a resting sell is proposed off the grid": ('            sell = trunc(unsold, inc)',
+                                                                           '            sell = unsold'),
 }
 
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
