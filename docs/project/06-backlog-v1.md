@@ -872,6 +872,13 @@ the spec invariants (DP-n) its tests cover.
     gated by an approval, rule 13), so the claim survives a later autonomy change.
   - NT-6: say that a notice joining a coalescing window meets the 60-second bound at the window's
     end.
+  - Round 2 nits: §3.2's preamble says every non-approval kind is caused by an `OwnerAlertSent`,
+    but `channel_lost` is caused by the dispatcher's own `NoticeAttempted` (§3.4 has it right);
+    say where the journal change is described that `StreamType` and `StreamId::parse` in
+    `mandate-journal` are a closed four-variant type E8-10 must extend first; E8-9 reconciles the
+    mandate reference cases' `OwnerAlertSent` `{subject, text: "tripwire_fired"}` with §3.2's
+    `kind`; keep one sentence, here or in the workspace API spec §3.9, for what
+    `ApprovalRef::of_requested_event` becomes.
 
 ### E9 Identity, tenancy, and policy
 
