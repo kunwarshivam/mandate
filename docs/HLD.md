@@ -676,6 +676,34 @@ Speed tiers:
 | Sandboxing | WebAssembly plug-ins; Firecracker for heavier workloads |
 | Observability | OpenTelemetry API with a Prometheus pull exporter (M6); the journal is the audit record, never telemetry ([DEC-73](project/04-decision-log.md#decisions)) |
 
+### Where the code stands (2026-10-03)
+
+This document describes the target design. Most of it is not built yet. The Rust crates in
+`crates/` cover these components today; `xtask/layers.toml` records each crate's layer, and
+[ADR-0001](adr/0001-engineering-setup.md) gives the crate rules.
+
+| Component in this document | Crates today |
+|---|---|
+| Agent runtime | `mandate-runtime` (the pure state machine and kill switches); `mandate-shell` (the process shell and the `mandate-tracer` binary) |
+| Risk engine | `mandate-risk` (the gate); `mandate-spec` (the mandate, its validation, policy, risk state, change classification); `mandate-builder` (autonomy and the order builder) |
+| Execution gateway and connectors | `mandate-executor` (the idempotent executor, reconciliation, protective exits); `mandate-alpaca` (the Alpaca paper connector) |
+| Journal and state | `mandate-journal`, `mandate-journal-pg` (the Postgres hot store), `mandate-journal-cold` (the cold store and export), `mandate-artifacts-fs` (the artifact store), `mandate-accounting` (the account fold) |
+| Approval service | `mandate-approval` (the pure approval core only) |
+| Research agent (§9) | `mandate-research` (the thesis contract and its admission checks) |
+| Market data | `mandate-marketdata` (Alpaca historical data into Parquet) |
+| Backtesting | `mandate-sim` (the fill model), `mandate-backtest` (the loop and its report) |
+| Shared foundations | `mandate-num`, `mandate-time`, `mandate-canon`, `mandate-domain`; `mandate-refcases` is the reference-case test harness |
+| Command line | `mandate-cli` |
+| Web app | `web/` (Next.js, DEC-200); there is no mobile app |
+
+Planned, with no code yet: the whole global control plane (directory, licensing and billing,
+fleet health, notification relay, connector catalog and model registry); the agent registry and
+spec compiler, policy service, deployment manager, audit explorer backend, and connection manager
+as services; the secrets vault; the model gateway; the shared data plane; the Python SDK and PyO3
+bindings; object storage and ClickHouse; Kubernetes, Helm, and the installer; and WebAssembly and
+Firecracker sandboxing. Python today is repository tooling (`python/mandate_tools`) and a research
+spike (`python/research_spike`).
+
 ---
 
 ## 12. Risks and open decisions
