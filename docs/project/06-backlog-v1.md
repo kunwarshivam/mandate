@@ -2522,6 +2522,9 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   and sizes `trim_guards`' trim on what it leaves, as the gate does. It awaits MC-B36 and MC-B37
   (`AWAITED`, with the counts for both fixtures). The reference PR follows, then the status rows,
   then a cleanup that drops `AWAITED` and makes the input required.
+  *Done:* the reference side in #567 (MC-B36, MC-B37, §5.5 states the subtraction); the cleanup
+  (`agent/g8-e6-4-open-sell-cleanup`) drops `AWAITED`, so family B's thirty-seven cases and the
+  sweep counts state one fixture, and refuses a trim case with no `open_sell_qty`.
 - **E6-4 harness cleanup: drop the transitional branches once MC-B33 and MC-B34 are on `main`**
   (#498 review, M1). In `crates/mandate-refcases/src/mandate/order_builder.rs`:
   (a) drop `AWAITED`, `awaited`, `counted` and the without-branch, so the case list and the sweep
