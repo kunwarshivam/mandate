@@ -454,6 +454,17 @@ the spec invariants (DP-n) its tests cover.
   account only; every MCP exchange is journaled; beta terms are recorded; the connector requests and
   stores only the agentic account's data; account numbers are held by reference (journal spec §6.4)
   and never logged.
+  *Refined by the [connections spec](../specs/connections.md) §6 ([DEC-441](decisions/DEC-441.md);
+  safety-critical; tests first, DEC-77):* **blocked on E7-15** and on DEC-441 item 15; not built
+  unless the tool contract gives an idempotent client order id and query by it (U-R1, U-R2; item 10).
+  Tests run only against fixtures synthesized from the published contract and the simulated broker
+  with Robinhood's rules (DEC-124); no test or run calls Robinhood (rule 8; item 11). The connector
+  implements `BrokerConnector` through the E7-16 MCP client; calls only allowlisted tools, never an
+  options, exercise, watchlist, alert, or other write tool (CN-9); names the agentic account on every
+  request and drops other accounts' data before hashing (CN-8); maps unconfirmed statuses to
+  `blocked` (U-R6); keeps a reserved budget for exits, cancels, and kill-switch orders (§6.5);
+  refuses a tool list carrying any fund-movement tool (CN-2); and a fixture with injection text in
+  tool descriptions shows the text reaches no journal text, notification, or model (CN-9).
 - **E7-5 (Must)** As an owner, I want one account ledger per broker account and one agent per
   instrument per account, so that agents never overspend or cross each other.
   *Accepted when:* RC-17 passes; external activity switches agents to exits-only (RC-15).
@@ -507,6 +518,71 @@ the spec invariants (DP-n) its tests cover.
   doubles still name (DEC-303 item 15). *Tests PR*: 17 pending tests against stubs in
   `mandate-journal`'s `control` module and `mandate-spec`'s `JournaledFact::from_record`. Three live
   tests keep `AccountSnapshotRecorded` unregistered until stream K's writer conforms (DEC-261 item 7).
+
+The rows below come from the [connections spec](../specs/connections.md)
+([DEC-441](decisions/DEC-441.md) item 13). All are safety-critical (broker connectors, OAuth
+scopes, key-permission checks, credentials) and go tests first (DEC-77). E7-1 (Alpaca OAuth) follows
+spec §5.2 to §5.4: scopes `trading` and `data` only, never `account:write`; a grant that differs from
+the request is refused; and live Alpaca is OAuth only, API keys paper only (DEC-441 items 3 and 5),
+after U-A1 to U-A5 are recorded.
+
+- **E7-11 (Must, M8)** As a workspace admin, I want a connection record that holds references
+  only, so that no credential can leak through the platform's own records (spec §3, CN-1, CN-5).
+  *Accepted when:* the record has the §3 fields and no secret-shaped member; a canary-secret scan
+  of journal, logs, artifacts, and API responses finds nothing; a second connection with the same
+  account fingerprint in the deployment is refused; the fingerprint is never journaled or returned.
+- **E7-12 (Must, M8)** As an owner, I want every credential checked at connect, at each executor
+  start, and daily, so that the platform never holds a permission that can move my funds or reach
+  the wrong environment or account (spec §8.1, CN-2, CN-3, CN-10).
+  *Accepted when:* for each connector, fixtures with each fund-movement permission, a wider grant,
+  a credential answering the other environment, and another account are refused before any vault
+  write; a live key whose permissions cannot be read is refused; each result, refusals included, is
+  journaled without the credential (*depends on E7-17* for the check-result events); a later
+  failure moves the connection to `suspended`; a token documented as reaching both environments is
+  refused with no request to the other host (DEC-441 item 21).
+- **E7-13 (Must, M8)** As an owner, I want a degraded or invalid connection to stop new openings
+  at once while exits keep going, so that losing a broker link never adds risk (spec §8.2, §9,
+  CN-6). *Accepted when:* fault injection that revokes, expires, or fails refresh at every step of an
+  open, an exit, and a kill switch sends no opening after the event and every exit the fake broker
+  still accepts; `AccountRestrictionChanged` (`closing_only`, `account_restricted`, cause
+  `connection_unavailable`) and `AgentModeApplied` are committed before anything else (trading
+  §7.3 v0.15, connections spec §9.1; DEC-441 items 7 and 23); a broker reject or notice is journaled
+  with `broker_reject` or `broker_notice`, never the connection cause, and the reverse; the owner
+  alert for the connection cause is distinct from the broker-restriction alert; the restriction
+  lifts only after the connection's own condition clears and then the owner acknowledges, an
+  account refresh alone never lifts it, and clearing it leaves any broker restriction standing.
+  *Reference cases:* RC-15 is unchanged; the tests PR adds a trading-domain case for the
+  connection row and its lift order (YAML, then `cargo xtask refcases --write`), and the journal
+  spec closes `AccountRestrictionChanged` with `cause` when that schema is registered.
+- **E7-14 (Must, M8)** As an owner, I want reconnecting my account to keep its connection, so that
+  revoking and reconnecting can never reset my loss carry (spec §9.2, CN-12).
+  *Depends on E7-17* (the reconnect rule). *Accepted when:* revoke and reconnect of the same
+  account keeps `connection_id`, `account_ref`,
+  the stream, and the loss carry, and V-032 still binds; reconciliation runs before any agent
+  resumes.
+- **E7-15 (Must, M8, before E7-6; no code)** As the founder, I want Robinhood's tool contract and
+  platform terms confirmed in writing, so that the connector is built on facts rather than guesses
+  (spec §6.6). *Accepted when:* U-R1 to U-R12 each have a recorded answer with its source, from
+  published documentation or Robinhood's written reply, gathered without any call to a real account;
+  DEC-441 items 15, 16, 17, and 20 are decided.
+- **E7-16 (Must, M8)** As an owner, I want the broker MCP client limited to an allowlist of tools
+  pinned by contract hash, so that a malicious server or poisoned tool metadata cannot steer it
+  (spec §6.2, CN-9). *Accepted when:* a fixture server that adds a tool, changes a schema, or carries
+  injection text in descriptions or errors: the new tool is never called, a changed hash halts
+  openings, and the text appears in no journal text, notification, or model input; only the pinned
+  host is reachable and redirects are refused.
+- **E7-17 (Must, M8)** As an auditor, I want connection state changes, permission-check results,
+  refusals, and credential rotation journaled, so that every connection's history can be replayed
+  (spec §3, §9, CN-10). *Accepted when:* the journal spec defines their schemas; adds `account_ref`
+  to `ConnectionEstablished` as a new `schema_version` (DEC-261 item 10's binding clause); and
+  allows a second `ConnectionEstablished` for a `connection_id` only after its `ConnectionRevoked`,
+  with the same broker, environment, and `account_ref` (spec §3), with vectors, tests first.
+- **E7-18 (Must, M8)** As an auditor, I want a broker exchange record to say that it is filtered
+  as well as redacted, so that nobody reads it as the broker's raw bytes in a dispute (spec §6.2
+  rules 4 and 6; #563 round 1, minor 2). *Accepted when:* the journal spec's `BrokerExchangeRecorded`
+  text (§6.3) says the stored exchange has other accounts' data dropped before redaction and
+  hashing, that the dropped parts cannot be recovered, and that reconciliation disputes rest on
+  the filtered record; the connections spec §6.2 says the same.
 
 ### E8 Escalation and approvals
 
