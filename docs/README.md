@@ -30,8 +30,15 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Mandate reference cases](specs/reference-cases/mandate.yaml) | Computed cases for validation, policy, risk state, gate limits, the order builder, autonomy, flatten, goals, change classification, admission, approvals, delegations, the review date, and tripwires |
 | [Journal spec](specs/journal.md) | Streams, event envelope, canonical serialization, hash chain, storage, replay, verification, export |
 | [Journal test vectors](specs/reference-cases/journal.yaml) | Exact canonical bytes and hashes, plus tamper cases |
+| [Data plane spec](specs/data-plane.md) (draft v0.1) | Live market data, reference data, news, filings, fundamentals, the point-in-time store, fan-out to workspaces, failure walk, and adversaries |
 | [Inference and model gateway spec](specs/inference.md) | Draft v0.1: every model call, the model gateway, pinning and no substitution, deadlines, caching, the registry, metering and spend caps, security, failure walk, and the fast-tier and provider decisions ([DEC-432](project/decisions/DEC-432.md)) |
 | [Agent harness spec](specs/agent-harness.md) | Draft v0.1: how a confirmed mandate version becomes a running agent process; construction and lifecycle, the trading and research loops, retrieval, model inputs and output checks, budgets, evaluation and change control, adversaries, and the founder's budget, evaluation, and licence decisions ([DEC-431](project/decisions/DEC-431.md)) |
+
+## Design
+
+| Document | Purpose |
+|---|---|
+| [Infrastructure and operations](design/infrastructure.md) | Draft v0.1: environments, invariants, runtime topology, data stores, secrets and the vault, backups and disaster recovery, deploy and upgrade, observability and on-call, security baseline, cost model, failure walk (DEC-434) |
 
 ## Product
 

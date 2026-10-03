@@ -105,6 +105,71 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E2-3 (Should)** As a researcher, I want order-book top-of-book data so that slippage models
   can use spreads.
 
+*The live data plane* ([data plane spec](../specs/data-plane.md), [DEC-433](decisions/DEC-433.md)).
+Stories marked SC are safety-critical (connectors, and anything the risk gate reads). Each names
+the spec invariants (DP-n) its tests cover.
+
+- **E2-5 (Must, M6; SC)** As an owner, I want my agents to receive live quotes, trades, bars,
+  trading statuses, and LULD bands from my own Alpaca connection, so that marks and halt checks are
+  current (PRD FR-2.7).
+  *Accepted when:* the stream client connects, authenticates, subscribes, and reconnects with
+  capped backoff against recorded fixtures with no network; the connection states of spec §3.2 hold,
+  with openings blocked outside `live`; every gap window is recorded and backfilled; duplicates,
+  out-of-order quotes, and corrections follow §3.3; the channels each feed carries are verified
+  first (spec §11 question 1); DP-4, DP-5, DP-7 pass under fault injection.
+- **E2-6 (Must, M6; SC)** As an owner, I want one workspace data service that normalizes market
+  data, stamps receive times, and keeps a bounded hot cache, so that every runtime and the executor
+  read the same current prices.
+  *Accepted when:* records are spec §3.1's types with `vendor_time` and `received_at`; quote age and
+  skew follow DEC-433 item 5; instrument status follows §3.5; conflation never drops status, LULD,
+  or correction messages; the subscription set and its overflow follow §3.2; a journal spec PR adds
+  the quote's vendor and receive times to `MarkUpdated` (spec §11 question 2); DP-3 and DP-10 pass.
+- **E2-7 (Must, M5)** As a researcher, I want the point-in-time store to answer "as of" queries by
+  knowledge time, with corrections and revised history as new versions, so that no backtest or
+  research query sees the future.
+  *Accepted when:* every new dataset kind has a knowledge time (spec §5.2); revised history is a new
+  dataset version and the old one stays readable; corrections are records naming the original; a
+  property test against an independent oracle shows DP-1 and DP-2; a backtest records its snapshot
+  digest and reruns bit for bit (DP-14).
+- **E2-8 (Must, M6)** As an owner, I want the eligibility floor's inputs (prior close, 20-day median
+  dollar volume, ETP classification) computed point in time and versioned, so that the floor decides
+  on data it could have known.
+  *Accepted when:* the statistics come from daily bars with knowledge time before the decision and
+  appear in the gate's `checks` inputs; the ETP list's source is decided (trading spec §15 items 5
+  and 8) and an over-age list denies ETP openings; the calendar end alert fires 90 days ahead.
+- **E2-9 (Must, M5)** As the research agent's owner, I want SEC filings and XBRL facts ingested from
+  EDGAR with deterministic tagging, so that the agent reads primary documents without a paid vendor.
+  *Accepted when:* fetches reach only allowlisted endpoints and respect the SEC's fair-access rules;
+  raw bytes are stored by digest before parsing; tags come from filer CIK through a versioned table,
+  resolved as of knowledge time; amended filings and restated facts are new records (DP-1, DP-2,
+  DP-8, DP-9, DP-12).
+- **E2-10 (Must, M5)** As an owner, I want news read through my own Alpaca connection, de-duplicated
+  and grouped by story, so that one story repeated by many outlets counts once.
+  *Accepted when:* vendor updates are linked versions; syndicated copies share a group key (spec
+  §4.4) and the corroboration check counts a group once (DEC-433 item 14, with mandate spec §8.5
+  check 15); prompt-injection fixtures in news text never reach an order (DP-8, E17-7).
+- **E2-11 (Must, M5)** As an owner, I want the research agent to read data only through one as-of
+  query interface that journals what it returns, so that every thesis's inputs are on the record.
+  *Accepted when:* spec §4.6's parameters are enforced; every returned item is journaled as
+  `ObservationRecorded` before the model reads it; the same observations feed the E17-5 drift
+  detector; a query never returns an item from outside the allowlist version (DP-1, DP-3, DP-9).
+- **E2-12 (Should, M11)** As an operator, I want the shared plane to publish signed whole-dataset
+  bundles that cells and hybrid sites pull, and an offline bundle for air-gapped sites, so that
+  public data is computed once without learning any workspace's interests.
+  *Accepted when:* bundles carry a manifest and signature verified before use; nothing
+  workspace-specific reaches the shared plane in a two-workspace test (DP-10); a dataset without a
+  recorded redistribution grant cannot publish (DP-11); no record has a directional field (DP-12).
+- **E2-13 (Must, M7; SC)** As the founder, I want a data-plane fault-injection suite that walks every
+  row of spec §7 to its exit, so that feed failures are proven safe, not assumed.
+  *Accepted when:* each row of §7 is a named test; with the shared plane and every news source down
+  the exit suites still pass (DP-13); one outlier quote anywhere in a random sequence changes no
+  latched limit, trim, or flatten (DP-6), with the H and E₀ cases pending on DEC-433 item 17.
+- **E2-14 (Must, after DEC-433 item 17; SC)** As an owner, I want one wrong high print never to set
+  my high-water mark or my day's starting equity, so that later real prices cannot confirm a loss
+  that did not happen.
+  *Accepted when:* the founder decides item 17; the mandate spec and its reference cases change in
+  their own PR first; DP-6's H and E₀ cases pass.
+
 ### E3 Accounting
 
 - **E3-1 (Must)** As a trader, I want positions, cash, fees, and realized and unrealized P&L
@@ -1222,6 +1287,75 @@ sets DEC-431 item 15's budgets.
   core appends thesis records and the executor copies `UniverseChanged`, so that the next agent copies
   the single-writer rule (DEC-431 item 2). *Accepted when:* the comments on the crate and on
   `ResearchEvent` match journal spec §2, with no code change.
+
+### E21 Operations and infrastructure (proposed, DEC-434)
+
+From the [infrastructure design](../design/infrastructure.md) (v0.1 draft). The epic joins the
+overview when the founder accepts it; until then each story is **(Proposed)** with the milestone it
+would serve. **SC** marks a story on a safety-critical path, to which the `AGENTS.md`
+safety-critical rules apply. Hosting, vendor, and budget choices stay with the founder (DEC-434
+items 13 to 20); no story here buys a service or touches live money.
+
+- **E21-1 (Proposed, M6; SC)** As the founder, I want the paper/live boundary held at the network
+  as well as in the build, so that no non-production environment can reach live money (OPS-5).
+  *Accepted when:* each non-production environment's egress allow-list is default-deny per process
+  type (design §3.1, §9); a test in the paper environment shows a request to each live trading host
+  fails at the network layer; and an agent runtime has no route to any broker host.
+- **E21-2 (Proposed, M6; SC)** As the founder, I want the Phase 1 paper environment run as
+  supervised processes (runtime per agent, executor per account, scheduler) with restart policy,
+  liveness, readiness, and a crash-loop bound, so that the soak runs unattended (design §3.4).
+  *Accepted when:* killing any process at any step recovers it from the journal with zero
+  duplicates; a process that is not ready takes no opening but still runs the kill switch; a
+  crash-looping agent is left `Paused` with an alert; and two copies of one executor leave the
+  older one `Fenced` before it sends.
+- **E21-3 (Proposed, M6)** As an operator, I want metrics through the OpenTelemetry API with a
+  Prometheus pull exporter (DEC-73, ES-18), with only opaque labels, so that I can watch the system
+  without leaking strategy. *Accepted when:* the exporter runs air-gapped; a lint fails any label
+  outside the allowed set (design §8.1); and a test shows the decision cycle unchanged with the
+  exporter failing (OPS-11).
+- **E21-4 (Proposed, M7)** As an operator, I want the safety alerts of design §8.2 raised from
+  journal events and metrics with opaque payloads, so that every FR-8.3 condition reaches someone.
+  *Accepted when:* each alert in the table fires in a fault-injection or fixture test, and a
+  payload capture finds no symbol, price, quantity, or mandate content (OPS-10).
+- **E21-5 (Proposed, M7; SC)** As the founder, I want the journal backed up by WAL archiving and
+  base backups, and a restore procedure that verifies before anything trades, so that a lost
+  database costs no record silently (design §6). *Accepted when:* a monthly drill restores the
+  paper journal, passes journal spec §11 over every stream, compares heads with the latest anchors
+  and cold manifests, and journals the result; a restore older than the last anchor takes the
+  integrity-incident path and no agent resumes (OPS-8); and a canary scan finds no secret in the
+  restored data.
+- **E21-6 (Proposed, M13)** As on-call, I want runbooks RB-01 to RB-18 (design §8.4), so that the
+  Phase 2 gate's "runbooks exist for every alert in FR-8.3" holds. *Accepted when:* each runbook
+  names its alert, its checks, its safe actions, and its exit, and is exercised once in staging.
+- **E21-7 (Proposed, M8; SC)** As an owner, I want agents upgraded by drain and hand-over, so that
+  an upgrade never drops protection (OPS-7, design §7.3). *Accepted when:* an upgrade drill with
+  open positions, an exit sequence in flight, pending approvals, and a kill switch issued
+  mid-hand-over shows no protective order canceled by the deploy, every unprotected interval within
+  `max_unprotected_s`, the kill switch applied by the new process, and zero duplicates.
+- **E21-8 (Proposed, M6 then M11)** As the founder, I want release builds from `main` that are
+  reproducible, carry an SBOM, and from M11 are signed with my hardware key and checked at start
+  (ES-14, ES-17, OPS-15). *Accepted when:* two builds of one commit are byte-identical; each process
+  journals its build digest; and outside dev and CI an unsigned binary refuses to start.
+- **E21-9 (Proposed, M8; SC)** As an owner, I want my broker credential held in the workspace vault,
+  leased only to the executor for my connection, and checked for scope, environment, and account at
+  every start, so that no other process can use it (design §5). *Accepted when:* a runtime's
+  identity cannot read any credential; an executor's can read exactly one; a credential with
+  withdrawal or transfer permission, the wrong environment, or the wrong account is refused and the
+  refusal journaled without the credential; and a vault outage stops no running executor before its
+  lease expires. Blocked on DEC-434 item 14.
+- **E21-10 (Proposed, M8)** As the founder, I want a written threat model per process type and
+  deployment mode (design §9), so that the M13 penetration test has a scope. *Accepted when:* it
+  covers the attackers `AGENTS.md` names plus a compromised dependency, operator laptop, tenant, and
+  backup, and each threat is blocked, detected, or disclosed.
+- **E21-11 (Proposed, M8; SC)** As an operator, I want the live journal on a synchronous standby
+  with fenced failover, drilled under load, so that a database failure loses no acknowledged append
+  (OPS-2, design §4.1). *Accepted when:* a staging drill fails the primary during intents in flight
+  with zero duplicates and zero lost acknowledged appends, and with no synchronous standby, appends
+  return `Unavailable` rather than commit asynchronously. Blocked on DEC-434 items 13, 15, and 19.
+- **E21-12 (Proposed, M12)** As the founder, I want usage counted per agent and per workspace
+  (agent-hours, events, artifacts, model tokens) against the cost model's variables (design §10),
+  so that budgets and pricing rest on measured numbers. *Accepted when:* counts reach metering
+  without content, and a workspace's monthly counts reproduce from its journal.
 
 ## Won't (v1)
 
