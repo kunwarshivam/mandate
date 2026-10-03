@@ -978,6 +978,20 @@ after U-A1 to U-A5 are recorded.
     mandate reference cases' `OwnerAlertSent` `{subject, text: "tripwire_fired"}` with §3.2's
     `kind`; keep one sentence, here or in the workspace API spec §3.9, for what
     `ApprovalRef::of_requested_event` becomes.
+- **E8-15 (Must, M8, after E10-10; SC)** As an approver, I want to see and answer approval requests
+  through the workspace API, so that the web app and the CLI share one approval service
+  ([workspace API spec](../specs/workspace-api.md) §4.3, §5.2, §5.3; [DEC-436](decisions/DEC-436.md)).
+  *Accepted when:* `GET /approvals/{id}` returns the content object and `content_hash` exactly as
+  `ApprovalRequested` holds them, with no scorecard, profit estimate, or price target (DEC-126); a
+  response commits one `ApprovalResponseSubmitted` with the client's content hash unchanged and the
+  server's `submitted_at`; `approved` needs step-up bound to that hash, and `skipped` is refused only
+  for authentication, role, or a malformed request (API-7); a client token cannot respond or
+  preview (API-6); a delegation preview is refused for an admission, a two-approver ask, a live
+  environment, or a client, and the chosen shape commits `MandateVersionCreated`, `MandateConfirmed`,
+  and the response in one batch under one step-up; the UI-facing status says "approved" only after
+  `ApprovalRevalidated` with `act` (API-12); `/n/{notice_id}` resolves a random notice id, never
+  the request's event id, and only after sign-in (spec §3.9, DEC-436 item 19; the payload is the
+  notifications spec's, E8-9).
 
 ### E9 Identity, tenancy, and policy
 
@@ -1125,6 +1139,62 @@ story buys a service, and none uses a real identity-provider account in tests (s
   is journaled. **Also ([DEC-191](04-decision-log.md#decisions)):** a hold-new-openings tool that sets
   `exits_only` and nothing else; lifting it is the owner's alone, with step-up.
 
+*The workspace services API* ([spec](../specs/workspace-api.md) v0.1 draft, [DEC-436](decisions/DEC-436.md)). These
+are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety-critical story.
+
+- **E10-10 (Must, M8, after E10-15; SC)** As the owner, I want one authenticated, idempotent API in
+  front of my workspace deployment, so that every surface takes my input the same way (spec §1 to
+  §3). *Accepted when:* every route without credentials returns 401 with one body (API-1); a route ×
+  role × client-scope matrix test matches spec §3.7 and §3.8, computed from the tables (API-2);
+  every mutating call commits its control-stream event before reporting `recorded`, and fault
+  injection on the append shows no effect without its cause (API-3, API-13); a fuzz of retries and
+  concurrent repeats commits at most one event per key (API-4); foreign and absent ids return the
+  same 404 (API-9); errors carry `code` and `effect` (spec §3.5); CSRF defences hold for every
+  mutating route (spec §3.3); the OpenAPI document is generated and checked in CI.
+- **E10-11 (Must, M8, after E10-10; SC)** As an operator, I want drafts, compile, validate,
+  versions, diffs, and confirmation through the API (spec §4.1, §5.1). *Accepted when:* the server
+  classifies every confirm itself and refuses `classification_changed` and `stale_base`; a
+  risk-increasing confirm without step-up bound to `{mandate_version, agent_id, base_version}` is
+  refused; a client can create a draft and nothing after it (API-5, API-6); a fuzz of random edits
+  shows every envelope change of a deployed agent came through a user's `MandateConfirmed`; the
+  compiler never proposes `auto`, a delegation, pinned instruments, the environment, or the
+  connection (V-022, V-038); two writers never merge a draft silently (API-19).
+- **E10-12 (Must, M8, after E10-10; SC)** As an operator, I want deploy, pause, resume, hold, Stop,
+  owner exit, acknowledgment, and the kill switch through the API, with command status (spec §4.2,
+  §5.4, §5.5). *Accepted when:* pause, hold, the kill switch, and owner exit are recorded with every
+  condition of API-7 injected (rate limit, stale or missing read model, missing step-up, runtime,
+  model gateway, market data, global control plane down, frozen control stream); the kill switch
+  commits within its bound with every ordinary worker busy and the read-model tables gone (API-8);
+  a kill switch without step-up is recorded and stops (DEC-158 (c)); go-live returns
+  `live_unavailable`; status moves `recorded` → `taken` → `applied` or `refused` from the owning
+  streams' events only.
+- **E10-13 (Must, M8, with the connections spec; SC)** As a workspace admin, I want to connect and
+  revoke broker accounts through the API without any credential ever coming back (spec §4.5).
+  *Accepted when:* responses match a schema with no secret-shaped member and canary-secret scans of
+  responses, logs, and the journal find nothing (API-11); connect needs step-up and a single-use
+  OAuth `state`; scopes beyond trading reject the connection (FR-2.2); an ordinary revoke is refused
+  while an agent on the connection holds positions or is not stopped; a revoke with `compromised:
+  true` commits the connection-scope kill switch and then `ConnectionRevoked` in one batch, never
+  waits on positions, commits the kill switch even without step-up or with the control stream
+  frozen, destroys the credential after the kill switch's requests are sent, and tells the owner
+  which positions remain at the broker (spec §5.6, DEC-436 item 20).
+- **E10-14 (Must, M8, before E10-6; SC)** As an owner, I want my connected agent's token limited to
+  `read`, `request`, `propose`, `dry_run`, and `hold`, so that it is owner input and never the owner
+  (spec §3.8, DEC-141). *Accepted when:* every other route refuses a client token; `requested_by` is
+  `client` whatever the body says; client events carry the `client` actor kind with `on_behalf_of`;
+  a token presented without a matching DPoP proof is refused, as are CLI and service-account tokens
+  without one (spec §3.3 item 2); every client call, reads included, is journaled; revocation fails
+  the next call; creating a client needs step-up and revoking needs none.
+- **E10-15 (Must, M8, first; journal spec change, tests first)** As an engineer, I want the journal
+  events the API needs defined before the API writes them (DEC-436 item 14). *Accepted when:* the
+  journal spec closes `MandateDraftSaved`, the compiler's `ModelInvocationRecorded` on the control
+  stream, `MandateConfirmed`'s `agent_id` and `base_version`, `OwnerRequestSubmitted`, the
+  `hold_openings` and `lift_hold` commands, the `client` actor kind with `on_behalf_of` (refused by
+  approval check 3, counted as its user by check 7), `ConnectionRevoked`'s reason `compromised`,
+  and `ClientConnected` and `ClientRevoked` (with the identity spec's §12.1; `ScopeHalted` and
+  `ScopeReenabled` only if DEC-437 item 21 is accepted), each
+  with test vectors and an invalid draft per rule.
+
 ### E11 Web app: dashboard and controls
 
 - **E11-1 (Must)** As an operator, I want a dashboard of agents, state, positions, P&L, open
@@ -1154,6 +1224,14 @@ story buys a service, and none uses a real identity-provider account in tests (s
   30 days before I confirm a version that adds autonomy, so that I widen it on evidence
   ([DEC-186](04-decision-log.md#decisions)). Counts only, replayed from the journal; no profit, loss, or outcome; wording
   waits for compliance question 39.
+- **E11-9 (Must, M9, after E10-10)** As an operator, I want the dashboard, agent, position, order,
+  P&L, universe, plan, brief, autonomy, and alert views served from the journal with their age, so
+  that the web app leaves its fixtures and never shows old data as current
+  ([workspace API spec](../specs/workspace-api.md) §4.7, §4.9, §6; [DEC-436](decisions/DEC-436.md)). *Accepted when:*
+  rebuilding every read model from the journal alone gives identical responses (API-14); every
+  response carries per-stream watermarks; values past their freshness limit are marked stale with
+  their age; model text appears only in quoted, attributed members (API-18); scorecards appear only
+  at their own route (FR-8.4); each fixture type of `web/src/fixtures/types.ts` has its source route.
 
 ### E12 Audit explorer
 
@@ -1172,6 +1250,14 @@ story buys a service, and none uses a real identity-provider account in tests (s
   model's memory ([DEC-192](04-decision-log.md#decisions)). *Accepted when:* each answer links the `DecisionMade`, thesis,
   rule or delegation, and gate result it cites; a model may phrase it but adds no fact; a missing
   fact reads "not recorded"; wording waits for compliance question 41.
+- **E12-6 (Must, M9, after E10-10)** As an auditor, I want journal reads, traces, timelines, gate
+  decisions, exports, and verification through the API, complete and checkable
+  ([workspace API spec](../specs/workspace-api.md) §4.8; [DEC-436](decisions/DEC-436.md)). *Accepted when:* a fuzz of page
+  sizes with concurrent appends shows concatenated pages equal the stream range exactly once, in
+  `seq` order, with a passing chain check across pages (API-15); every export is journaled as
+  `ExportCreated` before it is served, its canonical form passes the journal verifier, and derived
+  JSON and CSV name their manifest hash (API-16); a viewer can read none of it and an auditor can act
+  on nothing (API-2).
 
 ### E13 Hybrid deployment
 
@@ -3718,3 +3804,27 @@ From #528's round-2 review (DEC-411; the coordinator's ruling, 05:19Z on #528; f
   scores it `ERROR`, not caught. Say so in the module docstring, so nobody adds one and reads the `ERROR` as a catch.
 - **§11's case count is unchecked prose** (#528 round 2, minor 5). `main` said 427 where the file held 429. Add a
   `cargo xtask` assertion that §11's count matches `docs/specs/reference-cases/mandate.yaml`.
+
+From the round-1 review of the workspace services API spec ([#560](https://github.com/kunwarshivam/mandate/pull/560), minors; [DEC-436](decisions/DEC-436.md)):
+
+- **The CLI as a second writer** (minor 1). Carry DEC-436 item 3's sentence into spec §1.3: the
+  writer epoch fences whichever writer is stale, and the API is `Fenced` until it re-takes the
+  epoch, so the cost of the CLI fallback is visible.
+- **`mock-runtime.tsx`'s path** (minor 2). Spec §4.9 names it under the fixtures column; it is
+  `web/src/lib/mock-runtime.tsx`.
+- **One list of reducing shortcuts** (minor 3). Make API-7's list and §5.1's frozen-stream sentence
+  name the same set, so the freeze check cannot be built before the shortcut carve-out.
+- **Who makes the organization kill switch's fan-out calls** (minor 4). Identity spec §4.2 gives the
+  org scope to org owners and admins, who need no workspace membership for it; spec §5.4 says the
+  client issues workspace-scope calls. Name the principal and route.
+- **Cite the notice payload, do not restate it** (minor 5). Spec §3.9 should point at the
+  notifications spec §4.2 for the payload's members.
+- **API-2's test reads the workspace from the path only** (minor 6). Assert no route reads the
+  workspace from a body member.
+- **One wording for a client's reads** (minor 7). §3.7's client column and §3.8's `read` scope say
+  the same rule two ways; keep one.
+
+From the round-2 review of the workspace services API spec ([#560](https://github.com/kunwarshivam/mandate/pull/560), nits and cross-document notes; [DEC-436](decisions/DEC-436.md)):
+
+- **Offer the kill switch alone on the revoke-on-compromise screen** (workspace API spec §5.6), as
+  the alternative that keeps the connection so protection can be re-placed and exits re-driven.
