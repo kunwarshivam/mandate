@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.1, draft for review ([DEC-432](../project/decisions/DEC-432.md)). Items 1 to 12 of DEC-432 are agent readings; items 13 to 16 are Proposed and wait for the founder |
+| **Status** | v0.1, draft for review ([DEC-432](../project/decisions/DEC-432.md)). Items 1 to 12 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03 (DEC-432, "Founder decisions") |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The agent harness spec (`docs/specs/agent-harness.md`, drafted in parallel) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
@@ -310,7 +310,7 @@ compliance question 33 ([mandate spec §4.3](mandate.md#43-policy-hierarchy-dec-
 training data, licence, owner, or price. No weights, key, contract, or code exist. Neither is
 built, and neither is defined well enough to build.
 
-**Options** (DEC-432 item 13, Proposed for the founder):
+**Options** (DEC-432 item 13; the founder chose a hosted fast model on 2026-10-03):
 
 | Option | What it takes | For | Against |
 |---|---|---|---|
@@ -318,17 +318,21 @@ built, and neither is defined well enough to build.
 | B. Use a hosted fast model (Jev path) | A vendor contract and key; one adapter | Fastest to try | Early-access vendor (R-07); prompt content leaves the site; unusable air-gapped; spending is founder-reserved |
 | C. Drop the fast tier for v1 | Nothing | Matches the retail profile, which excludes `fast` until counsel answers; v1 needs only quant models and the research agent (FR-3.7 P0) | No fast model for business design partners in v1 |
 
-**Recommendation: C.** Keep the `fast.` prefix, the policy key, and this call contract, so a fast
-model can be added later without a schema change. Revisit OD-02 at Phase 3 with the bake-off it
-names, and a definition of the typed questions first. Until the founder decides, agents proceed on
-C, the most conservative option: no fast-model code, vendor, or spend.
+**Decision (DEC-432 item 13, the founder, 2026-10-03): a hosted fast model in v1**, not the drop
+this draft recommended. Keep the `fast.` prefix, the policy key, and this call contract. Revisit
+OD-02 at Phase 3 with the bake-off it names, and a definition of the typed questions first. The
+fast tier is served by a hosted model through the gateway, under the same pinning, deadline,
+metering, and evaluation-gate rules as any model (DEC-432 items 1 to 12). Which model follows
+item 14 (§6), and its evaluation gate comes first. The retail profile still excludes `fast` until
+counsel answers question 33.
 
 ---
 
 ## 6. Providers and hosting
 
-Choosing a provider is spending and a vendor choice, so it is the founder's (DEC-79). DEC-432
-item 14 is Proposed.
+Choosing a provider is spending and a vendor choice, so it is the founder's (DEC-79). The founder
+decided DEC-432 item 14 on 2026-10-03: an aggregator for every call, with provider routing locked per
+pinned model.
 
 | Option | Pinning | Data handling | Locality | Cost and effort |
 |---|---|---|---|---|
@@ -337,17 +341,22 @@ item 14 is Proposed.
 | 3. Cloud model platform (a hyperscaler's hosted models) | Snapshot ids per region | Enterprise data terms; region choice | Hosted, in a chosen region | Fits customers with an existing cloud contract |
 | 4. Self-hosted open weights | Exact weights digest and quantization | Prompts never leave the site | Local; the only option for air-gapped | GPU capacity and operations |
 
-**Recommendation.**
+**Decision (DEC-432 item 14, the founder, 2026-10-03): option 2**, not the direct APIs this draft
+recommended.
 
-- **Managed, v1:** option 1 for the research agent and the compiler, pinned to a dated snapshot,
-  with a provider whose terms exclude training on API data.
-- **Aggregator:** for internal evaluation and the spike only, with routing locked to one upstream
-  per identity, never for users' agents.
+- **Every hosted call:** every model, for the platform's own workspaces and for users' agents
+  alike, is reached through one aggregator with provider routing locked per pinned model (INF-2).
+  DEC-432 item 10 keeps DEC-67 whole on this path: a response whose reported provider or model
+  differs from the pin counts as missing.
+- **Data terms (DEC-432 item 15):** only endpoints whose terms exclude training on API data, with
+  the shortest retention available; both the aggregator's terms and the underlying provider's must
+  meet this.
 - **Hybrid and on-prem:** local-only by default (DEC-432 item 8). A customer may enable hosted
-  endpoints in policy. Option 4 is the path for local LLM research after v1.
-- **Until the founder decides:** no new paid service. The gateway is built against recorded
-  fixtures and a provider adapter interface. Live calls run only in the team's internal paper
-  workspaces, with the key the founder already provided for the spike.
+  endpoints in policy, and may bring their own key under the same routing lock (§7.4, DEC-432
+  item 16). Self-hosted open weights (option 4) remain the local path after v1.
+- **Spend guard:** no new paid service beyond the spike key already provided. The gateway is built
+  against recorded fixtures and a provider adapter interface. Live calls run only in the team's
+  internal paper workspaces.
 
 ---
 
@@ -362,6 +371,7 @@ One record per call (INF-6), written in the workspace deployment.
 | `call_id`, `workspace_id`, `agent_id`, `purpose` | Opaque IDs only |
 | `model_ref` | Registry id, version, and content hash; never prompt content |
 | `endpoint_class` | `hosted` or `local`, and the provider |
+| `key_owner` | `platform` or `customer`: whose provider key paid for the call. Customer-key calls count for caps and quotas and are billed zero for tokens ([billing design](../design/billing.md) BL-9, DEC-442 item 9) |
 | `input_tokens`, `output_tokens`, `cached_tokens`, `attempts`, `cache_hit` | Counts |
 | `cost_usd` | Fixed-point decimal, 6 places, rounded half up, as the spike does today |
 | `price_table_ref` | The versioned price table used |
@@ -384,6 +394,7 @@ One record per call (INF-6), written in the workspace deployment.
 |---|---|---|
 | Research cost cap | `behavior.research.cost_cap_usd_per_day`, an envelope field ([DEC-120](../project/04-decision-log.md#decisions)), tightened by the policy's `research_cost_cap_usd_per_day` | The research agent's calls, per agent per risk day |
 | Workspace model spend | HLD §8 quota ("model spend"), set by the operator or plan | All calls of the workspace per risk day |
+| Workspace cycle allotment | The license's `model_spend_usd_per_cycle`, from the plan ([billing design](../design/billing.md) §3.4, DEC-442 item 4) | All calls of the workspace per billing cycle; enforced alongside the per-risk-day caps, never instead of them |
 | Rate caps | Per agent: research calls only in proposal rounds no more often than `behavior.research.interval_s`; per workspace: a token bucket set by the plan | Calls per second |
 
 - **Reservation.** Before the first attempt, the gateway appends a reservation of the maximum
@@ -401,11 +412,18 @@ One record per call (INF-6), written in the workspace deployment.
 ### 7.4 Billing feed
 
 [HLD §10](../HLD.md#10-billing) bills model tokens at cost plus margin. The workspace deployment
-sums metering records per organization, period, endpoint class, and provider, and sends counts and
+sums metering records per organization, period, endpoint class, provider, and `key_owner`, and sends counts and
 cost only, never content, model outputs, or instruments, to the metering pipeline in the global
 control plane. Hybrid deployments send signed usage reports; air-gapped ones send offline reports.
-The margin is applied by billing, never by the gateway. Whether hybrid customers may bring their own
-provider keys, and so pay the provider directly, is DEC-432 item 16 (Proposed).
+The margin is applied by billing, never by the gateway. Managed deployments use platform keys only.
+Hybrid and on-prem customers may bring their own key (DEC-432 item 16): either their own account at
+the aggregator DEC-432 item 14 names, or a provider key that aggregator routes. Every call still goes
+through the gateway, which enforces INF-2's routing lock to named upstreams and DEC-432 item 10's
+reported-identity check exactly as for a platform key. A customer key is accepted only for registry
+entries whose routing lock the gateway can set and verify on that key; one that cannot keep the
+lock is refused when it is registered, so BYO is not offered for that model. Calls on a customer key
+carry `key_owner = customer`, count toward every cap and rate limit, and are billed zero for tokens
+([billing design](../design/billing.md) BL-9).
 
 ---
 
@@ -534,9 +552,10 @@ the date only; it does not suggest a replacement.
   on content failures, the cost reservation, the prompt-content restriction, the exact per-workspace
   cache, no tools, local-only by default for hybrid and on-prem, the endpoint quantization rule, the
   identity check, the `ModelInvocationRecorded` members, and the RAID R-07 wording.
-- **Items 13 to 16, Proposed for the founder:** the fast tier (§5), providers and hosting (§6),
-  provider data terms, and bring-your-own provider keys for hybrid. Work continues on the most
-  conservative option of each.
+- **Items 13 to 16, decided by the founder on 2026-10-03** (DEC-432, "Founder decisions"): a hosted
+  fast model (§5), an aggregator for every call with routing locked per pinned model (§6), provider
+  data terms as recommended, and bring-your-own provider keys allowed for hybrid and on-prem, with
+  platform keys for managed deployments (§7.4).
 
 ---
 

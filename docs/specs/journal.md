@@ -12,6 +12,13 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.12 ([DEC-438](../project/decisions/DEC-438.md) items 5 and 28):** the notice stream. A new
+  stream type, `ntf:{workspace_id}`, whose single writer is the workspace's notification dispatcher
+  ([notifications spec §5.1](notifications.md#51-the-dispatcher)), holds `NoticeIssued` and
+  `NoticeAttempted`. `OwnerAlertSent` becomes the subject stream owner's record that an alert was
+  raised, written in that stream and the subject's batch, with the alert's kind; its delivery
+  members move to `NoticeAttempted`. Nothing writes `OwnerAlertSent` today, so no record changes
+  meaning. No payload schema is closed here; E8-9's tests PR closes them.
 - **v0.11 ([DEC-413](../project/decisions/DEC-413.md) item 7):** §9.4 types `instrument_id` as §9.3's `asset_id`, not any `id`. It only refuses more (DEC-176), and adds no member.
   - **Why:** v0.9 typed it `id` on DEC-403's reading, which v0.10 tightened for `UniverseChanged.instrument`. A thesis admitted on an instrument that is not an asset ID would reach the executor's `UniverseChanged`, which v0.10 refuses, so the admission would be journaled with no universe change to follow it. No conforming writer emits anything else: the platform resolves the instrument before it writes the entry.
   - **The vectors gain four `research` drafts**, as §9.3's: a ticker (`BTCUSD`, a valid `id`), an asset ID with a trailing newline, and one in capitals, each refused as `non_canonical` at `payload.instrument_id`, and a number, refused as `schema`. The reference validator reuses §9.3's `asset_id` type, and its four seeded bugs (`types.asset_id`, `types.asset_id_case`, `types.asset_id_ident`, `types.asset_id_trailing_newline`) are each caught in the `research` section too.
@@ -165,6 +172,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 | Agent | `agent:{workspace_id}:{agent_id}` | The agent's runtime | Observations, model invocations, signal-model outputs, decisions, intents proposed, approvals, agent mode changes |
 | Workspace control | `ctl:{workspace_id}` | Workspace control services (in Phase 1, the founder's CLI) | Mandates, deployments, connections, disclosures, policy and configuration registration, owner acknowledgments, approval responses, owner commands, and alerts, surveillance reports, anchors, verification, records lifecycle, access and export |
 | Scheduler | `clock:{workspace_id}` | The workspace scheduler | `ClockAdvanced`, `TradingDayStarted`, clock measurements |
+| Notice | `ntf:{workspace_id}` | The workspace's notification dispatcher ([notifications spec §5.1](notifications.md#51-the-dispatcher)) | Notices issued and every delivery attempt. Never a risk input; no other stream's owner copies from it |
 
 - **Identifier grammar:** every `{…}` segment matches `[A-Za-z0-9_-]+`. `account_ref` is an opaque
   internal ULID; the broker's account number lives in the personal-data vault.
@@ -449,7 +457,8 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
 | `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result |
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
-| `OwnerAlertSent`, `OwnerAcknowledged` | — | subject event, channel, delivery status; user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
+| `OwnerAlertSent` | — | Written by the owner of the subject event's stream, in that stream and in the subject's batch, on any stream type ([notifications spec §5.5](notifications.md#55-records)): subject event, kind (notifications spec §3.2), and for a kill switch the owner command it carries out, if any. It records that an alert was raised; delivery is the notice stream's |
+| `OwnerAcknowledged` | — | user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
 | `ApprovalResponseSubmitted` | — | The owner's answer to an approval ([mandate spec §6.4](mandate.md#64-approvals)): agent, approval, verdict (`approved`, `skipped`), content hash, `submitted_at`, step-up evidence (assertion ID, authentication time, method) or null, responder (opaque) and role |
 | `OwnerCommandIssued` | — | The owner's command ([mandate spec §6.1](mandate.md#61-purposes)): agent or kill-switch scope, command (`pause`, `resume`, `stop`, `kill_switch`, `owner_exit`), the release choice and warning shown for a Stop with release, the bid, bid size, and floor confirmed for an owner exit, `submitted_at`, step-up evidence or null, user (opaque) |
 | `ConfigSnapshotRegistered` | — | configuration kind (fee, calendar, instrument snapshot, rule set, mandate), content hash |
@@ -461,6 +470,13 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 
 **Scheduler stream:** `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`,
 `ClockToleranceExceeded`.
+
+**Notice stream** (owner: the workspace's notification dispatcher; [notifications spec §5.5](notifications.md#55-records))
+
+| Event type | Required refs | Key payload fields |
+|---|---|---|
+| `NoticeIssued` | — | notice id (random, notifications spec §4.2), kind, class, cause (the `OwnerAlertSent`, `ApprovalRequested`, or owner command it answers, with its stream), recipients (opaque) |
+| `NoticeAttempted` | — | notice id, recipient (opaque), channel, attempt, status (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), reason, provider message id, `coalesced_into` |
 
 ### 9.1 Agent-stream payload schemas ([DEC-177](../project/04-decision-log.md#decisions))
 
