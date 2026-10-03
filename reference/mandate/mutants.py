@@ -299,11 +299,14 @@ TRIPWIRE_MUTANTS = {
     "V-044 allows unsorted ids": ('    if not sorted_unique([t["id"] for t in tws]):\n        return {"V-044"}', '    if False:\n        return {"V-044"}'),
 }
 # The trim's minimum (§5.5, DEC-399 item 5) is judged by the family-B cases rather than by a fuzz:
-# MC-B33 and MC-B34 sit where the instrument's minimum order size and the dollar minimum disagree.
+# MC-B33 and MC-B34 sit where the instrument's minimum order size and the dollar minimum disagree,
+# and MC-B35 is the full close the minimum exempts (DEC-423).
 TRIM_MUTANTS = {
-    "the trim's minimum is the dollar minimum order": ('        if sell < D(inp["min_order_size"]):',
-                                                      '        if sell * bid < D(inp["min_order_usd"]):'),
-    "the trim's minimum is ignored": ('        if sell < D(inp["min_order_size"]):', '        if False:'),
+    "the trim's minimum is the dollar minimum order": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
+                                                      '        if sell * bid < D(inp["min_order_usd"]) and sell != qty:'),
+    "the trim's minimum is ignored": ('        if sell < D(inp["min_order_size"]) and sell != qty:', '        if False:'),
+    "a full close is withheld below the minimum": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
+                                                   '        if sell < D(inp["min_order_size"]):'),
 }
 
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "

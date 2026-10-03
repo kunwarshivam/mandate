@@ -1318,8 +1318,10 @@ def builder(m, inp):
             guards.append("holding")
         if inp["asset_class"] == "us_equity" and inp.get("session", "regular") != "regular":
             guards.append("regular_session_only")
-        # §5.5's minimum is the instrument's minimum order size (trading spec §5.3 rule 2; DEC-399 item 5)
-        if sell < D(inp["min_order_size"]):
+        # §5.5's minimum is the instrument's minimum order size (trading spec §5.3 rule 2; DEC-399 item 5),
+        # except for a trim of the whole position, a full close rule 2 exempts (DEC-423). The model has
+        # no resting sell, so the whole position is the quantity held.
+        if sell < D(inp["min_order_size"]) and sell != qty:
             guards.append("below_minimum_order")
         if not guards:
             out.update({"action": "sell", "purpose": "risk_exit", "origin": "risk_engine", "reason": "trim_to_target",

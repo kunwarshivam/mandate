@@ -237,6 +237,10 @@ req("MC-B34", B["MC-B34"].get("trim_withheld") == ["below_minimum_order"]
     and trim_sell("MC-B34") < Decimal(BIN["MC-B34"]["min_order_size"])
     and trim_sell("MC-B34") * Decimal(BIN["MC-B34"]["quote"]["bid"]) >= Decimal(BIN["MC-B34"]["min_order_usd"]),
     "a trim below the minimum size that the dollar minimum would send is withheld")
+req("MC-B35", B["MC-B35"].get("purpose") == "risk_exit" and B["MC-B35"]["qty"] == BIN["MC-B35"]["position_qty"]
+    and trim_sell("MC-B35") == Decimal(BIN["MC-B35"]["position_qty"])
+    and Decimal(B["MC-B35"]["qty"]) < Decimal(BIN["MC-B35"]["min_order_size"]),
+    "a trim of the whole position below the minimum size is a full close, and goes")
 req("MC-B18", B["MC-B18"]["reason"] == "within_rebalance_band", "band")
 req("MC-B19", B["MC-B19"]["reason"] == "below_band_after_clipping", "band after clipping")
 req("MC-B20", B["MC-B20"]["reason"] == "no_fresh_outputs", "none")

@@ -20,6 +20,17 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-423](../project/decisions/DEC-423.md)):** §5.5's `trim_to_target`
+  minimum no longer withholds a trim of the whole position. That trim is a sell closing the full
+  position by its exact quantity, which [trading spec §5.3](trading-domain.md) rule 2 exempts from
+  `min_order_size`, so it goes at any size. Any other trim below `min_order_size` is still
+  withheld, including the remainder beside one of the agent's own resting sells, since that order
+  is not the position's quantity. The reference model, which has no resting sell, skips the
+  minimum for a trim equal to the quantity held. MC-B35 is added: 1 share at a 999 bid, whose
+  trim is that share, goes at a 2-share minimum (§11). No existing case changes. The example in
+  the entry below is not released by this: on the gate's 1e-9 quantity grid its trim is
+  0.000116667, not the whole position, and it waits for the instrument's real quantity grid
+  (DEC-423, Rationale).
 - **v0.6, amended ([DEC-411](../project/decisions/DEC-411.md), the founder's decision of 2026-10-02):**
   V-047 refuses a mandate at validation, and again at application, when the workspace's policy
   requires independent approval and the workspace has fewer than two active users (an unknown count
@@ -593,7 +604,7 @@ exits, and the kill switch are never denied by them (MI-1).
 
 | Action | Trigger | Effect | Lifts when |
 |---|---|---|---|
-| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, a position with MV − factor × cap ≥ `rebalance_band` × cap is sold down to factor × cap as a `risk_exit` (quantity rounded up to the increment) at the next evaluation, only once the rung has been active for `breach_confirm_s`, only if its quantity is at least the instrument's minimum order size (`min_order_size`, the minimum the risk gate holds; not §8.3 step 5's minimum order value), which matches the gate; a trim below it that is not a full close is an order the broker would refuse for size, and a trim that would close the whole position is still withheld, a known defect [DEC-423](../project/decisions/DEC-423.md) fixes, for equities only in the regular session, and never while Holding (DEC-65) | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
+| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, a position with MV − factor × cap ≥ `rebalance_band` × cap is sold down to factor × cap as a `risk_exit` (quantity rounded up to the increment) at the next evaluation, only once the rung has been active for `breach_confirm_s`, only if its quantity is at least the instrument's minimum order size (`min_order_size`, the minimum the risk gate holds; not §8.3 step 5's minimum order value) or is the whole position held, a full close trading spec §5.3 rule 2 exempts ([DEC-423](../project/decisions/DEC-423.md)), which matches the gate; any other trim below the minimum is an order the broker would refuse for size, for equities only in the regular session, and never while Holding (DEC-65) | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
 | `exits_only` | Confirmed (§5.6) | Restriction `drawdown_exits_only` (mode `exits_only`) | Owner acknowledgment (§5.8) |
 | `flatten_and_pause` | Confirmed (§5.6) | Agent-scoped kill switch; restriction `drawdown_flatten` (mode `paused`) | Owner acknowledgment once flat (§5.8) |
 
@@ -1592,7 +1603,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Risk state | MC-R01 to MC-R26 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |
 | Gate | MC-G01 to MC-G16 | Position cap, order size, group cooldown, orders per day, gross exposure, exits exempt, the working universe (including an empty one, which denies every opening) |
-| Order builder | MC-B01 to MC-B34 | Exit and buy conviction, freshness, clipping, band, trim and its guards, deferral, averaging down, accumulate clips with fees |
+| Order builder | MC-B01 to MC-B35 | Exit and buy conviction, freshness, clipping, band, trim and its guards and its full-close exemption, deferral, averaging down, accumulate clips with fees |
 | Autonomy | MC-A01 to MC-A16 | Built-in AUTO including `owner_exit`, rule order, thresholds, default, two approvers, the admission ceiling, `new_instrument`, `thesis_confidence` |
 | Agent flatten | MC-F01 to MC-F04 | Shared account, session deferral, owner kill switch with a floor price, and without confirmation |
 | Goal | MC-L01 to MC-L05 | `accumulate` completion, `on_complete`, end date (`profit_stop` is in the risk-state family) |

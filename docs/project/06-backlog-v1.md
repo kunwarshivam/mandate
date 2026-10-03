@@ -2344,6 +2344,28 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   PR makes the input required on a trim base.
   Until then, the case-list pin is open: dropping both awaited cases from the fixture fails
   nothing, because `counted` falls back to the counts without them.
+  *Since #526:* MC-B33 and MC-B34 are passing cases and `AWAITED` is MC-B35 alone; once #530
+  lands, (a) applies to MC-B35. The same cleanup rewrites `trim_guards`' doc comment, which still
+  says the exemption is one "which `ref.py` takes up in the reference PR after this harness"
+  (#530 review, m5).
+- **ES-22: the minors of #530's review, round 1** (DEC-423; freeze rule; m1, §5.5's binding clause, was done in #530):
+  (1) §11 says 427 cases where `mandate.yaml` holds 430, and nothing compares the prose with the
+  file. Correct the count, or have `generate.py` or an xtask check state it (m2);
+  (2) the spec's DEC-399 change-history entry still says the #504 example's trim is the whole
+  position. #530 corrected the same sentence in DEC-399 and only forward-referenced it in the
+  spec; add the parenthesis there too (m3);
+  (3) `docs/project/decisions/README.md` rule 4 says to supersede an accepted decision rather than
+  edit it, yet #504 and #530 edited DEC-399 item 8 on the coordinator's rulings. Record the
+  departure: either DEC-423 item 5 names the DEC-399 correction, or rule 4 gains a clause for a
+  correction a coordinator rules (m4);
+  (4) the trim's quantity grid differs between the reference and the gate. `ref.py` and the
+  harness read the case's `qty_increment`, and the gate derives 1e-9 or 1 from `fractionable`. On
+  a fractionable instrument they can disagree on `sell == held`: for example, 0.0002 held at a
+  600,000 bid, factor 0.02, a 0.001 minimum, where `ref.py` proposes 0.0002 on a 0.0001 grid and
+  the gate proposes nothing on 1e-9. No family-B case is fractionable, and one would fail the
+  harness loudly. The "real quantity grid" row closes it; pin it there with such a case (m6);
+  (5) add `<=` for `<` in the trim's minimum as a registered `mutants.py` trim mutant. MC-B33
+  catches it today, but nothing registers it (the review's plants).
 - **E6-4 harness: one scene for both gate calls on a trim base** (#498 review, m3). `trim_first`
   sets the scene instrument's `min_order_size` from the case, but `judge` builds its own scene in
   `Scene::read`, which takes the minimum from `qty_increment`. A case where a trim is withheld and
@@ -2364,7 +2386,10 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
   builder (increments of `0.0001` and `0.000001` exist). Once the snapshot carries the increment,
-  round the trim up on it, so a trim is never off the grid that §5.3 rule 2 refuses. **This is
+  round the trim up on it, so a trim is never off the grid that §5.3 rule 2 refuses. The
+  reference model and the harness already read a grid from the case (`qty_increment`), so the
+  gate's reading must then agree with theirs on `sell == held` for a fractionable instrument
+  (#530 review, m6). **This is
   also what releases the #504 review's case** ([DEC-423](decisions/DEC-423.md), Rationale): 0.0002
   BTC, a cap of 100, factor 0.5 and a 0.001 minimum give a trim of 0.000116667 on the 1e-9 grid,
   withheld below the minimum, but 0.0002 on the venue's 0.0001 grid, the whole position, which
