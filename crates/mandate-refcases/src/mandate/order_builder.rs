@@ -1,4 +1,4 @@
-//! Family B of the `mandate` suite: the thirty-five `builder` cases (spec §6.2, §8.1 to §8.3), run
+//! Family B of the `mandate` suite: the thirty-seven `builder` cases (spec §6.2, §8.1 to §8.3), run
 //! through `mandate_builder::propose`, `mandate_risk::evaluate` as §6.2 step 2's dry run, and
 //! `mandate_builder::decide` (E6-2, DEC-130, DEC-250).
 //!
@@ -772,8 +772,7 @@ struct Inputs {
 /// What a `trim_to_target` case states for §5.5's guards: how long the rung has been active, whether
 /// the goal is Holding, the instrument's minimum order size, which `ref.py` requires, and the
 /// quantity of the agent's own non-protective sells already resting in the instrument, which the
-/// trim is sized after (DEC-399 item 7). Until the reference PR states `open_sell_qty` on every trim
-/// case, an unstated one is none resting.
+/// trim is sized after (DEC-399 item 7). `ref.py` requires both of the last two on a trim base.
 struct TrimInputs {
     active_s: u64,
     holding: bool,
@@ -796,10 +795,7 @@ impl TrimInputs {
                 Qty::parse(str_at(input, "min_order_size")?),
                 "min_order_size",
             )?,
-            open_sell_qty: match input.get("open_sell_qty") {
-                None => Qty::ZERO,
-                Some(_) => num(Qty::parse(str_at(input, "open_sell_qty")?), "open_sell_qty")?,
-            },
+            open_sell_qty: num(Qty::parse(str_at(input, "open_sell_qty")?), "open_sell_qty")?,
         })
     }
 }
@@ -1636,46 +1632,17 @@ mod tests {
 
     const PLANTED: &str = "zz_planted";
 
-    /// The cases that pass against the merged `mandate-builder` and `mandate-risk`: all thirty-five
+    /// The cases that pass against the merged `mandate-builder` and `mandate-risk`: all thirty-seven
     /// since the trim arm compares MC-B17 and MC-B30 to MC-B32 (DEC-400), MC-B33 and MC-B34 landed
-    /// in #504 (DEC-399 item 8), and MC-B35, the whole-position trim below the minimum, in #530
-    /// (DEC-423).
-    const PASSING: [&str; 35] = [
+    /// in #504 (DEC-399 item 8), MC-B35, the whole-position trim below the minimum, in #530
+    /// (DEC-423), and MC-B36 and MC-B37, the trim after a resting sell, in #567 (DEC-399 item 7).
+    const PASSING: [&str; 37] = [
         "MC-B01", "MC-B02", "MC-B03", "MC-B04", "MC-B05", "MC-B06", "MC-B07", "MC-B08", "MC-B09",
         "MC-B10", "MC-B11", "MC-B12", "MC-B13", "MC-B14", "MC-B15", "MC-B16", "MC-B17", "MC-B18",
         "MC-B19", "MC-B20", "MC-B21", "MC-B22", "MC-B23", "MC-B24", "MC-B25", "MC-B26", "MC-B27",
-        "MC-B28", "MC-B29", "MC-B30", "MC-B31", "MC-B32", "MC-B33", "MC-B34", "MC-B35",
+        "MC-B28", "MC-B29", "MC-B30", "MC-B31", "MC-B32", "MC-B33", "MC-B34", "MC-B35", "MC-B36",
+        "MC-B37",
     ];
-
-    /// MC-B36 and MC-B37, a trim sized after a resting sell (DEC-399 item 7), which the reference
-    /// PR after this harness adds, with `open_sell_qty` stated on every trim case. Until it lands
-    /// the fixture holds them or not; if present they must pass, and the counts below are stated
-    /// for both fixtures. A cleanup drops the fixture without them once they land.
-    const AWAITED: [&str; 2] = ["MC-B36", "MC-B37"];
-    const DOCTORINGS_WITH: usize = 1092;
-    /// Four objects in each of 37 cases, 69 outputs, and two working orders.
-    const PLANTS_WITH: usize = 219;
-    const REFUSED_WITH: usize = 1485;
-
-    /// Whether the fixture already holds the [`AWAITED`] cases.
-    fn awaited(fixture: &Json) -> Result<bool, String> {
-        let present = crate::list_at(fixture, "cases")?
-            .iter()
-            .filter(|c| c["id"].as_str().is_some_and(|id| AWAITED.contains(&id)))
-            .count();
-        crate::ensure(present == 0 || present == AWAITED.len(), || {
-            format!(
-                "the fixture holds {present} of the {} awaited cases, not none or all",
-                AWAITED.len()
-            )
-        })?;
-        Ok(present == AWAITED.len())
-    }
-
-    /// `without` on today's fixture, `with` once the awaited cases land.
-    fn counted(fixture: &Json, without: usize, with: usize) -> Result<usize, String> {
-        Ok(if awaited(fixture)? { with } else { without })
-    }
 
     fn fixture() -> Result<Json, String> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
@@ -1688,19 +1655,14 @@ mod tests {
             .filter(|c| c["kind"] == "builder")
             .cloned()
             .collect();
-        let expected = counted(
-            fixture,
-            PASSING.len(),
-            PASSING.len().saturating_add(AWAITED.len()),
-        )?;
-        crate::ensure(cases.len() == expected, || {
-            format!("family B is {expected} cases, found {}", cases.len())
+        crate::ensure(cases.len() == PASSING.len(), || {
+            format!("family B is {} cases, found {}", PASSING.len(), cases.len())
         })?;
         Ok(cases)
     }
 
     fn listed(id: &str) -> bool {
-        PASSING.contains(&id) || AWAITED.contains(&id)
+        PASSING.contains(&id)
     }
 
     fn passing(fixture: &Json) -> Result<Vec<Json>, String> {
@@ -1812,7 +1774,8 @@ mod tests {
     /// - MC-B30 confirmed, with 2 resting and a 3-share minimum, withholds that remainder as
     ///   `below_minimum_order`, which the whole excess would meet, so a reading that ignored the
     ///   resting sell fails naming both answers;
-    /// - with 3 or more resting, no trim is due at all, and the case states no `trim_withheld`.
+    /// - with 3 or more resting, no trim is due at all, and the case states no `trim_withheld`;
+    /// - a trim case that states no `open_sell_qty` is refused naming it, never given a default.
     #[test]
     fn a_trim_is_sized_after_the_agent_s_resting_sells() -> Result<(), String> {
         let fixture = fixture()?;
@@ -1822,6 +1785,12 @@ mod tests {
             put(case, "expect", "order_usd", json!("99.9"));
         })?;
         run(remainder, "MC-B17").map_err(|e| format!("MC-B17 beside 2 resting shares: {e}"))?;
+        let unstated = doctored(&fixture, "MC-B17", "/input", remove("open_sell_qty"))?;
+        fails_naming(
+            run(unstated, "MC-B17"),
+            "open_sell_qty",
+            "MC-B17 with no resting-sell quantity",
+        )?;
         let whole_excess = doctored(&fixture, "MC-B17", "", |case| {
             put(case, "input", "open_sell_qty", json!("2"));
         })?;
@@ -1878,6 +1847,7 @@ mod tests {
                     members.insert("base".to_owned(), json!("two_stock_swing_trim"));
                 }
                 put(case, "input", "min_order_size", json!(minimum));
+                put(case, "input", "open_sell_qty", json!("0"));
             })
         };
         run(on_the_trim_base("7")?, "MC-B01")
@@ -2186,15 +2156,7 @@ mod tests {
             run(fixture.clone(), &id).map_err(|e| format!("{id}: {e}"))?;
             seen = seen.saturating_add(1);
         }
-        crate::expect_eq(
-            "cases listed",
-            counted(
-                &fixture,
-                PASSING.len(),
-                PASSING.len().saturating_add(AWAITED.len()),
-            )?,
-            seen,
-        )
+        crate::expect_eq("cases listed", PASSING.len(), seen)
     }
 
     /// MC-B26's pinned pair is read from its base's `symbol` (DEC-285): `BTC/USD` passes, and a
@@ -2261,11 +2223,7 @@ mod tests {
                 )?;
             }
         }
-        crate::expect_eq(
-            "doctorings, counted from the fixture",
-            doctorings,
-            counted(&fixture, 1046, DOCTORINGS_WITH)?,
-        )
+        crate::expect_eq("doctorings, counted from the fixture", doctorings, 1092)
     }
 
     /// A hold reaches neither the gate nor approval, so a hold that states either fails naming it,
@@ -2308,7 +2266,7 @@ mod tests {
                 fails_naming(run(stated, &id), member, &format!("{id}: {member} stated"))?;
             }
         }
-        crate::expect_eq("holds", holds, counted(&fixture, 14, 15)?)
+        crate::expect_eq("holds", holds, 15)
     }
 
     /// Every member of a case is read: a plant at the top level, in `input`, its `quote`, its
@@ -2371,7 +2329,7 @@ mod tests {
         crate::expect_eq(
             "plants: four objects per case, every output and two working orders",
             plants,
-            counted(&fixture, 35 * 4 + 65 + 2, PLANTS_WITH)?,
+            37 * 4 + 69 + 2,
         )
     }
 
@@ -2482,11 +2440,7 @@ mod tests {
                 }
             }
         }
-        crate::expect_eq(
-            "inputs refused, counted from the fixture",
-            refused,
-            counted(&fixture, 1390, REFUSED_WITH)?,
-        )
+        crate::expect_eq("inputs refused, counted from the fixture", refused, 1485)
     }
 
     /// The builder and the gate see one account: the gate state's equity, the instrument's market
