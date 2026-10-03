@@ -1,4 +1,11 @@
-"""Seeds known bugs into a copy of ref.py and checks that fuzz.py catches every one (AGENTS.md: independent oracles)."""
+"""Seeds known bugs into a copy of ref.py and checks that fuzz.py catches every one (AGENTS.md: independent oracles).
+
+A bug that makes a base mandate invalid cannot be carried here. `bases.py` asserts at import that
+every base passes `semantic()`, so such a probe crashes before any check runs, and `verdict()` scores
+the crash `ERROR`, which is neither a catch nor a survival. V-047 has two such bugs, an inverted
+policy and an ignored one: each fires V-047 on the bases. Do not add them, and do not read an
+`ERROR` as a catch (#528 round 2, minor 4).
+"""
 import pathlib, shutil, subprocess, sys, tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
