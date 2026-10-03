@@ -54,6 +54,7 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Product experience](product/09-product-experience.md) | Web v1 experience brief: principles, journeys, screen inventory and states, UX rules from the safety rules, open product decisions |
 | [Strategy options](product/10-strategy-options.md) | Market and regulatory evidence, strategy options ranked, the recommendation as decided in DEC-141 (the complete product leads; the owner's own agent is an optional channel), broker, demo, and discovery plans |
 | [Harness engineering](product/11-harness-engineering.md) | Research note: what harness engineering means, the open-source landscape, what trading agents and MCP gateways do and do not do, what enterprises appear to require, and the recommendations behind DEC-149's enterprise harness |
+| [Cost model](product/12-cost-model.md) (draft v0.1) | Inference, data, compute, storage, and fixed costs per agent and per workspace, as formulas with labelled assumptions; three illustrative scenarios, sensitivity, price floors per plan, and the budget guardrails (DEC-443, Proposed) |
 | [Glossary](product/glossary.md) | Shared vocabulary |
 
 ## Project
