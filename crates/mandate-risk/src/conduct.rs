@@ -334,27 +334,23 @@ fn on_grid(input: &GateInput<'_>, price: Price, adverse: Adverse) -> Result<Pric
 
 /// The participation caps slice an exit to the smaller of `order_size_participation ×
 /// trailing_5m_volume` and what is left of `daily_participation × adv_20d` today, truncated to the
-/// instrument's increment; the rest is re-proposed in a later interval or on a later day (§9.6,
-/// DEC-129 item 11). Each control whose cap binds is named in [`Pacing::applied`], so a slice says
-/// every limit it met.
+/// instrument's quantity grid (DEC-427); the rest is re-proposed in a later interval or on a later
+/// day (§9.6, DEC-129 item 11). Each control whose cap binds is named in [`Pacing::applied`], so a
+/// slice says every limit it met.
 ///
 /// A slice is never an order the broker would refuse, which would deny the exit (`AGENTS.md` rule
-/// 13, DEC-163 item 4): a cap that works out to zero, like a volume the executor could not supply,
-/// slices nothing, and a cap above zero but below the instrument's `min_order_size` slices at
-/// `min_order_size`. A cap binds only where that slice is below the proposed quantity, so an exit
-/// smaller than `min_order_size` goes whole.
+/// 13, DEC-163 item 4): a cap that is zero before truncation, like a volume the executor could not
+/// supply, slices nothing, and a cap above zero slices at no less than the instrument's
+/// `min_order_size` rounded up onto the grid, even where the grid truncates the cap to zero
+/// (DEC-445 item 1). A cap binds only where that slice is below the proposed quantity, so an exit
+/// smaller than that minimum goes whole.
 fn slice(input: &GateInput<'_>, pacing: &mut Pacing) -> Result<(), GateError> {
     let proposed = input.proposed.qty;
-    crate::trim::quantity_grid(input.instrument)?;
-    let increment = if input.instrument.fractionable {
-        ShareIncrement::Fractional
-    } else {
-        ShareIncrement::Whole
-    };
+    let grid = crate::trim::quantity_grid(input.instrument);
     let config = input.config;
     let mut caps = Vec::with_capacity(2);
     if let Some(trailing) = input.market.trailing_5m_volume {
-        let cap = trailing.portion(config.order_size_participation, increment)?;
+        let cap = trailing.portion(config.order_size_participation, ShareIncrement::Fractional)?;
         caps.push((PacingControl::OrderSizeParticipation, cap));
     }
     if let Some(adv) = input.market.adv_20d {
@@ -364,14 +360,11 @@ fn slice(input: &GateInput<'_>, pacing: &mut Pacing) -> Result<(), GateError> {
             Err(NumError::Negative) => Qty::ZERO,
             Err(other) => return Err(other.into()),
         };
-        caps.push((
-            PacingControl::DailyParticipation,
-            left.portion(Fraction::ONE, increment)?,
-        ));
+        caps.push((PacingControl::DailyParticipation, left));
     }
-    let minimum = input.instrument.min_order_size;
+    let minimum = crate::trim::up_onto(input.instrument.min_order_size, grid)?;
     for (control, cap) in caps {
-        let slice = cap.max(minimum);
+        let slice = crate::trim::down_onto(cap, grid)?.max(minimum);
         if cap > Qty::ZERO && slice < proposed {
             pacing.qty = pacing.qty.min(slice);
             pacing.applied.insert(control);

@@ -3343,6 +3343,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   ([DEC-445](decisions/DEC-445.md)), M1's on-grid minimum, M3's rows, and the property
   `the_trim_and_the_slice_stay_on_the_venue_s_grid` are pending in the tests PR. Two live rows that
   asserted DEC-445's superseded figures moved into pending tests.
+  *Implementation (`agent/g8-e6-4-qty-grid-impl`):* `quantity_grid` is the field read; the trim
+  truncates an off-grid remainder that is not the whole position (`down_onto`), and `slice` tests
+  the untruncated cap for zero, truncates it onto the grid and floors it at the minimum rounded up
+  onto the grid (`up_onto`). The six pending tests are live. The harness PR stating the case's grid
+  follows.
 - **E6-4: refuse a grid that is not above zero, per instrument** (#571 review, round 1, minor 2).
   `InstrumentSnapshot::qty_increment` is a `Qty`, so zero is representable. `ceiled_quotient` and
   `truncated_quotient` refuse it as `NotPositive`, but that error would leave `trim::proposals`

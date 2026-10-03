@@ -770,7 +770,6 @@ fn ceil_div(numerator: i128, denominator: i128) -> i128 {
 /// implementation PR the test stops at the grid stub's own report (DEC-77) whatever the runner
 /// draws first; a failing draw reports the gate's own error.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_trim_and_the_slice_stay_on_the_venue_s_grid() {
     use proptest::test_runner::{Config, TestCaseError, TestRunner};
 

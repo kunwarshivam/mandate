@@ -2522,7 +2522,6 @@ mod tests {
     /// - a daily cap of 10 with 9.9 used today leaves 0.1, the same corner on the daily cap: it
     ///   slices at 1 under `DailyParticipation` (#571 review, round 2, M4).
     #[test]
-    #[ignore = "pending E6-4"]
     fn a_slice_truncates_to_the_venue_s_quantity_grid() -> Result<(), GateError> {
         let owner = |trailing: &str, today: &str, minimum: &str| -> Result<_, GateError> {
             let mut o = allowing()?.selling(Origin::OwnerClose)?;
@@ -2622,7 +2621,6 @@ mod tests {
     /// case, a whole-share instrument that is not fractionable, so that an implementation keying
     /// the reading on `fractionable` fails here (#571 review, round 2, B4).
     #[test]
-    #[ignore = "pending E6-4"]
     fn a_positive_cap_below_one_step_slices_at_the_minimum() -> Result<(), GateError> {
         let exit = |origin: Origin, fractionable: bool| -> Result<_, GateError> {
             let mut o = allowing()?.selling(origin)?;
