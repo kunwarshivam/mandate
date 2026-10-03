@@ -8841,7 +8841,9 @@ mod sequence_tests {
             self.counting().into_iter().map(|(_, counts)| counts).sum()
         }
 
-        /// A stepped rung's cancel is confirmed with `left` unsold (§5.6 step 2): a lone ladder
+        /// A stepped rung ends with `left` unsold, its step's cancel confirmed or the broker's own
+        /// cancel coming first, as the executor counts either (#468's round-5 review, B1) (§5.6
+        /// step 2): a lone ladder
         /// sends its next rung for it, and so does a sequence whose ladder still climbs, neither
         /// paused nor stopped nor bounded; a sequence that no longer climbs ends there, and
         /// protection returns for what is left.
@@ -9572,9 +9574,11 @@ mod sequence_tests {
                     match first {
                         Some((id, held)) => {
                             held.live = false;
-                            Some(Input::BrokerUpdate(BrokerUpdate::Order(
-                                reported(id, held).map_err(failed)?,
-                            )))
+                            let left = held.qty.saturating_sub(held.filled);
+                            let report = reported(id, held).map_err(failed)?;
+                            let id = id.clone();
+                            desk.rung_cancelled(&id, left);
+                            Some(Input::BrokerUpdate(BrokerUpdate::Order(report)))
                         }
                         None => None,
                     }
@@ -9719,6 +9723,32 @@ mod sequence_tests {
             Move::BrokerCancel,
         ];
         rule_13_script_with(AFTER_HOURS, From::Unprotected, true, &script).map(|_| ())
+    }
+
+    /// #468's round-5 review, B1 (seed 326's minimal script): the broker cancels a lone ladder's
+    /// stepped rung itself, before its step's cancel is confirmed. The executor counts the rung's
+    /// unsold 4 and sends them at the next rung, so the oracle must count them too, or its
+    /// under-cover arm reads them as uncovered.
+    #[test]
+    fn a_stepped_rung_the_broker_cancels_leaves_its_remainder_counted() -> Result<(), String> {
+        let script = [
+            Move::BrokerCancel,
+            Move::Exit(0, 4, 141),
+            Move::Exit(0, 3, 141),
+            Move::Quote(None, None, false),
+            Move::Ack,
+            Move::Exit(0, 1, 141),
+            Move::Exit(0, 2, 141),
+            Move::Tick(10),
+            Move::BrokerCancel,
+        ];
+        rule_13_script_with(
+            TEN_SECONDS_BEFORE_THE_NIGHT,
+            From::Unprotected,
+            true,
+            &script,
+        )
+        .map(|_| ())
     }
 
     /// #468 round 1, M5: the Σ oracle's first catch beside an exit with no sequence of its own. A
