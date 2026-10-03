@@ -325,6 +325,20 @@ fn only_the_exact_spelling_is_a_thesis_refusal() {
 
 #[test]
 fn the_ignored_outputs_are_exactly_checks_1_to_3() {
+    let ignored: Vec<&str> = ThesisRefusal::all()
+        .into_iter()
+        .filter(|reason| reason.is_ignored_output())
+        .map(ThesisRefusal::code)
+        .collect();
+    assert_eq!(
+        ignored,
+        [
+            "direction_not_allowed",
+            "horizon_mismatch",
+            "revision_without_predecessor"
+        ],
+        "§8.2's ignored outputs, typed from the spec"
+    );
     for reason in ThesisRefusal::all() {
         assert_eq!(
             reason.is_ignored_output(),
