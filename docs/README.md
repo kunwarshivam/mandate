@@ -32,6 +32,7 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Journal test vectors](specs/reference-cases/journal.yaml) | Exact canonical bytes and hashes, plus tamper cases |
 | [Data plane spec](specs/data-plane.md) (draft v0.1) | Live market data, reference data, news, filings, fundamentals, the point-in-time store, fan-out to workspaces, failure walk, and adversaries |
 | [Inference and model gateway spec](specs/inference.md) | Draft v0.1: every model call, the model gateway, pinning and no substitution, deadlines, caching, the registry, metering and spend caps, security, failure walk, and the fast-tier and provider decisions ([DEC-432](project/decisions/DEC-432.md)) |
+| [Identity, tenancy, and authentication spec](specs/identity.md) | Draft v0.1: principals, organizations, workspaces, memberships and the V-047 user count, roles and the permission matrix, passkeys and OIDC, sessions, action-bound step-up, separation of duties, tenant isolation at every layer, recovery and break-glass, hybrid identity providers, and adversaries ([DEC-437](project/decisions/DEC-437.md)) |
 
 ## Design
 
