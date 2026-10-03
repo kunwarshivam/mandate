@@ -1093,7 +1093,9 @@ story buys a service, and none uses a real identity-provider account in tests (s
   applied, as V-002 does, and a case covers a second user deactivated between confirmation and application (#528
   round 2, major 1; the reference models V-047 at validation only, DEC-411 item 5).
   The founder's DEC-444 (2026-10-03) lets a version §9.2 rates risk-reducing through V-047; the spec, `ref.py` and
-  MC-V72 to MC-V75 carry it first (ES-22), then the tests PR (#536) splits its reducing-or-neutral pin to match.
+  MC-V72 to MC-V77 carry it first (ES-22), then the tests PR (#536) follows. The exception reads the agent's current
+  version matched by hash (DEC-444 item 3); `PreviousVersion` has no digest yet, so the Rust side refuses every version
+  under V-047 until it does, and the test that a reducing version passes lands with the digest.
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
   increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C48 pass.
@@ -3901,7 +3903,7 @@ From #528's round-2 review (DEC-411; the coordinator's ruling, 05:19Z on #528; f
   makes V-047 fire on the base mandates, so `bases.py`'s import-time assertion crashes the probe and `verdict()`
   scores it `ERROR`, not caught. Say so in the module docstring, so nobody adds one and reads the `ERROR` as a catch.
 - **The README's mandate case counts lag `main`** (#570 round 1, minor 2). `README.md`'s mandate row and its spec
-  table give 433 cases where the file holds 440 after #570, and were already two behind before it. Update them, or
+  table give 433 cases where the file holds 441 after #570, and were already two behind before it. Update them, or
   derive them from the case file as the §11 row below asks for the spec.
 - **§11's case count is unchecked prose** (#528 round 2, minor 5). `main` said 427 where the file held 429. Add a
   `cargo xtask` assertion that §11's count matches `docs/specs/reference-cases/mandate.yaml`.

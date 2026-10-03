@@ -300,10 +300,12 @@ def reduces_previous(prev, current, m):
     current version. `prev` is that version only if it is a whole schema-valid document whose canonical hash is
     `current`, the agent's current `mandate_version`, which the platform supplies and the requester never does
     (#570 round 1, B1): a predecessor nobody confirmed would let an increasing version pass. `classify`'s own result
-    decides the rest. No previous version (a deployment), no current version, only an identity, part of a document, or
-    a document that hashes to anything else is not reducing: validation cannot classify against the agent's version
-    (rule 3)."""
-    return (prev is not None and current is not None and V.is_valid(prev) and version(prev) == current
+    decides the rest. No previous version (a deployment), no current version, only an identity or part of a document,
+    a document with a value the schema refuses, or one that hashes to anything else is not reducing: validation cannot
+    classify against the agent's version (rule 3). The member test is `classify`'s precondition, so a partial document
+    is refused without being classified; the schema test is the one that refuses a whole document with a bad value."""
+    return (prev is not None and current is not None and set(SCHEMA["required"]) <= set(prev)
+            and V.is_valid(prev) and version(prev) == current
             and classify(prev, m)[0] == "risk_reducing")
 
 def semantic(m, ctx):

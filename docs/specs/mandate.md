@@ -28,7 +28,7 @@ builder, versioning, change classification, and the records kept.
   document validation does not have are still refused. The previous version is the agent's current
   one: the document whose canonical hash is its current `mandate_version`, supplied by the platform,
   never by the requester; a document that does not match it is refused (#570 round 1, B1). The
-  exemption reads §9.2's own result, not a second classifier. MC-V72 to MC-V76 are added (§11).
+  exemption reads §9.2's own result, not a second classifier. MC-V72 to MC-V77 are added (§11).
 - **v0.6, amended ([DEC-432](../project/decisions/DEC-432.md) item 18, under DEC-176):** §8.1's
   content-hash sentence lists everything the hash covers for a model called through the gateway, as
   inference spec §4.1 defines it, and says endpoints and status are outside it. It pins more, so it
@@ -425,8 +425,9 @@ A mandate is valid when it passes the JSON Schema, every V-rule, and the policy 
 Besides the document, validation reads: the account's equity and the other active agents' allocations
 on it, the validation date, the signal-model registry, each field's provenance, the workspace's users
 and approvers, the disclosures accepted, the instrument groups and other agents' claims, the
-connection's environment and loss carry, the eligibility failures, the previous version, and the
-effective policy values (§4.3), `independent_approval_required` among them.
+connection's environment and loss carry, the eligibility failures, the previous version and the
+agent's current `mandate_version` (V-047), and the effective policy values (§4.3),
+`independent_approval_required` among them.
 Failures return all violated codes. Warnings (§4.2) do not block, but each must be acknowledged
 and is recorded in `MandateConfirmed`.
 
@@ -1633,7 +1634,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 440 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 441 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1645,7 +1646,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Family | IDs | Covers |
 |---|---|---|
 | Schema | MC-S01 to MC-S31 | Structural rejects, including `on_complete`, the 300 s confirmation cap, per-model output age, `max_instruments` bounds, the research object, `autonomy.admission` |
-| Semantic | MC-V01 to MC-V76 | Every V-rule and warning, independent approval in a one-user workspace (V-047) and its risk-reducing exception, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
+| Semantic | MC-V01 to MC-V77 | Every V-rule and warning, independent approval in a one-user workspace (V-047) and its risk-reducing exception, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
 | Policy | MC-P01 to MC-P22 | Nearest-level reporting, each key kind, the retail profile (DEC-98), the internal research profile (DEC-103), paper-only environments, the research keys, platform maximums |
 | Risk state | MC-R01 to MC-R26 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |

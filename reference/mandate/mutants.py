@@ -31,11 +31,23 @@ MUTANTS = {
         '            and classify(prev, m)[0] == "risk_reducing")',
         '            and True)'),
     "V-047 exempts a version when no current version is supplied": (
-        '    return (prev is not None and current is not None and V.is_valid(prev) and version(prev) == current\n',
-        '    return (prev is not None and V.is_valid(prev) and (current is None or version(prev) == current)\n'),
+        '    return (prev is not None and current is not None and set(SCHEMA["required"]) <= set(prev)\n'
+        '            and V.is_valid(prev) and version(prev) == current\n',
+        '    return (prev is not None and set(SCHEMA["required"]) <= set(prev)\n'
+        '            and V.is_valid(prev) and (current is None or version(prev) == current)\n'),
+    "V-047 exempts a version whose previous document it does not have": (
+        '    return (prev is not None and current is not None and set(SCHEMA["required"]) <= set(prev)\n'
+        '            and V.is_valid(prev) and version(prev) == current\n'
+        '            and classify(prev, m)[0] == "risk_reducing")',
+        '    return (prev is not None and current is not None\n'
+        '            and (not V.is_valid(prev)\n'
+        '                 or (version(prev) == current and classify(prev, m)[0] == "risk_reducing")))'),
+    "V-047 exempts a previous document the schema refuses": (
+        '            and V.is_valid(prev) and version(prev) == current\n',
+        '            and version(prev) == current\n'),
     "V-047 exempts against a document that is not the agent's current version": (
-        '    return (prev is not None and current is not None and V.is_valid(prev) and version(prev) == current\n',
-        '    return (prev is not None and V.is_valid(prev)\n'),
+        '            and V.is_valid(prev) and version(prev) == current\n',
+        '            and V.is_valid(prev)\n'),
     "loss carry ignores withdrawals": ("        self.net_contributed += d\n", ""),
     "release retires without a loss carry": ('                self._retire("goal_complete", ev)\n',
                                              '                self.restrictions["retired"] = "stopped"\n'),

@@ -2085,13 +2085,16 @@ def fuzz_independence_floor(n):
     never by calling `classify`: one maximum raised behind the draft (reducing), the default made laxer behind it
     (reducing, not a maximum), a rename or other quiet hours (neutral), the draft's maximum raised (increasing), and one
     maximum raised behind it with another lowered (increasing). A forged predecessor (a reducing-looking document while
-    the current version is another) and one with no current version are not the agent's version, so they are refused.
+    the current version is another) and one with no current version are not the agent's version, so they are refused,
+    and so is an identity-only previous version paired with its own hash (it matches, but it is not a whole document),
+    and a whole document above the schema's `max_orders_per_day` paired with its own hash (it would classify as
+    reducing; only the schema test refuses it).
     Every document built is checked schema-valid, so a refusal comes from the clause under test. The rest of the
     verdict is the same mandate validated without the policy."""
     lone_workspaces = {None, 0, 1}
     laxer = {"deny": "ask", "ask": "auto"}
     shapes = ["none", "identity", "reducing", "reducing", "reducing_default", "neutral", "neutral_quiet", "increasing",
-              "mixed", "forged", "unhashed"]
+              "mixed", "forged", "unhashed", "schema_invalid"]
     for _ in range(n):
         m = copy.deepcopy(base.BASES[rng.choice(sorted(base.BASES))])
         if rng.random() < 0.3:
@@ -2111,12 +2114,14 @@ def fuzz_independence_floor(n):
             m["autonomy"]["default"] = "ask"
         if shape == "identity":
             ctx["previous_version"] = {"environment": m["environment"], "connection_id": m["connection_id"]}
-            ctx["current_mandate_version"] = version(m)
+            ctx["current_mandate_version"] = version(ctx["previous_version"])
         elif shape != "none":
             prev = copy.deepcopy(m)
             orders = m["risk"]["max_orders_per_day"]
             if shape in ("reducing", "mixed", "forged", "unhashed"):
                 prev["risk"]["max_orders_per_day"] = orders + 1
+            if shape == "schema_invalid":
+                prev["risk"]["max_orders_per_day"] = 10001
             if shape == "reducing_default":
                 prev["autonomy"]["default"] = laxer[m["autonomy"]["default"]]
             if shape == "neutral":
@@ -2127,8 +2132,9 @@ def fuzz_independence_floor(n):
                 m["risk"]["max_orders_per_day"] = orders + 1
             if shape == "mixed":
                 prev["risk"]["max_order_usd"] = "1"
-            check(V.is_valid(prev) and prev != m, "every previous version the fuzz builds is a whole schema-valid document",
-                  (shape, prev))
+            check(V.is_valid(prev) != (shape == "schema_invalid") and prev != m,
+                  "every previous version the fuzz builds is a whole document, schema-valid but for the one shape that "
+                  "is not", (shape, prev))
             ctx["previous_version"] = prev
             if shape == "forged":
                 real = copy.deepcopy(m)
