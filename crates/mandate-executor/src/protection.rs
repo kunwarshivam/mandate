@@ -630,8 +630,10 @@ pub(crate) fn rests(state: &ExecutorState, instrument: &InstrumentId) -> bool {
 /// (§5.4): any of it, in a sequence that cancelled it. A handed-on one's placement
 /// ([`passive_exit`]) was sized net of every exit selling beside it and rests by design, so it
 /// holds them only once its stop and their sells no longer fit within the position ([`fits`]),
-/// which is when [`begin_exit`] cancels it; an exit it was sized around goes rather than waiting
-/// on a cancel nobody asked, and a failed count holds (#286 round 2, M1′).
+/// which is when [`begin_exit`] or [`overtaken`] cancels it; an exit it was sized around goes
+/// rather than waiting on a cancel nobody asked, and a failed count holds (#286 round 2, M1′).
+/// The exits the gate holds are left out of that fit, as they are of `overtaken`'s, so the wait
+/// and the cancel always agree (DEC-425 item 1).
 fn protection_holds(state: &ExecutorState, instrument: &InstrumentId) -> bool {
     state.exiting.get(instrument).is_some_and(|sequence| {
         rests(state, instrument)
@@ -1015,6 +1017,12 @@ fn park(
 /// sequence on ([`passive_exit`]): the protection it placed rests by design, so the sequence
 /// waits on it only once a later exit did not fit beside it ([`protection_holds`]), and on the
 /// other exits, and [`replace`] then covers what they left unsold (#286 round 2, M1′).
+///
+/// While a sequence that is not handed on waits on the protection it cancelled, every resting
+/// order of it has a cancel asked or outstanding ([`cancel_resting`]): one the broker refused is
+/// asked again once its query finds the order still live, so the exit never waits out the bound
+/// on a cancel nothing will confirm (DEC-425 item 1; #524's pin (d)). A handed-on placement is
+/// [`overtaken`]'s.
 pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     release_waiting(batch)?;
     lone_steps(batch)?;
@@ -1026,6 +1034,9 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .collect();
     for (instrument, sequence) in sequences {
         if protection_holds(&batch.view, &instrument) {
+            if !handed(&batch.view, &sequence) {
+                cancel_resting(batch, &instrument)?;
+            }
             continue;
         }
         let exit = ClientOrderId::for_intent(&sequence.intent)?.rung(sequence.ladder.rung)?;
@@ -1598,9 +1609,22 @@ fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(),
         .exiting
         .get(instrument)
         .is_some_and(|sequence| handed(&batch.view, sequence));
-    if !handed_on || fits_beside_movable(&batch.view, instrument)? {
+    if !handed_on || fits(&batch.view, instrument)? {
         return Ok(());
     }
+    cancel_resting(batch, instrument)
+}
+
+/// Asks a cancel of every protective order resting in `instrument` that has none outstanding:
+/// never for one already `PendingCancel`, nor for one `Unknown` while a refused cancel's query
+/// is out (never cancelled blind), nor for one whose cancel was asked before the broker
+/// acknowledged it. So an exit waiting on that protection always waits on a cancel asked or
+/// outstanding, and a refused cancel is asked again once its query finds the order still live
+/// (§5.7; DEC-425 item 1).
+fn cancel_resting(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+) -> Result<(), ExecutorError> {
     let resting: Vec<ClientOrderId> = batch
         .view
         .protection
@@ -1625,12 +1649,14 @@ fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(),
     Ok(())
 }
 
-/// [`fits`], with the exits the gate holds left out: one that cannot move needs no room yet, so no
-/// placement is cancelled for it (#508's review, m1).
-fn fits_beside_movable(
-    view: &ExecutorState,
-    instrument: &InstrumentId,
-) -> Result<bool, ExecutorError> {
+/// Whether what protective orders cover in `instrument` and what its exits may still sell fit
+/// within the long position together, so no stop outlasts the position once they fill. The exits
+/// the gate holds are left out: one that cannot move needs no room yet, so no placement is
+/// cancelled for it (#508's review, m1), and none holds the others back. This is the one measure
+/// that whether a handed-on placement holds its exits back ([`protection_holds`]), whether it is
+/// cancelled for them ([`overtaken`]), and whether an arriving exit leaves it resting ([`begin`])
+/// all read, so an exit never waits on a placement that nothing will cancel (DEC-425 item 1).
+fn fits(view: &ExecutorState, instrument: &InstrumentId) -> Result<bool, ExecutorError> {
     let live = still_selling(view, instrument)?;
     let held = waiting(view, instrument)
         .iter()
@@ -1718,13 +1744,6 @@ fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty,
         })
         .try_fold(live, Qty::checked_add)
         .map_err(ExecutorError::from)
-}
-
-/// Whether what protective orders cover in `instrument` and what its exits may still sell fit
-/// within the long position together, so no stop outlasts the position once they fill.
-fn fits(view: &ExecutorState, instrument: &InstrumentId) -> Result<bool, ExecutorError> {
-    let committed = covered(view, instrument)?.checked_add(still_selling(view, instrument)?)?;
-    Ok(committed <= long(view, instrument)?)
 }
 
 /// The long position in `instrument` as the broker holds it (DEC-421, #515): the folded position
@@ -9740,7 +9759,6 @@ mod sequence_tests {
     /// Under the summed oracle no exit may wait past the bound, and every allowed exit is sent for
     /// its quantity (rule 13: a wait that never ends is a denial).
     #[test]
-    #[ignore = "pending E7-4"]
     fn seed_15_sends_every_allowed_risk_exit_within_the_bound() -> Result<(), String> {
         rule_13_summed(0, &SEED_15)
     }
@@ -9756,7 +9774,6 @@ mod sequence_tests {
     /// held and none is owed a cancel, so it passes there; then of seed 15, where it fails on
     /// `main`.
     #[test]
-    #[ignore = "pending E7-4"]
     fn an_exit_waiting_on_protection_always_has_its_cancel_asked() -> Result<(), String> {
         let asked = |state: &ExecutorState| -> Result<(), String> {
             for instrument in state.exiting.keys() {
@@ -9832,7 +9849,6 @@ mod sequence_tests {
     /// to wait on, so the cancel is asked again before §5.4's bound rather than the exit waiting
     /// it out.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_refused_protective_cancel_found_live_is_asked_again() -> Result<(), ExecutorError> {
         with_ports!(ports);
         let mut executor = protected(&ports)?;
