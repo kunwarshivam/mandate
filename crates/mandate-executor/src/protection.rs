@@ -11159,3 +11159,282 @@ mod bracket_tests {
         Ok(())
     }
 }
+
+/// #499's review, minor 1 (DEC-77): pins a tests PR wrote for three behaviours the fix's own
+/// tests were the only judges of, each read through what a ladder sends or what the gate answers,
+/// with its figures worked by hand in its doc rather than taken from [`remainders`].
+#[cfg(test)]
+mod remainder_pins {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_num::{Qty, SignedQty};
+
+    use super::sendable;
+    use crate::batch::Batch;
+    use crate::error::ExecutorError;
+    use crate::gate::{PartialGateDecision, Proposal, account_stream_checks};
+    use crate::ids::{ClientOrderId, IntentId};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Ids, executor_config, fees};
+    use crate::state::{
+        ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
+    };
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, Effect, EventId, Mode, Order, OrderState, Purpose,
+        RiskClock, WorkspaceId, WriterEpoch,
+    };
+
+    const SEQUENCE: &str = "01JABCDEFGHJKMNPQRSTV00010";
+    const LONE: &str = "01JABCDEFGHJKMNPQRSTV00020";
+
+    fn intent(id: &str) -> IntentId {
+        IntentId(EventId(id.to_owned()))
+    }
+
+    /// A sell of `qty` in AAPL by `agent`, named for `id`'s first rung, in `at`.
+    fn sell(id: &str, agent: &str, qty: &str, at: OrderState) -> Result<Order, ExecutorError> {
+        Ok(Order {
+            client_order_id: ClientOrderId::for_intent(&intent(id))?,
+            intent_id: Some(intent(id)),
+            agent: Some(AgentId(agent.to_owned())),
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Sell,
+            qty: Qty::parse(qty)?,
+            filled_qty: Qty::ZERO,
+            state: at,
+            attempt: 1,
+            purpose: Purpose::RiskExit,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        })
+    }
+
+    fn stepped(parked: bool) -> Ladder {
+        Ladder {
+            stepping: true,
+            parked,
+            ..Ladder::default()
+        }
+    }
+
+    /// Ten AAPL held and a live risk exit of 3 by `agent-c`, beside `agent-a`'s sequence whose
+    /// stepped rung left 5 unsold ([`SEQUENCE`]) and `lone_agent`'s lone ladder, parked where
+    /// `parked` is set, whose stepped rung left 4 unsold ([`LONE`]). [`SEQUENCE`]'s id sorts first.
+    fn two_ladders(lone_agent: &str, parked: bool) -> Result<ExecutorState, ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(1));
+        state
+            .positions
+            .insert(aapl.clone(), SignedQty::parse("10")?);
+        for order in [
+            sell(SEQUENCE, "agent-a", "5", OrderState::Canceled)?,
+            sell(LONE, lone_agent, "4", OrderState::Canceled)?,
+            sell(
+                "01JABCDEFGHJKMNPQRSTV00030",
+                "agent-c",
+                "3",
+                OrderState::Accepted,
+            )?,
+        ] {
+            state.orders.insert(order.client_order_id.clone(), order);
+        }
+        state.exiting.insert(
+            aapl.clone(),
+            ExitSequence {
+                intent: intent(SEQUENCE),
+                entry: ClientOrderId::parse("md-held-1")?,
+                agent: AgentId("agent-a".to_owned()),
+                prices: None,
+                passive: false,
+                ladder: stepped(false),
+            },
+        );
+        state.ladders.insert(
+            aapl,
+            LoneLadder {
+                intent: intent(LONE),
+                agent: AgentId(lone_agent.to_owned()),
+                ladder: stepped(parked),
+            },
+        );
+        Ok(state)
+    }
+
+    fn ports_for<R>(
+        run: impl FnOnce(&Ports<'_>) -> Result<R, ExecutorError>,
+    ) -> Result<R, ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        run(&Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        })
+    }
+
+    /// What each ladder's next rung sends, in the order given, each in the same step, and the
+    /// `rung_short` records that step journals as (exit, short by, sent).
+    #[expect(
+        clippy::type_complexity,
+        reason = "a test's answer: the sends and the short records, read side by side"
+    )]
+    fn sends(
+        state: &ExecutorState,
+        ladders: &[(&str, &str)],
+    ) -> Result<(Vec<(String, Qty)>, Vec<(String, String, String)>), ExecutorError> {
+        ports_for(|ports| {
+            let mut batch = Batch::new(state, ports)?;
+            let aapl = InstrumentId::new("AAPL")?;
+            let mut sent = Vec::new();
+            for (exit, left) in ladders {
+                let qty = sendable(&mut batch, &aapl, &intent(exit), Qty::parse(left)?)?;
+                sent.push(((*exit).to_owned(), qty));
+            }
+            let field = |draft: &crate::types::EventDraft, name: &str| {
+                draft
+                    .payload
+                    .get(name)
+                    .and_then(mandate_canon::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let shorts = batch
+                .effects
+                .iter()
+                .filter_map(|effect| match effect {
+                    Effect::Journal(draft)
+                        if draft.event_type == "ProtectionChanged"
+                            && field(draft, "action") == "rung_short" =>
+                    {
+                        Some((
+                            field(draft, "intent_id"),
+                            field(draft, "qty"),
+                            field(draft, "sent"),
+                        ))
+                    }
+                    _ => None,
+                })
+                .collect();
+            Ok((sent, shorts))
+        })
+    }
+
+    /// The gate's answer to `agent-d`'s sell of `qty` for `purpose` in AAPL.
+    fn ask(
+        state: &ExecutorState,
+        qty: &str,
+        purpose: Purpose,
+    ) -> Result<PartialGateDecision, ExecutorError> {
+        ports_for(|ports| {
+            account_stream_checks(
+                state,
+                &Proposal {
+                    agent: &AgentId("agent-d".to_owned()),
+                    instrument: &InstrumentId::new("AAPL")?,
+                    side: Side::Sell,
+                    qty: Qty::parse(qty)?,
+                    purpose,
+                    bracketed: false,
+                },
+                ports,
+            )
+        })
+    }
+
+    /// DEC-410 item 1, the two ladders' id order, read through what each next rung sends. Room is
+    /// the position of 10 less the live 3: 7. [`SEQUENCE`] sorts first and takes all its 5; the
+    /// lone ladder gets the 2 left of its 4, journaled `rung_short` by 2. Taken in the other
+    /// order, the lone ladder would send 4 and the sequence 3.
+    #[test]
+    fn two_ladders_send_in_their_exits_id_order() -> Result<(), ExecutorError> {
+        let state = two_ladders("agent-b", false)?;
+        let (five, two) = (Qty::parse("5")?, Qty::parse("2")?);
+        let expected = vec![(SEQUENCE.to_owned(), five), (LONE.to_owned(), two)];
+        let short = vec![(LONE.to_owned(), "2".to_owned(), "2".to_owned())];
+        assert_eq!(
+            sends(&state, &[(SEQUENCE, "5"), (LONE, "4")])?,
+            (expected.clone(), short.clone())
+        );
+        let reversed = sends(&state, &[(LONE, "4"), (SEQUENCE, "5")])?;
+        assert_eq!(
+            reversed,
+            (expected.into_iter().rev().collect(), short),
+            "the order the ladders are stepped in changes nothing: the id order decides"
+        );
+        Ok(())
+    }
+
+    /// DEC-410 item 1's guard: a lone ladder whose exit was abandoned counts nothing. With the
+    /// lone exit abandoned, only [`SEQUENCE`]'s 5 count beside the live 3, so a discretionary exit
+    /// of 4 is sized to the 2 left; were the abandoned ladder counted, nothing would be left. Its
+    /// own rung, if asked, sends nothing.
+    #[test]
+    fn a_lone_ladder_whose_exit_was_abandoned_counts_nothing() -> Result<(), ExecutorError> {
+        let mut state = two_ladders("agent-b", false)?;
+        state.intents.insert(
+            intent(LONE),
+            IntentRecord {
+                intent_id: intent(LONE),
+                agent: AgentId("agent-b".to_owned()),
+                received_at: RiskClock::from_secs(0),
+                outcome: IntentOutcome::Abandoned,
+                allowed_at: None,
+            },
+        );
+        let paced = ask(&state, "4", Purpose::DiscretionaryExit)?;
+        assert_eq!(
+            (paced.verdict_name(), paced.sized()),
+            ("allow", Some(Qty::parse("2")?))
+        );
+        assert_eq!(
+            sends(&state, &[(LONE, "4")])?.0,
+            vec![(LONE.to_owned(), Qty::ZERO)]
+        );
+        Ok(())
+    }
+
+    /// DEC-410 item 1 at the gate: a parked lone ladder of a stopped or paused agent counts
+    /// nothing, so beside it only [`SEQUENCE`]'s 5 count with the live 3, and a discretionary exit
+    /// of 2 by another agent goes unsized; one of 4 is sized to the 2 left, not crowded out as it
+    /// would be with the parked 4 counted. The same ladder counts again once its agent resumes.
+    #[test]
+    fn a_stopped_or_paused_agents_parked_ladder_leaves_the_gate_its_room()
+    -> Result<(), ExecutorError> {
+        for mode in [Mode::Stopped, Mode::Paused] {
+            let mut state = two_ladders("agent-b", true)?;
+            state.modes.insert(AgentId("agent-b".to_owned()), mode);
+            let whole = ask(&state, "2", Purpose::DiscretionaryExit)?;
+            assert_eq!(
+                (whole.verdict_name(), whole.sized()),
+                ("allow", None),
+                "{mode:?}"
+            );
+            let paced = ask(&state, "4", Purpose::DiscretionaryExit)?;
+            assert_eq!(
+                (paced.verdict_name(), paced.sized()),
+                ("allow", Some(Qty::parse("2")?)),
+                "{mode:?}"
+            );
+            assert_eq!(
+                paced.crowded_out().verdict_name(),
+                "allow",
+                "{mode:?}: 2 are left"
+            );
+            state.modes.remove(&AgentId("agent-b".to_owned()));
+            let resumed = ask(&state, "2", Purpose::DiscretionaryExit)?;
+            assert_eq!(
+                resumed.crowded_out().verdict_name(),
+                "deny",
+                "{mode:?}: resumed, the parked 2 count again and nothing is left"
+            );
+        }
+        Ok(())
+    }
+}
