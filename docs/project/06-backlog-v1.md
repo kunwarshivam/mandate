@@ -2519,8 +2519,9 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   case that reached it would fail loudly. Carry an open-sell input into `ref.py` and add a case.
   *Harness side (`agent/g8-e6-4-open-sell-harness`):* the family-B harness reads an optional
   `open_sell_qty` on a trim base, rests it as one non-protective agent sell in the gate's scene,
-  and sizes `trim_guards`' trim on what it leaves, as the gate does. The reference PR follows, then
-  the status rows, then a cleanup that makes the input required.
+  and sizes `trim_guards`' trim on what it leaves, as the gate does. It awaits MC-B36 and MC-B37
+  (`AWAITED`, with the counts for both fixtures). The reference PR follows, then the status rows,
+  then a cleanup that drops `AWAITED` and makes the input required.
 - **E6-4 harness cleanup: drop the transitional branches once MC-B33 and MC-B34 are on `main`**
   (#498 review, M1). In `crates/mandate-refcases/src/mandate/order_builder.rs`:
   (a) drop `AWAITED`, `awaited`, `counted` and the without-branch, so the case list and the sweep

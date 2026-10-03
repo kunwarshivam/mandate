@@ -1639,6 +1639,35 @@ mod tests {
         "MC-B28", "MC-B29", "MC-B30", "MC-B31", "MC-B32", "MC-B33", "MC-B34", "MC-B35",
     ];
 
+    /// MC-B36 and MC-B37, a trim sized after a resting sell (DEC-399 item 7), which the reference
+    /// PR after this harness adds, with `open_sell_qty` stated on every trim case. Until it lands
+    /// the fixture holds them or not; if present they must pass, and the counts below are stated
+    /// for both fixtures. A cleanup drops the fixture without them once they land.
+    const AWAITED: [&str; 2] = ["MC-B36", "MC-B37"];
+    const DOCTORINGS_WITH: usize = 1092;
+    const PLANTS_WITH: usize = 37 * 4 + 69 + 2;
+    const REFUSED_WITH: usize = 1485;
+
+    /// Whether the fixture already holds the [`AWAITED`] cases.
+    fn awaited(fixture: &Json) -> Result<bool, String> {
+        let present = crate::list_at(fixture, "cases")?
+            .iter()
+            .filter(|c| c["id"].as_str().is_some_and(|id| AWAITED.contains(&id)))
+            .count();
+        crate::ensure(present == 0 || present == AWAITED.len(), || {
+            format!(
+                "the fixture holds {present} of the {} awaited cases, not none or all",
+                AWAITED.len()
+            )
+        })?;
+        Ok(present == AWAITED.len())
+    }
+
+    /// `without` on today's fixture, `with` once the awaited cases land.
+    fn counted(fixture: &Json, without: usize, with: usize) -> Result<usize, String> {
+        Ok(if awaited(fixture)? { with } else { without })
+    }
+
     fn fixture() -> Result<Json, String> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
         read_fixture(&dir, "mandate.json").map(Arc::unwrap_or_clone)
@@ -1650,14 +1679,15 @@ mod tests {
             .filter(|c| c["kind"] == "builder")
             .cloned()
             .collect();
-        crate::ensure(cases.len() == PASSING.len(), || {
-            format!("family B is {} cases, found {}", PASSING.len(), cases.len())
+        let expected = counted(fixture, PASSING.len(), PASSING.len() + AWAITED.len())?;
+        crate::ensure(cases.len() == expected, || {
+            format!("family B is {expected} cases, found {}", cases.len())
         })?;
         Ok(cases)
     }
 
     fn listed(id: &str) -> bool {
-        PASSING.contains(&id)
+        PASSING.contains(&id) || AWAITED.contains(&id)
     }
 
     fn passing(fixture: &Json) -> Result<Vec<Json>, String> {
@@ -2143,7 +2173,11 @@ mod tests {
             run(fixture.clone(), &id).map_err(|e| format!("{id}: {e}"))?;
             seen = seen.saturating_add(1);
         }
-        crate::expect_eq("cases listed", PASSING.len(), seen)
+        crate::expect_eq(
+            "cases listed",
+            counted(&fixture, PASSING.len(), PASSING.len() + AWAITED.len())?,
+            seen,
+        )
     }
 
     /// MC-B26's pinned pair is read from its base's `symbol` (DEC-285): `BTC/USD` passes, and a
@@ -2210,7 +2244,11 @@ mod tests {
                 )?;
             }
         }
-        crate::expect_eq("doctorings, counted from the fixture", doctorings, 1046)
+        crate::expect_eq(
+            "doctorings, counted from the fixture",
+            doctorings,
+            counted(&fixture, 1046, DOCTORINGS_WITH)?,
+        )
     }
 
     /// A hold reaches neither the gate nor approval, so a hold that states either fails naming it,
@@ -2253,7 +2291,7 @@ mod tests {
                 fails_naming(run(stated, &id), member, &format!("{id}: {member} stated"))?;
             }
         }
-        crate::expect_eq("holds", holds, 14)
+        crate::expect_eq("holds", holds, counted(&fixture, 14, 15)?)
     }
 
     /// Every member of a case is read: a plant at the top level, in `input`, its `quote`, its
@@ -2316,7 +2354,7 @@ mod tests {
         crate::expect_eq(
             "plants: four objects per case, every output and two working orders",
             plants,
-            35 * 4 + 65 + 2,
+            counted(&fixture, 35 * 4 + 65 + 2, PLANTS_WITH)?,
         )
     }
 
@@ -2427,7 +2465,11 @@ mod tests {
                 }
             }
         }
-        crate::expect_eq("inputs refused, counted from the fixture", refused, 1390)
+        crate::expect_eq(
+            "inputs refused, counted from the fixture",
+            refused,
+            counted(&fixture, 1390, REFUSED_WITH)?,
+        )
     }
 
     /// The builder and the gate see one account: the gate state's equity, the instrument's market
