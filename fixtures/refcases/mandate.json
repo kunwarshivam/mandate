@@ -6661,7 +6661,7 @@
   {
    "id": "MC-V70",
    "kind": "semantic",
-   "title": "Independent approval required in a two-user workspace is fine",
+   "title": "Independent approval required in a two-user workspace passes V-047",
    "base": "btc_accumulator",
    "patch": [],
    "context": {

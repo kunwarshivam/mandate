@@ -2076,23 +2076,28 @@ def fuzz_content(n):
 
 def fuzz_independence_floor(n):
     """V-047 (DEC-411): under `independent_approval_required` a workspace of fewer than two users is refused at validation,
-    and the rule touches no other verdict. The oracle names the lone workspaces by count, not by comparison, and the
-    rest of the verdict is the same mandate validated without the policy."""
-    lone_workspaces = {0, 1}
+    a user count that is absent counts as one (rule 3), and the rule touches no other verdict. The oracle names the lone
+    workspaces as a set, the absent count among them, and the rest of the verdict is the same mandate validated without
+    the policy."""
+    lone_workspaces = {None, 0, 1}
     for _ in range(n):
         m = copy.deepcopy(base.BASES[rng.choice(sorted(base.BASES))])
         if rng.random() < 0.3:
             m["autonomy"]["approval"]["two_approver_above_usd"] = rng.choice(["500", "5000"])
-        required, users = rng.random() < 0.5, rng.choice([0, 1, 1, 2, 3, 5])
-        ctx = dict(base.CTX, disclosures_accepted=["sha256:" + "b" * 64], workspace_users=users,
-                   approver_users=rng.choice([1, 2, min(users, 2)]))
+        required, users = rng.random() < 0.5, rng.choice([None, 0, 1, 1, 2, 3, 5])
+        ctx = {k: v for k, v in base.CTX.items() if k != "workspace_users"}
+        ctx["disclosures_accepted"] = ["sha256:" + "b" * 64]
+        if users is not None:
+            ctx["workspace_users"] = users
+        ctx["approver_users"] = min(rng.choice([1, 2]), 1 if users is None else users)
         if rng.random() < 0.9:
             ctx["independent_approval_required"] = required
         else:
             required = False
         errs = semantic(m, ctx)[0]
         check(("V-047" in errs) == (required and users in lone_workspaces),
-              "V-047 refuses exactly independent approval in a workspace without a second user", (required, users, errs))
+              "V-047 refuses exactly independent approval in a workspace without a second user, an unknown count as one",
+              (required, users, errs))
         without = semantic(m, dict(ctx, independent_approval_required=False))[0]
         check([e for e in errs if e != "V-047"] == without, "V-047 changes no other verdict", (required, users, errs, without))
 

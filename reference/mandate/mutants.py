@@ -14,6 +14,9 @@ MUTANTS = {
     "V-047 counts a one-user workspace as independent": (
         '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
         '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 1:'),
+    "V-047 counts an unknown workspace as two users": (
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 2) < 2:'),
     "loss carry ignores withdrawals": ("        self.net_contributed += d\n", ""),
     "release retires without a loss carry": ('                self._retire("goal_complete", ev)\n',
                                              '                self.restrictions["retired"] = "stopped"\n'),

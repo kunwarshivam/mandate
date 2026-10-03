@@ -339,7 +339,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   spec V-047 and MC-V69 to MC-V71 ([DEC-411](decisions/DEC-411.md)); the code is owed on E10-1's row.
   **Founder question** (DEC-411 item 6): a workspace that loses its second user, or turns
   `independent_approval_required` on with one user, after a version is confirmed keeps its agents running with nothing
-  they latched liftable. Should removing the second user be refused, or flag the agents `policy_nonconforming`?
+  they latched liftable, and no new version validates there, a reducing one and §4.3's conforming version included
+  (V-047 refuses every version; the exits are adding a user or stopping the agent). Should removing the second user be
+  refused, or flag the agents `policy_nonconforming`, and should a reducing version be exempt from V-047?
+  Recorded beside it (DEC-411 item 2; #528 round 1, M3): two users of whom only the author is an approver pass V-047
+  and V-024, but an ask needing an independent approver times out (§6.4). Not decided: it would extend V-047 past the
+  founder's decision to approvers, which validation does not read independently of the author.
   Actions are `end_delegations` or `exits_only`, never `paused` (rule 13). *Accepted when:* a fired
   tripwire acts at its next evaluation, journals the event, alerts with opaque text, and lifts only
   by the owner's acknowledgment with step-up; adding or tightening one applies at once.

@@ -202,7 +202,7 @@ SEM.append(("MC-V68", "A released agent's loss carry counts against a redeploy o
 SEM += [
     ("MC-V69", "Independent approval required in a one-user workspace", "btc_accumulator", [],
      {"independent_approval_required": True, "workspace_users": 1}),
-    ("MC-V70", "Independent approval required in a two-user workspace is fine", "btc_accumulator", [],
+    ("MC-V70", "Independent approval required in a two-user workspace passes V-047", "btc_accumulator", [],
      {"independent_approval_required": True, "workspace_users": 2}),
     ("MC-V71", "A one-user workspace without independent approval is fine", "btc_accumulator", [],
      {"independent_approval_required": False, "workspace_users": 1}),
