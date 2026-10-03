@@ -1968,10 +1968,11 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
-/// The two `protection.rs` rows are #524's: a risk exit waits behind a handed-on placement for a
-/// cancel nothing asks, a wrong answer from code that runs, with no stub to stop at. Each fails
-/// on its own assertion; the fix (DEC-425) deletes the rows with the `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 6] = [
+/// The three `protection.rs` rows are #524's: a risk exit waits on a cancel nothing asks (behind
+/// a handed-on placement, or after a refused cancel the query finds still live), a wrong answer
+/// from code that runs, with no stub to stop at. Each fails on its own assertion; the fix
+/// (DEC-425) deletes the rows with the `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1995,6 +1996,10 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 6] = [
     (
         "crates/mandate-executor/src/protection.rs",
         "sequence_tests::an_exit_waiting_on_protection_always_has_its_cancel_asked",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_refused_protective_cancel_found_live_is_asked_again",
     ),
 ];
 

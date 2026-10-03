@@ -8296,6 +8296,48 @@ mod sequence_tests {
         rule_13_script_checked(0, false, true, &SEED_15, &asked).map(|_| ())
     }
 
+    /// DEC-425 constraint 1, found on #468 (the coordinator's ruling, 08:29Z on #468): a risk exit's
+    /// sequence asks the OCO cancelled, the broker refuses the cancel, and the query (§5.7)
+    /// answers the OCO still live with nothing pending. Nothing outstanding is left for the exit
+    /// to wait on, so the cancel is asked again before §5.4's bound rather than the exit waiting
+    /// it out.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_refused_protective_cancel_found_live_is_asked_again() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(0)), &ports)?;
+        executor.run(observation(Some(150), None, true, 0)?, &ports)?;
+        let first = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&first), vec![OCO]);
+        let refusal = executor.run(refused(OCO, "order is not cancelable"), &ports)?;
+        assert_eq!(queried(&refusal), vec![OCO]);
+        let live = Held {
+            purpose: Purpose::Protective,
+            qty: 10,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let mut asked = cancels(&executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(reported(OCO, &live)?)),
+            &ports,
+        )?)
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+        let bound = ports.config.max_unprotected_s;
+        for at in 1..bound {
+            if !asked.is_empty() {
+                break;
+            }
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            asked.extend(cancels(&tick).into_iter().map(str::to_owned));
+        }
+        assert_eq!(asked, vec![OCO.to_owned()], "asked again before the bound");
+        Ok(())
+    }
+
     /// #524's claim 2, which already holds on `main`: an exit the gate holds counts nothing
     /// toward the room later exits are allowed in. Seed 15's discretionary exit of 4 is held
     /// `exit_unpriced`, and the two risk exits of 2 beside it are both allowed, 3 + 2 + 2 within 10.
