@@ -151,6 +151,7 @@ pub(crate) fn context() -> Result<ValidationContext, String> {
         provenance: ProvenanceMap::default(),
         workspace_users: 1,
         approver_users: 1,
+        independent_approval_required: false,
         disclosures_accepted: BTreeSet::new(),
         instrument_groups: BTreeMap::new(),
         claimed_by_other_agents: BTreeSet::new(),
@@ -2141,4 +2142,24 @@ proptest! {
             previous = Some(figures);
         }
     }
+}
+
+/// Until V-047 lands (E10-1), the policy on is refused as `unimplemented` at every user count, and
+/// the policy off validates as before: the stub never answers for a rule it does not check.
+#[test]
+fn the_policy_is_refused_until_v047_lands_and_off_it_validates_as_before() -> Checked {
+    let base = mandate(&[])?;
+    for users in [0, 1, 2, u32::MAX] {
+        let mut ctx = context()?;
+        ctx.workspace_users = users;
+        let off = validate(&base, &ctx).map_err(|e| format!("{users} users, policy off: {e}"))?;
+        if !off.is_valid() {
+            return Err(format!("{users} users, policy off: {:?}", off.violations));
+        }
+        ctx.independent_approval_required = true;
+        if validate(&base, &ctx) != Err(SpecError::Unimplemented) {
+            return Err(format!("{users} users under the policy was evaluated"));
+        }
+    }
+    Ok(())
 }

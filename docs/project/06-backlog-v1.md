@@ -407,8 +407,8 @@ the spec invariants (DP-n) its tests cover.
   the reference side until #476 round 1. Run `generate.py --check` per PR.
   ~~Also owed (#444, DEC-353; E6-13's code half, tests first)~~ Done ([#516](https://github.com/kunwarshivam/mandate/pull/516),
   [#523](https://github.com/kunwarshivam/mandate/pull/523), [#527](https://github.com/kunwarshivam/mandate/pull/527);
-  [DEC-420](decisions/DEC-420.md)). Owed from #523's review: the next stream H tests PR pins that the delegations row
-  matches by `id`, not position (`[d1, d2]` to `[d2]` is reducing); and `reference/mandate/ref.py` gets three fixes,
+  [DEC-420](decisions/DEC-420.md)). Owed from #523's review: ~~the next stream H tests PR pins that the delegations row
+  matches by `id`, not position (`[d1, d2]` to `[d2]` is reducing)~~ (pinned with V-047's tests PR, DEC-428); and `reference/mandate/ref.py` gets three fixes,
   none of which the Rust shares: `T()` drops fractional seconds and raises on a calendar-less instant where V-041 should
   refuse; V-042's withheld previous document (identity only) is not modelled, where DEC-420 item 4 refuses every
   delegation; and an absent list against `[]` classifies reducing where the Rust says neutral.
@@ -1092,7 +1092,11 @@ story buys a service, and none uses a real identity-provider account in tests (s
   the effective `independent_approval_required`, V-047 refuses it in a workspace of fewer than two users, and the
   harness reads the cases' new context member, so MC-V69 to MC-V71 pass. V-047 also refuses again when a version is
   applied, as V-002 does, and a case covers a second user deactivated between confirmation and application (#528
-  round 2, major 1; the reference models V-047 at validation only, DEC-411 item 5).
+  round 2, major 1; the reference models V-047 at validation only, DEC-411 item 5). In progress (claim #124, stream
+  H4; [DEC-428](decisions/DEC-428.md)): the tests PR, then the implementation, then the status PR; the apply-time case
+  is a Rust test through `from_journal` (DEC-428 item 4), and `validate::recheck_at_application` rechecks V-002 and V-047.
+  Owed when `Membership` gets a producer (#536 round 1, minor 4): a test pins that pending invitations and deactivated
+  accounts do not count as users (spec V-047, DEC-411 item 2). `mandate-spec` receives a count, so it cannot pin it.
   The founder's DEC-444 (2026-10-03) lets a version §9.2 rates risk-reducing through V-047; the spec, `ref.py` and
   MC-V72 to MC-V77 carry it first (ES-22), then the tests PR (#536) follows. The exception reads the agent's current
   version matched by hash (DEC-444 item 3); `PreviousVersion` has no digest yet, so the Rust side refuses every version
