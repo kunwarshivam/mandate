@@ -1,5 +1,6 @@
 """Asserts that every reference case demonstrates what its title claims (AGENTS.md: validate fixtures)."""
 import pathlib
+import re
 import sys
 from decimal import ROUND_CEILING, Decimal
 from datetime import datetime, time, timezone
@@ -622,6 +623,10 @@ req("MC-J06", au_of("MC-J06")["rules"][0]["then"] == "auto" and C["MC-J06"]["pat
 req("MC-J09", au_of("MC-J09")["rules"][0]["then"] == "auto" and au_of("MC-J09")["rules"][0]["when"]["op"] == "lt"
     and int(C["MC-J09"]["patch"][0]["value"]) < int(au_of("MC-J09")["rules"][0]["when"]["value"]), "an auto rule narrowed")
 req("MC-J", sum(c.startswith("MC-J") for c in C) == 10, "10 routing cases")
+# §11 states how many cases the file holds; nothing else compares that prose with the file (#530 review, m2).
+SPEC = (pathlib.Path(__file__).resolve().parents[2] / "docs/specs/mandate.md").read_text()
+stated = re.findall(r"signal-model registry, and (\d+) cases that implementations must", SPEC)
+req("§11", stated == [str(len(d["cases"]))], f"§11 states {stated} cases, the file holds {len(d['cases'])}")
 print("cases", len(C), "title assertion failures", len(bad))
 for b in bad:
     print(" ", b)
