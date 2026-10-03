@@ -2077,10 +2077,12 @@ def fuzz_content(n):
         check(h[0] != h[1], "§6.4 every bound field moves the content hash", field)
 
 def fuzz_independence_floor(n):
-    """V-047 (DEC-411): under `independent_approval_required` a workspace of fewer than two users is refused at validation,
-    a user count that is absent counts as one (rule 3), and the rule touches no other verdict. The oracle names the lone
-    workspaces as a set, the absent count among them, and the rest of the verdict is the same mandate validated without
-    the policy."""
+    """V-047 (DEC-411, DEC-435): under `independent_approval_required` a workspace of fewer than two users is refused at
+    validation, a user count that is absent counts as one (rule 3), and the rule touches no other verdict, except that a
+    new version §9.2 rates risk-reducing against a whole previous document passes. The oracle names the lone workspaces
+    as a set, the absent count among them; it builds each previous version so its §9.2 label is known by construction
+    (one maximum moved, a rename, or both a maximum lowered and another raised), never by calling `classify`; and the rest
+    of the verdict is the same mandate validated without the policy."""
     lone_workspaces = {None, 0, 1}
     for _ in range(n):
         m = copy.deepcopy(base.BASES[rng.choice(sorted(base.BASES))])
@@ -2096,12 +2098,30 @@ def fuzz_independence_floor(n):
             ctx["independent_approval_required"] = required
         else:
             required = False
+        shape = rng.choice(["none", "identity", "reducing", "reducing", "neutral", "increasing", "mixed"])
+        if shape == "identity":
+            ctx["previous_version"] = {"environment": m["environment"], "connection_id": m["connection_id"]}
+        elif shape != "none":
+            prev = copy.deepcopy(m)
+            orders = m["risk"]["max_orders_per_day"]
+            if shape in ("reducing", "mixed"):
+                prev["risk"]["max_orders_per_day"] = orders + 1
+            if shape == "neutral":
+                prev["name"] = m["name"] + "-before"
+            if shape == "increasing":
+                m["risk"]["max_orders_per_day"] = orders + 1
+            if shape == "mixed":
+                prev["risk"]["max_order_usd"] = str(D(m["risk"]["max_order_usd"]) / 2)
+            ctx["previous_version"] = prev
+        exempt = shape == "reducing"
         errs = semantic(m, ctx)[0]
-        check(("V-047" in errs) == (required and users in lone_workspaces),
-              "V-047 refuses exactly independent approval in a workspace without a second user, an unknown count as one",
-              (required, users, errs))
+        check(("V-047" in errs) == (required and users in lone_workspaces and not exempt),
+              "V-047 refuses exactly independent approval in a workspace without a second user, an unknown count as one, "
+              "save a risk-reducing version against a whole previous document",
+              (required, users, shape, errs))
         without = semantic(m, dict(ctx, independent_approval_required=False))[0]
-        check([e for e in errs if e != "V-047"] == without, "V-047 changes no other verdict", (required, users, errs, without))
+        check([e for e in errs if e != "V-047"] == without, "V-047 changes no other verdict",
+              (required, users, shape, errs, without))
 
 if __name__ == "__main__":
     fuzz_ladder_precision(300)

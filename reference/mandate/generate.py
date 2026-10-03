@@ -207,6 +207,20 @@ SEM += [
     ("MC-V71", "A one-user workspace without independent approval is fine", "btc_accumulator", [],
      {"independent_approval_required": False, "workspace_users": 1}),
 ]
+LONE_UNDER_POLICY = {"independent_approval_required": True, "workspace_users": 1}
+FEWER_ORDERS = [rep("/risk/max_orders_per_day", 40)]
+SEM += [
+    ("MC-V72", "A risk-reducing version in a one-user workspace under independent approval passes V-047 (DEC-435)",
+     "btc_accumulator", FEWER_ORDERS, dict(LONE_UNDER_POLICY, previous_version=MB["btc_accumulator"])),
+    ("MC-V73", "A neutral version in a one-user workspace under independent approval is refused", "btc_accumulator",
+     [rep("/name", "btc-accumulator-renamed")], dict(LONE_UNDER_POLICY, previous_version=MB["btc_accumulator"])),
+    ("MC-V74", "A version that reduces one limit and raises another, in a one-user workspace, is refused",
+     "btc_accumulator", FEWER_ORDERS + [rep("/risk/max_order_usd", "1500")],
+     dict(LONE_UNDER_POLICY, previous_version=MB["btc_accumulator"])),
+    ("MC-V75", "A reducing version whose previous document validation lacks, in a one-user workspace, is refused",
+     "btc_accumulator", FEWER_ORDERS,
+     dict(LONE_UNDER_POLICY, previous_version={"environment": "paper", "connection_id": "conn_alpaca_paper_01"})),
+]
 
 for cid, title, base, patch, ctx in SEM:
     m = apply_patch(MB[base], patch)

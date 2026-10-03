@@ -20,6 +20,13 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-435](../project/decisions/DEC-435.md), the founder's decision of 2026-10-03
+  on DEC-411 item 6):** V-047 no longer refuses a new version of a running agent that §9.2
+  classifies as risk-reducing against its previous version, in a workspace of fewer than two users
+  under `independent_approval_required`. A neutral version, a risk-increasing one (including one
+  that reduces some fields and adds risk on another), a first version, and a version whose previous
+  document validation does not have are still refused. The exemption reads §9.2's own result, not a
+  second classifier. MC-V72 to MC-V75 are added (§11).
 - **v0.6, amended ([DEC-429](../project/decisions/DEC-429.md), wording only; #528 round 2, minors 1 to
   3):** V-047's reasons name a risk-increasing change again, which §4.3 lists and a lone user cannot
   make either (the latched-floor reason stays out). §5.7's single-user sentence says what V-047
@@ -440,7 +447,7 @@ and is recorded in `MandateConfirmed`.
 | V-043 | Each delegation's caps fit inside the envelope: `max_order_usd` ≤ `risk.max_order_usd`, `max_order_usd` ≤ `max_total_usd`, and `max_total_usd` ≤ `capital.allocation_usd`; and when `two_approver_above_usd` is set, `max_order_usd` ≤ it, so a delegation never stands in for a second approver. The gate enforces every limit regardless (§6.5); this keeps a delegation from even appearing to widen one |
 | V-044 | Tripwire ids are sorted and unique. A `consecutive_losing_exits` or `new_instruments` threshold is a whole number from 1 to 1,000; a `realized_loss_usd` threshold is in whole cents and at most `capital.allocation_usd`, so a tripwire never appears to guard what it cannot reach ([DEC-187](../project/04-decision-log.md#decisions), [DEC-352](../project/decisions/DEC-352.md)) |
 | V-046 | An `autonomy.review_by` the version sets or moves (absent from, or different from, the previous version's) is not before the validation date and at most 180 days after it; one carried unchanged is not checked again, so a lapsed date stays lapsed through a version that changes something else. A version whose previous version set a review date sets one too ([DEC-188](../project/04-decision-log.md#decisions), [DEC-272](../project/04-decision-log.md#decisions)) |
-| V-047 | When the workspace's policy requires independent approval (`independent_approval_required`, §4.3, its effective value), the workspace has at least two users. Users are the workspace's active members: a pending invitation or a deactivated account is not one, and a user count that is absent or not known counts as one user (rule 3, as §6.7 says of a missing name). Under that policy, deployment, a risk-increasing change, a high-water-mark reset, and lifting a fired tripwire each need a user other than the requester (§4.3, §5.8, §6.7). A one-user workspace could not deploy the mandate, make a risk-increasing change to it, acknowledge its drawdown ladder, or lift a tripwire it fired, so it is refused here, where the owner sees why, rather than at deployment or at the first latch. Checked at validation and again when a version is applied, as V-002 is ([DEC-411](../project/decisions/DEC-411.md)) |
+| V-047 | When the workspace's policy requires independent approval (`independent_approval_required`, §4.3, its effective value), the workspace has at least two users. Users are the workspace's active members: a pending invitation or a deactivated account is not one, and a user count that is absent or not known counts as one user (rule 3, as §6.7 says of a missing name). Under that policy, deployment, a risk-increasing change, a high-water-mark reset, and lifting a fired tripwire each need a user other than the requester (§4.3, §5.8, §6.7). A one-user workspace could not deploy the mandate, make a risk-increasing change to it, acknowledge its drawdown ladder, or lift a tripwire it fired, so it is refused here, where the owner sees why, rather than at deployment or at the first latch. **One exception** ([DEC-435](../project/decisions/DEC-435.md), the founder's decision of 2026-10-03 on DEC-411 item 6): a new version of a running agent that §9.2 classifies as **risk-reducing** against its previous version is not refused by V-047. The classification is §9.2's own result for the two documents, as change classification computes it, and no other reading of "reducing" counts. A version with any risk-increasing path is risk-increasing (§9.2), so one that reduces some fields and adds risk on another is refused, and so is a **neutral** version, a first version (no previous version: a deployment), and a version whose previous document validation does not have (rule 3). Checked at validation and again when a version is applied, as V-002 is ([DEC-411](../project/decisions/DEC-411.md)) |
 
 ### 4.2 Warnings and the confirmation screen
 
@@ -1593,7 +1600,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 433 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 437 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1605,7 +1612,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Family | IDs | Covers |
 |---|---|---|
 | Schema | MC-S01 to MC-S31 | Structural rejects, including `on_complete`, the 300 s confirmation cap, per-model output age, `max_instruments` bounds, the research object, `autonomy.admission` |
-| Semantic | MC-V01 to MC-V71 | Every V-rule and warning, independent approval in a one-user workspace (V-047), the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
+| Semantic | MC-V01 to MC-V75 | Every V-rule and warning, independent approval in a one-user workspace (V-047) and its risk-reducing exception, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
 | Policy | MC-P01 to MC-P22 | Nearest-level reporting, each key kind, the retail profile (DEC-98), the internal research profile (DEC-103), paper-only environments, the research keys, platform maximums |
 | Risk state | MC-R01 to MC-R26 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |

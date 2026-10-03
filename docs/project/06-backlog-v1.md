@@ -406,7 +406,9 @@ the spec invariants (DP-n) its tests cover.
   `independent_approval_required` on with one user, after a version is confirmed keeps its agents running with nothing
   they latched liftable, and no new version validates there, a reducing one and §4.3's conforming version included
   (V-047 refuses every version; the exits are adding a user or stopping the agent). Should removing the second user be
-  refused, or flag the agents `policy_nonconforming`, and should a reducing version be exempt from V-047?
+  refused, or flag the agents `policy_nonconforming`? ~~And should a reducing version be exempt from V-047?~~ Decided
+  yes, reducing only (the founder, 2026-10-03; [DEC-435](decisions/DEC-435.md)): a version §9.2 rates risk-reducing
+  passes V-047 there; a neutral one is still refused.
   Recorded beside it (DEC-411 item 2; #528 round 1, M3): two users of whom only the author is an approver pass V-047
   and V-024, but an ask needing an independent approver times out (§6.4). Not decided: it would extend V-047 past the
   founder's decision to approvers, which validation does not read independently of the author.
@@ -838,6 +840,8 @@ the spec invariants (DP-n) its tests cover.
   harness reads the cases' new context member, so MC-V69 to MC-V71 pass. V-047 also refuses again when a version is
   applied, as V-002 does, and a case covers a second user deactivated between confirmation and application (#528
   round 2, major 1; the reference models V-047 at validation only, DEC-411 item 5).
+  The founder's DEC-435 (2026-10-03) lets a version §9.2 rates risk-reducing through V-047; the spec, `ref.py` and
+  MC-V72 to MC-V75 carry it first (ES-22), then the tests PR (#536) splits its reducing-or-neutral pin to match.
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
   increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C48 pass.
