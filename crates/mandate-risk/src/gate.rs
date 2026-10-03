@@ -448,6 +448,7 @@ mod tests {
             median_dollar_volume_20d: Some(usd("90000000")?),
             median_dollar_volume_30d: None,
             min_order_size: Qty::parse("1")?,
+            qty_increment: Qty::parse("1")?,
             halted: false,
             status_feed_current: true,
         };
@@ -1817,6 +1818,8 @@ mod tests {
                 o.proposed.qty = Qty::parse(qty)?;
                 o.instrument.min_order_size = Qty::parse("0.5")?;
                 o.instrument.fractionable = fractionable;
+                o.instrument.qty_increment =
+                    Qty::parse(if fractionable { "0.000000001" } else { "1" })?;
                 o.proposed.tif = tif;
                 Ok(o)
             };
@@ -2474,6 +2477,8 @@ mod tests {
             o.market.trailing_5m_volume = Some(Qty::parse(trailing)?);
             o.market.adv_20d = Some(Qty::parse("200")?);
             o.instrument.fractionable = fractionable;
+            o.instrument.qty_increment =
+                Qty::parse(if fractionable { "0.000000001" } else { "1" })?;
             o.conduct
                 .participation_today
                 .insert(id("a")?, Qty::parse(today)?);
@@ -2501,6 +2506,43 @@ mod tests {
                 sliced("9", crate::PacingControl::DailyParticipation)?,
             ],
             "a cap equal to the proposal slices nothing; one below it slices to its increment"
+        );
+        Ok(())
+    }
+
+    /// A participation slice truncates to the venue's own quantity grid, not to a grid read from
+    /// `fractionable` (DEC-427). On a 0.25 grid the owner's exit of 10 is sliced by an order cap
+    /// of 9.95 to 9.75, and by a daily cap with 9.4 left to 9.25, where the nine-place grid gives
+    /// 9.95 and 9.4.
+    #[test]
+    #[ignore = "pending E6-4"]
+    fn a_slice_truncates_to_the_venue_s_quantity_grid() -> Result<(), GateError> {
+        let owner = |trailing: &str, today: &str| -> Result<_, GateError> {
+            let mut o = allowing()?.selling(Origin::OwnerClose)?;
+            o.market.trailing_5m_volume = Some(Qty::parse(trailing)?);
+            o.market.adv_20d = Some(Qty::parse("200")?);
+            o.instrument.fractionable = true;
+            o.instrument.qty_increment = Qty::parse("0.25")?;
+            o.conduct
+                .participation_today
+                .insert(id("a")?, Qty::parse(today)?);
+            Ok(o.decide()?
+                .pacing
+                .map(|pacing| (pacing.qty, pacing.applied)))
+        };
+        assert_eq!(
+            [owner("199", "0")?, owner("200", "0.6")?],
+            [
+                Some((
+                    Qty::parse("9.75")?,
+                    [crate::PacingControl::OrderSizeParticipation].into()
+                )),
+                Some((
+                    Qty::parse("9.25")?,
+                    [crate::PacingControl::DailyParticipation].into()
+                )),
+            ],
+            "a slice is a whole number of the venue's increment"
         );
         Ok(())
     }
@@ -2559,6 +2601,7 @@ mod tests {
             o.proposed.qty = Qty::parse(qty)?;
             o.instrument.min_order_size = Qty::parse(minimum)?;
             o.instrument.fractionable = true;
+            o.instrument.qty_increment = Qty::parse(if true { "0.000000001" } else { "1" })?;
             o.market.trailing_5m_volume = Some(Qty::parse(trailing)?);
             o.market.adv_20d = Some(Qty::parse("200")?);
             o.conduct
@@ -2660,6 +2703,7 @@ mod tests {
             o.proposed.qty = proposed;
             o.instrument.min_order_size = minimum;
             o.instrument.fractionable = fractionable;
+            o.instrument.qty_increment = Qty::parse(if fractionable { "0.000000001" } else { "1" })?;
             o.market.trailing_5m_volume = trailing
                 .map(|v| Qty::parse(&v.to_string()))
                 .transpose()
@@ -2773,6 +2817,7 @@ mod tests {
             .map_err(|e| fail(e.into()))?;
             let mut o = uncomputable(o, quote, x_is_one).map_err(fail)?;
             o.instrument.fractionable = fractionable;
+            o.instrument.qty_increment = Qty::parse(if fractionable { "0.000000001" } else { "1" })?;
             o.market.trailing_5m_volume = trailing.map(Qty::parse).transpose().map_err(num)?;
             o.market.adv_20d = adv.map(Qty::parse).transpose().map_err(num)?;
             if let Some(filled) = today {

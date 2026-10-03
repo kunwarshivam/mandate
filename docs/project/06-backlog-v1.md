@@ -2594,6 +2594,10 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   BTC, a cap of 100, factor 0.5 and a 0.001 minimum give a trim of 0.000116667 on the 1e-9 grid,
   withheld below the minimum, but 0.0002 on the venue's 0.0001 grid, the whole position, which
   DEC-423 exempts. Add that case as a trim test when this lands.
+  *Tests (`agent/g8-e6-4-qty-grid-tests`, [DEC-427](decisions/DEC-427.md)):* `InstrumentSnapshot`
+  carries `qty_increment`; `trim::quantity_grid` is the stub, and three pending tests pin the trim
+  (the #504 case included) and the participation slice on a venue grid. The implementation PR, then
+  a harness PR stating the case's grid, follow.
 - **E6-4 nits** (#466 review, round 1): `UsdExact::times_size_fraction`'s doc still lists "the
   ladder size factor applied to the target" though the gate's 24-place `Ratio` factor enters
   through `UsdExact::of_ratio`; say which number each serves (n2). `of_ratio` takes any `Ratio`,

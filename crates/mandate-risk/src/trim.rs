@@ -63,7 +63,7 @@ pub(crate) fn proposals(
         let qty = excess
             .checked_mul(UsdExact::of_qty(held))?
             .checked_sub(UsdExact::of_qty(on_sale).checked_mul(market_value)?)?
-            .ceiled_quotient(market_value, increment(instrument)?)?
+            .ceiled_quotient(market_value, quantity_grid(instrument)?)?
             .min(unsold);
         if qty.is_zero() {
             continue;
@@ -116,15 +116,26 @@ fn a_trimming_rung_is_confirmed(limits: &RiskLimits, risk: &RiskSnapshot) -> boo
     })
 }
 
-/// The instrument's quantity grid: whole shares unless it is fractionable, as the participation
-/// slice reads it (trading-domain spec §2.1).
-fn increment(instrument: &InstrumentSnapshot) -> Result<Qty, GateError> {
-    let grid = if instrument.fractionable {
+/// The instrument's quantity grid, which a trim rounds up on and a participation slice truncates
+/// to (trading-domain spec §2.1, DEC-427): the venue's own `qty_increment`.
+///
+/// Until the implementation PR reads that field, the grid is read from `fractionable`, whole
+/// shares or nine places, and a `qty_increment` that differs from that reading is refused as
+/// unimplemented rather than sized on the wrong grid (DEC-77). Every snapshot on `main` states the
+/// reading it already had, so only the pending tests reach the refusal.
+pub(crate) fn quantity_grid(instrument: &InstrumentSnapshot) -> Result<Qty, GateError> {
+    let read_from_fractionable = Qty::parse(if instrument.fractionable {
         "0.000000001"
     } else {
         "1"
-    };
-    Ok(Qty::parse(grid)?)
+    })?;
+    if instrument.qty_increment != read_from_fractionable {
+        return Err(GateError::Unimplemented(
+            "the venue's quantity grid",
+            "E6-4",
+        ));
+    }
+    Ok(read_from_fractionable)
 }
 
 #[cfg(test)]
@@ -232,6 +243,7 @@ mod tests {
                     median_dollar_volume_20d: None,
                     median_dollar_volume_30d: None,
                     min_order_size: Qty::parse("1")?,
+                    qty_increment: Qty::parse("1")?,
                     halted: false,
                     status_feed_current: true,
                 },
@@ -264,11 +276,12 @@ mod tests {
             Ok(())
         }
 
-        fn crypto(mut self) -> Self {
+        fn crypto(mut self) -> Result<Self, GateError> {
             self.instrument.asset_class = AssetClass::Crypto;
             self.instrument.exchange = None;
             self.instrument.fractionable = true;
-            self
+            self.instrument.qty_increment = Qty::parse("0.000000001")?;
+            Ok(self)
         }
 
         fn trims(&self) -> Result<Vec<Qty>, GateError> {
@@ -343,7 +356,7 @@ mod tests {
             Vec::new(),
             "an equity waits for the session"
         );
-        let mut crypto = Scene::new("10", "1000")?.crypto();
+        let mut crypto = Scene::new("10", "1000")?.crypto()?;
         crypto.now = UtcNanos::parse_rfc3339("2026-09-22T21:00:00Z")?;
         assert_eq!(crypto.trims()?, qty("2.5")?);
         Ok(())
@@ -373,6 +386,29 @@ mod tests {
         assert_eq!(scene.trims()?, qty("1")?);
         scene.instrument.min_order_size = Qty::parse("3")?;
         assert_eq!(scene.trims()?, Vec::new());
+        Ok(())
+    }
+
+    /// A trim rounds up on the venue's own quantity grid, not on a grid read from `fractionable`
+    /// (DEC-427; #466 review, m3; #530 review, m6). At a 600,000 price on the 1500 cap:
+    /// - 0.0002 held worth 120 at factor 0.02 is 90 over its 30 target, 0.00015. A 0.0001 grid
+    ///   rounds that up to the 0.0002 held, a full close that goes below a 0.001 minimum
+    ///   (DEC-423), where the nine-place grid would withhold 0.00015;
+    /// - 0.001 held worth 600 at factor 0.3 is 150 over its 450 target, 0.00025, rounded up to
+    ///   0.0003 on the same grid.
+    #[test]
+    #[ignore = "pending E6-4"]
+    fn a_trim_rounds_up_on_the_venue_s_quantity_grid() -> Result<(), GateError> {
+        let mut whole = Scene::new("0.0002", "120")?.crypto()?;
+        whole.instrument.qty_increment = Qty::parse("0.0001")?;
+        whole.instrument.min_order_size = Qty::parse("0.001")?;
+        whole.risk.size_factor = Ratio::parse("0.02")?;
+        assert_eq!(whole.trims()?, qty("0.0002")?);
+        let mut part = Scene::new("0.001", "600")?.crypto()?;
+        part.instrument.qty_increment = Qty::parse("0.0001")?;
+        part.instrument.min_order_size = Qty::parse("0.0001")?;
+        part.risk.size_factor = Ratio::parse("0.3")?;
+        assert_eq!(part.trims()?, qty("0.0003")?);
         Ok(())
     }
 

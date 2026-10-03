@@ -696,6 +696,26 @@ fn trims_of(
     minimum: &str,
     crypto: bool,
 ) -> Result<Vec<mandate_risk::TrimProposal>, mandate_risk::GateError> {
+    trims_on_grid(
+        held,
+        market_value,
+        factor,
+        (resting, protective),
+        minimum,
+        crypto.then_some("0.000000001"),
+    )
+}
+
+/// [`trims_of`] with a crypto instrument on the venue grid `grid`, or an equity on whole shares
+/// when `grid` is `None`.
+fn trims_on_grid(
+    held: &str,
+    market_value: &str,
+    factor: &str,
+    (resting, protective): (&str, &str),
+    minimum: &str,
+    grid: Option<&str>,
+) -> Result<Vec<mandate_risk::TrimProposal>, mandate_risk::GateError> {
     let mut s = Scenario::allowing();
     s.mandate = mandate_with(common::two_trimming_rungs());
     s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
@@ -716,10 +736,11 @@ fn trims_of(
         }
     }
     let mut instrument = common::equity_instrument(INSTRUMENT_2);
-    if crypto {
+    if let Some(grid) = grid {
         instrument.asset_class = AssetClass::Crypto;
         instrument.exchange = None;
         instrument.fractionable = true;
+        instrument.qty_increment = qty(grid);
     }
     instrument.min_order_size = qty(minimum);
     let instruments = BTreeMap::from([(asset(INSTRUMENT_2), instrument)]);
@@ -820,6 +841,55 @@ fn a_trim_of_the_whole_position_is_never_withheld_for_the_minimum() {
         mismatches.is_empty(),
         "a trim of the whole position held is proposed below the minimum, and no other \
          sub-minimum trim is:\n{}",
+        mismatches.join("\n")
+    );
+}
+
+/// A trim rounds up on the venue's own quantity grid (DEC-427; #466 review, m3; #530 review, m6),
+/// and so reaches DEC-423's full close where the venue's grid makes the trim the whole position.
+///
+/// Each row is worked out here from §5.5 on the 1500 cap and a 0.0001 grid, at a 600,000 price:
+/// - 0.0002 held worth 120 at factor 0.02 is 90 over its 30 target, 0.00015 of a unit. On the
+///   grid that rounds up to the 0.0002 held, a full close, proposed below a 0.001 minimum. The
+///   nine-place grid would size it at 0.00015 and withhold it (the #504 review's case, which
+///   DEC-423's Rationale left to this row).
+/// - 0.001 held worth 600 at factor 0.3 is 150 over its 450 target, 0.00025, rounded up to
+///   0.0003 at a 0.0001 minimum.
+/// - The same with 0.0001 resting on the agent's own sell: 0.00025 less 0.0001 on sale is
+///   0.00015, rounded up to 0.0002 (DEC-399 item 7).
+///
+/// Every row is run before one assertion, so under the stub each row's outcome is reported.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_trim_rounds_up_on_the_venue_s_quantity_grid() {
+    let rows = [
+        ("0.0002", "120", "0.02", "0", "0.001", "0.0002"),
+        ("0.001", "600", "0.3", "0", "0.0001", "0.0003"),
+        ("0.001", "600", "0.3", "0.0001", "0.0001", "0.0002"),
+    ];
+    let mismatches = rows
+        .into_iter()
+        .filter_map(|(held, value, factor, resting, minimum, sold)| {
+            let row = format!(
+                "{held} held at {value}, factor {factor}, {resting} resting, minimum {minimum}"
+            );
+            let expected = vec![(asset(INSTRUMENT_2), qty(sold), Purpose::RiskExit)];
+            match trims_on_grid(held, value, factor, (resting, "0"), minimum, Some("0.0001")) {
+                Ok(trims) => {
+                    let proposed = trims
+                        .iter()
+                        .map(|t| (t.instrument.clone(), t.qty, t.purpose))
+                        .collect::<Vec<_>>();
+                    (proposed != expected)
+                        .then(|| format!("{row}: proposed {proposed:?}, expected {expected:?}"))
+                }
+                Err(e) => Some(format!("{row}: the trims do not compute: {e}")),
+            }
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        mismatches.is_empty(),
+        "a trim rounds up on the venue's quantity grid:\n{}",
         mismatches.join("\n")
     );
 }

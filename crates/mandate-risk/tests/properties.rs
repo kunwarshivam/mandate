@@ -139,6 +139,7 @@ proptest! {
     ) {
         let mut s = Scenario::allowing();
         s.instrument.fractionable = fractionable;
+        s.instrument.qty_increment = qty(if fractionable { "0.000000001" } else { "1" });
         if let Some(text) = quote {
             let at = price(text);
             s.market.quote = Some(mandate_risk::SaneQuote {

@@ -648,6 +648,10 @@ pub struct InstrumentSnapshot {
     pub median_dollar_volume_20d: Option<Usd>,
     pub median_dollar_volume_30d: Option<Usd>,
     pub min_order_size: Qty,
+    /// The venue's quantity grid (trading-domain spec §2.1): an order quantity is a whole number
+    /// of it. A trim rounds up on it and a participation slice truncates to it (DEC-427), so the
+    /// gate never sizes an order off the grid that §5.3 rule 2 refuses. Whole shares are `1`.
+    pub qty_increment: Qty,
     pub halted: bool,
     pub status_feed_current: bool,
 }

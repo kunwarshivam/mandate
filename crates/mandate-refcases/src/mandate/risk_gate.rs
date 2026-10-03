@@ -595,6 +595,7 @@ fn listed_equity(
         median_dollar_volume_20d: Some(num(Usd::parse("90000000"), "median_dollar_volume_20d")?),
         median_dollar_volume_30d: None,
         min_order_size: one_share()?,
+        qty_increment: one_share()?,
         halted: false,
         status_feed_current: true,
     })

@@ -205,6 +205,7 @@ pub fn equity_instrument(id: &str) -> InstrumentSnapshot {
         median_dollar_volume_20d: Some(usd("90000000")),
         median_dollar_volume_30d: None,
         min_order_size: qty("1"),
+        qty_increment: qty("1"),
         halted: false,
         status_feed_current: true,
     }
