@@ -3831,6 +3831,52 @@ From #518's round-2 review (the coordinator's ruling, 00:28Z on #518; freeze rul
   fold does not know takes shares off the position and joins neither. `orders::fill` never writes
   that payload today; keying the pool on "no order found" makes the fold total over it.
 
+From #524's ruling ((A), 05:52Z on #524) and the reviews of #534 and #535 (the coordinator's ruling,
+05:08Z on #534; freeze rule):
+
+- **E7-4: count an exit allowed with no order yet in the gate's `available`** (#524, claim 1; a
+  possible tightening, with no defect behind it). On seed 15 the gate allows 7 of 10 and never
+  over-commits. The defect there is the wait, which DEC-425 fixes. Counting an allowed exit that
+  waits with no order as an open sell would deny a later exit that cannot fit, rather than let it
+  be allowed and wait. Decide it in its own story, with a test that a denied exit is not lost if the
+  waiting one is then abandoned.
+- **E7-4: DEC-424 item 5 states the lone entry's lifecycle as the code implements it** (#534 review,
+  minor 1). The entry is removed in two cases (absorption into a sequence, a `rung_short` that sends
+  nothing), replaced in one (the exit's own next rung), and in every other case stays while counting
+  zero. Say so, so the item stops implying the entry ends with its exit.
+- **E7-4: move the saturation pin and make it fail loudly** (#534 review, minor 3; #535 review,
+  minor 3). `gate::remainder_tests::an_over_filled_rung_counts_nothing_and_the_gate_still_decides`
+  belongs with the fix it pins. Carry it in the next tests correction to `remainder_tests`, and make
+  it fail, not pass silently, if `parked`'s rung id changes: today `get_mut` on a missing id skips
+  the over-fill and the assertions still hold.
+- **E7-4: `ladders` grows without bound when a lone exit finishes by filling** (#535 review,
+  minor 1). Nothing removes the entry of a lone ladder whose rung fills completely, so it stays,
+  counting zero. Remove it when its exit's last rung fills, or when the intent is no longer live.
+- **E7-4: `remainders`' long doc line, and one source for a lone ladder's intent** (#535 review,
+  minors 2 and 4). Wrap the doc line past 100 columns. And `ladders`' key `(InstrumentId, IntentId)`
+  repeats `LoneLadder.intent`, so the two can disagree: enforce the agreement where entries are
+  inserted, or drop the field and read the intent from the key.
+
+From #559's round-1 review (#524's tests; the coordinator's ruling, 09:35Z on #559; freeze rule):
+
+- **E7-4: model #524's refused-cancel answer as §5.7's query answer** (#559 round 1, minor 2).
+  `a_refused_protective_cancel_found_live_is_asked_again` feeds the answer as
+  `Input::BrokerUpdate(BrokerUpdate::Order(..))`. The path is the same, but its sibling
+  `a_refused_cancel_is_queried_then_asked_again_once` uses `Input::Broker(Ok(BrokerOutcome::Order(..)))`,
+  which is literally the answer to the query the test asserts. Use that.
+- **E7-4: #524's invariant fails on a resting id with no order record** (#559 round 1, minor 3).
+  `an_exit_waiting_on_protection_always_has_its_cancel_asked` reads an id in `protection.resting`
+  that `orders` does not know as outstanding, so an exit waiting on it forever would go unreported.
+  Fail on the unknown id instead.
+- **E7-4: ask the per-move check of the initial state and after the refold** (#559 round 1,
+  minor 4). `rule_13_script_checked` asks it only inside the step loop. Nothing is reachable there
+  today, since `protected(..)` starts with no sequence.
+- **E7-4: two doc lines in #559 run to 101 columns** (#559 round 1, minor 6). Wrap them with the
+  `remainders` row above.
+- **The saturation-pin row's wording** (#559 round 1, minor 7). The 05:08Z ruling put it in the
+  tests-correction row #532 started; the row added here points at the next tests correction to
+  `remainder_tests`. The substance is the same, so no change is needed.
+
 From #528's round-2 review (DEC-411; the coordinator's ruling, 05:19Z on #528; freeze rule):
 
 - **The reference does not model V-002's apply-time re-check** (#528 round 2, major 1). V-002 says it is "checked at
