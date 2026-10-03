@@ -2,13 +2,22 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.15:** §7.3 gains a row for a connection the connector reports `degraded` or `suspended`
+  ([connections spec §9.1](connections.md#91-states)): account state `closing_only`, all agents
+  `exits_only`. `AccountRestrictionChanged` carries an enumerated `cause` (`broker_reject`,
+  `broker_notice`, `connection_unavailable`), so the journal never records a broker restriction
+  that did not happen, and the connection cause has its own owner alert. The connection row lifts
+  on the connection's own condition and then the owner's acknowledgment, not on an account
+  refresh. A tightening under DEC-176 ([DEC-441](../project/decisions/DEC-441.md) item 23): no
+  outcome changes for a real broker restriction, and no existing reference case changes; the
+  connection row's case is added with E7-13's tests.
 - **v0.14:** §9.2's `legacy_pdt` day trade is stated as an opening and a closing of the same
   position on one trade date. A sale of an overnight position followed by a same-day repurchase
   is not a day trade; a later sale of the repurchased shares is one. "Selling and purchasing" is
@@ -716,6 +725,20 @@ mode) until the owner acknowledges and the account is refreshed:
 | Reject whose code or message indicates closing-only or restricted trading (connector reject table) | `closing_only` | All agents `exits_only` | `account_restricted` |
 | N consecutive 403 rejects without a known order-level cause (configured) | `closing_only` | All agents `exits_only`; account refreshed | `account_restricted` |
 | Broker notice of an intraday margin call or freeze | `closing_only` | All agents `exits_only` | `account_restricted` |
+| The connector reports the connection `degraded` or `suspended` ([connections spec §9.1](connections.md#91-states)) | `closing_only` | All agents `exits_only` | `account_restricted` |
+
+`AccountRestrictionChanged` records the **cause** of each change, one of a closed list, so a
+restriction the broker never imposed is never journaled as the broker's
+([DEC-441](../project/decisions/DEC-441.md) item 23):
+
+| `cause` | Rows above | Owner alert | Lifts when |
+|---|---|---|---|
+| `broker_reject` | Rows 2 and 3 (rejects) | Account restricted by the broker | The owner acknowledges and the account is refreshed |
+| `broker_notice` | Rows 1 and 4 (status, flags, notices) | Account restricted by the broker | The owner acknowledges and the account is refreshed |
+| `connection_unavailable` | Row 5 | A distinct alert: the platform cannot reach or use the connection; the broker has not restricted the account | The connection's own condition clears (good probes, a released connector version for contract drift, or a reconnect; connections spec §9.1), **then** the owner acknowledges. An account refresh neither is needed nor lifts it |
+
+Causes lift independently: a `connection_unavailable` restriction that clears leaves any broker
+restriction standing, and the reverse.
 
 Rejects for unknown `client_order_id`s count toward the 403 threshold only; they are not external
 activity unless they carry a fill.

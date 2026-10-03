@@ -2,7 +2,7 @@
 //! compares every member of every expected draft (DEC-85, DEC-292 item 3, DEC-317).
 //!
 //! DEC-317's three slices interpret every step, so every case is exercised through its first step,
-//! fifteen pass whole, and the rest fail naming the story or the decision that owes what they stop
+//! sixteen pass whole, and the rest fail naming the story or the decision that owes what they stop
 //! at. Each test has two halves that need each other: a case passes as the
 //! fixture states it, which an arm that failed everything could not do, and fails, naming what
 //! changed, when a member is edited, dropped, or added, which an arm that compared nothing could not.
@@ -109,9 +109,9 @@ fn every_case_asks_as_its_first_step_states() {
 }
 
 /// The lifecycle cases the runtime reproduces today.
-const PASSING: [&str; 15] = [
+const PASSING: [&str; 16] = [
     "MC-E02", "MC-E03", "MC-E04", "MC-E05", "MC-E07", "MC-E08", "MC-E09", "MC-E10", "MC-E11",
-    "MC-E12", "MC-E13", "MC-E14", "MC-E15", "MC-E16", "MC-E31",
+    "MC-E12", "MC-E13", "MC-E14", "MC-E15", "MC-E16", "MC-E18", "MC-E31",
 ];
 
 /// The lifecycle cases whose admitted grant reaches check 7, so their `ApprovalResponded` states
@@ -121,14 +121,14 @@ const QUORUM: [&str; 10] = [
     "MC-E29",
 ];
 
-/// The twenty-six cases split exactly as the runtime stands: fifteen pass, ten fail on the quorum
-/// record alone, and MC-E18 fails because the runtime cancels in a step whose mode is exits-only
-/// before it judges the response (mandate spec §6.4 "Cancellation").
+/// The twenty-six cases split exactly as the runtime stands: sixteen pass, and ten fail on the
+/// quorum record alone. MC-E18 passes as DEC-318 option (a) restated it: the response's step,
+/// whose mode is exits-only, records the mode, cancels as `mode_tightened`, then refuses the grant
+/// as `not_pending` (mandate spec §6.4 "Cancellation").
 #[test]
 fn the_lifecycle_cases_split_as_the_runtime_stands() {
     let fixture = fixture();
     let mut all: Vec<&str> = PASSING.iter().chain(&QUORUM).copied().collect();
-    all.push("MC-E18");
     all.sort_unstable();
     let lifecycle: Vec<String> = fixture["cases"]
         .as_array()
@@ -144,11 +144,39 @@ fn the_lifecycle_cases_split_as_the_runtime_stands() {
     for id in QUORUM {
         fails_naming(fixture.clone(), id, "the runtime records no quorum");
     }
-    fails_naming(
-        fixture.clone(),
-        "MC-E18",
-        r#"["AgentModeChanged", "ApprovalCanceled", "ApprovalResponded"]"#,
+}
+
+/// MC-E18 as it read before DEC-318 option (a), a grant admitted and then skipped at re-validation
+/// for `mode`, fails: the runtime cancels before it judges. With the response step's mode record
+/// left in the expected drafts, it fails too, because the record is the runtime's, not the case's.
+#[test]
+fn mc_e18_holds_only_as_the_cancellation() {
+    let fixture = fixture();
+    let mut judged = fixture.clone();
+    let drafts = &mut case_mut(&mut judged, "MC-E18")["expect"][1]["drafts"];
+    let refused = drafts[1].clone();
+    let mut admitted = refused;
+    admitted["result"] = json!("admitted");
+    admitted["reason"] = Json::Null;
+    admitted["quorum"] = json!({"required": 1, "independent": false});
+    let revalidated = json!({"type": "ApprovalRevalidated", "approval": "ap1", "result": "skip",
+        "reason": "mode", "clock": admitted["clock"].clone()});
+    *drafts = json!([admitted, revalidated]);
+    assert!(run(judged, "MC-E18").is_err(), "the old reading must fail");
+    let mut recorded = fixture.clone();
+    let drafts = case_mut(&mut recorded, "MC-E18")["expect"][1]["drafts"]
+        .as_array_mut()
+        .expect("a draft list");
+    let clock = drafts[0]["clock"].clone();
+    drafts.insert(
+        0,
+        json!({"type": "AgentModeChanged", "reason": "restriction_changed", "clock": clock}),
     );
+    assert!(
+        run(recorded, "MC-E18").is_err(),
+        "the mode record is not the case's"
+    );
+    run(fixture, "MC-E18").unwrap_or_else(|e| panic!("MC-E18: {e}"));
 }
 
 /// `fixture` with `quorum` struck from every expected draft of the ten [`QUORUM`] cases.
@@ -338,7 +366,8 @@ fn a_retailed_source_is_copied_once() {
 }
 
 /// The mode `now` states reaches the runtime: it is folded, so an exits-only `now` cancels the
-/// approval before the response is judged.
+/// approval before the response is judged, and the step's mode record is set aside as the
+/// runtime's (DEC-430).
 #[test]
 fn a_mode_now_states_reaches_the_runtime() {
     fails_naming(
@@ -349,7 +378,7 @@ fn a_mode_now_states_reaches_the_runtime() {
             json!("exits_only"),
         ),
         "MC-E02",
-        r#"["AgentModeChanged", "ApprovalCanceled", "ApprovalResponded"]"#,
+        r#"the runtime wrote ["ApprovalCanceled", "ApprovalResponded"]"#,
     );
 }
 
@@ -749,8 +778,8 @@ fn granted_with(fixture: &Json, pointer: &str, value: Json) -> Json {
 }
 
 /// The view, the classification and the dry run are the runtime's ports. An instrument out of the
-/// working universe skips the grant as restricted (check 9's universe arm; its mode arm is MC-E18's,
-/// DEC-318). Re-classified `auto`, the grant still acts (check 10). A gate denial skips it with the
+/// working universe skips the grant as restricted (check 9's universe arm; its mode arm
+/// no named step reaches, DEC-430). Re-classified `auto`, the grant still acts (check 10). A gate denial skips it with the
 /// gate's reason (check 11). Both are recorded as the re-validation's `decided_by_now` and
 /// `dry_run_reason`.
 #[test]
