@@ -913,3 +913,25 @@ fn an_optional_member_is_found_where_it_is_and_nowhere_else() -> Result<(), Stri
     assert!(members.optional("delegations").is_none());
     Ok(())
 }
+
+/// `$defs/instant`'s pattern, both its length and its characters: a text of the right length with a
+/// letter in it, and a digit prefix that every position it has matches, are both off the pattern.
+/// Added in E6-13's implementation PR, in-module under DEC-77's amendment, because the mutation
+/// gate found nothing that told the length check from the character check.
+#[test]
+fn the_instant_pattern_checks_its_length_and_every_character() {
+    assert!(super::is_instant("2026-09-24T00:00:00.000000000Z"));
+    assert!(
+        super::is_instant("2026-02-30T24:00:00.000000000Z"),
+        "a pattern, not a calendar"
+    );
+    for off in [
+        "2026",
+        "2026-09-24T00:00:00Z",
+        "2026-09-24T00:00:00.00000000AZ",
+        "2026-09-24T00:00:00.000000000Z0",
+        "2026-09-24 00:00:00.000000000Z",
+    ] {
+        assert!(!super::is_instant(off), "`{off}` is off the pattern");
+    }
+}

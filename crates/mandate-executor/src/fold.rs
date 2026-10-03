@@ -22,7 +22,7 @@ use crate::state::{
 use crate::types::{
     AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
     Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose, RiskClock,
-    SubmitOrder, TimeInForce, UnprotectedInterval,
+    Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -96,7 +96,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         state.copied.insert(event.event_id.clone(), origin.clone());
     }
     state.risk_clock = Some(at);
-    match kind {
+    let interpreted = match kind {
         "IntentReceived" => intent_received(state, payload, at),
         "GateDecided" => gate_decided(state, payload, at),
         "OrderSubmitted" => {
@@ -134,7 +134,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
-        "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
+        "FillApplied" | "LateFillApplied" => fill_applied(state, payload, event.seq),
         "FeesCharged" => fees_charged(state, payload),
         "ExternalActivityIngested" => Ok(()),
         "AccountRestrictionChanged" => {
@@ -162,6 +162,25 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             Ok(())
         }
         _ => later_slice(),
+    };
+    interpreted?;
+    net_after(state, payload)
+}
+
+/// DEC-421 item 5's netting runs after every account event, for the instrument of the order the
+/// event names or, when it names none the fold knows, the instrument it names. Every way an order
+/// becomes terminal (`OrderStateChanged`, `OrderAbandoned`) and every sell fill that names no
+/// order (`FillApplied`) passes through here, so a state that ends an order cannot skip the
+/// netting and leave held shares bare. The netting is idempotent, so an event that ends nothing
+/// and pools nothing changes nothing.
+fn net_after(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let ordered = optional_text(payload, "client_order_id")
+        .and_then(|raw| ClientOrderId::parse(raw).ok())
+        .and_then(|id| state.orders.get(&id))
+        .map(|order| order.instrument.clone());
+    match ordered.or_else(|| instrument(payload).ok()) {
+        Some(instrument) => net_unattributed(state, &instrument),
+        None => Ok(()),
     }
 }
 
@@ -716,7 +735,11 @@ fn order_abandoned(state: &mut ExecutorState, payload: &Value) -> Result<(), Exe
 /// A fill is applied by its broker fill id, once: a re-ingested fill changes nothing
 /// (trading-domain spec §5.7, journal spec §5.2). It moves the position the gate's
 /// `sell_exceeds_available` reads, and the filled quantity of the order it names.
-fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+///
+/// A sell fill that names no order has taken shares off the position that an ended sell's
+/// unapplied report may also name, so it joins the instrument's unattributed sells and is netted
+/// against those reports ([`net_unattributed`], DEC-421 item 5).
+fn fill_applied(state: &mut ExecutorState, payload: &Value, seq: Seq) -> Result<(), ExecutorError> {
     let fill = FillId(required_text(payload, "fill_id")?.to_owned());
     if state.fills.contains(&fill) {
         return Ok(());
@@ -725,7 +748,8 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
     let quantity = qty(payload, "qty_gross")?;
     let notional =
         quantity.notional(optional_price(payload, "price")?.ok_or_else(|| refused("price"))?)?;
-    let (signed, cash) = match side_of(required_text(payload, "side")?)? {
+    let side = side_of(required_text(payload, "side")?)?;
+    let (signed, cash) = match side {
         Side::Buy => (SignedQty::from(quantity), notional.negated()),
         Side::Sell => (SignedQty::from(quantity).negated(), notional),
     };
@@ -734,14 +758,71 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
     *position = position.checked_add(signed)?;
     state.cash_flow = state.cash_flow.checked_add(cash)?;
     state.fill_notional = state.fill_notional.checked_add(notional)?;
-    if let Some(order) = optional_text(payload, "client_order_id")
+    let named = optional_text(payload, "client_order_id");
+    if let Some(order) = named
         .and_then(|raw| ClientOrderId::parse(raw).ok())
         .and_then(|id| state.orders.get_mut(&id))
     {
         order.filled_qty = order.filled_qty.checked_add(quantity)?;
     }
+    if named.is_none() && side == Side::Sell {
+        state
+            .unattributed
+            .entry(position_of.clone())
+            .or_default()
+            .push((seq, quantity));
+    }
     state.fills.insert(fill);
     reattribute(state, &position_of);
+    Ok(())
+}
+
+/// DEC-421 item 5: an ended sell's reported fill that no update has applied, and a sell fill
+/// that named no order, may be the same shares, so they come off the held position once. Each
+/// ended sell in `instrument`, in id order, nets its report's unapplied part against the
+/// unattributed sells applied after it was submitted, oldest first: one applied before an order
+/// was submitted cannot be that order's fill. What a later update applies to the order caps what
+/// it has netted, and the excess is not given back: that unattributed sell was then a different
+/// sale, which must never net another order's report and leave protection over the position.
+fn net_unattributed(
+    state: &mut ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<(), ExecutorError> {
+    let ended: Vec<(ClientOrderId, Qty)> = state
+        .orders
+        .iter()
+        .filter(|(_, order)| {
+            &order.instrument == instrument && order.side == Side::Sell && order.state.is_terminal()
+        })
+        .map(|(id, order)| (id.clone(), order.filled_qty))
+        .collect();
+    let pool = state.unattributed.entry(instrument.clone()).or_default();
+    for (id, applied) in ended {
+        let Some(detail) = state.details.get_mut(&id) else {
+            continue;
+        };
+        let unapplied = detail
+            .reported_filled
+            .map_or(Ok(Qty::ZERO), |reported| reported.checked_sub(applied))
+            .unwrap_or(Qty::ZERO);
+        let mut netted = detail.netted.unwrap_or(Qty::ZERO).min(unapplied);
+        for (applied_at, left) in pool.iter_mut() {
+            if detail
+                .submitted_seq
+                .is_some_and(|submitted| *applied_at <= submitted)
+            {
+                continue;
+            }
+            let take = (*left).min(unapplied.checked_sub(netted).unwrap_or(Qty::ZERO));
+            *left = left.checked_sub(take)?;
+            netted = netted.checked_add(take)?;
+        }
+        detail.netted = Some(netted);
+    }
+    pool.retain(|(_, left)| *left != Qty::ZERO);
+    if pool.is_empty() {
+        state.unattributed.remove(instrument);
+    }
     Ok(())
 }
 
@@ -1282,15 +1363,117 @@ mod tests {
     use mandate_accounting::{InstrumentId, Side};
     use mandate_num::Qty;
 
-    use super::fold;
+    use super::{fold, net_unattributed};
     use crate::error::ExecutorError;
     use crate::ids::{ClientOrderId, IntentId};
     use crate::payload::{clock, object, text};
-    use crate::state::ExecutorState;
+    use crate::state::{ExecutorState, OrderDetail};
     use crate::types::{
         AccountRef, AccountScope, AgentId, EventId, FoldedEvent, Order, OrderState, Purpose,
         RiskClock, Seq, WorkspaceId,
     };
+
+    /// DEC-421 item 5: an unattributed sell of 5 AAPL nets only against an ended AAPL sell's
+    /// unapplied report, here 3 of `md-3-ended`'s. A live AAPL sell, an ended AAPL buy and an
+    /// ended MSFT sell, each with an unapplied report and sorted ahead of it, net nothing, and the
+    /// 2 left wait in the pool for the next ended sell. One submitted after the sell applied
+    /// cannot net it.
+    #[test]
+    fn an_unattributed_sell_nets_only_ended_sells_in_its_instrument() -> Result<(), ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let (aapl, msft) = (InstrumentId::new("AAPL")?, InstrumentId::new("MSFT")?);
+        let rows = [
+            (
+                "md-0-msft",
+                msft.clone(),
+                Side::Sell,
+                OrderState::Canceled,
+                1,
+            ),
+            (
+                "md-1-live",
+                aapl.clone(),
+                Side::Sell,
+                OrderState::Accepted,
+                1,
+            ),
+            ("md-2-buy", aapl.clone(), Side::Buy, OrderState::Canceled, 1),
+            (
+                "md-3-ended",
+                aapl.clone(),
+                Side::Sell,
+                OrderState::Canceled,
+                1,
+            ),
+            (
+                "md-4-later",
+                aapl.clone(),
+                Side::Sell,
+                OrderState::Canceled,
+                9,
+            ),
+        ];
+        for (id, instrument, side, now, submitted) in rows {
+            let client_order_id = ClientOrderId::parse(id)?;
+            state.orders.insert(
+                client_order_id.clone(),
+                Order {
+                    client_order_id: client_order_id.clone(),
+                    intent_id: None,
+                    agent: Some(AgentId("agent-a".to_owned())),
+                    instrument,
+                    side,
+                    qty: Qty::parse("4")?,
+                    filled_qty: Qty::ZERO,
+                    state: now,
+                    attempt: 1,
+                    purpose: Purpose::RiskExit,
+                    absent_lookups: 0,
+                    first_absence_at: None,
+                    cancel_unconfirmed: false,
+                    replaced_by: None,
+                    created_on: None,
+                },
+            );
+            state.details.insert(
+                client_order_id,
+                OrderDetail {
+                    submitted_seq: Some(Seq(submitted)),
+                    reported_filled: Some(Qty::parse("3")?),
+                    ..OrderDetail::default()
+                },
+            );
+        }
+        state
+            .unattributed
+            .insert(aapl.clone(), vec![(Seq(5), Qty::parse("5")?)]);
+        net_unattributed(&mut state, &aapl)?;
+        let netted = |id: &str| -> Result<Option<Qty>, ExecutorError> {
+            Ok(state
+                .details
+                .get(&ClientOrderId::parse(id)?)
+                .and_then(|detail| detail.netted))
+        };
+        assert_eq!(
+            (
+                netted("md-0-msft")?,
+                netted("md-1-live")?,
+                netted("md-2-buy")?,
+                netted("md-3-ended")?,
+                netted("md-4-later")?
+            ),
+            (None, None, None, Some(Qty::parse("3")?), Some(Qty::ZERO))
+        );
+        assert_eq!(
+            state.unattributed.get(&aapl),
+            Some(&vec![(Seq(5), Qty::parse("2")?)]),
+            "the 2 left wait for the next ended sell"
+        );
+        Ok(())
+    }
 
     /// A stream opened on paper, then an `OrderStateChanged` for an order the fold has never seen,
     /// carrying one extra field that names `md-r-e-1`. Without that field the fold answers

@@ -80,6 +80,13 @@ pub struct ExecutorState {
     pub(crate) watchdogged: BTreeMap<InstrumentId, RiskClock>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
+    /// Sell fills applied with no order named (`FillApplied` with no `client_order_id`), by the
+    /// journal position that applied them and what of each is not yet netted against an ended
+    /// sell's reported fill that no update has applied: the same shares may be both, so they come
+    /// off the held position once (DEC-421 item 5). Entries shrink only by netting: one that never
+    /// meets an ended sell's unapplied report stays for the life of the journal, bounded by how much
+    /// the owner trades the instrument outside the platform, not by anything in this crate.
+    pub(crate) unattributed: BTreeMap<InstrumentId, Vec<(Seq, Qty)>>,
     pub(crate) modes: BTreeMap<AgentId, Mode>,
     pub(crate) account_state: AccountState,
     pub(crate) consecutive_403s: u32,
@@ -123,6 +130,9 @@ pub(crate) struct OrderDetail {
     /// latest report carried: a bracket entry's filled quantity before its fills are ingested
     /// (§5.4's "the filled quantity", DEC-346 item 3).
     pub(crate) reported_filled: Option<Qty>,
+    /// What of `reported_filled` beyond the applied `filled_qty` an unattributed sell fill applied
+    /// after this order was submitted has already taken off the position (DEC-421 item 5).
+    pub(crate) netted: Option<Qty>,
     /// When a bracket entry's unprotected interval started: its first partial fill, from the
     /// `ProtectionChanged unprotected_start` that names it as `bracket` (§5.4, DEC-346 item 4).
     pub(crate) bracket_since: Option<RiskClock>,
@@ -223,6 +233,7 @@ impl ExecutorState {
             watchdogged: BTreeMap::new(),
             positions: BTreeMap::new(),
             fills: BTreeSet::new(),
+            unattributed: BTreeMap::new(),
             modes: BTreeMap::new(),
             account_state: AccountState::Active,
             consecutive_403s: 0,
