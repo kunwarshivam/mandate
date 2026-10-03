@@ -395,8 +395,8 @@
 'MC-C48' = { status = "passing", story = "E10-3" }
 
 # Family D, the review date (stream H, E6-14; DEC-188, DEC-271 to DEC-273). Passing since #396. MC-D01 and
-# MC-D05 to MC-D12 wait on V-046, the V-020 default and the V-042 carry in `mandate-spec` (stream F); MC-D23 and
-# MC-D24 on delegations in the order path (E8-8).
+# MC-D05 to MC-D10 wait on V-046 and the V-020 default in `mandate-spec` (stream F); MC-D11 and MC-D12, the V-042
+# carry, pass since #523 (DEC-420); MC-D23 and MC-D24 wait on delegations in the order path (E8-8).
 'MC-D01' = { status = "pending", story = "E6-14" }
 'MC-D02' = { status = "passing", story = "E6-14" }
 'MC-D03' = { status = "passing", story = "E6-14" }
@@ -407,8 +407,8 @@
 'MC-D08' = { status = "pending", story = "E6-14" }
 'MC-D09' = { status = "pending", story = "E6-14" }
 'MC-D10' = { status = "pending", story = "E6-14" }
-'MC-D11' = { status = "pending", story = "E6-14" }
-'MC-D12' = { status = "pending", story = "E6-14" }
+'MC-D11' = { status = "passing", story = "E6-14" }
+'MC-D12' = { status = "passing", story = "E6-14" }
 'MC-D13' = { status = "passing", story = "E6-14" }
 'MC-D14' = { status = "passing", story = "E6-14" }
 'MC-D15' = { status = "passing", story = "E6-14" }
@@ -519,16 +519,15 @@
 'MC-W55' = { status = "pending", story = "E6-13" }
 'MC-W56' = { status = "pending", story = "E6-13" }
 'MC-W57' = { status = "pending", story = "E6-13" }
-# Family J, delegation routing (stream H, E6-13, #444; DEC-353). The five controls carry no delegation and pass on
-# mandate-spec's §9.2 row today. The five with a delegation wait on E6-13's code half: `autonomy.delegations` in
-# mandate-spec's type and parser (refused today as an unknown member), then DEC-353's rule in its §9.2 classifier.
-'MC-J01' = { status = "pending", story = "E6-13" }
+# Family J, delegation routing (stream H, E6-13, #444; DEC-353). All ten pass: the five controls since #471, the
+# five with a delegation since #523 put delegations and DEC-353's rule into mandate-spec (DEC-420).
+'MC-J01' = { status = "passing", story = "E6-13" }
 'MC-J02' = { status = "passing", story = "E6-13" }
-'MC-J03' = { status = "pending", story = "E6-13" }
+'MC-J03' = { status = "passing", story = "E6-13" }
 'MC-J04' = { status = "passing", story = "E6-13" }
-'MC-J05' = { status = "pending", story = "E6-13" }
-'MC-J06' = { status = "pending", story = "E6-13" }
+'MC-J05' = { status = "passing", story = "E6-13" }
+'MC-J06' = { status = "passing", story = "E6-13" }
 'MC-J07' = { status = "passing", story = "E6-13" }
 'MC-J08' = { status = "passing", story = "E6-13" }
-'MC-J09' = { status = "pending", story = "E6-13" }
+'MC-J09' = { status = "passing", story = "E6-13" }
 'MC-J10' = { status = "passing", story = "E6-13" }
