@@ -304,7 +304,9 @@ are computed once and fanned out to subscribed workspaces. It emits no direction
 directional output is a signal model the user selects and pins
 ([mandate spec §8.1](specs/mandate.md#81-signal-model-contract-dec-52-dec-97);
 [DEC-62](project/04-decision-log.md#decisions)). This is the main cost lever for the managed
-offering. Hybrid and on-prem deployments can subscribe to it or run their own.
+offering. Hybrid and on-prem deployments can subscribe to it or run their own. The
+[data plane spec](specs/data-plane.md) (draft) defines it, the workspace data service, and the
+point-in-time store.
 
 ---
 
