@@ -704,6 +704,10 @@ after U-A1 to U-A5 are recorded.
   2. The status PR moving MC-E18 to `passing`.
   3. A §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
      (DEC-430 item 2). It is a spec PR and changes no rule.
+  *Follow-up (the #550 review, minors 1 and 2):* `mc_e18_holds_only_as_the_cancellation` asserts
+  only that its two plants fail. Pin each with `fails_naming` and the messages the review gives, so
+  a draft that stops being well formed cannot pass it by failing for another reason. `apply_now`'s
+  doc comment should say it is true whenever it folded a new mode, cancelling or not.
   *Follow-up (the #416 review, minor 3):* every `ask_permit` case asks for one instrument, so
   family E cannot see the budget counted per instrument rather than per agent (`mandate-approval`'s
   own suite does). A future MC-E case should spread its ten asks across instruments. It changes
