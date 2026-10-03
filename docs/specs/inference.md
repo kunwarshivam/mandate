@@ -362,6 +362,7 @@ One record per call (INF-6), written in the workspace deployment.
 | `call_id`, `workspace_id`, `agent_id`, `purpose` | Opaque IDs only |
 | `model_ref` | Registry id, version, and content hash; never prompt content |
 | `endpoint_class` | `hosted` or `local`, and the provider |
+| `key_owner` | `platform` or `customer`: whose provider key paid for the call. Customer-key calls count for caps and quotas and are billed zero for tokens ([billing design](../design/billing.md) BL-9, DEC-442 item 9) |
 | `input_tokens`, `output_tokens`, `cached_tokens`, `attempts`, `cache_hit` | Counts |
 | `cost_usd` | Fixed-point decimal, 6 places, rounded half up, as the spike does today |
 | `price_table_ref` | The versioned price table used |
@@ -404,8 +405,9 @@ One record per call (INF-6), written in the workspace deployment.
 sums metering records per organization, period, endpoint class, and provider, and sends counts and
 cost only, never content, model outputs, or instruments, to the metering pipeline in the global
 control plane. Hybrid deployments send signed usage reports; air-gapped ones send offline reports.
-The margin is applied by billing, never by the gateway. Whether hybrid customers may bring their own
-provider keys, and so pay the provider directly, is DEC-432 item 16 (Proposed).
+The margin is applied by billing, never by the gateway. Hybrid and on-prem customers may bring their
+own provider keys and pay the provider directly (DEC-432 item 16); those calls carry `key_owner =
+customer` and are billed zero for tokens ([billing design](../design/billing.md) §4.1).
 
 ---
 

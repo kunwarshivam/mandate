@@ -38,6 +38,7 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | Document | Purpose |
 |---|---|
 | [Infrastructure and operations](design/infrastructure.md) | Draft v0.1: environments, invariants, runtime topology, data stores, secrets and the vault, backups and disaster recovery, deploy and upgrade, observability and on-call, security baseline, cost model, failure walk (DEC-434) |
+| [Billing](design/billing.md) | Draft v0.1: invariants, plans and entitlements, quota enforcement before spend, the metering pipeline from journaled counts to invoices, the provider interface, the non-payment ladder that never touches exits, adversaries (DEC-442) |
 
 ## Product
 

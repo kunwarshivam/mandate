@@ -950,6 +950,53 @@ the spec invariants (DP-n) its tests cover.
 - **E14-2 (Must)** As an org owner, I want a hybrid license key tied to my organization.
 - **E14-3 (Should)** As an org owner, I want usage metering visible in the app.
 
+From the [billing design](../design/billing.md) (v0.1 draft, DEC-442). **SC** marks a story on a
+safety-critical path, to which the `AGENTS.md` safety-critical rules apply. No story here opens a
+provider account, sets a price, or charges anyone until DEC-442 items 14 to 20 are decided; each is
+built against a recorded provider fake.
+
+- **E14-4 (Must, M12)** As an org owner, I want my usage counted from my workspace's own records, so
+  that I can check what I am billed. *Accepted when:* the usage builder seals one report per
+  deployment per period from the closed counter list (design §4.1), `UsageReportSealed` before it
+  is signed; a property test shows two journals that differ only in orders and fills give identical
+  reports (BL-2); the canary run finds no canary byte in any report (BL-1); and
+  `mandate-cli usage recount` equals every sealed report, failing on a seeded builder off-by-one
+  (BL-7).
+- **E14-5 (Must, M12)** As the platform, I want usage ingested exactly once and reconciled, so that
+  no organization is billed twice or by estimate. *Accepted when:* fuzzed duplicate, reordered, and
+  delayed deliveries with ingest crashes give clean-run totals (BL-6); a chain gap, a late
+  air-gapped file, or a bounds-check failure holds the line and never estimates it (design §4.3);
+  and corrections are new reports and new traced lines, never edits (BL-11).
+- **E14-6 (Must, M12)** As the platform, I want the billing provider behind one interface with
+  idempotent writes and verified webhooks, so that the provider choice stays reversible.
+  *Accepted when:* every write carries the deterministic key of design §5.1 and a retry after a
+  timeout bills once; an outbox resends after a crash; a forged, replayed, or contradicted webhook
+  changes no state the provider API does not confirm (§5.3); the fake records every request and a
+  scan finds only BL-1's fields.
+- **E14-7 (Must, M12)** As an org owner, I want prices fixed for each cycle and every invoice line
+  explained, so that I am never re-billed at a new price. *Accepted when:* price versions are
+  immutable and pinned per cycle (BL-10); re-rating every closed cycle reproduces each line to the
+  cent; each line names its counter, period, version, and report digest (BL-11); money is
+  fixed-point with one rounding per line (BL-12); and bring-your-own-key tokens rate to zero with
+  unchanged quota use (BL-9), with `key_owner` on the metering record (inference spec §7.1).
+- **E14-8 (Must, M12; SC)** As an org owner, I want non-payment to follow a noticed ladder that never
+  touches my positions or exits. *Accepted when:* licenses are issued from the plan through E20-4's
+  format; the ladder of design §6.2 runs on a simulated clock with no early step and a notice
+  before each; only an API-confirmed non-payment withholds renewal and a provider outage renews
+  (BL-5, BL-14); and through every state, paper agents' exits, protective orders, owner exits, and
+  kill switches pass, while after lapse an opening is refused with `license_lapsed` (BL-4).
+- **E14-9 (Must, M12; SC)** As a billing admin, I want quotas and an organization spend cap enforced
+  before any spend, so that the bill never exceeds the cap. *Accepted when:* workspace, deployment,
+  seat, model-spend, and agent-hours quotas are checked at the points of design §3.4 with the
+  control plane unreachable; a fuzz over calls, deployments, stops, restarts, and cycle boundaries
+  shows spend never exceeds a cap by a separate accumulator; and no refusal appends a mode change,
+  cancel, or exit (BL-8).
+- **E14-10 (Should, M12)** As an org owner, I want sign-up, trial, plan changes, cancellation,
+  refunds, and organization deletion to behave as the design's lifecycle walk says. *Accepted
+  when:* each row of design §6.1 has a test from entry to exit; a downgrade below what runs stops no
+  agent; a refund is a traced credit to the original method; and deletion keeps billing records for
+  the retention period and the journal under its own rules.
+
 ### E15 Signal models: LLM and fast models, scorecards
 
 - **E15-1 (Must)** As an operator, I want an LLM research signal model that writes theses
