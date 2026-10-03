@@ -11,9 +11,17 @@
 //!
 //! The account stream's `MandateVersionApplied` and `UniverseChanged` are journal spec v0.8 §9.3's,
 //! with rules 29 to 33, routed here beside §9.2's (DEC-403, DEC-404).
+//!
+//! The agent stream's `ThesisProposed` and `ThesisRevised` are journal spec §9.4's, one shared
+//! schema with rules 34 to 38, routed here beside §9.2's and §9.3's (DEC-413, DEC-414). The checks
+//! that read the mandate the record names (§8.5 checks 4, 5, 6, 10 and 16's cap) are not schema
+//! rules: `append` holds no document store, so every reader of a thesis record runs
+//! `mandate_spec::context::check_thesis_record` before acting on it (DEC-414 item 3).
 
 use mandate_canon::Value;
+use mandate_domain::ThesisRefusal;
 use mandate_num::Usd;
+use mandate_time::UtcNanos;
 
 use crate::schema::Ty;
 use crate::{Invalid, InvalidReason, StreamId, StreamType};
@@ -40,11 +48,14 @@ const SNAPSHOT: &str = "AccountSnapshotRecorded";
 /// The account stream's risk-state records journal spec §9.3 closes, with rules 29 to 33.
 const RISK_STATE: [&str; 2] = ["MandateVersionApplied", "UniverseChanged"];
 
+/// The agent stream's research-agent thesis records journal spec §9.4 closes, with rules 34 to 38.
+const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
+
 /// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     match stream.stream_type() {
         StreamType::Control => CONTROL.contains(&event_type),
-        StreamType::Agent => event_type == REFUSAL,
+        StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
             event_type == REFUSAL || event_type == SNAPSHOT || RISK_STATE.contains(&event_type)
         }
@@ -186,6 +197,7 @@ pub(crate) fn payload(
                 "payload.thesis_id",
             )?;
         }
+        "ThesisProposed" | "ThesisRevised" => thesis_rules(event_type, p, config_refs)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
             for member in ["cash_band", "cash_in_band"] {
@@ -300,6 +312,101 @@ fn ascending(items: &[&str], path: &str) -> Result<(), Invalid> {
     )
 }
 
+/// Journal spec §9.4's rules 34 to 38 on a well-typed `ThesisProposed` or `ThesisRevised`, the first
+/// that fails reported, in number order (DEC-413, DEC-414). Rules 35 to 37 all report at
+/// `payload.reason`. Rule 36 recomputes checks 1 to 3 from the record's own members, with check 2
+/// compared to the nanosecond, and rule 37 check 15. Each reason is a [`ThesisRefusal`], named by its
+/// check number from 1 as §8.5 numbers it (DEC-415). Rule 38 reads the envelope's `config_refs.model_version`, as rule 22
+/// reads `AgentDeployed`'s mandate version.
+fn thesis_rules(
+    event_type: &str,
+    p: Payload<'_>,
+    config_refs: Option<&Value>,
+) -> Result<(), Invalid> {
+    let first_thesis = event_type == "ThesisProposed";
+    let revised =
+        p.0.get("revision")
+            .and_then(Value::as_int)
+            .is_some_and(|n| n > 0);
+    ensure(
+        first_thesis != revised,
+        InvalidReason::Schema,
+        "payload.revision",
+    )?;
+    ensure(
+        !first_thesis || p.is_null("autopsy_ref"),
+        InvalidReason::Schema,
+        "payload.autopsy_ref",
+    )?;
+    let admitted = p.0.get("admitted") == Some(&Value::Bool(true));
+    ensure(
+        p.is_null("reason") == admitted,
+        InvalidReason::Schema,
+        "payload.reason",
+    )?;
+    let refusal = ThesisRefusal::parse(p.text("reason")).ok();
+    let checks = [
+        (
+            ThesisRefusal::DirectionNotAllowed,
+            p.text("direction") != "long",
+        ),
+        (ThesisRefusal::HorizonMismatch, !horizon_agrees(p)),
+        (
+            ThesisRefusal::RevisionWithoutPredecessor,
+            !p.is_null("predecessor_thesis_id") != revised,
+        ),
+    ];
+    let first_failing = checks
+        .into_iter()
+        .find_map(|(check, fails)| fails.then_some(check));
+    let decided = match first_failing {
+        Some(first) => refusal == Some(first),
+        None => !refusal.is_some_and(ThesisRefusal::is_ignored_output),
+    };
+    ensure(decided, InvalidReason::Schema, "payload.reason")?;
+    let corroborated = if p.is_null("corroboration") {
+        refusal.is_some_and(|refusal| {
+            refusal.check_number() <= ThesisRefusal::NoCorroboration.check_number()
+        })
+    } else {
+        refusal != Some(ThesisRefusal::NoCorroboration)
+    };
+    ensure(corroborated, InvalidReason::Schema, "payload.reason")?;
+    let model = config_refs
+        .and_then(|refs| refs.get("model_version"))
+        .and_then(Value::as_str);
+    ensure(
+        model.is_none_or(|model| model == p.text("content_hash")),
+        InvalidReason::Schema,
+        "payload.content_hash",
+    )
+}
+
+const NANOS_PER_SECOND: i128 = 1_000_000_000;
+
+/// Check 2 (mandate spec §8.2, §8.5): `expires_at` is exactly `as_of` plus `horizon_s` seconds, to
+/// the nanosecond. An instant past the type's range never agrees, so it fails check 2 rather than
+/// being skipped.
+fn horizon_agrees(p: Payload<'_>) -> bool {
+    let nanos = |member: &str| {
+        UtcNanos::parse(p.text(member)).ok().and_then(|t| {
+            i128::from(t.secs())
+                .checked_mul(NANOS_PER_SECOND)
+                .and_then(|whole| whole.checked_add(i128::from(t.nanos())))
+        })
+    };
+    let horizon = p.0.get("horizon_s").and_then(Value::as_int).map(i128::from);
+    match (nanos("as_of"), nanos("expires_at"), horizon) {
+        (Some(as_of), Some(expires_at), Some(horizon)) => {
+            horizon
+                .checked_mul(NANOS_PER_SECOND)
+                .and_then(|span| as_of.checked_add(span))
+                == Some(expires_at)
+        }
+        _ => false,
+    }
+}
+
 /// Rule 24 on a compared snapshot: `cash_band` ≥ 0, and `cash_in_band` is `true` exactly when
 /// |`cash` − `model_cash`| ≤ `cash_band`. The amounts are compared as exact `Usd`; one too large to
 /// compare exactly is refused as `schema` at that member, never compared approximately (DEC-402).
@@ -347,6 +454,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         SNAPSHOT => &ACCOUNT_SNAPSHOT_RECORDED,
         "MandateVersionApplied" => &MANDATE_VERSION_APPLIED,
         "UniverseChanged" => &UNIVERSE_CHANGED,
+        "ThesisProposed" | "ThesisRevised" => &THESIS_RECORD,
         _ => return None,
     })
 }
@@ -404,6 +512,39 @@ static UNIVERSE_CHANGED: Ty = Ty::Record(&[
     ("lineage_id", Ty::Nullable(&Ty::Ident)),
     ("universe_size_after", Ty::Int),
     ("risk_clock", Ty::RiskClock),
+]);
+
+/// Journal spec §9.4's one schema for both thesis records, in the spec's member order (DEC-413).
+/// `instrument_id` is an asset ID (v0.11, DEC-413 item 7).
+static THESIS_RECORD: Ty = Ty::Record(&[
+    ("model_id", Ty::Str),
+    ("model_version", Ty::Str),
+    ("content_hash", Ty::DigestRef),
+    ("thesis_id", Ty::Ident),
+    ("lineage_id", Ty::Ident),
+    ("revision", Ty::Int),
+    ("predecessor_thesis_id", Ty::Nullable(&Ty::Ident)),
+    ("autopsy_ref", Ty::Nullable(&Ty::DigestRef)),
+    ("instrument_id", Ty::AssetId),
+    ("asset_class", Ty::OneOf(&["us_equity", "crypto"])),
+    ("direction", Ty::Str),
+    ("as_of", Ty::Timestamp),
+    ("expires_at", Ty::Timestamp),
+    ("horizon_s", Ty::Int),
+    ("conviction", Ty::Decimal),
+    ("confidence", Ty::Decimal),
+    ("evidence_ref", Ty::Nullable(&Ty::DigestRef)),
+    ("evidence_sources", Ty::List(&Ty::Str)),
+    (
+        "corroboration",
+        Ty::Nullable(&Ty::OneOf(&["independent_source", "market_data"])),
+    ),
+    ("invalidation", Ty::Str),
+    ("allowlist_version", Ty::Int),
+    ("prompt_ref", Ty::DigestRef),
+    ("response_ref", Ty::DigestRef),
+    ("admitted", Ty::Bool),
+    ("reason", Ty::Nullable(&Ty::OneOf(&ThesisRefusal::CODES))),
 ]);
 
 static ACCOUNT_SNAPSHOT_RECORDED: Ty = Ty::Record(&[
@@ -1468,6 +1609,137 @@ mod tests {
                 "payload.provenance[0].path".to_owned()
             ))
         );
+        Ok(())
+    }
+
+    /// Journal spec §9.4's vectors, judged by `Draft::parse` alone so the mutation gate sees rules 34
+    /// to 38 here: every base and valid draft of `ThesisProposed` and `ThesisRevised` is accepted,
+    /// and every invalid one is refused with the first reason and path it expects (DEC-413,
+    /// DEC-414). The order drafts pin which of two broken rules is reported first.
+    #[test]
+    fn every_thesis_draft_is_judged_as_its_vectors_say() -> Result<(), String> {
+        let section = named_section("research")?;
+        let mut failures = Vec::new();
+        let drafts = section
+            .get("drafts")
+            .and_then(Value::as_object)
+            .ok_or("no drafts")?;
+        let mut accepted: Vec<(String, Value)> = Vec::new();
+        for name in drafts.keys() {
+            accepted.push((
+                format!("base {}", name.as_str()),
+                named("base_draft", Value::Str(name.as_str().to_owned()))?,
+            ));
+        }
+        for case in list(&section, "valid_drafts") {
+            accepted.push((format!("valid {}", text(case, "name")), case.clone()));
+        }
+        for (name, case) in &accepted {
+            let parsed = Draft::parse(&draft(&section, case)?).map(|_| ());
+            if parsed.is_err() {
+                failures.push(format!("{name}: {parsed:?}"));
+            }
+        }
+        let invalid = list(&section, "invalid_drafts");
+        for case in invalid {
+            let expect = case.get("expect").ok_or("no expect")?;
+            let refused = Draft::parse(&draft(&section, case)?)
+                .err()
+                .map(|e| (e.reason.code().to_owned(), e.path));
+            let wanted = (
+                text(expect, "reason").to_owned(),
+                text(expect, "path").to_owned(),
+            );
+            if refused.as_ref() != Some(&wanted) {
+                failures.push(format!("invalid {}: {refused:?}", text(case, "name")));
+            }
+        }
+        assert!(
+            accepted.len() >= 16 && invalid.len() >= 60,
+            "the vectors may add drafts, never drop them: {} valid drafts and bases, {} invalid drafts",
+            accepted.len(),
+            invalid.len()
+        );
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        Ok(())
+    }
+
+    /// The members §9.4 lists without `?`, as paths below `payload`, written out from the spec's
+    /// table rather than read from this module's schemas: each is refused as `schema` when `null`
+    /// (DEC-413, DEC-414). The vectors pin each member's type but not its nullability, so this is
+    /// what keeps a member loosened to nullable from passing.
+    #[test]
+    fn a_required_thesis_member_is_never_null() -> Result<(), String> {
+        const THESIS_REQUIRED: [&str; 22] = [
+            "model_id",
+            "model_version",
+            "content_hash",
+            "thesis_id",
+            "lineage_id",
+            "revision",
+            "instrument_id",
+            "asset_class",
+            "direction",
+            "as_of",
+            "expires_at",
+            "horizon_s",
+            "conviction",
+            "confidence",
+            "evidence_sources",
+            "evidence_sources[0]",
+            "evidence_sources[1]",
+            "invalidation",
+            "allowlist_version",
+            "prompt_ref",
+            "response_ref",
+            "admitted",
+        ];
+        let section = named_section("research")?;
+        let mut checked = 0;
+        for name in ["proposed_admitted", "revised_admitted"] {
+            let case = named("base_draft", Value::Str(name.to_owned()))?;
+            assert_eq!(
+                refusal(base(&section, &case)?),
+                None,
+                "the {name} base appends"
+            );
+            for member in THESIS_REQUIRED {
+                let mut body = Value::Object(base(&section, &case)?);
+                *value_at(&mut body, &format!("payload.{member}"))? = Value::Null;
+                let Value::Object(body) = body else {
+                    return Err("the base is a record".to_owned());
+                };
+                assert_eq!(
+                    refusal(body),
+                    Some(("schema".to_owned(), format!("payload.{member}"))),
+                    "{name}.{member} = null"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 44);
+        Ok(())
+    }
+
+    /// Either thesis record at any `schema_version` but 1 is refused as `unknown_schema`: each
+    /// reaches its schema through `schema`'s version gate, never around it (DEC-414).
+    #[test]
+    fn a_thesis_record_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
+        let section = named_section("research")?;
+        let two = Int::new(2).ok_or("an integer")?;
+        for name in ["proposed_admitted", "revised_admitted"] {
+            let mut body = base(&section, &named("base_draft", Value::Str(name.to_owned()))?)?;
+            assert_eq!(refusal(body.clone()), None, "the {name} base appends");
+            body.insert(
+                Key::new("schema_version").map_err(|_| "key")?,
+                Value::Int(two),
+            );
+            assert_eq!(
+                refusal(body),
+                Some(("unknown_schema".to_owned(), "payload".to_owned())),
+                "{name}"
+            );
+        }
         Ok(())
     }
 }

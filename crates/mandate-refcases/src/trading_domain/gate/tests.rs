@@ -136,6 +136,7 @@ fn the_listing_and_market_are_dec_199_item_6s() -> Result<(), String> {
         median_dollar_volume_20d,
         median_dollar_volume_30d,
         min_order_size,
+        qty_increment,
         halted,
         status_feed_current,
     } = listing(msft.clone(), (Some(Exchange::Nyse), None), true, limit, at)?;
@@ -158,6 +159,11 @@ fn the_listing_and_market_are_dec_199_item_6s() -> Result<(), String> {
     )?;
     expect_eq("median_dollar_volume_30d", median_dollar_volume_30d, None)?;
     expect_eq("min_order_size", min_order_size, num(Qty::parse("1"))?)?;
+    expect_eq(
+        "qty_increment, a fractionable equity's grid of fractional shares",
+        qty_increment,
+        num(Qty::parse("0.000000001"))?,
+    )?;
     expect_eq("halted", halted, false)?;
     expect_eq("status_feed_current", status_feed_current, true)?;
 
@@ -178,6 +184,43 @@ fn the_listing_and_market_are_dec_199_item_6s() -> Result<(), String> {
         Some(num(Qty::parse("1000000"))?),
     )?;
     expect_eq("adv_20d", adv_20d, Some(num(Qty::parse("10000000"))?))
+}
+
+/// The listing's quantity grid is the venue's (DEC-427 item 6): a whole-share equity's is 1, and a
+/// crypto pair's is its `min_trade_increment`, never a grid read from `fractionable`.
+#[test]
+fn the_listing_states_the_venue_s_quantity_grid() -> Result<(), String> {
+    let num = |parsed: Result<Qty, _>| parsed.map_err(|e| format!("{e}"));
+    let at = UtcNanos::parse_rfc3339("2026-09-22T14:00:00Z").map_err(|e| e.to_string())?;
+    let limit = Price::parse("400").map_err(|e| e.to_string())?;
+    let msft = AssetId::new("MSFT").map_err(|e| e.to_string())?;
+    let btc = AssetId::new("BTC/USD").map_err(|e| e.to_string())?;
+    let whole = listing(msft, (Some(Exchange::Nyse), None), false, limit, at)?;
+    expect_eq(
+        "a whole-share equity's grid",
+        whole.qty_increment,
+        num(Qty::parse("1"))?,
+    )?;
+    let pair = super::Pair {
+        quote_currency: Some(QuoteCurrency::Usd),
+        min_order_size: num(Qty::parse("0.0001"))?,
+    };
+    for fractionable in [true, false] {
+        let crypto = listing(btc.clone(), (None, Some(pair)), fractionable, limit, at)?;
+        expect_eq(
+            "a crypto pair's grid, its min_trade_increment",
+            crypto.qty_increment,
+            num(Qty::parse("0.0001"))?,
+        )?;
+    }
+    let unstated = super::pair("BTC/USD", &json!({ "symbol": "BTC/USD" }))?;
+    let defaulted = listing(btc, (None, Some(unstated)), true, limit, at)?;
+    expect_eq(
+        "a crypto pair stating no min_trade_increment, on the smallest Qty",
+        defaulted.qty_increment,
+        num(Qty::parse("0.000000001"))?,
+    )?;
+    Ok(())
 }
 
 #[test]

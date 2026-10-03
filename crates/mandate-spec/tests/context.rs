@@ -82,6 +82,7 @@ fn args() -> ContextArgs {
             workspace_users: 1,
             approver_users: 1,
         }),
+        independent_approval_required: false,
         instrument_groups: BTreeMap::new(),
         eligibility_failures: BTreeSet::new(),
     }
@@ -368,6 +369,7 @@ fn the_previous_version_is_the_drafts_agents_last_active_version() {
         Some(PreviousVersion {
             environment: Environment::Live,
             connection_id: conn(THEIRS),
+            mandate: None,
         })
     );
     assert_eq!(
@@ -405,6 +407,23 @@ fn membership_is_what_the_identity_service_supplied_and_zero_without_it() {
         ),
         (0, 0, usd("25000"))
     );
+}
+
+/// The effective `independent_approval_required` is the policy owner's, given as an argument, and the
+/// fold carries it as given beside a value it read from a fact (V-047, DEC-428).
+#[test]
+fn the_effective_policy_is_what_the_policy_owner_supplied() {
+    let facts = [snapshot(OURS, "25000")];
+    for required in [true, false] {
+        let mut given = args();
+        given.independent_approval_required = required;
+        let read =
+            ValidationContext::from_journal(&draft(), given, &facts).expect("the facts fold");
+        assert_eq!(
+            (read.independent_approval_required, read.account_equity_usd),
+            (required, usd("25000"))
+        );
+    }
 }
 
 #[test]

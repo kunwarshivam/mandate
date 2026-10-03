@@ -20,6 +20,77 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-444](../project/decisions/DEC-444.md), the founder's decision of 2026-10-03
+  on DEC-411 item 6):** V-047 no longer refuses a new version of a running agent that §9.2
+  classifies as risk-reducing against its previous version, in a workspace of fewer than two users
+  under `independent_approval_required`. A neutral version, a risk-increasing one (including one
+  that reduces some fields and adds risk on another), a first version, and a version whose previous
+  document validation does not have are still refused. The previous version is the agent's current
+  one: the document whose canonical hash is its current `mandate_version`, supplied by the platform,
+  never by the requester; a document that does not match it is refused (#570 round 1, B1). The
+  exemption reads §9.2's own result, not a second classifier. MC-V72 to MC-V77 are added (§11).
+- **v0.6, amended ([DEC-432](../project/decisions/DEC-432.md) item 18, under DEC-176):** §8.1's
+  content-hash sentence lists everything the hash covers for a model called through the gateway, as
+  inference spec §4.1 defines it, and says endpoints and status are outside it. It pins more, so it
+  only tightens; no rule, case, or fixture changes, since the reference cases carry hashes as
+  opaque values.
+- **v0.6, amended ([DEC-438](../project/decisions/DEC-438.md) item 10, under DEC-176):** §6.4's
+  notification payload and §6.7's tripwire alert carry a random notice id instead of the approval's
+  or the limit event's id, since a ULID's leading bits are its creation time. It only sends less to
+  providers; no rule, case, or fixture changes. Until E8-9, nothing leaves the workspace: v0's only
+  channel is `cli_inbox`.
+- **v0.6, amended ([DEC-429](../project/decisions/DEC-429.md), wording only; #528 round 2, minors 1 to
+  3):** V-047's reasons name a risk-increasing change again, which §4.3 lists and a lone user cannot
+  make either (the latched-floor reason stays out). §5.7's single-user sentence says what V-047
+  refuses there, a loosening version, since a single-user workspace under the policy exists after
+  confirmation (DEC-411 item 6). §6.7 says MC-W50, MC-W53, MC-W54 and MC-W56 specify the
+  lone-workspace state, pending until E6-13. No rule, case, or fixture changes.
+- **v0.6, amended ([DEC-399](../project/decisions/DEC-399.md) item 7):** §5.5's `trim_to_target`
+  states what the risk gate already does: a trim is sized after the agent's own non-protective
+  sells resting in the instrument, the minimum is judged on what they leave, and no trim is due
+  when they cover the excess. The reference model takes it through a new trim input,
+  `open_sell_qty`, which the seven trim cases state as `'0'` with no expectation changed. MC-B36
+  (a 1-share remainder beside 2 resting, at a 3-share minimum the whole excess would meet, is
+  withheld) and MC-B37 (the same remainder at a 1-share minimum is the trim) are added (§11).
+- **v0.6, amended ([DEC-436](../project/decisions/DEC-436.md) items 9 and 19, the workspace API
+  spec; tightening only, DEC-176):** §6.4's check 7 counts an owner-connected client as the user it
+  acts for (`on_behalf_of`): a version proposed through a client has that user as its author, and a
+  grant can never come from a client (check 3 already refuses any actor not of kind `user`). No
+  rule loosens; no case or fixture changes.
+- **v0.6, amended ([DEC-423](../project/decisions/DEC-423.md)):** §5.5's `trim_to_target`
+  minimum no longer withholds a trim of the whole position. That trim is a sell closing the full
+  position by its exact quantity, which [trading spec §5.3](trading-domain.md) rule 2 exempts from
+  `min_order_size`, so it goes at any size. Any other trim below `min_order_size` is still
+  withheld, including the remainder beside one of the agent's own resting sells, since that order
+  is not the position's quantity. The reference model, which has no resting sell, skips the
+  minimum for a trim equal to the quantity held. MC-B35 is added: 1 share at a 999 bid, whose
+  trim is that share, goes at a 2-share minimum (§11). No existing case changes. The example in
+  the entry below is not released by this: on the gate's 1e-9 quantity grid its trim is
+  0.000116667, not the whole position, and it waits for the instrument's real quantity grid
+  (DEC-423, Rationale).
+- **v0.6, amended ([DEC-411](../project/decisions/DEC-411.md), the founder's decision of 2026-10-02):**
+  V-047 refuses a mandate at validation, and again at application, when the workspace's policy
+  requires independent approval and the workspace has fewer than two active users (an unknown count
+  is one). Under that policy deployment, a high-water-mark reset, and lifting a fired tripwire each
+  need a second user, so a single user could neither deploy the mandate nor acknowledge its ladder or
+  its tripwires; §5.7's single-user path is therefore never reached under that policy. §4 lists
+  what validation reads. A workspace that loses its second user after a version is confirmed is not
+  covered: see DEC-411. MC-V69 to MC-V71 are added (§11).
+- **v0.6, amended ([DEC-399](../project/decisions/DEC-399.md) item 8):** §5.5's
+  `trim_to_target` minimum is named: a trim is sent only if its quantity is at least the
+  instrument's minimum order size (`min_order_size`, [trading spec §5.3](trading-domain.md) rule 2),
+  which is the minimum the risk gate holds. §8.3 step 5's "minimum order" is named as the minimum
+  order value, `min_order_usd`, with its rule unchanged, and so is the `accumulate` goal's minimum
+  order (§3). The reference model judges a trim by the quantity, which matches the gate. Where the
+  two minimums disagree, a trim below `min_order_size` that is not a full close is an order the
+  broker would refuse for size. **Known defect:** a trim that would close the whole position is, on
+  this version, still withheld below `min_order_size`, though trading spec §5.3 rule 2 exempts a
+  full close. For example, 0.0002 BTC at a 600,000 bid (120 dollars) with a cap of 100, a confirmed
+  factor of 0.5 and a `min_order_size` of 0.001: the trim is the whole position on the venue's
+  0.0001 grid (on the gate's 1e-9 grid it is 0.000116667, as the entry above says), and it is
+  withheld at every evaluation. [DEC-423](../project/decisions/DEC-423.md) fixes it, in the gate first and
+  then here. No existing reference case changes, the four trim cases state `min_order_size`, and
+  MC-B33 and MC-B34 are added where the two minimums disagree; MC-B33 sits on the boundary (§11).
 - **v0.6, amended ([DEC-353](../project/decisions/DEC-353.md), [#444](https://github.com/kunwarshivam/mandate/issues/444)):**
   §9.2's autonomy row no longer calls a rule change reducing when it sends an order that reached an
   undelegated ask to an ask a delegation of the new version lifts: widening an `ask` rule a
@@ -194,10 +265,10 @@ stateDiagram-v2
     Compiled --> Reviewed: user enters or confirms every envelope field
     Reviewed --> Validated: schema + V-rules + policy hierarchy pass; warnings acknowledged
     Validated --> Versioned: canonical hash = mandate_version
-    Versioned --> Deployed: backtest and paper requirements met; owner approves (step-up)
+    Versioned --> Deployed: backtest and paper requirements met, then the owner approves (step-up)
     Deployed --> Deployed: new version applied (§2.2)
     Deployed --> Holding: goal complete or end date, on_complete = hold_protected or disarm_ladder
-    Deployed --> Retired: on_complete = release; profit_stop reached and flat; agent stopped
+    Deployed --> Retired: on_complete = release, profit_stop reached and flat, or agent stopped
     Holding --> Retired: owner releases or closes positions
     Retired --> [*]
 ```
@@ -314,7 +385,7 @@ it. `null` means no end.
 | Type | Parameters | Behavior | Done when | Then |
 |---|---|---|---|---|
 | `continuous` | `end_date`, `on_complete` | Trades the working universe (§2.3) | `end_date` passes | `on_complete` |
-| `accumulate` | instrument, `target_qty`, `max_avg_price` (or null), `max_spend_usd`, `end_date`, `on_complete` | Buys only the goal instrument; the universe is **pinned** to exactly that instrument and admits nothing (V-003). **Discretionary exits are disabled**; risk exits and protection apply. Buys are clipped (§8.3) | Remaining quantity (`target_qty` − position) is below one increment or below the minimum order; remaining spend is below the minimum order; or `end_date` passes | `on_complete` |
+| `accumulate` | instrument, `target_qty`, `max_avg_price` (or null), `max_spend_usd`, `end_date`, `on_complete` | Buys only the goal instrument; the universe is **pinned** to exactly that instrument and admits nothing (V-003). **Discretionary exits are disabled**; risk exits and protection apply. Buys are clipped (§8.3) | Remaining quantity (`target_qty` − position) is below one increment or below the minimum order value (`min_order_usd`); remaining spend is below the minimum order value (`min_order_usd`); or `end_date` passes | `on_complete` |
 | `profit_stop` | `profit_level`, `end_date` | Trades the working universe (§2.3) | Agent return reaches the level, confirmed in the risk state by breach time per §5.6 with no hard trigger: E − C ≥ `profit_level` × C (C = capital base, §5.1); or `end_date` passes | Discretionary exit of every position, then Retired (`AgentStopped`, reason `profit_stop_reached` or `end_date`) |
 
 - `profit_stop` is a stop condition, not a target: the UI shows `profit_level` as the level at
@@ -351,6 +422,12 @@ Bring-your-own-strategy is the exception: a **pinned** universe is an envelope f
 ## 4. Validation
 
 A mandate is valid when it passes the JSON Schema, every V-rule, and the policy hierarchy (§4.3).
+Besides the document, validation reads: the account's equity and the other active agents' allocations
+on it, the validation date, the signal-model registry, each field's provenance, the workspace's users
+and approvers, the disclosures accepted, the instrument groups and other agents' claims, the
+connection's environment and loss carry, the eligibility failures, the previous version and the
+agent's current `mandate_version` (V-047), and the effective policy values (§4.3),
+`independent_approval_required` among them.
 Failures return all violated codes. Warnings (§4.2) do not block, but each must be acknowledged
 and is recorded in `MandateConfirmed`.
 
@@ -395,6 +472,7 @@ and is recorded in `MandateConfirmed`.
 | V-043 | Each delegation's caps fit inside the envelope: `max_order_usd` ≤ `risk.max_order_usd`, `max_order_usd` ≤ `max_total_usd`, and `max_total_usd` ≤ `capital.allocation_usd`; and when `two_approver_above_usd` is set, `max_order_usd` ≤ it, so a delegation never stands in for a second approver. The gate enforces every limit regardless (§6.5); this keeps a delegation from even appearing to widen one |
 | V-044 | Tripwire ids are sorted and unique. A `consecutive_losing_exits` or `new_instruments` threshold is a whole number from 1 to 1,000; a `realized_loss_usd` threshold is in whole cents and at most `capital.allocation_usd`, so a tripwire never appears to guard what it cannot reach ([DEC-187](../project/04-decision-log.md#decisions), [DEC-352](../project/decisions/DEC-352.md)) |
 | V-046 | An `autonomy.review_by` the version sets or moves (absent from, or different from, the previous version's) is not before the validation date and at most 180 days after it; one carried unchanged is not checked again, so a lapsed date stays lapsed through a version that changes something else. A version whose previous version set a review date sets one too ([DEC-188](../project/04-decision-log.md#decisions), [DEC-272](../project/04-decision-log.md#decisions)) |
+| V-047 | When the workspace's policy requires independent approval (`independent_approval_required`, §4.3, its effective value), the workspace has at least two users. Users are the workspace's active members: a pending invitation or a deactivated account is not one, and a user count that is absent or not known counts as one user (rule 3, as §6.7 says of a missing name). Under that policy, deployment, a risk-increasing change, a high-water-mark reset, and lifting a fired tripwire each need a user other than the requester (§4.3, §5.8, §6.7). A one-user workspace could not deploy the mandate, make a risk-increasing change to it, acknowledge its drawdown ladder, or lift a tripwire it fired, so it is refused here, where the owner sees why, rather than at deployment or at the first latch. **One exception** ([DEC-444](../project/decisions/DEC-444.md), the founder's decision of 2026-10-03 on DEC-411 item 6): a new version of a running agent that §9.2 classifies as **risk-reducing** against its previous version is not refused by V-047. The classification is §9.2's own result for the two documents, as change classification computes it, and no other reading of "reducing" counts. The previous version is the agent's **current** version: the document whose canonical hash (§9.1) is the agent's current `mandate_version`, which the platform supplies from the journal and the requester never does. A document validation cannot match to that hash is not a previous version for this purpose. A version with any risk-increasing path is risk-increasing (§9.2), so one that reduces some fields and adds risk on another is refused, and so is a **neutral** version, a first version (no previous version: a deployment), and a version whose previous document validation does not have or cannot match to the agent's current `mandate_version` (rule 3). At application the current version is read again: a version validated against a predecessor that is no longer current when it applies is refused. Checked at validation and again when a version is applied, as V-002 is ([DEC-411](../project/decisions/DEC-411.md)) |
 
 ### 4.2 Warnings and the confirmation screen
 
@@ -565,7 +643,7 @@ exits, and the kill switch are never denied by them (MI-1).
 
 | Action | Trigger | Effect | Lifts when |
 |---|---|---|---|
-| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, a position with MV − factor × cap ≥ `rebalance_band` × cap is sold down to factor × cap as a `risk_exit` (quantity rounded up to the increment) at the next evaluation, only once the rung has been active for `breach_confirm_s`, only if the order meets the minimum, for equities only in the regular session, and never while Holding (DEC-65) | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
+| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, a position with MV − factor × cap ≥ `rebalance_band` × cap is sold down to factor × cap as a `risk_exit` (quantity rounded up to the increment, less the agent's own non-protective sells already resting in the instrument, [DEC-399](../project/decisions/DEC-399.md) item 7; none when they cover the excess) at the next evaluation, only once the rung has been active for `breach_confirm_s`, only if its quantity is at least the instrument's minimum order size (`min_order_size`, the minimum the risk gate holds; not §8.3 step 5's minimum order value) or is the whole position held, a full close trading spec §5.3 rule 2 exempts ([DEC-423](../project/decisions/DEC-423.md)), which matches the gate; any other trim below the minimum is an order the broker would refuse for size, for equities only in the regular session, and never while Holding (DEC-65) | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
 | `exits_only` | Confirmed (§5.6) | Restriction `drawdown_exits_only` (mode `exits_only`) | Owner acknowledgment (§5.8) |
 | `flatten_and_pause` | Confirmed (§5.6) | Agent-scoped kill switch; restriction `drawdown_flatten` (mode `paused`) | Owner acknowledgment once flat (§5.8) |
 
@@ -607,6 +685,7 @@ Applies to `exits_only` and `flatten_and_pause` rungs, daily loss, the lifetime 
   `max_loss_from_allocation` to f′ applies with E > C × (1 − f′) + L (strictly), journaled as
   `RiskLimitLifted` with reason `version_loosened`; confirmation then starts afresh. While the floor
   is latched, that version needs independent approval (a second user). In a single-user workspace
+  (under `independent_approval_required` a loosening version is refused there, by V-047)
   it applies only once the first full risk day after the confirmation day has ended; earlier it is
   rejected (`waiting_period`), as is a version that leaves E at or below the new floor
   (`still_below_new_floor`) or does not loosen (`not_loosening`).
@@ -832,9 +911,11 @@ own text, shown as theirs and never as the platform's.
   changed (DEC-111). No price targets, no profit estimates, and **no scorecard** until counsel
   answers [question 35](../product/08-compliance-and-regulatory.md), because a scorecard may count
   as hypothetical performance.
-- Notification payloads are exactly the request's opaque approval id and one generic text
-  (`AGENTS.md` rule 6): no instrument, side, quantity, price, order value, score, thesis, agent
-  name, rule, or deadline ever reaches them.
+- Notification payloads are exactly a random notice id, which resolves to the request only inside
+  the workspace and is never the request's event id, and one generic text (`AGENTS.md` rule 6;
+  [notifications spec §4.2](notifications.md#42-the-payload), DEC-438): no instrument, side,
+  quantity, price, order value, score, thesis, agent name, rule, deadline, or event timestamp ever
+  reaches them.
 - Never persuasive language or profit estimates.
 
 **Lifecycle.** An approval is **pending** from its `ApprovalRequested` until exactly one terminal
@@ -875,7 +956,7 @@ journaled on `ApprovalResponded` with result `refused`:
 | 4 | The request was delivered on at least one channel | `not_delivered` |
 | 5 | The response repeats the request's content hash | `content_mismatch` |
 | 6 | Step-up evidence is valid at the effective time (§6.1) | `step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method` |
-| 7 | The responder is not already in the approval's grant set, and, when independence is required, is not the mandate's author. The requirement is the **stricter** of the bound `approvers` and the workspace policy overlay (§4.3) current at the effective time: independence is required if either requires it, and the approver count is the larger of the bound `required` and the overlay's (2 when the overlay's `two_approver_above_usd` is set and `order_usd` exceeds it, else 1) | `duplicate_approver`, `not_independent` |
+| 7 | The responder is not already in the approval's grant set, and, when independence is required, is not the mandate's author. A version proposed through an owner-connected client is authored by the user the client acts for (`on_behalf_of`, [workspace API spec §3.3](workspace-api.md#33-authentication-and-sessions)), so proposing through one's own client never makes one independent of the result. The requirement is the **stricter** of the bound `approvers` and the workspace policy overlay (§4.3) current at the effective time: independence is required if either requires it, and the approver count is the larger of the bound `required` and the overlay's (2 when the overlay's `two_approver_above_usd` is set and `order_usd` exceeds it, else 1) | `duplicate_approver`, `not_independent` |
 
 A grant that passes all seven joins the approval's grant set. It is `admitted` if the set now holds
 check 7's approver count of distinct approvers, none of them the mandate's author while check 7
@@ -929,7 +1010,10 @@ for E9-4's step-up methods.
 the policy overlay lowers it while the approval is pending, needs two distinct approvers; when the
 request bound `independent_approval_required` or the overlay now requires it, neither may be the
 mandate's author (check 7). Each approver counts once. In a one-person workspace such an approval
-cannot reach its quorum, so it times out and is skipped. `deny` is never overridden.
+cannot reach its quorum, so it times out and is skipped. Under `independent_approval_required` V-047
+refuses a one-user workspace at validation, so there this describes a workspace that fell to one user,
+or turned the requirement on, after its version was confirmed
+([DEC-411](../project/decisions/DEC-411.md) item 6). `deny` is never overridden.
 
 **Delegation scopes** ([DEC-181](../project/04-decision-log.md#decisions)): an approval card may
 offer, beside Approve and Skip, the delegation shapes of §6.5, listed in `choices`. "Approve just
@@ -1110,8 +1194,9 @@ Fills before the arming input never count.
 **Firing.** The executor evaluates every tripwire of the version in effect, in `id` order, after the
 lifetime floor at each input (§5.2). One that is not fired and whose metric has reached its threshold
 fires at that input: `RiskLimitTriggered` (limit `tripwire:<id>`, its action, reason
-`tripwire_condition`, the metric, the threshold, and the value reached), then an `OwnerAlertSent` whose
-payload is the opaque id of that event and one generic text (`AGENTS.md` rule 6); it is a risk-limit
+`tripwire_condition`, the metric, the threshold, and the value reached), then an `OwnerAlertSent` naming
+that event, whose notice carries only a random notice id and one generic text (`AGENTS.md` rule 6;
+notifications spec §4.2); it is a risk-limit
 alert, so quiet hours never suppress it (§6.4). A version input is evaluated too, so a version that
 adds a tripwire, or lowers a threshold to a count already reached, applies at once (§2.2).
 
@@ -1133,7 +1218,11 @@ requested, which the acknowledgment carries, and the overlay when the executor p
 and §6.4 check 7 read it. Under it the acknowledgment names both users, and one that names the
 requester as the acknowledging user, or omits either name, is refused with `not_independent` (rule 3:
 a missing name never counts as a second user). With the requirement on and only one user in the
-workspace, a fired tripwire cannot be lifted until a second user exists, as for the drawdown ladder.
+workspace, a fired tripwire could not be lifted until a second user exists, as for the drawdown ladder,
+so V-047 refuses such a mandate at validation. What stays reachable is a workspace that falls to one
+user, or turns the requirement on, after its version was confirmed
+([DEC-411](../project/decisions/DEC-411.md) item 6): the tripwire then stays fired until a second user
+acknowledges it, as MC-W50, MC-W53, MC-W54 and MC-W56 specify (pending until E6-13 makes them bind).
 A refused one is journaled as `OwnerCommandRefused` and the tripwire stays fired. A valid one journals
 `RiskLimitLifted` (reason `owner_acknowledged`), lifts the restriction it held, and, if the version in
 effect still holds the `id`, arms it afresh with nothing counted, so the owner is not asked again for
@@ -1213,7 +1302,13 @@ until the owner confirms them, §7), because they only reduce risk.
 - A signal model is a registered component with an id (`quant.`, `fast.`, or `llm.` prefix), a
   semantic version, and a **content hash** of its code, prompt, parameter schema, and underlying
   model identity (provider, model name, and version, or weights hash); the mandate pins all three
-  (V-007). **Signal models never place orders.**
+  (V-007). For a model called through the model gateway, the hash also covers the rest of the
+  registry entry's pinned content: the retrieval plan, the output schema and validation bounds, the
+  call deadline, the output-token limit, the sampling parameters, the quantization of open weights,
+  the methodology text, and the authorship label
+  ([inference spec §4.1](inference.md#41-registry-entry), DEC-432 items 17 and 18). The entry's
+  endpoints and status are **not** in the hash: a routing or status change never changes a pin.
+  **Signal models never place orders.**
 - **The model gateway never substitutes a model** (DEC-67): a fallback may route only to another
   endpoint serving the identical pinned model; otherwise the call fails and the output counts as
   missing (§8.3). The platform withdraws a model version only through a journaled
@@ -1298,7 +1393,7 @@ each evaluation:
    - if `max_avg_price` is set and a − `max_avg_price` × β > 0:
      n ≤ (`max_avg_price` × position − cost basis) ÷ (a − `max_avg_price` × β). Then hold if the
      projected average (cost basis + n × a) ÷ (position + n × β) would exceed `max_avg_price`.
-5. Hold if the result is below the minimum order. Otherwise the proposal (purpose, quantity, limit
+5. Hold if the result is below the minimum order value (`min_order_usd`). Otherwise the proposal (purpose, quantity, limit
    price, s, outputs used, clips applied) goes to the gate dry run and autonomy (§6.2).
 
 
@@ -1539,7 +1634,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 427 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 441 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1551,12 +1646,12 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Family | IDs | Covers |
 |---|---|---|
 | Schema | MC-S01 to MC-S31 | Structural rejects, including `on_complete`, the 300 s confirmation cap, per-model output age, `max_instruments` bounds, the research object, `autonomy.admission` |
-| Semantic | MC-V01 to MC-V68 | Every V-rule and warning, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
+| Semantic | MC-V01 to MC-V77 | Every V-rule and warning, independent approval in a one-user workspace (V-047) and its risk-reducing exception, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
 | Policy | MC-P01 to MC-P22 | Nearest-level reporting, each key kind, the retail profile (DEC-98), the internal research profile (DEC-103), paper-only environments, the research keys, platform maximums |
 | Risk state | MC-R01 to MC-R26 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |
 | Gate | MC-G01 to MC-G16 | Position cap, order size, group cooldown, orders per day, gross exposure, exits exempt, the working universe (including an empty one, which denies every opening) |
-| Order builder | MC-B01 to MC-B32 | Exit and buy conviction, freshness, clipping, band, trim and its guards, deferral, averaging down, accumulate clips with fees |
+| Order builder | MC-B01 to MC-B37 | Exit and buy conviction, freshness, clipping, band, trim and its guards and its full-close exemption, the trim after a resting sell, deferral, averaging down, accumulate clips with fees |
 | Autonomy | MC-A01 to MC-A16 | Built-in AUTO including `owner_exit`, rule order, thresholds, default, two approvers, the admission ceiling, `new_instrument`, `thesis_confidence` |
 | Agent flatten | MC-F01 to MC-F04 | Shared account, session deferral, owner kill switch with a floor price, and without confirmation |
 | Goal | MC-L01 to MC-L05 | `accumulate` completion, `on_complete`, end date (`profit_stop` is in the risk-state family) |

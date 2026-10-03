@@ -1,4 +1,11 @@
-"""Seeds known bugs into a copy of ref.py and checks that fuzz.py catches every one (AGENTS.md: independent oracles)."""
+"""Seeds known bugs into a copy of ref.py and checks that fuzz.py catches every one (AGENTS.md: independent oracles).
+
+A bug that makes a base mandate invalid cannot be carried here. `bases.py` asserts at import that
+every base passes `semantic()`, so such a probe crashes before any check runs, and `verdict()` scores
+the crash `ERROR`, which is neither a catch nor a survival. V-047 has two such bugs, an inverted
+policy and an ignored one: each fires V-047 on the bases. Do not add them, and do not read an
+`ERROR` as a catch (#528 round 2, minor 4).
+"""
 import pathlib, shutil, subprocess, sys, tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -8,6 +15,39 @@ MUTANTS = {
                                              "        if not breached:\n            self.acc = 0.0"),
     "additive capital base": ("self.C, self.L = H1, E01, C1, L1", "self.C, self.L = H1, E01, self.C + d, L1"),
     "hard trigger latches on one quote": ("        if quote and (t - self.hard_first[key]).total_seconds() >= self.hard_wait():", "        if True:"),
+    "V-047 reads a stated policy's presence, not its value": (
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
+        '    if "independent_approval_required" in ctx and ctx.get("workspace_users", 1) < 2:'),
+    "V-047 counts a one-user workspace as independent": (
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 1:'),
+    "V-047 counts an unknown workspace as two users": (
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 2) < 2:'),
+    "V-047 exempts a neutral version too": (
+        '            and classify(prev, m)[0] == "risk_reducing")',
+        '            and classify(prev, m)[0] in ("risk_reducing", "neutral"))'),
+    "V-047 exempts every version of a running agent": (
+        '            and classify(prev, m)[0] == "risk_reducing")',
+        '            and True)'),
+    "V-047 exempts a version when no current version is supplied": (
+        '    return (prev is not None and current is not None and set(SCHEMA["required"]) <= set(prev)\n'
+        '            and V.is_valid(prev) and version(prev) == current\n',
+        '    return (prev is not None and set(SCHEMA["required"]) <= set(prev)\n'
+        '            and V.is_valid(prev) and (current is None or version(prev) == current)\n'),
+    "V-047 exempts a version whose previous document it does not have": (
+        '    return (prev is not None and current is not None and set(SCHEMA["required"]) <= set(prev)\n'
+        '            and V.is_valid(prev) and version(prev) == current\n'
+        '            and classify(prev, m)[0] == "risk_reducing")',
+        '    return (prev is not None and current is not None\n'
+        '            and (not V.is_valid(prev)\n'
+        '                 or (version(prev) == current and classify(prev, m)[0] == "risk_reducing")))'),
+    "V-047 exempts a previous document the schema refuses": (
+        '            and V.is_valid(prev) and version(prev) == current\n',
+        '            and version(prev) == current\n'),
+    "V-047 exempts against a document that is not the agent's current version": (
+        '            and V.is_valid(prev) and version(prev) == current\n',
+        '            and V.is_valid(prev)\n'),
     "loss carry ignores withdrawals": ("        self.net_contributed += d\n", ""),
     "release retires without a loss carry": ('                self._retire("goal_complete", ev)\n',
                                              '                self.restrictions["retired"] = "stopped"\n'),
@@ -121,7 +161,8 @@ MUTANTS = {
                                        '    if False:\n        return skip("reclassified_deny")'),
     "re-validation accepts an ask by another trigger": ('    if c["decision"] == "ask" and c["by"] != req["decided_by"]:', '    if False:'),
     "re-validation skips the gate dry run": ('    if now["dry_run"]["verdict"] != "allow":', '    if False:'),
-    "re-validation ignores the mode": ('    if now["mode"] != "normal":\n        return skip("mode")', '    if False:\n        return skip("mode")'),
+    "a response step judges before an exits-only mode cancels": ('        if inp["now"]["mode"] != "normal" and st["pending"]:',
+                                                                 '        if False:'),
     "drift without the absolute value": ('abs(D(m_now) - D(m_req)) * 10000', '(D(m_now) - D(m_req)) * 10000'),
     "drift uses the crypto band for equities": ('<= DRIFT_BAND_BP[asset_class] * D(m_req)', '<= 200 * D(m_req)'),
     "no mark is inside the band": ('    if m_req is None or m_now is None:\n        return False\n    return abs(',
@@ -289,12 +330,28 @@ TRIPWIRE_MUTANTS = {
                                                 'inp.get("independent_now", False)'),
     "V-044 allows unsorted ids": ('    if not sorted_unique([t["id"] for t in tws]):\n        return {"V-044"}', '    if False:\n        return {"V-044"}'),
 }
+# The trim's minimum (§5.5, DEC-399 item 5) is judged by the family-B cases rather than by a fuzz:
+# MC-B33 and MC-B34 sit where the instrument's minimum order size and the dollar minimum disagree,
+# MC-B33 also sits on the boundary, a trim exactly at the minimum, MC-B35 is the full close the
+# minimum exempts (DEC-423), and MC-B36 and MC-B37 size the trim after a resting sell (DEC-399 item 7).
+TRIM_MUTANTS = {
+    "the trim's minimum is the dollar minimum order": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
+                                                      '        if sell * bid < D(inp["min_order_usd"]) and sell != qty:'),
+    "the trim's minimum is ignored": ('        if sell < D(inp["min_order_size"]) and sell != qty:', '        if False:'),
+    "a full close is withheld below the minimum": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
+                                                   '        if sell < D(inp["min_order_size"]):'),
+    "a trim at the minimum is withheld": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
+                                          '        if sell <= D(inp["min_order_size"]) and sell != qty:'),
+    "a trim ignores the agent's resting sells": ('        sell = max(D(0), min(qty - on_sale, ceil_inc((mv - factor * cap) / bid, inc) - on_sale))',
+                                                 '        sell = max(D(0), min(qty, ceil_inc((mv - factor * cap) / bid, inc)))'),
+}
+
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
          "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(2500); fuzz_client_ceiling(300); "
          "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
-         "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
+         "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_independence_floor(300); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
          "print(len(FAIL))")
 
 TW_PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
@@ -305,6 +362,12 @@ CASE_PROBE = ("import json, yaml\n"
               "mine = [c for c in generate.doc['cases'] if c['id'].startswith('MC-W')]; "
               "kept = [c for c in yaml.safe_load(open('../../docs/specs/reference-cases/mandate.yaml'))['cases'] if c['id'].startswith('MC-W')]; "
               "print('differ' if json.loads(json.dumps(mine)) != kept else 'same')")
+
+B_CASE_PROBE = ("import json, yaml\n"
+                "try:\n    import generate\nexcept AssertionError:\n    print('differ')\n    raise SystemExit(0)\n"
+                "mine = [c for c in generate.doc['cases'] if c['id'].startswith('MC-B')]; "
+                "kept = [c for c in yaml.safe_load(open('../../docs/specs/reference-cases/mandate.yaml'))['cases'] if c['id'].startswith('MC-B')]; "
+                "print('differ' if json.loads(json.dumps(mine)) != kept else 'same')")
 
 def run(work, probe):
     return subprocess.run([sys.executable, "-c", probe], cwd=work, capture_output=True, text=True, timeout=900)
@@ -325,19 +388,23 @@ def main():
         work = root / "reference" / "mandate"
         shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
         source = (HERE / "ref.py").read_text()
-        missing = [name for name, (old, _) in (MUTANTS | TRIPWIRE_MUTANTS).items() if old not in source]
+        missing = [name for name, (old, _) in (MUTANTS | TRIPWIRE_MUTANTS | TRIM_MUTANTS).items() if old not in source]
         assert not missing, f"mutation anchors missing, checked before any run: {missing}"
         assert verdict(run(work, PROBE), "0") == "missed", "the shared fuzz fails on the unmutated model"
         assert verdict(run(work, TW_PROBE), "0") == "missed", "the tripwire fuzz fails on the unmutated model"
         assert verdict(run(work, CASE_PROBE), "same") == "missed", "the MC-W cases differ from the unmutated model's"
-        for name, (old, new) in (MUTANTS | TRIPWIRE_MUTANTS).items():
+        assert verdict(run(work, B_CASE_PROBE), "same") == "missed", "the MC-B cases differ from the unmutated model's"
+        for name, (old, new) in (MUTANTS | TRIPWIRE_MUTANTS | TRIM_MUTANTS).items():
             shutil.rmtree(work, ignore_errors=True)
             shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
             ref = work / "ref.py"
             text = ref.read_text()
             assert old in text, f"mutation anchor missing: {name}"
             ref.write_text(text.replace(old, new, 1))
-            if name in TRIPWIRE_MUTANTS:
+            if name in TRIM_MUTANTS:
+                status = {"caught": "caught", "missed": "SURVIVED", "ERROR": "ERROR"}[verdict(run(work, B_CASE_PROBE), "same")]
+                name = f"{name} (MC-B cases)"
+            elif name in TRIPWIRE_MUTANTS:
                 by_fuzz, by_cases = verdict(run(work, TW_PROBE), "0"), verdict(run(work, CASE_PROBE), "same")
                 status = "ERROR" if "ERROR" in (by_fuzz, by_cases) else ("caught" if by_fuzz == by_cases == "caught" else "SURVIVED")
                 name = f"{name} (fuzz {by_fuzz}, MC-W cases {by_cases})"
@@ -346,7 +413,7 @@ def main():
             print(f"{status:8} {name}", flush=True)
             if status != "caught":
                 bad.append(name)
-    print(f"{len(MUTANTS) + len(TRIPWIRE_MUTANTS)} mutants, {len(bad)} not caught", flush=True)
+    print(f"{len(MUTANTS) + len(TRIPWIRE_MUTANTS) + len(TRIM_MUTANTS)} mutants, {len(bad)} not caught", flush=True)
     sys.exit(1 if bad else 0)
 
 if __name__ == "__main__":

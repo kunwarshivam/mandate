@@ -11,13 +11,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_canon::Value;
 use mandate_domain::{AssetClass, AssetId, AutonomyDecision, Environment};
 use mandate_num::{Fraction, NumError, Usd};
-use mandate_time::Date;
+use mandate_time::{Date, UtcNanos};
 
+use crate::change::{ChangeClass, classify};
 use crate::condition::{
     Condition, ConditionField, ConditionValue, FieldKind, MAX_CONDITION_DEPTH, Operator,
 };
 use crate::document::{
-    ConnectionId, Goal, LadderAction, Mandate, ModelId, Pointer, ProvenanceMap, ScaleAction,
+    ConnectionId, Goal, LadderAction, Lifts, Mandate, ModelId, Pointer, ProvenanceMap, ScaleAction,
     SignalModel, Source, pointer,
 };
 use crate::policy::{PolicyLevel, PolicyViolation, check, platform_base};
@@ -67,6 +68,19 @@ pub enum Violation {
     /// The `scale_sizes` factors' fractional digits sum past 12, so some set of active rungs would
     /// have a size factor the order builder cannot multiply by exactly (DEC-167).
     V040,
+    /// A delegation's id repeats, its `lifts` names a source that is not an `ask`, or its window is
+    /// empty or longer than 30 days (§6.5, DEC-181).
+    V041,
+    /// A version risk-increasing on any path but the delegations and the review date carries a
+    /// delegation over from the previous version (§9.2 read with the delegations removed, DEC-353
+    /// item 4).
+    V042,
+    /// A delegation's caps do not fit inside the envelope, or stand in for a second approver.
+    V043,
+    /// The workspace's policy requires independent approval and the workspace has fewer than two
+    /// active users, so nothing the policy reserves for a second user could ever happen (DEC-411).
+    /// Checked at validation and again when a version is applied ([`recheck_at_application`]).
+    V047,
 }
 
 impl Violation {
@@ -105,6 +119,10 @@ impl Violation {
             Self::V038 => "V-038",
             Self::V039 => "V-039",
             Self::V040 => "V-040",
+            Self::V041 => "V-041",
+            Self::V042 => "V-042",
+            Self::V043 => "V-043",
+            Self::V047 => "V-047",
         }
     }
 }
@@ -167,8 +185,15 @@ pub struct ValidationContext {
     pub validation_date: Date,
     pub registry: Option<BTreeMap<ModelId, RegisteredModel>>,
     pub provenance: ProvenanceMap,
+    /// The workspace's active members (V-020, V-047): a pending invitation or a deactivated account
+    /// is not one. A caller with no count passes 1 or 0, never more, because a count that is absent or
+    /// not known counts as one user (§4.1 V-047, rule 3); [`ContextArgs`](crate::context::ContextArgs)
+    /// with no membership folds to 0.
     pub workspace_users: u32,
     pub approver_users: u32,
+    /// The effective `independent_approval_required` (§4.3: once `true` at a level, every child is
+    /// `true`), which V-047 reads. An absent policy key is `false`, as the hierarchy reads it.
+    pub independent_approval_required: bool,
     pub disclosures_accepted: BTreeSet<mandate_canon::Digest>,
     /// Which instrument group each instrument belongs to (trading spec §7.1); an instrument absent
     /// from the map is its own group.
@@ -196,11 +221,16 @@ impl GroupId {
     }
 }
 
-/// What V-031 compares a new version against: the two fields that may never change.
+/// What V-031 and V-042 compare a new version against: the two fields that may never change, and
+/// the previous version itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreviousVersion {
     pub environment: Environment,
     pub connection_id: ConnectionId,
+    /// The previous version's document, which V-042 classifies the new one against. `None` when the
+    /// caller holds only the version's identity: V-042 then cannot tell a carried delegation from a
+    /// new one, so it refuses every delegation the new version holds, failing closed (DEC-420).
+    pub mandate: Option<Mandate>,
 }
 
 /// The four dollar figures §4.2 puts on the confirmation screen.
@@ -251,6 +281,7 @@ pub fn validate(
     account_rules(mandate, context, &worst_case, &mut violations)?;
     document_rules(mandate, &document, &mut violations);
     condition_rules(mandate, &mut violations);
+    delegation_rules(mandate, context, &mut violations)?;
     provenance_rules(mandate, &document, context, &mut violations);
     universe_rules(mandate, &mut violations);
     let rules = &mandate.autonomy.rules;
@@ -285,6 +316,48 @@ pub fn validate(
         warnings,
         worst_case,
     })
+}
+
+/// The rules §4.1 checks again when a version is applied, against the facts at application: V-002,
+/// atomically with the application, and V-047 (DEC-411, DEC-428). `context` is folded at the moment of
+/// application, never the one the version was confirmed under, so a second user deactivated, or
+/// another agent's allocation applied, between confirmation and application refuses it.
+///
+/// Returns the violated codes among those two and no others; an empty set lets the version apply. A
+/// version that would fail any other rule never reached application, because it was refused at
+/// validation, and the rules that read only the document cannot change in between.
+pub fn recheck_at_application(
+    mandate: &Mandate,
+    context: &ValidationContext,
+) -> Result<BTreeSet<Violation>, SpecError> {
+    let allocation_path = "/capital/allocation_usd";
+    let committed = context
+        .other_allocations_usd
+        .checked_add(usd(&mandate.capital.allocation_usd, allocation_path)?)
+        .map_err(|cause| out_of_range(allocation_path, cause))?;
+    let mut violations = BTreeSet::new();
+    flag(
+        &mut violations,
+        committed > context.account_equity_usd,
+        Violation::V002,
+    );
+    flag(
+        &mut violations,
+        lone_under_independent_approval(context),
+        Violation::V047,
+    );
+    Ok(violations)
+}
+
+/// V-047's condition: the policy requires independent approval and the workspace has no second
+/// active user. A count the caller did not know arrives as 0 or 1 (DEC-428 item 2), so it is here.
+///
+/// DEC-444 exempts a version §9.2 classifies as risk-reducing against the agent's current version,
+/// the document whose hash is the agent's current `mandate_version`. [`PreviousVersion`] carries no
+/// digest, so no document can be matched to that version here, and every version is refused: the
+/// refusing side DEC-444 item 3 names until the type can match one.
+fn lone_under_independent_approval(context: &ValidationContext) -> bool {
+    context.independent_approval_required && context.workspace_users < 2
 }
 
 /// The places of the size fraction the order builder multiplies its targets by (§8.3 step 2), which
@@ -372,8 +445,8 @@ fn flag(violations: &mut BTreeSet<Violation>, broken: bool, violation: Violation
     }
 }
 
-/// The rules that read the account and the connection: V-001, V-002, V-005, V-006, V-007, V-024,
-/// V-030, V-031, and V-032.
+/// The rules that read the account, the connection, and the workspace: V-001, V-002, V-005, V-006,
+/// V-007, V-024, V-030, V-031, V-032, and V-047.
 fn account_rules(
     m: &Mandate,
     ctx: &ValidationContext,
@@ -392,6 +465,7 @@ fn account_rules(
         Violation::V001,
     );
     flag(out, committed > ctx.account_equity_usd, Violation::V002);
+    flag(out, lone_under_independent_approval(ctx), Violation::V047);
     let universe = &m.universe;
     flag(
         out,
@@ -679,8 +753,14 @@ fn universe_rules(m: &Mandate, out: &mut BTreeSet<Violation>) {
 
 /// V-017, V-018, and V-023, over every comparison of every rule.
 fn condition_rules(m: &Mandate, out: &mut BTreeSet<Violation>) {
-    for rule in &m.autonomy.rules {
-        for (comparison, depth) in rule.when.comparisons() {
+    let conditions = m.autonomy.rules.iter().map(|rule| &rule.when).chain(
+        m.autonomy
+            .delegations
+            .iter()
+            .map(|delegation| &delegation.when),
+    );
+    for when in conditions {
+        for (comparison, depth) in when.comparisons() {
             flag(out, depth > MAX_CONDITION_DEPTH, Violation::V017);
             if let Condition::Compare { field, op, value } = comparison {
                 flag(out, field.is_reserved(), Violation::V018);
@@ -688,6 +768,122 @@ fn condition_rules(m: &Mandate, out: &mut BTreeSet<Violation>) {
             }
         }
     }
+}
+
+/// The longest a delegation may stand: 30 days (§6.5, V-041).
+const DELEGATION_MAX_SPAN_S: i64 = 30 * 86_400;
+
+/// V-041, V-042, and V-043 (§6.5, DEC-181, DEC-420).
+///
+/// V-042 classifies on its own basis: the delegations removed from both versions and the new
+/// version's review date in both (DEC-273), so a version increasing only because of what its own
+/// delegations lift carries them (DEC-353 item 4). With the previous document withheld, no
+/// delegation can be shown new, so every one is refused (DEC-420 item 4).
+fn delegation_rules(
+    m: &Mandate,
+    ctx: &ValidationContext,
+    out: &mut BTreeSet<Violation>,
+) -> Result<(), SpecError> {
+    let autonomy = &m.autonomy;
+    if autonomy.delegations.is_empty() {
+        return Ok(());
+    }
+    let ids: BTreeSet<_> = autonomy.delegations.iter().map(|d| &d.id).collect();
+    flag(
+        out,
+        ids.len() != autonomy.delegations.len(),
+        Violation::V041,
+    );
+    let two_approver = autonomy.approval.two_approver_above_usd.as_ref();
+    for d in &autonomy.delegations {
+        let names_an_ask = match &d.lifts {
+            Lifts::Default => autonomy.default == AutonomyDecision::Ask,
+            Lifts::Rule(id) => autonomy
+                .rules
+                .iter()
+                .any(|rule| &rule.id == id && rule.then == AutonomyDecision::Ask),
+        };
+        flag(
+            out,
+            !names_an_ask || !window_holds(d.starts_at, d.expires_at),
+            Violation::V041,
+        );
+        let inside = d.max_order_usd <= m.risk.max_order_usd
+            && d.max_order_usd <= d.max_total_usd
+            && d.max_total_usd <= m.capital.allocation_usd
+            && two_approver.is_none_or(|two| d.max_order_usd <= *two);
+        flag(out, !inside, Violation::V043);
+    }
+    if let Some(previous) = &ctx.previous_version {
+        let carried = match &previous.mandate {
+            None => true,
+            Some(before) => {
+                before
+                    .autonomy
+                    .delegations
+                    .iter()
+                    .any(|d| ids.contains(&d.id))
+                    && classify(
+                        &without_delegations(before, m)?,
+                        &without_delegations(m, m)?,
+                    )?
+                    .class
+                        >= ChangeClass::RiskIncreasing
+            }
+        };
+        flag(out, carried, Violation::V042);
+    }
+    Ok(())
+}
+
+/// `[starts, expires)` is a window, and at most 30 days long. An instant that is no instant is no
+/// window (DEC-420 item 3).
+fn window_holds(starts: Option<UtcNanos>, expires: Option<UtcNanos>) -> bool {
+    match (starts, expires) {
+        (Some(starts), Some(expires)) => {
+            starts < expires
+                && expires
+                    .secs()
+                    .checked_sub(starts.secs())
+                    .is_some_and(|span| {
+                        (span, expires.nanos()) <= (DELEGATION_MAX_SPAN_S, starts.nanos())
+                    })
+        }
+        _ => false,
+    }
+}
+
+/// `m` as V-042 classifies it: its document with the delegations removed and `review_of`'s review
+/// date, or none, in place of its own, parsed again.
+fn without_delegations(m: &Mandate, review_of: &Mandate) -> Result<Mandate, SpecError> {
+    let review = review_of
+        .canonical()?
+        .get("autonomy")
+        .and_then(|autonomy| autonomy.get("review_by"))
+        .cloned();
+    let mut document = m.canonical()?;
+    if let Value::Object(top) = &mut document
+        && let Some((_, Value::Object(autonomy))) =
+            top.iter_mut().find(|(key, _)| key.as_str() == "autonomy")
+    {
+        let review_key = autonomy
+            .keys()
+            .find(|key| key.as_str() == "review_by")
+            .cloned();
+        autonomy.retain(|key, _| key.as_str() != "delegations" && key.as_str() != "review_by");
+        if let Some(value) = review {
+            let key = match review_key {
+                Some(key) => key,
+                None => {
+                    mandate_canon::Key::new("review_by").map_err(|_| SpecError::InvalidInput {
+                        what: "the review date's member name",
+                    })?
+                }
+            };
+            autonomy.insert(key, value);
+        }
+    }
+    Ok(Mandate::parse(&document)?)
 }
 
 /// V-023 (§6.3). A decimal must also fit the exact type the order path compares it as, so a value the
@@ -786,8 +982,10 @@ fn provenance_rules(
             .enumerate()
             .map(|(index, rule)| (rule.then, format!("/autonomy/rules/{index}/then"))),
     )
-    .filter(|(decision, _)| *decision == AutonomyDecision::Auto);
-    for (_, auto) in autos {
+    .filter(|(decision, _)| *decision == AutonomyDecision::Auto)
+    .map(|(_, path)| path)
+    .chain((0..autonomy.delegations.len()).map(|index| format!("/autonomy/delegations/{index}")));
+    for auto in autos {
         flag(
             out,
             entries.iter().any(|(path, provenance)| {

@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
 use mandate_num::{Qty, Rounding, SignedQty, Usd};
+use mandate_time::Date;
 
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
@@ -57,9 +58,17 @@ pub struct ExecutorState {
     pub(crate) copied: BTreeMap<EventId, EventId>,
     /// Each instrument's running exit sequence, `unprotected_start` to `unprotected_end` (§5.4).
     pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
-    /// Each instrument's exit laddered outside a sequence (§5.6: extended hours, the closing
-    /// auction window, a presumed halt), folded from its rungs' `OrderSubmitted`.
-    pub(crate) ladders: BTreeMap<InstrumentId, LoneLadder>,
+    /// Each instrument whose protection is being re-placed before its GTC expiry: cancelled, and
+    /// re-placed once the cancels are confirmed, `unprotected_start` to `unprotected_end` (§5.4).
+    pub(crate) replacing: BTreeMap<InstrumentId, Replacement>,
+    /// The latest trading day a copied `TradingDayStarted` began: the creation date of the GTC
+    /// protection placed from then on, and the day §5.4's re-placement buffer is counted from.
+    pub(crate) trading_day: Option<Date>,
+    /// Each exit laddered outside a sequence (§5.6: extended hours, the closing auction window, a
+    /// presumed halt), by its instrument and its intent, folded from its rungs' `OrderSubmitted`:
+    /// one for each exit, so a second exit laddered in the instrument never replaces the first
+    /// one's (DEC-424).
+    pub(crate) ladders: BTreeMap<(InstrumentId, IntentId), LoneLadder>,
     /// The latest quote per instrument: process-local, an input never journaled (like the tick).
     pub(crate) quotes: BTreeMap<InstrumentId, MarketObservation>,
     /// The latest-observed sane quote with a bid per instrument, kept past newer quotes that are
@@ -80,6 +89,13 @@ pub struct ExecutorState {
     pub(crate) watchdogged: BTreeMap<InstrumentId, RiskClock>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
+    /// Sell fills applied with no order named (`FillApplied` with no `client_order_id`), by the
+    /// journal position that applied them and what of each is not yet netted against an ended
+    /// sell's reported fill that no update has applied: the same shares may be both, so they come
+    /// off the held position once (DEC-421 item 5). Entries shrink only by netting: one that never
+    /// meets an ended sell's unapplied report stays for the life of the journal, bounded by how much
+    /// the owner trades the instrument outside the platform, not by anything in this crate.
+    pub(crate) unattributed: BTreeMap<InstrumentId, Vec<(Seq, Qty)>>,
     pub(crate) modes: BTreeMap<AgentId, Mode>,
     pub(crate) account_state: AccountState,
     pub(crate) consecutive_403s: u32,
@@ -123,6 +139,9 @@ pub(crate) struct OrderDetail {
     /// latest report carried: a bracket entry's filled quantity before its fills are ingested
     /// (§5.4's "the filled quantity", DEC-346 item 3).
     pub(crate) reported_filled: Option<Qty>,
+    /// What of `reported_filled` beyond the applied `filled_qty` an unattributed sell fill applied
+    /// after this order was submitted has already taken off the position (DEC-421 item 5).
+    pub(crate) netted: Option<Qty>,
     /// When a bracket entry's unprotected interval started: its first partial fill, from the
     /// `ProtectionChanged unprotected_start` that names it as `bracket` (§5.4, DEC-346 item 4).
     pub(crate) bracket_since: Option<RiskClock>,
@@ -215,6 +234,8 @@ impl ExecutorState {
             awaiting: BTreeMap::new(),
             copied: BTreeMap::new(),
             exiting: BTreeMap::new(),
+            replacing: BTreeMap::new(),
+            trading_day: None,
             ladders: BTreeMap::new(),
             quotes: BTreeMap::new(),
             sane_bids: BTreeMap::new(),
@@ -223,6 +244,7 @@ impl ExecutorState {
             watchdogged: BTreeMap::new(),
             positions: BTreeMap::new(),
             fills: BTreeSet::new(),
+            unattributed: BTreeMap::new(),
             modes: BTreeMap::new(),
             account_state: AccountState::Active,
             consecutive_403s: 0,
@@ -507,6 +529,15 @@ pub(crate) struct ExitSequence {
     pub(crate) ladder: Ladder,
 }
 
+/// One re-placement before expiry as its `unprotected_start` journaled it (§5.4): the entry,
+/// agent and prices the new protection takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Replacement {
+    pub(crate) entry: ClientOrderId,
+    pub(crate) agent: AgentId,
+    pub(crate) prices: Option<ProtectionPrices>,
+}
+
 /// An exit §5.6 ladders with no protection to cancel first: its intent, agent and progress.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LoneLadder {
@@ -633,6 +664,7 @@ mod tests {
             started_at: RiskClock::from_secs(40),
             ended_at: None,
             alerted: false,
+            uncovered: false,
         });
         state
             .positions

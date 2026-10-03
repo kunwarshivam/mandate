@@ -15,7 +15,7 @@ use proptest::prelude::*;
 
 use super::{
     GroupId, PreviousVersion, RegisteredModel, ValidationContext, ValidationReport, Violation,
-    Warning, covers, pointer, validate,
+    Warning, covers, pointer, recheck_at_application, validate,
 };
 use crate::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
 use crate::{Mandate, ParseError, SpecError};
@@ -151,6 +151,7 @@ pub(crate) fn context() -> Result<ValidationContext, String> {
         provenance: ProvenanceMap::default(),
         workspace_users: 1,
         approver_users: 1,
+        independent_approval_required: false,
         disclosures_accepted: BTreeSet::new(),
         instrument_groups: BTreeMap::new(),
         claimed_by_other_agents: BTreeSet::new(),
@@ -819,6 +820,7 @@ fn each_context_rule_fires_on_its_side_of_the_boundary() -> Checked {
                     environment: Environment::Live,
                     connection_id: ConnectionId::parse("conn_alpaca_paper_01")
                         .map_err(|e| e.to_string())?,
+                    mandate: None,
                 });
                 Ok(())
             })?,
@@ -831,6 +833,7 @@ fn each_context_rule_fires_on_its_side_of_the_boundary() -> Checked {
                 c.previous_version = Some(PreviousVersion {
                     environment: Environment::Paper,
                     connection_id: ConnectionId::parse("conn_other").map_err(|e| e.to_string())?,
+                    mandate: None,
                 });
                 Ok(())
             })?,
@@ -844,6 +847,7 @@ fn each_context_rule_fires_on_its_side_of_the_boundary() -> Checked {
                     environment: Environment::Paper,
                     connection_id: ConnectionId::parse("conn_alpaca_paper_01")
                         .map_err(|e| e.to_string())?,
+                    mandate: None,
                 });
                 Ok(())
             })?,
@@ -1953,6 +1957,7 @@ const BREAKERS: [Breaker; 26] = [
                 .map(|connection_id| PreviousVersion {
                     environment: Environment::Paper,
                     connection_id,
+                    mandate: None,
                 });
     }),
     (Violation::V032, &[], |c| {
@@ -2137,4 +2142,56 @@ proptest! {
             previous = Some(figures);
         }
     }
+}
+
+/// V-047 at each count around its boundary, at validation and at application: refused exactly when
+/// the policy is on with none or one user, as its own code beside the others the context breaks, and
+/// the recheck reports V-002 and V-047 and nothing else.
+#[test]
+fn v047_refuses_the_policy_below_two_users_at_validation_and_at_application() -> Checked {
+    let base = mandate(&[])?;
+    for (users, required, refused) in [
+        (0, true, true),
+        (1, true, true),
+        (2, true, false),
+        (u32::MAX, true, false),
+        (0, false, false),
+        (1, false, false),
+    ] {
+        let mut ctx = context()?;
+        ctx.workspace_users = users;
+        ctx.independent_approval_required = required;
+        let expected = if refused {
+            BTreeSet::from([Violation::V047])
+        } else {
+            BTreeSet::new()
+        };
+        let row = format!("{users} users, policy {required}");
+        let found = validate(&base, &ctx).map_err(|e| format!("{row}: {e}"))?;
+        if found.violations != expected {
+            return Err(format!("{row}: validation gave {:?}", found.violations));
+        }
+        let rechecked = recheck_at_application(&base, &ctx).map_err(|e| format!("{row}: {e}"))?;
+        if rechecked != expected {
+            return Err(format!("{row}: the recheck gave {rechecked:?}"));
+        }
+        ctx.approver_users = 0;
+        ctx.other_allocations_usd = usd("15000.01")?;
+        let mut both = expected.clone();
+        both.insert(Violation::V002);
+        let rechecked = recheck_at_application(&base, &ctx).map_err(|e| format!("{row}: {e}"))?;
+        if rechecked != both {
+            return Err(format!(
+                "{row}, short of equity: the recheck gave {rechecked:?}"
+            ));
+        }
+        ctx.other_allocations_usd = usd("15000")?;
+        let rechecked = recheck_at_application(&base, &ctx).map_err(|e| format!("{row}: {e}"))?;
+        if rechecked != expected {
+            return Err(format!(
+                "{row}, equity exactly met: the recheck gave {rechecked:?}"
+            ));
+        }
+    }
+    Ok(())
 }

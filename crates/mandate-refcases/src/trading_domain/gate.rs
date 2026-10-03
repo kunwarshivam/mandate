@@ -811,7 +811,9 @@ fn day_trade_figures(case: &Json) -> Result<DayTradeFigures, String> {
 /// so. A US equity trades on `exchange` in USD with a 90,000,000 median 20-day dollar volume (the
 /// liquid collar tier) and one share its minimum order. A crypto pair is quoted in the currency its
 /// `symbol` names, with the same 90,000,000 as its 30-day median (the case file's header: absent
-/// crypto volume fields pass) and its `min_trade_increment` as its minimum order (DEC-285).
+/// crypto volume fields pass) and its `min_trade_increment` as its minimum order (DEC-285). The
+/// quantity grid is the venue's (DEC-427 item 6): a crypto pair's `min_trade_increment`, and for an
+/// equity whole shares, or fractional shares where the case says it is fractionable.
 fn listing(
     instrument: AssetId,
     (exchange, pair): (Option<Exchange>, Option<Pair>),
@@ -853,6 +855,13 @@ fn listing(
         median_dollar_volume_20d: median_20d,
         median_dollar_volume_30d: median_30d,
         min_order_size,
+        qty_increment: match pair {
+            Some(pair) => pair.min_order_size,
+            None => num(
+                Qty::parse(if fractionable { "0.000000001" } else { "1" }),
+                "qty_increment",
+            )?,
+        },
         halted: false,
         status_feed_current: true,
     })

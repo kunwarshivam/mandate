@@ -65,6 +65,8 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("ClockAdvanced", &[ACCT, CLOCK], &[]),
     ("ObservationRecorded", &[AGENT], &[]),
     ("ModelInvocationRecorded", &[AGENT], &[MOD]),
+    ("ThesisProposed", &[AGENT], &[MAN, MOD]),
+    ("ThesisRevised", &[AGENT], &[MAN, MOD]),
     ("ModelOutputRecorded", &[AGENT], &[MAN]),
     ("DecisionMade", &[AGENT], &[MAN]),
     ("IntentProposed", &[AGENT], &[MAN]),
@@ -157,10 +159,14 @@ const SNAPSHOT_ON_ACCOUNT: (&str, &str) = ("AccountSnapshotRecorded", ACCT);
 const RISK_STATE_ON_ACCOUNT: [(&str, &str); 2] =
     [("MandateVersionApplied", ACCT), ("UniverseChanged", ACCT)];
 
+/// The agent stream's research-agent thesis records journal spec §9.4 closes (DEC-413, DEC-414).
+const THESIS_ON_AGENT: [(&str, &str); 2] = [("ThesisProposed", AGENT), ("ThesisRevised", AGENT)];
+
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {
     CLOSED_BY_SECTION_9_2.contains(&(event_type, kind))
         || (event_type, kind) == SNAPSHOT_ON_ACCOUNT
         || RISK_STATE_ON_ACCOUNT.contains(&(event_type, kind))
+        || THESIS_ON_AGENT.contains(&(event_type, kind))
 }
 
 fn stream_of(kind: &str) -> &'static str {
@@ -545,6 +551,38 @@ fn risk_state_records_are_routed_to_section_9_3() {
 fn risk_state_records_refuse_an_unlisted_member() {
     for (event_type, kind) in RISK_STATE_ON_ACCOUNT {
         let refused = Draft::parse(&draft(event_type, kind, &["mandate_version"])).map(|_| ());
+        assert_eq!(
+            refused.map_err(|e| (e.reason, e.path)),
+            Err((InvalidReason::Schema, "payload.unregistered".to_owned())),
+            "{event_type}"
+        );
+    }
+}
+
+/// Each thesis record is routed to §9.4's checks, never refused for want of a catalogue entry or a
+/// schema (DEC-413, DEC-414).
+#[test]
+fn thesis_records_are_routed_to_section_9_4() {
+    for (event_type, kind) in THESIS_ON_AGENT {
+        let refused = Draft::parse(&draft(event_type, kind, &[MAN, MOD]))
+            .map(|_| ())
+            .unwrap_err();
+        assert!(
+            !matches!(
+                refused.reason,
+                InvalidReason::UnknownSchema | InvalidReason::UnknownEventType
+            ),
+            "{event_type}: {refused:?}"
+        );
+    }
+}
+
+/// §9.4 closes the shared schema, so a member it does not list is refused as `schema` at that
+/// member.
+#[test]
+fn thesis_records_refuse_an_unlisted_member() {
+    for (event_type, kind) in THESIS_ON_AGENT {
+        let refused = Draft::parse(&draft(event_type, kind, &[MAN, MOD])).map(|_| ());
         assert_eq!(
             refused.map_err(|e| (e.reason, e.path)),
             Err((InvalidReason::Schema, "payload.unregistered".to_owned())),

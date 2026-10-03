@@ -1,7 +1,10 @@
 """Asserts that every reference case demonstrates what its title claims (AGENTS.md: validate fixtures)."""
+import hashlib
+import json
 import pathlib
+import re
 import sys
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 import yaml
@@ -53,7 +56,7 @@ exp = {"MC-V03": "V-002", "MC-V05": "V-003", "MC-V06": "V-005", "MC-V08": "V-006
        "MC-V49": "V-020", "MC-V50": "V-020", "MC-V51": "V-033",
        "MC-V53": "V-034", "MC-V54": "V-034", "MC-V55": "V-035", "MC-V56": "V-036", "MC-V57": "V-036",
        "MC-V58": "V-036", "MC-V59": "V-037", "MC-V61": "V-039", "MC-V62": "V-038", "MC-V63": "V-020",
-       "MC-V64": "V-022", "MC-V67": "V-020"}
+       "MC-V64": "V-022", "MC-V67": "V-020", "MC-V69": "V-047"}
 for cid, code in exp.items():
     req(cid, C[cid]["expect"]["violations"] == [code], f"expected exactly {code}")
 req("MC-V13", "W-003" in C["MC-V13"]["expect"]["warnings"], "W-003")
@@ -62,6 +65,41 @@ req("MC-V47", "W-005" in C["MC-V47"]["expect"]["warnings"], "W-005")
 req("MC-V48", len(C["MC-V48"]["expect"]["violations"]) >= 3, "multiple")
 req("MC-V60", C["MC-V60"]["expect"]["violations"] == ["V-003", "V-036"], "accumulate admits nothing, two ways")
 req("MC-V65", "W-006" in C["MC-V65"]["expect"]["warnings"], "W-006")
+for cid, required, users in (("MC-V69", True, 1), ("MC-V70", True, 2), ("MC-V71", False, 1)):
+    ctx = C[cid]["context"]
+    req(cid, C[cid]["patch"] == [] and ctx == {"independent_approval_required": required, "workspace_users": users},
+        "V-047's trio differs only in the policy and the workspace's users (DEC-411)")
+for cid in ("MC-V70", "MC-V71"):
+    req(cid, C[cid]["expect"]["violations"] == [], "a second user, or no independence, passes V-047")
+lone = {"independent_approval_required": True, "workspace_users": 1}
+current = d["bases"]["btc_accumulator"]["mandate"]
+current_version = d["bases"]["btc_accumulator"]["canonical_sha256"]
+fewer_orders = [{"op": "replace", "path": "/risk/max_orders_per_day", "value": 40}]
+for cid, patch, previous, refused in (
+        ("MC-V72", fewer_orders, "current", False),
+        ("MC-V73", [{"op": "replace", "path": "/name", "value": "btc-accumulator-renamed"}], "current", True),
+        ("MC-V74", fewer_orders + [{"op": "replace", "path": "/risk/max_order_usd", "value": "1500"}], "current", True),
+        ("MC-V75", fewer_orders, "identity", True),
+        ("MC-V76", [{"op": "replace", "path": "/risk/max_order_usd", "value": "5000"}], "forged", True),
+        ("MC-V77", fewer_orders, "over_schema", True)):
+    ctx = C[cid]["context"]
+    prev = ctx["previous_version"]
+    shape = {"current": lambda: prev == current,
+             "identity": lambda: set(prev) == {"environment", "connection_id"},
+             "forged": lambda: prev != current
+             and dict(prev, risk=dict(prev["risk"], max_order_usd=None))
+             == dict(current, risk=dict(current["risk"], max_order_usd=None))
+             and Decimal(prev["risk"]["max_order_usd"]) > Decimal(patch[0]["value"])
+             > Decimal(current["risk"]["max_order_usd"]),
+             "over_schema": lambda: prev == dict(current, risk=dict(current["risk"], max_orders_per_day=10001))}[previous]()
+    own_hash = "sha256:" + hashlib.sha256(json.dumps(prev, sort_keys=True, separators=(",", ":"),
+                                                     ensure_ascii=False).encode()).hexdigest()
+    hash_named = own_hash if previous in ("identity", "over_schema") else current_version
+    req(cid, C[cid]["base"] == "btc_accumulator" and C[cid]["patch"] == patch and shape
+        and {k: v for k, v in ctx.items() if k != "previous_version"} == dict(lone, current_mandate_version=hash_named),
+        "V-047's exception cases differ from the base only in the patch named and the previous version (DEC-444)")
+    req(cid, C[cid]["expect"]["violations"] == (["V-047"] if refused else []),
+        "only a risk-reducing version against the agent's current document passes V-047 in a lone workspace (DEC-444)")
 
 # risk state
 s = steps("MC-R01")
@@ -219,6 +257,31 @@ req("MC-B17", B["MC-B17"]["purpose"] == "risk_exit" and B["MC-B17"]["reason"] ==
 req("MC-B30", B["MC-B30"].get("trim_withheld") == ["rung_not_confirmed"], "trim waits")
 req("MC-B31", set(B["MC-B31"].get("trim_withheld", [])) == {"holding", "regular_session_only"}, "trim guards")
 req("MC-B32", "trim_withheld" not in B["MC-B32"] and B["MC-B32"].get("purpose") != "risk_exit", "below band, no trim")
+BIN = {cid: C[cid]["input"] for cid in C if cid.startswith("MC-B")}
+req("MC-B33", B["MC-B33"].get("purpose") == "risk_exit" and Decimal(B["MC-B33"]["qty"]) >= Decimal(BIN["MC-B33"]["min_order_size"])
+    and Decimal(B["MC-B33"]["order_usd"]) < Decimal(BIN["MC-B33"]["min_order_usd"]), "a trim at least the minimum size goes under a larger dollar minimum")
+def trim_sell(cid):
+    inp, exp = BIN[cid], B[cid]
+    inc, bid = Decimal(inp["qty_increment"]), Decimal(inp["quote"]["bid"])
+    excess = Decimal(exp["current_mv"]) - Decimal(inp["size_factor"]) * Decimal(exp["cap"])
+    on_sale = Decimal(inp["open_sell_qty"])
+    whole = (excess / bid / inc).to_integral_value(rounding=ROUND_CEILING) * inc
+    return max(Decimal(0), min(Decimal(inp["position_qty"]) - on_sale, whole - on_sale))
+req("MC-B34", B["MC-B34"].get("trim_withheld") == ["below_minimum_order"]
+    and trim_sell("MC-B34") < Decimal(BIN["MC-B34"]["min_order_size"])
+    and trim_sell("MC-B34") * Decimal(BIN["MC-B34"]["quote"]["bid"]) >= Decimal(BIN["MC-B34"]["min_order_usd"]),
+    "a trim below the minimum size that the dollar minimum would send is withheld")
+req("MC-B35", B["MC-B35"].get("purpose") == "risk_exit" and B["MC-B35"]["qty"] == BIN["MC-B35"]["position_qty"]
+    and trim_sell("MC-B35") == Decimal(BIN["MC-B35"]["position_qty"])
+    and Decimal(B["MC-B35"]["qty"]) < Decimal(BIN["MC-B35"]["min_order_size"]),
+    "a trim of the whole position below the minimum size is a full close, and goes")
+req("MC-B36", B["MC-B36"].get("trim_withheld") == ["below_minimum_order"] and Decimal(BIN["MC-B36"]["open_sell_qty"]) > 0
+    and 0 < trim_sell("MC-B36") < Decimal(BIN["MC-B36"]["min_order_size"])
+    and trim_sell("MC-B36") + Decimal(BIN["MC-B36"]["open_sell_qty"]) >= Decimal(BIN["MC-B36"]["min_order_size"]),
+    "the remainder a resting sell leaves is below the minimum size, though the whole excess is not, and is withheld")
+req("MC-B37", B["MC-B37"].get("purpose") == "risk_exit" and Decimal(BIN["MC-B37"]["open_sell_qty"]) > 0
+    and Decimal(B["MC-B37"]["qty"]) == trim_sell("MC-B37") < trim_sell("MC-B37") + Decimal(BIN["MC-B37"]["open_sell_qty"]),
+    "the trim is the remainder a resting sell leaves, not the whole excess")
 req("MC-B18", B["MC-B18"]["reason"] == "within_rebalance_band", "band")
 req("MC-B19", B["MC-B19"]["reason"] == "below_band_after_clipping", "band after clipping")
 req("MC-B20", B["MC-B20"]["reason"] == "no_fresh_outputs", "none")
@@ -429,7 +492,7 @@ req("MC-E11", C["MC-E11"]["script"][1]["response"]["actor_kind"] == "platform_op
 req("MC-E12", C["MC-E12"]["script"][1]["response"]["responder"] not in C["MC-E12"]["context"]["approvers"], "not listed")
 req("MC-E15", esc_last("MC-E15") == refused("step_up_reused"), "reused")
 req("MC-E16", C["MC-E16"]["context"]["environment"] == "live", "live")
-for cid, reason in [("MC-E17", "version_changed"), ("MC-E18", "mode"), ("MC-E19", "reclassified_deny"),
+for cid, reason in [("MC-E17", "version_changed"), ("MC-E19", "reclassified_deny"),
                     ("MC-E20", "reclassified_other_trigger"), ("MC-E22", "drift"), ("MC-E23", "drift")]:
     req(cid, esc_last(cid) == skipped(reason), reason)
 for cid, ok in [("MC-E21", True), ("MC-E22", False)]:
@@ -451,6 +514,9 @@ req("MC-E30", [q["status"] for q in C["MC-E30"]["expect"]] ==
     ["suppressed_quiet_hours", "delivered", "suppressed_quiet_hours", "delivered", "delivered"], "push hours, both DST states")
 offsets = {datetime.fromisoformat(q["at"][:19] + "+00:00").astimezone(ZoneInfo("America/New_York")).utcoffset() for q in C["MC-E30"]["queries"]}
 req("MC-E30", len(offsets) == 2, "both DST states")
+req("MC-E18", esc_last("MC-E18") == [("ApprovalCanceled", None, "mode_tightened")] + refused("not_pending") and
+    C["MC-E18"]["script"][-1]["kind"] == "response" and C["MC-E18"]["script"][-1]["now"]["mode"] == "exits_only",
+    "an exits-only step cancels before it judges the grant (DEC-318 option (a))")
 req("MC-E31", esc_last("MC-E31") == [("ApprovalCanceled", None, "mode_tightened")] + refused("not_pending"), "cancelled first, in one step")
 # MC-E32: each query is inside quiet hours by one zone and outside by the other, so the expected
 # statuses are the New York reading and the negation of the UTC one. A UTC implementation fails it
@@ -600,6 +666,10 @@ req("MC-J06", au_of("MC-J06")["rules"][0]["then"] == "auto" and C["MC-J06"]["pat
 req("MC-J09", au_of("MC-J09")["rules"][0]["then"] == "auto" and au_of("MC-J09")["rules"][0]["when"]["op"] == "lt"
     and int(C["MC-J09"]["patch"][0]["value"]) < int(au_of("MC-J09")["rules"][0]["when"]["value"]), "an auto rule narrowed")
 req("MC-J", sum(c.startswith("MC-J") for c in C) == 10, "10 routing cases")
+# §11 states how many cases the file holds; nothing else compares that prose with the file (#530 review, m2).
+SPEC = (pathlib.Path(__file__).resolve().parents[2] / "docs/specs/mandate.md").read_text()
+stated = re.findall(r"signal-model registry, and (\d+) cases that implementations must", SPEC)
+req("§11", stated == [str(len(d["cases"]))], f"§11 states {stated} cases, the file holds {len(d['cases'])}")
 print("cases", len(C), "title assertion failures", len(bad))
 for b in bad:
     print(" ", b)

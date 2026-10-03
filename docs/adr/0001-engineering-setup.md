@@ -7,6 +7,40 @@
 | **Deciders** | Engineering panel of three principal engineers (systems and correctness; agent productivity and CI; operations, security, and supply chain), under founder delegation |
 | **Process** | Independent proposals, then one voting round on 14 disputed points. Every decision below is unanimous or a majority that the others accept; no adopted option is one a panelist rejected. Versions were verified on 2026-09-25 |
 
+## Current state (2026-10-03)
+
+The decisions below are the record of 2026-09-25 and their amendments. This note says where the
+repository stands today, so a reader does not take a planned item for a built one.
+
+- **Toolchain.** Rust 1.98.1, edition 2024, Python 3.14 (`.python-version`), uv 0.12.19. CI and
+  `.cursor/install.sh` pin cargo-nextest 0.9.146, cargo-deny 0.20.2, cargo-mutants 27.1.0, typos
+  1.50.2, gitleaks 8.30.1, shellcheck 0.11.0, and actionlint 1.7.12. The Python workspace's dev
+  tools are pytest and ruff only; hypothesis and pyright are not in use yet.
+- **Crates.** `crates/` holds `mandate-num`, `mandate-time`, `mandate-canon`, `mandate-domain`,
+  `mandate-approval`, `mandate-journal`, `mandate-accounting`, `mandate-journal-cold`,
+  `mandate-spec`, `mandate-risk`, `mandate-builder`, `mandate-research`, `mandate-sim`,
+  `mandate-marketdata`, `mandate-journal-pg`, `mandate-artifacts-fs`, `mandate-executor`,
+  `mandate-runtime`, `mandate-backtest`, `mandate-cli`, `mandate-alpaca`, `mandate-shell`, and the
+  `mandate-refcases` harness. `xtask/layers.toml` is the record of each crate's layer and whether it
+  is safety-critical; every crate but `mandate-marketdata` and `xtask` is marked
+  `safety_critical = true`.
+- **Top level.** `fuzz/` and `deploy/` do not exist yet. `web/` exists (DEC-200), and so do
+  `config/` and `assets/`.
+- **CI jobs.** `fast` runs `lint`, `test`, `pending`, and `spec-guard`. `full` runs `refcases`,
+  `reference`, `supply-chain`, `postgres`, and `mutants`. `cargo xtask check` runs all nine, and
+  there is no `cargo xtask ci pr` (ES-15 means `cargo xtask check`). The `nightly` workflow now runs
+  weekly, on Sunday and on demand (DEC-256): every per-PR job, ten seeds of
+  `reference/mandate/fuzz.py`, `reference/mandate/mutants.py`, and a full-history gitleaks scan.
+  cargo-fuzz, the differential run against `mandate-cli oracle`, benchmarks (gungraun, criterion),
+  the aarch64 build and replay, Postgres 17, cargo-audit, and the beta-toolchain canary are not
+  built yet.
+- **Merge.** A pull request merges by label (DEC-175): the coordinator
+  writes `Coordinator-approved-head: <sha>` into the description and adds the
+  `coordinator-approved` label, and `.github/workflows/merge.yml` runs
+  `.github/scripts/merge-approved.sh`. The script squash-merges only when that head is the current
+  head and the latest `ci` run on it succeeded, which means `fast` and `full` passed, plus the `web`
+  workflow when the change touches `web/`. Squash is the only merge method.
+
 ## Context
 
 The Tier 1 specs are approved ([DEC-71](../project/04-decision-log.md#decisions)). Before agents

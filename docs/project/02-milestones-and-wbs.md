@@ -8,6 +8,8 @@
 Milestones are sequenced by dependency and closed by exit criteria, not dates. Work packages
 (WP) map to the [backlog](06-backlog-v1.md) epics.
 
+This file is the plan. Where each milestone stands is in the [work tracker](08-work-tracker.md).
+
 ## Milestone map
 
 ```mermaid

@@ -43,6 +43,7 @@ fn context() -> ValidationContext {
         provenance: ProvenanceMap::default(),
         workspace_users: 1,
         approver_users: 1,
+        independent_approval_required: false,
         disclosures_accepted: BTreeSet::new(),
         instrument_groups: BTreeMap::new(),
         claimed_by_other_agents: BTreeSet::new(),

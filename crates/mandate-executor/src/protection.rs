@@ -7,25 +7,29 @@ use mandate_num::{Adverse, Fraction, Price, Qty, ShareIncrement, SignedQty, Tick
 
 use mandate_accounting::Side;
 use mandate_canon::Value;
+use mandate_time::{Date, ExchangeCalendar};
 
 use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::fold::single_holder;
+use crate::gate::available;
 use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::orders::transition;
+use crate::orders::{legal, transition};
 use crate::payload::{int, text};
 use crate::ports::Ports;
 use crate::session::{
     Venue, closed_hold, extended_hours, same_session, stops_trigger_since, venue,
 };
-use crate::state::{EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, LoneLadder};
+use crate::state::{
+    EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, Ladder, LoneLadder, Replacement,
+};
 use crate::types::{
-    AgentId, BracketLegs, BrokerRequest, EventId, ExitTier, IntentBody, IntentHandoff,
-    MarketObservation, Mode, OcoLegs, OrderState, OrderType, ProtectionPrices, Purpose, RiskClock,
-    SubmitOrder, TimeInForce,
+    AgentId, BracketLegs, BrokerRequest, Effect, EventId, ExecutorConfig, ExitTier, IntentBody,
+    IntentHandoff, MarketObservation, Mode, OcoLegs, Order, OrderState, OrderType, Protection,
+    ProtectionPrices, Purpose, RiskClock, SubmitOrder, TimeInForce,
 };
 
 /// The triggered-stop watchdog's clock (§5.4): a sane mark at or below the instrument's resting
@@ -111,7 +115,7 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .map(|(instrument, _)| instrument.clone())
         .collect();
     for instrument in due {
-        let held = covered(&batch.view, &instrument)?.min(long(&batch.view, &instrument));
+        let held = covered(&batch.view, &instrument)?.min(long(&batch.view, &instrument)?);
         let fresh = batch
             .view
             .quotes
@@ -333,7 +337,7 @@ fn steps(view: &ExecutorState, sequence: &ExitSequence) -> bool {
 }
 
 /// Whether the sequence's ladder may still climb: neither bounded nor its agent paused or stopped.
-fn climbs(view: &ExecutorState, sequence: &ExitSequence) -> bool {
+pub(crate) fn climbs(view: &ExecutorState, sequence: &ExitSequence) -> bool {
     view.effective_mode(&sequence.agent) < Mode::Paused
         && !view.unprotected.iter().any(|interval| {
             interval.ended_at.is_none()
@@ -343,6 +347,109 @@ fn climbs(view: &ExecutorState, sequence: &ExitSequence) -> bool {
                     .get(&interval.instrument)
                     .is_some_and(|running| running.intent == sequence.intent)
         })
+}
+
+/// What the exit ladders in `instrument` will still send between rungs, each ladder by its exit's
+/// intent in id order, with its stepped rung's unfilled quantity and what it counts of it
+/// (DEC-410). A ladder is between rungs once its step's cancel is confirmed with part of the rung
+/// unsold ([`unsent`]), and it counts only while something will send that part: a sequence's
+/// ladder while it still climbs ([`climbs`]), and a lone ladder unless it is parked while its
+/// agent is paused or stopped, or its exit's intent is abandoned. What it counts is never
+/// stored: it is the unfilled quantity capped at the position less the open sells less what the
+/// ladders ahead of it count, so a sell beside it takes its room as it goes and gives it back if
+/// it ends unsold. One instrument holds at most a sequence's ladder and one lone ladder for each
+/// exit laddered in it (DEC-424), and they share the room in their exits' id order. A sequence's ladder that no longer climbed at the confirmation has
+/// already ended (DEC-409), and a refused rung or a passive sequence counts nothing.
+pub(crate) fn remainders(
+    state: &ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<Vec<(IntentId, Qty)>, ExecutorError> {
+    let sequence = state
+        .exiting
+        .get(instrument)
+        .filter(|sequence| climbs(state, sequence))
+        .map(|sequence| (&sequence.intent, sequence.ladder));
+    let lone = state
+        .ladders
+        .iter()
+        .filter(|((held, _), _)| held == instrument)
+        .map(|(_, lone)| lone)
+        .filter(|lone| !lone.ladder.parked || state.effective_mode(&lone.agent) < Mode::Paused)
+        .filter(|lone| {
+            state
+                .intents
+                .get(&lone.intent)
+                .is_none_or(|record| record.outcome != IntentOutcome::Abandoned)
+        })
+        .map(|lone| (&lone.intent, lone.ladder));
+    let mut ladders = Vec::new();
+    for (intent, ladder) in sequence.into_iter().chain(lone) {
+        let left = unsent(state, intent, ladder)?;
+        if ladder.stepping {
+            ladders.push((intent.clone(), left));
+        }
+    }
+    ladders.sort_by(|(one, _), (other, _)| one.0.0.cmp(&other.0.0));
+    let mut room = available(state, instrument)?;
+    let mut counted = Vec::new();
+    for (intent, left) in ladders {
+        let counts = left.min(room);
+        room = room.checked_sub(counts)?;
+        counted.push((intent, counts));
+    }
+    Ok(counted)
+}
+
+/// The sum of [`remainders`].
+pub(crate) fn between_rungs(
+    state: &ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<Qty, ExecutorError> {
+    remainders(state, instrument)?
+        .into_iter()
+        .try_fold(Qty::ZERO, |total, (_, counts)| total.checked_add(counts))
+        .map_err(ExecutorError::from)
+}
+
+/// What a ladder's current rung left unsold once that rung's cancel is confirmed: what its next
+/// rung would send with nothing beside it (DEC-410). A rung whose applied fills ran past its
+/// quantity left nothing, as [`crate::gate::available`] reads it: the gate reaches this through
+/// [`remainders`], so an error here would stop every decision in the instrument, risk exits
+/// included (#499's review, minor 2).
+fn unsent(state: &ExecutorState, intent: &IntentId, ladder: Ladder) -> Result<Qty, ExecutorError> {
+    let rung = ClientOrderId::for_intent(intent)?.rung(ladder.rung)?;
+    Ok(match state.orders.get(&rung) {
+        Some(order) if order.state == OrderState::Canceled => {
+            order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO)
+        }
+        _ => Qty::ZERO,
+    })
+}
+
+/// DEC-410 item 4: what `intent`'s next rung sends, of the `left` its stepped rung left unsold:
+/// what its remainder counts now ([`remainders`]). A shorter rung is journaled `ProtectionChanged
+/// rung_short`, with what it does not send and why; with nothing to send, that record ends the
+/// ladder, so it never sends later into a position bought afresh.
+fn sendable(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    intent: &IntentId,
+    left: Qty,
+) -> Result<Qty, ExecutorError> {
+    let sends = remainders(&batch.view, instrument)?
+        .into_iter()
+        .find(|(owner, _)| owner == intent)
+        .map_or(Qty::ZERO, |(_, counts)| counts);
+    if sends < left {
+        let pairs = vec![
+            ("intent_id", text(intent.0.0.clone())),
+            ("qty", text(left.checked_sub(sends)?.to_string())),
+            ("sent", text(sends.to_string())),
+            ("reason", text("position_taken")),
+        ];
+        changed(batch, instrument, "rung_short", pairs)?;
+    }
+    Ok(sends)
 }
 
 /// §5.6 step 2, on every tick: a laddered rung left unfilled for `exit_step_s` is cancelled to
@@ -367,7 +474,7 @@ pub(crate) fn ladder_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
                 .view
                 .ladders
                 .iter()
-                .filter(|(instrument, lone)| {
+                .filter(|((instrument, _), lone)| {
                     batch.ports.instruments.exit_tier(instrument).is_some()
                         && batch.view.effective_mode(&lone.agent) < Mode::Paused
                 })
@@ -523,8 +630,10 @@ pub(crate) fn rests(state: &ExecutorState, instrument: &InstrumentId) -> bool {
 /// (§5.4): any of it, in a sequence that cancelled it. A handed-on one's placement
 /// ([`passive_exit`]) was sized net of every exit selling beside it and rests by design, so it
 /// holds them only once its stop and their sells no longer fit within the position ([`fits`]),
-/// which is when [`begin_exit`] cancels it; an exit it was sized around goes rather than waiting
-/// on a cancel nobody asked, and a failed count holds (#286 round 2, M1′).
+/// which is when [`begin_exit`] or [`overtaken`] cancels it; an exit it was sized around goes
+/// rather than waiting on a cancel nobody asked, and a failed count holds (#286 round 2, M1′).
+/// The exits the gate holds are left out of that fit, as they are of `overtaken`'s, so the wait
+/// and the cancel always agree (DEC-425 item 1).
 fn protection_holds(state: &ExecutorState, instrument: &InstrumentId) -> bool {
     state.exiting.get(instrument).is_some_and(|sequence| {
         rests(state, instrument)
@@ -838,16 +947,10 @@ fn lone_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .view
         .ladders
         .iter()
-        .map(|(instrument, lone)| (instrument.clone(), lone.clone()))
+        .map(|((instrument, _), lone)| (instrument.clone(), lone.clone()))
         .collect();
     for (instrument, lone) in ladders.into_iter().filter(|(_, lone)| lone.ladder.stepping) {
-        let rung = ClientOrderId::for_intent(&lone.intent)?.rung(lone.ladder.rung)?;
-        let left = match batch.view.orders.get(&rung) {
-            Some(order) if order.state == OrderState::Canceled => {
-                order.qty.checked_sub(order.filled_qty)?
-            }
-            _ => Qty::ZERO,
-        };
+        let left = unsent(&batch.view, &lone.intent, lone.ladder)?;
         if left == Qty::ZERO {
             continue;
         }
@@ -859,8 +962,11 @@ fn lone_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         } else if rests(&batch.view, &instrument) {
             begin(batch, &lone.intent, false)?;
         } else {
-            let at = (&lone.intent, lone.ladder.rung);
-            next_rung(batch, &instrument, at, left, true)?;
+            let sends = sendable(batch, &instrument, &lone.intent, left)?;
+            if sends > Qty::ZERO {
+                let at = (&lone.intent, lone.ladder.rung);
+                next_rung(batch, &instrument, at, sends, true)?;
+            }
         }
     }
     Ok(())
@@ -911,6 +1017,12 @@ fn park(
 /// sequence on ([`passive_exit`]): the protection it placed rests by design, so the sequence
 /// waits on it only once a later exit did not fit beside it ([`protection_holds`]), and on the
 /// other exits, and [`replace`] then covers what they left unsold (#286 round 2, M1′).
+///
+/// While a sequence that is not handed on waits on the protection it cancelled, every resting
+/// order of it has a cancel asked or outstanding ([`cancel_resting`]): one the broker refused is
+/// asked again once its query finds the order still live, so the exit never waits out the bound
+/// on a cancel nothing will confirm (DEC-425 item 1; #524's pin (d)). A handed-on placement is
+/// [`overtaken`]'s.
 pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     release_waiting(batch)?;
     lone_steps(batch)?;
@@ -922,21 +1034,29 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .collect();
     for (instrument, sequence) in sequences {
         if protection_holds(&batch.view, &instrument) {
+            if !handed(&batch.view, &sequence) {
+                cancel_resting(batch, &instrument)?;
+            }
             continue;
         }
         let exit = ClientOrderId::for_intent(&sequence.intent)?.rung(sequence.ladder.rung)?;
         let finished = match batch.view.orders.get(&exit) {
             Some(order) if order.state == OrderState::Canceled && steps(&batch.view, &sequence) => {
-                let left = order.qty.checked_sub(order.filled_qty)?;
+                let left = unsent(&batch.view, &sequence.intent, sequence.ladder)?;
                 if left == Qty::ZERO {
                     true
                 } else if let Some(reason) = closed_hold(batch.ports, &instrument, batch.at()) {
                     park(batch, &sequence.intent, reason, sequence.ladder.parked)?;
                     true
                 } else {
-                    let at = (&sequence.intent, sequence.ladder.rung);
-                    next_rung(batch, &instrument, at, left, false)?;
-                    continue;
+                    let sends = sendable(batch, &instrument, &sequence.intent, left)?;
+                    if sends == Qty::ZERO {
+                        true
+                    } else {
+                        let at = (&sequence.intent, sequence.ladder.rung);
+                        next_rung(batch, &instrument, at, sends, false)?;
+                        continue;
+                    }
                 }
             }
             Some(order) => handed(&batch.view, &sequence) || order.state.is_terminal(),
@@ -964,6 +1084,8 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             replace(batch, &instrument, &sequence)?;
         }
     }
+    replacements(batch)?;
+    re_cover(batch)?;
     brackets(batch)?;
     acknowledged(batch)
 }
@@ -1028,6 +1150,7 @@ fn bracket(
         let id = ClientOrderId::for_protection(entry, &batch.next_id())?;
         let mut placed = recorded_placement(&id, order.qty, prices);
         placed.extend(named.clone());
+        placed.extend(created(&batch.view));
         changed(batch, &instrument, "placed", placed)?;
         if detail.bracket_since.is_some() {
             changed(batch, &instrument, "unprotected_end", named)?;
@@ -1041,7 +1164,7 @@ fn bracket(
         let unapplied = filled.checked_sub(order.filled_qty)?;
         let committed = covered(&batch.view, &instrument)?
             .checked_add(still_selling(&batch.view, &instrument)?)?;
-        let room = long(&batch.view, &instrument)
+        let room = long(&batch.view, &instrument)?
             .checked_add(unapplied)?
             .checked_sub(committed)
             .unwrap_or(Qty::ZERO);
@@ -1065,6 +1188,7 @@ fn bracket(
             journal_submission(batch, &oco, None, &agent, 1)?;
             let mut placed = recorded_placement(&oco.client_order_id, qty, prices);
             placed.extend(named.clone());
+            placed.extend(created(&batch.view));
             changed(batch, &instrument, "placed", placed)?;
             request = Some(oco);
         }
@@ -1102,6 +1226,341 @@ fn bracket(
     Ok(())
 }
 
+/// The `created_on` a protective order placed now records: the trading day the latest copied
+/// `TradingDayStarted` began, from which its GTC expiry is counted (§5.2, §5.4). None before the
+/// first one.
+fn created(view: &ExecutorState) -> Option<(&'static str, Value)> {
+    view.trading_day
+        .map(|day| ("created_on", text(day.to_string())))
+}
+
+/// §5.4's re-placement before expiry, at a copied `TradingDayStarted`: in every instrument where
+/// protection rests at known prices, no exit sequence runs and no re-placement is under way (an
+/// exit working there does not stop it: [`re_place`] sizes around it, DEC-367 item 4(a)),
+/// protection with a GTC order on or past its buffer day ([`expiring`]),
+/// or with no recorded creation date, is cancelled — all of it, by id, as an exit
+/// sequence's first step is — and the start of the interval records the entry, agent and prices
+/// the new protection takes. Once the cancels are confirmed, [`settle`] re-places it for the held
+/// quantity ([`re_place`]) and the interval ends. An exit that starts meanwhile takes the
+/// instrument's sequence over, and its own re-placement ends the interval (DEC-347).
+pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let Some(today) = batch.view.trading_day else {
+        return Ok(());
+    };
+    let due: Vec<(InstrumentId, Protection)> = batch
+        .view
+        .protection
+        .iter()
+        .filter(|(instrument, protection)| {
+            !protection.resting.is_empty()
+                && !batch.view.exiting.contains_key(*instrument)
+                && !batch.view.replacing.contains_key(*instrument)
+                && protection.resting.iter().any(|id| {
+                    batch
+                        .view
+                        .orders
+                        .get(id)
+                        .and_then(|order| order.created_on)
+                        .is_none_or(|created| {
+                            expiring(created, today, batch.ports.config).unwrap_or(true)
+                        })
+                })
+        })
+        .map(|(instrument, protection)| (instrument.clone(), protection.clone()))
+        .collect();
+    for (instrument, protection) in due {
+        let Some(first) = protection.resting.first() else {
+            continue;
+        };
+        if protection.prices.is_none() {
+            let pairs = vec![("orders", text(joined(&protection.resting)))];
+            let alerted = changed(batch, &instrument, "expiry_unreplaceable", pairs)?;
+            batch.notify(alerted, "protection_expiring");
+            continue;
+        }
+        let entry = first.protected_entry().unwrap_or_else(|| first.clone());
+        let agent = batch
+            .view
+            .orders
+            .get(first)
+            .and_then(|order| order.agent.clone())
+            .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+        let mut pairs = vec![
+            ("replacing", Value::Bool(true)),
+            ("orders", text(joined(&protection.resting))),
+            ("entry", text(entry.as_str())),
+            ("agent", text(agent.0.clone())),
+        ];
+        if let Some(prices) = protection.prices {
+            pairs.push(("stop", text(prices.stop.to_string())));
+            if let Some(take_profit) = prices.take_profit {
+                pairs.push(("take_profit", text(take_profit.to_string())));
+            }
+        }
+        changed(batch, &instrument, "unprotected_start", pairs)?;
+        for id in protection.resting {
+            if ask_cancel(batch, &id)? {
+                batch.broker(BrokerRequest::Cancel {
+                    client_order_id: id,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether every order that ended in `instrument` this step is a rung of one of its lone ladders
+/// while that ladder steps: the ladder is between rungs, under way as a sequence is, and its next
+/// rung or its park follows (DEC-260 (14), (18); one lone ladder for each exit, DEC-424).
+fn stepping_alone(view: &ExecutorState, instrument: &InstrumentId, ended: &[Order]) -> bool {
+    let stepping: Vec<&IntentId> = view
+        .ladders
+        .iter()
+        .filter(|((held, _), lone)| held == instrument && lone.ladder.stepping)
+        .map(|(_, lone)| &lone.intent)
+        .collect();
+    !stepping.is_empty()
+        && ended
+            .iter()
+            .filter(|order| &order.instrument == instrument)
+            .all(|order| {
+                order
+                    .intent_id
+                    .as_ref()
+                    .is_some_and(|intent| stepping.contains(&intent))
+            })
+}
+
+/// The founder's decision on #468, "never silent" (DEC-367 item 4 (a′)): a position left
+/// under-covered with nothing to place protection at, its recorded prices gone, is journaled
+/// (`ProtectionChanged expiry_unreplaceable`) and the owner alerted (`protection_expiring`).
+fn unprotectable(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+) -> Result<(), ExecutorError> {
+    let alerted = changed(batch, instrument, "expiry_unreplaceable", Vec::new())?;
+    batch.notify(alerted, "protection_expiring");
+    Ok(())
+}
+
+/// The founder's decision on #468, case (b) (DEC-367 item 4): an exit that ended unfilled in this
+/// step (cancelled, expired or rejected), or a protective order cancelled or expired, can leave
+/// held shares with
+/// neither a protective order nor an exit. Examples: an exit beside protection sized around it,
+/// or a placement whose cancel was asked for an exit since abandoned. Where no sequence,
+/// re-placement or ladder between rungs runs in the instrument, those shares are protected again
+/// at once ([`re_place`]), its interval started first, for what the protection and the exits
+/// still working leave uncovered. The prices are the resting protection's, or else the ended
+/// protective order's own.
+/// Protection the broker refuses, or cancels before acknowledging it, is not re-placed here: its
+/// interval stays open and bounded (DEC-348 item 2), so neither loops, nor restarts the bound.
+/// With no prices anywhere to place from, the shortfall is journaled and the owner alerted
+/// ([`unprotectable`]), never left silent, once a step. The step's own drafts name the orders that ended, so a
+/// replay re-covers the same.
+fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let ended: Vec<Order> = batch
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Journal(draft) => Some(draft),
+            _ => None,
+        })
+        .filter_map(|draft| {
+            let state = draft.payload.get("state").and_then(Value::as_str)?;
+            let id = draft
+                .payload
+                .get("client_order_id")
+                .and_then(Value::as_str)?;
+            let order = batch.view.orders.get(&ClientOrderId::parse(id).ok()?)?;
+            let awaited = batch
+                .view
+                .awaiting
+                .get(&order.instrument)
+                .is_some_and(|ids| ids.contains(&order.client_order_id));
+            let ends = match state {
+                "canceled" | "expired" => order.purpose != Purpose::Protective || !awaited,
+                "rejected" => order.purpose != Purpose::Protective,
+                _ => false,
+            };
+            (ends && order.side == Side::Sell && !order.purpose.adds_risk()).then(|| order.clone())
+        })
+        .collect();
+    let instruments: BTreeSet<InstrumentId> =
+        ended.iter().map(|order| order.instrument.clone()).collect();
+    let alerted: BTreeSet<InstrumentId> = batch
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Journal(draft)
+                if draft.payload.get("action").and_then(Value::as_str)
+                    == Some("expiry_unreplaceable") =>
+            {
+                draft.payload.get("instrument").and_then(Value::as_str)
+            }
+            _ => None,
+        })
+        .filter_map(|instrument| InstrumentId::new(instrument).ok())
+        .collect();
+    for instrument in instruments {
+        if batch.view.exiting.contains_key(&instrument)
+            || batch.view.replacing.contains_key(&instrument)
+            || stepping_alone(&batch.view, &instrument, &ended)
+        {
+            continue;
+        }
+        let committed = covered(&batch.view, &instrument)?
+            .checked_add(working_exits(&batch.view, &instrument)?)?;
+        if committed >= long(&batch.view, &instrument)? {
+            continue;
+        }
+        let resting = batch
+            .view
+            .protection
+            .get(&instrument)
+            .and_then(|protection| {
+                protection
+                    .resting
+                    .first()
+                    .and_then(|first| batch.view.orders.get(first))
+                    .zip(protection.prices)
+            });
+        let lost = ended
+            .iter()
+            .filter(|order| order.purpose == Purpose::Protective)
+            .filter(|order| order.instrument == instrument)
+            .find_map(|order| {
+                let request = batch
+                    .view
+                    .details
+                    .get(&order.client_order_id)?
+                    .request
+                    .as_ref()?;
+                let prices = match (&request.oco, request.stop_price) {
+                    (Some(legs), _) => ProtectionPrices {
+                        stop: legs.stop,
+                        take_profit: Some(legs.take_profit),
+                    },
+                    (None, Some(stop)) => ProtectionPrices {
+                        stop,
+                        take_profit: None,
+                    },
+                    (None, None) => return None,
+                };
+                Some((order, prices))
+            });
+        let Some((from, prices)) = resting.or(lost) else {
+            if !alerted.contains(&instrument) {
+                unprotectable(batch, &instrument)?;
+            }
+            continue;
+        };
+        let entry = from
+            .client_order_id
+            .protected_entry()
+            .unwrap_or_else(|| from.client_order_id.clone());
+        let agent = from
+            .agent
+            .clone()
+            .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+        changed(batch, &instrument, "unprotected_start", Vec::new())?;
+        let sequence = Replacement {
+            entry,
+            agent,
+            prices: Some(prices),
+        };
+        re_place(batch, &instrument, &sequence)?;
+    }
+    Ok(())
+}
+
+/// What the exit orders working in `instrument` may still sell: the broker holds them, so
+/// protection re-placed beside them covers only the rest (rule 12, §5.4's `fits`). Unlike
+/// [`still_selling`], an exit intent with no order yet — held, parked or waiting on its cancels —
+/// counts nothing here: its sequence re-protects around it (#468 round 1, B1). A lone ladder
+/// between rungs counts nothing either, though it has no sequence: its next rung goes only
+/// through a sequence that first cancels this protection ([`lone_steps`] calls `begin` where
+/// protection rests), so the two are never live together and the rung's shares stay covered
+/// meanwhile (DEC-260 (18); DEC-367 item 4; #468's round-4 ruling, M1).
+fn working_exits(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+    view.orders
+        .values()
+        .filter(|order| {
+            &order.instrument == instrument
+                && exits(order.purpose)
+                && !order.state.is_terminal()
+                && order.state != OrderState::Intent
+        })
+        .try_fold(Qty::ZERO, |sum, order| {
+            Ok(sum.checked_add(order.qty.checked_sub(order.filled_qty)?)?)
+        })
+}
+
+fn joined(ids: &[ClientOrderId]) -> String {
+    ids.iter()
+        .map(ClientOrderId::as_str)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Whether a GTC order created on `created` is due for re-placement on `today` (§5.4): today is on
+/// or after the trading day `protective_replace_buffer_trading_days` trading days before its expiry,
+/// `gtc_expiry_days` calendar days after its creation — that is, at most that many trading days
+/// remain from today up to the expiry (DEC-367 item 2).
+///
+/// The trading days are counted two ways where the calendar cannot place a day. The low count reads
+/// such a day as non-trading, so the buffer is reached no later than §5.4's (rule 3, #468 round 1,
+/// M2). The high count reads it as trading unless it is a weekend. An order is judged by its low
+/// count, unless that count was already within the buffer on its creation day: such an order was
+/// placed as a re-placement at the calendar's edge, and is judged by its high count, so it is not
+/// due again the day after it is placed (#468 round 2, M1).
+fn expiring(created: Date, today: Date, config: &ExecutorConfig) -> Result<bool, ExecutorError> {
+    let mut expiry = created;
+    for _ in 0..config.gtc_expiry_days {
+        expiry = expiry.next()?;
+    }
+    let calendar = ExchangeCalendar::us_equities().ok();
+    let buffer = config.protective_replace_buffer_trading_days;
+    let within = |from: Date, high: bool| -> Result<bool, ExecutorError> {
+        let mut remaining: u32 = 0;
+        let mut day = from;
+        while day < expiry {
+            let trading = calendar
+                .as_ref()
+                .and_then(|calendar| calendar.is_trading_day(day).ok())
+                .unwrap_or(high && !day.is_weekend());
+            if trading {
+                remaining = remaining.saturating_add(1);
+            }
+            if remaining > buffer {
+                return Ok(false);
+            }
+            day = day.next()?;
+        }
+        Ok(true)
+    };
+    let placed_at_the_edge = within(created, false)?;
+    within(today, placed_at_the_edge)
+}
+
+/// After every step: a re-placement whose cancels are all confirmed — nothing rests any more —
+/// re-places protection for the held quantity at the recorded prices and ends its interval,
+/// unless an exit sequence has taken the instrument over ([`new_day`]).
+fn replacements(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let due: Vec<(InstrumentId, Replacement)> = batch
+        .view
+        .replacing
+        .iter()
+        .filter(|(instrument, _)| {
+            !rests(&batch.view, instrument) && !batch.view.exiting.contains_key(*instrument)
+        })
+        .map(|(instrument, recorded)| (instrument.clone(), recorded.clone()))
+        .collect();
+    for (instrument, recorded) in due {
+        re_place(batch, &instrument, &recorded)?;
+    }
+    Ok(())
+}
+
 /// A `placed` record's fields for one protective order covering `qty` at `prices`.
 fn recorded_placement(
     id: &ClientOrderId,
@@ -1128,11 +1587,89 @@ fn recorded_placement(
 pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     for exit in waiting_exits(&batch.view) {
         cancel_openings(batch, Some(&exit.agent), Some(&exit.instrument))?;
+        overtaken(batch, &exit.instrument)?;
         if !awaits_cancel(&batch.view, &exit.agent, &exit.instrument, exit.purpose) {
             gate_and_submit(batch, &exit.intent)?;
         }
     }
     Ok(())
+}
+
+/// DEC-419: a handed-on placement that does not fit beside the exits still selling, and those
+/// allowed and waiting that are not held, is cancelled for them, as [`begin`] cancels it for an
+/// exit that arrives after it. An exit allowed while the placement was still to come would
+/// otherwise wait behind it with nothing to cancel it (#489). It runs at every step an exit waits,
+/// the placement's own included, and asks only where no cancel is outstanding: never for an order
+/// already `PendingCancel`, nor for one `Unknown` while a refused cancel's query is out (never
+/// cancelled blind), nor for one whose cancel was asked before the broker acknowledged it. So it
+/// asks once, and again only once that query finds the placement still live (§5.7).
+fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
+    let handed_on = batch
+        .view
+        .exiting
+        .get(instrument)
+        .is_some_and(|sequence| handed(&batch.view, sequence));
+    if !handed_on || fits(&batch.view, instrument)? {
+        return Ok(());
+    }
+    cancel_resting(batch, instrument)
+}
+
+/// Asks a cancel of every protective order resting in `instrument`, whoever placed it (§5.4),
+/// that has none outstanding: never for one already `PendingCancel`, nor for one `Unknown` while
+/// a refused cancel's query is out (never cancelled blind), nor for one whose cancel was asked in
+/// a state that cannot record it, because §5.7 has no edge from there to `PendingCancel` (before
+/// the broker acknowledged it, or while the broker holds it `pending_replace`): that cancel stays
+/// outstanding until the broker reports the order in a state that can. So an exit waiting on that
+/// protection always waits on a cancel asked or outstanding, a refused cancel is asked again once
+/// its query finds the order still live, and a cancel is never asked again at every step (§5.7;
+/// DEC-425 item 1; #576's review, B1).
+fn cancel_resting(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+) -> Result<(), ExecutorError> {
+    let resting: Vec<ClientOrderId> = batch
+        .view
+        .protection
+        .get(instrument)
+        .map(|protection| protection.resting.clone())
+        .unwrap_or_default();
+    for id in resting {
+        let outstanding = batch.view.orders.get(&id).is_none_or(|order| {
+            matches!(order.state, OrderState::PendingCancel | OrderState::Unknown)
+                || order.cancel_unconfirmed && !legal(order.state, OrderState::PendingCancel)
+        });
+        if outstanding {
+            continue;
+        }
+        let requested = vec![("cancel_requested", Value::Bool(true))];
+        transition(batch, &id, OrderState::PendingCancel, requested)?;
+        batch.broker(BrokerRequest::Cancel {
+            client_order_id: id,
+        });
+    }
+    Ok(())
+}
+
+/// Whether what protective orders cover in `instrument` and what its exits may still sell fit
+/// within the long position together, so no stop outlasts the position once they fill. The exits
+/// the gate holds are left out: one that cannot move needs no room yet, so no placement is
+/// cancelled for it (#508's review, m1), and none holds the others back. This is the one measure
+/// that whether a handed-on placement holds its exits back ([`protection_holds`]), whether it is
+/// cancelled for them ([`overtaken`]), and whether an arriving exit leaves it resting ([`begin`])
+/// all read, so an exit never waits on a placement that nothing will cancel (DEC-425 item 1).
+fn fits(view: &ExecutorState, instrument: &InstrumentId) -> Result<bool, ExecutorError> {
+    let live = still_selling(view, instrument)?;
+    let held = waiting(view, instrument)
+        .iter()
+        .filter(|intent| view.held.contains(*intent))
+        .filter_map(|intent| match view.bodies.get(intent) {
+            Some(IntentBody::Order { qty, .. }) => Some(*qty),
+            _ => None,
+        })
+        .try_fold(Qty::ZERO, Qty::checked_add)?;
+    let movable = live.checked_sub(held).unwrap_or(Qty::ZERO);
+    Ok(covered(view, instrument)?.checked_add(movable)? <= long(view, instrument)?)
 }
 
 /// One exit the gate allowed that has no order yet: it waits on its cancels.
@@ -1211,20 +1748,37 @@ fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty,
         .map_err(ExecutorError::from)
 }
 
-/// Whether what protective orders cover in `instrument` and what its exits may still sell fit
-/// within the long position together, so no stop outlasts the position once they fill.
-fn fits(view: &ExecutorState, instrument: &InstrumentId) -> Result<bool, ExecutorError> {
-    let committed = covered(view, instrument)?.checked_add(still_selling(view, instrument)?)?;
-    Ok(committed <= long(view, instrument))
-}
-
-fn long(view: &ExecutorState, instrument: &InstrumentId) -> Qty {
-    view.positions
+/// The long position in `instrument` as the broker holds it (DEC-421, #515): the folded position
+/// less every fill the broker reported on a sell that has ended, in any terminal state, that no
+/// fill update has applied and no unattributed sell fill has already taken off it (`netted`, the
+/// fold's netting). An order whose applied quantity has run ahead of its report contributes
+/// nothing rather than an error: the fold has already taken those shares off. The result is
+/// floored at zero. A live sell's unapplied fill is left in, because [`still_selling`] counts
+/// that order's remainder from the same applied quantity, so the two cancel.
+fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+    let folded = view
+        .positions
         .get(instrument)
         .copied()
         .unwrap_or(SignedQty::ZERO)
         .max(SignedQty::ZERO)
-        .abs()
+        .abs();
+    let unapplied = view
+        .orders
+        .iter()
+        .filter(|(_, order)| {
+            &order.instrument == instrument && order.side == Side::Sell && order.state.is_terminal()
+        })
+        .filter_map(|(id, order)| {
+            let detail = view.details.get(id)?;
+            let reported = detail.reported_filled?;
+            reported
+                .checked_sub(order.filled_qty)
+                .and_then(|left| left.checked_sub(detail.netted.unwrap_or(Qty::ZERO)))
+                .ok()
+        })
+        .try_fold(Qty::ZERO, Qty::checked_add)?;
+    Ok(folded.checked_sub(unapplied).unwrap_or(Qty::ZERO))
 }
 
 /// The unfilled quantity every live protective order in `instrument` covers.
@@ -1277,12 +1831,37 @@ fn replace(
     instrument: &InstrumentId,
     sequence: &ExitSequence,
 ) -> Result<(), ExecutorError> {
-    let qty = long(&batch.view, instrument)
-        .checked_sub(covered(&batch.view, instrument)?)
+    let recorded = Replacement {
+        entry: sequence.entry.clone(),
+        agent: sequence.agent.clone(),
+        prices: sequence.prices,
+    };
+    re_place(batch, instrument, &recorded)
+}
+
+/// [`replace`] for the entry, agent and prices a sequence or a re-placement before expiry
+/// recorded. With shares left to cover and no prices to place at, the shortfall is journaled and
+/// alerted ([`unprotectable`]), and the `unprotected_end` that ends the sequence is marked
+/// `uncovered`: the interval stays open and bounded, since nothing covers the shares (DEC-367
+/// item 4, #468's round-4 review, m2).
+fn re_place(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    sequence: &Replacement,
+) -> Result<(), ExecutorError> {
+    let committed =
+        covered(&batch.view, instrument)?.checked_add(working_exits(&batch.view, instrument)?)?;
+    let qty = long(&batch.view, instrument)?
+        .checked_sub(committed)
         .unwrap_or(Qty::ZERO);
-    let prices = sequence.prices.filter(|_| qty > Qty::ZERO);
-    let Some(prices) = prices else {
+    if qty == Qty::ZERO {
         changed(batch, instrument, "unprotected_end", Vec::new())?;
+        return Ok(());
+    }
+    let Some(prices) = sequence.prices else {
+        unprotectable(batch, instrument)?;
+        let uncovered = vec![("uncovered", Value::Bool(true))];
+        changed(batch, instrument, "unprotected_end", uncovered)?;
         return Ok(());
     };
     let crypto = batch.ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto);
@@ -1385,7 +1964,8 @@ fn place(
     prices: ProtectionPrices,
 ) -> Result<(), ExecutorError> {
     journal_submission(batch, request, intent, agent, 1)?;
-    let placed = recorded_placement(&request.client_order_id, request.qty, prices);
+    let mut placed = recorded_placement(&request.client_order_id, request.qty, prices);
+    placed.extend(created(&batch.view));
     changed(batch, &request.instrument, "placed", placed).map(|_| ())
 }
 
@@ -1424,12 +2004,7 @@ pub(crate) fn passive_exit(
     let Some(take_profit) = prices.take_profit else {
         return Err(ExecutorError::Unimplemented { story: "E7-4" });
     };
-    let held = batch
-        .view
-        .positions
-        .get(instrument)
-        .copied()
-        .unwrap_or(SignedQty::ZERO);
+    let held = long(&batch.view, instrument)?;
     let exit = OcoLegs {
         take_profit: limit,
         stop: prices.stop,
@@ -1439,7 +2014,6 @@ pub(crate) fn passive_exit(
     place(batch, &first, Some(intent), &sequence.agent, prices)?;
     let selling = still_selling(&batch.view, instrument)?;
     let rest = held
-        .abs()
         .checked_sub(qty)
         .and_then(|rest| rest.checked_sub(selling))
         .unwrap_or(Qty::ZERO);
@@ -2200,17 +2774,18 @@ mod probe_tests {
 
 #[cfg(test)]
 mod sequence_tests {
-    use std::collections::{BTreeMap, VecDeque};
+    use std::cell::RefCell;
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
     use mandate_accounting::{AssetClass, InstrumentId, Side};
     use mandate_canon::Value;
     use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
-    use mandate_time::Date;
+    use mandate_time::{Date, ExchangeCalendar};
     use proptest::prelude::{Just, ProptestConfig, Strategy, TestCaseError, any, prop};
     use proptest::prop_oneof;
     use proptest::test_runner::TestRunner;
 
-    use super::rests;
+    use super::{fits, long, rests};
     use crate::error::ExecutorError;
     use crate::fold::fold;
     use crate::ids::{ClientOrderId, IntentId};
@@ -2220,12 +2795,13 @@ mod sequence_tests {
         Everything, Executor, Ids, aapl, account, drafted, executor_config, fees, missing,
         submitted,
     };
-    use crate::state::ExecutorState;
+    use crate::state::{ExecutorState, IntentOutcome, OrderDetail};
     use crate::types::{
         AgentId, BrokerFill, BrokerOrder, BrokerOutcome, BrokerReject, BrokerRequest,
-        BrokerUnknown, BrokerUpdate, Effect, EventDraft, EventId, ExecutorConfig, ExitTier, FillId,
-        Input, IntentBody, IntentHandoff, MandateVersion, MarketObservation, Mode, OcoLegs,
-        OrderState, OrderType, Purpose, ReconcileReason, RiskClock, SubmitOrder, TimeInForce,
+        BrokerUnknown, BrokerUpdate, Command, Effect, EventDraft, EventId, ExecutorConfig,
+        ExitTier, FillId, Initiator, Input, IntentBody, IntentHandoff, KillScope, MandateVersion,
+        MarketObservation, Mode, OcoLegs, Order, OrderState, OrderType, Purpose, ReconcileReason,
+        RiskClock, SubmitOrder, TimeInForce,
     };
 
     const OCO: &str = "md-held-1-p1";
@@ -2243,6 +2819,82 @@ mod sequence_tests {
         let mut pairs = pairs;
         pairs.push(("risk_clock", clock(RiskClock::from_secs(0))?));
         executor.commit_one(event_type, object(pairs)?)
+    }
+
+    /// An accepted risk exit of 4 with no sequence of its own, sent while nothing rested.
+    const LONE: &str = "md-exit-1";
+
+    /// Ten AAPL that `agent-a` bought, with [`LONE`] working beside an OCO for the other 6, the cap
+    /// DEC-346 item 6 applies (position less exits still selling): #468 round 1's B1 state, from
+    /// which #468's rule-13 property found #489.
+    fn beside_a_lone_exit(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        for (id, purpose, qty) in [(LONE, "risk_exit", "4"), (OCO, "protective", "6")] {
+            let mut pairs = vec![
+                ("client_order_id", text(id)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text(qty)),
+                ("purpose", text(purpose)),
+            ];
+            if purpose == "protective" {
+                pairs.extend([
+                    ("tif", text("gtc")),
+                    ("order_class", text("oco")),
+                    ("take_profit", text("170")),
+                    ("stop", text("140")),
+                ]);
+            } else {
+                pairs.push(("limit", text("150")));
+            }
+            committed(&mut executor, "OrderSubmitted", pairs)?;
+            committed(
+                &mut executor,
+                "OrderStateChanged",
+                vec![("client_order_id", text(id)), ("state", text("accepted"))],
+            )?;
+        }
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(OCO)),
+                ("qty", text("6")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+                ("created_on", text("2026-06-05")),
+            ],
+        )?;
+        Ok(executor)
+    }
+
+    /// Ten AAPL that `agent-a` bought, nothing protecting them and no prices recorded, with
+    /// [`LONE`] a risk exit for all ten working: where the round-3 review of #468 found
+    /// `re_cover`'s silent arm (M1), for the rule-13 scripts to reach.
+    fn unprotected(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(LONE)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("10")),
+                ("limit", text("150")),
+                ("purpose", text("risk_exit")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(LONE)), ("state", text("accepted"))],
+        )?;
+        Ok(executor)
     }
 
     /// Ten AAPL that `agent-a` bought, protected by one GTC OCO at 170 over 140 named for the
@@ -6024,6 +6676,981 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-367 item 2 (#468 round 1, M2): a day the calendar cannot place counts as a non-trading
+    /// day, so the buffer is reached earlier, never later. A GTC order created 2028-10-07 expires
+    /// 2029-01-05, and every day from 2029-01-01, New Year's Day, lies past the calendar's last
+    /// date. On Thursday 2028-12-28 the old reading counted six trading days (the 28th, the 29th
+    /// and 2029-01-01 to 04) and re-placed a day late; counted as none, the days past the range
+    /// leave two and it is due. Five in-range trading days remain from 2028-12-22 (the 25th is
+    /// Christmas), so it is due there, and six from the 21st, so it is not yet.
+    #[test]
+    fn a_day_past_the_calendar_never_delays_the_re_placement() -> Result<(), ExecutorError> {
+        let config = executor_config();
+        let created = Date::parse("2028-10-07")?;
+        assert!(super::expiring(
+            created,
+            Date::parse("2028-12-28")?,
+            &config
+        )?);
+        assert!(super::expiring(
+            created,
+            Date::parse("2028-12-22")?,
+            &config
+        )?);
+        assert!(!super::expiring(
+            created,
+            Date::parse("2028-12-21")?,
+            &config
+        )?);
+        assert!(
+            !super::expiring(
+                Date::parse("2028-12-22")?,
+                Date::parse("2028-12-26")?,
+                &config
+            )?,
+            "an order placed within the buffer at the calendar's edge is judged by its high count, \
+             so it is not due the next trading day (#468 round 2, M1)"
+        );
+        let edge = Date::parse("2028-12-22")?;
+        assert!(
+            !super::expiring(edge, Date::parse("2029-03-14")?, &config)?,
+            "the high count reads the weekdays past the calendar as trading days: six from \
+             2029-03-14 to the expiry, 2029-03-22"
+        );
+        assert!(
+            super::expiring(edge, Date::parse("2029-03-15")?, &config)?,
+            "and five from 2029-03-15, so it is due there"
+        );
+        Ok(())
+    }
+
+    /// The trading days in `[from, expiry)` the calendar places, a day it cannot place counted as
+    /// none: the property's own low count, kept apart from [`super::expiring`]'s.
+    fn placed_trading_days(
+        calendar: &ExchangeCalendar,
+        from: Date,
+        expiry: Date,
+    ) -> Result<u32, ExecutorError> {
+        let mut count = 0_u32;
+        let mut day = from;
+        while day < expiry {
+            if calendar.is_trading_day(day).unwrap_or(false) {
+                count = count.saturating_add(1);
+            }
+            day = day.next()?;
+        }
+        Ok(count)
+    }
+
+    /// The trading day after `day`: the calendar's, or past its range the next weekday.
+    fn following_trading_day(
+        calendar: &ExchangeCalendar,
+        day: Date,
+    ) -> Result<Date, ExecutorError> {
+        let mut next = day.next()?;
+        while !calendar.is_trading_day(next).unwrap_or(!next.is_weekend()) {
+            next = next.next()?;
+        }
+        Ok(next)
+    }
+
+    /// DEC-367 item 2, as #468 round 3 ruled: around the calendar's edge, no GTC order is due on
+    /// the day it is created, and an order whose low count was within the buffer on its creation
+    /// day is not due on its next trading day, so a re-placement is never re-placed in a loop. The
+    /// low count is the property's own ([`placed_trading_days`]).
+    #[test]
+    fn no_re_placement_is_due_the_day_it_is_placed_nor_the_next_when_placed_at_the_edge()
+    -> Result<(), ExecutorError> {
+        let config = executor_config();
+        let calendar =
+            ExchangeCalendar::us_equities().map_err(|_| missing("the US equities calendar"))?;
+        let mut created = Date::parse("2028-09-01")?;
+        let last = Date::parse("2029-03-01")?;
+        let mut at_the_edge = 0_u32;
+        while created <= last {
+            let mut expiry = created;
+            for _ in 0..config.gtc_expiry_days {
+                expiry = expiry.next()?;
+            }
+            assert!(
+                !super::expiring(created, created, &config)?,
+                "an order created {created:?} is due the day it is created"
+            );
+            if placed_trading_days(&calendar, created, expiry)?
+                <= config.protective_replace_buffer_trading_days
+            {
+                at_the_edge = at_the_edge.saturating_add(1);
+                let next = following_trading_day(&calendar, created)?;
+                assert!(
+                    !super::expiring(created, next, &config)?,
+                    "an order placed within the buffer on {created:?} is due again on {next:?}"
+                );
+            }
+            created = following_trading_day(&calendar, created)?;
+        }
+        assert!(
+            at_the_edge > 0,
+            "the dates reach the calendar's edge, so the second clause is exercised"
+        );
+        Ok(())
+    }
+
+    /// DEC-367 item 2: the one case outside the property above. An order placed 2028-12-21 has six
+    /// in-range trading days left (the 21st, 22nd and 26th to 29th), outside the buffer, so it is
+    /// judged by its low count and is due on 2028-12-22, its next trading day: one extra
+    /// re-placement. That re-placement, placed 2028-12-22 within the buffer, is judged by its high
+    /// count and is not due again on any trading day through 2029-03-14: then none.
+    #[test]
+    fn the_order_placed_2028_12_21_is_re_placed_once_then_never_again() -> Result<(), ExecutorError>
+    {
+        let config = executor_config();
+        let calendar =
+            ExchangeCalendar::us_equities().map_err(|_| missing("the US equities calendar"))?;
+        let placed = Date::parse("2028-12-21")?;
+        assert!(!super::expiring(placed, placed, &config)?);
+        let replaced = Date::parse("2028-12-22")?;
+        assert!(
+            super::expiring(placed, replaced, &config)?,
+            "one extra re-placement, on 2028-12-22"
+        );
+        let mut day = replaced;
+        let last = Date::parse("2029-03-14")?;
+        while day <= last {
+            assert!(
+                !super::expiring(replaced, day, &config)?,
+                "the re-placement placed 2028-12-22 is due again on {day:?}"
+            );
+            day = following_trading_day(&calendar, day)?;
+        }
+        Ok(())
+    }
+
+    /// A copied `TradingDayStarted` for `date`, committed as the executor copies it and stepped.
+    fn trading_day(
+        executor: &mut Executor,
+        ports: &Ports<'_>,
+        date: &str,
+    ) -> Result<Vec<Effect>, ExecutorError> {
+        committed(
+            executor,
+            "TradingDayStarted",
+            vec![("date", text(date)), ("originated", Value::Bool(true))],
+        )?;
+        let day = executor
+            .journal
+            .last()
+            .cloned()
+            .ok_or_else(|| missing("the trading day"))?;
+        executor.run(Input::Journal(day), ports)
+    }
+
+    /// #468 round 1, B1 (rule 12, §5.4's `fits`), as the founder's decision on #468 replaced it: a
+    /// due day (2026-08-28, past the buffer day 2026-08-27) re-places the OCO beside [`LONE`] for
+    /// the 6 [`LONE`] cannot sell, never more. When [`LONE`] then ends unfilled, its 4 shares are
+    /// protected again in that step, so the position is covered throughout.
+    #[test]
+    fn a_re_placement_beside_a_working_exit_is_topped_up_when_the_exit_ends()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        let first = trading_day(&mut executor, &ports, "2026-08-28")?;
+        assert_eq!(cancels(&first), vec![OCO]);
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(oco_sizes(&placed), vec![Qty::parse("6")?]);
+        acknowledge_protection(&mut executor, &placed, &ports)?;
+        let ended = executor.run(lone_ended()?, &ports)?;
+        assert_eq!(oco_sizes(&ended), vec![Qty::parse("4")?]);
+        assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        Ok(())
+    }
+
+    /// The broker's report that [`LONE`] was cancelled with nothing filled.
+    fn lone_ended() -> Result<Input, ExecutorError> {
+        let order = reported(
+            LONE,
+            &Held {
+                purpose: Purpose::RiskExit,
+                qty: 4,
+                filled: 0,
+                acked: true,
+                live: false,
+            },
+        )?;
+        Ok(Input::BrokerUpdate(BrokerUpdate::Order(order)))
+    }
+
+    /// The sizes of the OCOs `effects` submit.
+    fn oco_sizes(effects: &[Effect]) -> Vec<Qty> {
+        ocos(effects)
+            .into_iter()
+            .map(|(_, qty, _, _)| qty)
+            .collect()
+    }
+
+    /// #468 round 1, B1's matching guard, as the founder's decision on #468 replaced it: a
+    /// re-placement whose cancels are confirmed while an exit works with no sequence of its own, a
+    /// state a restart may leave between the two, re-places at once for what that exit cannot
+    /// sell; once the exit ends unfilled, its shares are protected too.
+    #[test]
+    fn a_re_placement_beside_a_working_exit_covers_what_the_exit_cannot_sell()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(LONE)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("4")),
+                ("limit", text("150")),
+                ("purpose", text("risk_exit")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(LONE)), ("state", text("accepted"))],
+        )?;
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            oco_sizes(&confirmed),
+            vec![Qty::parse("6")?],
+            "{:?}",
+            drafted(&confirmed)
+        );
+        acknowledge_protection(&mut executor, &confirmed, &ports)?;
+        let ended = executor.run(lone_ended()?, &ports)?;
+        assert_eq!(oco_sizes(&ended), vec![Qty::parse("4")?]);
+        Ok(())
+    }
+
+    /// #468 round 1, M4.1 (rule 5, DEC-348 item 1): the re-placement's interval starts before its
+    /// cancel is sent, so `max_unprotected_s` runs from the earlier instant.
+    #[test]
+    fn a_re_placement_starts_its_interval_before_it_cancels() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let started = trading_day(&mut executor, &ports, "2026-09-21")?;
+        let start = started.iter().position(|effect| {
+            matches!(effect, Effect::Journal(draft) if draft.event_type == "ProtectionChanged"
+                && draft.payload.get("action").and_then(Value::as_str) == Some("unprotected_start"))
+        });
+        let cancel = started
+            .iter()
+            .position(|effect| matches!(effect, Effect::Broker(BrokerRequest::Cancel { .. })));
+        assert!(
+            start.is_some() && cancel.is_some() && start < cancel,
+            "{:?}",
+            drafted(&started)
+        );
+        Ok(())
+    }
+
+    /// #468 round 1, M4.2 (DEC-367 item 3): every resting protective order in the instrument is
+    /// cancelled, two tranches here, not only the first.
+    #[test]
+    fn a_re_placement_cancels_every_tranche() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = in_two_tranches(&ports)?;
+        let second = "md-held-1-p2";
+        let started = trading_day(&mut executor, &ports, "2026-09-21")?;
+        let mut cancelled = cancels(&started);
+        cancelled.sort_unstable();
+        assert_eq!(cancelled, vec![OCO, second]);
+        Ok(())
+    }
+
+    /// #468 round 1, M4.3 (DEC-367 item 5, DEC-347): an exit sequence that takes the instrument
+    /// over while a re-placement waits keeps it. The confirmed cancels re-place nothing, though no
+    /// exit order is working yet; the sequence re-protects when it ends.
+    #[test]
+    fn an_exit_takes_a_re_placement_over() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("unprotected_start")),
+                ("intent_id", text(EXIT)),
+                ("entry", text("md-held-1")),
+                ("agent", text("agent-a")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+            ],
+        )?;
+        assert!(executor.state.exiting.contains_key(&aapl()?));
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert!(
+            submissions(&confirmed)
+                .iter()
+                .all(|order| order.purpose != Purpose::Protective),
+            "{:?}",
+            drafted(&confirmed)
+        );
+        Ok(())
+    }
+
+    /// #468 round 1, M4.4: a re-placement is forgotten once its interval ends, so no later step
+    /// re-places from its stale record.
+    #[test]
+    fn a_finished_re_placement_is_forgotten() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        assert!(executor.state.replacing.contains_key(&aapl()?));
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(submissions(&placed).len(), 1);
+        assert!(executor.state.replacing.is_empty());
+        acknowledge_protection(&mut executor, &placed, &ports)?;
+        let later = executor.run(Input::Tick(RiskClock::from_secs(5)), &ports)?;
+        assert!(submissions(&later).is_empty() && actions(&later).is_empty());
+        Ok(())
+    }
+
+    /// DEC-367 item 1: protection re-placed on a trading day records that day as its creation, so
+    /// the next trading day, some sixty trading days from its expiry, re-places nothing. Undated, it
+    /// would be due again every day.
+    #[test]
+    fn a_re_placement_is_dated_and_not_re_placed_the_next_day() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            protection_drafts(&placed)
+                .iter()
+                .find(|draft| draft.payload.get("action").and_then(Value::as_str) == Some("placed"))
+                .and_then(|draft| draft.payload.get("created_on"))
+                .and_then(Value::as_str),
+            Some("2026-09-21")
+        );
+        acknowledge_protection(&mut executor, &placed, &ports)?;
+        let next = trading_day(&mut executor, &ports, "2026-09-22")?;
+        assert!(
+            cancels(&next).is_empty() && actions(&next).is_empty(),
+            "{:?}",
+            drafted(&next)
+        );
+        Ok(())
+    }
+
+    /// #468 round 2, M1: at the calendar's edge as well, a re-placement placed on a trading day is
+    /// not re-placed the next one. Placed 2028-12-22, it has five in-range trading days left, so
+    /// its low count is within the buffer the day it is placed; it is judged by its high count.
+    #[test]
+    fn a_re_placement_at_the_calendars_edge_is_not_re_placed_the_next_day()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2028-12-22")?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(submissions(&placed).len(), 1);
+        acknowledge_protection(&mut executor, &placed, &ports)?;
+        let next = trading_day(&mut executor, &ports, "2028-12-26")?;
+        assert!(
+            cancels(&next).is_empty() && actions(&next).is_empty(),
+            "{:?}",
+            drafted(&next)
+        );
+        Ok(())
+    }
+
+    /// Ten AAPL that `agent-a` bought, protected in two tranches at 170 over 140: [`OCO`] for 6 and
+    /// `md-held-1-p2` for 4.
+    fn in_two_tranches(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        let second = "md-held-1-p2";
+        for (id, qty) in [(OCO, "6"), (second, "4")] {
+            committed(
+                &mut executor,
+                "OrderSubmitted",
+                vec![
+                    ("client_order_id", text(id)),
+                    ("agent", text("agent-a")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("sell")),
+                    ("qty", text(qty)),
+                    ("tif", text("gtc")),
+                    ("purpose", text("protective")),
+                    ("order_class", text("oco")),
+                    ("take_profit", text("170")),
+                    ("stop", text("140")),
+                ],
+            )?;
+            committed(
+                &mut executor,
+                "OrderStateChanged",
+                vec![("client_order_id", text(id)), ("state", text("accepted"))],
+            )?;
+            committed(
+                &mut executor,
+                "ProtectionChanged",
+                vec![
+                    ("instrument", text("AAPL")),
+                    ("action", text("placed")),
+                    ("orders", text(id)),
+                    ("qty", text(qty)),
+                    ("take_profit", text("170")),
+                    ("stop", text("140")),
+                ],
+            )?;
+        }
+        Ok(executor)
+    }
+
+    /// [`re_place`] on `executor`'s state for AAPL at 170 over 140: its effects.
+    fn re_placed(executor: &Executor, ports: &Ports<'_>) -> Result<Vec<Effect>, ExecutorError> {
+        let mut batch = crate::batch::Batch::new(&executor.state, ports)?;
+        let recorded = crate::state::Replacement {
+            entry: ClientOrderId::parse("md-held-1")?,
+            agent: AgentId("agent-a".to_owned()),
+            prices: Some(crate::types::ProtectionPrices {
+                stop: Price::parse("140")?,
+                take_profit: Some(Price::parse("170")?),
+            }),
+        };
+        super::re_place(&mut batch, &aapl()?, &recorded)?;
+        Ok(batch.effects)
+    }
+
+    /// Commits an accepted risk-exit sell of `qty` in `instrument` under `id`.
+    fn working_exit(
+        executor: &mut Executor,
+        id: &str,
+        instrument: &str,
+        qty: &str,
+    ) -> Result<(), ExecutorError> {
+        committed(
+            executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(id)),
+                ("agent", text("agent-a")),
+                ("instrument", text(instrument)),
+                ("side", text("sell")),
+                ("qty", text(qty)),
+                ("limit", text("150")),
+                ("purpose", text("risk_exit")),
+            ],
+        )?;
+        committed(
+            executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(id)), ("state", text("accepted"))],
+        )
+    }
+
+    /// #468 round 2, M3 (DEC-367 item 4): only the instrument's own exits count. An exit working in
+    /// MSFT neither defers AAPL's re-placement nor shrinks it.
+    #[test]
+    fn another_instruments_exit_neither_defers_nor_shrinks_a_re_placement()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        working_exit(&mut executor, "md-msft-exit", "MSFT", "4")?;
+        let started = trading_day(&mut executor, &ports, "2026-09-21")?;
+        assert_eq!(cancels(&started), vec![OCO], "not deferred by MSFT's exit");
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            ocos(&placed)
+                .into_iter()
+                .map(|(_, qty, _, _)| qty)
+                .collect::<Vec<_>>(),
+            vec![Qty::parse("10")?],
+            "MSFT's exit sells none of AAPL's shares"
+        );
+        Ok(())
+    }
+
+    /// #468 round 2, M3 (DEC-367 item 4): a working exit counts what it may still sell. An exit of
+    /// 4 that has filled 3 leaves 7 held and 1 still selling, so protection covers 6, not 3.
+    #[test]
+    fn a_partly_filled_exit_counts_only_its_remainder() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        working_exit(&mut executor, LONE, "AAPL", "4")?;
+        committed(
+            &mut executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-lone")),
+                ("client_order_id", text(LONE)),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text("3")),
+                ("price", text("150")),
+            ],
+        )?;
+        let effects = re_placed(&executor, &ports)?;
+        assert_eq!(
+            ocos(&effects)
+                .into_iter()
+                .map(|(_, qty, _, _)| qty)
+                .collect::<Vec<_>>(),
+            vec![Qty::parse("6")?]
+        );
+        Ok(())
+    }
+
+    /// #468 round 2, M3: with the position already below what the working exits may sell, the
+    /// re-placement places nothing and ends its interval, never the whole held quantity.
+    #[test]
+    fn an_over_committed_position_re_places_nothing() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        working_exit(&mut executor, LONE, "AAPL", "4")?;
+        committed(
+            &mut executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-elsewhere")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text("7")),
+                ("price", text("150")),
+            ],
+        )?;
+        let effects = re_placed(&executor, &ports)?;
+        assert!(submissions(&effects).is_empty(), "{:?}", drafted(&effects));
+        assert_eq!(actions(&effects), vec!["unprotected_end"]);
+        Ok(())
+    }
+
+    /// #468 round 2, m7 (DEC-367 item 5): a restart between the confirmed cancel and the
+    /// re-placement resumes it; the first input after the restart re-places the held quantity.
+    #[test]
+    fn a_restart_resumes_a_re_placement() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        executor.commit_one(
+            "OrderStateChanged",
+            object(vec![
+                ("client_order_id", text(OCO)),
+                ("state", text("canceled")),
+                ("risk_clock", clock(RiskClock::from_secs(0))?),
+            ])?,
+        )?;
+        let mut restarted = executor.restarted(&ports)?;
+        assert!(restarted.state.replacing.contains_key(&aapl()?));
+        let first = restarted.run(Input::Tick(RiskClock::from_secs(1)), &ports)?;
+        assert_eq!(
+            ocos(&first)
+                .into_iter()
+                .map(|(_, qty, _, _)| qty)
+                .collect::<Vec<_>>(),
+            vec![Qty::parse("10")?]
+        );
+        Ok(())
+    }
+
+    /// #468 round 1, m1: the trading day is the greatest date copied, so a re-copied older fact
+    /// never moves it back.
+    #[test]
+    fn an_older_trading_day_never_moves_the_day_back() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-22")?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        assert_eq!(executor.state.trading_day, Some(Date::parse("2026-09-22")?));
+        Ok(())
+    }
+
+    /// The founder's decision on #468, case (a): protection due beside a working exit is re-placed
+    /// for what that exit cannot sell, never left to expire. On 2026-08-28, past the buffer day,
+    /// the OCO for 6 beside [`LONE`] is cancelled with its interval started first, and re-placed
+    /// for the 6 [`LONE`] cannot sell.
+    #[test]
+    fn due_protection_beside_a_working_exit_is_re_placed_for_what_it_cannot_sell()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        let due = trading_day(&mut executor, &ports, "2026-08-28")?;
+        assert_eq!(cancels(&due), vec![OCO]);
+        assert_eq!(actions(&due), vec!["unprotected_start"]);
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            ocos(&placed)
+                .into_iter()
+                .map(|(_, qty, _, _)| qty)
+                .collect::<Vec<_>>(),
+            vec![Qty::parse("6")?],
+            "what {LONE} cannot sell"
+        );
+        Ok(())
+    }
+
+    /// DEC-367 item 4: protection the broker cancels with no sequence or re-placement under way is
+    /// re-placed at once, at the cancelled order's own prices, since none rests to read them from.
+    #[test]
+    fn protection_the_broker_cancels_is_re_placed_at_its_own_prices() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let order = reported(
+            OCO,
+            &Held {
+                purpose: Purpose::Protective,
+                qty: 10,
+                filled: 0,
+                acked: true,
+                live: false,
+            },
+        )?;
+        let ended = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(order)), &ports)?;
+        assert_eq!(actions(&ended).first(), Some(&"unprotected_start"));
+        assert_eq!(
+            ocos(&ended)
+                .into_iter()
+                .map(|(_, qty, legs, _)| (qty, legs))
+                .collect::<Vec<_>>(),
+            vec![(Qty::parse("10")?, legs("170", "140", "10")?)],
+            "{:?}",
+            drafted(&ended)
+        );
+        Ok(())
+    }
+
+    /// The round-3 review of #468, M1: an exit that ends unfilled where nothing protects the
+    /// position and no prices are recorded anywhere leaves it under-covered with nothing to place.
+    /// It is journaled (`expiry_unreplaceable`) and the owner alerted, never silent.
+    #[test]
+    fn an_exit_that_ends_with_nothing_to_price_protection_from_is_alerted()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(LONE)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("4")),
+                ("limit", text("150")),
+                ("purpose", text("risk_exit")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(LONE)), ("state", text("accepted"))],
+        )?;
+        let ended = executor.run(lone_ended()?, &ports)?;
+        assert_eq!(actions(&ended), vec!["expiry_unreplaceable"]);
+        assert_eq!(alerts(&ended), vec!["protection_expiring"]);
+        Ok(())
+    }
+
+    /// The round-3 review of #468, M1's second route: unpriced protection alerted while it is due
+    /// then expires at the broker. The moment the position is left unprotected is journaled and
+    /// alerted too, not only the days before it.
+    #[test]
+    fn unpriced_protection_that_expires_at_the_broker_is_alerted() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = unpriced(&ports)?;
+        let mut order = reported(
+            OCO,
+            &Held {
+                purpose: Purpose::Protective,
+                qty: 10,
+                filled: 0,
+                acked: true,
+                live: false,
+            },
+        )?;
+        "expired".clone_into(&mut order.status);
+        let expired = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(order)), &ports)?;
+        assert_eq!(actions(&expired), vec!["expiry_unreplaceable"]);
+        assert_eq!(alerts(&expired), vec!["protection_expiring"]);
+        Ok(())
+    }
+
+    /// The round-3 review of #468, M1, through a sequence: an exit over unpriced protection
+    /// cancels it and is then cancelled by the broker unfilled, so the sequence returns protection
+    /// for the 10 with no prices to place it at. That is journaled and alerted, never silent, and
+    /// the sequence ends; but the interval stays open, since nothing covers the 10, so §5.4's bound
+    /// still governs it and alerts it at `max_unprotected_s` (the round-4 review, m2; rule 3).
+    #[test]
+    fn an_unpriced_sequence_that_ends_with_shares_left_is_alerted() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = unpriced(&ports)?;
+        executor.run(sell(EXIT, "4", "150", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let order = reported(
+            &format!("md-{EXIT}"),
+            &Held {
+                purpose: Purpose::RiskExit,
+                qty: 4,
+                filled: 0,
+                acked: true,
+                live: false,
+            },
+        )?;
+        let ended = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(order)), &ports)?;
+        assert_eq!(
+            actions(&ended),
+            vec!["expiry_unreplaceable", "unprotected_end"],
+            "{:?}",
+            drafted(&ended)
+        );
+        assert_eq!(alerts(&ended), vec!["protection_expiring"]);
+        assert!(executor.state.exiting.is_empty(), "the sequence ends");
+        let open: Vec<_> = executor
+            .state
+            .unprotected
+            .iter()
+            .filter(|interval| interval.ended_at.is_none())
+            .collect();
+        assert_eq!(open.len(), 1, "the 10 are still uncovered: {open:?}");
+        let bound = executor.run(Input::Tick(RiskClock::from_secs(31)), &ports)?;
+        assert!(
+            alerts(&bound).contains(&"unprotected_interval_limit"),
+            "the bound still governs the uncovered interval: {:?}",
+            alerts(&bound)
+        );
+        Ok(())
+    }
+
+    /// The round-3 review of #468, m1: a broker that cancels protection before acknowledging it,
+    /// round after round, would restart §5.4's bound each time. A protective order cancelled while
+    /// the interval still awaits it is read as a refusal (DEC-348 item 2): the top-up re-places
+    /// nothing, the one interval stays open, and the bound alerts it.
+    #[test]
+    fn protection_cancelled_before_its_acknowledgment_keeps_the_bound() -> Result<(), ExecutorError>
+    {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let cancelled = |id: &str| -> Result<Input, ExecutorError> {
+            let order = reported(
+                id,
+                &Held {
+                    purpose: Purpose::Protective,
+                    qty: 10,
+                    filled: 0,
+                    acked: true,
+                    live: false,
+                },
+            )?;
+            Ok(Input::BrokerUpdate(BrokerUpdate::Order(order)))
+        };
+        let first = executor.run(cancelled(OCO)?, &ports)?;
+        let placed: Vec<String> = ocos(&first)
+            .into_iter()
+            .map(|(id, _, _, _)| id.to_owned())
+            .collect();
+        assert_eq!(placed.len(), 1, "{:?}", drafted(&first));
+        let top_up = placed.first().ok_or_else(|| missing("the top-up"))?;
+        let refused = executor.run(cancelled(top_up)?, &ports)?;
+        assert!(
+            ocos(&refused).is_empty() && actions(&refused).is_empty(),
+            "{:?}",
+            drafted(&refused)
+        );
+        assert_eq!(executor.state.unprotected.len(), 1);
+        let bound = executor.run(Input::Tick(RiskClock::from_secs(31)), &ports)?;
+        assert!(
+            alerts(&bound).contains(&"unprotected_interval_limit"),
+            "{:?}",
+            alerts(&bound)
+        );
+        assert_eq!(executor.state.unprotected.len(), 1);
+        Ok(())
+    }
+
+    /// The round-3 review of #468, m2: a re-placement under way owns its instrument, so the
+    /// top-up leaves it alone. With two tranches due and their cancels confirmed one at a time,
+    /// one OCO for the held 10 is placed once both are gone, never one per tranche.
+    #[test]
+    fn a_re_placement_under_way_is_not_topped_up_tranche_by_tranche() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = in_two_tranches(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        let after_first = executor.run(cancel_accepted(OCO), &ports)?;
+        assert!(
+            oco_sizes(&after_first).is_empty(),
+            "{:?}",
+            drafted(&after_first)
+        );
+        let after_both = executor.run(cancel_accepted("md-held-1-p2"), &ports)?;
+        assert_eq!(oco_sizes(&after_both), vec![Qty::parse("10")?]);
+        Ok(())
+    }
+
+    /// The founder's decision on #468, case (b): an exit that ends unfilled (cancelled, expired or
+    /// rejected) beside protection sized around it leaves its shares under-covered. They are
+    /// protected again in the same step, at the resting protection's prices, its interval started
+    /// before the placement.
+    #[test]
+    fn an_exit_that_ends_unfilled_has_its_shares_protected_again_at_once()
+    -> Result<(), ExecutorError> {
+        for status in ["canceled", "expired", "rejected"] {
+            with_ports!(ports);
+            let mut executor = beside_a_lone_exit(&ports)?;
+            let mut order = reported(
+                LONE,
+                &Held {
+                    purpose: Purpose::RiskExit,
+                    qty: 4,
+                    filled: 0,
+                    acked: true,
+                    live: false,
+                },
+            )?;
+            status.clone_into(&mut order.status);
+            let ended = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(order)), &ports)?;
+            assert_eq!(
+                actions(&ended).first(),
+                Some(&"unprotected_start"),
+                "{status}: {:?}",
+                drafted(&ended)
+            );
+            assert_eq!(
+                ocos(&ended)
+                    .into_iter()
+                    .map(|(_, qty, legs, _)| (qty, legs))
+                    .collect::<Vec<_>>(),
+                vec![(Qty::parse("4")?, legs("170", "140", "4")?)],
+                "{status}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Ten AAPL that `agent-a` bought, protected by an order for all ten with no recorded prices.
+    fn unpriced(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(OCO)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("10")),
+                ("limit", text("170")),
+                ("purpose", text("protective")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(OCO)),
+                ("qty", text("10")),
+            ],
+        )?;
+        Ok(executor)
+    }
+
+    /// #468 round 1, m2, with the founder's decision on #468: protection resting with no recorded
+    /// prices has nothing to be re-placed at, so it is left resting rather than cancelled, and,
+    /// once due, journaled and alerted, never silent.
+    #[test]
+    fn due_protection_with_no_prices_is_alerted_and_left_alone() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = unpriced(&ports)?;
+        let started = trading_day(&mut executor, &ports, "2026-09-21")?;
+        assert!(cancels(&started).is_empty(), "{:?}", drafted(&started));
+        assert_eq!(actions(&started), vec!["expiry_unreplaceable"]);
+        assert_eq!(alerts(&started), vec!["protection_expiring"]);
+        Ok(())
+    }
+
+    /// #468 round 1, m7: a second trading day while a re-placement still waits on its cancels
+    /// starts no second one.
+    #[test]
+    fn a_second_trading_day_starts_no_second_re_placement() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        trading_day(&mut executor, &ports, "2026-09-21")?;
+        let again = trading_day(&mut executor, &ports, "2026-09-22")?;
+        assert!(
+            actions(&again).is_empty() && cancels(&again).is_empty(),
+            "{:?}",
+            drafted(&again)
+        );
+        Ok(())
+    }
+
+    /// §5.4's re-placement before expiry (DEC-367 item 3): at a copied `TradingDayStarted` past
+    /// the GTC order's buffer day, the resting protection is cancelled by id, and the interval's
+    /// start names what it cancels, so a restart knows what the re-placement waits on.
+    #[test]
+    fn a_re_placement_before_expiry_names_what_it_cancels() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(OCO)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("10")),
+                ("tif", text("gtc")),
+                ("purpose", text("protective")),
+                ("order_class", text("oco")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(OCO)), ("state", text("accepted"))],
+        )?;
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(OCO)),
+                ("qty", text("10")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+                ("created_on", text("2026-06-01")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "TradingDayStarted",
+            vec![
+                ("date", text("2026-08-31")),
+                ("originated", Value::Bool(true)),
+            ],
+        )?;
+        let day = executor
+            .journal
+            .last()
+            .cloned()
+            .ok_or_else(|| missing("the trading day"))?;
+        let started = executor.run(Input::Journal(day), &ports)?;
+        assert_eq!(cancels(&started), vec![OCO]);
+        assert_eq!(
+            protection_drafts(&started)
+                .first()
+                .and_then(|draft| draft.payload.get("orders"))
+                .and_then(Value::as_str),
+            Some(OCO),
+            "{:?}",
+            drafted(&started)
+        );
+        Ok(())
+    }
+
     /// §5.4's bound ends every exit in the instrument, not the sequence's alone: `settle`
     /// re-places protection only once none is working, so one left working would leave the
     /// position unprotected past the bound (#286 round 2, M1′ and M2′).
@@ -6884,7 +8511,32 @@ mod sequence_tests {
         Fill(u32),
         Confirm,
         Pause(bool),
+        TradingDay(usize),
+        /// The broker cancels the first exit it holds acknowledged and live, as at a day order's
+        /// close (founder's decision on #468, case (b)).
+        BrokerCancel,
+        /// The agent stopped, or back to normal: a stop holds exits as a pause does.
+        Stop(bool),
+        /// The broker refuses the latest rung it holds unacknowledged (#485).
+        Reject,
+        /// The broker refuses the latest exit's first order it holds unacknowledged: a sell
+        /// beside a ladder that ends unsold (DEC-410 item 6).
+        RejectFirst,
+        /// The process restarts: the state is folded afresh from the journal.
+        Restart,
+        /// The owner's agent-scoped kill switch (§5.5).
+        KillSwitch,
+        /// The first protective order the broker holds live fills this many shares, as a stop
+        /// triggering does.
+        Triggered(u32),
+        /// The broker refuses the latest cancel it was asked, as for an order it holds in no
+        /// cancelable state (#508's review, M1).
+        Refuse,
     }
+
+    /// The trading days a script's `TradingDayStarted` may name, in order: a later move may name
+    /// an earlier one, as a re-copied or out-of-order fact would.
+    const TRADING_DATES: [&str; 4] = ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"];
 
     const EXIT_PURPOSES: [Purpose; 4] = [
         Purpose::RiskExit,
@@ -6904,6 +8556,8 @@ mod sequence_tests {
             2 => (1_u32..=3).prop_map(Move::Fill),
             3 => Just(Move::Confirm),
             1 => any::<bool>().prop_map(Move::Pause),
+            1 => (0_usize..TRADING_DATES.len()).prop_map(Move::TradingDay),
+            1 => Just(Move::BrokerCancel),
         ]
     }
 
@@ -6942,6 +8596,43 @@ mod sequence_tests {
         fills: u32,
         paused: bool,
         quiet_since: i64,
+        /// Whether the Σ checks run ([`Desk::within_position`]): #485's scripts and properties run
+        /// them; the random property joins them with #485's fix (DEC-408 item 5).
+        sums: bool,
+        /// The rungs whose cancel was asked for a ladder step (§5.6 step 2). Never cleared: a
+        /// rung's id is unique to its exit and rung, so a later rung never matches an old one.
+        stepped: BTreeSet<String>,
+        /// Each exit between rungs, with its stepped rung's unfilled quantity once its cancel is
+        /// confirmed, until the exit's next rung is sent, the exit is abandoned, nothing is left
+        /// to send, or protection returns and ends a sequence that was not parked (#485). What
+        /// it counts is derived from this when read ([`Desk::counted_for`]), never stored.
+        between: BTreeMap<String, u32>,
+        /// The exits held `parked` for the next open (DEC-260 (18)): their remainder outlives the
+        /// protection's return.
+        parked: BTreeSet<String>,
+        /// The exits laddered with no sequence of their own (DEC-260 (14)): a pause since a step
+        /// was asked does not end them.
+        lone: BTreeSet<String>,
+        /// The exit whose sequence opened the latest interval, and the exits whose interval
+        /// reached its bound, which ends their climb (§5.6 step 2).
+        sequence: Option<String>,
+        bounded: BTreeSet<String>,
+        /// The exits whose ladder ended between rungs by the oracle's own record: paused, stopped
+        /// or bounded at the step's confirmation (DEC-409), or bounded later (DEC-410 item 1). No
+        /// later rung of theirs may be sent.
+        ended: BTreeSet<String>,
+        /// Each rung journaled short (DEC-410 item 4): its exit, what it did not send, and what
+        /// it sent.
+        shorts: Vec<(String, u32, u32)>,
+        /// Every order a cancel was asked for: a refusal of that cancel is the cancel's, never the
+        /// order's rejection (§5.7).
+        cancelled: BTreeSet<String>,
+        /// Whether an unprotected interval is open by the oracle's own record: a sequence, a
+        /// passive sequence or a re-placement started and not yet ended.
+        open: bool,
+        /// Whether the executor journaled and alerted an under-covered position it had nothing
+        /// to place protection at (`expiry_unreplaceable`), since the position was last covered.
+        alerted: bool,
     }
 
     /// 2018-01-01 00:00 ET, the calendar's first date: before it (the 1970 base, the eve of 2018)
@@ -7066,6 +8757,151 @@ mod sequence_tests {
             })
         }
 
+        /// §5.4's Σ protective sell quantity ≤ position, counted as `fits` counts it: every
+        /// protective order the broker holds live, with every exit it holds live, sells at most the
+        /// position (rule 12). The under-cover arm (the founder's decision on #468): while no
+        /// sequence or re-placement is under way, they and the rungs ladders between rungs will
+        /// still send sell at least the position, so no held share is left without a protective
+        /// order, an exit or a rung to come, unless the executor journaled and alerted it. A
+        /// ladder's rungs count as cover for their own shares only, so an order that ends beside
+        /// a stepping ladder is still seen (#468's seed 18; the round-4 review, B2). A parked
+        /// remainder that counts nothing, its agent paused or stopped, is held by rule 13 and
+        /// alerted at its park (DEC-260 (18), (19)), so its shares are accounted for too. With the Σ checks on, the live exits with every rung a ladder between
+        /// rungs may still send sell at most the position too (DEC-408). And no sell works beside a ladder between
+        /// rungs unless that ladder is parked for the open, the only state in which a remainder
+        /// lasts: so a sell beside it overlaps the rung for one step at most (DEC-410 item 7).
+        /// The oracle's own record, never the fold's.
+        fn within_position(&mut self) -> Result<(), String> {
+            let selling: u32 = self
+                .venue
+                .values()
+                .filter(|held| held.live)
+                .map(|held| held.qty.saturating_sub(held.filled))
+                .sum();
+            if selling > self.position {
+                return Err(format!(
+                    "{selling} may sell against a position of {} at {}",
+                    self.position, self.now
+                ));
+            }
+            let held_back: u32 = self
+                .between
+                .iter()
+                .filter(|(exit, _)| self.parked.contains(*exit) && !self.counts(exit))
+                .map(|(_, left)| *left)
+                .sum();
+            let rungs = self.counted().saturating_add(held_back);
+            if selling >= self.position {
+                self.alerted = false;
+            } else if !self.open && selling.saturating_add(rungs) < self.position && !self.alerted {
+                return Err(format!(
+                    "{selling} protective and exit orders and {rungs} of rungs still to send cover \
+                     a position of {} at {}, with no sequence or re-placement under way, and no \
+                     alert: {:?} between rungs",
+                    self.position, self.now, self.between
+                ));
+            }
+            if !self.sums {
+                return Ok(());
+            }
+            let exiting = self.working(None).saturating_add(self.counted());
+            if exiting > self.position {
+                return Err(format!(
+                    "{exiting} live exits and rungs still to send against a position of {} at {}: \
+                     {:?} between rungs",
+                    self.position, self.now, self.between
+                ));
+            }
+            for exit in self.between.keys() {
+                let beside = self.working(Some(exit));
+                if beside > 0 && !self.parked.contains(exit) {
+                    return Err(format!(
+                        "{beside} working beside {exit}'s remainder, which is not parked for the \
+                         open at {}: DEC-410 item 7 bounds that overlap to one step",
+                        self.now
+                    ));
+                }
+            }
+            Ok(())
+        }
+
+        /// Whether `exit`'s remainder will be sent, by the oracle's own record (DEC-410 item 1): a
+        /// lone ladder's unless it is parked while the agent is paused or stopped, a sequence's
+        /// while the agent is neither and its interval has not reached its bound.
+        fn counts(&self, exit: &str) -> bool {
+            if self.lone.contains(exit) {
+                !(self.parked.contains(exit) && self.paused)
+            } else {
+                !self.paused && !self.bounded.contains(exit)
+            }
+        }
+
+        /// What each remainder that will be sent counts, in its exits' id order, computed the
+        /// oracle's own way (DEC-410 item 1): its stepped rung's unfilled quantity, capped at the
+        /// position less the live exits at the broker less what the remainders ahead of it count.
+        fn counting(&self) -> Vec<(&str, u32)> {
+            let mut room = self.position.saturating_sub(self.working(None));
+            let mut counting = Vec::new();
+            for (exit, left) in self.between.iter().filter(|(exit, _)| self.counts(exit)) {
+                let counts = (*left).min(room);
+                room = room.saturating_sub(counts);
+                counting.push((exit.as_str(), counts));
+            }
+            counting
+        }
+
+        /// What `exit`'s remainder counts now, and so what its next rung must send.
+        fn counted_for(&self, exit: &str) -> u32 {
+            self.counting()
+                .into_iter()
+                .find(|(owner, _)| *owner == exit)
+                .map_or(0, |(_, counts)| counts)
+        }
+
+        /// What the remainders that will be sent add up to.
+        fn counted(&self) -> u32 {
+            self.counting().into_iter().map(|(_, counts)| counts).sum()
+        }
+
+        /// A stepped rung ends with `left` unsold, its step's cancel confirmed or the broker's own
+        /// cancel coming first, as the executor counts either (#468's round-5 review, B1) (§5.6
+        /// step 2): a lone ladder
+        /// sends its next rung for it, and so does a sequence whose ladder still climbs, neither
+        /// paused nor stopped nor bounded; a sequence that no longer climbs ends there, and
+        /// protection returns for what is left.
+        fn rung_cancelled(&mut self, id: &str, left: u32) {
+            let exit = exit_of(id);
+            let climbs = self.lone.contains(&exit) || !self.paused && !self.bounded.contains(&exit);
+            if self.stepped.contains(id) && left > 0 {
+                if climbs {
+                    self.between.insert(exit, left);
+                } else {
+                    self.ended.insert(exit);
+                }
+            }
+        }
+
+        /// What the live exits at the broker may still sell, `intent`'s own rungs left out.
+        fn working(&self, intent: Option<&str>) -> u32 {
+            self.venue
+                .iter()
+                .filter(|(id, held)| {
+                    held.live
+                        && held.purpose != Purpose::Protective
+                        && intent.is_none_or(|intent| exit_of(id) != intent)
+                })
+                .map(|(_, held)| held.qty.saturating_sub(held.filled))
+                .sum()
+        }
+
+        /// What is left for `intent` once the live exits and the rungs still to be sent are
+        /// counted (#485): the most a discretionary exit may be sized to (DEC-410 item 3).
+        fn room(&self, intent: &str) -> u32 {
+            self.position
+                .saturating_sub(self.working(Some(intent)))
+                .saturating_sub(self.counted())
+        }
+
         /// Whether `qty` more on top of what every other exit may still sell exceeds the
         /// position: the only denial an exit may meet (§5.3 rules 3 and 4).
         fn oversells(&self, intent: &str, qty: u32) -> bool {
@@ -7087,6 +8923,28 @@ mod sequence_tests {
         fn saw(&mut self, draft: &EventDraft) -> Result<(), String> {
             let field = |name: &str| draft.payload.get(name).and_then(Value::as_str);
             let intent = field("intent_id").unwrap_or_default().to_owned();
+            if draft.event_type == "ProtectionChanged" {
+                match field("action") {
+                    Some("unprotected_start" | "passive_start") => self.open = true,
+                    Some("unprotected_end") => self.open = false,
+                    Some("expiry_unreplaceable") => self.alerted = true,
+                    _ => {}
+                }
+            }
+            let id = field("client_order_id").unwrap_or_default();
+            if draft.event_type == "OrderStateChanged"
+                && field("state") == Some("rejected")
+                && self.cancelled.contains(id)
+            {
+                return Err(format!(
+                    "{id}: a refusal of its cancel was read as the order's rejection (§5.7)"
+                ));
+            }
+            if draft.event_type == "OrderStateChanged"
+                && draft.payload.get("ladder_step") == Some(&Value::Bool(true))
+            {
+                self.stepped.insert(id.to_owned());
+            }
             match (draft.event_type.as_str(), field("action")) {
                 ("IntentReceived", _) if intent.starts_with("w-") => {
                     let qty = field("qty")
@@ -7116,12 +8974,24 @@ mod sequence_tests {
                 ("GateDecided", _) => {
                     let verdict = field("verdict").unwrap_or_default();
                     let reason = field("reason_code").unwrap_or_default();
-                    let oversells = self
-                        .exits
-                        .get(&intent)
-                        .is_some_and(|exit| self.oversells(&intent, exit.qty));
+                    if draft.payload.get("parked") == Some(&Value::Bool(true)) {
+                        self.parked.insert(intent.clone());
+                    }
                     let priceable = self.priceable();
                     let closed = self.closed();
+                    let oversells = self.exits.get(&intent).is_some_and(|exit| {
+                        self.oversells(&intent, exit.qty)
+                            || exit.purpose == Purpose::DiscretionaryExit
+                                && self.room(&intent) == 0
+                                && !closed
+                                && priceable
+                    });
+                    if self.sums && verdict == "hold" && reason == "unknown_order_in_flight" {
+                        return Err(format!(
+                            "{intent} held unknown_order_in_flight, though the script's broker \
+                             never leaves an order unknown"
+                        ));
+                    }
                     let now = self.now;
                     let Some(exit) = self.exits.get_mut(&intent) else {
                         return Ok(());
@@ -7159,11 +9029,110 @@ mod sequence_tests {
                     let extended = draft.payload.get("extended_hours") == Some(&Value::Bool(true));
                     let id = field("client_order_id").unwrap_or_default();
                     self.sent(id, purpose, extended)?;
+                    let qty = field("qty")
+                        .unwrap_or_default()
+                        .parse::<u32>()
+                        .map_err(|error| format!("{id}'s qty: {error}"))?;
+                    if self.sums && qty == 0 {
+                        return Err(format!("{id} sent for nothing"));
+                    }
+                    let later = id != format!("md-{intent}");
+                    let protected = self
+                        .venue
+                        .values()
+                        .any(|held| held.live && held.purpose == Purpose::Protective);
+                    if purpose != Purpose::Protective
+                        && later
+                        && self.lone.contains(&intent)
+                        && protected
+                    {
+                        return Err(format!(
+                            "{id}: a lone ladder's rung sent while protection is live at {}, \
+                             where its next rung must first cancel it (DEC-367 item 4, DEC-260 \
+                             (18))",
+                            self.now
+                        ));
+                    }
+                    if self.sums && self.ended.contains(&intent) && later {
+                        return Err(format!(
+                            "{id}: a rung of a ladder that ended between rungs (DEC-409, DEC-410)"
+                        ));
+                    }
+                    let counts = self.counted_for(&intent);
+                    if self.sums && later && self.between.contains_key(&intent) && qty != counts {
+                        return Err(format!(
+                            "{id} sent {qty}, where its remainder counts {counts} (DEC-410 item 4)"
+                        ));
+                    }
+                    let room = self.room(&intent);
+                    if let Some(exit) = self.exits.get(&intent)
+                        && self.sums
+                        && purpose != Purpose::Protective
+                        && id == format!("md-{intent}")
+                        && qty != exit.qty
+                        && (exit.purpose != Purpose::DiscretionaryExit || qty != room.min(exit.qty))
+                    {
+                        return Err(format!(
+                            "{intent} ({:?}) sent for {qty} of {}, with {room} left: only a \
+                             discretionary exit is sized (DEC-410)",
+                            exit.purpose, exit.qty
+                        ));
+                    }
+                    if self.between.remove(&intent).is_some() {
+                        self.parked.remove(&intent);
+                    }
+                    if draft.payload.get("laddered") == Some(&Value::Bool(true)) {
+                        self.lone.insert(intent.clone());
+                    }
                     if let Some(exit) = self.exits.get_mut(&intent) {
                         exit.done = true;
                     }
                 }
+                ("ProtectionChanged", Some("unprotected_end")) => {
+                    let parked = &self.parked;
+                    self.between.retain(|exit, _| parked.contains(exit));
+                    self.lone.extend(self.between.keys().cloned());
+                    self.bounded.clear();
+                    self.sequence = None;
+                }
+                ("ProtectionChanged", Some("unprotected_start")) if !intent.is_empty() => {
+                    self.lone.remove(&intent);
+                    self.sequence = Some(intent.clone());
+                }
+                ("ProtectionChanged", Some("interval_limit")) => {
+                    if let Some(sequence) = self.sequence.clone() {
+                        if self.between.remove(&sequence).is_some() {
+                            self.ended.insert(sequence.clone());
+                        }
+                        self.bounded.insert(sequence);
+                    }
+                }
+                ("ProtectionChanged", Some("rung_short")) => {
+                    let number = |name: &str| {
+                        field(name)
+                            .unwrap_or_default()
+                            .parse::<u32>()
+                            .map_err(|error| format!("a short rung's {name}: {error}"))
+                    };
+                    let (short, sent) = (number("qty")?, number("sent")?);
+                    let left = self.between.get(&intent).copied().unwrap_or(0);
+                    let counts = self.counted_for(&intent);
+                    if self.sums
+                        && (short == 0 || sent != counts || short != left.saturating_sub(counts))
+                    {
+                        return Err(format!(
+                            "{intent}: a rung short by {short}, sending {sent}, where {left} is left \
+                             and the remainder counts {counts} (DEC-410 item 4)"
+                        ));
+                    }
+                    if sent == 0 {
+                        self.between.remove(&intent);
+                        self.ended.insert(intent.clone());
+                    }
+                    self.shorts.push((intent.clone(), short, sent));
+                }
                 ("OrderAbandoned", _) => {
+                    self.between.remove(&intent);
                     let reason = field("reason_code").or(field("reason")).unwrap_or_default();
                     if let Some(exit) = self.exits.get_mut(&intent) {
                         if reason != "unprotected_interval_limit" {
@@ -7246,6 +9215,7 @@ mod sequence_tests {
                         Effect::Journal(draft) => self.saw(&draft)?,
                         Effect::Broker(BrokerRequest::Cancel { client_order_id }) => {
                             self.asked.push(client_order_id.as_str().to_owned());
+                            self.cancelled.insert(client_order_id.as_str().to_owned());
                         }
                         Effect::Broker(BrokerRequest::Submit(order)) => {
                             self.sent(
@@ -7289,6 +9259,66 @@ mod sequence_tests {
         }
     }
 
+    /// The owner's pause, stop or resumption of `agent`, committed to the account stream as the
+    /// executor copies it (mandate spec §5.9) and folded, so a restart folds the mode each
+    /// decision was taken under. The copy itself is not stepped, since what the executor does on
+    /// a mode change is still E7-4's stub; the script steps a tick at the same instant instead, so
+    /// the executor acts on the new mode before the oracle checks it.
+    fn mode_applied(
+        executor: &mut Executor,
+        agent: &AgentId,
+        to: &str,
+        now: i64,
+    ) -> Result<(), String> {
+        let failed = |error: ExecutorError| format!("{error:?}");
+        let fact = object(vec![
+            ("agent", text(agent.0.clone())),
+            ("to", text(to)),
+            ("restriction", text("owner")),
+            ("originated", Value::Bool(true)),
+            (
+                "risk_clock",
+                clock(RiskClock::from_secs(now)).map_err(failed)?,
+            ),
+        ])
+        .map_err(failed)?;
+        executor
+            .commit_one("AgentModeApplied", fact)
+            .map_err(failed)
+    }
+
+    /// `executor`'s journal folded afresh, with what is process-local (quotes, the watchdog's clock,
+    /// the clock and the writer's epoch) carried over: the state a restart resumes from. The modes
+    /// are carried over too, though the scripts' journaled pauses already fold to them.
+    fn refolded(executor: &Executor) -> Result<ExecutorState, String> {
+        let mut restarted = ExecutorState::new(executor.state.scope.clone());
+        for event in &executor.journal {
+            fold(&mut restarted, event).map_err(|error| format!("{error:?}"))?;
+        }
+        restarted.quotes.clone_from(&executor.state.quotes);
+        restarted.sane_bids.clone_from(&executor.state.sane_bids);
+        restarted.trades.clone_from(&executor.state.trades);
+        restarted.breaches.clone_from(&executor.state.breaches);
+        restarted.modes.clone_from(&executor.state.modes);
+        restarted.now = executor.state.now;
+        restarted.epoch = executor.state.epoch;
+        restarted.started = executor.state.started;
+        restarted.started_at = executor.state.started_at;
+        Ok(restarted)
+    }
+
+    /// The exit a client order id belongs to, by §2.3's naming: `md-<intent>`, and `-l<n>` for a
+    /// later rung.
+    fn exit_of(id: &str) -> String {
+        let bare = id.strip_prefix("md-").unwrap_or(id);
+        match bare.rsplit_once("-l") {
+            Some((intent, rung)) if rung.bytes().all(|byte| byte.is_ascii_digit()) => {
+                intent.to_owned()
+            }
+            _ => bare.to_owned(),
+        }
+    }
+
     /// One order as the broker reports it.
     fn reported(id: &str, held: &Held) -> Result<BrokerOrder, ExecutorError> {
         let status = match (held.live, held.filled) {
@@ -7315,29 +9345,94 @@ mod sequence_tests {
     }
 
     fn rule_13_script(start: i64, script: &[Move]) -> Result<(), String> {
+        rule_13_script_with(start, From::Protected, false, script).map(|_| ())
+    }
+
+    /// [`rule_13_script`] with the Σ checks ([`Desk::within_position`], DEC-408).
+    fn rule_13_summed(start: i64, script: &[Move]) -> Result<(), String> {
+        rule_13_script_with(start, From::Protected, true, script).map(|_| ())
+    }
+
+    /// Where a rule-13 script starts: ten protected AAPL ([`protected`]), #468 round 1's B1 state
+    /// ([`beside_a_lone_exit`]), or nothing protecting the ten and no prices recorded, with a risk
+    /// exit for all of them working ([`unprotected`]).
+    #[derive(Clone, Copy, Debug)]
+    enum From {
+        Protected,
+        BesideALoneExit,
+        Unprotected,
+    }
+
+    /// [`rule_13_script`], from `from`.
+    fn rule_13_script_from(start: i64, from: From, script: &[Move]) -> Result<(), String> {
+        rule_13_script_with(start, from, false, script).map(|_| ())
+    }
+
+    /// Runs `script` under the oracle from `from`, with the Σ checks where `sums` is set, and
+    /// answers the oracle's own record at its end, for a named script to assert its claim on.
+    fn rule_13_script_with(
+        start: i64,
+        from: From,
+        sums: bool,
+        script: &[Move],
+    ) -> Result<Desk, String> {
+        rule_13_script_checked(start, from, sums, script, &|_| Ok(()))
+    }
+
+    /// [`rule_13_script_with`], with `check` asked of the executor's state after every move.
+    fn rule_13_script_checked(
+        start: i64,
+        from: From,
+        sums: bool,
+        script: &[Move],
+        check: &dyn Fn(&ExecutorState) -> Result<(), String>,
+    ) -> Result<Desk, String> {
         let failed = |error: ExecutorError| format!("{error:?}");
         let (config, fees) = (executor_config(), fees().map_err(failed)?);
         let ports = tiered_ports(&config, &fees);
-        let mut executor = protected(&ports).map_err(failed)?;
+        let mut executor = match from {
+            From::Protected => protected(&ports),
+            From::BesideALoneExit => beside_a_lone_exit(&ports),
+            From::Unprotected => unprotected(&ports),
+        }
+        .map_err(failed)?;
+        let held = |purpose, qty| Held {
+            purpose,
+            qty,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let venue = match from {
+            From::Protected => BTreeMap::from([(OCO.to_owned(), held(Purpose::Protective, 10))]),
+            From::BesideALoneExit => BTreeMap::from([
+                (OCO.to_owned(), held(Purpose::Protective, 6)),
+                (LONE.to_owned(), held(Purpose::RiskExit, 4)),
+            ]),
+            From::Unprotected => BTreeMap::from([(LONE.to_owned(), held(Purpose::RiskExit, 10))]),
+        };
         let mut desk = Desk {
             now: start,
             quotes: Vec::new(),
             position: 10,
-            venue: BTreeMap::from([(
-                OCO.to_owned(),
-                Held {
-                    purpose: Purpose::Protective,
-                    qty: 10,
-                    filled: 0,
-                    acked: true,
-                    live: true,
-                },
-            )]),
+            venue,
             asked: Vec::new(),
             exits: BTreeMap::new(),
             fills: 0,
             paused: false,
             quiet_since: 0,
+            sums,
+            stepped: BTreeSet::new(),
+            between: BTreeMap::new(),
+            parked: BTreeSet::new(),
+            lone: BTreeSet::new(),
+            sequence: None,
+            bounded: BTreeSet::new(),
+            ended: BTreeSet::new(),
+            shorts: Vec::new(),
+            cancelled: BTreeSet::new(),
+            open: false,
+            alerted: false,
         };
         let agent = AgentId("agent-a".to_owned());
         desk.deliver(
@@ -7438,6 +9533,8 @@ mod sequence_tests {
                         match desk.venue.get_mut(&id) {
                             Some(held) if held.live => {
                                 held.live = false;
+                                let left = held.qty.saturating_sub(held.filled);
+                                desk.rung_cancelled(&id, left);
                                 Some(cancel_accepted(&id))
                             }
                             Some(_) => Some(refused(&id, "order is not cancelable")),
@@ -7445,55 +9542,162 @@ mod sequence_tests {
                         }
                     }
                 }
+                Move::Refuse => desk
+                    .asked
+                    .pop()
+                    .map(|id| refused(&id, "order is not cancelable")),
                 Move::Pause(paused) => {
-                    let mode = if paused { Mode::Paused } else { Mode::Normal };
                     desk.paused = paused;
-                    executor.state.modes.insert(agent.clone(), mode);
+                    let to = if paused { "paused" } else { "normal" };
+                    mode_applied(&mut executor, &agent, to, desk.now)?;
+                    Some(Input::Tick(RiskClock::from_secs(desk.now)))
+                }
+                Move::Stop(stopped) => {
+                    desk.paused = stopped;
+                    let to = if stopped { "stopped" } else { "normal" };
+                    mode_applied(&mut executor, &agent, to, desk.now)?;
+                    Some(Input::Tick(RiskClock::from_secs(desk.now)))
+                }
+                Move::Reject => {
+                    let latest = desk
+                        .venue
+                        .iter_mut()
+                        .filter(|(id, held)| {
+                            held.live
+                                && !held.acked
+                                && held.purpose != Purpose::Protective
+                                && id.contains("-l")
+                        })
+                        .last();
+                    match latest {
+                        Some((id, held)) => {
+                            held.live = false;
+                            Some(refused(id, "rejected"))
+                        }
+                        None => None,
+                    }
+                }
+                Move::RejectFirst => {
+                    let latest = desk
+                        .venue
+                        .iter_mut()
+                        .filter(|(id, held)| {
+                            held.live
+                                && !held.acked
+                                && held.purpose != Purpose::Protective
+                                && !id.contains("-l")
+                        })
+                        .last();
+                    match latest {
+                        Some((id, held)) => {
+                            held.live = false;
+                            Some(refused(id, "rejected"))
+                        }
+                        None => None,
+                    }
+                }
+                Move::Restart => {
+                    executor.state = refolded(&executor)?;
                     None
                 }
+                Move::BrokerCancel => {
+                    let first = desk.venue.iter_mut().find(|(_, held)| {
+                        held.live && held.acked && held.purpose != Purpose::Protective
+                    });
+                    match first {
+                        Some((id, held)) => {
+                            held.live = false;
+                            let left = held.qty.saturating_sub(held.filled);
+                            let report = reported(id, held).map_err(failed)?;
+                            let id = id.clone();
+                            desk.rung_cancelled(&id, left);
+                            Some(Input::BrokerUpdate(BrokerUpdate::Order(report)))
+                        }
+                        None => None,
+                    }
+                }
+                Move::Triggered(qty) => {
+                    let first = desk
+                        .venue
+                        .iter_mut()
+                        .find(|(_, held)| held.live && held.purpose == Purpose::Protective);
+                    match first {
+                        Some((id, held)) => {
+                            let qty = qty.min(held.qty.saturating_sub(held.filled));
+                            held.filled = held.filled.saturating_add(qty);
+                            held.live = held.filled < held.qty;
+                            desk.position = desk.position.saturating_sub(qty);
+                            desk.fills = desk.fills.saturating_add(1);
+                            Some(Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
+                                fill_id: FillId(format!("f-{}", desk.fills)),
+                                client_order_id: Some(id.clone()),
+                                instrument: aapl().map_err(failed)?,
+                                side: Side::Sell,
+                                qty: Qty::parse(&qty.to_string())
+                                    .map_err(|error| error.to_string())?,
+                                price: Price::parse("140").map_err(|error| error.to_string())?,
+                                fees: Usd::ZERO,
+                                trade_date: Date::parse("2026-09-22")
+                                    .map_err(|error| error.to_string())?,
+                            })))
+                        }
+                        None => None,
+                    }
+                }
+                Move::TradingDay(day) => {
+                    let date = TRADING_DATES.get(day).copied().unwrap_or("2026-09-21");
+                    let at = clock(RiskClock::from_secs(desk.now)).map_err(failed)?;
+                    let fact = object(vec![
+                        ("date", text(date)),
+                        ("originated", Value::Bool(true)),
+                        ("risk_clock", at),
+                    ])
+                    .map_err(failed)?;
+                    executor
+                        .commit_one("TradingDayStarted", fact)
+                        .map_err(failed)?;
+                    executor.journal.last().cloned().map(Input::Journal)
+                }
+                Move::KillSwitch => Some(Input::Command(Command::KillSwitch {
+                    scope: KillScope::Agent(agent.clone()),
+                    initiator: Initiator::Owner,
+                    confirmation: None,
+                })),
             };
             if let Some(input) = input {
                 desk.deliver(&mut executor, &ports, input)?;
             }
+            desk.within_position()?;
+            check(&executor.state).map_err(|error| format!("after move {step}: {error}"))?;
             if matches!(next, Move::Tick(_)) {
                 desk.bounded(&config)?;
             }
         }
-        let mut restarted = ExecutorState::new(executor.state.scope.clone());
-        for event in &executor.journal {
-            fold(&mut restarted, event).map_err(failed)?;
-        }
-        restarted.quotes.clone_from(&executor.state.quotes);
-        restarted.sane_bids.clone_from(&executor.state.sane_bids);
-        restarted.trades.clone_from(&executor.state.trades);
-        restarted.breaches.clone_from(&executor.state.breaches);
-        restarted.modes.clone_from(&executor.state.modes);
-        restarted.now = executor.state.now;
-        restarted.epoch = executor.state.epoch;
-        restarted.started = executor.state.started;
-        restarted.started_at = executor.state.started_at;
+        let restarted = refolded(&executor)?;
         if restarted != executor.state {
             return Err(format!(
                 "a restart from the journal differs from the live state:\n{restarted:#?}\n{:#?}",
                 executor.state
             ));
         }
-        Ok(())
+        Ok(desk)
     }
 
     /// Rule 13, by an oracle of its own over random scripts of ticks, quotes (a bid, a trade,
-    /// either, neither; sane or not; marks at, above and below the stop, so the watchdog fires), exits of every purpose and size, acknowledgments, partial
-    /// fills, cancel confirmations and pauses, against ten protected AAPL with an exit tier, from
-    /// an instant in each session (none the calendar covers, after-hours, just before the closing
-    /// auction window, the morning, overnight, and just before the open): no
-    /// input is refused; no exit is denied but for a genuine over-sell; no exit is held but for
-    /// rule 13's four, or a discretionary exit with nothing to price from (DEC-160 (12)); no
-    /// exit falls back to its own limit while something prices it; and none stays neither
+    /// either, neither; sane or not; marks at, above and below the stop, so the watchdog fires),
+    /// exits of every purpose and size, acknowledgments, partial fills, cancel confirmations and
+    /// pauses, against ten protected AAPL with an exit tier, from an instant in each session (none
+    /// the calendar covers, after-hours, just before the closing auction window, the morning,
+    /// overnight, and just before the open): no input is refused; no exit is denied but for an
+    /// over-sell of the position by the live sells and the rungs still to be sent; no exit is held
+    /// but for rule 13's four, or a discretionary exit with nothing to price from (DEC-160 (12));
+    /// no exit falls back to its own limit while something prices it; and none stays neither
     /// submitted, denied nor abandoned past the bounds but under those holds or the broker's
-    /// silence on a protective cancel. The oracle reads the drafts and its own record, never
+    /// silence on a protective cancel. Live sells never exceed the position, nor do live exits with
+    /// the rungs ladders between rungs will still send, and every later rung sends what its
+    /// remainder counts (DEC-408, DEC-410). The oracle reads the drafts and its own record, never
     /// the fold; and at the end the journal, folded afresh, equals the live state but for what is
-    /// process-local (quotes, the watchdog's clock, the clock, the writer's epoch, and the pause set
-    /// directly here).
+    /// process-local (quotes, the watchdog's clock, the clock, and the writer's epoch).
     #[test]
     fn rule_13_holds_over_random_scripts() -> Result<(), String> {
         let config = ProptestConfig {
@@ -7519,10 +9723,1584 @@ mod sequence_tests {
         ]);
         TestRunner::new(config)
             .run(
-                &(starts, prop::collection::vec(moves(), 1..64)),
-                |(start, script)| rule_13_script(start, &script).map_err(TestCaseError::fail),
+                &(starts, 0_usize..3, prop::collection::vec(moves(), 1..64)),
+                |(start, from, script)| {
+                    let from = match from {
+                        0 => From::Protected,
+                        1 => From::BesideALoneExit,
+                        _ => From::Unprotected,
+                    };
+                    rule_13_script_with(start, from, true, &script)
+                        .map(|_| ())
+                        .map_err(TestCaseError::fail)
+                },
             )
             .map_err(|error| error.to_string())
+    }
+
+    /// #524, seed 15's minimal script on `main`, from ten protected AAPL: a passive risk exit of 3
+    /// is handed on as the take-profit of an OCO for 3; then, the quote 30 minutes old, risk exits
+    /// of 2 and 2 are allowed and a discretionary exit of 4 is held `exit_unpriced`. The gate
+    /// allows 3 + 2 + 2 = 7 of 10.
+    const SEED_15: [Move; 11] = [
+        Move::Quote(Some(135), None, true),
+        Move::Exit(0, 3, 141),
+        Move::Tick(1_800),
+        Move::Exit(0, 2, 141),
+        Move::Exit(2, 4, 141),
+        Move::Exit(0, 2, 141),
+        Move::Tick(1_800),
+        Move::Confirm,
+        Move::Confirm,
+        Move::Confirm,
+        Move::Tick(1),
+    ];
+
+    /// #524 (the coordinator's ruling (A)): on seed 15 the gate never over-allows, but the risk
+    /// exits of 2 wait behind the handed-on placement for a cancel nothing asks, past the bound.
+    /// Under the summed oracle no exit may wait past the bound, and every allowed exit is sent for
+    /// its quantity (rule 13: a wait that never ends is a denial).
+    #[test]
+    fn seed_15_sends_every_allowed_risk_exit_within_the_bound() -> Result<(), String> {
+        rule_13_summed(0, &SEED_15)
+    }
+
+    /// #524's invariant at the step, which does not decide how the fix keeps it. Where a sequence
+    /// runs beside resting protection and an exit there waits with no order yet, neither held at
+    /// the gate (`state.held`) nor waiting on a live opening of its own agent, every resting
+    /// protective order there has a cancel asked or outstanding. So an exit waiting on protection
+    /// always waits on a cancel that is coming, or is released to go beside it; a held exit is
+    /// owed no cancel (DEC-425 constraint 3). The antecedent is read from the state, not from
+    /// `protection_holds`, the predicate the fix is likeliest to rewrite (#559's review, M1). It
+    /// is asked first of the review's pause script, where the only exit beside the placement is
+    /// held and none is owed a cancel, so it passes there; then of seed 15, where it fails on
+    /// `main`.
+    #[test]
+    fn an_exit_waiting_on_protection_always_has_its_cancel_asked() -> Result<(), String> {
+        let asked = |state: &ExecutorState| -> Result<(), String> {
+            for instrument in state.exiting.keys() {
+                let resting = state
+                    .protection
+                    .get(instrument)
+                    .map(|protection| protection.resting.clone())
+                    .unwrap_or_default();
+                let opening = |agent: &AgentId| {
+                    state.orders.values().any(|order| {
+                        order.purpose.adds_risk()
+                            && &order.instrument == instrument
+                            && order.agent.as_ref() == Some(agent)
+                            && !order.state.is_terminal()
+                            && order.state != OrderState::Intent
+                    })
+                };
+                let waits = state.intents.values().any(|record| {
+                    let exit_here = matches!(
+                        state.bodies.get(&record.intent_id),
+                        Some(IntentBody::Order { instrument: held_in, purpose, .. })
+                            if held_in == instrument
+                                && *purpose != Purpose::Protective
+                                && !purpose.adds_risk()
+                    );
+                    let unordered = ClientOrderId::for_intent(&record.intent_id)
+                        .is_ok_and(|id| !state.orders.contains_key(&id));
+                    record.outcome == IntentOutcome::Received
+                        && exit_here
+                        && unordered
+                        && !state.held.contains(&record.intent_id)
+                        && !opening(&record.agent)
+                });
+                if resting.is_empty() || !waits {
+                    continue;
+                }
+                for id in resting {
+                    let outstanding = state.orders.get(&id).is_none_or(|order| {
+                        order.cancel_unconfirmed
+                            || matches!(
+                                order.state,
+                                OrderState::PendingCancel | OrderState::Unknown
+                            )
+                    });
+                    if !outstanding {
+                        return Err(format!(
+                            "{} holds {instrument}'s exits back with no cancel asked",
+                            id.as_str()
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        };
+        let paused = [
+            Move::Pause(true),
+            Move::Exit(0, 1, 141),
+            Move::Exit(0, 1, 141),
+            Move::Quote(Some(135), None, true),
+            Move::Pause(false),
+            Move::Confirm,
+            Move::Pause(true),
+            Move::Exit(0, 1, 141),
+        ];
+        rule_13_script_checked(0, From::Protected, true, &paused, &asked)
+            .map_err(|error| format!("a held exit read as waiting: {error}"))?;
+        rule_13_script_checked(0, From::Protected, true, &SEED_15, &asked).map(|_| ())
+    }
+
+    /// DEC-425 constraint 1, found on #468 (the coordinator's ruling, 08:29Z on #468): a risk exit's
+    /// sequence asks the OCO cancelled, the broker refuses the cancel, and the query (§5.7)
+    /// answers the OCO still live with nothing pending. Nothing outstanding is left for the exit
+    /// to wait on, so the cancel is asked again before §5.4's bound rather than the exit waiting
+    /// it out, and only once: every step to the bound runs, and none asks again while that cancel
+    /// is outstanding (`settle`'s path, as `a_refused_cancel_is_queried_then_asked_again_once` pins
+    /// `overtaken`'s).
+    #[test]
+    fn a_refused_protective_cancel_found_live_is_asked_again() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(0)), &ports)?;
+        executor.run(observation(Some(150), None, true, 0)?, &ports)?;
+        let first = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&first), vec![OCO]);
+        let refusal = executor.run(refused(OCO, "order is not cancelable"), &ports)?;
+        assert_eq!(queried(&refusal), vec![OCO]);
+        let live = Held {
+            purpose: Purpose::Protective,
+            qty: 10,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let mut asked = cancels(&executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(reported(OCO, &live)?)),
+            &ports,
+        )?)
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+        let bound = ports.config.max_unprotected_s;
+        for at in 1..bound {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            asked.extend(cancels(&tick).into_iter().map(str::to_owned));
+        }
+        assert_eq!(
+            asked,
+            vec![OCO.to_owned()],
+            "asked again before the bound, and once: never again while it is outstanding \
+             (#576's review, minor 2)"
+        );
+        Ok(())
+    }
+
+    /// The OCO reported `pending_replace`, from ten protected AAPL, before a marketable risk exit
+    /// for all ten starts its sequence: the step's cancel is asked once and cannot be recorded,
+    /// since `pending_replace` has no edge to `PendingCancel` (§5.7), so the order keeps its state
+    /// with the cancel unconfirmed.
+    fn pending_replace_beside_an_exit(
+        ports: &Ports<'_>,
+    ) -> Result<(Executor, Vec<Effect>), ExecutorError> {
+        let mut executor = protected(ports)?;
+        let live = Held {
+            purpose: Purpose::Protective,
+            qty: 10,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let mut replacing = reported(OCO, &live)?;
+        "pending_replace".clone_into(&mut replacing.status);
+        executor.run(Input::BrokerUpdate(BrokerUpdate::Order(replacing)), ports)?;
+        let first = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, ports)?;
+        Ok((executor, first))
+    }
+
+    /// #576's review, B1 (DEC-425 item 1): a protective order whose cancel was asked and cannot
+    /// be recorded is not asked again at every step. Past §5.4's bound the OCO has had exactly one
+    /// cancel asked, no step journals anything but the bound's own records, and the bound alerts
+    /// once.
+    #[test]
+    fn a_protective_cancel_that_cannot_be_recorded_is_asked_once() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let (mut executor, first) = pending_replace_beside_an_exit(&ports)?;
+        assert_eq!(cancels(&first), vec![OCO]);
+        let bound = ports.config.max_unprotected_s;
+        let (mut asked, mut busy, mut alerted) = (0, 0, Vec::new());
+        for at in 1..=bound.saturating_mul(4) {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            asked += cancels(&tick).iter().filter(|id| **id == OCO).count();
+            busy += usize::from(!drafted(&tick).is_empty());
+            alerted.extend(alerts(&tick).into_iter().map(str::to_owned));
+        }
+        assert_eq!(asked, 0, "the OCO's cancel is asked once, not once a step");
+        assert!(busy <= 2, "{busy} steps journaled; only the bound's may");
+        assert_eq!(alerted, vec!["unprotected_interval_limit".to_owned()]);
+        Ok(())
+    }
+
+    /// What ends that state, the first way: the broker reports the OCO back to a state its cancel
+    /// can be recorded in (`new`). The cancel is asked again, once, and once it is confirmed the
+    /// exit goes.
+    #[test]
+    fn a_protective_order_back_from_pending_replace_is_cancelled_and_the_exit_goes()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let (mut executor, _) = pending_replace_beside_an_exit(&ports)?;
+        let waiting = executor.run(Input::Tick(RiskClock::from_secs(1)), &ports)?;
+        let mut asked: Vec<String> = cancels(&waiting).into_iter().map(str::to_owned).collect();
+        let live = Held {
+            purpose: Purpose::Protective,
+            qty: 10,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let back = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(reported(OCO, &live)?)),
+            &ports,
+        )?;
+        asked.extend(cancels(&back).into_iter().map(str::to_owned));
+        for at in 2..5 {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            asked.extend(cancels(&tick).into_iter().map(str::to_owned));
+        }
+        assert_eq!(
+            asked,
+            vec![OCO.to_owned()],
+            "nothing while it is pending_replace, then asked again once"
+        );
+        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = format!("md-{EXIT}");
+        assert!(
+            submissions(&confirmed)
+                .iter()
+                .any(|order| order.client_order_id.as_str() == exit),
+            "the exit goes: {:?}",
+            drafted(&confirmed)
+        );
+        Ok(())
+    }
+
+    /// What ends that state, the second way: the OCO ends at the broker while it is
+    /// `pending_replace` (here cancelled by the owner there). Nothing rests, so the sequence goes
+    /// on and the exit is sent.
+    #[test]
+    fn a_protective_order_that_ends_while_pending_replace_lets_the_exit_go()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let (mut executor, _) = pending_replace_beside_an_exit(&ports)?;
+        let waiting = executor.run(Input::Tick(RiskClock::from_secs(1)), &ports)?;
+        assert!(
+            cancels(&waiting).is_empty(),
+            "nothing asked while it is pending_replace"
+        );
+        let gone = Held {
+            purpose: Purpose::Protective,
+            qty: 10,
+            filled: 0,
+            acked: true,
+            live: false,
+        };
+        let ended = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(reported(OCO, &gone)?)),
+            &ports,
+        )?;
+        let exit = format!("md-{EXIT}");
+        assert!(
+            submissions(&ended)
+                .iter()
+                .any(|order| order.client_order_id.as_str() == exit),
+            "the exit goes: {:?}",
+            drafted(&ended)
+        );
+        Ok(())
+    }
+
+    /// DEC-425 constraint 4 (#576's review, minor 3; #559's review's script): protection is removed
+    /// only where §5.4 already removes it, and §5.4 cancels **all** of an instrument's protective
+    /// orders as an exit sequence's step 1. A passive exit of 1 leaves two placements resting, the
+    /// handed-on OCO for 1 and the cover for 9; a second exit of 1 that does not fit beside them
+    /// has every resting protective order's cancel asked, as on `main`, not some of them.
+    #[test]
+    fn an_exit_beside_two_placements_has_every_resting_one_cancelled() -> Result<(), String> {
+        let script = [
+            Move::Tick(1),
+            Move::Tick(1),
+            Move::Tick(1),
+            Move::Tick(1),
+            Move::Ack,
+            Move::Quote(Some(135), None, true),
+            Move::Exit(0, 1, 141),
+            Move::Confirm,
+            Move::Exit(0, 1, 141),
+            Move::Tick(1),
+        ];
+        let last = RefCell::new((0, 0));
+        let seen = |state: &ExecutorState| -> Result<(), String> {
+            let resting: Vec<&ClientOrderId> = state
+                .protection
+                .values()
+                .flat_map(|protection| protection.resting.iter())
+                .collect();
+            let cancelling = resting
+                .iter()
+                .filter(|id| {
+                    state.orders.get(**id).is_some_and(|order| {
+                        order.cancel_unconfirmed || order.state == OrderState::PendingCancel
+                    })
+                })
+                .count();
+            *last.borrow_mut() = (resting.len(), cancelling);
+            Ok(())
+        };
+        rule_13_script_checked(0, From::Protected, true, &script, &seen)?;
+        let (resting, cancelling) = last.into_inner();
+        if (resting, cancelling) == (2, 2) {
+            Ok(())
+        } else {
+            Err(format!(
+                "{cancelling} of {resting} resting protective orders cancelled"
+            ))
+        }
+    }
+
+    /// DEC-425 constraint 3, which already holds on `main`, in a shape neither direction of the fix
+    /// changes (#559's review, minor 5): a held exit never causes a protective cancel. Two risk
+    /// exits of 1 arrive while the agent is paused; on the resumption the first is handed on as
+    /// the take-profit of a placement and the cancel is confirmed; the agent is paused again and a
+    /// third exit of 1 arrives, held `paused` at the gate (rule 13). With no exit waiting that is
+    /// not held, nothing is owed a cancel: at no step while an exit is held does a protective
+    /// order there get a cancel asked that it did not have the step before. (The script is the one the review found
+    /// (b)'s first antecedent misread.)
+    #[test]
+    fn a_held_exit_alone_never_causes_a_protective_cancel() -> Result<(), String> {
+        let script = [
+            Move::Pause(true),
+            Move::Exit(0, 1, 141),
+            Move::Exit(0, 1, 141),
+            Move::Quote(Some(135), None, true),
+            Move::Pause(false),
+            Move::Confirm,
+            Move::Pause(true),
+            Move::Exit(0, 9, 141),
+            Move::Tick(1),
+        ];
+        let before: RefCell<BTreeSet<ClientOrderId>> = RefCell::new(BTreeSet::new());
+        let held_at_end = RefCell::new(false);
+        let untouched = |state: &ExecutorState| -> Result<(), String> {
+            let cancelling: BTreeSet<ClientOrderId> = state
+                .protection
+                .values()
+                .flat_map(|protection| protection.resting.iter())
+                .filter(|id| {
+                    state.orders.get(*id).is_some_and(|order| {
+                        order.cancel_unconfirmed || order.state == OrderState::PendingCancel
+                    })
+                })
+                .cloned()
+                .collect();
+            let held = !state.held.is_empty();
+            *held_at_end.borrow_mut() = held;
+            let previous = before.replace(cancelling.clone());
+            match cancelling.difference(&previous).next() {
+                Some(id) if held => Err(format!("{} cancelled for a held exit", id.as_str())),
+                _ => Ok(()),
+            }
+        };
+        rule_13_script_checked(0, From::Protected, false, &script, &untouched)?;
+        if held_at_end.into_inner() {
+            Ok(())
+        } else {
+            Err("the third exit is no longer held at the end".to_owned())
+        }
+    }
+
+    /// #524's claim 2, which already holds on `main`: an exit the gate holds counts nothing
+    /// toward the room later exits are allowed in. Seed 15's discretionary exit of 4 is held
+    /// `exit_unpriced`, and the two risk exits of 2 beside it are both allowed, 3 + 2 + 2 within 10.
+    #[test]
+    fn a_held_exit_counts_nothing_toward_the_gates_room() -> Result<(), String> {
+        let prefix = SEED_15.get(..6).ok_or("seed 15's arrivals")?;
+        let desk = rule_13_script_with(0, From::Protected, false, prefix)?;
+        let mut decided: Vec<(Purpose, u32, &str, &str)> = desk
+            .exits
+            .values()
+            .map(|exit| {
+                (
+                    exit.purpose,
+                    exit.qty,
+                    exit.verdict.as_str(),
+                    exit.reason.as_str(),
+                )
+            })
+            .collect();
+        decided.sort_by_key(|(purpose, qty, _, _)| (format!("{purpose:?}"), *qty));
+        let held = decided
+            .iter()
+            .filter(|(purpose, _, verdict, _)| {
+                *purpose == Purpose::DiscretionaryExit && *verdict == "hold"
+            })
+            .count();
+        let allowed_twos = decided
+            .iter()
+            .filter(|(purpose, qty, verdict, _)| {
+                *purpose == Purpose::RiskExit && *qty == 2 && *verdict == "allow"
+            })
+            .count();
+        if held == 1 && allowed_twos == 2 {
+            Ok(())
+        } else {
+            Err(format!("{decided:?}"))
+        }
+    }
+
+    /// #468's seed 18, end to end (the round-4 review, B2), found by the random property once the
+    /// under-cover arm counts a ladder's rungs as cover rather than exempting every ladder: with
+    /// nothing protecting ten AAPL after-hours, the broker cancels a lone exit while another
+    /// exit's lone ladder steps. The cancelled exit's shares are no rung's, so they are topped up
+    /// or alerted; reading the instrument as stepping alone would leave them silent.
+    #[test]
+    fn an_exit_cancelled_beside_another_exits_stepping_ladder_is_covered_or_alerted()
+    -> Result<(), String> {
+        let script = [
+            Move::BrokerCancel,
+            Move::Exit(1, 4, 141),
+            Move::Exit(0, 3, 141),
+            Move::Ack,
+            Move::Tick(10),
+            Move::Exit(0, 2, 141),
+            Move::Exit(0, 1, 141),
+            Move::BrokerCancel,
+        ];
+        rule_13_script_with(AFTER_HOURS, From::Unprotected, true, &script).map(|_| ())
+    }
+
+    /// #468's round-5 review, B1 (seed 326's minimal script): the broker cancels a lone ladder's
+    /// stepped rung itself, before its step's cancel is confirmed. The executor counts the rung's
+    /// unsold 4 and sends them at the next rung, so the oracle must count them too, or its
+    /// under-cover arm reads them as uncovered.
+    #[test]
+    fn a_stepped_rung_the_broker_cancels_leaves_its_remainder_counted() -> Result<(), String> {
+        let script = [
+            Move::BrokerCancel,
+            Move::Exit(0, 4, 141),
+            Move::Exit(0, 3, 141),
+            Move::Quote(None, None, false),
+            Move::Ack,
+            Move::Exit(0, 1, 141),
+            Move::Exit(0, 2, 141),
+            Move::Tick(10),
+            Move::BrokerCancel,
+        ];
+        rule_13_script_with(
+            TEN_SECONDS_BEFORE_THE_NIGHT,
+            From::Unprotected,
+            true,
+            &script,
+        )
+        .map(|_| ())
+    }
+
+    /// #468 round 1, M5: the Σ oracle's first catch beside an exit with no sequence of its own. A
+    /// risk exit held at the night's start re-protects at once (DEC-160 (12)), and that protection
+    /// covers only what [`LONE`] cannot still sell: 6, never the held 10.
+    #[test]
+    fn re_protection_beside_a_working_exit_covers_only_the_rest() -> Result<(), String> {
+        let script = [Move::Exit(0, 1, 141), Move::Tick(10), Move::Confirm];
+        rule_13_script_from(TEN_SECONDS_BEFORE_THE_NIGHT, From::BesideALoneExit, &script)
+    }
+
+    /// The founder's decision on #468, case (b), through the oracle: [`LONE`] cancelled by the
+    /// broker beside an OCO for the other 6 leaves 4 shares with neither a protective order nor an
+    /// exit, and nothing under way (the under-cover arm of [`Desk::within_position`]).
+    #[test]
+    fn an_exit_the_broker_cancels_leaves_no_share_uncovered() -> Result<(), String> {
+        rule_13_script_from(0, From::BesideALoneExit, &[Move::BrokerCancel])
+    }
+
+    /// The under-cover arm's first catch on the random scripts: a passive exit's placement is
+    /// cancelled for a later exit that the interval's bound then abandons, and the handed-on
+    /// sequence ends with those cancels still to come. When they are confirmed, nothing is under
+    /// way, so the shares they protected are protected again at once (DEC-367 item 4).
+    #[test]
+    fn a_placement_cancelled_for_an_exit_since_abandoned_is_re_placed() -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(135), None, true),
+            Move::Exit(0, 1, 141),
+            Move::Exit(0, 1, 141),
+            Move::Confirm,
+            Move::Tick(10),
+            Move::Exit(0, 1, 141),
+            Move::Ack,
+            Move::Tick(10),
+            Move::Tick(10),
+            Move::Confirm,
+            Move::Fill(1),
+            Move::Confirm,
+            Move::Confirm,
+        ];
+        rule_13_script_from(0, From::Protected, &script)
+    }
+
+    /// The under-cover arm's catch from the unprotected start (seed 18): with nothing protecting
+    /// the position, two lone exits ladder; the second's ladder steps, and the broker cancels the
+    /// first. That exit is not the stepping ladder's, so the shares it would have sold are
+    /// under-covered with nothing under way, and with no prices anywhere they are journaled and
+    /// alerted (DEC-367 item 4).
+    #[test]
+    fn an_exit_the_broker_cancels_beside_another_exits_stepping_ladder_is_alerted()
+    -> Result<(), String> {
+        let script = [
+            Move::Fill(2),
+            Move::Fill(3),
+            Move::BrokerCancel,
+            Move::Quote(None, None, false),
+            Move::Exit(0, 2, 141),
+            Move::Exit(0, 3, 141),
+            Move::Ack,
+            Move::Tick(1_800),
+            Move::BrokerCancel,
+        ];
+        rule_13_script_from(0, From::Unprotected, &script)
+    }
+
+    /// #468 round 1, B1, through the oracle: a trading day beside [`LONE`] re-places nothing that
+    /// [`LONE`] may still sell.
+    #[test]
+    fn a_trading_day_beside_a_working_exit_never_over_covers() -> Result<(), String> {
+        rule_13_script_from(
+            0,
+            From::BesideALoneExit,
+            &[Move::TradingDay(0), Move::Confirm],
+        )
+    }
+
+    /// #485's minimal script, from the rule-13 property: a risk exit's rung steps while the agent
+    /// is paused; two discretionary exits still selling keep protection from returning, so the
+    /// sequence lingered between rungs, and once the pause was lifted a new risk exit was allowed
+    /// against the whole position and the old ladder resumed beside it: 11 against 10. A ladder
+    /// that no longer climbs when its step is confirmed ends there (DEC-409).
+    #[test]
+    fn a_risk_exit_beside_a_sequence_between_rungs_never_over_sells() -> Result<(), String> {
+        rule_13_summed(0, &stepped_while(Move::Pause(true), Move::Pause(false)))
+    }
+
+    /// DEC-409, stopped: the same walk as [`a_risk_exit_beside_a_sequence_between_rungs_never_over_sells`]
+    /// with the agent stopped and resumed rather than paused.
+    #[test]
+    fn a_ladder_stopped_between_rungs_never_resumes_beside_a_new_exit() -> Result<(), String> {
+        rule_13_summed(0, &stepped_while(Move::Stop(true), Move::Stop(false)))
+    }
+
+    /// #485's script: three exits beside the OCO, the risk exit's rung stepped and confirmed while
+    /// `held` holds the agent, then `freed` lifts it and a new risk exit of 4 arrives.
+    fn stepped_while(held: Move, freed: Move) -> [Move; 11] {
+        [
+            Move::Exit(2, 1, 141),
+            Move::Exit(0, 4, 141),
+            Move::Exit(2, 2, 141),
+            Move::Confirm,
+            Move::Quote(Some(135), None, true),
+            Move::Tick(2),
+            Move::Tick(8),
+            held,
+            Move::Confirm,
+            freed,
+            Move::Exit(0, 4, 141),
+        ]
+    }
+
+    /// A risk exit of 4 at 19:59:50 ET goes after-hours, its step at 20:00:05 is confirmed with no
+    /// session open, so it parks for the next open and protection returns for the held 10
+    /// (DEC-260 (18)); a risk exit of 8 then arrives and is held `session_closed`.
+    const PARKED_BESIDE_A_HELD_EXIT: [Move; 7] = [
+        Move::Quote(Some(150), None, true),
+        Move::Exit(0, 4, 150),
+        Move::Confirm,
+        Move::Ack,
+        Move::Tick(15),
+        Move::Confirm,
+        Move::Exit(0, 8, 150),
+    ];
+
+    /// A risk exit of 6 at 19:59:50 ET goes after-hours from ten protected AAPL; its step at
+    /// 20:00:05 is confirmed with no session open, so it parks for the next open and protection
+    /// returns for the held 10 beside its remainder of 6 (DEC-260 (18)), acknowledged.
+    const PARKED_BESIDE_PROTECTION: [Move; 7] = [
+        Move::Quote(Some(150), None, true),
+        Move::Exit(0, 6, 150),
+        Move::Confirm,
+        Move::Ack,
+        Move::Tick(15),
+        Move::Confirm,
+        Move::Ack,
+    ];
+
+    /// The night after [`PARKED_BESIDE_PROTECTION`], to 04:00 ET with a fresh quote; then the
+    /// protection's cancel at the open is confirmed, the rung acknowledged, and its step's
+    /// cancel confirmed in turn.
+    const NIGHT_TO_THE_OPEN: [Move; 11] = [
+        Move::Tick(3_600),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(3_600),
+        Move::Quote(Some(150), None, true),
+        Move::Confirm,
+        Move::Ack,
+        Move::Tick(30),
+        Move::Confirm,
+        Move::Ack,
+    ];
+
+    /// #468's round-4 ruling, pin 3: the protection's stop triggers overnight beside a parked
+    /// ladder and sells all 10. The rung is sized when it is sent (#485), so at the open it sends
+    /// nothing and the ladder ends; under the summed oracle no sell exceeds the position and no
+    /// rung goes for nothing.
+    #[test]
+    fn a_stop_that_fills_overnight_beside_a_parked_ladder_leaves_its_rung_nothing()
+    -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_PROTECTION
+            .into_iter()
+            .chain([Move::Triggered(10)])
+            .chain(NIGHT_TO_THE_OPEN)
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// Pin 3's partial variant: the stop sells 6 of the 10 overnight, so the parked ladder's rung,
+    /// with 6 unsold, sends at the open at most the 4 left, sized by its remainder's count
+    /// (DEC-410 item 4).
+    #[test]
+    fn a_stop_that_fills_six_overnight_leaves_the_parked_ladder_at_most_four() -> Result<(), String>
+    {
+        let script: Vec<Move> = PARKED_BESIDE_PROTECTION
+            .into_iter()
+            .chain([Move::Triggered(6)])
+            .chain(NIGHT_TO_THE_OPEN)
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// The night, to 04:00 ET, the pre-market open, with a fresh quote and both cancels confirmed.
+    const TO_THE_OPEN: [Move; 8] = [
+        Move::Tick(3_600),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(3_600),
+        Move::Quote(Some(150), None, true),
+        Move::Confirm,
+        Move::Confirm,
+    ];
+
+    /// #485, the parked route, with no pause at all: at the open the held exit of 8 was released
+    /// against the whole position and the parked ladder resumed beside it: 12 against 10. The
+    /// plan gives way, not the sell (DEC-410 item 2): the exit of 8 goes whole, the parked
+    /// remainder counts the 2 it leaves, and the ladder's next rung sends 2, journaled short by 2.
+    /// The oracle checks the rung and the record against its own figure.
+    #[test]
+    fn a_risk_exit_held_overnight_beside_a_parked_ladder_goes_whole_and_the_ladder_sends_what_is_left()
+    -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .chain(TO_THE_OPEN)
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// DEC-410 item 2, nothing left: the parked ladder would sell the whole position, so the risk
+    /// exit held overnight finds nothing left at the open beside its remainder. It goes whole, and
+    /// the ladder's next rung sends the other 6, journaled short by 4.
+    #[test]
+    fn a_risk_exit_beside_a_parked_ladder_selling_everything_goes_whole() -> Result<(), String> {
+        let script: Vec<Move> = [
+            Move::Quote(Some(150), None, true),
+            Move::Exit(0, 10, 150),
+            Move::Confirm,
+            Move::Ack,
+            Move::Tick(15),
+            Move::Confirm,
+            Move::Exit(0, 4, 150),
+        ]
+        .into_iter()
+        .chain(TO_THE_OPEN)
+        .chain([Move::Tick(60), Move::Ack, Move::Fill(3), Move::Tick(60)])
+        .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// The review of #494 (M2), a remainder that nothing sends: a risk exit's step parks at
+    /// 20:00:05 beside an owner exit still working, so the sequence stays parked, and its interval
+    /// reaches its bound in the night. Its ladder no longer climbs, so its remainder stops counting
+    /// and is never sent (DEC-410 item 1): a risk exit of 5 at the open goes whole, and no rung
+    /// of the old ladder follows it.
+    #[test]
+    fn a_parked_sequence_past_its_bound_never_sends_its_remainder() -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(150), None, true),
+            Move::Exit(0, 4, 150),
+            Move::Exit(1, 2, 150),
+            Move::Confirm,
+            Move::Ack,
+            Move::Ack,
+            Move::Tick(15),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(3_600),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Tick(3_600),
+            Move::Quote(Some(150), None, true),
+            Move::Exit(0, 5, 150),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(30),
+            Move::Confirm,
+            Move::Ack,
+            Move::Fill(5),
+            Move::Tick(30),
+            Move::Confirm,
+            Move::Tick(30),
+            Move::Confirm,
+            Move::Tick(30),
+        ];
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// DEC-410 item 1, a ladder that resumes with nothing left: parked overnight with 4 unsold
+    /// while the agent is paused, its whole position is sold by the stop meanwhile. When the agent
+    /// resumes in the session, the remainder counts what is left, which is nothing, so no rung is
+    /// sent against a position of 0 and the ladder ends, journaled short by all 4.
+    #[test]
+    fn a_ladder_that_resumes_with_nothing_left_sends_nothing() -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .take(6)
+            .chain([Move::Pause(true), Move::Triggered(10)])
+            .chain(TO_THE_OPEN)
+            .chain([Move::Pause(false), Move::Tick(30), Move::Confirm])
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// DEC-410 item 1, a ladder that counts again: parked overnight with 4 unsold while the agent
+    /// is paused, it counts nothing; meanwhile the stop fills 8 of the 10. When the agent resumes,
+    /// the remainder counts again, but only the 2 shares left, so its rung at the open sends 2,
+    /// journaled short by 2.
+    #[test]
+    fn a_ladder_that_resumes_after_its_position_shrank_sends_only_what_is_left()
+    -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .take(6)
+            .chain([Move::Pause(true), Move::Triggered(8), Move::Pause(false)])
+            .chain(TO_THE_OPEN)
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// DEC-410 item 1: two ladders between rungs in one instrument share the room in their exits'
+    /// id order. A sequence's ladder (the first id) and a parked lone one, each with 4 unsold,
+    /// beside a live exit of 4 in a position of 10: the first counts 4 and the second the 2
+    /// left. A sell beside them that ends unsold gives its room back, and a lone ladder whose
+    /// exit was abandoned counts nothing.
+    #[test]
+    fn two_ladders_share_the_room_in_their_exits_id_order() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        let instrument = aapl()?;
+        let agent = AgentId("agent-a".to_owned());
+        let rung =
+            |intent: &str, state: OrderState| -> Result<crate::types::Order, ExecutorError> {
+                Ok(crate::types::Order {
+                    client_order_id: ClientOrderId::parse(&format!("md-{intent}"))?,
+                    intent_id: Some(IntentId(EventId(intent.to_owned()))),
+                    agent: Some(agent.clone()),
+                    instrument: instrument.clone(),
+                    side: Side::Sell,
+                    qty: Qty::parse("4")?,
+                    filled_qty: Qty::ZERO,
+                    state,
+                    attempt: 1,
+                    purpose: Purpose::RiskExit,
+                    absent_lookups: 0,
+                    first_absence_at: None,
+                    cancel_unconfirmed: false,
+                    replaced_by: None,
+                    created_on: None,
+                })
+            };
+        let (first, second) = ("01JABCDEFGHJKMNPQRSTV00001", "01JABCDEFGHJKMNPQRSTV00002");
+        let selling = "01JABCDEFGHJKMNPQRSTV00003";
+        for order in [
+            rung(first, OrderState::Canceled)?,
+            rung(second, OrderState::Canceled)?,
+            rung(selling, OrderState::Accepted)?,
+        ] {
+            executor
+                .state
+                .orders
+                .insert(order.client_order_id.clone(), order);
+        }
+        executor.state.exiting.insert(
+            instrument.clone(),
+            crate::state::ExitSequence {
+                intent: IntentId(EventId(first.to_owned())),
+                entry: ClientOrderId::parse("md-held-1")?,
+                agent: agent.clone(),
+                prices: None,
+                passive: false,
+                ladder: crate::state::Ladder {
+                    stepping: true,
+                    ..crate::state::Ladder::default()
+                },
+            },
+        );
+        executor.state.ladders.insert(
+            (instrument.clone(), IntentId(EventId(second.to_owned()))),
+            crate::state::LoneLadder {
+                intent: IntentId(EventId(second.to_owned())),
+                agent: agent.clone(),
+                ladder: crate::state::Ladder {
+                    stepping: true,
+                    parked: true,
+                    ..crate::state::Ladder::default()
+                },
+            },
+        );
+        let counted = |state: &ExecutorState| -> Result<Vec<(String, Qty)>, ExecutorError> {
+            Ok(super::remainders(state, &instrument)?
+                .into_iter()
+                .map(|(intent, counts)| (intent.0.0, counts))
+                .collect())
+        };
+        let (four, two) = (Qty::parse("4")?, Qty::parse("2")?);
+        assert_eq!(
+            counted(&executor.state)?,
+            vec![(first.to_owned(), four), (second.to_owned(), two)]
+        );
+        let rejected = ClientOrderId::parse(&format!("md-{selling}"))?;
+        if let Some(order) = executor.state.orders.get_mut(&rejected) {
+            order.state = OrderState::Rejected;
+        }
+        assert_eq!(
+            counted(&executor.state)?,
+            vec![(first.to_owned(), four), (second.to_owned(), four)],
+            "the rejected sell gives its room back"
+        );
+        executor.state.intents.insert(
+            IntentId(EventId(second.to_owned())),
+            crate::state::IntentRecord {
+                intent_id: IntentId(EventId(second.to_owned())),
+                agent: agent.clone(),
+                received_at: RiskClock::from_secs(0),
+                outcome: crate::state::IntentOutcome::Abandoned,
+                allowed_at: None,
+            },
+        );
+        assert_eq!(counted(&executor.state)?, vec![(first.to_owned(), four)]);
+        Ok(())
+    }
+
+    /// DEC-410 item 4, folded: a `rung_short` that still sends something leaves the ladder to
+    /// its rung, and one that sends nothing ends that exit's ladder alone, a sequence's by ending
+    /// its climb, a lone one by dropping it, so a restart ends the same ladders.
+    #[test]
+    fn a_short_rung_that_sends_nothing_ends_only_its_own_ladder() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held(&ports)?;
+        let instrument = aapl()?;
+        let agent = AgentId("agent-a".to_owned());
+        let (first, second) = ("01JABCDEFGHJKMNPQRSTV00001", "01JABCDEFGHJKMNPQRSTV00002");
+        let stepping = crate::state::Ladder {
+            stepping: true,
+            parked: true,
+            ..crate::state::Ladder::default()
+        };
+        executor.state.exiting.insert(
+            instrument.clone(),
+            crate::state::ExitSequence {
+                intent: IntentId(EventId(first.to_owned())),
+                entry: ClientOrderId::parse("md-held-1")?,
+                agent: agent.clone(),
+                prices: None,
+                passive: false,
+                ladder: stepping,
+            },
+        );
+        executor.state.ladders.insert(
+            (instrument.clone(), IntentId(EventId(second.to_owned()))),
+            crate::state::LoneLadder {
+                intent: IntentId(EventId(second.to_owned())),
+                agent,
+                ladder: stepping,
+            },
+        );
+        let short = |intent: &str, sent: &str| {
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("rung_short")),
+                ("intent_id", text(intent)),
+                ("qty", text("2")),
+                ("sent", text(sent)),
+                ("reason", text("position_taken")),
+            ]
+        };
+        committed(&mut executor, "ProtectionChanged", short(second, "2"))?;
+        assert!(
+            executor
+                .state
+                .ladders
+                .keys()
+                .any(|(held, _)| held == &instrument),
+            "2 still sent"
+        );
+        committed(&mut executor, "ProtectionChanged", short(first, "0"))?;
+        assert_eq!(
+            (
+                executor
+                    .state
+                    .exiting
+                    .get(&instrument)
+                    .map(|sequence| sequence.ladder.stepping),
+                executor
+                    .state
+                    .ladders
+                    .keys()
+                    .any(|(held, _)| held == &instrument)
+            ),
+            (Some(false), true),
+            "the sequence's ladder ends, the lone one stays"
+        );
+        committed(&mut executor, "ProtectionChanged", short(second, "0"))?;
+        assert!(
+            !executor
+                .state
+                .ladders
+                .keys()
+                .any(|(held, _)| held == &instrument)
+        );
+        Ok(())
+    }
+
+    /// DEC-410, restart between rungs: the parked remainder is folded from the journal, so a
+    /// process restarted overnight, and again at the open, counts it as before. On
+    /// today's code it fails on its prefix's over-sell, as
+    /// [`a_risk_exit_held_overnight_beside_a_parked_ladder_goes_whole_and_the_ladder_sends_what_is_left`] does; the
+    /// restarts are what the fix must get right.
+    #[test]
+    fn a_restart_between_rungs_still_counts_the_parked_remainder() -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .chain([Move::Restart])
+            .chain(TO_THE_OPEN.into_iter().take(5))
+            .chain([Move::Restart])
+            .chain(TO_THE_OPEN.into_iter().skip(5))
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// DEC-410, a refused rung: once the broker refuses the parked ladder's next rung, its
+    /// remainder no longer counts, so a new risk exit of 4 goes beside what still sells. On today's
+    /// code it fails on its prefix's over-sell; the refusal and the exit
+    /// after it are what the fix must get right.
+    #[test]
+    fn a_refused_rung_leaves_its_remainder_to_the_next_exit() -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .chain(TO_THE_OPEN)
+            .chain([Move::Reject, Move::Exit(0, 4, 150), Move::Confirm])
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// The agent paused in the night, through the pre-market, and resumed at 09:30:05 ET, the
+    /// regular session's open, where a discretionary exit held overnight may go (rule 13). The
+    /// parked ladder of a paused agent counts nothing and waits (DEC-410 item 1), so on the
+    /// resumption the exit and the ladder's remainder are decided in the same step; then the
+    /// protective cancel is confirmed.
+    const PAUSED_TO_THE_REGULAR_OPEN: [Move; 12] = [
+        Move::Pause(true),
+        Move::Tick(3_600),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(3_600),
+        Move::Tick(19_800),
+        Move::Quote(Some(150), None, true),
+        Move::Pause(false),
+        Move::Confirm,
+        Move::Confirm,
+        Move::Tick(1),
+    ];
+
+    /// #533's two exits (DEC-424), both sent laddered in AAPL while nothing protects it.
+    const FIRST_LONE: &str = "01JABCDEFGHJKMNPQRSTV00001";
+    const SECOND_LONE: &str = "01JABCDEFGHJKMNPQRSTV00002";
+
+    /// What `effects` sent for `intent` other than its first rung: its later rungs' quantities.
+    fn later_rungs(effects: &[Effect], intent: &str) -> Vec<Qty> {
+        let first = format!("md-{intent}");
+        submissions(effects)
+            .iter()
+            .filter(|order| {
+                let id = order.client_order_id.as_str();
+                id.starts_with(&first) && id != first
+            })
+            .map(|order| order.qty)
+            .collect()
+    }
+
+    /// #533 (DEC-424): ten AAPL held with nothing protecting them and nothing to price from, a
+    /// risk exit of 1 is sent laddered and its step is asked; a second risk exit of 1 is then sent
+    /// laddered too. When the first exit's step is confirmed, its next rung sends its 1, and the
+    /// second exit's ladder steps and sends its own: each lone ladder is its own exit's, so the
+    /// second never replaces the first. Σ stays within the position: 2 live sells against 10.
+    #[test]
+    fn a_second_laddered_exit_never_drops_the_first_exits_remainder() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        executor.run(observation(None, None, false, 0)?, &ports)?;
+        executor.run(sell(FIRST_LONE, "1", "141", Purpose::RiskExit)?, &ports)?;
+        let stepped = executor.run(Input::Tick(RiskClock::from_secs(10)), &ports)?;
+        let first = format!("md-{FIRST_LONE}");
+        assert_eq!(
+            cancels(&stepped),
+            vec![first.clone()],
+            "the first exit's step"
+        );
+        executor.run(sell(SECOND_LONE, "1", "141", Purpose::RiskExit)?, &ports)?;
+        let resumed = executor.run(cancel_accepted(&first), &ports)?;
+        assert_eq!(
+            later_rungs(&resumed, FIRST_LONE),
+            vec![Qty::parse("1")?],
+            "the first exit's next rung sends its 1: {:?}",
+            drafted(&resumed)
+        );
+        let second = format!("md-{SECOND_LONE}");
+        let stepped = executor.run(Input::Tick(RiskClock::from_secs(20)), &ports)?;
+        assert!(
+            cancels(&stepped).contains(&second.as_str()),
+            "the second exit's step: {:?}",
+            drafted(&stepped)
+        );
+        let resumed = executor.run(cancel_accepted(&second), &ports)?;
+        assert_eq!(
+            later_rungs(&resumed, SECOND_LONE),
+            vec![Qty::parse("1")?],
+            "{:?}",
+            drafted(&resumed)
+        );
+        Ok(())
+    }
+
+    /// #533's two exits parked overnight (DEC-424): at 19:59:50 ET a risk exit of 6 is sent
+    /// laddered with nothing to price from, then one of 4 at 19:59:55; each step is confirmed
+    /// after 20:00, in the overnight session, so each ladder is parked between rungs with its
+    /// whole rung unsold. Both remainders count, in their exits' id order: 6 and then 4.
+    fn two_lone_ladders_parked(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        let at = TEN_SECONDS_BEFORE_THE_NIGHT;
+        executor.run(Input::Tick(RiskClock::from_secs(at)), ports)?;
+        executor.run(observation(None, None, false, at)?, ports)?;
+        executor.run(sell(FIRST_LONE, "6", "141", Purpose::RiskExit)?, ports)?;
+        executor.run(
+            Input::Tick(RiskClock::from_secs(at.saturating_add(5))),
+            ports,
+        )?;
+        executor.run(sell(SECOND_LONE, "4", "141", Purpose::RiskExit)?, ports)?;
+        executor.run(
+            Input::Tick(RiskClock::from_secs(at.saturating_add(10))),
+            ports,
+        )?;
+        executor.run(cancel_accepted(&format!("md-{FIRST_LONE}")), ports)?;
+        executor.run(
+            Input::Tick(RiskClock::from_secs(at.saturating_add(15))),
+            ports,
+        )?;
+        executor.run(cancel_accepted(&format!("md-{SECOND_LONE}")), ports)?;
+        Ok(executor)
+    }
+
+    /// What each remainder in AAPL counts, by its exit's intent.
+    fn counted(executor: &Executor) -> Result<Vec<(String, Qty)>, ExecutorError> {
+        Ok(super::remainders(&executor.state, &aapl()?)?
+            .into_iter()
+            .map(|(intent, counts)| (intent.0.0, counts))
+            .collect())
+    }
+
+    /// The account stream's next fact, committed at the executor's own clock.
+    fn committed_now(
+        executor: &mut Executor,
+        event_type: &str,
+        pairs: Vec<(&str, Value)>,
+    ) -> Result<(), ExecutorError> {
+        let mut pairs = pairs;
+        pairs.push(("risk_clock", clock(executor.state.clock())?));
+        executor.commit_one(event_type, object(pairs)?)
+    }
+
+    #[test]
+    fn two_laddered_exits_parked_overnight_both_count_in_their_exits_id_order()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let executor = two_lone_ladders_parked(&ports)?;
+        assert_eq!(
+            counted(&executor)?,
+            vec![
+                (FIRST_LONE.to_owned(), Qty::parse("6")?),
+                (SECOND_LONE.to_owned(), Qty::parse("4")?),
+            ]
+        );
+        Ok(())
+    }
+
+    /// DEC-410 item 4 with two lone ladders (DEC-424): a short rung that sends nothing ends the
+    /// ladder of the exit it names and no other.
+    #[test]
+    fn a_short_rung_that_sends_nothing_ends_only_its_own_exits_lone_ladder()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = two_lone_ladders_parked(&ports)?;
+        committed_now(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("action", text("rung_short")),
+                ("instrument", text("AAPL")),
+                ("intent_id", text(SECOND_LONE)),
+                ("qty", text("4")),
+                ("sent", text("0")),
+                ("reason", text("position_taken")),
+            ],
+        )?;
+        assert_eq!(
+            counted(&executor)?,
+            vec![(FIRST_LONE.to_owned(), Qty::parse("6")?)]
+        );
+        Ok(())
+    }
+
+    /// DEC-410 item 1's guard with two lone ladders (DEC-424): the ladder of an abandoned exit
+    /// counts nothing, and the other exit's still counts.
+    #[test]
+    fn an_abandoned_exits_lone_ladder_counts_nothing_beside_another() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = two_lone_ladders_parked(&ports)?;
+        committed_now(
+            &mut executor,
+            "OrderAbandoned",
+            vec![
+                ("client_order_id", text(format!("md-{SECOND_LONE}"))),
+                ("intent_id", text(SECOND_LONE)),
+                ("reason", text("max_intent_age")),
+            ],
+        )?;
+        assert_eq!(
+            counted(&executor)?,
+            vec![(FIRST_LONE.to_owned(), Qty::parse("6")?)]
+        );
+        Ok(())
+    }
+
+    /// DEC-410 item 1, absorption, with two lone ladders (DEC-424): a sequence started for one
+    /// exit takes that exit's lone ladder in, stepping and parked as it was, and leaves the other
+    /// exit's lone ladder where it is, so both still count.
+    #[test]
+    fn a_sequence_for_one_laddered_exit_takes_only_that_exits_lone_ladder()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = two_lone_ladders_parked(&ports)?;
+        committed_now(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("action", text("unprotected_start")),
+                ("instrument", text("AAPL")),
+                ("intent_id", text(SECOND_LONE)),
+                ("entry", text("md-held-1")),
+                ("agent", text("agent-a")),
+            ],
+        )?;
+        let sequence = executor.state.exiting.get(&aapl()?).map(|sequence| {
+            (
+                sequence.intent.0.0.clone(),
+                sequence.ladder.stepping,
+                sequence.ladder.parked,
+            )
+        });
+        assert_eq!(sequence, Some((SECOND_LONE.to_owned(), true, true)));
+        assert_eq!(
+            counted(&executor)?,
+            vec![
+                (FIRST_LONE.to_owned(), Qty::parse("6")?),
+                (SECOND_LONE.to_owned(), Qty::parse("4")?),
+            ]
+        );
+        Ok(())
+    }
+
+    /// The exit of the script's step `step`: the oracle's own record of it, its verdict and
+    /// reason, and the quantity of its first order at the broker, if one was sent.
+    fn fate(desk: &Desk, step: usize) -> (String, String, Option<u32>) {
+        let intent = format!("01JABCDEFGHJKMNPQRSTV{step:05}");
+        let (verdict, reason) = desk.exits.get(&intent).map_or_else(
+            || (String::new(), String::new()),
+            |exit| (exit.verdict.clone(), exit.reason.clone()),
+        );
+        let sent = desk.venue.get(&format!("md-{intent}")).map(|held| held.qty);
+        (verdict, reason, sent)
+    }
+
+    /// DEC-410 item 3, sized: a remainder of 4 parks overnight, and a discretionary exit of 8
+    /// arrives in the night and is held `session_closed`. When the agent, paused meanwhile,
+    /// resumes at the regular open, the exit is sized to the 6 left,
+    /// and the ladder's next rung sends the other 4; the oracle checks both against its own
+    /// figures.
+    #[test]
+    fn a_discretionary_exit_beside_a_parked_remainder_is_sized_to_what_is_left()
+    -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .take(6)
+            .chain([Move::Exit(2, 8, 150)])
+            .chain(PAUSED_TO_THE_REGULAR_OPEN)
+            .collect();
+        let desk =
+            rule_13_script_with(TEN_SECONDS_BEFORE_THE_NIGHT, From::Protected, true, &script)?;
+        assert_eq!(fate(&desk, 6), ("allow".to_owned(), String::new(), Some(6)));
+        Ok(())
+    }
+
+    /// The parked ladder selling the whole position: a risk exit of 10 at 19:59:50 ET parks at
+    /// 20:00:05 with all 10 unsold, then a discretionary exit of 3 arrives in the night.
+    const PARKED_WITH_NOTHING_LEFT: [Move; 7] = [
+        Move::Quote(Some(150), None, true),
+        Move::Exit(0, 10, 150),
+        Move::Confirm,
+        Move::Ack,
+        Move::Tick(15),
+        Move::Confirm,
+        Move::Exit(2, 3, 150),
+    ];
+
+    /// DEC-410 item 3, nothing left, decided at the open: in the night the discretionary exit is
+    /// held `session_closed`, not denied, because only the open orders' half of §5.3 rule 4 comes
+    /// before the holds. When the agent, paused meanwhile, resumes at the regular open, the
+    /// remainder of 10 counts again, so the exit is denied `sell_exceeds_available`, terminally.
+    #[test]
+    fn a_discretionary_exit_with_nothing_left_is_held_overnight_then_refused_at_the_open()
+    -> Result<(), String> {
+        let night = rule_13_script_with(
+            TEN_SECONDS_BEFORE_THE_NIGHT,
+            From::Protected,
+            true,
+            &PARKED_WITH_NOTHING_LEFT,
+        )?;
+        assert_eq!(
+            fate(&night, 6),
+            ("hold".to_owned(), "session_closed".to_owned(), None)
+        );
+        let script: Vec<Move> = PARKED_WITH_NOTHING_LEFT
+            .into_iter()
+            .chain(PAUSED_TO_THE_REGULAR_OPEN)
+            .collect();
+        let open =
+            rule_13_script_with(TEN_SECONDS_BEFORE_THE_NIGHT, From::Protected, true, &script)?;
+        assert_eq!(
+            fate(&open, 6),
+            ("deny".to_owned(), "sell_exceeds_available".to_owned(), None)
+        );
+        Ok(())
+    }
+
+    /// DEC-410 items 4 and 7: at the open the risk exit of 8 held overnight goes whole, and the
+    /// parked ladder's next rung goes in the same step, short by the 2 the 8 took, journaled
+    /// `rung_short`. The broker then refuses the 8. The rung was already sent, so the 2 stay
+    /// unsold, disclosed by that record, and the ladder sends nothing more than its rung.
+    #[test]
+    fn a_rung_sent_short_beside_a_sell_the_broker_then_refuses_is_journaled_short()
+    -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .chain(TO_THE_OPEN)
+            .chain([
+                Move::RejectFirst,
+                Move::Tick(1),
+                Move::Ack,
+                Move::Fill(2),
+                Move::Tick(1),
+                Move::Confirm,
+                Move::Tick(1),
+            ])
+            .collect();
+        let desk =
+            rule_13_script_with(TEN_SECONDS_BEFORE_THE_NIGHT, From::Protected, true, &script)?;
+        assert_eq!(
+            desk.shorts,
+            vec![("01JABCDEFGHJKMNPQRSTV00001".to_owned(), 2, 2)]
+        );
+        assert_eq!(fate(&desk, 6).2, Some(8), "the 8 went whole");
+        let covered: u32 = desk
+            .venue
+            .values()
+            .filter(|held| held.live && held.purpose == Purpose::Protective)
+            .map(|held| held.qty.saturating_sub(held.filled))
+            .sum();
+        assert_eq!(
+            (desk.position, desk.working(None), covered),
+            (8, 0, 8),
+            "the 8 left unsold are protected, no more and no less (§5.4)"
+        );
+        Ok(())
+    }
+
+    /// DEC-410, the kill switch: the owner's agent-scoped kill switch between rungs, with a ladder
+    /// parked and an exit held, leaves nothing selling past the position through the open
+    /// (`AGENTS.md` rule 13; E7-3 implements the kill switch).
+    #[test]
+    #[ignore = "pending E7-3"]
+    fn a_kill_switch_between_rungs_never_over_sells() -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .chain([Move::KillSwitch])
+            .chain(TO_THE_OPEN)
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// #485, by the oracle over random scripts that put a ladder between rungs first: a rung
+    /// stepped while paused or stopped, or parked overnight beside a held exit, then any moves,
+    /// the new ones included. Live exits and the rungs still to send never exceed the position,
+    /// and no exit is denied for a remainder (DEC-408).
+    #[test]
+    fn rule_13_holds_over_random_scripts_from_between_rungs() -> Result<(), String> {
+        let config = ProptestConfig {
+            cases: 256,
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        };
+        let tail = prop_oneof![
+            8 => moves(),
+            1 => any::<bool>().prop_map(Move::Stop),
+            1 => Just(Move::Reject),
+            1 => Just(Move::Restart),
+        ];
+        TestRunner::new(config)
+            .run(
+                &(0_usize..3, prop::collection::vec(tail, 1..48)),
+                |(prefix, tail)| {
+                    let (start, head): (i64, Vec<Move>) = match prefix {
+                        0 => (
+                            0,
+                            stepped_while(Move::Pause(true), Move::Pause(false)).to_vec(),
+                        ),
+                        1 => (
+                            0,
+                            stepped_while(Move::Stop(true), Move::Stop(false)).to_vec(),
+                        ),
+                        _ => (
+                            TEN_SECONDS_BEFORE_THE_NIGHT,
+                            PARKED_BESIDE_A_HELD_EXIT.to_vec(),
+                        ),
+                    };
+                    let script: Vec<Move> = head.into_iter().chain(tail).collect();
+                    rule_13_summed(start, &script).map_err(TestCaseError::fail)
+                },
+            )
+            .map_err(|error| error.to_string())
+    }
+
+    /// #489's minimal script, from #468's rule-13 property: beside [`LONE`], a risk exit of 4 above
+    /// the bid goes passive and its sequence cancels the OCO; a risk exit of 3 allowed meanwhile
+    /// waits on that cancel. The passive exit is then placed as an OCO for 4, which beside [`LONE`]
+    /// and the exit of 3 no longer fits within 10, and nothing cancelled it, so the exit of 3
+    /// waited past `max_intent_age_s` (DEC-418). The placement that does not fit beside a waiting
+    /// exit is cancelled for it as soon as it is placed (DEC-419).
+    #[test]
+    fn a_risk_exit_allowed_during_a_passive_sequences_cancel_is_never_stranded()
+    -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(135), None, true),
+            Move::Exit(0, 4, 141),
+            Move::Exit(0, 3, 141),
+            Move::Tick(1_800),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(1),
+            Move::Confirm,
+            Move::Tick(1),
+        ];
+        rule_13_script_from(0, From::BesideALoneExit, &script)
+    }
+
+    /// #508's review, M1: the placement's cancel is asked in the step it is placed, while the
+    /// broker has not acknowledged it, and the broker refuses that cancel. The refusal is the
+    /// cancel's, not the order's: the placement is never journaled rejected, it is queried, and
+    /// the cancel is asked again once it is seen live, so the exit of 3 still goes. Before #508
+    /// the placement was never cancelled at all (#489), and this failed on the exit's stranding.
+    #[test]
+    fn a_refused_cancel_of_an_unacknowledged_placement_is_asked_again() -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(135), None, true),
+            Move::Exit(0, 4, 141),
+            Move::Exit(0, 3, 141),
+            Move::Tick(1_800),
+            Move::Confirm,
+            Move::Refuse,
+            Move::Tick(1),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(1),
+            Move::Confirm,
+            Move::Tick(1),
+        ];
+        rule_13_script_from(0, From::BesideALoneExit, &script)
+    }
+
+    /// #508's review, M1, step by step: the placement's cancel is asked before the broker has
+    /// acknowledged it; the broker refuses it; the refusal is the cancel's, so the placement is
+    /// queried, never journaled rejected; the query finds it live, so the cancel is asked again,
+    /// once; and the next step asks nothing more while that cancel is outstanding.
+    #[test]
+    fn a_refused_cancel_is_queried_then_asked_again_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(0)), &ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(SECOND, "4", "141", Purpose::RiskExit)?, &ports)?;
+        executor.run(sell(EXIT, "3", "141", Purpose::RiskExit)?, &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(1_800)), &ports)?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        let placement = format!("md-{SECOND}");
+        assert!(
+            cancels(&placed).contains(&placement.as_str()),
+            "{:?}",
+            drafted(&placed)
+        );
+        let refusal = executor.run(refused(&placement, "order is not cancelable"), &ports)?;
+        assert!(
+            !refusal.iter().any(|effect| matches!(
+                effect,
+                Effect::Journal(draft)
+                    if draft.payload.get("state").and_then(Value::as_str) == Some("rejected")
+            )),
+            "{:?}",
+            drafted(&refusal)
+        );
+        assert!(
+            refusal.iter().any(|effect| matches!(
+                effect,
+                Effect::Broker(BrokerRequest::GetOrderByClientId(id)) if id.as_str() == placement
+            )),
+            "{:?}",
+            drafted(&refusal)
+        );
+        assert!(
+            cancels(&refusal).is_empty(),
+            "nothing is cancelled blind while the query is out: {:?}",
+            drafted(&refusal)
+        );
+        let absent = executor.run(
+            Input::Broker(Ok(BrokerOutcome::Absent {
+                client_order_id: placement.clone(),
+            })),
+            &ports,
+        )?;
+        assert!(cancels(&absent).is_empty(), "{:?}", drafted(&absent));
+        let unknown = executor.run(Input::Tick(RiskClock::from_secs(1_800)), &ports)?;
+        assert!(
+            cancels(&unknown).is_empty(),
+            "nor while the order sits unknown: {:?}",
+            drafted(&unknown)
+        );
+        let live = reported(
+            &placement,
+            &Held {
+                purpose: Purpose::Protective,
+                qty: 4,
+                filled: 0,
+                acked: true,
+                live: true,
+            },
+        )?;
+        let found = executor.run(Input::Broker(Ok(BrokerOutcome::Order(live))), &ports)?;
+        assert_eq!(cancels(&found), vec![placement.as_str()]);
+        let next = executor.run(Input::Tick(RiskClock::from_secs(1_801)), &ports)?;
+        assert!(cancels(&next).is_empty(), "{:?}", drafted(&next));
+        Ok(())
+    }
+
+    /// #508's review, m1: an exit the gate holds cannot move, so a passive exit's placement is not
+    /// cancelled for it. Beside [`LONE`] (4) and a held risk exit of 3, a passive exit of 4 placed
+    /// into a position of 10 stays, though with the held 3 counted it would not fit.
+    #[test]
+    fn a_held_exit_never_has_a_placement_cancelled_for_it() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        let agent = AgentId("agent-a".to_owned());
+        executor.state.modes.insert(agent.clone(), Mode::Paused);
+        let held = executor.run(sell(SECOND, "3", "141", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(verdicts(&held), vec!["hold"]);
+        executor.state.modes.insert(agent, Mode::Normal);
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(EXIT, "4", "141", Purpose::RiskExit)?, &ports)?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&placed).len(),
+            1,
+            "the passive exit is placed: {:?}",
+            drafted(&placed)
+        );
+        assert!(
+            cancels(&placed).is_empty(),
+            "and not cancelled for an exit that cannot go: {:?}",
+            drafted(&placed)
+        );
+        Ok(())
+    }
+
+    /// #508's review, m1, at the step [`overtaken`] runs: beside [`LONE`] (4), a passive exit of 4
+    /// is placed into a position of 10 while a risk exit of 1 waits on the OCO's cancel and a risk
+    /// exit of 2 the gate holds has no order. The placement's 4, the lone 4 and the waiting 1 fit;
+    /// with the held 2 they would not, and that exit cannot move, so the placement is not cancelled.
+    #[test]
+    fn a_held_exit_beside_a_waiting_one_has_no_placement_cancelled_for_it()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(0)), &ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(SECOND, "4", "141", Purpose::RiskExit)?, &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(1_800)), &ports)?;
+        let agent = AgentId("agent-a".to_owned());
+        executor.state.modes.insert(agent.clone(), Mode::Paused);
+        let held = executor.run(sell(LATER, "2", "141", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(verdicts(&held), vec!["hold"]);
+        executor.state.modes.insert(agent, Mode::Normal);
+        executor.run(sell(EXIT, "1", "141", Purpose::RiskExit)?, &ports)?;
+        let placed = executor.run(cancel_accepted(OCO), &ports)?;
+        let placement = format!("md-{SECOND}");
+        assert!(
+            submissions(&placed)
+                .iter()
+                .any(|order| order.client_order_id.as_str() == placement),
+            "the passive exit is placed: {:?}",
+            drafted(&placed)
+        );
+        assert!(
+            cancels(&placed).is_empty(),
+            "and not cancelled for the held exit: {:?}",
+            drafted(&placed)
+        );
+        Ok(())
     }
 
     /// #400 round 2's nit: the random oracle reached the composed plant (an exit's step into the
@@ -7908,6 +11686,67 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// #468's round-4 ruling, pin 4: at the open the parked ladder's sequence asks the night's
+    /// protection cancelled, and the broker refuses the cancel. The refusal is not read as the
+    /// cancel's confirmation: the order is queried (§5.7), the cancel stays outstanding, and no
+    /// rung is sent while the protection is live, even once the query answers it still live. The
+    /// ladder is never left without a cancel outstanding until §5.4's bound, which alerts the
+    /// owner with the position still covered by its protection. (That the answer does not ask the
+    /// cancel again is `main`'s, the invariant #524's fix takes up, DEC-425.)
+    #[test]
+    fn a_refused_cancel_at_the_open_sends_no_rung_beside_live_protection()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let late = 1_790_121_595;
+        let open = 1_790_150_400;
+        let mut executor = protected(&ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(late)), &ports)?;
+        executor.run(observation(Some(150), None, true, late)?, &ports)?;
+        executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = format!("md-{EXIT}");
+        executor.run(Input::Tick(RiskClock::from_secs(late + 10)), &ports)?;
+        executor.run(cancel_accepted(&exit), &ports)?;
+        executor.run(observation(Some(151), None, true, open)?, &ports)?;
+        let opened = executor.run(Input::Tick(RiskClock::from_secs(open)), &ports)?;
+        assert!(
+            submissions(&opened).is_empty(),
+            "the cancel goes before any rung"
+        );
+        let night = cancels(&opened)
+            .first()
+            .map(|id| (*id).to_owned())
+            .ok_or_else(|| missing("the night's protection cancelled at the open"))?;
+        let refusal = executor.run(refused(&night, "order is not cancelable"), &ports)?;
+        assert_eq!(queried(&refusal), vec![night.as_str()]);
+        assert!(submissions(&refusal).is_empty());
+        let live = Held {
+            purpose: Purpose::Protective,
+            qty: 10,
+            filled: 0,
+            acked: true,
+            live: true,
+        };
+        let answered = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(reported(&night, &live)?)),
+            &ports,
+        )?;
+        assert!(submissions(&answered).is_empty());
+        let mut bounded = Vec::new();
+        for after in [1, 10, 31] {
+            let tick = executor.run(Input::Tick(RiskClock::from_secs(open + after)), &ports)?;
+            assert!(
+                submissions(&tick).is_empty(),
+                "no rung beside live protection"
+            );
+            bounded.extend(alerts(&tick).into_iter().map(str::to_owned));
+        }
+        assert_eq!(bounded, vec!["unprotected_interval_limit".to_owned()]);
+        assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        Ok(())
+    }
+
     /// The coordinator's ruling on #400 round 2 (5930410998) for a sequence's ladder: the step
     /// confirmed in the overnight session parks it and re-protects the position, and the park
     /// alerts the owner **once**, `session_closed`, naming the park's own record; nothing else is
@@ -8011,7 +11850,7 @@ mod sequence_tests {
         for (intent, takes) in [(SECOND, false), (EXIT, true)] {
             let mut executor = held(&ports)?;
             executor.state.ladders.insert(
-                aapl()?,
+                (aapl()?, IntentId(EventId(EXIT.to_owned()))),
                 crate::state::LoneLadder {
                     intent: IntentId(EventId(EXIT.to_owned())),
                     agent: AgentId("agent-a".to_owned()),
@@ -8274,6 +12113,584 @@ mod sequence_tests {
                 drafted(&tick)
             );
         }
+        Ok(())
+    }
+
+    /// #515's script up to the broker's terminal report: ten held and protected, a marketable
+    /// risk exit of 4 goes once the OCO's cancel is confirmed and is acknowledged, `applied` of
+    /// it is filled by an update, and the broker then reports it `canceled` with 3 filled. Answers
+    /// the report's effects.
+    fn ended_with_three_reported(
+        executor: &mut Executor,
+        ports: &Ports<'_>,
+        applied: Option<&str>,
+    ) -> Result<Vec<Effect>, ExecutorError> {
+        executor.run(observation(Some(135), None, true, 0)?, ports)?;
+        executor.run(sell(EXIT, "4", "130", Purpose::RiskExit)?, ports)?;
+        let released = executor.run(cancel_accepted(OCO), ports)?;
+        let exit = format!("md-{EXIT}");
+        assert!(
+            submissions(&released)
+                .iter()
+                .any(|order| order.client_order_id.as_str() == exit),
+            "the exit goes once the cancel is confirmed: {:?}",
+            drafted(&released)
+        );
+        let held = |filled: u32, live: bool| Held {
+            purpose: Purpose::RiskExit,
+            qty: 4,
+            filled,
+            acked: true,
+            live,
+        };
+        executor.run(
+            Input::Broker(Ok(BrokerOutcome::Submitted(reported(
+                &exit,
+                &held(0, true),
+            )?))),
+            ports,
+        )?;
+        if let Some(qty) = applied {
+            executor.run(filled(EXIT, qty)?, ports)?;
+        }
+        let ended = reported(&exit, &held(3, false))?;
+        executor.run(Input::BrokerUpdate(BrokerUpdate::Order(ended)), ports)
+    }
+
+    /// What every live protective order in AAPL covers, by the executor's own record.
+    fn resting_cover(state: &ExecutorState) -> Result<Qty, ExecutorError> {
+        let aapl = aapl()?;
+        state
+            .orders
+            .values()
+            .filter(|order| {
+                order.instrument == aapl
+                    && order.purpose == Purpose::Protective
+                    && !order.state.is_terminal()
+            })
+            .try_fold(Qty::ZERO, |total, order| {
+                total.checked_add(order.qty.checked_sub(order.filled_qty)?)
+            })
+            .map_err(ExecutorError::from)
+    }
+
+    /// #468's round-4 review, M1, as ruled (option 2): two lone laddered risk exits of 6 and 4 in
+    /// AAPL, with nothing protecting it, park for the open with their rungs' 10 unsold. They
+    /// count 10 between rungs, and at the open each rung goes for its own remainder, 6 and 4,
+    /// never more than the position between them; no protection goes beside them meanwhile.
+    #[test]
+    fn two_parked_lone_ladders_resume_at_the_open_within_the_position() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        let at = TEN_SECONDS_BEFORE_THE_NIGHT;
+        executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+        executor.run(observation(None, None, false, at)?, &ports)?;
+        let first = "01JABCDEFGHJKMNPQRSTV00001";
+        let second = "01JABCDEFGHJKMNPQRSTV00002";
+        let mut night = Vec::new();
+        night.extend(executor.run(sell(first, "6", "141", Purpose::RiskExit)?, &ports)?);
+        night.extend(executor.run(Input::Tick(RiskClock::from_secs(at + 5)), &ports)?);
+        night.extend(executor.run(sell(second, "4", "141", Purpose::RiskExit)?, &ports)?);
+        night.extend(executor.run(Input::Tick(RiskClock::from_secs(at + 10)), &ports)?);
+        night.extend(executor.run(cancel_accepted(&format!("md-{first}")), &ports)?);
+        night.extend(executor.run(Input::Tick(RiskClock::from_secs(at + 15)), &ports)?);
+        night.extend(executor.run(cancel_accepted(&format!("md-{second}")), &ports)?);
+        assert_eq!(
+            super::between_rungs(&executor.state, &aapl()?)?,
+            Qty::parse("10")?
+        );
+        let open = 1_790_150_400;
+        night.extend(executor.run(Input::Tick(RiskClock::from_secs(open - 60)), &ports)?);
+        assert_eq!(protection_sent(&night)?, Qty::ZERO);
+        executor.run(observation(Some(150), None, true, open)?, &ports)?;
+        let resumed = executor.run(Input::Tick(RiskClock::from_secs(open)), &ports)?;
+        assert_eq!(later_rungs(&resumed, first), vec![Qty::parse("6")?]);
+        assert_eq!(later_rungs(&resumed, second), vec![Qty::parse("4")?]);
+        assert_eq!(protection_sent(&resumed)?, Qty::ZERO);
+        Ok(())
+    }
+
+    /// What `effects` sent as protection.
+    fn protection_sent(effects: &[Effect]) -> Result<Qty, ExecutorError> {
+        submissions(effects)
+            .iter()
+            .filter(|order| order.purpose == Purpose::Protective)
+            .try_fold(Qty::ZERO, |total, order| total.checked_add(order.qty))
+            .map_err(ExecutorError::from)
+    }
+
+    /// #515, `main`'s route (#468's round-3 review; DEC-421): the broker reports the exit of 4
+    /// `canceled` with 3 filled, a fill no update has applied yet. The broker holds 7, so §5.4
+    /// re-places protection for exactly the 7: no more (the Σ cap, rule 12) and no less (the
+    /// remaining quantity is protected), and the interval ends with it placed.
+    #[test]
+    fn an_exit_ended_with_a_fill_not_yet_applied_is_re_protected_for_what_the_broker_holds()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, None)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("7")?,
+            "protection is re-placed for the 7 the broker holds: {:?}",
+            drafted(&after)
+        );
+        assert_eq!(
+            actions(&after),
+            vec!["placed", "unprotected_end"],
+            "and the interval ends with it placed: {:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
+    /// #515's script 2, this PR's route (DEC-421 item 4): beside an OCO for 6, the broker reports
+    /// [`LONE`], the risk exit of 4, `canceled` with 3 filled, a fill no update has applied yet. The
+    /// broker holds 7, so the top-up ([`re_cover`]) covers the 1 the OCO leaves, never the 4 the
+    /// fold's position of 10 would ask for.
+    #[test]
+    fn a_lone_exit_ended_with_a_fill_not_yet_applied_is_topped_up_for_what_the_broker_holds()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        let ended = reported(
+            LONE,
+            &Held {
+                purpose: Purpose::RiskExit,
+                qty: 4,
+                filled: 3,
+                acked: true,
+                live: false,
+            },
+        )?;
+        let after = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(ended)), &ports)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("1")?,
+            "the top-up covers the 1 of the 7 held that the OCO for 6 leaves: {:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
+    /// A sell fill of `qty` AAPL that names no order: an activities row with no
+    /// `client_order_id`, which the executor applies as external activity.
+    fn unattributed(qty: &str) -> Result<Input, ExecutorError> {
+        Ok(Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
+            fill_id: FillId(format!("f-external-{qty}")),
+            client_order_id: None,
+            instrument: aapl()?,
+            side: Side::Sell,
+            qty: Qty::parse(qty)?,
+            price: Price::parse("139")?,
+            fees: Usd::ZERO,
+            trade_date: Date::parse("2026-09-22")?,
+        })))
+    }
+
+    /// DEC-421 item 5, the other order: the exit's report comes first and protection is
+    /// re-placed for 7; the same 3 then arrive as a fill that names no order. They come off once,
+    /// so the held position still reads 7 and nothing is re-placed.
+    #[test]
+    fn a_report_then_its_unattributed_fill_come_off_once() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, None)?;
+        assert_eq!(protection_sent(&after)?, Qty::parse("7")?);
+        let later = executor.run(unattributed("3")?, &ports)?;
+        assert_eq!(protection_sent(&later)?, Qty::ZERO, "{:?}", drafted(&later));
+        assert_eq!(long(&executor.state, &aapl()?)?, Qty::parse("7")?);
+        Ok(())
+    }
+
+    /// DEC-421 item 5's bound: a sell fill that names no order, applied before the exit was
+    /// submitted, cannot be the exit's fill, so it nets nothing. Ten held, 3 sold externally,
+    /// then the exit of 4 reports 3 filled: the broker holds 4, and protection is re-placed for 4.
+    #[test]
+    fn an_unattributed_fill_before_the_exit_nets_nothing() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(unattributed("3")?, &ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, None)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("4")?,
+            "{:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
+    /// #518's review, blocker 1: the broker's 3 arrive first as a fill that names no order (an
+    /// activities row with no `client_order_id`), and then the exit's report says 3 filled. They
+    /// are the same shares, so they come off once: the 7 held are re-protected, not 4, and a
+    /// breached stop's watchdog then exits all 7 (§5.4; DEC-421 item 5).
+    #[test]
+    fn an_unattributed_fill_and_its_report_come_off_once() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(EXIT, "4", "130", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = format!("md-{EXIT}");
+        let held = |filled: u32, live: bool| Held {
+            purpose: Purpose::RiskExit,
+            qty: 4,
+            filled,
+            acked: true,
+            live,
+        };
+        executor.run(
+            Input::Broker(Ok(BrokerOutcome::Submitted(reported(
+                &exit,
+                &held(0, true),
+            )?))),
+            &ports,
+        )?;
+        executor.run(unattributed("3")?, &ports)?;
+        let pooled = executor
+            .state
+            .unattributed
+            .get(&aapl()?)
+            .into_iter()
+            .flatten()
+            .try_fold(Qty::ZERO, |total, (_, left)| total.checked_add(*left))?;
+        assert_eq!(
+            pooled,
+            Qty::parse("3")?,
+            "one entry of 3 joins the pool for one fill of 3"
+        );
+        let ended = reported(&exit, &held(3, false))?;
+        let after = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(ended)), &ports)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("7")?,
+            "the broker's 3 come off once, however the fill was attributed: {:?}",
+            drafted(&after)
+        );
+        acknowledge_protection(&mut executor, &after, &ports)?;
+        executor.run(quote("139")?, &ports)?;
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(31)), &ports)?;
+        assert_eq!(
+            watchdog_intents(&fired)
+                .into_iter()
+                .map(|(_, _, purpose, qty)| (purpose, qty))
+                .collect::<Vec<_>>(),
+            vec![("risk_exit".to_owned(), "7".to_owned())],
+            "a breached stop exits all 7: {:?}",
+            drafted(&fired)
+        );
+        Ok(())
+    }
+
+    /// #518's round-2 review, blocker 1: the exit's live report says 3 filled, the same 3 arrive
+    /// as a fill that names no order, and the exit then ends by `OrderAbandoned` rather than by a
+    /// broker update. The netting runs after every event that ends an order, so they come off once
+    /// and the next step re-places protection for the 7 the broker holds, not 4 (DEC-421 item 5).
+    #[test]
+    fn an_exit_abandoned_after_its_report_and_its_unattributed_fill_is_re_protected_for_what_is_held()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(EXIT, "4", "130", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = format!("md-{EXIT}");
+        let held = |filled: u32| Held {
+            purpose: Purpose::RiskExit,
+            qty: 4,
+            filled,
+            acked: true,
+            live: true,
+        };
+        executor.run(
+            Input::Broker(Ok(BrokerOutcome::Submitted(reported(&exit, &held(0))?))),
+            &ports,
+        )?;
+        let live = reported(&exit, &held(3))?;
+        executor.run(Input::BrokerUpdate(BrokerUpdate::Order(live)), &ports)?;
+        executor.run(unattributed("3")?, &ports)?;
+        committed(
+            &mut executor,
+            "OrderAbandoned",
+            vec![
+                ("client_order_id", text(&exit)),
+                ("intent_id", text(EXIT)),
+                ("reason", text("gate_recheck")),
+            ],
+        )?;
+        let after = executor.run(quote("139")?, &ports)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("7")?,
+            "the abandoned exit's 3 come off once, so the 7 held are re-protected: {:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
+    /// #515, the applied part: 2 of the exit's fills are applied by an update before the broker
+    /// reports 3 filled, so only the 1 not yet applied comes off the position of 8, and protection
+    /// is re-placed for exactly 7 (#517's review, blocker 2).
+    #[test]
+    fn only_the_part_of_a_reported_fill_not_yet_applied_comes_off() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, Some("2"))?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("7")?,
+            "{:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
+    /// #515, the fill update after the terminal report: once protection covers the 7 held, the
+    /// update applying the 3 re-places nothing, and the 3 come off once, not twice (#517's
+    /// review, item a).
+    #[test]
+    fn a_fill_applied_after_its_report_comes_off_once() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        ended_with_three_reported(&mut executor, &ports, None)?;
+        let before = resting_cover(&executor.state)?;
+        let later = executor.run(filled(EXIT, "3")?, &ports)?;
+        assert_eq!(
+            protection_sent(&later)?,
+            Qty::ZERO,
+            "the applied fill re-places nothing: {:?}",
+            drafted(&later)
+        );
+        assert_eq!(
+            (before, resting_cover(&executor.state)?),
+            (Qty::parse("7")?, Qty::parse("7")?),
+            "the 3 come off once"
+        );
+        Ok(())
+    }
+
+    /// #515 at the passive exit (#518's review, blocker 2): after the exit's 3 come off and the
+    /// re-placed OCO is acknowledged, a passive exit of 2 at 160 cancels it, and on the confirmed
+    /// cancel the passive exit and the rest of the position are protected together for exactly
+    /// the 7 the broker holds: never Σ 10 against 7 (rule 12).
+    #[test]
+    fn a_passive_exit_after_an_unapplied_fill_protects_only_what_the_broker_holds()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, None)?;
+        acknowledge_protection(&mut executor, &after, &ports)?;
+        let resting: Vec<String> = submissions(&after)
+            .iter()
+            .filter(|order| order.purpose == Purpose::Protective)
+            .map(|order| order.client_order_id.as_str().to_owned())
+            .collect();
+        let started = executor.run(sell(SECOND, "2", "160", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&started), resting, "{:?}", drafted(&started));
+        let mut placed = Qty::ZERO;
+        for id in &resting {
+            placed = placed.checked_add(protection_sent(
+                &executor.run(cancel_accepted(id), &ports)?,
+            )?)?;
+        }
+        assert_eq!(
+            placed,
+            Qty::parse("7")?,
+            "Σ protective sells against 7 held"
+        );
+        Ok(())
+    }
+
+    /// DEC-421's reading of what the broker holds, alone: of ten AAPL, a sell that ended with 3
+    /// reported and none applied leaves 7. A live sell's unapplied fill, an ended buy's, and an
+    /// ended sell's in another instrument each leave it at 7.
+    #[test]
+    fn the_long_held_counts_only_ended_sells_in_its_own_instrument() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut state = protected(&ports)?.state;
+        let msft = InstrumentId::new("MSFT")?;
+        for (id, instrument, side, state_now, reported) in [
+            (
+                "md-ended-sell",
+                aapl()?,
+                Side::Sell,
+                OrderState::Canceled,
+                "3",
+            ),
+            (
+                "md-live-sell",
+                aapl()?,
+                Side::Sell,
+                OrderState::PartiallyFilled,
+                "2",
+            ),
+            (
+                "md-ended-buy",
+                aapl()?,
+                Side::Buy,
+                OrderState::Canceled,
+                "5",
+            ),
+            (
+                "md-other-sell",
+                msft.clone(),
+                Side::Sell,
+                OrderState::Filled,
+                "4",
+            ),
+        ] {
+            let client_order_id = ClientOrderId::parse(id)?;
+            state.orders.insert(
+                client_order_id.clone(),
+                Order {
+                    client_order_id: client_order_id.clone(),
+                    intent_id: None,
+                    agent: Some(AgentId("agent-a".to_owned())),
+                    instrument,
+                    side,
+                    qty: Qty::parse("5")?,
+                    filled_qty: Qty::ZERO,
+                    state: state_now,
+                    attempt: 1,
+                    purpose: Purpose::RiskExit,
+                    absent_lookups: 0,
+                    first_absence_at: None,
+                    cancel_unconfirmed: false,
+                    replaced_by: None,
+                    created_on: None,
+                },
+            );
+            state.details.insert(
+                client_order_id,
+                OrderDetail {
+                    reported_filled: Some(Qty::parse(reported)?),
+                    ..OrderDetail::default()
+                },
+            );
+        }
+        assert_eq!(long(&state, &aapl()?)?, Qty::parse("7")?);
+        assert_eq!(long(&state, &msft)?, Qty::ZERO, "never below zero");
+        let ended = ClientOrderId::parse("md-ended-sell")?;
+        let apply = |state: &mut ExecutorState, qty: &str| -> Result<(), ExecutorError> {
+            if let Some(order) = state.orders.get_mut(&ended) {
+                order.filled_qty = Qty::parse(qty)?;
+            }
+            Ok(())
+        };
+        apply(&mut state, "2")?;
+        assert_eq!(
+            long(&state, &aapl()?)?,
+            Qty::parse("9")?,
+            "only the 1 the fill update has not applied comes off"
+        );
+        apply(&mut state, "4")?;
+        assert_eq!(
+            long(&state, &aapl()?)?,
+            Qty::parse("10")?,
+            "an applied quantity ahead of the report takes nothing more off"
+        );
+        state.positions.insert(msft.clone(), SignedQty::parse("2")?);
+        assert_eq!(
+            long(&state, &msft)?,
+            Qty::ZERO,
+            "a correction larger than the position floors at zero"
+        );
+        Ok(())
+    }
+
+    /// DEC-421 item 1, `fits` (#518's review, minor 3): it reads the held position through
+    /// [`long`], so ten AAPL under an OCO for 10 fit while nothing is reported, and no longer fit
+    /// once an ended sell reports 3 filled that no update has applied. A handed-on placement then
+    /// holds its exits back on a cancel, §5.4's own first step, which errs toward re-protecting
+    /// what the broker holds.
+    #[test]
+    fn a_reported_fill_not_yet_applied_makes_protection_overhang() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut state = protected(&ports)?.state;
+        assert!(fits(&state, &aapl()?)?, "10 under 10");
+        let id = ClientOrderId::parse("md-ended-sell")?;
+        state.orders.insert(
+            id.clone(),
+            Order {
+                client_order_id: id.clone(),
+                intent_id: None,
+                agent: Some(AgentId("agent-a".to_owned())),
+                instrument: aapl()?,
+                side: Side::Sell,
+                qty: Qty::parse("4")?,
+                filled_qty: Qty::ZERO,
+                state: OrderState::Canceled,
+                attempt: 1,
+                purpose: Purpose::RiskExit,
+                absent_lookups: 0,
+                first_absence_at: None,
+                cancel_unconfirmed: false,
+                replaced_by: None,
+                created_on: None,
+            },
+        );
+        state.details.insert(
+            id,
+            OrderDetail {
+                reported_filled: Some(Qty::parse("3")?),
+                ..OrderDetail::default()
+            },
+        );
+        assert!(!fits(&state, &aapl()?)?, "10 over the 7 the broker holds");
+        Ok(())
+    }
+
+    /// DEC-421's one rule for every terminal state (the coordinator's ruling on #518, cases d and
+    /// e): of ten AAPL, sells ended `Rejected`, `Expired` and `Canceled`, each with 1 reported and
+    /// none applied, all come off, accumulating to 7. One whose 1 an unattributed sell fill has
+    /// already taken off (`netted`) does not come off again.
+    #[test]
+    fn every_ended_sell_counts_whatever_ended_it() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut state = protected(&ports)?.state;
+        for (id, ended) in [
+            ("md-rejected", OrderState::Rejected),
+            ("md-expired", OrderState::Expired),
+            ("md-canceled", OrderState::Canceled),
+        ] {
+            let client_order_id = ClientOrderId::parse(id)?;
+            state.orders.insert(
+                client_order_id.clone(),
+                Order {
+                    client_order_id: client_order_id.clone(),
+                    intent_id: None,
+                    agent: Some(AgentId("agent-a".to_owned())),
+                    instrument: aapl()?,
+                    side: Side::Sell,
+                    qty: Qty::parse("2")?,
+                    filled_qty: Qty::ZERO,
+                    state: ended,
+                    attempt: 1,
+                    purpose: Purpose::RiskExit,
+                    absent_lookups: 0,
+                    first_absence_at: None,
+                    cancel_unconfirmed: false,
+                    replaced_by: None,
+                    created_on: None,
+                },
+            );
+            state.details.insert(
+                client_order_id,
+                OrderDetail {
+                    reported_filled: Some(Qty::parse("1")?),
+                    ..OrderDetail::default()
+                },
+            );
+        }
+        assert_eq!(long(&state, &aapl()?)?, Qty::parse("7")?);
+        if let Some(detail) = state.details.get_mut(&ClientOrderId::parse("md-rejected")?) {
+            detail.netted = Some(Qty::parse("1")?);
+        }
+        assert_eq!(long(&state, &aapl()?)?, Qty::parse("8")?, "netted once");
         Ok(())
     }
 }
@@ -8983,6 +13400,411 @@ mod bracket_tests {
             ])?,
         );
         assert!(refused.is_err(), "{refused:?}");
+        Ok(())
+    }
+}
+
+/// #499's review, minor 1 (DEC-77): pins a tests PR wrote for three behaviours the fix's own
+/// tests were the only judges of, each read through what a ladder sends or what the gate answers,
+/// with its figures worked by hand in its doc rather than taken from [`remainders`].
+#[cfg(test)]
+mod remainder_pins {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_num::{Qty, SignedQty};
+
+    use super::sendable;
+    use crate::batch::Batch;
+    use crate::error::ExecutorError;
+    use crate::gate::{PartialGateDecision, Proposal, account_stream_checks};
+    use crate::ids::{ClientOrderId, IntentId};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Ids, executor_config, fees};
+    use crate::state::{
+        ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
+    };
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, Effect, EventId, Mode, Order, OrderState, Purpose,
+        RiskClock, WorkspaceId, WriterEpoch,
+    };
+
+    const SEQUENCE: &str = "01JABCDEFGHJKMNPQRSTV00010";
+    const LONE: &str = "01JABCDEFGHJKMNPQRSTV00020";
+
+    fn intent(id: &str) -> IntentId {
+        IntentId(EventId(id.to_owned()))
+    }
+
+    /// A sell of `qty` in AAPL by `agent`, named for `id`'s first rung, in `at`.
+    fn sell(id: &str, agent: &str, qty: &str, at: OrderState) -> Result<Order, ExecutorError> {
+        Ok(Order {
+            client_order_id: ClientOrderId::for_intent(&intent(id))?,
+            intent_id: Some(intent(id)),
+            agent: Some(AgentId(agent.to_owned())),
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Sell,
+            qty: Qty::parse(qty)?,
+            filled_qty: Qty::ZERO,
+            state: at,
+            attempt: 1,
+            purpose: Purpose::RiskExit,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        })
+    }
+
+    fn stepped(parked: bool) -> Ladder {
+        Ladder {
+            stepping: true,
+            parked,
+            ..Ladder::default()
+        }
+    }
+
+    /// Ten AAPL held and a live risk exit of 3 by `agent-c`, beside `agent-a`'s sequence whose
+    /// stepped rung left 5 unsold ([`SEQUENCE`]) and `lone_agent`'s lone ladder, parked where
+    /// `parked` is set, whose stepped rung left 4 unsold ([`LONE`]). [`SEQUENCE`]'s id sorts first.
+    fn two_ladders(lone_agent: &str, parked: bool) -> Result<ExecutorState, ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(1));
+        state
+            .positions
+            .insert(aapl.clone(), SignedQty::parse("10")?);
+        for order in [
+            sell(SEQUENCE, "agent-a", "5", OrderState::Canceled)?,
+            sell(LONE, lone_agent, "4", OrderState::Canceled)?,
+            sell(
+                "01JABCDEFGHJKMNPQRSTV00030",
+                "agent-c",
+                "3",
+                OrderState::Accepted,
+            )?,
+        ] {
+            state.orders.insert(order.client_order_id.clone(), order);
+        }
+        state.exiting.insert(
+            aapl.clone(),
+            ExitSequence {
+                intent: intent(SEQUENCE),
+                entry: ClientOrderId::parse("md-held-1")?,
+                agent: AgentId("agent-a".to_owned()),
+                prices: None,
+                passive: false,
+                ladder: stepped(false),
+            },
+        );
+        state.ladders.insert(
+            (aapl, intent(LONE)),
+            LoneLadder {
+                intent: intent(LONE),
+                agent: AgentId(lone_agent.to_owned()),
+                ladder: stepped(parked),
+            },
+        );
+        Ok(state)
+    }
+
+    fn ports_for<R>(
+        run: impl FnOnce(&Ports<'_>) -> Result<R, ExecutorError>,
+    ) -> Result<R, ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        run(&Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        })
+    }
+
+    /// What each ladder's next rung sends, in the order given, each in the same step, and the
+    /// `rung_short` records that step journals as (exit, short by, sent).
+    #[expect(
+        clippy::type_complexity,
+        reason = "a test's answer: the sends and the short records, read side by side"
+    )]
+    fn sends(
+        state: &ExecutorState,
+        ladders: &[(&str, &str)],
+    ) -> Result<(Vec<(String, Qty)>, Vec<(String, String, String)>), ExecutorError> {
+        ports_for(|ports| {
+            let mut batch = Batch::new(state, ports)?;
+            let aapl = InstrumentId::new("AAPL")?;
+            let mut sent = Vec::new();
+            for (exit, left) in ladders {
+                let qty = sendable(&mut batch, &aapl, &intent(exit), Qty::parse(left)?)?;
+                sent.push(((*exit).to_owned(), qty));
+            }
+            let field = |draft: &crate::types::EventDraft, name: &str| {
+                draft
+                    .payload
+                    .get(name)
+                    .and_then(mandate_canon::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let shorts = batch
+                .effects
+                .iter()
+                .filter_map(|effect| match effect {
+                    Effect::Journal(draft)
+                        if draft.event_type == "ProtectionChanged"
+                            && field(draft, "action") == "rung_short" =>
+                    {
+                        Some((
+                            field(draft, "intent_id"),
+                            field(draft, "qty"),
+                            field(draft, "sent"),
+                        ))
+                    }
+                    _ => None,
+                })
+                .collect();
+            Ok((sent, shorts))
+        })
+    }
+
+    /// The gate's answer to `agent-d`'s sell of `qty` for `purpose` in AAPL.
+    fn ask(
+        state: &ExecutorState,
+        qty: &str,
+        purpose: Purpose,
+    ) -> Result<PartialGateDecision, ExecutorError> {
+        ports_for(|ports| {
+            account_stream_checks(
+                state,
+                &Proposal {
+                    agent: &AgentId("agent-d".to_owned()),
+                    instrument: &InstrumentId::new("AAPL")?,
+                    side: Side::Sell,
+                    qty: Qty::parse(qty)?,
+                    purpose,
+                    bracketed: false,
+                },
+                ports,
+            )
+        })
+    }
+
+    /// DEC-410 item 1, the two ladders' id order, read through what each next rung sends. Room is
+    /// the position of 10 less the live 3: 7. [`SEQUENCE`] sorts first and takes all its 5; the
+    /// lone ladder gets the 2 left of its 4, journaled `rung_short` by 2. Taken in the other
+    /// order, the lone ladder would send 4 and the sequence 3.
+    #[test]
+    fn two_ladders_send_in_their_exits_id_order() -> Result<(), ExecutorError> {
+        let state = two_ladders("agent-b", false)?;
+        let (five, two) = (Qty::parse("5")?, Qty::parse("2")?);
+        let expected = vec![(SEQUENCE.to_owned(), five), (LONE.to_owned(), two)];
+        let short = vec![(LONE.to_owned(), "2".to_owned(), "2".to_owned())];
+        assert_eq!(
+            sends(&state, &[(SEQUENCE, "5"), (LONE, "4")])?,
+            (expected.clone(), short.clone())
+        );
+        let reversed = sends(&state, &[(LONE, "4"), (SEQUENCE, "5")])?;
+        assert_eq!(
+            reversed,
+            (expected.into_iter().rev().collect(), short),
+            "the order the ladders are stepped in changes nothing: the id order decides"
+        );
+        Ok(())
+    }
+
+    /// DEC-410 item 1's guard: a lone ladder whose exit was abandoned counts nothing. With the
+    /// lone exit abandoned, only [`SEQUENCE`]'s 5 count beside the live 3, so a discretionary exit
+    /// of 4 is sized to the 2 left; were the abandoned ladder counted, nothing would be left. Its
+    /// own rung, if asked, sends nothing.
+    #[test]
+    fn a_lone_ladder_whose_exit_was_abandoned_counts_nothing() -> Result<(), ExecutorError> {
+        let mut state = two_ladders("agent-b", false)?;
+        state.intents.insert(
+            intent(LONE),
+            IntentRecord {
+                intent_id: intent(LONE),
+                agent: AgentId("agent-b".to_owned()),
+                received_at: RiskClock::from_secs(0),
+                outcome: IntentOutcome::Abandoned,
+                allowed_at: None,
+            },
+        );
+        let paced = ask(&state, "4", Purpose::DiscretionaryExit)?;
+        assert_eq!(
+            (paced.verdict_name(), paced.sized()),
+            ("allow", Some(Qty::parse("2")?))
+        );
+        assert_eq!(
+            sends(&state, &[(LONE, "4")])?.0,
+            vec![(LONE.to_owned(), Qty::ZERO)]
+        );
+        Ok(())
+    }
+
+    /// DEC-410 item 1 at the gate: a parked lone ladder of a stopped or paused agent counts
+    /// nothing, so beside it only [`SEQUENCE`]'s 5 count with the live 3, and a discretionary exit
+    /// of 2 by another agent goes unsized; one of 4 is sized to the 2 left, not crowded out as it
+    /// would be with the parked 4 counted. The same ladder counts again once its agent resumes.
+    #[test]
+    fn a_stopped_or_paused_agents_parked_ladder_leaves_the_gate_its_room()
+    -> Result<(), ExecutorError> {
+        for mode in [Mode::Stopped, Mode::Paused] {
+            let mut state = two_ladders("agent-b", true)?;
+            state.modes.insert(AgentId("agent-b".to_owned()), mode);
+            let whole = ask(&state, "2", Purpose::DiscretionaryExit)?;
+            assert_eq!(
+                (whole.verdict_name(), whole.sized()),
+                ("allow", None),
+                "{mode:?}"
+            );
+            let paced = ask(&state, "4", Purpose::DiscretionaryExit)?;
+            assert_eq!(
+                (paced.verdict_name(), paced.sized()),
+                ("allow", Some(Qty::parse("2")?)),
+                "{mode:?}"
+            );
+            assert_eq!(
+                paced.crowded_out().verdict_name(),
+                "allow",
+                "{mode:?}: 2 are left"
+            );
+            state.modes.remove(&AgentId("agent-b".to_owned()));
+            let resumed = ask(&state, "2", Purpose::DiscretionaryExit)?;
+            assert_eq!(
+                resumed.crowded_out().verdict_name(),
+                "deny",
+                "{mode:?}: resumed, the parked 2 count again and nothing is left"
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod stepping_alone_pins {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_num::Qty;
+
+    use super::stepping_alone;
+    use crate::error::ExecutorError;
+    use crate::ids::{ClientOrderId, IntentId};
+    use crate::state::{ExecutorState, Ladder, LoneLadder};
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, EventId, Order, OrderState, Purpose, WorkspaceId,
+    };
+
+    const LONE: &str = "01JABCDEFGHJKMNPQRSTV00020";
+
+    fn intent() -> IntentId {
+        IntentId(EventId(LONE.to_owned()))
+    }
+
+    /// AAPL's one lone ladder ([`LONE`]), between rungs where `stepping` is set, and its rung of 4
+    /// that ended this step.
+    fn lone(stepping: bool) -> Result<(ExecutorState, Vec<Order>), ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.ladders.insert(
+            (aapl.clone(), intent()),
+            LoneLadder {
+                intent: intent(),
+                agent: AgentId("agent-b".to_owned()),
+                ladder: Ladder {
+                    stepping,
+                    ..Ladder::default()
+                },
+            },
+        );
+        Ok((state, vec![rung(aapl, intent())?]))
+    }
+
+    /// A rung of 4 by `exit` in `instrument`, cancelled this step.
+    fn rung(instrument: InstrumentId, exit: IntentId) -> Result<Order, ExecutorError> {
+        Ok(Order {
+            client_order_id: ClientOrderId::for_intent(&exit)?,
+            intent_id: Some(exit),
+            agent: Some(AgentId("agent-b".to_owned())),
+            instrument,
+            side: Side::Sell,
+            qty: Qty::parse("4")?,
+            filled_qty: Qty::ZERO,
+            state: OrderState::Canceled,
+            attempt: 1,
+            purpose: Purpose::RiskExit,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        })
+    }
+
+    /// DEC-260 (14), (18) with DEC-424: a rung that ended counts as its ladder stepping only while
+    /// that ladder's cancel was a step's. A lone ladder in the instrument whose cancel was not a
+    /// step's is not stepping, so its ended rung leaves the protection to the usual path.
+    /// Only orders that ended in the instrument asked about count: one that ended elsewhere, for
+    /// another exit, leaves AAPL's stepping ladder stepping alone.
+    #[test]
+    fn only_a_stepping_lone_ladder_counts_its_ended_rung_as_stepping_alone()
+    -> Result<(), ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        let (stepping, mut ended) = lone(true)?;
+        assert!(stepping_alone(&stepping, &aapl, &ended));
+        ended.push(rung(
+            InstrumentId::new("MSFT")?,
+            IntentId(EventId("01JABCDEFGHJKMNPQRSTV00099".to_owned())),
+        )?);
+        assert!(
+            stepping_alone(&stepping, &aapl, &ended),
+            "an order that ended in another instrument says nothing of AAPL's ladder"
+        );
+        let (resting, ended) = lone(false)?;
+        assert!(!stepping_alone(&resting, &aapl, &ended));
+        assert!(!stepping_alone(
+            &resting,
+            &InstrumentId::new("MSFT")?,
+            &ended
+        ));
+        Ok(())
+    }
+
+    /// #468's seed 18 and DEC-424. A rung that ended beside another exit's stepping lone ladder is
+    /// not that ladder's, so the instrument is not stepping alone; once that other exit has a
+    /// stepping lone ladder of its own, it is.
+    #[test]
+    fn a_rung_of_another_exit_beside_a_stepping_ladder_is_not_stepping_alone()
+    -> Result<(), ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        let other = IntentId(EventId("01JABCDEFGHJKMNPQRSTV00021".to_owned()));
+        let (one, mut ended) = lone(true)?;
+        ended.push(rung(aapl.clone(), other.clone())?);
+        assert!(
+            !stepping_alone(&one, &aapl, &ended),
+            "seed 18: the other exit's rung is no stepping ladder's, so the shares it would have \
+             sold are topped up or alerted"
+        );
+        let mut two = one;
+        two.ladders.insert(
+            (aapl.clone(), other.clone()),
+            LoneLadder {
+                intent: other,
+                agent: AgentId("agent-b".to_owned()),
+                ladder: Ladder {
+                    stepping: true,
+                    ..Ladder::default()
+                },
+            },
+        );
+        assert!(
+            stepping_alone(&two, &aapl, &ended),
+            "DEC-424: each exit has its own lone ladder, and every ended rung is one of theirs"
+        );
         Ok(())
     }
 }

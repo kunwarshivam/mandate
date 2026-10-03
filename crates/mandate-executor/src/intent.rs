@@ -174,14 +174,15 @@ fn decide(
     let decision = match closed {
         Some(reason) => decision.closed(reason),
         None if unpriced => decision.unpriced(),
-        None => decision,
+        None => decision.crowded_out(),
     };
     Ok((decision, *purpose))
 }
 
 /// Runs the binding gate on an intent, journals the decision, and answers its verdict name:
 /// `allow`, `hold`, or `deny`. With `always` false, a decision that does not allow is not
-/// journaled again: a held intent re-checked at a tick records only the moment it is released.
+/// journaled again: a held intent re-checked at a tick records only the moment it is released,
+/// or a discretionary exit's terminal denial beside a plan (DEC-410 item 3).
 fn gate(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
@@ -189,7 +190,7 @@ fn gate(
 ) -> Result<&'static str, ExecutorError> {
     let (decision, purpose) = decide(batch, intent)?;
     let verdict = decision.verdict_name();
-    if verdict == ALLOW || always {
+    if verdict == ALLOW || always || decision.crowded_denial() {
         let decided = journal_decision(batch, intent, &decision, purpose, Vec::new())?;
         if let reason @ (UNPRICED | SESSION_UNKNOWN) = decision.reason_code() {
             batch.notify(
@@ -220,6 +221,9 @@ fn journal_decision(
         ("checks", decision.checks_value()?),
         ("evaluation", text("account_stream_only")),
     ];
+    if let Some(sized) = decision.sized() {
+        pairs.push(("sized_qty", text(sized.to_string())));
+    }
     pairs.append(&mut extra);
     batch.journal("GateDecided", None, pairs)
 }
