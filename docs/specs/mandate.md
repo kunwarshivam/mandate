@@ -20,6 +20,13 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-436](../project/decisions/DEC-436.md) items 9 and 19, the workspace API
+  spec; tightening only, DEC-176):** §6.4's notification payload is an opaque, random notice id
+  that the workspace deployment maps to the request, never the request's event id, whose time
+  component would date the request. Check 7 counts an owner-connected client as the user it acts
+  for (`on_behalf_of`): a version proposed through a client has that user as its author, and a
+  grant can never come from a client (check 3 already refuses any actor not of kind `user`). No
+  rule loosens; no case or fixture changes.
 - **v0.6, amended ([DEC-429](../project/decisions/DEC-429.md), wording only; #528 round 2, minors 1 to
   3):** V-047's reasons name a risk-increasing change again, which §4.3 lists and a lone user cannot
   make either (the latched-floor reason stays out). §5.7's single-user sentence says what V-047
@@ -879,7 +886,9 @@ own text, shown as theirs and never as the platform's.
   changed (DEC-111). No price targets, no profit estimates, and **no scorecard** until counsel
   answers [question 35](../product/08-compliance-and-regulatory.md), because a scorecard may count
   as hypothetical performance.
-- Notification payloads are exactly the request's opaque approval id and one generic text
+- Notification payloads are exactly an opaque, random notice id, which the workspace deployment
+  maps to the request and which is never the request's event id ([workspace API spec
+  §3.9](workspace-api.md#39-approval-links)), and one generic text
   (`AGENTS.md` rule 6): no instrument, side, quantity, price, order value, score, thesis, agent
   name, rule, or deadline ever reaches them.
 - Never persuasive language or profit estimates.
@@ -922,7 +931,7 @@ journaled on `ApprovalResponded` with result `refused`:
 | 4 | The request was delivered on at least one channel | `not_delivered` |
 | 5 | The response repeats the request's content hash | `content_mismatch` |
 | 6 | Step-up evidence is valid at the effective time (§6.1) | `step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method` |
-| 7 | The responder is not already in the approval's grant set, and, when independence is required, is not the mandate's author. The requirement is the **stricter** of the bound `approvers` and the workspace policy overlay (§4.3) current at the effective time: independence is required if either requires it, and the approver count is the larger of the bound `required` and the overlay's (2 when the overlay's `two_approver_above_usd` is set and `order_usd` exceeds it, else 1) | `duplicate_approver`, `not_independent` |
+| 7 | The responder is not already in the approval's grant set, and, when independence is required, is not the mandate's author. A version proposed through an owner-connected client is authored by the user the client acts for (`on_behalf_of`, [workspace API spec §3.3](workspace-api.md#33-authentication-and-sessions)), so proposing through one's own client never makes one independent of the result. The requirement is the **stricter** of the bound `approvers` and the workspace policy overlay (§4.3) current at the effective time: independence is required if either requires it, and the approver count is the larger of the bound `required` and the overlay's (2 when the overlay's `two_approver_above_usd` is set and `order_usd` exceeds it, else 1) | `duplicate_approver`, `not_independent` |
 
 A grant that passes all seven joins the approval's grant set. It is `admitted` if the set now holds
 check 7's approver count of distinct approvers, none of them the mandate's author while check 7

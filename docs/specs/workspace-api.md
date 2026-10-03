@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Items 1 to 16 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556), gap 6. Notification delivery and approval deep links: the [notifications spec](https://github.com/kunwarshivam/mandate/pull/558) (`docs/specs/notifications.md`, #558), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -53,8 +53,8 @@ It does three things, and only these:
 | Caller | Principal | How it authenticates | What it may do |
 |---|---|---|---|
 | **Web app** (`web/`, DEC-200) | A user | Session from the identity spec (passkey or OIDC), in an HttpOnly cookie | Everything its role allows (§3.7) |
-| **CLI** (`mandate-cli`) | A user | A device-bound token from the identity spec | As the web app. In Phase 1, and for on-site operators, the CLI may still append to the control stream directly (DEC-436 item 3) |
-| **Owner-connected agent** over MCP (DEC-141, DEC-183) | A **client** acting for one user | Its own scoped, revocable token; never a broker credential (DEC-141 item 4) | A closed list (§3.8): reads, owner requests, draft proposals, the dry run (DEC-190), and holding new openings (DEC-191). Never confirms, approves, picks a delegation, or uses an owner-only control |
+| **CLI** (`mandate-cli`) | A user | A sender-constrained (DPoP) token from the identity spec (§3.3 item 2) | As the web app. In Phase 1, and for on-site operators, the CLI may still append to the control stream directly (DEC-436 item 3) |
+| **Owner-connected agent** over MCP (DEC-141, DEC-183) | A **client** acting for one user | Its own scoped, revocable, sender-constrained (DPoP) token; never a broker credential (DEC-141 item 4) | A closed list (§3.8): reads, owner requests, draft proposals, the dry run (DEC-190), and holding new openings (DEC-191). Never confirms, approves, picks a delegation, or uses an owner-only control |
 | **Approval link** from a notification | Nobody until sign-in | The link holds only an opaque notice id; it grants nothing (§3.9) | Lands on the sign-in, then routes as a user |
 
 The Owlhead MCP server (E10-6, E10-8) is a thin adapter: each MCP tool maps to one API operation
@@ -101,7 +101,7 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 | **API-4** | **Idempotent.** Every mutating call carries an `Idempotency-Key`. The same principal, operation, and key always resolve to the same control-stream event. A repeat with the same body returns the first outcome; a different body returns 409 `idempotency_conflict`. Nothing is committed twice | Fuzz: random retries, duplicate submits, lost responses, and concurrent repeats; an independent counter of control-stream events per key never exceeds one |
 | **API-5** | **The envelope changes only by a confirmed version.** No call changes an envelope field of a deployed agent except confirming a mandate version, by a **user** with the role for it. The server computes the classification itself (mandate spec §9.2) and requires step-up when it is risk-increasing; a client's claimed classification is never used (rule 11) | Fuzz random envelope edits through every operation; an oracle that diffs the confirmed documents shows every change came through a `MandateConfirmed` by a user, with step-up whenever its own §9.2 verdict is increasing |
 | **API-6** | **A client is owner input, never the owner.** A client token reaches only the operations of §3.8. `requested_by` is set from the authenticated channel, never from the request body (mandate spec §6.2 step 5a). A client can never confirm a version, answer an approval, create, widen, or pick a delegation, connect or revoke a connection, change a member, policy, or client, export, or use pause, resume, Stop, release, owner exit, acknowledgment, or the kill switch (DEC-141, DEC-185, DEC-191) | The route matrix for the client principal; a test that a client request carrying `requested_by: owner` in its body is journaled as `client` |
-| **API-7** | **Risk reduction is never blocked by the API.** Pause, holding new openings, the kill switch at any scope, an owner exit, Skip on an approval, ending a delegation, and away mode (the **API-7 operations**) are refused only for a failed authentication, a role that may not act, or a malformed request. Never for a rate limit, a quota, a stale or missing read model, missing step-up (except where mandate spec §6.1 requires it, below), a runtime, model, market-data, or global-control-plane outage, a pending approval, or a frozen control stream (journal spec §11). A kill switch or owner exit without valid step-up is still recorded and still stops or routes (mandate spec §6.1, DEC-158 option (c)) | A test per operation with every one of those conditions injected; each still commits its event. Resume, Stop, and acknowledgment are not risk reduction and may be refused without step-up, as mandate spec §6.1 says |
+| **API-7** | **Risk reduction is never blocked by the API.** Pause, holding new openings, the kill switch at any scope (including the kill-switch half of a revoke on compromise, §5.6), an owner exit, Skip on an approval, ending a delegation, and away mode (the **API-7 operations**) are refused only for a failed authentication, a role that may not act, or a malformed request. Never for a rate limit, a quota, a stale or missing read model, missing step-up (except where mandate spec §6.1 requires it, below), a runtime, model, market-data, or global-control-plane outage, a pending approval, or a frozen control stream (journal spec §11). A kill switch or owner exit without valid step-up is still recorded and still stops or routes (mandate spec §6.1, DEC-158 option (c)) | A test per operation with every one of those conditions injected; each still commits its event. Resume, Stop, and acknowledgment are not risk reduction and may be refused without step-up, as mandate spec §6.1 says |
 | **API-8** | **The kill-switch path needs only the API, its authentication, and Postgres.** Pause and the kill switch read no read model, call no model, runtime, market-data service, global control plane, or telemetry, and run on a reserved worker and database-connection pool that other traffic cannot exhaust (infrastructure §3.6) | A test with the model gateway, read-model tables, runtime, and metrics exporter all unavailable and every ordinary worker busy: the kill switch commits within its bound |
 | **API-9** | **Tenants never see each other.** Every resource lives under one workspace. A principal reaches only workspaces it belongs to. An id from another workspace, or one that does not exist, returns the same 404. No response, error, log line, metric label, or notification carries another workspace's data | Cross-workspace tests at the route, database (row-level security), and artifact layers (OPS-6); a test that the 404 bodies and timings for "foreign" and "absent" match |
 | **API-10** | **Nothing sensitive leaves through the API's side channels.** What the API hands to the relay or a notification provider is an opaque notice id and generic text only; approval links carry only that id; page titles, URLs, and error titles hold no instrument, size, price, thesis, or agent name (rule 6) | Payload capture tests on every notification the API emits; a URL lint over the route table |
@@ -111,7 +111,7 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 | **API-14** | **Read models are derived and stamped.** Every read names, for each stream it read, the `seq` and hash it reflects, and the `recorded_at` of that event. No value comes from anywhere but the journal and stored artifacts. A value older than its freshness limit is returned marked stale with its age, never as current | Replay test: rebuilding every read model from the journal alone gives identical responses; a staleness test per freshness limit |
 | **API-15** | **Journal pages are complete and checkable.** Paging a stream by cursor yields every event in the range exactly once, in `seq` order, with each event's `hash` and `prev_hash`, so a client can check that each page joins the last | Fuzz: random page sizes and concurrent appends; concatenated pages equal the stream range, and the chain check passes |
 | **API-16** | **Exports are verifiable and recorded.** Every export is journaled (`ExportCreated`) before it is served. A canonical export verifies under journal spec §11 against its anchors; every derived JSON or CSV view names the manifest hash it came from | A test that runs the journal verifier over each export and fails a tampered one |
-| **API-17** | **Step-up is bound to one action.** A step-up challenge the API issues names one action digest (§3.6). Evidence is accepted only on the call for that digest, and an assertion id is used once per workspace (DEC-173 item 3) | Tests that evidence for one approval, version, or command is refused on another; replay of a used assertion is refused |
+| **API-17** | **Step-up is bound to one action.** A step-up challenge the API issues names one action digest (§3.6). Evidence is accepted only on the call for that digest, and an assertion id is used once per workspace (DEC-173 item 3) | Tests that evidence for one approval, version, or command is refused on another; replay of a used assertion is refused; the step-up kinds are enumerated from identity spec ID-4 and §4.2's **S** cells, and every one can issue a challenge |
 | **API-18** | **Model text is never an action.** Model output (chat replies, theses, compiler notes) is returned only in members typed as quoted, attributed content with an author label. Action cards come only from deterministic operations (§4.6), and acting on one needs its own call (rule 4, DEC-192) | A schema test: no action or button member's type can hold model text |
 | **API-19** | **Concurrent edits never merge silently.** A draft update and a version confirmation name the base they were made from; a call whose base is no longer current is refused with 409 and the current base, never applied over another person's change. Risk-reducing shortcuts (§4.5) rebase instead, and their result is re-classified | Fuzz with two writers; every version's recorded base is its real predecessor, and every rebased shortcut is still classified reducing |
 
@@ -167,16 +167,25 @@ Owned by the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (
    every mutating call: the `Origin` header must be the app's own origin, and the call must carry a
    custom request header a cross-site form cannot set. No bearer token is ever stored in browser
    storage (brief §5, rule 6 row).
-2. **CLI and client tokens** are bearer tokens bound to one principal and one workspace, revocable
-   at once, and stored by the server only as a hash.
+2. **CLI, client, and service-account tokens are sender-constrained** (DPoP, RFC 9449; identity
+   spec §6.3, §6.5, §6.6): each request carries a proof signed by the key the token was issued to,
+   and the API refuses a token presented without a matching proof. A copied token alone is useless.
+   Tokens are bound to one principal and one workspace, revocable at once, and stored by the server
+   only as a hash. No plain bearer token is accepted on any route.
 3. **Authentication works without the global control plane** (HLD §8), and the kill-switch path
-   must authenticate without a network call to the identity provider: a locally verified passkey or
-   a session the deployment can verify itself (§7, DEC-436 item 17).
-4. Every journaled event names the principal in `actor`: `user` with the user's opaque id, or, for
-   a client, a new actor kind `client` with the client's opaque id and the user it acts for in the
-   payload (journal change, DEC-436 item 9). A client is never recorded as a `user`, so even a bug
-   that let a client answer an approval would be refused by the runtime's check 3. Events also
-   record the channel (`web`, `cli`, `mcp`) and the authentication method.
+   authenticates without a network call to the identity provider, by any of identity spec §6.4's
+   three routes: a live session whose provider refresh failed (pause and kill switch only, until its
+   absolute lifetime), a reduction-only session opened by a workspace-local passkey, or the host
+   CLI. DEC-436 item 17 asks only about a session past its absolute lifetime.
+4. Every journaled event names the principal in `actor`. A user is `{kind: "user", id}`. A client
+   is `{kind: "client", id: <client id>}`, with the human it acts for named beside it as
+   `on_behalf_of` (journal change; DEC-436 item 9; the coordinator's settlement X2 on #560). A
+   client is never recorded as a `user`, so the runtime's check 3 refuses a client's answer from the
+   record alone. Wherever a rule compares humans (check 7's "not the mandate's author", mandate
+   spec §5.8's requester, identity spec ID-6), a `client` actor counts as its `on_behalf_of` user,
+   so a version an operator proposes through their own client and then confirms is still their own
+   (mandate spec §6.4, amended in this change). Events also record the channel (`web`, `cli`,
+   `mcp`) and the authentication method.
 
 ### 3.4 Idempotency
 
@@ -230,10 +239,15 @@ Errors are RFC 9457 problem documents with these members:
 The ceremony belongs to the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556) (E9-4). The API's part:
 
 - `POST /v1/workspaces/{ws}/step-up/challenges` with `{action: {kind, digest}}` returns a challenge
-  for that one action. `kind` is `approve`, `confirm_version`, `deploy`, `command`, `acknowledge`,
-  `connect`, `disclosure`, `client_create`, or `policy`. `digest` is the SHA-256 of the action's
-  canonical object: the approval's content hash, the mandate version hash, or the command's
-  canonical members (DEC-279 item 1's object for commands).
+  for that one action. `kind` names one of the actions identity spec ID-4 lists, and the set grows
+  with that list: `confirm_version` (risk-increasing, a delegation grant included), `deploy`,
+  `approve`, `connection` (connect, change, or revoke), `kill_switch_release`, `resume`, `stop`,
+  `acknowledge`, `owner_exit`, `kill_switch_privilege`, `disclosure`, `policy_loosen`,
+  `member_invite`, `role_grant`, `client_connect`, `credential_enrol`, `break_glass_approve`, and
+  `lift_hold`. API-17's test enumerates the kinds from identity spec ID-4 and §4.2's **S** cells,
+  not from this list. `digest` is the SHA-256 of the action's canonical object: the approval's
+  content hash, the mandate version hash, or the command's canonical members (DEC-279 item 1's
+  object for commands).
 - The evidence the call then carries is `{assertion_id, authenticated_at, method}`, the shape the
   journal records (journal spec §9.2). The API checks it is bound to the call's digest and unused,
   and records it. **Validity is judged by the stream owner** at the moment mandate spec §6.1 names;
@@ -243,29 +257,73 @@ The ceremony belongs to the [identity spec](https://github.com/kunwarshivam/mand
 
 ### 3.7 Roles
 
-Roles and separation of duties belong to the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556). This is the API's reading of HLD §8, PRD
-FR-1.3, PX-11 (b), and journal spec §7, for its route matrix; the identity spec wins where they
-differ. "Owner" in the specs means a workspace admin or operator acting on the agent.
+Roles, the permission matrix, and separation of duties belong to the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556). The API enforces
+that matrix and no other (API-2; the coordinator's settlement X1 on #560). It is printed here exactly
+as identity spec §4.2 states it, so the route test can parse it; if the two ever differ, identity
+spec §4.2 wins and this copy is a defect. **S** marks a permission that needs step-up (§3.6). A blank
+cell is a denial. OO org owner, OA org admin, Bill billing admin, WA workspace admin, Op operator, Ap
+approver, Vi viewer, Au auditor, Cl client (DEC-141), SA service account. There is no inheritance
+from org roles: acting in a workspace needs a membership in it (identity spec §4.1).
 
-| Operation group | Workspace admin | Operator | Approver | Viewer | Auditor | Client (§3.8) |
-|---|---|---|---|---|---|---|
-| Read agents, positions, approvals, plan, brief | Yes | Yes | Yes | Yes | No | Its agents only |
-| Read journal, trace, timeline, gate decisions | Yes | Yes | Yes | No | Yes | No |
-| Exports, verification runs | Yes | No | No | No | Yes | No |
-| Drafts, compile, validate, create version | Yes | Yes | No | No | No | Propose only |
-| Confirm a version, deploy | Yes | Yes | No | No | No | No |
-| Pause | Yes | Yes | Yes | No | No | No |
-| Hold new openings (`exits_only`, DEC-191) | Yes | Yes | Yes | No | No | Yes |
-| Resume, Stop, release, owner exit, kill switch, acknowledge | Yes | Yes | No | No | No | No |
-| Approve or Skip | If listed in `autonomy.approval.approvers` and holding any of the first three roles | Same | Same | No | No | No |
-| End a delegation, away mode | Yes | Yes | No | No | No | No |
-| Connections: connect, revoke | Yes | No | No | No | No | No |
-| Policies, members, clients | Yes | No | No | No | No | No |
+| Permission | S | OO | OA | Bill | WA | Op | Ap | Vi | Au | Cl | SA |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| View agents, positions, decisions | | | | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| Read records, verification; export (journal §7) | | | | | ✓ | | | | ✓ | | ✓ |
+| Draft a mandate version | | | | | | ✓ | | | | ✓ (propose only) | |
+| Confirm a version: reducing or neutral | | | | | | ✓ | | | | | |
+| Confirm a version: risk-increasing (incl. a delegation grant, V-022) | S | | | | | ✓ | | | | | |
+| Deploy, go live (E10-4) | S | | | | | ✓ | | | | | |
+| Pause | | | | | ✓ | ✓ | ✓ | | | | |
+| Hold new openings (`exits_only`, DEC-191) | | | | | ✓ | ✓ | | | | ✓ | |
+| Lift a hold a client set (DEC-191) | S | | | | ✓ | ✓ | | | | | |
+| Resume, Stop, Stop with release | S | | | | ✓ | ✓ | | | | | |
+| Kill switch, agent scope: engage | | | | | ✓ | ✓ | | | | | |
+| Kill switch, connection or workspace scope: engage | | | | | ✓ | ✓ | | | | | |
+| Kill switch, org scope: engage | | ✓ | ✓ | | | | | | | | |
+| Kill switch, any scope: privileges beyond the stop (mandate §6.1), for a scope one may engage | S | ✓ | ✓ | | ✓ | ✓ | | | | | |
+| Kill switch release (re-enable a halted scope, §4.4) | S | ✓ (org) | ✓ (org) | | ✓ | | | | | | |
+| Owner exit (close a position) | S | | | | | ✓ | | | | | |
+| Acknowledge (ladder, tripwire, reconciliation) | S | | | | ✓ | ✓ | | | | | |
+| Answer an approval: approve | S | | | | | | ✓ | | | | |
+| Answer an approval: skip | | | | | | | ✓ | | | | |
+| Remove or narrow a delegation | | | | | | ✓ | | | | | |
+| Connect, change, or revoke a broker connection | S | | | | ✓ | | | | | | |
+| Accept a disclosure (V-005) | S | | | | | ✓ | | | | | |
+| Workspace policy: tighten | | | | | ✓ | | | | | | |
+| Workspace policy: loosen (within the org's) | S | | | | ✓ | | | | | | |
+| Invite, deactivate, remove a workspace member | S for invite | | | | ✓ | | | | | | |
+| Grant or remove a workspace role | S for grant | | | | ✓ | | | | | | |
+| Connect a client (issue its token) | S | | | | | ✓ | | | | | |
+| Revoke a client | | | | | ✓ | ✓ | | | | | |
+| Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | |
+| Org policy: tighten | | ✓ | ✓ | | | | | | | | |
+| Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | |
+| SSO configuration | S | ✓ | ✓ | | | | | | | | |
+| Create or archive a workspace | S | ✓ | ✓ | | | | | | | | |
+| Org memberships and org roles | S | ✓ | ✓ (not owner) | | | | | | | | |
+| Issue or revoke a service account | S | ✓ | ✓ | | | | | | | | |
+| Billing | | ✓ | | ✓ | | | | | | | |
+| Transfer org ownership; delete the org | S | ✓ | | | | | | | | | |
+| Approve a break-glass request (§10.3) | S | ✓ | | | ✓ | | | | | | |
 
-An organization owner or admin acts in each workspace as its workspace admin. Separation of duties
-(FR-1.6) is enforced where the specs already enforce it: by the runtime at approval (check 7) and
-by the executor at acknowledgment (mandate spec §5.8). The API adds no second copy that could
-disagree.
+How the API's operations map onto those rows:
+
+| API operation | Matrix row |
+|---|---|
+| Read models (§4.7), the approvals inbox and content (§4.3) | View agents, positions, decisions |
+| Journal, trace, timeline, gate decisions, exports, verification (§4.8) | Read records, verification; export |
+| Drafts, compile, validate, create a version (§4.1) | Draft a mandate version |
+| Confirm (§5.1) | Confirm a version, by the server's own classification |
+| End a delegation, away mode (§4.4) | Remove or narrow a delegation |
+| Pause, hold, lift a hold, resume, Stop, kill switch, release, owner exit, acknowledge (§4.2) | The row of the same name |
+| Approve, Skip (§5.2) | Answer an approval, and listed in `autonomy.approval.approvers` (identity spec §4.1) |
+| Connect, revoke, revoke on compromise (§4.5) | Connect, change, or revoke a broker connection |
+| Policies, members, clients (§4.5) | The rows of the same names |
+| Owner request, dry run, chat (§4.6) | **No row yet.** Until identity spec §4.2 adds one, a user needs the operator role, and a client the `request` or `dry_run` scope (§3.8) |
+
+Separation of duties is enforced where the specs already enforce it: by the runtime at approval
+(check 7) and by the executor at acknowledgment (mandate spec §5.8), with a client counted as its
+human (§3.3 item 4). The API adds no second copy that could disagree.
 
 ### 3.8 Client scopes (owner-connected agents)
 
@@ -286,11 +344,16 @@ its next call; revocation needs no step-up because it only removes access.
 
 ### 3.9 Approval links
 
-Deep-link delivery belongs to the [notifications spec](https://github.com/kunwarshivam/mandate/pull/558) (`docs/specs/notifications.md`, #558); this section states what the API serves. A notification carries a random **notice id**, generic text, and nothing else (rule 6, mandate spec
-§6.4). The link is `/n/{notice_id}`. Opening it shows sign-in only (brief G4); after sign-in the API
+The notification's payload is the [notifications spec](https://github.com/kunwarshivam/mandate/pull/558) (`docs/specs/notifications.md`, #558)'s to define (its §4.2); under the coordinator's
+settlement X3 on #560 it carries a random **notice id** and generic text only. This section states
+what the API serves. The link is `/n/{notice_id}`. Opening it shows sign-in only (brief G4); after sign-in the API
 resolves the notice to its approval for that user, if the user may see it, and otherwise returns
-404. The notice id is not the approval's event id, so a link reveals no creation time and no event
-reference. A link grants no authority and holds no token.
+404. The notice id is random and is not the approval's event id: a ULID's first 48 bits are its
+creation time, so an event id in a payload would tell the relay and the provider when the request
+was made. A link grants no authority and holds no token. Mandate spec §6.4's payload sentence is
+amended in this change to name the notice id, and `mandate_approval::ApprovalRef::of_requested_event`
+(`crates/mandate-approval/src/notify.rs`), which builds the reference from the event today, becomes a
+notice-id lookup (E8-15).
 
 ### 3.10 Rate limits and quotas
 
@@ -336,6 +399,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Owner exit | `POST /agents/{id}/exits` | `OwnerCommandIssued` (`owner_exit`) | §5.4. Never refused for step-up (mandate spec §6.1) |
 | Acknowledge | `POST /agents/{id}/acknowledgments` | `OwnerAcknowledged` | Names the event acknowledged; step-up; independence judged by the executor |
 | Kill switch | `POST /kill-switch` | `OwnerCommandIssued` (`kill_switch`) | §5.4. Agent, connection, or workspace scope |
+| Release a halted scope | `POST /kill-switch/release` | `ScopeReleased` (identity spec §12.1, journal change) | Identity spec §4.4: step-up; re-enables nothing by itself, so each agent still needs its own deploy or resume. An agent scope has no release (`stopped` is terminal) |
 | Command status | `GET /commands/{event_id}` | — | §5.5 |
 
 ### 4.3 Approvals (approval service)
@@ -363,7 +427,8 @@ define yet; §11's E10-15 adds them before the operation ships.
 |---|---|---|---|
 | List, read connections | `GET /connections`, `GET /connections/{id}` | — | Opaque id, broker, environment, scopes, the 1× check, data profile, restrictions, agents granted, loss carry (O4). **References only**: no account number, key, or token (API-11) |
 | Connect | `POST /connections/oauth/start`, then the broker redirects to `GET /connections/oauth/callback` | `ConnectionEstablished` | Step-up before start. PKCE and a single-use `state`; the token exchange goes straight to the vault; scopes beyond trading reject the connection (FR-2.2). Flow details are the connections spec's |
-| Revoke | `POST /connections/{id}/revoke` | `ConnectionRevoked` | Step-up. Refused while any agent on it holds positions or is not stopped: without the connection nothing can exit or re-protect, so revoking is not risk reduction. The kill switch comes first |
+| Revoke | `POST /connections/{id}/revoke` | `ConnectionRevoked` | Step-up. Refused while any agent on it holds positions or is not stopped: without the connection nothing can exit or re-protect, so an ordinary revoke is not risk reduction. For a credential the owner believes is compromised, use the next row |
+| Revoke now, on compromise | `POST /connections/{id}/revoke` with `compromised: true` | `OwnerCommandIssued` (`kill_switch`, connection scope), then `ConnectionRevoked` (reason `compromised`, journal change), in one batch | §5.6. Never waits on positions: the kill switch runs first in the same command, then the credential is revoked |
 | Policies | `GET`, `PUT /policies/workspace` | `PolicyChanged` | A value looser than its parent is refused naming the nearest ancestor (FR-1.5); the response lists agents made nonconforming (X1). Step-up |
 | Members | `GET /members`, `POST /invitations`, `PATCH`, `DELETE /members/{id}` | Identity spec's events (journal change) | Removing a member ends their sessions and tokens at once |
 | Clients | `GET /clients`, `POST /clients`, `DELETE /clients/{id}` | `ClientConnected`, `ClientRevoked` (journal change) | Create needs step-up and shows the scopes in words (E10-8); revoke needs none |
@@ -562,6 +627,38 @@ refusal is journaled where the specs put it.
 client keeps the `event_id` from §3.4 and polls this resource until the event exists or the client
 gives up and says "the result is unknown; we are checking".
 
+### 5.6 Revoke now, on a compromised credential
+
+`POST /connections/{connection_id}/revoke` with:
+
+| Member | Type | Meaning |
+|---|---|---|
+| `compromised` | `true` | Selects this path. `false` or absent is the ordinary revoke of §4.5 |
+| `record` | record or `null` | The rendered confirmation, which states what the next paragraphs say |
+| `step_up` | step-up or `null` | Bound to digest = SHA-256 of `{connection_id, compromised: true}` (kind `connection`) |
+
+The API commits one batch, in this order: `OwnerCommandIssued` with `kill_switch` at the
+connection's scope, then `ConnectionRevoked` with reason `compromised`. Revocation never waits on
+positions, on fills, or on the regular session. The executor processes the batch in `seq` order:
+
+1. **The kill switch first** (trading spec §5.5): every agent on the connection to `stopped`, the
+   broker's cancel-all and close-position requests sent with the executor's current lease.
+   Whatever the broker accepts, queues, or fills stands at the broker after revocation; nothing on
+   our side holds or cancels it (rule 13).
+2. **Then the revocation:** the executor sends nothing more with that credential, the vault
+   destroys it and ends every lease (infrastructure §5.4), and, where the broker offers token
+   revocation (OAuth), the platform revokes the token there.
+3. **What is left is the owner's, and the owner is told so.** An exit the executor would have
+   deferred and re-driven later (equities outside the regular session) is not re-driven, because no
+   credential remains; protection was canceled by step 1. The confirmation and the alert say which
+   positions remain at the broker, unprotected, and that the owner must also revoke the leaked key
+   at the broker, since revoking it on our side does not stop someone else who holds it. This
+   residual is listed for the threat model (#557).
+
+The kill-switch half is an API-7 operation: without valid step-up, or while the control stream is
+frozen, the API still commits the kill switch, and refuses only the revocation with
+`step_up_required` (`effect: recorded` for the kill switch). The batch is otherwise all or nothing.
+
 ---
 
 ## 6. Consistency model
@@ -605,7 +702,7 @@ risk-reducing call never consults one (API-7, API-8).
 |---|---|---|
 | **API process down** | No new owner input through the web app or MCP. Agents keep trading inside their mandates; protection rests at the broker. The web app shows "cannot reach your workspace" with no cached content (G1, G4) and, on Stop, how to reach the broker directly. Kill switch alternatives, in order: a second API replica (managed runs at least two); on site, the CLI's direct control-stream append (DEC-436 item 3); the broker's own controls, which reconciliation then ingests as external activity (trading spec §7.1) | API-8 |
 | **Postgres down** | Nothing can be journaled, so no command can be recorded, the kill switch included (infrastructure §2, "Known limit"). Every mutating call returns `journal_unavailable` with `effect: none`. Protection resting at the broker is the backstop; the UI points to the broker | API-3, API-13 |
-| **Identity provider down** | Existing sessions keep working until they expire. New sign-ins fail. The kill switch and pause need authentication the deployment can verify without the provider (§3.3 item 3): a locally verified passkey. Whether an expired session may still pause is DEC-436 item 17 (Proposed); until decided it may not | API-1, API-7 |
+| **Identity provider down** | New sign-ins fail. Pause and the kill switch stay reachable by identity spec §6.4's routes (§3.3 item 3): a session whose refresh failed keeps those two until its absolute lifetime, a workspace-local passkey opens a reduction-only session, and the host CLI works on site. Whether a session past its absolute lifetime may still pause is DEC-436 item 17 (Proposed); until decided it may not | API-1, API-7 |
 | **Global control plane down** | Nothing changes in the API; only relay push is lost, and the status strip says so (HLD §4) | API-8 |
 | **Runtime down or lagging** | Commands are recorded and wait. The runtime judges an owner exit and a kill switch at the time the owner committed them (mandate spec §6.1), so a late read still applies them. The kill switch's account part is the executor's and does not wait for the runtime (infrastructure §3.6). Status stays `recorded` and says so | API-7, API-13 |
 | **Stale read model** | Values are shown with their age. Risk-increasing calls that depend on a stale fact may be refused with the reason; risk-reducing calls never look | API-14, API-7 |
@@ -618,6 +715,7 @@ risk-reducing call never consults one (API-7, API-8).
 | **Version change while an approval is pending** | The executor applies the version; the runtime cancels the approval (`version_applied`). A response already sent is refused `not_pending`. D6 shows "canceled by a new version" | API-12 |
 | **Version confirmed, rejected at application** | Status `refused` with `MandateVersionApplied`'s reason in words (A6) | API-13 |
 | **Control stream frozen** by a verification failure (journal spec §11) | Mandate and deployment changes are refused with `control_stream_frozen`. The API-7 operations are still recorded, as journal spec §11 keeps the kill switch working: otherwise a tampering incident would disable Stop | API-7 |
+| **Broker credential suspected compromised** | The owner uses §5.6: kill switch and revocation in one command, never waiting on positions. Deferred equity sells are not re-driven; the owner is told which positions remain at the broker and to revoke the key there | API-7, API-11 |
 | **Member removed or client revoked mid-flow** | Their next call fails authentication, so a removed user can no longer answer even while a version still lists them in `autonomy.approval.approvers`. A response they recorded before removal stands and is judged by the runtime like any other | API-1 |
 | **Session expires on a record screen** | The confirm fails `unauthenticated` with `effect: none`; after sign-in the screen re-renders from fresh data and needs a fresh confirmation (brief §4.1) | API-13 |
 | **API upgrade** | Replicas drain; `/v1` stays served; the control stream's writer epoch passes to the new process (journal spec §5.1) and an append from the old one is `Fenced`, which the API reports as `effect: unknown` and resolves by lookup | API-4 |
@@ -630,6 +728,8 @@ risk-reducing call never consults one (API-7, API-8).
 |---|---|---|
 | **Stolen browser session** | Approve trades, confirm a looser version, connect a broker | Every risk-increasing call needs step-up bound to its action (API-17); a session alone can pause, hold, skip, or kill-switch, which add no risk (rule 2). A kill switch on a stolen session realizes losses at worst through an ordinary flatten; the step-up-gated owner-exit privilege is not available to it |
 | **Stolen assertion** | Reuse one step-up for another approval or a version | Bound to one digest; single-use per workspace (DEC-173 item 3); 300 s life judged by the stream owner |
+| **Stolen CLI or client token** | Read, request, propose, dry-run, or hold from another machine, through leaked agent logs or a prompt-injected session | Sender-constrained tokens (§3.3 item 2): without the private key, the token is refused. With the key too (a compromised host), the client's closed scopes still add no risk alone (API-6, MI-30), and revoking the client needs no step-up (identity spec ID-5) |
+| **Leaked broker credential** | Trade the owner's account directly, outside the platform | Not stoppable from our side alone. §5.6 revokes at once without waiting on positions, with the kill switch first, and tells the owner to revoke the key at the broker. Keys never pass through the API outward (API-11) |
 | **CSRF** | A third-party page posts to the API with the owner's cookie | `SameSite=Strict`, an `Origin` check, and a required custom header (§3.3) |
 | **Replay of a captured request** | Re-send a recorded approve or kill switch | Idempotency returns the original outcome (API-4); the assertion is already used; `submitted_at` is the server's |
 | **Insider with the viewer role** | Pause an agent, read the journal, export | The route matrix (API-2): a viewer acts on nothing and reads no journal; an auditor reads but acts on nothing. Exports are journaled (API-16) |
@@ -671,12 +771,15 @@ risk-reducing call never consults one (API-7, API-8).
 
 ## 10. Decisions
 
-Recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 are reversible engineering
-readings an agent accepts (DEC-79, DEC-176): each adds no trading rule, or only tightens one.
+Recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 and 19 to 21 are reversible
+engineering readings an agent accepts (DEC-79, DEC-176): each adds no trading rule, or only tightens
+one. Items 9, 19, 20, and 21 carry the coordinator's round-1 settlements X1, X2, X3, and X5 and its
+ruling on M2 and M3.
 Items 17 and 18 stay **Proposed** for the founder:
 
-- **Item 17:** whether a session that expired while the identity provider is unreachable may still
-  pause. Recommended: yes, for pause only, up to 12 hours after its last successful authentication,
+- **Item 17:** whether a session past its absolute lifetime, while the identity provider is
+  unreachable, may still pause (identity spec §6.4 already keeps pause and the kill switch on a
+  session whose refresh failed, until that lifetime). Recommended: yes, for pause only, up to 12 hours after its last successful authentication,
   never after revocation, journaled with the method `session_grace`. Until decided: no grace;
   pause needs a valid session, and the kill switch a locally verified passkey.
 - **Item 18:** whether the API is offered to third parties (DEC-149, E18). Recommended: first-party
@@ -687,7 +790,8 @@ Items 17 and 18 stay **Proposed** for the founder:
 ## 11. Backlog
 
 Stories continue the existing epics (DEC-436 item 15): E8-15, E10-10 to E10-15, E11-9, and E12-6 in
-the [backlog](../project/06-backlog-v1.md). **SC** marks a safety-critical story.
+the [backlog](../project/06-backlog-v1.md). The round-1 review's minors are rows under "Spec
+follow-ups" there (freeze rule). **SC** marks a safety-critical story.
 
 ---
 
