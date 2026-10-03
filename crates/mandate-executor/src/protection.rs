@@ -111,7 +111,7 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .map(|(instrument, _)| instrument.clone())
         .collect();
     for instrument in due {
-        let held = covered(&batch.view, &instrument)?.min(long(&batch.view, &instrument));
+        let held = covered(&batch.view, &instrument)?.min(long(&batch.view, &instrument)?);
         let fresh = batch
             .view
             .quotes
@@ -1041,7 +1041,7 @@ fn bracket(
         let unapplied = filled.checked_sub(order.filled_qty)?;
         let committed = covered(&batch.view, &instrument)?
             .checked_add(still_selling(&batch.view, &instrument)?)?;
-        let room = long(&batch.view, &instrument)
+        let room = long(&batch.view, &instrument)?
             .checked_add(unapplied)?
             .checked_sub(committed)
             .unwrap_or(Qty::ZERO);
@@ -1193,7 +1193,7 @@ fn fits_beside_movable(
         })
         .try_fold(Qty::ZERO, Qty::checked_add)?;
     let movable = live.checked_sub(held).unwrap_or(Qty::ZERO);
-    Ok(covered(view, instrument)?.checked_add(movable)? <= long(view, instrument))
+    Ok(covered(view, instrument)?.checked_add(movable)? <= long(view, instrument)?)
 }
 
 /// One exit the gate allowed that has no order yet: it waits on its cancels.
@@ -1276,16 +1276,40 @@ fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty,
 /// within the long position together, so no stop outlasts the position once they fill.
 fn fits(view: &ExecutorState, instrument: &InstrumentId) -> Result<bool, ExecutorError> {
     let committed = covered(view, instrument)?.checked_add(still_selling(view, instrument)?)?;
-    Ok(committed <= long(view, instrument))
+    Ok(committed <= long(view, instrument)?)
 }
 
-fn long(view: &ExecutorState, instrument: &InstrumentId) -> Qty {
-    view.positions
+/// The long position in `instrument` as the broker holds it (DEC-421, #515): the folded position
+/// less every fill the broker reported on a sell that has ended, in any terminal state, that no
+/// fill update has applied and no unattributed sell fill has already taken off it (`netted`, the
+/// fold's netting). An order whose applied quantity has run ahead of its report contributes
+/// nothing rather than an error: the fold has already taken those shares off. The result is
+/// floored at zero. A live sell's unapplied fill is left in, because [`still_selling`] counts
+/// that order's remainder from the same applied quantity, so the two cancel.
+fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+    let folded = view
+        .positions
         .get(instrument)
         .copied()
         .unwrap_or(SignedQty::ZERO)
         .max(SignedQty::ZERO)
-        .abs()
+        .abs();
+    let unapplied = view
+        .orders
+        .iter()
+        .filter(|(_, order)| {
+            &order.instrument == instrument && order.side == Side::Sell && order.state.is_terminal()
+        })
+        .filter_map(|(id, order)| {
+            let detail = view.details.get(id)?;
+            let reported = detail.reported_filled?;
+            reported
+                .checked_sub(order.filled_qty)
+                .and_then(|left| left.checked_sub(detail.netted.unwrap_or(Qty::ZERO)))
+                .ok()
+        })
+        .try_fold(Qty::ZERO, Qty::checked_add)?;
+    Ok(folded.checked_sub(unapplied).unwrap_or(Qty::ZERO))
 }
 
 /// The unfilled quantity every live protective order in `instrument` covers.
@@ -1338,7 +1362,7 @@ fn replace(
     instrument: &InstrumentId,
     sequence: &ExitSequence,
 ) -> Result<(), ExecutorError> {
-    let qty = long(&batch.view, instrument)
+    let qty = long(&batch.view, instrument)?
         .checked_sub(covered(&batch.view, instrument)?)
         .unwrap_or(Qty::ZERO);
     let prices = sequence.prices.filter(|_| qty > Qty::ZERO);
@@ -1485,12 +1509,7 @@ pub(crate) fn passive_exit(
     let Some(take_profit) = prices.take_profit else {
         return Err(ExecutorError::Unimplemented { story: "E7-4" });
     };
-    let held = batch
-        .view
-        .positions
-        .get(instrument)
-        .copied()
-        .unwrap_or(SignedQty::ZERO);
+    let held = long(&batch.view, instrument)?;
     let exit = OcoLegs {
         take_profit: limit,
         stop: prices.stop,
@@ -1500,7 +1519,6 @@ pub(crate) fn passive_exit(
     place(batch, &first, Some(intent), &sequence.agent, prices)?;
     let selling = still_selling(&batch.view, instrument)?;
     let rest = held
-        .abs()
         .checked_sub(qty)
         .and_then(|rest| rest.checked_sub(selling))
         .unwrap_or(Qty::ZERO);
@@ -2271,7 +2289,7 @@ mod sequence_tests {
     use proptest::prop_oneof;
     use proptest::test_runner::TestRunner;
 
-    use super::rests;
+    use super::{fits, long, rests};
     use crate::error::ExecutorError;
     use crate::fold::fold;
     use crate::ids::{ClientOrderId, IntentId};
@@ -2281,12 +2299,12 @@ mod sequence_tests {
         Everything, Executor, Ids, aapl, account, drafted, executor_config, fees, missing,
         submitted,
     };
-    use crate::state::ExecutorState;
+    use crate::state::{ExecutorState, OrderDetail};
     use crate::types::{
         AgentId, BrokerFill, BrokerOrder, BrokerOutcome, BrokerReject, BrokerRequest,
         BrokerUnknown, BrokerUpdate, Command, Effect, EventDraft, EventId, ExecutorConfig,
         ExitTier, FillId, Initiator, Input, IntentBody, IntentHandoff, KillScope, MandateVersion,
-        MarketObservation, Mode, OcoLegs, OrderState, OrderType, Purpose, ReconcileReason,
+        MarketObservation, Mode, OcoLegs, Order, OrderState, OrderType, Purpose, ReconcileReason,
         RiskClock, SubmitOrder, TimeInForce,
     };
 
@@ -9502,7 +9520,6 @@ mod sequence_tests {
     /// re-places protection for exactly the 7: no more (the Σ cap, rule 12) and no less (the
     /// remaining quantity is protected), and the interval ends with it placed.
     #[test]
-    #[ignore = "pending E7-4"]
     fn an_exit_ended_with_a_fill_not_yet_applied_is_re_protected_for_what_the_broker_holds()
     -> Result<(), ExecutorError> {
         with_ports!(ports);
@@ -9523,11 +9540,166 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// A sell fill of `qty` AAPL that names no order: an activities row with no
+    /// `client_order_id`, which the executor applies as external activity.
+    fn unattributed(qty: &str) -> Result<Input, ExecutorError> {
+        Ok(Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
+            fill_id: FillId(format!("f-external-{qty}")),
+            client_order_id: None,
+            instrument: aapl()?,
+            side: Side::Sell,
+            qty: Qty::parse(qty)?,
+            price: Price::parse("139")?,
+            fees: Usd::ZERO,
+            trade_date: Date::parse("2026-09-22")?,
+        })))
+    }
+
+    /// DEC-421 item 5, the other order: the exit's report comes first and protection is
+    /// re-placed for 7; the same 3 then arrive as a fill that names no order. They come off once,
+    /// so the held position still reads 7 and nothing is re-placed.
+    #[test]
+    fn a_report_then_its_unattributed_fill_come_off_once() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, None)?;
+        assert_eq!(protection_sent(&after)?, Qty::parse("7")?);
+        let later = executor.run(unattributed("3")?, &ports)?;
+        assert_eq!(protection_sent(&later)?, Qty::ZERO, "{:?}", drafted(&later));
+        assert_eq!(long(&executor.state, &aapl()?)?, Qty::parse("7")?);
+        Ok(())
+    }
+
+    /// DEC-421 item 5's bound: a sell fill that names no order, applied before the exit was
+    /// submitted, cannot be the exit's fill, so it nets nothing. Ten held, 3 sold externally,
+    /// then the exit of 4 reports 3 filled: the broker holds 4, and protection is re-placed for 4.
+    #[test]
+    fn an_unattributed_fill_before_the_exit_nets_nothing() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(unattributed("3")?, &ports)?;
+        let after = ended_with_three_reported(&mut executor, &ports, None)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("4")?,
+            "{:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
+    /// #518's review, blocker 1: the broker's 3 arrive first as a fill that names no order (an
+    /// activities row with no `client_order_id`), and then the exit's report says 3 filled. They
+    /// are the same shares, so they come off once: the 7 held are re-protected, not 4, and a
+    /// breached stop's watchdog then exits all 7 (§5.4; DEC-421 item 5).
+    #[test]
+    fn an_unattributed_fill_and_its_report_come_off_once() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(EXIT, "4", "130", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = format!("md-{EXIT}");
+        let held = |filled: u32, live: bool| Held {
+            purpose: Purpose::RiskExit,
+            qty: 4,
+            filled,
+            acked: true,
+            live,
+        };
+        executor.run(
+            Input::Broker(Ok(BrokerOutcome::Submitted(reported(
+                &exit,
+                &held(0, true),
+            )?))),
+            &ports,
+        )?;
+        executor.run(unattributed("3")?, &ports)?;
+        let pooled = executor
+            .state
+            .unattributed
+            .get(&aapl()?)
+            .into_iter()
+            .flatten()
+            .try_fold(Qty::ZERO, |total, (_, left)| total.checked_add(*left))?;
+        assert_eq!(
+            pooled,
+            Qty::parse("3")?,
+            "one entry of 3 joins the pool for one fill of 3"
+        );
+        let ended = reported(&exit, &held(3, false))?;
+        let after = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(ended)), &ports)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("7")?,
+            "the broker's 3 come off once, however the fill was attributed: {:?}",
+            drafted(&after)
+        );
+        acknowledge_protection(&mut executor, &after, &ports)?;
+        executor.run(quote("139")?, &ports)?;
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(31)), &ports)?;
+        assert_eq!(
+            watchdog_intents(&fired)
+                .into_iter()
+                .map(|(_, _, purpose, qty)| (purpose, qty))
+                .collect::<Vec<_>>(),
+            vec![("risk_exit".to_owned(), "7".to_owned())],
+            "a breached stop exits all 7: {:?}",
+            drafted(&fired)
+        );
+        Ok(())
+    }
+
+    /// #518's round-2 review, blocker 1: the exit's live report says 3 filled, the same 3 arrive
+    /// as a fill that names no order, and the exit then ends by `OrderAbandoned` rather than by a
+    /// broker update. The netting runs after every event that ends an order, so they come off once
+    /// and the next step re-places protection for the 7 the broker holds, not 4 (DEC-421 item 5).
+    #[test]
+    fn an_exit_abandoned_after_its_report_and_its_unattributed_fill_is_re_protected_for_what_is_held()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(135), None, true, 0)?, &ports)?;
+        executor.run(sell(EXIT, "4", "130", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let exit = format!("md-{EXIT}");
+        let held = |filled: u32| Held {
+            purpose: Purpose::RiskExit,
+            qty: 4,
+            filled,
+            acked: true,
+            live: true,
+        };
+        executor.run(
+            Input::Broker(Ok(BrokerOutcome::Submitted(reported(&exit, &held(0))?))),
+            &ports,
+        )?;
+        let live = reported(&exit, &held(3))?;
+        executor.run(Input::BrokerUpdate(BrokerUpdate::Order(live)), &ports)?;
+        executor.run(unattributed("3")?, &ports)?;
+        committed(
+            &mut executor,
+            "OrderAbandoned",
+            vec![
+                ("client_order_id", text(&exit)),
+                ("intent_id", text(EXIT)),
+                ("reason", text("gate_recheck")),
+            ],
+        )?;
+        let after = executor.run(quote("139")?, &ports)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("7")?,
+            "the abandoned exit's 3 come off once, so the 7 held are re-protected: {:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
     /// #515, the applied part: 2 of the exit's fills are applied by an update before the broker
     /// reports 3 filled, so only the 1 not yet applied comes off the position of 8, and protection
     /// is re-placed for exactly 7 (#517's review, blocker 2).
     #[test]
-    #[ignore = "pending E7-4"]
     fn only_the_part_of_a_reported_fill_not_yet_applied_comes_off() -> Result<(), ExecutorError> {
         with_ports!(ports);
         let mut executor = protected(&ports)?;
@@ -9545,7 +9717,6 @@ mod sequence_tests {
     /// update applying the 3 re-places nothing, and the 3 come off once, not twice (#517's
     /// review, item a).
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_fill_applied_after_its_report_comes_off_once() -> Result<(), ExecutorError> {
         with_ports!(ports);
         let mut executor = protected(&ports)?;
@@ -9571,7 +9742,6 @@ mod sequence_tests {
     /// cancel the passive exit and the rest of the position are protected together for exactly
     /// the 7 the broker holds: never Σ 10 against 7 (rule 12).
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_passive_exit_after_an_unapplied_fill_protects_only_what_the_broker_holds()
     -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -9597,6 +9767,195 @@ mod sequence_tests {
             Qty::parse("7")?,
             "Σ protective sells against 7 held"
         );
+        Ok(())
+    }
+
+    /// DEC-421's reading of what the broker holds, alone: of ten AAPL, a sell that ended with 3
+    /// reported and none applied leaves 7. A live sell's unapplied fill, an ended buy's, and an
+    /// ended sell's in another instrument each leave it at 7.
+    #[test]
+    fn the_long_held_counts_only_ended_sells_in_its_own_instrument() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut state = protected(&ports)?.state;
+        let msft = InstrumentId::new("MSFT")?;
+        for (id, instrument, side, state_now, reported) in [
+            (
+                "md-ended-sell",
+                aapl()?,
+                Side::Sell,
+                OrderState::Canceled,
+                "3",
+            ),
+            (
+                "md-live-sell",
+                aapl()?,
+                Side::Sell,
+                OrderState::PartiallyFilled,
+                "2",
+            ),
+            (
+                "md-ended-buy",
+                aapl()?,
+                Side::Buy,
+                OrderState::Canceled,
+                "5",
+            ),
+            (
+                "md-other-sell",
+                msft.clone(),
+                Side::Sell,
+                OrderState::Filled,
+                "4",
+            ),
+        ] {
+            let client_order_id = ClientOrderId::parse(id)?;
+            state.orders.insert(
+                client_order_id.clone(),
+                Order {
+                    client_order_id: client_order_id.clone(),
+                    intent_id: None,
+                    agent: Some(AgentId("agent-a".to_owned())),
+                    instrument,
+                    side,
+                    qty: Qty::parse("5")?,
+                    filled_qty: Qty::ZERO,
+                    state: state_now,
+                    attempt: 1,
+                    purpose: Purpose::RiskExit,
+                    absent_lookups: 0,
+                    first_absence_at: None,
+                    cancel_unconfirmed: false,
+                    replaced_by: None,
+                    created_on: None,
+                },
+            );
+            state.details.insert(
+                client_order_id,
+                OrderDetail {
+                    reported_filled: Some(Qty::parse(reported)?),
+                    ..OrderDetail::default()
+                },
+            );
+        }
+        assert_eq!(long(&state, &aapl()?)?, Qty::parse("7")?);
+        assert_eq!(long(&state, &msft)?, Qty::ZERO, "never below zero");
+        let ended = ClientOrderId::parse("md-ended-sell")?;
+        let apply = |state: &mut ExecutorState, qty: &str| -> Result<(), ExecutorError> {
+            if let Some(order) = state.orders.get_mut(&ended) {
+                order.filled_qty = Qty::parse(qty)?;
+            }
+            Ok(())
+        };
+        apply(&mut state, "2")?;
+        assert_eq!(
+            long(&state, &aapl()?)?,
+            Qty::parse("9")?,
+            "only the 1 the fill update has not applied comes off"
+        );
+        apply(&mut state, "4")?;
+        assert_eq!(
+            long(&state, &aapl()?)?,
+            Qty::parse("10")?,
+            "an applied quantity ahead of the report takes nothing more off"
+        );
+        state.positions.insert(msft.clone(), SignedQty::parse("2")?);
+        assert_eq!(
+            long(&state, &msft)?,
+            Qty::ZERO,
+            "a correction larger than the position floors at zero"
+        );
+        Ok(())
+    }
+
+    /// DEC-421 item 1, `fits` (#518's review, minor 3): it reads the held position through
+    /// [`long`], so ten AAPL under an OCO for 10 fit while nothing is reported, and no longer fit
+    /// once an ended sell reports 3 filled that no update has applied. A handed-on placement then
+    /// holds its exits back on a cancel, §5.4's own first step, which errs toward re-protecting
+    /// what the broker holds.
+    #[test]
+    fn a_reported_fill_not_yet_applied_makes_protection_overhang() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut state = protected(&ports)?.state;
+        assert!(fits(&state, &aapl()?)?, "10 under 10");
+        let id = ClientOrderId::parse("md-ended-sell")?;
+        state.orders.insert(
+            id.clone(),
+            Order {
+                client_order_id: id.clone(),
+                intent_id: None,
+                agent: Some(AgentId("agent-a".to_owned())),
+                instrument: aapl()?,
+                side: Side::Sell,
+                qty: Qty::parse("4")?,
+                filled_qty: Qty::ZERO,
+                state: OrderState::Canceled,
+                attempt: 1,
+                purpose: Purpose::RiskExit,
+                absent_lookups: 0,
+                first_absence_at: None,
+                cancel_unconfirmed: false,
+                replaced_by: None,
+                created_on: None,
+            },
+        );
+        state.details.insert(
+            id,
+            OrderDetail {
+                reported_filled: Some(Qty::parse("3")?),
+                ..OrderDetail::default()
+            },
+        );
+        assert!(!fits(&state, &aapl()?)?, "10 over the 7 the broker holds");
+        Ok(())
+    }
+
+    /// DEC-421's one rule for every terminal state (the coordinator's ruling on #518, cases d and
+    /// e): of ten AAPL, sells ended `Rejected`, `Expired` and `Canceled`, each with 1 reported and
+    /// none applied, all come off, accumulating to 7. One whose 1 an unattributed sell fill has
+    /// already taken off (`netted`) does not come off again.
+    #[test]
+    fn every_ended_sell_counts_whatever_ended_it() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut state = protected(&ports)?.state;
+        for (id, ended) in [
+            ("md-rejected", OrderState::Rejected),
+            ("md-expired", OrderState::Expired),
+            ("md-canceled", OrderState::Canceled),
+        ] {
+            let client_order_id = ClientOrderId::parse(id)?;
+            state.orders.insert(
+                client_order_id.clone(),
+                Order {
+                    client_order_id: client_order_id.clone(),
+                    intent_id: None,
+                    agent: Some(AgentId("agent-a".to_owned())),
+                    instrument: aapl()?,
+                    side: Side::Sell,
+                    qty: Qty::parse("2")?,
+                    filled_qty: Qty::ZERO,
+                    state: ended,
+                    attempt: 1,
+                    purpose: Purpose::RiskExit,
+                    absent_lookups: 0,
+                    first_absence_at: None,
+                    cancel_unconfirmed: false,
+                    replaced_by: None,
+                    created_on: None,
+                },
+            );
+            state.details.insert(
+                client_order_id,
+                OrderDetail {
+                    reported_filled: Some(Qty::parse("1")?),
+                    ..OrderDetail::default()
+                },
+            );
+        }
+        assert_eq!(long(&state, &aapl()?)?, Qty::parse("7")?);
+        if let Some(detail) = state.details.get_mut(&ClientOrderId::parse("md-rejected")?) {
+            detail.netted = Some(Qty::parse("1")?);
+        }
+        assert_eq!(long(&state, &aapl()?)?, Qty::parse("8")?, "netted once");
         Ok(())
     }
 }

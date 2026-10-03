@@ -2812,3 +2812,18 @@ From the #485 chain's round-3 review (#494 and #496; the coordinator's ruling, 2
 - **E7-4: hoist `overtaken` out of `release_waiting`'s per-exit loop** (#508 round 2, m3′). It runs
   once per waiting exit, not once per instrument; with the `Unknown` arm in its guard the repeats ask
   nothing, so this is wasted work only.
+
+From #518's round-2 review (the coordinator's ruling, 00:28Z on #518; freeze rule):
+
+- **E7-4: bound DEC-421's correction to the reconciliation the report asked for** (#518 round 2,
+  major 2; DEC-421 items 1 and 5). Its own story, tests first. Today an unapplied report is netted
+  against any unattributed sell applied after the order was submitted, so a sale the owner makes at
+  the broker cancels the correction and protection over-covers (Σ 7 against 4 held). A report that
+  overstates its fills under-covers with no bound. Ending the correction when the reconciliation the
+  report asked for completes gets both right: a fill it attributes closes the correction, and one it
+  cannot attribute has already left the position. The same story decides whether the gate's
+  `available` takes the reading.
+- **E7-4: pool a sell fill whose named order the fold does not know** (#518 round 2, minor 3).
+  `fill_applied` pools only when the payload names no order, so a `FillApplied` naming an order the
+  fold does not know takes shares off the position and joins neither. `orders::fill` never writes
+  that payload today; keying the pool on "no order found" makes the fold total over it.
