@@ -758,8 +758,9 @@ fn ceil_div(numerator: i128, denominator: i128) -> i128 {
 ///
 /// For an owner's exit of the whole position paced by an order cap of 5% of the trailing volume:
 /// - the slice is a whole number of the grid, below the proposal, and above zero (rule 13);
-/// - it is never above the larger of the cap truncated onto the grid and the minimum rounded up
-///   onto it, and exactly that larger figure where it is below the proposal (B3, M1).
+/// - it is never above the largest of the cap truncated onto the grid, the minimum rounded up
+///   onto it, and one step of it, and exactly that figure where it is below the proposal (B3,
+///   M1; a zero minimum still slices at one step, #578 review, B1).
 ///
 /// The venue grids are drawn on a fractionable crypto instrument, and a grid of 1 also on a
 /// whole-share equity that is not fractionable, so that an implementation keying either reading on
@@ -790,7 +791,7 @@ fn the_trim_and_the_slice_stay_on_the_venue_s_grid() {
         (1_i128..=40, 0_i128..10),
         prop::sample::select(vec![0_i128, 0, 0, 2, 5, 9, 10]),
         prop::sample::select(vec![0_i128, 100, 300, 500]),
-        prop::sample::select(vec![(1_i128, 1_i128), (2, 1), (3, 2)]),
+        prop::sample::select(vec![(0_i128, 1_i128), (1, 1), (2, 1), (3, 2)]),
         0_i128..2_000,
     );
     let check = |(
@@ -924,7 +925,11 @@ fn the_trim_and_the_slice_stay_on_the_venue_s_grid() {
             evaluate(&s.input()).map_err(|e| TestCaseError::fail(format!("{row}: {e}")))?;
         let cap = volume * 5 / 100;
         let expected = (cap > 0)
-            .then(|| (cap / grid * grid).max(ceil_div(minimum, grid) * grid))
+            .then(|| {
+                (cap / grid * grid)
+                    .max(ceil_div(minimum, grid) * grid)
+                    .max(grid)
+            })
             .filter(|slice| *slice < proposed);
         let got = decision
             .pacing
