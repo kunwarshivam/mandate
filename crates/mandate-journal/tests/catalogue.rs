@@ -54,6 +54,7 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("KillSwitchActivated", &[ACCT, AGENT], &[]),
     ("OwnerCommandRefused", &[ACCT, AGENT], &[]),
     ("MandateVersionApplied", &[ACCT], &[MAN]),
+    ("UniverseChanged", &[ACCT], &[MAN]),
     ("RiskDayStarted", &[ACCT], &[MAN]),
     ("RiskLimitTriggered", &[ACCT], &[MAN]),
     ("RiskLimitLifted", &[ACCT], &[MAN]),
@@ -64,6 +65,8 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("ClockAdvanced", &[ACCT, CLOCK], &[]),
     ("ObservationRecorded", &[AGENT], &[]),
     ("ModelInvocationRecorded", &[AGENT], &[MOD]),
+    ("ThesisProposed", &[AGENT], &[MAN, MOD]),
+    ("ThesisRevised", &[AGENT], &[MAN, MOD]),
     ("ModelOutputRecorded", &[AGENT], &[MAN]),
     ("DecisionMade", &[AGENT], &[MAN]),
     ("IntentProposed", &[AGENT], &[MAN]),
@@ -114,6 +117,8 @@ const REGISTERED: &[&str] = &[
     "OrderSubmitted",
     "FillApplied",
     "MarkUpdated",
+    "MandateVersionApplied",
+    "UniverseChanged",
 ];
 
 /// Payload schemas journal spec v0.6 §9.1 closes on the agent stream (E7-9). On an agent stream a
@@ -150,8 +155,18 @@ const CLOSED_BY_SECTION_9_2: &[(&str, &str)] = &[
 /// (DEC-402). It is kept apart from the eleven pairs until that registration is implemented.
 const SNAPSHOT_ON_ACCOUNT: (&str, &str) = ("AccountSnapshotRecorded", ACCT);
 
+/// The account stream's risk-state records journal spec §9.3 closes (DEC-403, DEC-404).
+const RISK_STATE_ON_ACCOUNT: [(&str, &str); 2] =
+    [("MandateVersionApplied", ACCT), ("UniverseChanged", ACCT)];
+
+/// The agent stream's research-agent thesis records journal spec §9.4 closes (DEC-413, DEC-414).
+const THESIS_ON_AGENT: [(&str, &str); 2] = [("ThesisProposed", AGENT), ("ThesisRevised", AGENT)];
+
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {
-    CLOSED_BY_SECTION_9_2.contains(&(event_type, kind)) || (event_type, kind) == SNAPSHOT_ON_ACCOUNT
+    CLOSED_BY_SECTION_9_2.contains(&(event_type, kind))
+        || (event_type, kind) == SNAPSHOT_ON_ACCOUNT
+        || RISK_STATE_ON_ACCOUNT.contains(&(event_type, kind))
+        || THESIS_ON_AGENT.contains(&(event_type, kind))
 }
 
 fn stream_of(kind: &str) -> &'static str {
@@ -347,6 +362,7 @@ const RISK_INPUTS: &[&str] = &[
     "CashInLieuPosted",
     "CompensatingEvent",
     "MandateVersionApplied",
+    "UniverseChanged",
     "RiskDayStarted",
     "OwnerAcknowledged",
 ];
@@ -354,6 +370,16 @@ const RISK_INPUTS: &[&str] = &[
 /// A valid payload for every registered risk input; registering another one without adding it here
 /// fails `every_registered_risk_input_requires_risk_clock`.
 const RISK_INPUT_PAYLOADS: &[(&str, &[&str], &str)] = &[
+    (
+        "MandateVersionApplied",
+        &["mandate_version"],
+        r#"{"agent_id":"agent_a","old_version":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","new_version":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","classification":"neutral","step_up":null,"result":"applied","reason":null,"allocation_change":null,"max_loss_from_allocation":null,"risk_clock":"2026-09-21T14:00:01.000000000Z"}"#,
+    ),
+    (
+        "UniverseChanged",
+        &["mandate_version"],
+        r#"{"agent_id":"agent_a","instrument":"7b4a1c2e-1111-4a2b-9c3d-000000000001","change":"removed","reason":"version_applied","thesis_id":null,"lineage_id":null,"universe_size_after":0,"risk_clock":"2026-09-21T14:00:01.000000000Z"}"#,
+    ),
     (
         "MarkUpdated",
         &[],
@@ -374,7 +400,18 @@ fn every_registered_risk_input_requires_risk_clock() {
             .iter()
             .find(|(t, _, _)| t == event_type)
             .unwrap_or_else(|| panic!("add a valid {event_type} payload to RISK_INPUT_PAYLOADS"));
-        let draft = with_payload(event_type, refs, payload);
+        let mut named: Vec<String> = payload
+            .match_indices("\"sha256:")
+            .filter_map(|(at, _)| payload.get(at..at + 73))
+            .map(str::to_owned)
+            .collect();
+        named.sort();
+        named.dedup();
+        let draft = edit(
+            &with_payload(event_type, refs, payload),
+            "artifact_refs",
+            Some(&format!("[{}]", named.join(","))),
+        );
         assert!(
             Draft::parse(&draft).is_ok(),
             "{event_type} payload is valid"
@@ -489,6 +526,69 @@ fn account_snapshot_recorded_refuses_an_unlisted_member() {
         refused.map_err(|e| (e.reason, e.path)),
         Err((InvalidReason::Schema, "payload.unregistered".to_owned()))
     );
+}
+
+/// Each risk-state record is routed to §9.3's checks, never refused for want of a catalogue entry
+/// or a schema (DEC-403, DEC-404).
+#[test]
+fn risk_state_records_are_routed_to_section_9_3() {
+    for (event_type, kind) in RISK_STATE_ON_ACCOUNT {
+        let refused = Draft::parse(&draft(event_type, kind, &["mandate_version"]))
+            .map(|_| ())
+            .unwrap_err();
+        assert!(
+            !matches!(
+                refused.reason,
+                InvalidReason::UnknownSchema | InvalidReason::UnknownEventType
+            ),
+            "{event_type}: {refused:?}"
+        );
+    }
+}
+
+/// §9.3 closes both schemas, so a member neither lists is refused as `schema` at that member.
+#[test]
+fn risk_state_records_refuse_an_unlisted_member() {
+    for (event_type, kind) in RISK_STATE_ON_ACCOUNT {
+        let refused = Draft::parse(&draft(event_type, kind, &["mandate_version"])).map(|_| ());
+        assert_eq!(
+            refused.map_err(|e| (e.reason, e.path)),
+            Err((InvalidReason::Schema, "payload.unregistered".to_owned())),
+            "{event_type}"
+        );
+    }
+}
+
+/// Each thesis record is routed to §9.4's checks, never refused for want of a catalogue entry or a
+/// schema (DEC-413, DEC-414).
+#[test]
+fn thesis_records_are_routed_to_section_9_4() {
+    for (event_type, kind) in THESIS_ON_AGENT {
+        let refused = Draft::parse(&draft(event_type, kind, &[MAN, MOD]))
+            .map(|_| ())
+            .unwrap_err();
+        assert!(
+            !matches!(
+                refused.reason,
+                InvalidReason::UnknownSchema | InvalidReason::UnknownEventType
+            ),
+            "{event_type}: {refused:?}"
+        );
+    }
+}
+
+/// §9.4 closes the shared schema, so a member it does not list is refused as `schema` at that
+/// member.
+#[test]
+fn thesis_records_refuse_an_unlisted_member() {
+    for (event_type, kind) in THESIS_ON_AGENT {
+        let refused = Draft::parse(&draft(event_type, kind, &[MAN, MOD])).map(|_| ());
+        assert_eq!(
+            refused.map_err(|e| (e.reason, e.path)),
+            Err((InvalidReason::Schema, "payload.unregistered".to_owned())),
+            "{event_type}"
+        );
+    }
 }
 
 const SHA_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

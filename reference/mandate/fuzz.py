@@ -850,7 +850,7 @@ def mutate_delegations(ds):
         ds.reverse()
 
 def fuzz_delegation_changes(n):
-    """MI-29: a version classified risk-reducing or neutral never lets a delegation lift what the old one would not."""
+    """MI-29: a delegation change classified risk-reducing or neutral never makes a decision less strict."""
     for _ in range(n):
         m = rand_delegated_mandate()
         if m is None:
@@ -874,8 +874,82 @@ def fuzz_delegation_changes(n):
             st = rand_state(t, usage, trouble_p=0.1)
             a = rand_autonomy_action()
             d0, d1 = autonomy(m, a, st)["decision"], autonomy(new, a, st)["decision"]
-            check(STRICT[d1] >= STRICT[d0], "MI-29 a reducing delegation change never lifts more",
+            check(STRICT[d1] >= STRICT[d0], "MI-29 a reducing delegation change never decides less strictly",
                   (m["autonomy"]["delegations"], new["autonomy"]["delegations"], a, st, d0, d1))
+
+def narrow_delegations(ds):
+    """A delegation change the delegations row calls reducing: one removed, a cap lowered, or the window cut."""
+    ds = copy.deepcopy(ds)
+    k, d = rng.random(), rng.choice(ds)
+    if k < 0.4:
+        ds.remove(d)
+    elif k < 0.7:
+        c = rng.choice(DELEGATION_CAPS)
+        d[c] = max(1, d[c] - 1) if c == "max_orders" else norm(D(d[c]) / 2)
+    else:
+        d["expires_at"] = fmt(max(T(d["starts_at"]) + timedelta(seconds=1), T(d["expires_at"]) - timedelta(seconds=rng.choice([30, 3600, 86400]))))
+    return ds
+
+def fuzz_delegated_rule_changes(n):
+    """MI-29 across the two §9.2 rows (#444, DEC-353): a version classified reducing or neutral that changes the rules,
+    with the delegations kept or narrowed in the same version, never makes any decision less strict than the previous
+    version gave it, with each version's delegations in force and the same usage. An order `auto` by a rule may become
+    `auto` by a delegation. The oracle compares decisions only, never the classifier's own conditions. Some versions
+    name a source that is not an ask, which V-041 refuses. Some draws widen the rule a delegation names or make its
+    source an ask, and some remove a rule ahead of it, on purpose.
+
+    Two §9.2 bullets hold only because V-041 refuses a version (DEC-353 items 2 and 5): adding a rule a carried
+    delegation already names, and a kept rule a delegation names going from `auto` to `ask`. Neither pair is valid,
+    so the negative control asserts V-041 refuses its old version; a change to V-041 that admits it fails here."""
+    for _ in range(n):
+        m = rand_delegated_mandate(any_source=rng.random() < 0.3)
+        if m is None:
+            continue
+        ds = m["autonomy"]["delegations"]
+        if rng.random() < 0.1:
+            bad = copy.deepcopy(m)
+            d = rng.choice(bad["autonomy"]["delegations"])
+            autos = [r["id"] for r in bad["autonomy"]["rules"] if r["then"] == "auto"]
+            d["lifts"] = f"rule:{rng.choice(autos)}" if autos and rng.random() < 0.5 else "rule:not_in_this_version"
+            check("V-041" in delegation_errors(bad, None),
+                  "V-041 refuses a delegation naming a rule the version lacks or that is not an ask (§9.2 relies on it)",
+                  (bad["autonomy"], d))
+        new = copy.deepcopy(m)
+        rest = copy.deepcopy({k: v for k, v in m["autonomy"].items() if k != "delegations"})
+        named = rng.choice(ds)["lifts"]
+        k = rng.random()
+        if k < 0.45:
+            for r in rest["rules"]:
+                if f"rule:{r['id']}" == named:
+                    w = r["when"]
+                    wider = [v for v in FIELDS_NUM.get(w["field"], [])
+                             if (D(v) < D(w["value"]) if w["op"] in ("gt", "gte") else D(v) > D(w["value"]))]
+                    if wider and k < 0.35:
+                        w["value"] = rng.choice(wider)
+                    else:
+                        r["then"] = "ask"
+            if named == "default":
+                rest["default"] = "ask"
+        elif k < 0.65:
+            ids = [f"rule:{r['id']}" for r in rest["rules"]]
+            ahead = ids.index(named) if named in ids else len(ids)
+            if ahead:
+                rest["rules"].pop(rng.randrange(ahead))
+        else:
+            rest = mutate(rest)
+        nds = narrow_delegations(ds) if rng.random() < 0.25 else copy.deepcopy(ds)
+        new["autonomy"] = dict(rest, delegations=nds)
+        c, _ = classify(m, new)
+        if c not in ("risk_reducing", "neutral"):
+            continue
+        for _ in range(25):
+            t = DELEG_NOW + timedelta(seconds=rng.randint(-3600, 3 * 86400))
+            st = rand_state(t, {}, trouble_p=0.1)
+            a = rand_autonomy_action()
+            r0, r1 = autonomy(m, a, st), autonomy(new, a, st)
+            check(STRICT[r1["decision"]] >= STRICT[r0["decision"]],
+                  "MI-29 a reducing rule change never decides less strictly with the delegations in force",
+                  (m["autonomy"], new["autonomy"], a, st, r0, r1))
 
 def fuzz_delegation_rules(n):
     """V-041 (the 30-day span), V-042 (no carry-over past a risk-increasing version), V-043 (caps inside the envelope),
@@ -1854,7 +1928,7 @@ def fuzz_ask_budget(n):
     for _ in range(n):
         noon = int(rng.choice(days).timestamp())
         evs = []
-        for _ in range(rng.randint(0, 24)):
+        for _ in range(rng.randint(0, rng.choice([4, 24]))):
             t = noon + rng.randint(-14 * 3600, 11 * 3600 + 3599)
             kind = rng.choices(["requested", "owner_skipped", "timed_out", "version_applied"], [8, 2, 2, 1])[0]
             evs.append({"event": kind, "at_s": t, "instrument": rng.choice(["A", "B"]), "timeout_s": rng.choice([30, 300, 600])})
@@ -1864,6 +1938,9 @@ def fuzz_ask_budget(n):
         q = rng.choice([last, last + 1, noon + 11 * 3600 + 3599] + [e["at_s"] + e["timeout_s"] + rng.choice([-1, 0]) for e in timeouts])
         q = max(q, last)
         inst = rng.choice(["A", "B"])
+        if timeouts and rng.random() < 0.5:
+            edge = rng.choice(timeouts)
+            q, inst = max(edge["at_s"] + edge["timeout_s"] + rng.choice([-1, 0]), last), edge["instrument"]
         day = datetime.fromtimestamp(q, NYC).date()
         same = lambda e: datetime.fromtimestamp(e["at_s"], NYC).date() == day
         asked = len([e for e in evs if e["event"] == "requested" and same(e)])
@@ -2012,6 +2089,7 @@ if __name__ == "__main__":
     fuzz_delegations(600)
     fuzz_delegation_changes(600)
     fuzz_delegation_rules(400)
+    fuzz_delegated_rule_changes(1500)
     fuzz_client_ceiling(400)
     fuzz_review(600)
     fuzz_review_changes(600)

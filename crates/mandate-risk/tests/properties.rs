@@ -117,8 +117,8 @@ proptest! {
     /// ([`Price::collar_bound`]'s `overflow`), and `0.0000833`, whose passive end sits below one
     /// Reg NMS tick and truncates to zero on the grid ([`Price::on_tick`]'s `not_positive`); the
     /// decimal's own edges sit beside them. The volumes at the edges show that no participation cap
-    /// fails: `Qty::portion` takes a fraction of at most one. Pending E6-6, whose implementation
-    /// reads a control that cannot be computed as pacing nothing, so the whole exit goes.
+    /// fails: `Qty::portion` takes a fraction of at most one. Since E6-6's exit routing (#452,
+    /// DEC-327, DEC-383), a control that cannot be computed paces nothing, so the whole exit goes.
     #[test]
     fn an_exit_over_extreme_figures_is_still_routed(
         origin in prop::sample::select(vec![

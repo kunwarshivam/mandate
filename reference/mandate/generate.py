@@ -555,14 +555,21 @@ B = [
     ("MC-B16", "Above target with positive conviction and limit_buys: hold", "two_stock_swing",
      dict(BI, position_qty="10", size_factor="0.5", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
     ("MC-B17", "trim_to_target: confirmed rung reduces the position as a risk exit", "two_stock_swing_trim",
-     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_size="1", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
     ("MC-B30", "trim_to_target withheld until the rung is confirmed", "two_stock_swing_trim",
-     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=10, gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=10, min_order_size="1", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
     ("MC-B31", "trim_to_target withheld outside the regular session and while holding", "two_stock_swing_trim",
      at_now(dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, session="after_hours", holding=True,
-                 gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO), AFTER_HOURS)),
+                 min_order_size="1", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO), AFTER_HOURS)),
     ("MC-B32", "No trim when the excess is below the rebalance band", "two_stock_swing_trim",
-     dict(BI, position_qty="8", size_factor="0.5", scale_active_s=120, gate_state=gst(positions_mv={XYZ: "799.2"}), outputs=TWO)),
+     dict(BI, position_qty="8", size_factor="0.5", scale_active_s=120, min_order_size="1", gate_state=gst(positions_mv={XYZ: "799.2"}), outputs=TWO)),
+    ("MC-B33", "trim_to_target: a trim of at least the instrument's minimum size goes under a larger dollar minimum",
+     "two_stock_swing_trim",
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_usd="500", min_order_size="3",
+          gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+    ("MC-B34", "trim_to_target withheld below the instrument's minimum order size", "two_stock_swing_trim",
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, min_order_size="4",
+          gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
     ("MC-B18", "Delta within the rebalance band: hold", "two_stock_swing", dict(BI, position_qty="7", gate_state=gst(positions_mv={XYZ: "699.3"}), outputs=TWO)),
     ("MC-B19", "Value after limit clips below the band: hold", "two_stock_swing",
      dict(BI, gross_usd="1950", gate_state=gst(positions_mv={QRS: "1950"}), outputs=[out(MOM, "1", "1"), out(NEWS, "1", "1")])),
@@ -1118,6 +1125,57 @@ cases.append({"id": "MC-E32", "kind": "escalation", "op": "deliver_now",
               "expect": [{"status": deliver_now(q["channel"], QH, q["at"])} for q in E32Q]})
 e_case("MC-E31", "A grant batched with a cancelling exits-only restriction is not pending and never acts (DEC-131 item 25(j))",
        [ASK1, {"kind": "batch", "reason": "mode_tightened", "responses": [e_resp("ctl1", 30, H1)], "now": E_NOW}])
+
+# =========================================================== P. delegation routing (§9.2, MI-11, MI-29; #444, DEC-353)
+# A rule change the autonomy row would call reducing is increasing when it sends an order that reached an undelegated
+# ask to an ask a delegation of the new version lifts (MI-29). An order that was auto stays auto, so removing or
+# narrowing an auto rule ahead of a delegated ask stays reducing. Each delegated case has a control without the delegation.
+J_DELEG = lambda lifts: {"op": "add", "path": "/autonomy/delegations", "value": [dict(REVIEW_DELEGATION, lifts=lifts)]}
+J_TWO_ASKS = [rep("/autonomy/rules", [{"id": "large_orders", "when": {"field": "order_usd", "op": "gt", "value": "900"}, "then": "ask"},
+                                     {"id": "low_score", "when": {"field": "combined_score", "op": "lt", "value": "0.65"}, "then": "ask"}])]
+J_ONE_ASK = [rep("/autonomy/rules", [{"id": "large_orders", "when": {"field": "order_usd", "op": "gt", "value": "900"}, "then": "ask"}])]
+derived("btc_accumulator_two_asks", "btc_accumulator", J_TWO_ASKS, "two ask rules and an ask default, no auto rule")
+derived("btc_accumulator_two_asks_delegated", "btc_accumulator_two_asks", [J_DELEG("rule:low_score")],
+        "a delegation lifts the later ask rule, low_score")
+derived("btc_accumulator_one_ask_delegated_default", "btc_accumulator", J_ONE_ASK + [J_DELEG("default")],
+        "one ask rule, and a delegation lifts the ask default")
+derived("btc_accumulator_delegated_large", "btc_accumulator", [J_DELEG("rule:large_orders")],
+        "a delegation lifts the ask rule large_orders")
+J_SMALL = [{"op": "add", "path": "/autonomy/rules/0", "value": {"id": "small", "when": {"field": "order_usd", "op": "lt", "value": "100"}, "then": "auto"}}]
+derived("btc_accumulator_two_asks_delegated_small", "btc_accumulator_two_asks_delegated", J_SMALL,
+        "adds an auto rule, small, ahead of both asks")
+derived("btc_accumulator_two_asks_small", "btc_accumulator_two_asks", J_SMALL, "adds an auto rule, small, ahead of both asks")
+derived("btc_accumulator_one_ask", "btc_accumulator", J_ONE_ASK, "one ask rule and an ask default")
+CH_J = [
+    ("MC-J01", "Widening an ask rule a delegation lifts is risk-increasing", "btc_accumulator_delegated_large",
+     [rep("/autonomy/rules/0/when/value", "800")]),
+    ("MC-J02", "Widening the same ask rule with no delegation is risk-reducing", "btc_accumulator",
+     [rep("/autonomy/rules/0/when/value", "800")]),
+    ("MC-J03", "Removing an ask rule ahead of an ask rule a delegation lifts is risk-increasing", "btc_accumulator_two_asks_delegated",
+     [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J04", "Removing the same ask rule with no delegation is risk-reducing", "btc_accumulator_two_asks",
+     [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J05", "Removing an ask rule ahead of an ask default a delegation lifts is risk-increasing", "btc_accumulator_one_ask_delegated_default",
+     [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J06", "Removing an auto rule ahead of an ask rule a delegation lifts stays risk-reducing: its orders stay auto",
+     "btc_accumulator_two_asks_delegated_small", [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J07", "Removing the same auto rule with no delegation is risk-reducing", "btc_accumulator_two_asks_small",
+     [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J08", "Removing the same ask rule ahead of the ask default with no delegation is risk-reducing", "btc_accumulator_one_ask",
+     [{"op": "remove", "path": "/autonomy/rules/0"}]),
+    ("MC-J09", "Narrowing an auto rule ahead of an ask rule a delegation lifts stays risk-reducing: its orders stay auto", "btc_accumulator_two_asks_delegated_small",
+     [rep("/autonomy/rules/0/when/value", "50")]),
+    ("MC-J10", "Narrowing the same auto rule with no delegation is risk-reducing", "btc_accumulator_two_asks_small",
+     [rep("/autonomy/rules/0/when/value", "50")]),
+]
+for cid, title, base, patch in CH_J:
+    old = MB[base]
+    new = apply_patch(old, patch)
+    assert V.is_valid(new) and semantic(old, CTX)[0] == [] and semantic(new, CTX)[0] == [], (cid, semantic(old, CTX), semantic(new, CTX))
+    got, paths = classify(old, new)
+    cases.append({"id": cid, "kind": "change", "title": title, "base": base, "patch": patch,
+                  "expect": {"classification": got, "changed_paths": paths, "old_version": version(old), "new_version": version(new),
+                             "step_up_required": got == "risk_increasing"}})
 
 # =========================================================== O. tripwires (§6.7, MI-31, V-044; DEC-187, DEC-350 to DEC-352)
 # Family W. The fold's inputs are account-stream events in seq order at the risk clock `at`; a MandateVersionApplied

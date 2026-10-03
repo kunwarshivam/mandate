@@ -685,6 +685,145 @@ fn no_trim_while_holding() {
     );
 }
 
+/// The trims of one position held at `market_value` under the confirmed rung at `factor`, with
+/// `resting` of the agent's own non-protective sells and `protective` of its protective sells
+/// working, and the instrument's minimum order size `minimum`.
+fn trims_of(
+    held: &str,
+    market_value: &str,
+    factor: &str,
+    (resting, protective): (&str, &str),
+    minimum: &str,
+    crypto: bool,
+) -> Result<Vec<mandate_risk::TrimProposal>, mandate_risk::GateError> {
+    let mut s = Scenario::allowing();
+    s.mandate = mandate_with(common::two_trimming_rungs());
+    s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
+    s.risk.size_factor = common::ratio(factor);
+    s.agent.positions.insert(asset(INSTRUMENT_2), qty(held));
+    s.agent
+        .market_values
+        .insert(asset(INSTRUMENT_2), usd(market_value));
+    for (id, open_qty, is_protective) in [(77, resting, false), (78, protective, true)] {
+        if open_qty != "0" {
+            let mut sell = open_order(s.agent.agent, INSTRUMENT_2, "0");
+            sell.side = Side::Sell;
+            sell.opening = false;
+            sell.protective = is_protective;
+            sell.open_qty = qty(open_qty);
+            s.account.working_orders.insert(ClientOrderId(id), sell);
+            s.agent.working_orders.insert(ClientOrderId(id));
+        }
+    }
+    let mut instrument = common::equity_instrument(INSTRUMENT_2);
+    if crypto {
+        instrument.asset_class = AssetClass::Crypto;
+        instrument.exchange = None;
+        instrument.fractionable = true;
+    }
+    instrument.min_order_size = qty(minimum);
+    let instruments = BTreeMap::from([(asset(INSTRUMENT_2), instrument)]);
+    mandate_risk::trim_proposals(
+        s.now,
+        &s.config,
+        &s.mandate,
+        &s.risk,
+        &s.agent,
+        &s.account,
+        &instruments,
+    )
+}
+
+/// A trim of the whole position held is proposed below the instrument's minimum order size, and
+/// any other sub-minimum trim is still withheld (DEC-423; trading spec §5.3 rule 2's exception for
+/// a sell closing the full position by its exact quantity; #504 review, M1; #520 review, round 1).
+///
+/// Each row's trim is worked out here from §5.5 on the 1500 cap: the target is `factor × 1500`,
+/// the band 75, and the sell is the excess over the target at the position's own price, less what
+/// the agent's own non-protective sells already have on sale, rounded up to the grid and capped at
+/// what is not on sale. Proposed:
+/// - 1 share at 1000, factor 0.5: the excess 250 is a quarter share, rounded up to the 1 held.
+///   At a 2-share minimum it closes the position. This is also the withheld row below it once its
+///   resting sell fills.
+/// - 1 share at 1000 under a resting protective stop for it: the same trim. A protective stop is
+///   not a trim in progress (DEC-399 item 7), and the trim is still the whole position.
+/// - 0.0002 BTC worth 120, factor 0: the whole 120 is over the zero target, so the sell is the
+///   0.0002 held, below a 0.001 minimum.
+/// - 0.0002 BTC worth 120, factor 1e-10: the target is 0.00000015 dollars, so the raw sell is
+///   0.00019999999975, rounded up on the 1e-9 grid to the 0.0002 held. A full close at a target
+///   above zero.
+///
+/// Withheld:
+/// - 2 shares at 1000 each with 1 resting, factor 0.5: the excess 1250 less the 1000 on sale is a
+///   quarter share, rounded up to the 1 not on sale. That order is 1 share of a 2-share position,
+///   not a full close, so the broker's 2-share minimum applies to it. Nothing is lost: if the
+///   resting sell fills, the next trim is the 1 left, the whole position (the first row); if it
+///   ends unfilled, the next trim is both shares.
+/// - 2 shares at 1000 each, factor 0.7: the excess 950 is 0.95 of a share, so the 1-share trim is
+///   one increment short of the 2 held, and a 2-share minimum withholds it.
+/// - 10 shares at 100, factor 0.5: the excess 250 is 3 shares of 10, so a 4-share minimum
+///   withholds it.
+///
+/// Every row is run before one assertion, so under the stub each row's outcome is reported.
+#[test]
+fn a_trim_of_the_whole_position_is_never_withheld_for_the_minimum() {
+    let rows = [
+        ("1", "1000", "0.5", ("0", "0"), "2", false, Some("1")),
+        ("1", "1000", "0.5", ("0", "1"), "2", false, Some("1")),
+        (
+            "0.0002",
+            "120",
+            "0",
+            ("0", "0"),
+            "0.001",
+            true,
+            Some("0.0002"),
+        ),
+        (
+            "0.0002",
+            "120",
+            "0.0000000001",
+            ("0", "0"),
+            "0.001",
+            true,
+            Some("0.0002"),
+        ),
+        ("2", "2000", "0.5", ("1", "0"), "2", false, None),
+        ("2", "2000", "0.7", ("0", "0"), "2", false, None),
+        ("10", "1000", "0.5", ("0", "0"), "4", false, None),
+    ];
+    let mismatches = rows
+        .into_iter()
+        .filter_map(|(held, value, factor, resting, minimum, crypto, sold)| {
+            let row = format!(
+                "{held} held at {value}, factor {factor}, {} resting and {} protective, \
+                 minimum {minimum}",
+                resting.0, resting.1
+            );
+            let expected = sold
+                .map(|sold| vec![(asset(INSTRUMENT_2), qty(sold), Purpose::RiskExit)])
+                .unwrap_or_default();
+            match trims_of(held, value, factor, resting, minimum, crypto) {
+                Ok(trims) => {
+                    let proposed = trims
+                        .iter()
+                        .map(|t| (t.instrument.clone(), t.qty, t.purpose))
+                        .collect::<Vec<_>>();
+                    (proposed != expected)
+                        .then(|| format!("{row}: proposed {proposed:?}, expected {expected:?}"))
+                }
+                Err(e) => Some(format!("{row}: the trims do not compute: {e}")),
+            }
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        mismatches.is_empty(),
+        "a trim of the whole position held is proposed below the minimum, and no other \
+         sub-minimum trim is:\n{}",
+        mismatches.join("\n")
+    );
+}
+
 /// Only `scale_action: trim_to_target` trims; `limit_buys` never proposes a sell.
 ///
 /// Mandate §5.5 gives the trim to `trim_to_target` alone — under `limit_buys` the size factor only
@@ -780,24 +919,51 @@ fn a_rung_trims_only_after_breach_confirm_s() {
 /// The close window is the last ten minutes of the session the calendar gives, not of 16:00.
 #[test]
 fn the_close_window_follows_the_early_close_calendar() {
-    let full = mandate_risk::session_at(
-        at("2026-09-22T19:50:00Z"),
-        &common::test_default_config(),
-        AssetClass::UsEquity,
-    )
-    .expect("a covered date has a session");
-    let early = mandate_risk::session_at(
-        at("2026-11-27T17:50:00Z"),
-        &common::test_default_config(),
-        AssetClass::UsEquity,
-    )
-    .expect("an early-close date has a session");
+    let at_instant = |instant: &str| {
+        let session = mandate_risk::session_at(
+            at(instant),
+            &common::test_default_config(),
+            AssetClass::UsEquity,
+        )
+        .expect("a covered date has a session");
+        (session.session, session.close_window)
+    };
+    let (regular, after) = (Session::Regular, Session::AfterHours);
 
-    assert_eq!(
-        (full.close_window, early.close_window),
-        (true, true),
-        "15:50 ET on a full day and 12:50 ET on an early-close day are both in the window"
-    );
+    for (day, before, first, last, close) in [
+        (
+            "a full day",
+            "2026-09-22T19:49:59.999999999Z",
+            "2026-09-22T19:50:00Z",
+            "2026-09-22T19:59:59.999999999Z",
+            "2026-09-22T20:00:00Z",
+        ),
+        (
+            "an early-close day",
+            "2026-11-27T17:49:59.999999999Z",
+            "2026-11-27T17:50:00Z",
+            "2026-11-27T17:59:59.999999999Z",
+            "2026-11-27T18:00:00Z",
+        ),
+    ] {
+        assert_eq!(
+            [
+                at_instant(before),
+                at_instant(first),
+                at_instant(last),
+                at_instant(close)
+            ],
+            [
+                (regular, false),
+                (regular, true),
+                (regular, true),
+                (after, false)
+            ],
+            "on {day} the window is the last ten minutes before the calendar's close: a \
+             nanosecond before them is outside it, their first and last instants inside it, and \
+             the close itself ends the session and the window"
+        );
+    }
 }
 
 /// `RC-25` step 2: an increase at 15:50 is `close_window`, not `auction_window` (DEC-129 item 18).
@@ -848,11 +1014,20 @@ fn an_auction_window_denies_a_market_opening_and_reprices_a_market_exit() {
         (
             d.verdict,
             d.reason,
-            d.pacing.map(|p| (p.qty, p.marketable_limit_required))
+            d.pacing
+                .as_ref()
+                .map(|p| (p.qty, p.marketable_limit_required))
         ),
         (Verdict::Allow, None, Some((qty("10"), true))),
         "a market-order risk exit in the opening auction is sent as a marketable limit, never \
          denied (spec 4.3, MI-1)"
+    );
+    assert_eq!(
+        d.pacing.map(|p| (p.limit_price, p.applied)),
+        Some((price("120"), BTreeSet::new())),
+        "the re-priced exit keeps the proposal's limit, and no §9.6 control is applied to it: a \
+         risk exit is exempt from §9.6 entirely, so the marketable price is the exit ladder's to \
+         set, not a collar's"
     );
 
     let mut pre_market = Scenario::allowing();
@@ -1303,9 +1478,16 @@ fn a_dropped_status_feed_is_a_presumed_halt() {
         "§4.4 and §5.6 re-price an exit under a presumed halt; MI-1 forbids denying it"
     );
     assert_eq!(
-        exit.pacing.map(|p| p.marketable_limit_required),
+        exit.pacing.as_ref().map(|p| p.marketable_limit_required),
         Some(true),
         "the allow carries the marketable-limit requirement the exit price ladder needs"
+    );
+    assert_eq!(
+        exit.pacing.map(|p| (p.qty, p.limit_price, p.applied)),
+        Some((qty("10"), price("100"), BTreeSet::new())),
+        "the re-priced exit keeps the proposal's quantity and limit, and no §9.6 control is \
+         applied to it: a risk exit is exempt from §9.6 entirely, so the marketable price is the \
+         exit ladder's to set (§4.4, §5.6)"
     );
 }
 
@@ -1685,4 +1867,113 @@ fn declared_reason_code_variants() -> BTreeSet<String> {
         variants.len()
     );
     variants
+}
+
+/// DEC-401: a proposal of zero quantity is no order, and the gate refuses it by name before any
+/// check, whatever else it would be. The grid is every origin, both sides, flat and held, every
+/// agent mode, both passes, a working universe read or not, and four quotes: an ordinary one and
+/// the three over which a collar cannot be computed (DEC-383's: the passive end overflowing at
+/// the decimal's maximum, truncating to zero at `0.0000833`, and a configured `x` of one). On
+/// every row the oracle is the quantity alone: zero is `zero_quantity`, ahead of the unread
+/// universe's own error and of the collar's arithmetic (DEC-401 item 3), and the smallest
+/// quantity above zero is never refused that way, so the refusal is the zero and not a row it
+/// happens to sit on.
+#[test]
+fn a_proposal_of_zero_is_refused_by_name_whatever_else_it_would_be() {
+    const COLLARS: [Option<(&str, bool)>; 4] = [
+        None,
+        Some(("79228162514264337593.543950335", false)),
+        Some(("0.0000833", false)),
+        Some(("99.95", true)),
+    ];
+    let origins = [
+        Origin::OrderBuilder,
+        Origin::GoalCompletion,
+        Origin::RemovedInstrument,
+        Origin::RiskEngine,
+        Origin::TrimToTarget,
+        Origin::StopWatchdog,
+        Origin::AutomatedKillSwitch,
+        Origin::OwnerClose,
+        Origin::OwnerKillSwitch,
+        Origin::ProtectiveLeg,
+    ];
+    let modes = [
+        AgentMode::Normal,
+        AgentMode::ExitsOnly,
+        AgentMode::Paused,
+        AgentMode::Stopped,
+    ];
+    let passes = [
+        mandate_risk::GatePass::First,
+        mandate_risk::GatePass::BeforeSubmission,
+    ];
+    let mut rows = 0_u32;
+    for origin in origins {
+        for side in [Side::Buy, Side::Sell] {
+            for held in ["0", "10"] {
+                for mode in modes {
+                    for pass in passes {
+                        for universe_read in [true, false] {
+                            for collar in COLLARS {
+                                for (quantity, zero) in [("0", true), ("0.000000001", false)] {
+                                    let mut s = Scenario::allowing();
+                                    if let Some((quote, x_is_one)) = collar {
+                                        s.market.quote = Some(mandate_risk::SaneQuote {
+                                            bid: price(quote),
+                                            ask: price(quote),
+                                            at: s.now,
+                                        });
+                                        if x_is_one {
+                                            s.config.collar_liquid_x = fraction("1");
+                                            s.config.collar_other_x = fraction("1");
+                                            s.config.collar_crypto_x = fraction("1");
+                                        }
+                                    }
+                                    s.pass = pass;
+                                    s.agent.mode = mode;
+                                    s.agent.positions.insert(asset(INSTRUMENT_3), qty(held));
+                                    s.proposed =
+                                        proposal(INSTRUMENT_3, side, quantity, "100", origin);
+                                    if !universe_read {
+                                        s.universe = mandate_risk::WorkingUniverse::Unavailable;
+                                    }
+                                    let decided = evaluate(&s.input());
+                                    let refused_as_zero = matches!(
+                                        decided,
+                                        Err(mandate_risk::GateError::ZeroQuantity)
+                                    );
+                                    assert_eq!(
+                                        refused_as_zero, zero,
+                                        "{origin:?} {side:?} of {quantity} with {held} held, {mode:?}, \
+                                     {pass:?}, universe read {universe_read}, quote {collar:?}: \
+                                     {decided:?}"
+                                    );
+                                    rows = rows.saturating_add(1);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        rows,
+        10 * 2 * 2 * 4 * 2 * 2 * 4 * 2,
+        "every row of the grid was decided"
+    );
+}
+
+/// DEC-401's refusal has its own stable code, distinct from every other refusal's.
+#[test]
+fn a_zero_proposal_reports_the_zero_quantity_code() {
+    let mut s = Scenario::allowing();
+    s.proposed = proposal(INSTRUMENT_3, Side::Buy, "0", "100", Origin::OrderBuilder);
+    let refused = evaluate(&s.input());
+    assert_eq!(
+        refused.as_ref().map_err(mandate_risk::GateError::code),
+        Err("zero_quantity"),
+        "the refusal names the zero: {refused:?}"
+    );
 }

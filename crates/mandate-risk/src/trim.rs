@@ -1,7 +1,8 @@
 //! Mandate spec §5.5's `trim_to_target` (DEC-56, DEC-65): once a `trim_to_target` rung has been
 //! active for `breach_confirm_s`, a position whose market value exceeds `factor × cap` by at least
 //! `rebalance_band × cap` is sold down to `factor × cap` as a risk exit, the quantity rounded **up**
-//! to the increment, if the sell meets the instrument's minimum, for an equity only in the regular
+//! to the increment, if the sell meets the instrument's minimum or is the whole position held
+//! (trading spec §5.3 rule 2's full-close exception, DEC-423), for an equity only in the regular
 //! session, and never while the goal is `Holding`. The agent's own open non-protective sells in the
 //! instrument are subtracted from the excess first, so a trim already working is never proposed
 //! again (DEC-399 item 7).
@@ -64,7 +65,11 @@ pub(crate) fn proposals(
             .checked_sub(UsdExact::of_qty(on_sale).checked_mul(market_value)?)?
             .ceiled_quotient(market_value, increment(instrument)?)?
             .min(unsold);
-        if qty.is_zero() || qty < instrument.min_order_size {
+        if qty.is_zero() {
+            continue;
+        }
+        let closes_the_position = qty == held;
+        if qty < instrument.min_order_size && !closes_the_position {
             continue;
         }
         trims.push(TrimProposal {
@@ -344,14 +349,29 @@ mod tests {
         Ok(())
     }
 
-    /// "Only if the order meets the minimum": a 3-share trim is proposed at a minimum of 3 and not
-    /// at 4.
+    /// "Only if the order meets the minimum", unless it is the whole position (DEC-423): a 3-share
+    /// trim of 10 is proposed at a minimum of 3 and not at 4. The full-close exemption is
+    /// `hand::a_trim_of_the_whole_position_is_never_withheld_for_the_minimum`.
     #[test]
     fn a_trim_below_the_minimum_is_not_proposed() -> Result<(), GateError> {
         let mut scene = Scene::new("10", "1000")?;
         scene.instrument.min_order_size = Qty::parse("3")?;
         assert_eq!(scene.trims()?, qty("3")?);
         scene.instrument.min_order_size = Qty::parse("4")?;
+        assert_eq!(scene.trims()?, Vec::new());
+        Ok(())
+    }
+
+    /// The minimum is judged on what is left to sell after the agent's own resting sells, not on
+    /// the whole excess (DEC-399 items 5 and 7): with 2 of the 3-share trim already resting, the
+    /// 1-share remainder is proposed at a minimum of 1 and withheld at 3, where the whole excess
+    /// of 3 shares would meet it (#498 review, m8).
+    #[test]
+    fn the_minimum_is_judged_on_the_remainder_after_resting_sells() -> Result<(), GateError> {
+        let mut scene = Scene::new("10", "1000")?;
+        scene.resting(7, "2", Side::Sell, false, true)?;
+        assert_eq!(scene.trims()?, qty("1")?);
+        scene.instrument.min_order_size = Qty::parse("3")?;
         assert_eq!(scene.trims()?, Vec::new());
         Ok(())
     }

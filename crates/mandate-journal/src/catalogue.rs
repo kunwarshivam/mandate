@@ -59,7 +59,8 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "HighWaterMarkReset"
         | "PositionReleased"
         | "InstrumentRestrictionChanged"
-        | "GoalCompleted" => entry(ACCOUNT, &[MAN]),
+        | "GoalCompleted"
+        | "UniverseChanged" => entry(ACCOUNT, &[MAN]),
         "OrderSubmitted"
         | "OrderStateChanged"
         | "OrderAbandoned"
@@ -78,6 +79,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "AgentModeApplied" => entry(ACCOUNT, NONE),
 
         "ModelInvocationRecorded" => entry(AGENT, &[MOD]),
+        "ThesisProposed" | "ThesisRevised" => entry(AGENT, &[MAN, MOD]),
         "ModelOutputRecorded"
         | "DecisionMade"
         | "IntentProposed"

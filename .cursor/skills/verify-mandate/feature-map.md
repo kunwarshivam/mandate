@@ -177,11 +177,11 @@ the crate is pending.
   the spec guard keeps that file apart from code (ES-22). Family B (all 32 `MC-B` cases) runs in the
   shared harness through `crates/mandate-refcases/src/mandate/order_builder.rs` (DEC-250): `propose`,
   then `mandate_risk::evaluate` on the proposed order as §6.2 step 2's dry run, then `decide` on
-  that verdict, with the session and close window from `mandate_risk::session_at`. 28 pass,
-  `MC-B22` after hours and `MC-B23` in the close window among them since #347 moved their clocks,
-  and the three crypto buys, `MC-B26` to `MC-B28`, since E6-10's check 2 (#422); the four
-  `trim_to_target` cases fail until the arm compares `mandate_risk::trim_proposals`' answer (E6-4, DEC-399
-  item 6), their `OWED` rows pinning that answer. Its in-module tests doctor the fixture to prove
+  that verdict, with the session and close window from `mandate_risk::session_at`. All 32 pass:
+  `MC-B22` after hours and `MC-B23` in the close window since #347 moved their clocks, the three
+  crypto buys, `MC-B26` to `MC-B28`, since E6-10's check 2 (#422), and the four `trim_to_target`
+  cases since the trim arm compares `mandate_risk::trim_proposals`' trim and `ref.py`'s guards
+  (E6-4, DEC-400), and `status.toml` lists all four as passing. Its in-module tests doctor the fixture to prove
   every member is read, a cash fee rate the gate would not reserve is refused, and a `session` or
   `in_close_window` label that contradicts `now` fails the case.
 - **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; families A and B in the shared
@@ -468,8 +468,9 @@ while a reducing purpose passes it.
   oracle, which never calls the crate's arithmetic), and the in-module tests in `gate.rs`,
   `conduct.rs` and `surveillance.rs` for the boundaries the files above cannot pin (among them
   E6-6's exit routing, DEC-383: an exit over an uncomputable collar routed at its own limit and
-  sliced as an `i128` oracle computes, an opening over one and a proposal of zero keeping the
-  collar's error, and only `overflow` and `not_positive` skipped). Planted bugs per test: the task
+  sliced as an `i128` oracle computes, an opening over one keeping the collar's error, a
+  proposal of zero refused before the collar is reached (DEC-401), and only `overflow` and
+  `not_positive` skipped). Planted bugs per test: the task
   brief.
 - **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
   `fixtures/refcases/mandate.json`, through `crates/mandate-refcases/src/mandate/risk_gate.rs`
@@ -517,7 +518,7 @@ while a reducing purpose passes it.
 
 - **Spec:** `docs/specs/journal.md` §9.2 (the control stream's closed schemas, `OwnerCommandRefused`
   on the agent and account streams, the `pointer` and `date` types, consistency rules 17 to 24,
-  subject rules 25 and 26, copy rule 27, and the mapping table); DEC-168, DEC-261, DEC-302, DEC-303,
+  subject rules 25, 26 and 28, copy rule 27, and the mapping table); DEC-168, DEC-261, DEC-302, DEC-303,
   DEC-304, DEC-402. `AccountSnapshotRecorded` and rule 24 are registered with the executor's fee-step
   writer (DEC-261 item 7, DEC-402).
 - **Code:** `crates/mandate-journal/src/control.rs` (`Draft::parse` routes each §9.2 type on its
@@ -533,6 +534,51 @@ while a reducing purpose passes it.
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-spec -p mandate-refcases -p
   mandate-executor -E 'binary(control_stream) | binary(journal_record) | binary(catalogue) |
   test(/control::tests/) | test(the_fee_steps_snapshot_is_never_refused_for_its_members)'`.
+
+## Account-stream risk-state records (journal spec §9.3, under E7-10)
+
+- **Spec:** `docs/specs/journal.md` §9.3 (`MandateVersionApplied` and `UniverseChanged`, the `asset_id`
+  type, rules 29 to 33, and the mapping table); DEC-403, DEC-404. Both are registered, and the mapping re-derives
+  §9.2's classification from the two stored documents and refuses a mismatch (DEC-404 items 5 and 8).
+- **Code:** `crates/mandate-journal/src/control.rs` (`governs`, `MANDATE_VERSION_APPLIED`,
+  `UNIVERSE_CHANGED`, and rules 29 to 33 in `payload`), `crates/mandate-journal/src/catalogue.rs`
+  (`UniverseChanged`'s entry), and `crates/mandate-spec/src/context.rs` (`JournaledFact::from_record`
+  with `change::classify`).
+- **Tests:** `crates/mandate-refcases/tests/risk_state.rs` (the vectors through `append`, the
+  mapping, and the classification re-derivation), `crates/mandate-refcases/tests/asset_id.rs` (the
+  journal's `asset_id` check and `AssetId::parse` agree over a generated corpus), `control::tests` in `control.rs`
+  (`every_risk_state_draft_is_judged_as_its_vectors_say`, `a_required_risk_state_member_is_never_null`,
+  `a_risk_state_record_at_another_schema_version_is_an_unknown_schema`,
+  `rule_33_refuses_nothing_that_shows_no_raise`),
+  `crates/mandate-journal/tests/catalogue.rs` (`risk_state_records_are_routed_to_section_9_3`,
+  `risk_state_records_refuse_an_unlisted_member`), and `record_tests` in `context.rs`
+  (`a_version_maps_only_under_the_classification_its_documents_give`, over 14 §9.2 rows, and
+  `a_version_document_that_is_absent_or_an_impostor_is_refused`).
+- **Run:** `cargo nextest run -p mandate-journal -p mandate-spec -p mandate-refcases
+  -E 'binary(risk_state) | test(/risk_state/) | test(/universe_change/) |
+  test(/version_maps_only/) | test(/impostor/) | test(/schema_version/) | test(/rule_33/)'`.
+
+## Research-agent thesis records (journal spec §9.4, under E17-2)
+
+- **Spec:** `docs/specs/journal.md` §9.4 (`ThesisProposed` and `ThesisRevised`, one shared schema,
+  rules 34 to 38, `instrument_id` an `asset_id`); DEC-413, DEC-414. `append` checks the schema and
+  rules; the mandate re-derivation of §8.5 checks 4, 5, 6, 10 and 16's cap (DEC-413 item 5) is
+  `check_thesis_record`, which every reader of a thesis record runs before acting on it (DEC-414
+  item 3).
+- **Code:** `crates/mandate-journal/src/control.rs` (`governs`, `THESIS`, `THESIS_RECORD`,
+  `thesis_rules`, `horizon_agrees`), `crates/mandate-journal/src/catalogue.rs` (both entries, `man`
+  and `mod`), and `crates/mandate-spec/src/context.rs` (`check_thesis_record`,
+  `THESIS_MANDATE_CHECKS`, `MANDATE_ALONE_CHECKS`).
+- **Tests:** `control::tests` in `control.rs` (`every_thesis_draft_is_judged_as_its_vectors_say`,
+  `a_required_thesis_member_is_never_null`,
+  `a_thesis_record_at_another_schema_version_is_an_unknown_schema`),
+  `crates/mandate-journal/tests/catalogue.rs` (`thesis_records_are_routed_to_section_9_4` and
+  `thesis_records_refuse_an_unlisted_member`), and `thesis_tests` in `context.rs` (the six
+  re-derivation tests: pinned universe, admission `deny`, asset class, revision cap, the named
+  mandate, an absent or impostor document).
+- **Run:** `cargo nextest run -p mandate-journal -p mandate-spec -E 'test(/thesis/)'`; the vectors
+  themselves with `uv run --directory python pytest -q
+  mandate_tools/tests/test_journal_research_vectors.py`.
 
 ## Append protocol
 

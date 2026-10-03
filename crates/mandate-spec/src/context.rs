@@ -24,7 +24,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value};
-use mandate_domain::{AssetId, Environment};
+use mandate_domain::{AssetClass, AssetId, AutonomyDecision, Environment};
 use mandate_num::Usd;
 use mandate_time::Date;
 
@@ -72,10 +72,9 @@ pub enum JournaledFact {
     /// `DisclosureAccepted`: a disclosure version the workspace accepted (V-005).
     DisclosureAccepted { version: Digest },
     /// `AgentDeployed`, or `MandateVersionApplied` for a deployed agent: the version in force. The
-    /// latest one per agent replaces the earlier ones. Journal spec v0.7 §9.2 closes only
-    /// `AgentDeployed`, so [`JournaledFact::from_record`] maps it alone. `MandateVersionApplied` and
-    /// `UniverseChanged` wait for the backlog's "account-stream risk-state records" row (DEC-303 item 6),
-    /// and until then they map to none and the fold fails closed.
+    /// latest one per agent replaces the earlier ones. Journal spec v0.7 §9.2 closes `AgentDeployed`
+    /// and v0.8 §9.3 an applied `MandateVersionApplied`, each read from the stored document its
+    /// version names (DEC-403, DEC-404).
     AgentVersionActive {
         agent: AgentId,
         connection_id: ConnectionId,
@@ -132,9 +131,11 @@ impl JournaledFact {
     /// in the record. `account_connection` is the connection the record's account stream belongs to,
     /// which no record names yet (DEC-261 item 10), so an `AccountSnapshotRecorded` needs it.
     ///
-    /// `Err` when the record cannot be mapped: a deployment whose document is not stored, or does
-    /// not hash to the version it is stored under; a snapshot with no connection given; or a member
-    /// the fact needs that the payload does not hold in §9.2's form. A record that cannot be mapped is
+    /// `Err` when the record cannot be mapped: a deployment or a version change whose document is not
+    /// stored, or does not hash to the version it is stored under; a version change whose
+    /// `classification` is not `change::classify`'s verdict of its two documents, applied or rejected
+    /// alike (DEC-404 item 5); a snapshot with no connection given; or a member the fact needs that
+    /// the payload does not hold in §9.2's or §9.3's form. A record that cannot be mapped is
     /// refused, never skipped, because a fact the fold never sees takes the value that refuses only
     /// for facts that add (module doc), and a dropped `ConnectionRevoked` would not.
     pub fn from_record(
@@ -234,6 +235,53 @@ impl JournaledFact {
                     .map_err(|_| malformed("retired_on"))?,
                 loss_added_usd: record.usd("loss_added")?,
             },
+            "UniverseChanged" => Self::UniverseChanged {
+                agent: AgentId::new(record.id("agent_id")?),
+                instrument: AssetId::parse(record.text("instrument")?)
+                    .map_err(|_| malformed("instrument"))?,
+                admitted: match record.text("change")? {
+                    "admitted" => true,
+                    "removed" => false,
+                    _ => return Err(malformed("change")),
+                },
+            },
+            "MandateVersionApplied" => {
+                let stored = |name: &'static str| -> Result<Mandate, SpecError> {
+                    let version = record.digest(name)?;
+                    let document = documents(&version).ok_or(malformed(name))?;
+                    let mandate = Mandate::parse(&document).map_err(|_| malformed(name))?;
+                    if mandate.version()?.digest() != version {
+                        return Err(malformed(name));
+                    }
+                    Ok(mandate)
+                };
+                let (old, new) = (stored("old_version")?, stored("new_version")?);
+                let verdict = crate::change::classify(&old, &new)?.class;
+                if record.text("classification")? != verdict.as_str() {
+                    return Err(malformed("classification"));
+                }
+                match record.text("result")? {
+                    "applied" => {}
+                    "rejected" => return Ok(None),
+                    _ => return Err(malformed("result")),
+                }
+                Self::AgentVersionActive {
+                    agent: AgentId::new(record.id("agent_id")?),
+                    connection_id: new.connection_id.clone(),
+                    environment: new.environment,
+                    allocation_usd: new
+                        .capital
+                        .allocation_usd
+                        .to_usd()
+                        .map_err(|_| malformed("new_version"))?,
+                    pinned: new
+                        .universe
+                        .pinned_instruments
+                        .iter()
+                        .map(|i| i.asset_id.clone())
+                        .collect(),
+                }
+            }
             "AccountSnapshotRecorded" => Self::AccountSnapshot {
                 connection_id: account_connection
                     .cloned()
@@ -245,6 +293,131 @@ impl JournaledFact {
         Ok(Some(fact))
     }
 }
+
+/// The registration's re-derivation of a research-agent thesis record's verdict (journal spec
+/// v0.9 §9.4; DEC-413 item 5, DEC-414; #490 round 1, M2, as #470 round 2 minor 5 ruled for §9.3):
+/// mandate spec §8.5 checks 4, 5, 6, 10, and 16's revision cap, re-derived from the stored mandate
+/// document `mandate_version` names, which is the record's `config_refs.mandate_version`, the
+/// mandate in force when the thesis was judged.
+///
+/// `payload` is a `ThesisProposed` or `ThesisRevised` payload in §9.4's form. `Ok(())` when the
+/// record's verdict passes over no check that mandate fails, and a refusal at check 5, 6, or 10 is
+/// one the mandate fails too. The policy overlay only tightens, so a check the mandate fails always
+/// fails; checks 4 and 16 the overlay or the folded lineage can also fail, so a refusal there need
+/// not fail by the mandate.
+///
+/// `Err(InvalidInput)` naming `mandate_version` when the document is not stored or does not hash to
+/// the version it is stored under; naming `admitted` when the record admits past a check the
+/// mandate fails; and naming `reason` when the record is refused at a check later than the first
+/// one the mandate fails, or at check 5, 6, or 10 when the mandate passes it.
+///
+/// Check 4 asks for a research envelope on a mandate whose model admits instruments as one
+/// expression, as `mandate-research` does: V-036 makes "no admitting model" and "no research
+/// envelope" the same condition for a validated mandate, so two disjuncts would differ only on
+/// documents validation rejects.
+pub fn check_thesis_record(
+    payload: &Value,
+    mandate_version: &Digest,
+    documents: &dyn Fn(&Digest) -> Option<Value>,
+) -> Result<(), SpecError> {
+    let stored = documents(mandate_version).ok_or(malformed("mandate_version"))?;
+    let mandate = Mandate::parse(&stored).map_err(|_| malformed("mandate_version"))?;
+    if mandate.version()?.digest() != *mandate_version {
+        return Err(malformed("mandate_version"));
+    }
+    let record = Record(payload);
+    let asset_class =
+        AssetClass::parse(record.text("asset_class")?).map_err(|_| malformed("asset_class"))?;
+    let revision = payload
+        .get("revision")
+        .and_then(Value::as_int)
+        .ok_or(malformed("revision"))?;
+    let admits_instruments = mandate
+        .behavior
+        .signal_models
+        .iter()
+        .any(|model| model.admits_instruments);
+    let fails = |check: u8| match check {
+        4 => mandate
+            .behavior
+            .research
+            .as_ref()
+            .filter(|_| admits_instruments)
+            .is_none(),
+        5 => mandate.universe.pinned,
+        6 => mandate.autonomy.admission == AutonomyDecision::Deny,
+        10 => !mandate.universe.asset_classes.contains(&asset_class),
+        16 => {
+            revision
+                > mandate
+                    .behavior
+                    .research
+                    .as_ref()
+                    .map_or(0, |research| u64::from(research.max_revisions_per_lineage))
+        }
+        _ => false,
+    };
+    let first = THESIS_MANDATE_CHECKS
+        .into_iter()
+        .find(|check| fails(*check));
+    match payload.get("admitted") {
+        Some(Value::Bool(true)) => match first {
+            Some(_) => Err(malformed("admitted")),
+            None => Ok(()),
+        },
+        Some(Value::Bool(false)) => {
+            let reason = record.text("reason")?;
+            let check = THESIS_REFUSALS
+                .iter()
+                .position(|known| *known == reason)
+                .and_then(|index| u8::try_from(index).ok())
+                .and_then(|index| index.checked_add(1))
+                .ok_or(malformed("reason"))?;
+            let later_than_first = first.is_some_and(|first| check > first);
+            let unfailed_by_the_mandate = MANDATE_ALONE_CHECKS.contains(&check) && !fails(check);
+            if later_than_first || unfailed_by_the_mandate {
+                Err(malformed("reason"))
+            } else {
+                Ok(())
+            }
+        }
+        _ => Err(malformed("admitted")),
+    }
+}
+
+/// Mandate spec §8.5's refusal reasons in check order: a reason's check number is its position, from
+/// 1 (journal spec §9.4).
+const THESIS_REFUSALS: [&str; 17] = [
+    "direction_not_allowed",
+    "horizon_mismatch",
+    "revision_without_predecessor",
+    "research_disabled",
+    "universe_pinned",
+    "admission_denied",
+    "cost_cap_reached",
+    "not_in_data_universe",
+    "operator_halt",
+    "not_allowed_asset_class",
+    "leveraged_etp_not_enabled",
+    "eligibility_floor",
+    "instrument_group_claimed",
+    "source_not_allowlisted",
+    "no_corroboration",
+    "lineage_retired",
+    "universe_full",
+];
+
+/// The §8.5 checks the stored mandate decides, in check order (DEC-413 item 5): a research agent
+/// that admits instruments (4), an unpinned universe (5), admission not `deny` (6), the instrument's
+/// asset class (10), and the revision cap (16). The policy overlay only tightens, so a check the
+/// mandate fails always fails.
+const THESIS_MANDATE_CHECKS: [u8; 5] = [4, 5, 6, 10, 16];
+
+/// The checks that read the mandate alone, so a refusal at one of them must also fail by the
+/// document. Checks 4 and 16 are not among them: the overlay can fail 4, and 16 also reads the folded
+/// `retired` flag. Check 6 stays only while the overlay raises `auto` to `ask` and never to `deny`
+/// (DEC-413 item 4, DEC-414 item 4).
+const MANDATE_ALONE_CHECKS: [u8; 3] = [5, 6, 10];
 
 /// `ConfigSnapshotRegistered`'s kind for a signal model (journal spec §9.2).
 const MODEL_KIND: &str = "model_version";
@@ -533,6 +706,7 @@ impl Fold {
             .map(|(connection_id, environment, _, _)| PreviousVersion {
                 environment: *environment,
                 connection_id: connection_id.clone(),
+                mandate: None,
             });
         let membership = args.membership.unwrap_or(Membership {
             workspace_users: 0,
@@ -989,7 +1163,7 @@ mod record_tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use mandate_canon::{Digest, Key, Value};
-    use mandate_domain::Environment;
+    use mandate_domain::{AssetId, Environment};
     use mandate_time::Date;
 
     use super::{AgentId, ContextArgs, JournaledFact};
@@ -1133,24 +1307,296 @@ mod record_tests {
         Ok(())
     }
 
-    /// §9.2 closes neither `MandateVersionApplied` nor `UniverseChanged`, so each maps to none and
-    /// the fold fails closed, even given every member a mapped type reads (DEC-303 item 6; #461
-    /// round 1, M2).
+    /// A risk-state record is never skipped: one that cannot be mapped, here because it lacks every
+    /// member §9.3 gives it, is refused, so the fold fails closed (DEC-303 item 6, DEC-404).
     #[test]
-    fn a_type_section_9_2_leaves_open_maps_to_none() -> Result<(), SpecError> {
+    fn a_risk_state_record_is_never_skipped() -> Result<(), SpecError> {
         let record = object(&[
             ("agent_id", text("agent_a")),
             ("connection_id", text("conn_1")),
             ("mandate_version", text(&digest_text('a'))),
-            ("record_ref", text(&digest_text('b'))),
         ])?;
         for event_type in ["MandateVersionApplied", "UniverseChanged"] {
-            assert_eq!(
-                JournaledFact::from_record(event_type, &record, &nothing, None)?,
-                None,
+            assert!(
+                JournaledFact::from_record(event_type, &record, &nothing, None).is_err(),
                 "{event_type}"
             );
         }
+        Ok(())
+    }
+
+    fn universe_change(change: &str) -> Result<Value, SpecError> {
+        object(&[
+            ("agent_id", text("agent_b")),
+            ("instrument", text("7b4a1c2e-2222-4a2b-9c3d-000000000002")),
+            ("change", text(change)),
+            ("reason", text("version_applied")),
+            ("thesis_id", Value::Null),
+            ("lineage_id", Value::Null),
+            ("universe_size_after", Value::Null),
+            ("risk_clock", text("2026-09-22T16:00:00.000000000Z")),
+        ])
+    }
+
+    /// `UniverseChanged` maps to its agent, its instrument, and whether it was admitted (journal spec
+    /// §9.3).
+    #[test]
+    fn a_universe_change_maps_to_its_instrument_admitted_or_removed() -> Result<(), SpecError> {
+        let instrument = AssetId::parse("7b4a1c2e-2222-4a2b-9c3d-000000000002")?;
+        for (change, admitted) in [("admitted", true), ("removed", false)] {
+            assert_eq!(
+                JournaledFact::from_record(
+                    "UniverseChanged",
+                    &universe_change(change)?,
+                    &nothing,
+                    None
+                )?,
+                Some(JournaledFact::UniverseChanged {
+                    agent: AgentId::new("agent_b"),
+                    instrument: instrument.clone(),
+                    admitted,
+                }),
+                "{change}"
+            );
+        }
+        let refused = JournaledFact::from_record(
+            "UniverseChanged",
+            &universe_change("paused")?,
+            &nothing,
+            None,
+        );
+        assert_eq!(refused, Err(SpecError::InvalidInput { what: "change" }));
+        Ok(())
+    }
+
+    fn version_record(
+        old: &Digest,
+        new: &Digest,
+        classification: &str,
+        result: &str,
+    ) -> Result<Value, SpecError> {
+        let sha = |d: &Digest| text(&format!("sha256:{}", d.to_hex()));
+        object(&[
+            ("agent_id", text("agent_a")),
+            ("old_version", sha(old)),
+            ("new_version", sha(new)),
+            ("classification", text(classification)),
+            ("step_up", Value::Null),
+            ("result", text(result)),
+            ("reason", Value::Null),
+            ("allocation_change", Value::Null),
+            ("max_loss_from_allocation", Value::Null),
+            ("risk_clock", text("2026-09-22T14:30:00.000000000Z")),
+        ])
+    }
+
+    /// An applied `MandateVersionApplied` maps to the agent's version in force, read from the stored
+    /// document `new_version` names, and a rejected one to none, but only under the classification
+    /// mandate spec §9.2 gives its two stored documents: under any other it is refused at
+    /// `classification`, applied or rejected alike. The pairs cover the §9.2 rows rule 33 cannot see
+    /// (#482 round 1, M1): a risk maximum, unpinning, `max_instruments`, protection off, a later
+    /// `end_date`, a signal-model change, an asset class added, `behavior.research` set from null,
+    /// pinning from a version with an admitting model (reducing, DEC-121) and from one without, and
+    /// an autonomy `then` in each direction. Each verdict is written from §9.2's table by hand, not
+    /// computed by the classifier under test (DEC-403 item 5; #470 round 2, minor 5). The pairs are
+    /// parsed, not validated: six break a V-rule (V-008, V-013, V-034, V-036), so this also pins that
+    /// the mapping does not validate the stored documents, which classification never consults
+    /// (#482 round 2, m1).
+    #[test]
+    fn a_version_maps_only_under_the_classification_its_documents_give() -> Result<(), String> {
+        const RESEARCH: &str =
+            r#"{"interval_s": 3600, "cost_cap_usd_per_day": "5", "max_revisions_per_lineage": 3}"#;
+        let base = mandate(&[])?;
+        let unpinned = mandate(&[("/universe/pinned", "false")])?;
+        let admitting = mandate(&[
+            ("/universe/pinned", "false"),
+            ("/behavior/research", RESEARCH),
+            ("/behavior/signal_models/0/admits_instruments", "true"),
+        ])?;
+        let changed = |patch: (&str, &str)| mandate(&[patch]);
+        let pairs = [
+            (
+                &base,
+                changed(("/risk/max_order_usd", r#""2000""#))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/risk/max_order_usd", r#""500""#))?,
+                "risk_reducing",
+            ),
+            (&base, changed(("/name", r#""renamed""#))?, "neutral"),
+            (
+                &base,
+                changed(("/universe/pinned", "false"))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/universe/max_instruments", "5"))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/protection/enabled", "false"))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/goal/end_date", r#""2027-06-30""#))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/behavior/signal_models/0/weight", r#""0.5""#))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/universe/asset_classes", r#"["crypto", "us_equity"]"#))?,
+                "risk_increasing",
+            ),
+            (
+                &base,
+                changed(("/behavior/research", RESEARCH))?,
+                "risk_increasing",
+            ),
+            (&admitting, base.clone(), "risk_reducing"),
+            (&unpinned, base.clone(), "risk_increasing"),
+            (
+                &base,
+                changed(("/autonomy/rules/0/then", r#""deny""#))?,
+                "risk_reducing",
+            ),
+            (
+                &base,
+                changed(("/autonomy/rules/0/then", r#""auto""#))?,
+                "risk_increasing",
+            ),
+        ];
+        let canonical = |m: &crate::Mandate| m.canonical().map_err(|e| e.to_string());
+        let digest =
+            |m: &crate::Mandate| m.version().map(|v| v.digest()).map_err(|e| e.to_string());
+        let mut stored = BTreeMap::new();
+        for (old, new, _) in &pairs {
+            stored.insert(digest(old)?, canonical(old)?);
+            stored.insert(digest(new)?, canonical(new)?);
+        }
+        let documents = |d: &Digest| stored.get(d).cloned();
+        for (n, (old, new, verdict)) in pairs.iter().enumerate() {
+            let applied = Some(JournaledFact::AgentVersionActive {
+                agent: AgentId::new("agent_a"),
+                connection_id: new.connection_id.clone(),
+                environment: new.environment,
+                allocation_usd: new
+                    .capital
+                    .allocation_usd
+                    .to_usd()
+                    .map_err(|e| e.to_string())?,
+                pinned: new
+                    .universe
+                    .pinned_instruments
+                    .iter()
+                    .map(|i| i.asset_id.clone())
+                    .collect(),
+            });
+            for (result, fact) in [("applied", applied), ("rejected", None)] {
+                for label in ["risk_increasing", "risk_reducing", "neutral"] {
+                    let record = version_record(&digest(old)?, &digest(new)?, label, result)
+                        .map_err(|e| e.to_string())?;
+                    let got = JournaledFact::from_record(
+                        "MandateVersionApplied",
+                        &record,
+                        &documents,
+                        None,
+                    );
+                    let want = if label == *verdict {
+                        Ok(fact.clone())
+                    } else {
+                        Err(SpecError::InvalidInput {
+                            what: "classification",
+                        })
+                    };
+                    assert_eq!(
+                        got, want,
+                        "pair {n} ({verdict}), {result}, labelled {label}"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A version's document must be stored and hash to the digest that names it: an absent one, or
+    /// an impostor stored under another document's digest, is refused at the member that names it,
+    /// `old_version` before `new_version`, never mapped from whatever is stored (#482 round 1, m4;
+    /// as `AgentDeployed`).
+    #[test]
+    fn a_version_document_that_is_absent_or_an_impostor_is_refused() -> Result<(), String> {
+        let old = mandate(&[])?;
+        let new = mandate(&[("/name", r#""renamed""#)])?;
+        let other = mandate(&[("/name", r#""impostor""#)])?;
+        let canonical = |m: &crate::Mandate| m.canonical().map_err(|e| e.to_string());
+        let digest =
+            |m: &crate::Mandate| m.version().map(|v| v.digest()).map_err(|e| e.to_string());
+        let record = version_record(&digest(&old)?, &digest(&new)?, "neutral", "applied")
+            .map_err(|e| e.to_string())?;
+        let honest = [
+            (digest(&old)?, canonical(&old)?),
+            (digest(&new)?, canonical(&new)?),
+        ];
+        let cases = [
+            (vec![], "old_version"),
+            (vec![honest[1].clone()], "old_version"),
+            (vec![honest[0].clone()], "new_version"),
+            (
+                vec![(digest(&old)?, canonical(&other)?), honest[1].clone()],
+                "old_version",
+            ),
+            (
+                vec![honest[0].clone(), (digest(&new)?, canonical(&other)?)],
+                "new_version",
+            ),
+        ];
+        for (documents, what) in cases {
+            let stored: BTreeMap<Digest, Value> = documents.into_iter().collect();
+            let got = JournaledFact::from_record(
+                "MandateVersionApplied",
+                &record,
+                &|d: &Digest| stored.get(d).cloned(),
+                None,
+            );
+            assert_eq!(got, Err(SpecError::InvalidInput { what }), "{what}");
+        }
+        Ok(())
+    }
+
+    /// `result` is read exhaustively: `applied` maps, `rejected` maps to none, and any other value is
+    /// refused at `result`, never read as a rejection (#497 round 1, m2).
+    #[test]
+    fn a_version_record_with_an_unknown_result_is_refused() -> Result<(), String> {
+        let old = mandate(&[])?;
+        let new = mandate(&[("/name", r#""renamed""#)])?;
+        let canonical = |m: &crate::Mandate| m.canonical().map_err(|e| e.to_string());
+        let digest =
+            |m: &crate::Mandate| m.version().map(|v| v.digest()).map_err(|e| e.to_string());
+        let stored: BTreeMap<Digest, Value> = [
+            (digest(&old)?, canonical(&old)?),
+            (digest(&new)?, canonical(&new)?),
+        ]
+        .into_iter()
+        .collect();
+        let record = version_record(&digest(&old)?, &digest(&new)?, "neutral", "pending")
+            .map_err(|e| e.to_string())?;
+        assert_eq!(
+            JournaledFact::from_record(
+                "MandateVersionApplied",
+                &record,
+                &|d: &Digest| stored.get(d).cloned(),
+                None
+            ),
+            Err(SpecError::InvalidInput { what: "result" })
+        );
         Ok(())
     }
 
@@ -1215,6 +1661,351 @@ mod record_tests {
         ];
         for (event_type, payload, member) in cases {
             assert_eq!(refused(event_type, &payload), Some(member), "{event_type}");
+        }
+        Ok(())
+    }
+}
+
+/// The thesis registration's re-derivation (DEC-414): pending until its implementation PR.
+#[cfg(test)]
+mod thesis_tests {
+    use std::collections::BTreeMap;
+
+    use mandate_canon::{Digest, Int, Key, Value};
+
+    use super::check_thesis_record;
+    use crate::validate::tests::mandate;
+    use crate::{Mandate, SpecError};
+
+    const RESEARCH: &str =
+        r#"{"interval_s": 3600, "cost_cap_usd_per_day": "5", "max_revisions_per_lineage": 3}"#;
+
+    /// The test base made a research agent's mandate: unpinned, `behavior.research` set, and its one
+    /// signal model admitting instruments (§8.5 checks 4 and 5 pass), `us_equity` only, admission
+    /// `ask`, a revision cap of 3.
+    ///
+    /// These documents are parsed, not validated, and are not valid mandates: the admitting model
+    /// keeps the base's `quant.momentum` id, where §8.4 and V-036 want an `llm.` one. That is
+    /// acceptable here because `check_thesis_record` reads only typed fields and no V-rule; the
+    /// backlog records making them valid (#510 round 1, minor 1, as #482 round 2's m1 for
+    /// `record_tests`). The base itself, as `unresearched`, fails check 4 on both disjuncts (no
+    /// `behavior.research` and no admitting model), so no case tells them apart; V-036 makes them one
+    /// condition for a validated mandate, as `mandate-research` notes.
+    const RESEARCH_PATCHES: [(&str, &str); 3] = [
+        ("/universe/pinned", "false"),
+        ("/behavior/research", RESEARCH),
+        ("/behavior/signal_models/0/admits_instruments", "true"),
+    ];
+
+    fn research(extra: &[(&str, &str)]) -> Result<Mandate, String> {
+        let mut patches = RESEARCH_PATCHES.to_vec();
+        patches.extend_from_slice(extra);
+        mandate(&patches)
+    }
+
+    /// A §9.4 payload with every member, admitted unless `reason` is given.
+    fn thesis(reason: Option<&str>, revision: u64, asset_class: &str) -> Result<Value, String> {
+        let text = |v: &str| Value::Str(v.to_owned());
+        let int = |n: u64| Int::new(n).map(Value::Int).ok_or("an integer");
+        let digest = |c: char| text(&format!("sha256:{}", c.to_string().repeat(64)));
+        let predecessor = if revision > 0 {
+            text("th_0")
+        } else {
+            Value::Null
+        };
+        let members = [
+            ("model_id", text("quant.momentum")),
+            ("model_version", text("1.0.0")),
+            ("content_hash", digest('2')),
+            ("thesis_id", text("th_1")),
+            ("lineage_id", text("th_0")),
+            ("revision", int(revision)?),
+            ("predecessor_thesis_id", predecessor),
+            ("autopsy_ref", Value::Null),
+            (
+                "instrument_id",
+                text("7b4a1c2e-5555-4a2b-9c3d-000000000005"),
+            ),
+            ("asset_class", text(asset_class)),
+            ("direction", text("long")),
+            ("as_of", text("2026-09-22T14:00:00.000000000Z")),
+            ("expires_at", text("2026-09-23T14:00:00.000000000Z")),
+            ("horizon_s", int(86_400)?),
+            ("conviction", text("0.7")),
+            ("confidence", text("0.8")),
+            ("evidence_ref", Value::Null),
+            ("evidence_sources", Value::Array(vec![text("src.filings")])),
+            ("corroboration", text("market_data")),
+            ("invalidation", text("Guidance is cut.")),
+            ("allowlist_version", int(1)?),
+            ("prompt_ref", digest('a')),
+            ("response_ref", digest('b')),
+            ("admitted", Value::Bool(reason.is_none())),
+            ("reason", reason.map_or(Value::Null, text)),
+        ];
+        let mut out = mandate_canon::Object::new();
+        for (name, value) in members {
+            out.insert(Key::new(name).map_err(|_| "key")?, value);
+        }
+        Ok(Value::Object(out))
+    }
+
+    /// The stored documents, each under its own version's digest.
+    struct Store(BTreeMap<Digest, Value>);
+
+    impl Store {
+        fn of<const N: usize>(mandates: [&Mandate; N]) -> Result<(Self, [Digest; N]), String> {
+            let mut stored = BTreeMap::new();
+            let mut digests = Vec::new();
+            for m in mandates {
+                let digest = m.version().map_err(|e| e.to_string())?.digest();
+                stored.insert(digest, m.canonical().map_err(|e| e.to_string())?);
+                digests.push(digest);
+            }
+            let digests = digests
+                .try_into()
+                .map_err(|_| "one digest per mandate".to_owned())?;
+            Ok((Self(stored), digests))
+        }
+
+        fn judge(&self, payload: &Value, version: &Digest) -> Result<(), SpecError> {
+            check_thesis_record(payload, version, &|d: &Digest| self.0.get(d).cloned())
+        }
+    }
+
+    fn refused(what: &'static str) -> Result<(), SpecError> {
+        Err(SpecError::InvalidInput { what })
+    }
+
+    /// Every verdict the mandate allows is accepted: an admission under the research mandate, a
+    /// refusal at a check the mandate fails, a refusal earlier than it, and a refusal at a check only
+    /// the overlay or the folded lineage decides (4, and 16 under the cap). The mandates are the
+    /// mandate reference cases' shapes: pinned (MI-20, MC-N08), admission `deny` (MC-N15), and a
+    /// revision past the cap (MC-N24).
+    #[test]
+    fn a_thesis_whose_verdict_its_mandate_allows_is_accepted() -> Result<(), String> {
+        let open = research(&[])?;
+        let pinned = research(&[("/universe/pinned", "true")])?;
+        let denied = research(&[("/autonomy/admission", r#""deny""#)])?;
+        let (store, v) = Store::of([&open, &pinned, &denied])?;
+        let cases = [
+            ("admitted", thesis(None, 0, "us_equity")?, &v[0]),
+            (
+                "refused later, mandate passes",
+                thesis(Some("eligibility_floor"), 0, "us_equity")?,
+                &v[0],
+            ),
+            (
+                "refused at check 4 the overlay decides",
+                thesis(Some("research_disabled"), 0, "us_equity")?,
+                &v[0],
+            ),
+            ("admitted at the cap", thesis(None, 3, "us_equity")?, &v[0]),
+            (
+                "retired under the cap",
+                thesis(Some("lineage_retired"), 1, "us_equity")?,
+                &v[0],
+            ),
+            (
+                "retired past the cap",
+                thesis(Some("lineage_retired"), 4, "us_equity")?,
+                &v[0],
+            ),
+            (
+                "refused at check 10",
+                thesis(Some("not_allowed_asset_class"), 0, "crypto")?,
+                &v[0],
+            ),
+            (
+                "pinned, refused at check 5",
+                thesis(Some("universe_pinned"), 0, "us_equity")?,
+                &v[1],
+            ),
+            (
+                "pinned, ignored at check 1",
+                thesis(Some("direction_not_allowed"), 0, "us_equity")?,
+                &v[1],
+            ),
+            (
+                "denied, refused at check 6",
+                thesis(Some("admission_denied"), 0, "us_equity")?,
+                &v[2],
+            ),
+            (
+                "denied, refused at check 4 before it",
+                thesis(Some("research_disabled"), 0, "us_equity")?,
+                &v[2],
+            ),
+        ];
+        assert_eq!(
+            store.judge(&thesis(None, 0, "us_equity")?, &v[1]),
+            Err(SpecError::InvalidInput { what: "admitted" }),
+            "the paired control: an admission under a pinned universe is refused"
+        );
+        for (name, payload, version) in cases {
+            assert_eq!(store.judge(&payload, version), Ok(()), "{name}");
+        }
+        Ok(())
+    }
+
+    /// An admission past any check the mandate fails is refused at `admitted`: a pinned universe
+    /// (check 5, MI-20), admission `deny` (6), an asset class outside `universe.asset_classes` (10),
+    /// a revision past the cap (16), and no research agent at all (4).
+    #[test]
+    fn a_thesis_admitted_past_a_check_its_mandate_fails_is_refused() -> Result<(), String> {
+        let open = research(&[])?;
+        let pinned = research(&[("/universe/pinned", "true")])?;
+        let denied = research(&[("/autonomy/admission", r#""deny""#)])?;
+        let unresearched = mandate(&[("/universe/pinned", "false")])?;
+        let (store, v) = Store::of([&open, &pinned, &denied, &unresearched])?;
+        let cases = [
+            ("check 5", thesis(None, 0, "us_equity")?, &v[1]),
+            ("check 6", thesis(None, 0, "us_equity")?, &v[2]),
+            ("check 10", thesis(None, 0, "crypto")?, &v[0]),
+            ("check 16", thesis(None, 4, "us_equity")?, &v[0]),
+            ("check 4", thesis(None, 0, "us_equity")?, &v[3]),
+        ];
+        assert_eq!(
+            store.judge(&thesis(None, 0, "us_equity")?, &v[0]),
+            Ok(()),
+            "the paired control: an admission the mandate allows is accepted"
+        );
+        for (name, payload, version) in cases {
+            assert_eq!(
+                store.judge(&payload, version),
+                refused("admitted"),
+                "{name}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A refusal at a check later than the first one the mandate fails is refused at `reason`: the
+    /// first failure decides (§8.5), and the mandate's checks come before eligibility, sources, the
+    /// cap and a full universe.
+    #[test]
+    fn a_thesis_refused_after_its_mandate_fails_an_earlier_check_is_refused() -> Result<(), String>
+    {
+        let open = research(&[])?;
+        let pinned = research(&[("/universe/pinned", "true")])?;
+        let denied = research(&[("/autonomy/admission", r#""deny""#)])?;
+        let both = research(&[
+            ("/universe/pinned", "true"),
+            ("/autonomy/admission", r#""deny""#),
+        ])?;
+        let unresearched = mandate(&[("/universe/pinned", "false")])?;
+        let (store, v) = Store::of([&open, &pinned, &denied, &both, &unresearched])?;
+        let cases = [
+            (
+                "pinned and denied, refused at 6",
+                thesis(Some("admission_denied"), 0, "us_equity")?,
+                &v[3],
+            ),
+            (
+                "pinned, refused at 12",
+                thesis(Some("eligibility_floor"), 0, "us_equity")?,
+                &v[1],
+            ),
+            (
+                "pinned, refused at 6",
+                thesis(Some("admission_denied"), 0, "us_equity")?,
+                &v[1],
+            ),
+            (
+                "denied, refused at 17",
+                thesis(Some("universe_full"), 0, "us_equity")?,
+                &v[2],
+            ),
+            (
+                "crypto, refused at 14",
+                thesis(Some("source_not_allowlisted"), 0, "crypto")?,
+                &v[0],
+            ),
+            (
+                "past the cap, refused at 17",
+                thesis(Some("universe_full"), 4, "us_equity")?,
+                &v[0],
+            ),
+            (
+                "no research agent, refused at 17",
+                thesis(Some("universe_full"), 0, "us_equity")?,
+                &v[4],
+            ),
+        ];
+        assert_eq!(
+            store.judge(&thesis(Some("universe_pinned"), 0, "us_equity")?, &v[1]),
+            Ok(()),
+            "the paired control: a refusal at the first check the mandate fails is accepted"
+        );
+        for (name, payload, version) in cases {
+            assert_eq!(store.judge(&payload, version), refused("reason"), "{name}");
+        }
+        Ok(())
+    }
+
+    /// A refusal at check 5, 6, or 10 the mandate passes is refused at `reason`: those three read
+    /// the mandate alone (check 6 while the overlay raises `auto` only to `ask`), so the record
+    /// names a failure its own mandate does not show.
+    #[test]
+    fn a_thesis_refused_at_a_mandate_check_its_mandate_passes_is_refused() -> Result<(), String> {
+        let open = research(&[])?;
+        let (store, v) = Store::of([&open])?;
+        assert_eq!(
+            store.judge(&thesis(Some("eligibility_floor"), 0, "us_equity")?, &v[0]),
+            Ok(()),
+            "the paired control: a refusal at a check the mandate does not decide is accepted"
+        );
+        for reason in [
+            "universe_pinned",
+            "admission_denied",
+            "not_allowed_asset_class",
+        ] {
+            assert_eq!(
+                store.judge(&thesis(Some(reason), 0, "us_equity")?, &v[0]),
+                refused("reason"),
+                "{reason}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The mandate is the stored document `config_refs.mandate_version` names, the one in force when
+    /// the thesis was judged: one admission is accepted under the research mandate and refused under
+    /// a pinned one, both stored, so the check reads the named document and no other.
+    #[test]
+    fn a_thesis_is_judged_under_the_mandate_it_names() -> Result<(), String> {
+        let open = research(&[])?;
+        let pinned = research(&[("/universe/pinned", "true")])?;
+        let (store, v) = Store::of([&open, &pinned])?;
+        let admitted = thesis(None, 0, "us_equity")?;
+        assert_eq!(store.judge(&admitted, &v[0]), Ok(()));
+        assert_eq!(store.judge(&admitted, &v[1]), refused("admitted"));
+        Ok(())
+    }
+
+    /// A mandate that is not stored, or is stored under another document's digest, is refused at
+    /// `mandate_version`, never judged from whatever is stored.
+    #[test]
+    fn a_thesis_mandate_that_is_absent_or_an_impostor_is_refused() -> Result<(), String> {
+        let open = research(&[])?;
+        let pinned = research(&[("/universe/pinned", "true")])?;
+        let (_, v) = Store::of([&open, &pinned])?;
+        let pinned_document = pinned.canonical().map_err(|e| e.to_string())?;
+        let impostor = Store(BTreeMap::from([(v[0], pinned_document)]));
+        let empty = Store(BTreeMap::new());
+        let refused_record = thesis(Some("eligibility_floor"), 0, "us_equity")?;
+        let real = Store::of([&open])?.0;
+        assert_eq!(
+            real.judge(&refused_record, &v[0]),
+            Ok(()),
+            "the paired control: the named mandate, stored under its own digest, is judged"
+        );
+        for (name, store) in [("absent", &empty), ("impostor", &impostor)] {
+            assert_eq!(
+                store.judge(&refused_record, &v[0]),
+                refused("mandate_version"),
+                "{name}"
+            );
         }
         Ok(())
     }

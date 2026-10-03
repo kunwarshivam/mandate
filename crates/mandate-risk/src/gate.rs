@@ -30,10 +30,20 @@ const ORDER: [Check; 8] = [
 /// A check's decision when it does not pass.
 pub(crate) type Stop = (Verdict, ReasonCode);
 
+/// DEC-401: a proposal of zero quantity is refused by name, before any check, for every origin
+/// and side. It is no order, so refusing it adds no risk (`AGENTS.md` rule 3) and denies no
+/// reduction (rule 13), and an allow would hand the broker an order it refuses.
+fn refuse_nothing() -> Result<Decision, GateError> {
+    Err(GateError::ZeroQuantity)
+}
+
 /// §9.1: the first failing check decides, and every check after it is listed as not reached. An
 /// allowed order then carries the [`conduct::pacing`] checks 3 to 6 put on it, or `None` when
 /// nothing did.
 pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
+    if input.proposed.qty.is_zero() {
+        return refuse_nothing();
+    }
     let held = input
         .agent
         .positions
@@ -2889,33 +2899,35 @@ mod tests {
         }
 
         /// A proposal of zero reduces nothing, so an uncomputable collar does not route it: the
-        /// gate keeps the collar's own error for it, as before E6-6, rather than allow an order of
-        /// nothing (DEC-383). The expected error per quote is the arithmetic's: the passive end
-        /// overflows at the decimal's maximum, truncates to zero on the Reg NMS grid at
-        /// `0.0000833`, and a configured `x` of one puts the aggressive end at zero. Moved here
-        /// from `tests/properties.rs` by the #452 ruling.
+        /// gate refuses it before the collar is reached rather than allow an order of nothing.
+        /// DEC-401 replaces DEC-383 item 3's "keeps the collar's error" with one refusal by name,
+        /// which `tests/hand.rs`'s grid pins too. Here, over the three quotes whose collar
+        /// cannot be computed (the passive end overflowing at the decimal's maximum, truncating to
+        /// zero on the Reg NMS grid at `0.0000833`, and a configured `x` of one putting the
+        /// aggressive end at zero), the refusal is `GateError::ZeroQuantity` itself, so a collar
+        /// error cannot satisfy it (DEC-401 item 4). Moved here from `tests/properties.rs` by the
+        /// #452 ruling.
         #[test]
         fn a_zero_quantity_exit_over_an_uncomputable_collar_is_not_routed(
             origin in prop::sample::select(vec![
                 Origin::OrderBuilder, Origin::GoalCompletion, Origin::RemovedInstrument,
             ]),
             trigger in prop::sample::select(vec![
-                ("79228162514264337593.543950335", false, mandate_num::NumError::Overflow),
-                ("0.0000833", false, mandate_num::NumError::NotPositive),
-                ("99.95", true, mandate_num::NumError::NotPositive),
+                ("79228162514264337593.543950335", false),
+                ("0.0000833", false),
+                ("99.95", true),
             ]),
         ) {
             let fail = |e: GateError| TestCaseError::fail(e.to_string());
-            let (quote, x_is_one, expected) = trigger;
+            let (quote, x_is_one) = trigger;
             let o = allowing().map_err(fail)?.selling(origin).map_err(fail)?;
             let mut o = uncomputable(o, quote, x_is_one).map_err(fail)?;
             o.proposed.qty = Qty::ZERO;
 
             let d = o.decide();
             prop_assert!(
-                matches!(&d, Err(GateError::Num(e)) if *e == expected),
-                "a zero exit keeps the collar's error {:?}: {:?}",
-                expected,
+                matches!(&d, Err(GateError::ZeroQuantity)),
+                "a zero exit is refused before its collar is reached: {:?}",
                 d
             );
         }

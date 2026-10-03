@@ -624,12 +624,20 @@ fn semantic_context(fixture: &Json, stated: &Json) -> Result<ValidationContext, 
             "approver_users" => context.approver_users = u32_of(stated, key)?,
             "previous_version" => {
                 let previous = at_of(stated, key)?;
-                unknown_members(previous, &["environment", "connection_id"])
-                    .map_err(|unknown| format!("`previous_version` members: {unknown}"))?;
+                let identity_only =
+                    unknown_members(previous, &["environment", "connection_id"]).is_ok();
                 context.previous_version = Some(PreviousVersion {
                     environment: environment(str_at(previous, "environment")?)?,
                     connection_id: ConnectionId::parse(str_at(previous, "connection_id")?)
                         .map_err(|e| format!("`previous_version.connection_id`: {}", e.code()))?,
+                    mandate: if identity_only {
+                        None
+                    } else {
+                        Some(
+                            Mandate::parse(&crate::to_canon(previous)?)
+                                .map_err(|e| format!("`previous_version`: {}", e.code()))?,
+                        )
+                    },
                 });
             }
             other => return Err(format!("`context.{other}` is not interpreted")),

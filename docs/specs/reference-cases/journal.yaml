@@ -30,6 +30,11 @@
 # An invalid or valid draft names its base by `base_seq` (a chain event) or `base_draft` (one of
 # `drafts`). `journaled_facts` is the `JournaledFact` each record maps to, one per mapped record, by
 # `seq` or by `draft`; the account stream's connection is given in `derivation.account_connection`.
+#
+# `research` (spec §9.4, DEC-413) is generated and checked the same way, by
+# reference/journal/research.py. `drafts` are named base drafts of `ThesisProposed` and
+# `ThesisRevised` on a research agent's stream, `artifacts` holds every object they name, and each
+# invalid or valid draft names its base by `base_draft`. No record in it maps to a `JournaledFact`.
 
 version: 3
 hash_algorithm: sha256
@@ -3915,3 +3920,3095 @@ control_stream:
       value: live
     expect:
       outcome: Valid
+risk_state:
+  spec: docs/specs/journal.md v0.8 §9.3 (DEC-403)
+  stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+  artifacts:
+  - name: old_document
+    ref: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    object:
+      mandate_schema_version: 1
+      name: btc-accumulator
+      source_text_ref: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      environment: paper
+      connection_id: conn_alpaca_paper_01
+      capital:
+        allocation_usd: '10000'
+        max_loss_from_allocation: '0.1'
+      goal:
+        type: accumulate
+        instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+        target_qty: '0.15'
+        max_avg_price: '58000'
+        max_spend_usd: '9000'
+        end_date: '2026-12-31'
+        on_complete: hold_protected
+      universe:
+        pinned: true
+        pinned_instruments:
+        - asset_id: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+          symbol: BTC/USD
+          asset_class: crypto
+        max_instruments: 1
+        asset_classes:
+        - crypto
+        leveraged_etps_enabled: false
+        leveraged_etp_disclosure_version: null
+      behavior:
+        description: Buy dips; avoid trading 30 minutes around major macro releases.
+        signal_models:
+        - id: quant.mean_reversion
+          version: 1.0.0
+          content_hash: sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0
+          params:
+          - key: lookback_bars
+            value: '20'
+          - key: z_entry
+            value: '1.5'
+          weight: '1'
+          max_output_age_s: 1800
+          admits_instruments: false
+        research: null
+        cadence:
+          interval_s: 900
+          event_sources:
+          - news
+          - price
+        sizing:
+          method: conviction_linear
+          entry_threshold: '0.3'
+          exit_threshold: '0.3'
+          rebalance_band: '0.05'
+      protection:
+        enabled: true
+        stop_distance: '0.08'
+        take_profit_distance: null
+        crypto_stop_limit_offset: '0.005'
+      risk:
+        max_position_usd: '10000'
+        max_position_fraction: '1'
+        max_gross_exposure_usd: '10000'
+        max_order_usd: '1000'
+        max_orders_per_day: 50
+        max_daily_loss: '0.02'
+        daily_loss_action: exits_only
+        max_drawdown: '0.08'
+        drawdown_ladder:
+        - at: '0.03'
+          action: scale_sizes
+          factor: '0.5'
+        - at: '0.06'
+          action: exits_only
+          factor: null
+        - at: '0.08'
+          action: flatten_and_pause
+          factor: null
+        hysteresis: '0.01'
+        scale_action: limit_buys
+        breach_confirm_s: 60
+        daily_breach_min_s: 3600
+        scale_lift_after_s: 600
+        reentry_cooldown_s: 3600
+      autonomy:
+        rules:
+        - id: large_orders
+          when:
+            field: order_usd
+            op: gt
+            value: '900'
+          then: ask
+        - id: low_score
+          when:
+            field: combined_score
+            op: lt
+            value: '0.65'
+          then: ask
+        - id: routine
+          when:
+            field: purpose
+            op: in
+            value:
+            - increase
+            - open
+          then: auto
+        default: ask
+        admission: ask
+        approval:
+          timeout_s: 600
+          on_timeout: skip
+          approvers:
+          - role:approver
+          two_approver_above_usd: null
+      notifications:
+        channels:
+        - email
+        - web_push
+        quiet_hours:
+          start: '23:00'
+          end: 07:00
+          timezone: America/New_York
+    canonical: '{"autonomy":{"admission":"ask","approval":{"approvers":["role:approver"],"on_timeout":"skip","timeout_s":600,"two_approver_above_usd":null},"default":"ask","rules":[{"id":"large_orders","then":"ask","when":{"field":"order_usd","op":"gt","value":"900"}},{"id":"low_score","then":"ask","when":{"field":"combined_score","op":"lt","value":"0.65"}},{"id":"routine","then":"auto","when":{"field":"purpose","op":"in","value":["increase","open"]}}]},"behavior":{"cadence":{"event_sources":["news","price"],"interval_s":900},"description":"Buy dips; avoid trading 30 minutes around major macro releases.","research":null,"signal_models":[{"admits_instruments":false,"content_hash":"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0","id":"quant.mean_reversion","max_output_age_s":1800,"params":[{"key":"lookback_bars","value":"20"},{"key":"z_entry","value":"1.5"}],"version":"1.0.0","weight":"1"}],"sizing":{"entry_threshold":"0.3","exit_threshold":"0.3","method":"conviction_linear","rebalance_band":"0.05"}},"capital":{"allocation_usd":"10000","max_loss_from_allocation":"0.1"},"connection_id":"conn_alpaca_paper_01","environment":"paper","goal":{"end_date":"2026-12-31","instrument":"7b4a1c2e-1111-4a2b-9c3d-000000000001","max_avg_price":"58000","max_spend_usd":"9000","on_complete":"hold_protected","target_qty":"0.15","type":"accumulate"},"mandate_schema_version":1,"name":"btc-accumulator","notifications":{"channels":["email","web_push"],"quiet_hours":{"end":"07:00","start":"23:00","timezone":"America/New_York"}},"protection":{"crypto_stop_limit_offset":"0.005","enabled":true,"stop_distance":"0.08","take_profit_distance":null},"risk":{"breach_confirm_s":60,"daily_breach_min_s":3600,"daily_loss_action":"exits_only","drawdown_ladder":[{"action":"scale_sizes","at":"0.03","factor":"0.5"},{"action":"exits_only","at":"0.06","factor":null},{"action":"flatten_and_pause","at":"0.08","factor":null}],"hysteresis":"0.01","max_daily_loss":"0.02","max_drawdown":"0.08","max_gross_exposure_usd":"10000","max_order_usd":"1000","max_orders_per_day":50,"max_position_fraction":"1","max_position_usd":"10000","reentry_cooldown_s":3600,"scale_action":"limit_buys","scale_lift_after_s":600},"source_text_ref":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","universe":{"asset_classes":["crypto"],"leveraged_etp_disclosure_version":null,"leveraged_etps_enabled":false,"max_instruments":1,"pinned":true,"pinned_instruments":[{"asset_class":"crypto","asset_id":"7b4a1c2e-1111-4a2b-9c3d-000000000001","symbol":"BTC/USD"}]}}'
+  - name: new_document
+    ref: sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54
+    object:
+      mandate_schema_version: 1
+      name: btc-accumulator
+      source_text_ref: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      environment: paper
+      connection_id: conn_alpaca_paper_01
+      capital:
+        allocation_usd: '12500'
+        max_loss_from_allocation: '0.1'
+      goal:
+        type: accumulate
+        instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+        target_qty: '0.15'
+        max_avg_price: '58000'
+        max_spend_usd: '9000'
+        end_date: '2026-12-31'
+        on_complete: hold_protected
+      universe:
+        pinned: true
+        pinned_instruments:
+        - asset_id: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+          symbol: BTC/USD
+          asset_class: crypto
+        max_instruments: 1
+        asset_classes:
+        - crypto
+        leveraged_etps_enabled: false
+        leveraged_etp_disclosure_version: null
+      behavior:
+        description: Buy dips; avoid trading 30 minutes around major macro releases.
+        signal_models:
+        - id: quant.mean_reversion
+          version: 1.0.0
+          content_hash: sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0
+          params:
+          - key: lookback_bars
+            value: '20'
+          - key: z_entry
+            value: '1.5'
+          weight: '1'
+          max_output_age_s: 1800
+          admits_instruments: false
+        research: null
+        cadence:
+          interval_s: 900
+          event_sources:
+          - news
+          - price
+        sizing:
+          method: conviction_linear
+          entry_threshold: '0.3'
+          exit_threshold: '0.3'
+          rebalance_band: '0.05'
+      protection:
+        enabled: true
+        stop_distance: '0.08'
+        take_profit_distance: null
+        crypto_stop_limit_offset: '0.005'
+      risk:
+        max_position_usd: '10000'
+        max_position_fraction: '1'
+        max_gross_exposure_usd: '10000'
+        max_order_usd: '1000'
+        max_orders_per_day: 50
+        max_daily_loss: '0.02'
+        daily_loss_action: exits_only
+        max_drawdown: '0.08'
+        drawdown_ladder:
+        - at: '0.03'
+          action: scale_sizes
+          factor: '0.5'
+        - at: '0.06'
+          action: exits_only
+          factor: null
+        - at: '0.08'
+          action: flatten_and_pause
+          factor: null
+        hysteresis: '0.01'
+        scale_action: limit_buys
+        breach_confirm_s: 60
+        daily_breach_min_s: 3600
+        scale_lift_after_s: 600
+        reentry_cooldown_s: 3600
+      autonomy:
+        rules:
+        - id: large_orders
+          when:
+            field: order_usd
+            op: gt
+            value: '900'
+          then: ask
+        - id: low_score
+          when:
+            field: combined_score
+            op: lt
+            value: '0.65'
+          then: ask
+        - id: routine
+          when:
+            field: purpose
+            op: in
+            value:
+            - increase
+            - open
+          then: auto
+        default: ask
+        admission: ask
+        approval:
+          timeout_s: 600
+          on_timeout: skip
+          approvers:
+          - role:approver
+          two_approver_above_usd: null
+      notifications:
+        channels:
+        - email
+        - web_push
+        quiet_hours:
+          start: '23:00'
+          end: 07:00
+          timezone: America/New_York
+    canonical: '{"autonomy":{"admission":"ask","approval":{"approvers":["role:approver"],"on_timeout":"skip","timeout_s":600,"two_approver_above_usd":null},"default":"ask","rules":[{"id":"large_orders","then":"ask","when":{"field":"order_usd","op":"gt","value":"900"}},{"id":"low_score","then":"ask","when":{"field":"combined_score","op":"lt","value":"0.65"}},{"id":"routine","then":"auto","when":{"field":"purpose","op":"in","value":["increase","open"]}}]},"behavior":{"cadence":{"event_sources":["news","price"],"interval_s":900},"description":"Buy dips; avoid trading 30 minutes around major macro releases.","research":null,"signal_models":[{"admits_instruments":false,"content_hash":"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0","id":"quant.mean_reversion","max_output_age_s":1800,"params":[{"key":"lookback_bars","value":"20"},{"key":"z_entry","value":"1.5"}],"version":"1.0.0","weight":"1"}],"sizing":{"entry_threshold":"0.3","exit_threshold":"0.3","method":"conviction_linear","rebalance_band":"0.05"}},"capital":{"allocation_usd":"12500","max_loss_from_allocation":"0.1"},"connection_id":"conn_alpaca_paper_01","environment":"paper","goal":{"end_date":"2026-12-31","instrument":"7b4a1c2e-1111-4a2b-9c3d-000000000001","max_avg_price":"58000","max_spend_usd":"9000","on_complete":"hold_protected","target_qty":"0.15","type":"accumulate"},"mandate_schema_version":1,"name":"btc-accumulator","notifications":{"channels":["email","web_push"],"quiet_hours":{"end":"07:00","start":"23:00","timezone":"America/New_York"}},"protection":{"crypto_stop_limit_offset":"0.005","enabled":true,"stop_distance":"0.08","take_profit_distance":null},"risk":{"breach_confirm_s":60,"daily_breach_min_s":3600,"daily_loss_action":"exits_only","drawdown_ladder":[{"action":"scale_sizes","at":"0.03","factor":"0.5"},{"action":"exits_only","at":"0.06","factor":null},{"action":"flatten_and_pause","at":"0.08","factor":null}],"hysteresis":"0.01","max_daily_loss":"0.02","max_drawdown":"0.08","max_gross_exposure_usd":"10000","max_order_usd":"1000","max_orders_per_day":50,"max_position_fraction":"1","max_position_usd":"10000","reentry_cooldown_s":3600,"scale_action":"limit_buys","scale_lift_after_s":600},"source_text_ref":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","universe":{"asset_classes":["crypto"],"leveraged_etp_disclosure_version":null,"leveraged_etps_enabled":false,"max_instruments":1,"pinned":true,"pinned_instruments":[{"asset_class":"crypto","asset_id":"7b4a1c2e-1111-4a2b-9c3d-000000000001","symbol":"BTC/USD"}]}}'
+  - name: renamed_document
+    ref: sha256:c0a5e0805506a7b3da92f677fe0f9c7721f39ac2b268af8f17f2422784ccf79f
+    object:
+      mandate_schema_version: 1
+      name: btc-accumulator-renamed
+      source_text_ref: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      environment: paper
+      connection_id: conn_alpaca_paper_01
+      capital:
+        allocation_usd: '10000'
+        max_loss_from_allocation: '0.1'
+      goal:
+        type: accumulate
+        instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+        target_qty: '0.15'
+        max_avg_price: '58000'
+        max_spend_usd: '9000'
+        end_date: '2026-12-31'
+        on_complete: hold_protected
+      universe:
+        pinned: true
+        pinned_instruments:
+        - asset_id: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+          symbol: BTC/USD
+          asset_class: crypto
+        max_instruments: 1
+        asset_classes:
+        - crypto
+        leveraged_etps_enabled: false
+        leveraged_etp_disclosure_version: null
+      behavior:
+        description: Buy dips; avoid trading 30 minutes around major macro releases.
+        signal_models:
+        - id: quant.mean_reversion
+          version: 1.0.0
+          content_hash: sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0
+          params:
+          - key: lookback_bars
+            value: '20'
+          - key: z_entry
+            value: '1.5'
+          weight: '1'
+          max_output_age_s: 1800
+          admits_instruments: false
+        research: null
+        cadence:
+          interval_s: 900
+          event_sources:
+          - news
+          - price
+        sizing:
+          method: conviction_linear
+          entry_threshold: '0.3'
+          exit_threshold: '0.3'
+          rebalance_band: '0.05'
+      protection:
+        enabled: true
+        stop_distance: '0.08'
+        take_profit_distance: null
+        crypto_stop_limit_offset: '0.005'
+      risk:
+        max_position_usd: '10000'
+        max_position_fraction: '1'
+        max_gross_exposure_usd: '10000'
+        max_order_usd: '1000'
+        max_orders_per_day: 50
+        max_daily_loss: '0.02'
+        daily_loss_action: exits_only
+        max_drawdown: '0.08'
+        drawdown_ladder:
+        - at: '0.03'
+          action: scale_sizes
+          factor: '0.5'
+        - at: '0.06'
+          action: exits_only
+          factor: null
+        - at: '0.08'
+          action: flatten_and_pause
+          factor: null
+        hysteresis: '0.01'
+        scale_action: limit_buys
+        breach_confirm_s: 60
+        daily_breach_min_s: 3600
+        scale_lift_after_s: 600
+        reentry_cooldown_s: 3600
+      autonomy:
+        rules:
+        - id: large_orders
+          when:
+            field: order_usd
+            op: gt
+            value: '900'
+          then: ask
+        - id: low_score
+          when:
+            field: combined_score
+            op: lt
+            value: '0.65'
+          then: ask
+        - id: routine
+          when:
+            field: purpose
+            op: in
+            value:
+            - increase
+            - open
+          then: auto
+        default: ask
+        admission: ask
+        approval:
+          timeout_s: 600
+          on_timeout: skip
+          approvers:
+          - role:approver
+          two_approver_above_usd: null
+      notifications:
+        channels:
+        - email
+        - web_push
+        quiet_hours:
+          start: '23:00'
+          end: 07:00
+          timezone: America/New_York
+    canonical: '{"autonomy":{"admission":"ask","approval":{"approvers":["role:approver"],"on_timeout":"skip","timeout_s":600,"two_approver_above_usd":null},"default":"ask","rules":[{"id":"large_orders","then":"ask","when":{"field":"order_usd","op":"gt","value":"900"}},{"id":"low_score","then":"ask","when":{"field":"combined_score","op":"lt","value":"0.65"}},{"id":"routine","then":"auto","when":{"field":"purpose","op":"in","value":["increase","open"]}}]},"behavior":{"cadence":{"event_sources":["news","price"],"interval_s":900},"description":"Buy dips; avoid trading 30 minutes around major macro releases.","research":null,"signal_models":[{"admits_instruments":false,"content_hash":"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0","id":"quant.mean_reversion","max_output_age_s":1800,"params":[{"key":"lookback_bars","value":"20"},{"key":"z_entry","value":"1.5"}],"version":"1.0.0","weight":"1"}],"sizing":{"entry_threshold":"0.3","exit_threshold":"0.3","method":"conviction_linear","rebalance_band":"0.05"}},"capital":{"allocation_usd":"10000","max_loss_from_allocation":"0.1"},"connection_id":"conn_alpaca_paper_01","environment":"paper","goal":{"end_date":"2026-12-31","instrument":"7b4a1c2e-1111-4a2b-9c3d-000000000001","max_avg_price":"58000","max_spend_usd":"9000","on_complete":"hold_protected","target_qty":"0.15","type":"accumulate"},"mandate_schema_version":1,"name":"btc-accumulator-renamed","notifications":{"channels":["email","web_push"],"quiet_hours":{"end":"07:00","start":"23:00","timezone":"America/New_York"}},"protection":{"crypto_stop_limit_offset":"0.005","enabled":true,"stop_distance":"0.08","take_profit_distance":null},"risk":{"breach_confirm_s":60,"daily_breach_min_s":3600,"daily_loss_action":"exits_only","drawdown_ladder":[{"action":"scale_sizes","at":"0.03","factor":"0.5"},{"action":"exits_only","at":"0.06","factor":null},{"action":"flatten_and_pause","at":"0.08","factor":null}],"hysteresis":"0.01","max_daily_loss":"0.02","max_drawdown":"0.08","max_gross_exposure_usd":"10000","max_order_usd":"1000","max_orders_per_day":50,"max_position_fraction":"1","max_position_usd":"10000","reentry_cooldown_s":3600,"scale_action":"limit_buys","scale_lift_after_s":600},"source_text_ref":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","universe":{"asset_classes":["crypto"],"leveraged_etp_disclosure_version":null,"leveraged_etps_enabled":false,"max_instruments":1,"pinned":true,"pinned_instruments":[{"asset_class":"crypto","asset_id":"7b4a1c2e-1111-4a2b-9c3d-000000000001","symbol":"BTC/USD"}]}}'
+  - name: tightened_document
+    ref: sha256:139f3129f3558c6b2aec5bbb71dd1d5f9aeb0305fbb9bcbfc14a6d288c60372c
+    object:
+      mandate_schema_version: 1
+      name: btc-accumulator
+      source_text_ref: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      environment: paper
+      connection_id: conn_alpaca_paper_01
+      capital:
+        allocation_usd: '10000'
+        max_loss_from_allocation: '0.08'
+      goal:
+        type: accumulate
+        instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+        target_qty: '0.15'
+        max_avg_price: '58000'
+        max_spend_usd: '9000'
+        end_date: '2026-12-31'
+        on_complete: hold_protected
+      universe:
+        pinned: true
+        pinned_instruments:
+        - asset_id: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+          symbol: BTC/USD
+          asset_class: crypto
+        max_instruments: 1
+        asset_classes:
+        - crypto
+        leveraged_etps_enabled: false
+        leveraged_etp_disclosure_version: null
+      behavior:
+        description: Buy dips; avoid trading 30 minutes around major macro releases.
+        signal_models:
+        - id: quant.mean_reversion
+          version: 1.0.0
+          content_hash: sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0
+          params:
+          - key: lookback_bars
+            value: '20'
+          - key: z_entry
+            value: '1.5'
+          weight: '1'
+          max_output_age_s: 1800
+          admits_instruments: false
+        research: null
+        cadence:
+          interval_s: 900
+          event_sources:
+          - news
+          - price
+        sizing:
+          method: conviction_linear
+          entry_threshold: '0.3'
+          exit_threshold: '0.3'
+          rebalance_band: '0.05'
+      protection:
+        enabled: true
+        stop_distance: '0.08'
+        take_profit_distance: null
+        crypto_stop_limit_offset: '0.005'
+      risk:
+        max_position_usd: '10000'
+        max_position_fraction: '1'
+        max_gross_exposure_usd: '10000'
+        max_order_usd: '1000'
+        max_orders_per_day: 50
+        max_daily_loss: '0.02'
+        daily_loss_action: exits_only
+        max_drawdown: '0.08'
+        drawdown_ladder:
+        - at: '0.03'
+          action: scale_sizes
+          factor: '0.5'
+        - at: '0.06'
+          action: exits_only
+          factor: null
+        - at: '0.08'
+          action: flatten_and_pause
+          factor: null
+        hysteresis: '0.01'
+        scale_action: limit_buys
+        breach_confirm_s: 60
+        daily_breach_min_s: 3600
+        scale_lift_after_s: 600
+        reentry_cooldown_s: 3600
+      autonomy:
+        rules:
+        - id: large_orders
+          when:
+            field: order_usd
+            op: gt
+            value: '900'
+          then: ask
+        - id: low_score
+          when:
+            field: combined_score
+            op: lt
+            value: '0.65'
+          then: ask
+        - id: routine
+          when:
+            field: purpose
+            op: in
+            value:
+            - increase
+            - open
+          then: auto
+        default: ask
+        admission: ask
+        approval:
+          timeout_s: 600
+          on_timeout: skip
+          approvers:
+          - role:approver
+          two_approver_above_usd: null
+      notifications:
+        channels:
+        - email
+        - web_push
+        quiet_hours:
+          start: '23:00'
+          end: 07:00
+          timezone: America/New_York
+    canonical: '{"autonomy":{"admission":"ask","approval":{"approvers":["role:approver"],"on_timeout":"skip","timeout_s":600,"two_approver_above_usd":null},"default":"ask","rules":[{"id":"large_orders","then":"ask","when":{"field":"order_usd","op":"gt","value":"900"}},{"id":"low_score","then":"ask","when":{"field":"combined_score","op":"lt","value":"0.65"}},{"id":"routine","then":"auto","when":{"field":"purpose","op":"in","value":["increase","open"]}}]},"behavior":{"cadence":{"event_sources":["news","price"],"interval_s":900},"description":"Buy dips; avoid trading 30 minutes around major macro releases.","research":null,"signal_models":[{"admits_instruments":false,"content_hash":"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0","id":"quant.mean_reversion","max_output_age_s":1800,"params":[{"key":"lookback_bars","value":"20"},{"key":"z_entry","value":"1.5"}],"version":"1.0.0","weight":"1"}],"sizing":{"entry_threshold":"0.3","exit_threshold":"0.3","method":"conviction_linear","rebalance_band":"0.05"}},"capital":{"allocation_usd":"10000","max_loss_from_allocation":"0.08"},"connection_id":"conn_alpaca_paper_01","environment":"paper","goal":{"end_date":"2026-12-31","instrument":"7b4a1c2e-1111-4a2b-9c3d-000000000001","max_avg_price":"58000","max_spend_usd":"9000","on_complete":"hold_protected","target_qty":"0.15","type":"accumulate"},"mandate_schema_version":1,"name":"btc-accumulator","notifications":{"channels":["email","web_push"],"quiet_hours":{"end":"07:00","start":"23:00","timezone":"America/New_York"}},"protection":{"crypto_stop_limit_offset":"0.005","enabled":true,"stop_distance":"0.08","take_profit_distance":null},"risk":{"breach_confirm_s":60,"daily_breach_min_s":3600,"daily_loss_action":"exits_only","drawdown_ladder":[{"action":"scale_sizes","at":"0.03","factor":"0.5"},{"action":"exits_only","at":"0.06","factor":null},{"action":"flatten_and_pause","at":"0.08","factor":null}],"hysteresis":"0.01","max_daily_loss":"0.02","max_drawdown":"0.08","max_gross_exposure_usd":"10000","max_order_usd":"1000","max_orders_per_day":50,"max_position_fraction":"1","max_position_usd":"10000","reentry_cooldown_s":3600,"scale_action":"limit_buys","scale_lift_after_s":600},"source_text_ref":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","universe":{"asset_classes":["crypto"],"leveraged_etp_disclosure_version":null,"leveraged_etps_enabled":false,"max_instruments":1,"pinned":true,"pinned_instruments":[{"asset_class":"crypto","asset_id":"7b4a1c2e-1111-4a2b-9c3d-000000000001","symbol":"BTC/USD"}]}}'
+  - name: loosened_document
+    ref: sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16
+    object:
+      mandate_schema_version: 1
+      name: btc-accumulator
+      source_text_ref: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      environment: paper
+      connection_id: conn_alpaca_paper_01
+      capital:
+        allocation_usd: '10000'
+        max_loss_from_allocation: '0.15'
+      goal:
+        type: accumulate
+        instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+        target_qty: '0.15'
+        max_avg_price: '58000'
+        max_spend_usd: '9000'
+        end_date: '2026-12-31'
+        on_complete: hold_protected
+      universe:
+        pinned: true
+        pinned_instruments:
+        - asset_id: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+          symbol: BTC/USD
+          asset_class: crypto
+        max_instruments: 1
+        asset_classes:
+        - crypto
+        leveraged_etps_enabled: false
+        leveraged_etp_disclosure_version: null
+      behavior:
+        description: Buy dips; avoid trading 30 minutes around major macro releases.
+        signal_models:
+        - id: quant.mean_reversion
+          version: 1.0.0
+          content_hash: sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0
+          params:
+          - key: lookback_bars
+            value: '20'
+          - key: z_entry
+            value: '1.5'
+          weight: '1'
+          max_output_age_s: 1800
+          admits_instruments: false
+        research: null
+        cadence:
+          interval_s: 900
+          event_sources:
+          - news
+          - price
+        sizing:
+          method: conviction_linear
+          entry_threshold: '0.3'
+          exit_threshold: '0.3'
+          rebalance_band: '0.05'
+      protection:
+        enabled: true
+        stop_distance: '0.08'
+        take_profit_distance: null
+        crypto_stop_limit_offset: '0.005'
+      risk:
+        max_position_usd: '10000'
+        max_position_fraction: '1'
+        max_gross_exposure_usd: '10000'
+        max_order_usd: '1000'
+        max_orders_per_day: 50
+        max_daily_loss: '0.02'
+        daily_loss_action: exits_only
+        max_drawdown: '0.08'
+        drawdown_ladder:
+        - at: '0.03'
+          action: scale_sizes
+          factor: '0.5'
+        - at: '0.06'
+          action: exits_only
+          factor: null
+        - at: '0.08'
+          action: flatten_and_pause
+          factor: null
+        hysteresis: '0.01'
+        scale_action: limit_buys
+        breach_confirm_s: 60
+        daily_breach_min_s: 3600
+        scale_lift_after_s: 600
+        reentry_cooldown_s: 3600
+      autonomy:
+        rules:
+        - id: large_orders
+          when:
+            field: order_usd
+            op: gt
+            value: '900'
+          then: ask
+        - id: low_score
+          when:
+            field: combined_score
+            op: lt
+            value: '0.65'
+          then: ask
+        - id: routine
+          when:
+            field: purpose
+            op: in
+            value:
+            - increase
+            - open
+          then: auto
+        default: ask
+        admission: ask
+        approval:
+          timeout_s: 600
+          on_timeout: skip
+          approvers:
+          - role:approver
+          two_approver_above_usd: null
+      notifications:
+        channels:
+        - email
+        - web_push
+        quiet_hours:
+          start: '23:00'
+          end: 07:00
+          timezone: America/New_York
+    canonical: '{"autonomy":{"admission":"ask","approval":{"approvers":["role:approver"],"on_timeout":"skip","timeout_s":600,"two_approver_above_usd":null},"default":"ask","rules":[{"id":"large_orders","then":"ask","when":{"field":"order_usd","op":"gt","value":"900"}},{"id":"low_score","then":"ask","when":{"field":"combined_score","op":"lt","value":"0.65"}},{"id":"routine","then":"auto","when":{"field":"purpose","op":"in","value":["increase","open"]}}]},"behavior":{"cadence":{"event_sources":["news","price"],"interval_s":900},"description":"Buy dips; avoid trading 30 minutes around major macro releases.","research":null,"signal_models":[{"admits_instruments":false,"content_hash":"sha256:92f265c39cf2f074af1de7182974ea9298d4419c767a9e4cc4a4de442f308bd0","id":"quant.mean_reversion","max_output_age_s":1800,"params":[{"key":"lookback_bars","value":"20"},{"key":"z_entry","value":"1.5"}],"version":"1.0.0","weight":"1"}],"sizing":{"entry_threshold":"0.3","exit_threshold":"0.3","method":"conviction_linear","rebalance_band":"0.05"}},"capital":{"allocation_usd":"10000","max_loss_from_allocation":"0.15"},"connection_id":"conn_alpaca_paper_01","environment":"paper","goal":{"end_date":"2026-12-31","instrument":"7b4a1c2e-1111-4a2b-9c3d-000000000001","max_avg_price":"58000","max_spend_usd":"9000","on_complete":"hold_protected","target_qty":"0.15","type":"accumulate"},"mandate_schema_version":1,"name":"btc-accumulator","notifications":{"channels":["email","web_push"],"quiet_hours":{"end":"07:00","start":"23:00","timezone":"America/New_York"}},"protection":{"crypto_stop_limit_offset":"0.005","enabled":true,"stop_distance":"0.08","take_profit_distance":null},"risk":{"breach_confirm_s":60,"daily_breach_min_s":3600,"daily_loss_action":"exits_only","drawdown_ladder":[{"action":"scale_sizes","at":"0.03","factor":"0.5"},{"action":"exits_only","at":"0.06","factor":null},{"action":"flatten_and_pause","at":"0.08","factor":null}],"hysteresis":"0.01","max_daily_loss":"0.02","max_drawdown":"0.08","max_gross_exposure_usd":"10000","max_order_usd":"1000","max_orders_per_day":50,"max_position_fraction":"1","max_position_usd":"10000","reentry_cooldown_s":3600,"scale_action":"limit_buys","scale_lift_after_s":600},"source_text_ref":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","universe":{"asset_classes":["crypto"],"leveraged_etp_disclosure_version":null,"leveraged_etps_enabled":false,"max_instruments":1,"pinned":true,"pinned_instruments":[{"asset_class":"crypto","asset_id":"7b4a1c2e-1111-4a2b-9c3d-000000000001","symbol":"BTC/USD"}]}}'
+  - name: research_document
+    ref: sha256:b5c23878277c18f61c1095f6324d303a0706ae459ca83f6817617f14930e3300
+    object:
+      mandate_schema_version: 1
+      name: research-equity
+      source_text_ref: null
+      environment: paper
+      connection_id: conn_alpaca_paper_01
+      capital:
+        allocation_usd: '10000'
+        max_loss_from_allocation: '0.1'
+      goal:
+        type: continuous
+        end_date: null
+        on_complete: hold_protected
+      universe:
+        pinned: false
+        pinned_instruments: []
+        max_instruments: 5
+        asset_classes:
+        - us_equity
+        leveraged_etps_enabled: false
+        leveraged_etp_disclosure_version: null
+      behavior:
+        description: Hold a small book of US equities on the research agent's theses.
+        signal_models:
+        - id: llm.research_agent
+          version: 0.1.0
+          content_hash: sha256:4444444444444444444444444444444444444444444444444444444444444444
+          params: []
+          weight: '0.5'
+          max_output_age_s: 3600
+          admits_instruments: true
+        - id: quant.momentum
+          version: 1.0.0
+          content_hash: sha256:2222222222222222222222222222222222222222222222222222222222222222
+          params:
+          - key: lookback_bars
+            value: '50'
+          weight: '0.5'
+          max_output_age_s: 900
+          admits_instruments: false
+        research:
+          interval_s: 3600
+          cost_cap_usd_per_day: '5'
+          max_revisions_per_lineage: 3
+        cadence:
+          interval_s: 300
+          event_sources:
+          - fills
+          - news
+          - price
+        sizing:
+          method: conviction_linear
+          entry_threshold: '0.3'
+          exit_threshold: '0.3'
+          rebalance_band: '0.05'
+      protection:
+        enabled: true
+        stop_distance: '0.05'
+        take_profit_distance: '0.1'
+        crypto_stop_limit_offset: null
+      risk:
+        max_position_usd: '1500'
+        max_position_fraction: '0.2'
+        max_gross_exposure_usd: '2000'
+        max_order_usd: '1000'
+        max_orders_per_day: 50
+        max_daily_loss: '0.02'
+        daily_loss_action: exits_only
+        max_drawdown: '0.08'
+        drawdown_ladder:
+        - at: '0.03'
+          action: scale_sizes
+          factor: '0.5'
+        - at: '0.06'
+          action: exits_only
+          factor: null
+        - at: '0.08'
+          action: flatten_and_pause
+          factor: null
+        hysteresis: '0.01'
+        scale_action: limit_buys
+        breach_confirm_s: 60
+        daily_breach_min_s: 3600
+        scale_lift_after_s: 600
+        reentry_cooldown_s: 3600
+      autonomy:
+        rules:
+        - id: large_orders
+          when:
+            field: order_usd
+            op: gt
+            value: '900'
+          then: ask
+        - id: low_score
+          when:
+            field: combined_score
+            op: lt
+            value: '0.65'
+          then: ask
+        - id: routine
+          when:
+            field: purpose
+            op: in
+            value:
+            - increase
+            - open
+          then: auto
+        default: ask
+        admission: ask
+        approval:
+          timeout_s: 600
+          on_timeout: skip
+          approvers:
+          - role:approver
+          two_approver_above_usd: null
+      notifications:
+        channels:
+        - email
+        - web_push
+        quiet_hours:
+          start: '23:00'
+          end: 07:00
+          timezone: America/New_York
+    canonical: '{"autonomy":{"admission":"ask","approval":{"approvers":["role:approver"],"on_timeout":"skip","timeout_s":600,"two_approver_above_usd":null},"default":"ask","rules":[{"id":"large_orders","then":"ask","when":{"field":"order_usd","op":"gt","value":"900"}},{"id":"low_score","then":"ask","when":{"field":"combined_score","op":"lt","value":"0.65"}},{"id":"routine","then":"auto","when":{"field":"purpose","op":"in","value":["increase","open"]}}]},"behavior":{"cadence":{"event_sources":["fills","news","price"],"interval_s":300},"description":"Hold a small book of US equities on the research agent''s theses.","research":{"cost_cap_usd_per_day":"5","interval_s":3600,"max_revisions_per_lineage":3},"signal_models":[{"admits_instruments":true,"content_hash":"sha256:4444444444444444444444444444444444444444444444444444444444444444","id":"llm.research_agent","max_output_age_s":3600,"params":[],"version":"0.1.0","weight":"0.5"},{"admits_instruments":false,"content_hash":"sha256:2222222222222222222222222222222222222222222222222222222222222222","id":"quant.momentum","max_output_age_s":900,"params":[{"key":"lookback_bars","value":"50"}],"version":"1.0.0","weight":"0.5"}],"sizing":{"entry_threshold":"0.3","exit_threshold":"0.3","method":"conviction_linear","rebalance_band":"0.05"}},"capital":{"allocation_usd":"10000","max_loss_from_allocation":"0.1"},"connection_id":"conn_alpaca_paper_01","environment":"paper","goal":{"end_date":null,"on_complete":"hold_protected","type":"continuous"},"mandate_schema_version":1,"name":"research-equity","notifications":{"channels":["email","web_push"],"quiet_hours":{"end":"07:00","start":"23:00","timezone":"America/New_York"}},"protection":{"crypto_stop_limit_offset":null,"enabled":true,"stop_distance":"0.05","take_profit_distance":"0.1"},"risk":{"breach_confirm_s":60,"daily_breach_min_s":3600,"daily_loss_action":"exits_only","drawdown_ladder":[{"action":"scale_sizes","at":"0.03","factor":"0.5"},{"action":"exits_only","at":"0.06","factor":null},{"action":"flatten_and_pause","at":"0.08","factor":null}],"hysteresis":"0.01","max_daily_loss":"0.02","max_drawdown":"0.08","max_gross_exposure_usd":"2000","max_order_usd":"1000","max_orders_per_day":50,"max_position_fraction":"0.2","max_position_usd":"1500","reentry_cooldown_s":3600,"scale_action":"limit_buys","scale_lift_after_s":600},"source_text_ref":null,"universe":{"asset_classes":["us_equity"],"leveraged_etp_disclosure_version":null,"leveraged_etps_enabled":false,"max_instruments":5,"pinned":false,"pinned_instruments":[]}}'
+  drafts:
+    version_applied:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZRA0A000000000000000V1
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: MandateVersionApplied
+      schema_version: 1
+      event_time: '2026-09-22T14:30:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54
+      payload:
+        agent_id: agent_a
+        old_version: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+        new_version: sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54
+        classification: risk_increasing
+        step_up:
+          assertion_id: assert_owner_01
+          authenticated_at: '2026-09-22T14:29:10.000000000Z'
+          method: webauthn
+        result: applied
+        reason: null
+        allocation_change: '2500'
+        max_loss_from_allocation: null
+        risk_clock: '2026-09-22T14:30:00.000000000Z'
+      artifact_refs:
+      - sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+      pii_refs: []
+    version_rejected:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZRA1A000000000000000V2
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: MandateVersionApplied
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+      payload:
+        agent_id: agent_a
+        old_version: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+        new_version: sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54
+        classification: risk_increasing
+        step_up:
+          assertion_id: assert_owner_01
+          authenticated_at: '2026-09-22T14:59:20.000000000Z'
+          method: webauthn
+        result: rejected
+        reason: increase_blocked_while_latched
+        allocation_change: null
+        max_loss_from_allocation: null
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs:
+      - sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+      pii_refs: []
+    universe_admitted:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZRB0A000000000000000V3
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: UniverseChanged
+      schema_version: 1
+      event_time: '2026-09-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:b5c23878277c18f61c1095f6324d303a0706ae459ca83f6817617f14930e3300
+      payload:
+        agent_id: agent_b
+        instrument: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        change: admitted
+        reason: thesis_admitted
+        thesis_id: thesis_01J8ZT
+        lineage_id: lineage_01J8ZT
+        universe_size_after: 1
+        risk_clock: '2026-09-22T16:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    universe_removed_pinned:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZRB1A000000000000000V4
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: UniverseChanged
+      schema_version: 1
+      event_time: '2026-09-22T16:30:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54
+      payload:
+        agent_id: agent_a
+        instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+        change: removed
+        reason: version_applied
+        thesis_id: null
+        lineage_id: null
+        universe_size_after: 0
+        risk_clock: '2026-09-22T16:30:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+  journaled_facts:
+  - draft: version_applied
+    fact:
+      kind: AgentVersionActive
+      agent: agent_a
+      connection_id: conn_alpaca_paper_01
+      environment: paper
+      allocation_usd: '12500'
+      pinned:
+      - 7b4a1c2e-1111-4a2b-9c3d-000000000001
+  - draft: version_rejected
+    fact: null
+  - draft: universe_admitted
+    fact:
+      kind: UniverseChanged
+      agent: agent_b
+      instrument: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+      admitted: true
+  - draft: universe_removed_pinned
+    fact:
+      kind: UniverseChanged
+      agent: agent_a
+      instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001
+      admitted: false
+  invalid_drafts:
+  - name: applied_carries_a_comment
+    clause: §9.3 closed schema
+    base_draft: version_applied
+    changes:
+    - path: payload.comment
+      value: raised for the quarter
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.comment
+  - name: applied_without_risk_clock
+    clause: §9.1 absent member
+    base_draft: version_applied
+    changes:
+    - path: payload.risk_clock
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: applied_risk_clock_off_the_second
+    clause: §9.2 risk_clock
+    base_draft: version_applied
+    changes:
+    - path: payload.risk_clock
+      value: '2026-09-22T14:30:00.500000000Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.risk_clock
+  - name: applied_agent_not_an_id
+    clause: §9.1 id
+    base_draft: version_applied
+    changes:
+    - path: payload.agent_id
+      value: agent a
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.agent_id
+  - name: applied_old_version_a_bare_hash
+    clause: §9.1 ref
+    base_draft: version_applied
+    changes:
+    - path: payload.old_version
+      value: e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: artifact_refs
+      value:
+      - sha256:2cf97c88e134c2d0831232123fa70d8e60ad3047cd412a2592f6d8cf05d98f54
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.old_version
+  - name: applied_new_version_null
+    clause: '§9.3 new_version: never null'
+    base_draft: version_applied
+    changes:
+    - path: payload.new_version
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.new_version
+  - name: applied_classified_invalid
+    clause: '§9.3 classification: an invalid change never applies'
+    base_draft: version_applied
+    changes:
+    - path: payload.classification
+      value: invalid
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.classification
+  - name: applied_result_pending
+    clause: §9.3 result
+    base_draft: version_applied
+    changes:
+    - path: payload.result
+      value: pending
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.result
+  - name: applied_allocation_change_not_a_decimal
+    clause: §9.1 decimal
+    base_draft: version_applied
+    changes:
+    - path: payload.allocation_change
+      value: 2,500
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.allocation_change
+  - name: loosened_floor_as_a_percentage
+    clause: §9.1 decimal
+    base_draft: version_applied
+    changes:
+    - path: payload.old_version
+      value: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.new_version
+      value: sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16
+    - path: artifact_refs
+      value:
+      - sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.allocation_change
+      value: null
+    - path: payload.max_loss_from_allocation
+      value: 15%
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.max_loss_from_allocation
+  - name: applied_step_up_carries_a_token
+    clause: '§9.3 step_up: closed'
+    base_draft: version_applied
+    changes:
+    - path: payload.step_up.token
+      value: secret
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up.token
+  - name: increasing_without_step_up
+    clause: rule 29
+    base_draft: version_applied
+    changes:
+    - path: payload.step_up
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up
+  - name: rejected_without_reason
+    clause: rule 30
+    base_draft: version_rejected
+    changes:
+    - path: payload.reason
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: applied_with_a_reason
+    clause: rule 30
+    base_draft: version_applied
+    changes:
+    - path: payload.reason
+      value: would_trigger_limit
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: rejected_with_an_allocation_change
+    clause: rule 30
+    base_draft: version_rejected
+    changes:
+    - path: payload.allocation_change
+      value: '2500'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.allocation_change
+  - name: rejected_with_a_floor
+    clause: rule 30
+    base_draft: version_rejected
+    changes:
+    - path: payload.max_loss_from_allocation
+      value: '0.15'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.max_loss_from_allocation
+  - name: rejected_reason_unknown
+    clause: §9.3 reason
+    base_draft: version_rejected
+    changes:
+    - path: payload.reason
+      value: nothing_to_acknowledge
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
+  - name: rejected_without_reason_and_with_allocation
+    clause: 'rule 30: the first offending member, reason before allocation_change'
+    base_draft: version_rejected
+    changes:
+    - path: payload.reason
+      value: null
+    - path: payload.allocation_change
+      value: '2500'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: raise_classified_neutral
+    clause: 'rule 33: an applied allocation increase is risk-increasing'
+    base_draft: version_applied
+    changes:
+    - path: payload.classification
+      value: neutral
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.classification
+  - name: floor_raise_classified_reducing
+    clause: 'rule 33: an applied floor raise is risk-increasing'
+    base_draft: version_applied
+    changes:
+    - path: payload.old_version
+      value: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.new_version
+      value: sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16
+    - path: artifact_refs
+      value:
+      - sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.classification
+      value: risk_reducing
+    - path: payload.allocation_change
+      value: null
+    - path: payload.max_loss_from_allocation
+      value: '0.15'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.classification
+  - name: latched_increase_classified_neutral
+    clause: 'rule 33: a latched increase is refused only on a risk-increasing version'
+    base_draft: version_rejected
+    changes:
+    - path: payload.classification
+      value: neutral
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.classification
+  - name: raise_classified_neutral_without_step_up
+    clause: 'rules 29 and 33: a misclassified raise is reported at its classification'
+    base_draft: version_applied
+    changes:
+    - path: payload.classification
+      value: neutral
+    - path: payload.step_up
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.classification
+  - name: applied_without_mandate_ref
+    clause: §9 required config_refs
+    base_draft: version_applied
+    changes:
+    - path: config_refs
+      value: {}
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.mandate_version
+  - name: admitted_instrument_not_an_id
+    clause: §9.3 asset_id
+    base_draft: universe_admitted
+    changes:
+    - path: payload.instrument
+      value: BTC/USD
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument
+  - name: admitted_size_as_text
+    clause: §9.1 integer
+    base_draft: universe_admitted
+    changes:
+    - path: payload.universe_size_after
+      value: '1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.universe_size_after
+  - name: admitted_change_paused
+    clause: §9.3 change
+    base_draft: universe_admitted
+    changes:
+    - path: payload.change
+      value: paused
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.change
+  - name: admitted_reason_unknown
+    clause: §9.3 reason
+    base_draft: universe_admitted
+    changes:
+    - path: payload.reason
+      value: owner_added
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
+  - name: admitted_thesis_not_an_id
+    clause: §9.1 id
+    base_draft: universe_admitted
+    changes:
+    - path: payload.thesis_id
+      value: thesis 01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.thesis_id
+  - name: admitted_lineage_not_an_id
+    clause: §9.1 id
+    base_draft: universe_admitted
+    changes:
+    - path: payload.lineage_id
+      value: lineage/01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.lineage_id
+  - name: admitted_instrument_an_id_not_an_asset_id
+    clause: '§9.3 asset_id: an id that is not the uuid form (#497 round 1, m3)'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.instrument
+      value: BTCUSD
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument
+  - name: admitted_instrument_not_a_string
+    clause: '§9.3 asset_id: not a string (#509 round 1, m2)'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.instrument
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: admitted_instrument_with_a_trailing_newline
+    clause: '§9.3 asset_id: the whole string, so a trailing newline is refused (#511 round 1)'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.instrument
+      value: '7b4a1c2e-2222-4a2b-9c3d-000000000002
+
+        '
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument
+  - name: admitted_instrument_in_capitals
+    clause: '§9.3 asset_id: lowercase only, so one asset has one spelling'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.instrument
+      value: 7B4A1C2E-2222-4A2B-9C3D-000000000002
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument
+  - name: order_29_before_30
+    clause: 'rules 29 then 30: a risk-increasing applied record without step-up and with a reason'
+    base_draft: version_applied
+    changes:
+    - path: payload.step_up
+      value: null
+    - path: payload.reason
+      value: would_trigger_limit
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up
+      also:
+      - reason: schema
+        path: payload.reason
+  - name: order_30_before_33
+    clause: 'rules 30 then 33: a rejected raise labelled neutral that also carries an allocation change'
+    base_draft: version_rejected
+    changes:
+    - path: payload.classification
+      value: neutral
+    - path: payload.allocation_change
+      value: '2500'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.allocation_change
+      also:
+      - reason: schema
+        path: payload.classification
+  - name: order_31_before_32
+    clause: 'rules 31 then 32: a thesis admission that removes and names no thesis'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.change
+      value: removed
+    - path: payload.thesis_id
+      value: null
+    - path: payload.lineage_id
+      value: null
+    - path: payload.universe_size_after
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+      also:
+      - reason: schema
+        path: payload.thesis_id
+  - name: thesis_admission_removes
+    clause: rule 31
+    base_draft: universe_admitted
+    changes:
+    - path: payload.change
+      value: removed
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: expiry_admits
+    clause: rule 31
+    base_draft: universe_admitted
+    changes:
+    - path: payload.reason
+      value: thesis_expired
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: admitted_without_thesis
+    clause: 'rule 32: null together, at the null one'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.thesis_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.thesis_id
+  - name: admitted_without_lineage
+    clause: 'rule 32: null together, at the null one'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.lineage_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.lineage_id
+  - name: admitted_with_neither
+    clause: 'rule 32: a thesis reason names its thesis'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.thesis_id
+      value: null
+    - path: payload.lineage_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.thesis_id
+  - name: halt_without_thesis
+    clause: 'rule 32: an operator halts per thesis'
+    base_draft: universe_removed_pinned
+    changes:
+    - path: payload.reason
+      value: operator_halt
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.thesis_id
+  - name: pinned_admission_names_a_thesis
+    clause: 'rule 32: an instrument a pinned list admits follows from no thesis'
+    base_draft: universe_removed_pinned
+    changes:
+    - path: payload.change
+      value: admitted
+    - path: payload.universe_size_after
+      value: 1
+    - path: payload.thesis_id
+      value: thesis_01J8ZT
+    - path: payload.lineage_id
+      value: lineage_01J8ZT
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.thesis_id
+  - name: pinning_switch_removal_with_thesis_alone
+    clause: 'rule 32: null together, at the null one'
+    base_draft: universe_removed_pinned
+    changes:
+    - path: payload.thesis_id
+      value: thesis_01J8ZT
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.lineage_id
+  - name: removed_on_the_control_stream
+    clause: §9 stream
+    base_draft: universe_removed_pinned
+    changes:
+    - path: stream_id
+      value: ctl:ws_01J8Z2
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  valid_drafts:
+  - name: neutral_without_step_up
+    clause: 'rule 29: only a risk-increasing version needs step-up'
+    base_draft: version_applied
+    changes:
+    - path: payload.old_version
+      value: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.new_version
+      value: sha256:c0a5e0805506a7b3da92f677fe0f9c7721f39ac2b268af8f17f2422784ccf79f
+    - path: artifact_refs
+      value:
+      - sha256:c0a5e0805506a7b3da92f677fe0f9c7721f39ac2b268af8f17f2422784ccf79f
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.classification
+      value: neutral
+    - path: payload.step_up
+      value: null
+    - path: payload.allocation_change
+      value: null
+    expect:
+      outcome: Valid
+  - name: reducing_with_step_up
+    clause: 'rule 29: step-up is allowed on any version'
+    base_draft: version_applied
+    changes:
+    - path: payload.old_version
+      value: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.new_version
+      value: sha256:139f3129f3558c6b2aec5bbb71dd1d5f9aeb0305fbb9bcbfc14a6d288c60372c
+    - path: artifact_refs
+      value:
+      - sha256:139f3129f3558c6b2aec5bbb71dd1d5f9aeb0305fbb9bcbfc14a6d288c60372c
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.classification
+      value: risk_reducing
+    - path: payload.allocation_change
+      value: null
+    expect:
+      outcome: Valid
+  - name: applied_changing_neither
+    clause: 'rule 30: an applied version may change neither the allocation nor the floor'
+    base_draft: version_applied
+    changes:
+    - path: payload.old_version
+      value: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.new_version
+      value: sha256:c0a5e0805506a7b3da92f677fe0f9c7721f39ac2b268af8f17f2422784ccf79f
+    - path: artifact_refs
+      value:
+      - sha256:c0a5e0805506a7b3da92f677fe0f9c7721f39ac2b268af8f17f2422784ccf79f
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.classification
+      value: neutral
+    - path: payload.allocation_change
+      value: null
+    expect:
+      outcome: Valid
+  - name: floor_loosened
+    clause: 'rules 30 and 33: an applied floor raise, risk-increasing with step-up'
+    base_draft: version_applied
+    changes:
+    - path: payload.old_version
+      value: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.new_version
+      value: sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16
+    - path: artifact_refs
+      value:
+      - sha256:267a2a70a07dbeeff3b655a9ad8528498da87f48c704d9d8f223c5fd64308d16
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+    - path: payload.allocation_change
+      value: null
+    - path: payload.max_loss_from_allocation
+      value: '0.15'
+    expect:
+      outcome: Valid
+  - name: pinned_instrument_admitted
+    clause: 'rule 31: version_applied admits'
+    base_draft: universe_removed_pinned
+    changes:
+    - path: payload.change
+      value: admitted
+    - path: payload.universe_size_after
+      value: 1
+    expect:
+      outcome: Valid
+  - name: pinning_switch_removes_a_thesis_instrument
+    clause: 'rule 32: DEC-121''s pinning switch removes an admitted instrument and names its thesis'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.change
+      value: removed
+    - path: payload.reason
+      value: version_applied
+    - path: payload.universe_size_after
+      value: 0
+    expect:
+      outcome: Valid
+  - name: eligibility_lost_on_a_pinned_instrument
+    clause: 'rule 32: eligibility_lost may name no thesis'
+    base_draft: universe_removed_pinned
+    changes:
+    - path: payload.reason
+      value: eligibility_lost
+    expect:
+      outcome: Valid
+  - name: eligibility_lost_on_a_thesis
+    clause: 'rule 32: eligibility_lost may name its thesis'
+    base_draft: universe_admitted
+    changes:
+    - path: payload.change
+      value: removed
+    - path: payload.reason
+      value: eligibility_lost
+    - path: payload.universe_size_after
+      value: 0
+    expect:
+      outcome: Valid
+research:
+  spec: docs/specs/journal.md v0.9 §9.4 (DEC-413)
+  stream_id: agent:ws_01J8Z2:agent_r
+  artifacts:
+  - name: research_mandate
+    ref: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+    object:
+      mandate_schema_version: 1
+      name: research-equity
+      source_text_ref: null
+      environment: paper
+      connection_id: conn_alpaca_paper_01
+      capital:
+        allocation_usd: '10000'
+        max_loss_from_allocation: '0.1'
+      goal:
+        type: continuous
+        end_date: null
+        on_complete: hold_protected
+      universe:
+        pinned: false
+        pinned_instruments: []
+        max_instruments: 5
+        asset_classes:
+        - us_equity
+        leveraged_etps_enabled: false
+        leveraged_etp_disclosure_version: null
+      behavior:
+        description: Hold a small book of US equities on the research agent's theses.
+        signal_models:
+        - id: llm.research_agent
+          version: 0.1.0
+          content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+          params: []
+          weight: '0.5'
+          max_output_age_s: 3600
+          admits_instruments: true
+        - id: quant.momentum
+          version: 1.0.0
+          content_hash: sha256:2222222222222222222222222222222222222222222222222222222222222222
+          params:
+          - key: lookback_bars
+            value: '50'
+          weight: '0.5'
+          max_output_age_s: 900
+          admits_instruments: false
+        research:
+          interval_s: 3600
+          cost_cap_usd_per_day: '5'
+          max_revisions_per_lineage: 3
+        cadence:
+          interval_s: 300
+          event_sources:
+          - fills
+          - news
+          - price
+        sizing:
+          method: conviction_linear
+          entry_threshold: '0.3'
+          exit_threshold: '0.3'
+          rebalance_band: '0.05'
+      protection:
+        enabled: true
+        stop_distance: '0.05'
+        take_profit_distance: '0.1'
+        crypto_stop_limit_offset: null
+      risk:
+        max_position_usd: '1500'
+        max_position_fraction: '0.2'
+        max_gross_exposure_usd: '2000'
+        max_order_usd: '1000'
+        max_orders_per_day: 50
+        max_daily_loss: '0.02'
+        daily_loss_action: exits_only
+        max_drawdown: '0.08'
+        drawdown_ladder:
+        - at: '0.03'
+          action: scale_sizes
+          factor: '0.5'
+        - at: '0.06'
+          action: exits_only
+          factor: null
+        - at: '0.08'
+          action: flatten_and_pause
+          factor: null
+        hysteresis: '0.01'
+        scale_action: limit_buys
+        breach_confirm_s: 60
+        daily_breach_min_s: 3600
+        scale_lift_after_s: 600
+        reentry_cooldown_s: 3600
+      autonomy:
+        rules:
+        - id: large_orders
+          when:
+            field: order_usd
+            op: gt
+            value: '900'
+          then: ask
+        - id: low_score
+          when:
+            field: combined_score
+            op: lt
+            value: '0.65'
+          then: ask
+        - id: routine
+          when:
+            field: purpose
+            op: in
+            value:
+            - increase
+            - open
+          then: auto
+        default: ask
+        admission: ask
+        approval:
+          timeout_s: 600
+          on_timeout: skip
+          approvers:
+          - role:approver
+          two_approver_above_usd: null
+      notifications:
+        channels:
+        - email
+        - web_push
+        quiet_hours:
+          start: '23:00'
+          end: 07:00
+          timezone: America/New_York
+    canonical: '{"autonomy":{"admission":"ask","approval":{"approvers":["role:approver"],"on_timeout":"skip","timeout_s":600,"two_approver_above_usd":null},"default":"ask","rules":[{"id":"large_orders","then":"ask","when":{"field":"order_usd","op":"gt","value":"900"}},{"id":"low_score","then":"ask","when":{"field":"combined_score","op":"lt","value":"0.65"}},{"id":"routine","then":"auto","when":{"field":"purpose","op":"in","value":["increase","open"]}}]},"behavior":{"cadence":{"event_sources":["fills","news","price"],"interval_s":300},"description":"Hold a small book of US equities on the research agent''s theses.","research":{"cost_cap_usd_per_day":"5","interval_s":3600,"max_revisions_per_lineage":3},"signal_models":[{"admits_instruments":true,"content_hash":"sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883","id":"llm.research_agent","max_output_age_s":3600,"params":[],"version":"0.1.0","weight":"0.5"},{"admits_instruments":false,"content_hash":"sha256:2222222222222222222222222222222222222222222222222222222222222222","id":"quant.momentum","max_output_age_s":900,"params":[{"key":"lookback_bars","value":"50"}],"version":"1.0.0","weight":"0.5"}],"sizing":{"entry_threshold":"0.3","exit_threshold":"0.3","method":"conviction_linear","rebalance_band":"0.05"}},"capital":{"allocation_usd":"10000","max_loss_from_allocation":"0.1"},"connection_id":"conn_alpaca_paper_01","environment":"paper","goal":{"end_date":null,"on_complete":"hold_protected","type":"continuous"},"mandate_schema_version":1,"name":"research-equity","notifications":{"channels":["email","web_push"],"quiet_hours":{"end":"07:00","start":"23:00","timezone":"America/New_York"}},"protection":{"crypto_stop_limit_offset":null,"enabled":true,"stop_distance":"0.05","take_profit_distance":"0.1"},"risk":{"breach_confirm_s":60,"daily_breach_min_s":3600,"daily_loss_action":"exits_only","drawdown_ladder":[{"action":"scale_sizes","at":"0.03","factor":"0.5"},{"action":"exits_only","at":"0.06","factor":null},{"action":"flatten_and_pause","at":"0.08","factor":null}],"hysteresis":"0.01","max_daily_loss":"0.02","max_drawdown":"0.08","max_gross_exposure_usd":"2000","max_order_usd":"1000","max_orders_per_day":50,"max_position_fraction":"0.2","max_position_usd":"1500","reentry_cooldown_s":3600,"scale_action":"limit_buys","scale_lift_after_s":600},"source_text_ref":null,"universe":{"asset_classes":["us_equity"],"leveraged_etp_disclosure_version":null,"leveraged_etps_enabled":false,"max_instruments":5,"pinned":false,"pinned_instruments":[]}}'
+  - name: model_content
+    ref: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+    object:
+      kind: signal_model
+      model_id: llm.research_agent
+      model_version: 0.1.0
+      authorship: platform
+      code: 'reference fixture: stands for the research agent''s prompt, code, and model identity (mandate spec §8.1, §8.4)'
+    canonical: '{"authorship":"platform","code":"reference fixture: stands for the research agent''s prompt, code, and model identity (mandate spec §8.1, §8.4)","kind":"signal_model","model_id":"llm.research_agent","model_version":"0.1.0"}'
+  - name: prompt_th_01J8ZTA0
+    ref: sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+    object:
+      kind: prompt
+      thesis_id: th_01J8ZTA0
+      note: 'reference fixture: stands for the prompt of th_01J8ZTA0'
+    canonical: '{"kind":"prompt","note":"reference fixture: stands for the prompt of th_01J8ZTA0","thesis_id":"th_01J8ZTA0"}'
+  - name: response_th_01J8ZTA0
+    ref: sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+    object:
+      kind: response
+      thesis_id: th_01J8ZTA0
+      note: 'reference fixture: stands for the response of th_01J8ZTA0'
+    canonical: '{"kind":"response","note":"reference fixture: stands for the response of th_01J8ZTA0","thesis_id":"th_01J8ZTA0"}'
+  - name: evidence_th_01J8ZTA0
+    ref: sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    object:
+      kind: evidence
+      thesis_id: th_01J8ZTA0
+      note: 'reference fixture: stands for the evidence of th_01J8ZTA0'
+    canonical: '{"kind":"evidence","note":"reference fixture: stands for the evidence of th_01J8ZTA0","thesis_id":"th_01J8ZTA0"}'
+  - name: prompt_th_01J8ZTA1
+    ref: sha256:eb189164129b8731e3b1af918757f01e290473b0bb7c9e8cf05daee77e77b5c9
+    object:
+      kind: prompt
+      thesis_id: th_01J8ZTA1
+      note: 'reference fixture: stands for the prompt of th_01J8ZTA1'
+    canonical: '{"kind":"prompt","note":"reference fixture: stands for the prompt of th_01J8ZTA1","thesis_id":"th_01J8ZTA1"}'
+  - name: response_th_01J8ZTA1
+    ref: sha256:c4d252caaea5004ce2af9e30492f52cbecec66d87d48bfc3dc6af2da59e17e4a
+    object:
+      kind: response
+      thesis_id: th_01J8ZTA1
+      note: 'reference fixture: stands for the response of th_01J8ZTA1'
+    canonical: '{"kind":"response","note":"reference fixture: stands for the response of th_01J8ZTA1","thesis_id":"th_01J8ZTA1"}'
+  - name: evidence_th_01J8ZTA1
+    ref: sha256:c57ad9e261f661444bdcf48bdd286994e5c18294f0f309e495c1414b66471aad
+    object:
+      kind: evidence
+      thesis_id: th_01J8ZTA1
+      note: 'reference fixture: stands for the evidence of th_01J8ZTA1'
+    canonical: '{"kind":"evidence","note":"reference fixture: stands for the evidence of th_01J8ZTA1","thesis_id":"th_01J8ZTA1"}'
+  - name: prompt_th_01J8ZTA2
+    ref: sha256:fbc645943eb89d5905e1f3e20f8103fca31b376fe1f48099444f94958bfd16a1
+    object:
+      kind: prompt
+      thesis_id: th_01J8ZTA2
+      note: 'reference fixture: stands for the prompt of th_01J8ZTA2'
+    canonical: '{"kind":"prompt","note":"reference fixture: stands for the prompt of th_01J8ZTA2","thesis_id":"th_01J8ZTA2"}'
+  - name: response_th_01J8ZTA2
+    ref: sha256:6a2aaffcf570761c553551701dfcc52ddf3f645d62254ebf635b74b580e0c0f1
+    object:
+      kind: response
+      thesis_id: th_01J8ZTA2
+      note: 'reference fixture: stands for the response of th_01J8ZTA2'
+    canonical: '{"kind":"response","note":"reference fixture: stands for the response of th_01J8ZTA2","thesis_id":"th_01J8ZTA2"}'
+  - name: evidence_th_01J8ZTA2
+    ref: sha256:60b678cdc98e03bbe77245b98051f6bc38965d7b1c5d3a7297ea6cbfb284f7ff
+    object:
+      kind: evidence
+      thesis_id: th_01J8ZTA2
+      note: 'reference fixture: stands for the evidence of th_01J8ZTA2'
+    canonical: '{"kind":"evidence","note":"reference fixture: stands for the evidence of th_01J8ZTA2","thesis_id":"th_01J8ZTA2"}'
+  - name: prompt_th_01J8ZTB0
+    ref: sha256:40624ea491a5def5686f60323a7d9a51d95b358dbd81768c3a454e24be53fb57
+    object:
+      kind: prompt
+      thesis_id: th_01J8ZTB0
+      note: 'reference fixture: stands for the prompt of th_01J8ZTB0'
+    canonical: '{"kind":"prompt","note":"reference fixture: stands for the prompt of th_01J8ZTB0","thesis_id":"th_01J8ZTB0"}'
+  - name: response_th_01J8ZTB0
+    ref: sha256:7a8aa682626ad22c854278ca2ffb553a7e61805b652433ecc526bf9a9d1c4e9a
+    object:
+      kind: response
+      thesis_id: th_01J8ZTB0
+      note: 'reference fixture: stands for the response of th_01J8ZTB0'
+    canonical: '{"kind":"response","note":"reference fixture: stands for the response of th_01J8ZTB0","thesis_id":"th_01J8ZTB0"}'
+  - name: evidence_th_01J8ZTB0
+    ref: sha256:14ef8daea12f0ab66ad8d5adac8658f275dba9a9088a29d8588de0f68b14aabb
+    object:
+      kind: evidence
+      thesis_id: th_01J8ZTB0
+      note: 'reference fixture: stands for the evidence of th_01J8ZTB0'
+    canonical: '{"kind":"evidence","note":"reference fixture: stands for the evidence of th_01J8ZTB0","thesis_id":"th_01J8ZTB0"}'
+  - name: prompt_th_01J8ZTB1
+    ref: sha256:ef90890543eb4af76f7642ea35a613f669adffcc5263f11cd88f3e039f9d721f
+    object:
+      kind: prompt
+      thesis_id: th_01J8ZTB1
+      note: 'reference fixture: stands for the prompt of th_01J8ZTB1'
+    canonical: '{"kind":"prompt","note":"reference fixture: stands for the prompt of th_01J8ZTB1","thesis_id":"th_01J8ZTB1"}'
+  - name: response_th_01J8ZTB1
+    ref: sha256:fa7e2b0e6cf2a8da27602cffb9459814d3445c6434d96778f3457cae5fc6c75d
+    object:
+      kind: response
+      thesis_id: th_01J8ZTB1
+      note: 'reference fixture: stands for the response of th_01J8ZTB1'
+    canonical: '{"kind":"response","note":"reference fixture: stands for the response of th_01J8ZTB1","thesis_id":"th_01J8ZTB1"}'
+  - name: evidence_th_01J8ZTB1
+    ref: sha256:4bfee4ec03b119a1f1cb412e19e135c15ae3b2970da3a4a89267a9b1b0a6236e
+    object:
+      kind: evidence
+      thesis_id: th_01J8ZTB1
+      note: 'reference fixture: stands for the evidence of th_01J8ZTB1'
+    canonical: '{"kind":"evidence","note":"reference fixture: stands for the evidence of th_01J8ZTB1","thesis_id":"th_01J8ZTB1"}'
+  - name: autopsy_th_01J8ZTB0
+    ref: sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+    object:
+      kind: autopsy
+      thesis_id: th_01J8ZTB0
+      note: 'reference fixture: stands for the autopsy of th_01J8ZTB0'
+    canonical: '{"kind":"autopsy","note":"reference fixture: stands for the autopsy of th_01J8ZTB0","thesis_id":"th_01J8ZTB0"}'
+  - name: autopsy_th_01J8ZTB1
+    ref: sha256:aef4494c5209f88b9e36671a79cc1eb5bbb48ffa6f2dacfe2224004336762d13
+    object:
+      kind: autopsy
+      thesis_id: th_01J8ZTB1
+      note: 'reference fixture: stands for the autopsy of th_01J8ZTB1'
+    canonical: '{"kind":"autopsy","note":"reference fixture: stands for the autopsy of th_01J8ZTB1","thesis_id":"th_01J8ZTB1"}'
+  drafts:
+    proposed_admitted:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZTA0A000000000000000T1
+      stream_id: agent:ws_01J8Z2:agent_r
+      event_type: ThesisProposed
+      schema_version: 1
+      event_time: '2026-09-22T14:00:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_r
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      payload:
+        model_id: llm.research_agent
+        model_version: 0.1.0
+        content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        revision: 0
+        predecessor_thesis_id: null
+        autopsy_ref: null
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        asset_class: us_equity
+        direction: long
+        as_of: '2026-09-22T14:00:00.000000000Z'
+        expires_at: '2026-09-27T14:00:00.000000000Z'
+        horizon_s: 432000
+        conviction: '0.62'
+        confidence: '0.7'
+        evidence_ref: sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+        evidence_sources:
+        - filings_sec_edgar
+        - news_wire_a
+        corroboration: market_data
+        invalidation: Guidance withdrawn, or a close below the prior quarter's low
+        allowlist_version: 7
+        prompt_ref: sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+        response_ref: sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+        admitted: true
+        reason: null
+      artifact_refs:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+      pii_refs: []
+    proposed_refused:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZTA1A000000000000000T2
+      stream_id: agent:ws_01J8Z2:agent_r
+      event_type: ThesisProposed
+      schema_version: 1
+      event_time: '2026-09-22T14:10:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_r
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      payload:
+        model_id: llm.research_agent
+        model_version: 0.1.0
+        content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        thesis_id: th_01J8ZTA1
+        lineage_id: th_01J8ZTA1
+        revision: 0
+        predecessor_thesis_id: null
+        autopsy_ref: null
+        instrument_id: 7b4a1c2e-3333-4a2b-9c3d-000000000003
+        asset_class: us_equity
+        direction: long
+        as_of: '2026-09-22T14:00:00.000000000Z'
+        expires_at: '2026-09-27T14:00:00.000000000Z'
+        horizon_s: 432000
+        conviction: '0.62'
+        confidence: '0.7'
+        evidence_ref: sha256:c57ad9e261f661444bdcf48bdd286994e5c18294f0f309e495c1414b66471aad
+        evidence_sources:
+        - filings_sec_edgar
+        - news_wire_a
+        corroboration: independent_source
+        invalidation: Guidance withdrawn, or a close below the prior quarter's low
+        allowlist_version: 7
+        prompt_ref: sha256:eb189164129b8731e3b1af918757f01e290473b0bb7c9e8cf05daee77e77b5c9
+        response_ref: sha256:c4d252caaea5004ce2af9e30492f52cbecec66d87d48bfc3dc6af2da59e17e4a
+        admitted: false
+        reason: eligibility_floor
+      artifact_refs:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:c4d252caaea5004ce2af9e30492f52cbecec66d87d48bfc3dc6af2da59e17e4a
+      - sha256:c57ad9e261f661444bdcf48bdd286994e5c18294f0f309e495c1414b66471aad
+      - sha256:eb189164129b8731e3b1af918757f01e290473b0bb7c9e8cf05daee77e77b5c9
+      pii_refs: []
+    proposed_ignored:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZTA2A000000000000000T3
+      stream_id: agent:ws_01J8Z2:agent_r
+      event_type: ThesisProposed
+      schema_version: 1
+      event_time: '2026-09-22T14:20:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_r
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      payload:
+        model_id: llm.research_agent
+        model_version: 0.1.0
+        content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        thesis_id: th_01J8ZTA2
+        lineage_id: th_01J8ZTA2
+        revision: 0
+        predecessor_thesis_id: null
+        autopsy_ref: null
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        asset_class: us_equity
+        direction: short
+        as_of: '2026-09-22T14:00:00.000000000Z'
+        expires_at: '2026-09-27T14:00:00.000000000Z'
+        horizon_s: 432000
+        conviction: '0.62'
+        confidence: '0.7'
+        evidence_ref: sha256:60b678cdc98e03bbe77245b98051f6bc38965d7b1c5d3a7297ea6cbfb284f7ff
+        evidence_sources:
+        - filings_sec_edgar
+        - news_wire_a
+        corroboration: null
+        invalidation: Guidance withdrawn, or a close below the prior quarter's low
+        allowlist_version: 7
+        prompt_ref: sha256:fbc645943eb89d5905e1f3e20f8103fca31b376fe1f48099444f94958bfd16a1
+        response_ref: sha256:6a2aaffcf570761c553551701dfcc52ddf3f645d62254ebf635b74b580e0c0f1
+        admitted: false
+        reason: direction_not_allowed
+      artifact_refs:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:60b678cdc98e03bbe77245b98051f6bc38965d7b1c5d3a7297ea6cbfb284f7ff
+      - sha256:6a2aaffcf570761c553551701dfcc52ddf3f645d62254ebf635b74b580e0c0f1
+      - sha256:fbc645943eb89d5905e1f3e20f8103fca31b376fe1f48099444f94958bfd16a1
+      pii_refs: []
+    revised_admitted:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZTB0A000000000000000T4
+      stream_id: agent:ws_01J8Z2:agent_r
+      event_type: ThesisRevised
+      schema_version: 1
+      event_time: '2026-09-28T14:00:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_r
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      payload:
+        model_id: llm.research_agent
+        model_version: 0.1.0
+        content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        thesis_id: th_01J8ZTB0
+        lineage_id: th_01J8ZTA0
+        revision: 1
+        predecessor_thesis_id: th_01J8ZTA0
+        autopsy_ref: sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        asset_class: us_equity
+        direction: long
+        as_of: '2026-09-28T14:00:00.000000000Z'
+        expires_at: '2026-10-03T14:00:00.000000000Z'
+        horizon_s: 432000
+        conviction: '0.62'
+        confidence: '0.7'
+        evidence_ref: sha256:14ef8daea12f0ab66ad8d5adac8658f275dba9a9088a29d8588de0f68b14aabb
+        evidence_sources:
+        - filings_sec_edgar
+        - news_wire_a
+        corroboration: independent_source
+        invalidation: Guidance withdrawn, or a close below the prior quarter's low
+        allowlist_version: 7
+        prompt_ref: sha256:40624ea491a5def5686f60323a7d9a51d95b358dbd81768c3a454e24be53fb57
+        response_ref: sha256:7a8aa682626ad22c854278ca2ffb553a7e61805b652433ecc526bf9a9d1c4e9a
+        admitted: true
+        reason: null
+      artifact_refs:
+      - sha256:14ef8daea12f0ab66ad8d5adac8658f275dba9a9088a29d8588de0f68b14aabb
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:40624ea491a5def5686f60323a7d9a51d95b358dbd81768c3a454e24be53fb57
+      - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+      - sha256:7a8aa682626ad22c854278ca2ffb553a7e61805b652433ecc526bf9a9d1c4e9a
+      pii_refs: []
+    revised_retired:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZTB1A000000000000000T5
+      stream_id: agent:ws_01J8Z2:agent_r
+      event_type: ThesisRevised
+      schema_version: 1
+      event_time: '2026-10-04T14:00:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_r
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      payload:
+        model_id: llm.research_agent
+        model_version: 0.1.0
+        content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        thesis_id: th_01J8ZTB1
+        lineage_id: th_01J8ZTA0
+        revision: 4
+        predecessor_thesis_id: th_01J8ZTB0D
+        autopsy_ref: sha256:aef4494c5209f88b9e36671a79cc1eb5bbb48ffa6f2dacfe2224004336762d13
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        asset_class: us_equity
+        direction: long
+        as_of: '2026-10-04T14:00:00.000000000Z'
+        expires_at: '2026-10-09T14:00:00.000000000Z'
+        horizon_s: 432000
+        conviction: '0.62'
+        confidence: '0.7'
+        evidence_ref: sha256:4bfee4ec03b119a1f1cb412e19e135c15ae3b2970da3a4a89267a9b1b0a6236e
+        evidence_sources:
+        - filings_sec_edgar
+        - news_wire_a
+        corroboration: market_data
+        invalidation: Guidance withdrawn, or a close below the prior quarter's low
+        allowlist_version: 7
+        prompt_ref: sha256:ef90890543eb4af76f7642ea35a613f669adffcc5263f11cd88f3e039f9d721f
+        response_ref: sha256:fa7e2b0e6cf2a8da27602cffb9459814d3445c6434d96778f3457cae5fc6c75d
+        admitted: false
+        reason: lineage_retired
+      artifact_refs:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:4bfee4ec03b119a1f1cb412e19e135c15ae3b2970da3a4a89267a9b1b0a6236e
+      - sha256:aef4494c5209f88b9e36671a79cc1eb5bbb48ffa6f2dacfe2224004336762d13
+      - sha256:ef90890543eb4af76f7642ea35a613f669adffcc5263f11cd88f3e039f9d721f
+      - sha256:fa7e2b0e6cf2a8da27602cffb9459814d3445c6434d96778f3457cae5fc6c75d
+      pii_refs: []
+  invalid_drafts:
+  - name: model_id_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.model_id
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.model_id
+  - name: model_version_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.model_version
+      value: 1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model_version
+  - name: content_hash_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.content_hash
+      value: '4444444444444444444444444444444444444444444444444444444444444444'
+    - path: artifact_refs
+      value:
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.content_hash
+  - name: thesis_id_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.thesis_id
+      value: thesis 01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.thesis_id
+  - name: lineage_id_ill_typed
+    clause: §9.1 types
+    base_draft: revised_admitted
+    changes:
+    - path: payload.lineage_id
+      value: lineage/01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.lineage_id
+  - name: revision_ill_typed
+    clause: §9.1 types
+    base_draft: revised_admitted
+    changes:
+    - path: payload.revision
+      value: '1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.revision
+  - name: predecessor_thesis_id_ill_typed
+    clause: §9.1 types
+    base_draft: revised_admitted
+    changes:
+    - path: payload.predecessor_thesis_id
+      value: th 01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.predecessor_thesis_id
+  - name: autopsy_ref_ill_typed
+    clause: §9.1 types
+    base_draft: revised_admitted
+    changes:
+    - path: payload.autopsy_ref
+      value: autopsy.md
+    - path: artifact_refs
+      value:
+      - sha256:14ef8daea12f0ab66ad8d5adac8658f275dba9a9088a29d8588de0f68b14aabb
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:40624ea491a5def5686f60323a7d9a51d95b358dbd81768c3a454e24be53fb57
+      - sha256:7a8aa682626ad22c854278ca2ffb553a7e61805b652433ecc526bf9a9d1c4e9a
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.autopsy_ref
+  - name: instrument_id_ill_typed
+    clause: §9.4 asset_id
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.instrument_id
+      value: BRK.B
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument_id
+  - name: asset_class_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.asset_class
+      value: us_option
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.asset_class
+  - name: direction_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.direction
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.direction
+  - name: as_of_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.as_of
+      value: '2026-09-22T14:00:00Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.as_of
+  - name: expires_at_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.expires_at
+      value: 1790517600
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.expires_at
+  - name: horizon_s_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.horizon_s
+      value: '432000'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.horizon_s
+  - name: conviction_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.conviction
+      value: 62%
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.conviction
+  - name: confidence_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.confidence
+      value: 1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.confidence
+  - name: evidence_ref_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.evidence_ref
+      value: sha256:EVIDENCE
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.evidence_ref
+  - name: evidence_sources_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.evidence_sources
+      value: news_wire_a
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.evidence_sources
+  - name: corroboration_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.corroboration
+      value: model_asserted
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.corroboration
+  - name: invalidation_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.invalidation
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.invalidation
+  - name: allowlist_version_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.allowlist_version
+      value: '7'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.allowlist_version
+  - name: prompt_ref_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.prompt_ref
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.prompt_ref
+  - name: response_ref_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.response_ref
+      value: '4444444444444444444444444444444444444444444444444444444444444444'
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.response_ref
+  - name: admitted_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.admitted
+      value: 'true'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.admitted
+  - name: reason_ill_typed
+    clause: §9.1 types
+    base_draft: proposed_refused
+    changes:
+    - path: payload.reason
+      value: stale_thesis
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
+  - name: instrument_id_a_ticker_not_an_asset_id
+    clause: '§9.4 asset_id: an id that is not mandate spec §3''s asset ID'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.instrument_id
+      value: BTCUSD
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument_id
+  - name: instrument_id_not_a_string
+    clause: '§9.4 asset_id: not a string'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.instrument_id
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument_id
+  - name: instrument_id_with_a_trailing_newline
+    clause: '§9.4 asset_id: the whole string, so a trailing newline is refused'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.instrument_id
+      value: '7b4a1c2e-2222-4a2b-9c3d-000000000002
+
+        '
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument_id
+  - name: instrument_id_an_uppercase_asset_id
+    clause: '§9.4 asset_id: uppercase is refused, never folded'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.instrument_id
+      value: 7B4A1C2E-2222-4A2B-9C3D-000000000002
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument_id
+  - name: a_source_cited_as_empty_text
+    clause: §9.1 text, inside the list
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.evidence_sources
+      value:
+      - filings_sec_edgar
+      - ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.evidence_sources[1]
+  - name: proposed_carries_a_score
+    clause: §9.4 closed schema
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.score
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.score
+  - name: proposed_without_allowlist_version
+    clause: §9.1 absent member
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.allowlist_version
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.allowlist_version
+  - name: proposed_reason_absent_not_null
+    clause: '§9.1 absent member: never read as null'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.reason
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: proposed_as_a_revision
+    clause: 'rule 34: a ThesisProposed is revision 0'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.revision
+      value: 1
+    - path: payload.predecessor_thesis_id
+      value: th_01J8ZT00
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.revision
+  - name: revised_at_revision_zero
+    clause: 'rule 34: a ThesisRevised is a revision above 0'
+    base_draft: revised_admitted
+    changes:
+    - path: payload.revision
+      value: 0
+    - path: payload.predecessor_thesis_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.revision
+  - name: proposed_with_an_autopsy
+    clause: 'rule 34: only a revision carries an autopsy'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.autopsy_ref
+      value: sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.autopsy_ref
+  - name: admitted_with_a_reason
+    clause: rule 35
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.reason
+      value: universe_full
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: refused_without_a_reason
+    clause: rule 35
+    base_draft: proposed_refused
+    changes:
+    - path: payload.reason
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: short_admitted
+    clause: 'rule 36: check 1 fails on the record'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.direction
+      value: short
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: horizon_off_by_a_nanosecond_admitted
+    clause: 'rule 36: check 2 compares the instants exactly'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.expires_at
+      value: '2026-09-27T14:00:00.000000001Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: revision_without_predecessor_admitted
+    clause: 'rule 36: check 3 fails on the record'
+    base_draft: revised_admitted
+    changes:
+    - path: payload.predecessor_thesis_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: short_and_off_horizon_refused_for_the_horizon
+    clause: 'rule 36: the first failing check decides'
+    base_draft: proposed_ignored
+    changes:
+    - path: payload.expires_at
+      value: '2026-09-27T14:00:01.000000000Z'
+    - path: payload.reason
+      value: horizon_mismatch
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: short_and_without_predecessor_refused_for_the_predecessor
+    clause: 'rule 36: checks 1 and 3 both fail, and check 1 decides'
+    base_draft: revised_admitted
+    changes:
+    - path: payload.direction
+      value: short
+    - path: payload.predecessor_thesis_id
+      value: null
+    - path: payload.admitted
+      value: false
+    - path: payload.reason
+      value: revision_without_predecessor
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: off_horizon_and_without_predecessor_refused_for_the_predecessor
+    clause: 'rule 36: checks 2 and 3 both fail, and check 2 decides'
+    base_draft: revised_admitted
+    changes:
+    - path: payload.expires_at
+      value: '2026-10-03T14:00:01.000000000Z'
+    - path: payload.predecessor_thesis_id
+      value: null
+    - path: payload.admitted
+      value: false
+    - path: payload.reason
+      value: revision_without_predecessor
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: long_refused_as_short
+    clause: 'rule 36: a check the record passes is never the reason'
+    base_draft: proposed_refused
+    changes:
+    - path: payload.reason
+      value: direction_not_allowed
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: on_horizon_refused_as_a_mismatch
+    clause: 'rule 36: a check the record passes is never the reason'
+    base_draft: proposed_refused
+    changes:
+    - path: payload.reason
+      value: horizon_mismatch
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: uncorroborated_admitted
+    clause: 'rule 37: check 15 fails on the record'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.corroboration
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: uncorroborated_refused_by_a_later_check
+    clause: 'rule 37: an uncorroborated thesis never reaches check 16'
+    base_draft: revised_retired
+    changes:
+    - path: payload.corroboration
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: uncorroborated_refused_as_full
+    clause: 'rule 37: an uncorroborated thesis never reaches check 17'
+    base_draft: proposed_refused
+    changes:
+    - path: payload.corroboration
+      value: null
+    - path: payload.reason
+      value: universe_full
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: corroborated_refused_as_uncorroborated
+    clause: 'rule 37: a corroborated thesis passes check 15'
+    base_draft: proposed_refused
+    changes:
+    - path: payload.reason
+      value: no_corroboration
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: model_ref_names_another_model
+    clause: rule 38
+    base_draft: proposed_admitted
+    changes:
+    - path: config_refs.model_version
+      value: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content_hash
+  - name: admitted_and_short_and_uncorroborated
+    clause: 'rules 36 and 37: each reported once, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.direction
+      value: short
+    - path: payload.corroboration
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+      also:
+      - reason: schema
+        path: payload.reason
+  - name: order_revision_and_autopsy
+    clause: 'report order: revision, autopsy, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.revision
+      value: 1
+    - path: payload.predecessor_thesis_id
+      value: th_01J8ZT00
+    - path: payload.autopsy_ref
+      value: sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.revision
+      also:
+      - reason: schema
+        path: payload.autopsy_ref
+  - name: order_revision_and_reason
+    clause: 'report order: revision, reason, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.revision
+      value: 1
+    - path: payload.predecessor_thesis_id
+      value: th_01J8ZT00
+    - path: payload.reason
+      value: universe_full
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.revision
+      also:
+      - reason: schema
+        path: payload.reason
+  - name: order_revision_and_model
+    clause: 'report order: revision, model, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.revision
+      value: 1
+    - path: payload.predecessor_thesis_id
+      value: th_01J8ZT00
+    - path: config_refs.model_version
+      value: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.revision
+      also:
+      - reason: schema
+        path: payload.content_hash
+  - name: order_autopsy_and_reason
+    clause: 'report order: autopsy, reason, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.autopsy_ref
+      value: sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+    - path: payload.reason
+      value: universe_full
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.autopsy_ref
+      also:
+      - reason: schema
+        path: payload.reason
+  - name: order_autopsy_and_model
+    clause: 'report order: autopsy, model, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.autopsy_ref
+      value: sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+    - path: config_refs.model_version
+      value: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.autopsy_ref
+      also:
+      - reason: schema
+        path: payload.content_hash
+  - name: order_reason_and_model
+    clause: 'report order: reason, model, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.reason
+      value: universe_full
+    - path: config_refs.model_version
+      value: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+      also:
+      - reason: schema
+        path: payload.content_hash
+  - name: order_revision_and_autopsy_and_reason_and_model
+    clause: 'report order: revision, autopsy, reason, model, in number order'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.revision
+      value: 1
+    - path: payload.predecessor_thesis_id
+      value: th_01J8ZT00
+    - path: payload.autopsy_ref
+      value: sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+    - path: payload.reason
+      value: universe_full
+    - path: config_refs.model_version
+      value: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.revision
+      also:
+      - reason: schema
+        path: payload.autopsy_ref
+      - reason: schema
+        path: payload.reason
+      - reason: schema
+        path: payload.content_hash
+  - name: order_rule_37_before_rule_38
+    clause: 'report order: rule 37 alone in its group, then rule 38'
+    base_draft: proposed_refused
+    changes:
+    - path: payload.reason
+      value: universe_full
+    - path: payload.corroboration
+      value: null
+    - path: config_refs.model_version
+      value: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+      also:
+      - reason: schema
+        path: payload.content_hash
+  - name: proposed_without_model_ref
+    clause: '§9 required config_refs: mod'
+    base_draft: proposed_admitted
+    changes:
+    - path: config_refs
+      value:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.model_version
+  - name: revised_without_mandate_ref
+    clause: '§9 required config_refs: man'
+    base_draft: revised_admitted
+    changes:
+    - path: config_refs
+      value:
+        model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.mandate_version
+  - name: prompt_not_listed
+    clause: §3 artifact_refs
+    base_draft: proposed_admitted
+    changes:
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+    expect:
+      outcome: Invalid
+      reason: artifact_refs
+      path: artifact_refs
+  - name: proposed_on_the_account_stream
+    clause: §9 stream
+    base_draft: proposed_admitted
+    changes:
+    - path: stream_id
+      value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: revised_on_the_control_stream
+    clause: §9 stream
+    base_draft: revised_admitted
+    changes:
+    - path: stream_id
+      value: ctl:ws_01J8Z2
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  valid_drafts:
+  - name: first_thesis_with_a_predecessor_is_recorded_ignored
+    clause: 'rules 34 and 36: check 3 refuses it, and the record keeps it'
+    base_draft: proposed_refused
+    changes:
+    - path: payload.predecessor_thesis_id
+      value: th_01J8ZT00
+    - path: payload.reason
+      value: revision_without_predecessor
+    expect:
+      outcome: Valid
+  - name: revision_without_predecessor_is_recorded_ignored
+    clause: 'rules 34 and 36: the entry type follows the revision, not the verdict'
+    base_draft: revised_admitted
+    changes:
+    - path: payload.predecessor_thesis_id
+      value: null
+    - path: payload.admitted
+      value: false
+    - path: payload.reason
+      value: revision_without_predecessor
+    expect:
+      outcome: Valid
+  - name: revision_without_an_autopsy
+    clause: 'rule 34: no rule requires the autopsy (DEC-413 item 5)'
+    base_draft: revised_admitted
+    changes:
+    - path: payload.autopsy_ref
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:14ef8daea12f0ab66ad8d5adac8658f275dba9a9088a29d8588de0f68b14aabb
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:40624ea491a5def5686f60323a7d9a51d95b358dbd81768c3a454e24be53fb57
+      - sha256:7a8aa682626ad22c854278ca2ffb553a7e61805b652433ecc526bf9a9d1c4e9a
+    expect:
+      outcome: Valid
+  - name: short_and_off_horizon_refused_for_the_direction
+    clause: 'rule 36: the first failing check decides'
+    base_draft: proposed_ignored
+    changes:
+    - path: payload.expires_at
+      value: '2026-09-27T14:00:01.000000000Z'
+    expect:
+      outcome: Valid
+  - name: uncorroborated_refused_as_uncorroborated
+    clause: rule 37
+    base_draft: proposed_refused
+    changes:
+    - path: payload.corroboration
+      value: null
+    - path: payload.reason
+      value: no_corroboration
+    expect:
+      outcome: Valid
+  - name: uncorroborated_refused_by_an_earlier_check
+    clause: 'rule 37: an earlier check''s refusal stands'
+    base_draft: proposed_refused
+    changes:
+    - path: payload.corroboration
+      value: null
+    expect:
+      outcome: Valid
+  - name: admitted_citing_no_source_on_market_data
+    clause: '§9.4 evidence_sources: an empty list, and market data corroborates'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.evidence_sources
+      value: []
+    - path: payload.evidence_ref
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+    expect:
+      outcome: Valid
+  - name: mc_n07_sources_are_recorded_as_cited
+    clause: '§9.4 evidence_sources: MC-N07''s pair, out of order and off the allowlist, recorded as given'
+    base_draft: proposed_refused
+    changes:
+    - path: payload.evidence_sources
+      value:
+      - src.filings
+      - src.anonymous_blog
+    - path: payload.reason
+      value: source_not_allowlisted
+    expect:
+      outcome: Valid
+  - name: a_source_cited_twice_is_kept
+    clause: '§9.4 evidence_sources: duplicates kept, as the model gave them'
+    base_draft: proposed_admitted
+    changes:
+    - path: payload.evidence_sources
+      value:
+      - filings_sec_edgar
+      - news_wire_a
+      - filings_sec_edgar
+    expect:
+      outcome: Valid
+  - name: refused_when_the_universe_is_full
+    clause: 'rules 35 to 37: check 17 is reached only past check 15'
+    base_draft: proposed_refused
+    changes:
+    - path: payload.reason
+      value: universe_full
+    expect:
+      outcome: Valid
+  - name: zero_horizon_on_the_instant
+    clause: 'rule 36: a zero horizon passes check 2 when the instants agree'
+    base_draft: proposed_refused
+    changes:
+    - path: payload.horizon_s
+      value: 0
+    - path: payload.expires_at
+      value: '2026-09-22T14:00:00.000000000Z'
+    expect:
+      outcome: Valid
+  reference_cases:
+  - case: MC-N01
+    thesis_id: th-1
+    event_type: ThesisProposed
+  - case: MC-N02
+    thesis_id: th-2
+    event_type: ThesisProposed
+  - case: MC-N03
+    thesis_id: th-3
+    event_type: ThesisProposed
+  - case: MC-N04
+    thesis_id: th-4
+    event_type: ThesisProposed
+  - case: MC-N05
+    thesis_id: th-5
+    event_type: ThesisProposed
+  - case: MC-N06
+    thesis_id: th-6
+    event_type: ThesisProposed
+  - case: MC-N07
+    thesis_id: th-7
+    event_type: ThesisProposed
+  - case: MC-N08
+    thesis_id: th-8
+    event_type: ThesisProposed
+  - case: MC-N09
+    thesis_id: th-9
+    event_type: ThesisProposed
+  - case: MC-N10
+    thesis_id: th-10
+    event_type: ThesisProposed
+  - case: MC-N11
+    thesis_id: th-11
+    event_type: ThesisProposed
+  - case: MC-N12
+    thesis_id: th-12
+    event_type: ThesisProposed
+  - case: MC-N13
+    thesis_id: th-13
+    event_type: ThesisProposed
+  - case: MC-N14
+    thesis_id: th-14
+    event_type: ThesisProposed
+  - case: MC-N15
+    thesis_id: th-15
+    event_type: ThesisProposed
+  - case: MC-N16
+    thesis_id: th-16
+    event_type: ThesisProposed
+  - case: MC-N25
+    thesis_id: th-17
+    event_type: ThesisProposed
+  - case: MC-N26
+    thesis_id: th-18
+    event_type: ThesisProposed
+  - case: MC-N17
+    thesis_id: th-20
+    event_type: ThesisProposed
+  - case: MC-N17
+    thesis_id: th-21
+    event_type: ThesisRevised
+  - case: MC-N17
+    thesis_id: th-22
+    event_type: ThesisRevised
+  - case: MC-N17
+    thesis_id: th-23
+    event_type: ThesisRevised
+  - case: MC-N17
+    thesis_id: th-24
+    event_type: ThesisRevised
+  - case: MC-N18
+    thesis_id: th-30
+    event_type: ThesisProposed
+  - case: MC-N18
+    thesis_id: th-31
+    event_type: ThesisRevised
+  - case: MC-N19
+    thesis_id: th-40
+    event_type: ThesisRevised
+  - case: MC-N24
+    thesis_id: th-50
+    event_type: ThesisProposed
+  - case: MC-N24
+    thesis_id: th-51
+    event_type: ThesisRevised
+  - case: MC-N24
+    thesis_id: th-52
+    event_type: ThesisRevised
+  - case: MC-N27
+    thesis_id: th-60
+    event_type: ThesisProposed
+  - case: MC-N27
+    thesis_id: th-61
+    event_type: ThesisRevised
+  - case: MC-N27
+    thesis_id: th-62
+    event_type: ThesisRevised
+  - case: MC-N28
+    thesis_id: th-70
+    event_type: ThesisProposed
+  - case: MC-N28
+    thesis_id: th-71
+    event_type: ThesisRevised
+  - case: MC-N28
+    thesis_id: th-80
+    event_type: ThesisProposed
+  - case: MC-N28
+    thesis_id: th-72
+    event_type: ThesisRevised

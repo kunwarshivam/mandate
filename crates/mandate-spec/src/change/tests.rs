@@ -11,9 +11,13 @@ use super::{
     ChangeClass, Often, changed_paths, classify, classify_autonomy, how_often, pinning_switch,
 };
 use crate::condition::{Condition, ConditionField, ConditionValue, Operator};
-use crate::document::{Approval, ApproverRef, Autonomy, OnTimeout, Rule, RuleId};
+use mandate_time::UtcNanos;
+
+use crate::document::{
+    Approval, ApproverRef, Autonomy, Delegation, DelegationId, Lifts, OnTimeout, Rule, RuleId,
+};
 use crate::validate::tests::mandate;
-use crate::{ParseError, SpecError};
+use crate::{DecGrammar, ParseError, SchemaDec, SpecError};
 
 type Checked = Result<(), String>;
 
@@ -35,6 +39,7 @@ fn autonomy(when: Condition, then: AutonomyDecision) -> Result<Autonomy, String>
         default: Ask,
         admission: Ask,
         review_by: None,
+        delegations: Vec::new(),
         approval: Approval {
             timeout_s: 600,
             on_timeout: OnTimeout::Skip,
@@ -144,5 +149,40 @@ fn a_diverged_mandate_is_refused_by_every_entry_point() -> Checked {
         []
     );
     assert!(!pinning_switch(&parsed, &parsed, &[]).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
+/// The autonomy row compares the blocks with their delegations removed (DEC-420 item 6), so two
+/// blocks that differ only in their delegations are neutral there; §9.2's delegations row decides
+/// them. Added in E6-13's implementation PR, in-module under DEC-77's amendment, because the
+/// mutation gate found nothing in `tests/` that tells this `Neutral` from a reducing verdict.
+#[test]
+fn blocks_that_differ_only_in_their_delegations_are_neutral_in_the_autonomy_row() -> Checked {
+    let old = autonomy(not_in(ConditionField::Purpose, &["increase"]), Ask)?;
+    let at = |text: &str| UtcNanos::parse(text).map_err(|e| e.to_string());
+    let usd =
+        |text: &str| SchemaDec::parse(text, DecGrammar::PositiveDecimal).map_err(|e| e.to_string());
+    let new = Autonomy {
+        delegations: vec![Delegation {
+            id: DelegationId::parse("d1").map_err(|e| e.to_string())?,
+            lifts: Lifts::Rule(RuleId::parse("only").map_err(|e| e.to_string())?),
+            when: not_in(ConditionField::Purpose, &["increase"]),
+            max_order_usd: usd("100")?,
+            max_orders: 1,
+            max_total_usd: usd("100")?,
+            starts_at: Some(at("2026-09-24T00:00:00.000000000Z")?),
+            expires_at: Some(at("2026-09-25T00:00:00.000000000Z")?),
+            source_approval_id: None,
+        }],
+        ..old.clone()
+    };
+    for (before, after) in [(&old, &new), (&new, &old)] {
+        let got = classify_autonomy(before, after).map_err(|e| e.to_string())?;
+        if got != ChangeClass::Neutral {
+            return Err(format!(
+                "a delegations-only difference is {got:?}, not neutral"
+            ));
+        }
+    }
     Ok(())
 }

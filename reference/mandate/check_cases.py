@@ -1,7 +1,7 @@
 """Asserts that every reference case demonstrates what its title claims (AGENTS.md: validate fixtures)."""
 import pathlib
 import sys
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 import yaml
@@ -219,6 +219,18 @@ req("MC-B17", B["MC-B17"]["purpose"] == "risk_exit" and B["MC-B17"]["reason"] ==
 req("MC-B30", B["MC-B30"].get("trim_withheld") == ["rung_not_confirmed"], "trim waits")
 req("MC-B31", set(B["MC-B31"].get("trim_withheld", [])) == {"holding", "regular_session_only"}, "trim guards")
 req("MC-B32", "trim_withheld" not in B["MC-B32"] and B["MC-B32"].get("purpose") != "risk_exit", "below band, no trim")
+BIN = {cid: C[cid]["input"] for cid in C if cid.startswith("MC-B")}
+req("MC-B33", B["MC-B33"].get("purpose") == "risk_exit" and Decimal(B["MC-B33"]["qty"]) >= Decimal(BIN["MC-B33"]["min_order_size"])
+    and Decimal(B["MC-B33"]["order_usd"]) < Decimal(BIN["MC-B33"]["min_order_usd"]), "a trim at least the minimum size goes under a larger dollar minimum")
+def trim_sell(cid):
+    inp, exp = BIN[cid], B[cid]
+    inc, bid = Decimal(inp["qty_increment"]), Decimal(inp["quote"]["bid"])
+    excess = Decimal(exp["current_mv"]) - Decimal(inp["size_factor"]) * Decimal(exp["cap"])
+    return min(Decimal(inp["position_qty"]), (excess / bid / inc).to_integral_value(rounding=ROUND_CEILING) * inc)
+req("MC-B34", B["MC-B34"].get("trim_withheld") == ["below_minimum_order"]
+    and trim_sell("MC-B34") < Decimal(BIN["MC-B34"]["min_order_size"])
+    and trim_sell("MC-B34") * Decimal(BIN["MC-B34"]["quote"]["bid"]) >= Decimal(BIN["MC-B34"]["min_order_usd"]),
+    "a trim below the minimum size that the dollar minimum would send is withheld")
 req("MC-B18", B["MC-B18"]["reason"] == "within_rebalance_band", "band")
 req("MC-B19", B["MC-B19"]["reason"] == "below_band_after_clipping", "band after clipping")
 req("MC-B20", B["MC-B20"]["reason"] == "no_fresh_outputs", "none")
@@ -581,6 +593,25 @@ req("MC-W57", C["MC-W57"]["kind"] == "risk_state" and C["MC-W57"]["steps"][1]["e
     "an end_delegations tripwire latches; the loss counts from the new risk day")
 req("MC-W", sum(c.startswith("MC-W") for c in C) == 57, "57 tripwire cases")
 
+# delegation routing (§9.2, MI-29; #444, DEC-353)
+J_INC = {"MC-J01", "MC-J03", "MC-J05"}
+for k in range(1, 11):
+    cid = f"MC-J{k:02}"
+    cls = "risk_increasing" if cid in J_INC else "risk_reducing"
+    req(cid, C[cid]["expect"]["classification"] == cls and C[cid]["expect"]["changed_paths"] == ["/autonomy/rules"], cls)
+au_of = lambda cid: d["bases"][C[cid]["base"]]["mandate"]["autonomy"]
+lifts = lambda cid: [x["lifts"] for x in au_of(cid).get("delegations", [])]
+bare = lambda cid: {k: v for k, v in d["bases"][C[cid]["base"]]["mandate"].items() if k != "autonomy"} | {
+    "autonomy": {k: v for k, v in au_of(cid).items() if k != "delegations"}}
+for deleg, ctrl, lift in [("MC-J01", "MC-J02", "rule:large_orders"), ("MC-J03", "MC-J04", "rule:low_score"), ("MC-J05", "MC-J08", "default"),
+                          ("MC-J06", "MC-J07", "rule:low_score"), ("MC-J09", "MC-J10", "rule:low_score")]:
+    req(deleg, lifts(deleg) == [lift] and lifts(ctrl) == [] and bare(deleg) == bare(ctrl) and C[deleg]["patch"] == C[ctrl]["patch"],
+        f"the same change as {ctrl}, whose base differs only by the delegation")
+req("MC-J06", au_of("MC-J06")["rules"][0]["then"] == "auto" and C["MC-J06"]["patch"] == [{"op": "remove", "path": "/autonomy/rules/0"}],
+    "an auto rule removed")
+req("MC-J09", au_of("MC-J09")["rules"][0]["then"] == "auto" and au_of("MC-J09")["rules"][0]["when"]["op"] == "lt"
+    and int(C["MC-J09"]["patch"][0]["value"]) < int(au_of("MC-J09")["rules"][0]["when"]["value"]), "an auto rule narrowed")
+req("MC-J", sum(c.startswith("MC-J") for c in C) == 10, "10 routing cases")
 print("cases", len(C), "title assertion failures", len(bad))
 for b in bad:
     print(" ", b)

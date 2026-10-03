@@ -53,8 +53,9 @@
 //! DEC-129 item 29's fail-closed refusal of an opening a missing check might have denied has
 //! nothing left to refuse, and [`evaluate`] decides every proposal itself. E6-4 adds
 //! [`trim_proposals`], mandate spec §5.5's `trim_to_target` (DEC-65, DEC-399), the last entry point
-//! #136 stubbed. [`GateError::Unimplemented`] stays only for DEC-129 item 27's refusal of an
-//! opening that breaks a §5.3 rule with no registered reason code.
+//! #136 stubbed. E6-6's last row refuses a proposal of zero quantity as
+//! [`GateError::ZeroQuantity`] before any check (DEC-401). [`GateError::Unimplemented`] stays only for
+//! DEC-129 item 27's refusal of an opening that breaks a §5.3 rule with no registered reason code.
 
 use core::fmt::Display;
 use std::collections::{BTreeMap, BTreeSet};
@@ -256,6 +257,10 @@ pub enum GateError {
     DayTradeLedgerOutOfOrder,
     #[error("a fill sells more of an instrument than the account held")]
     DayTradeLedgerInconsistent,
+    /// A proposal of zero quantity is no order: it reduces and adds nothing, the broker refuses
+    /// it, and the gate refuses to decide it rather than allow it (DEC-401).
+    #[error("the proposal is for a quantity of zero, which is no order")]
+    ZeroQuantity,
     #[error("{0} is not implemented yet (pending {1})")]
     Unimplemented(&'static str, &'static str),
     #[error(transparent)]
@@ -277,6 +282,7 @@ impl GateError {
             Self::InstrumentUnknown => "instrument_unknown",
             Self::DayTradeLedgerOutOfOrder => "day_trade_ledger_out_of_order",
             Self::DayTradeLedgerInconsistent => "day_trade_ledger_inconsistent",
+            Self::ZeroQuantity => "zero_quantity",
             Self::Unimplemented(_, _) => "unimplemented",
             Self::Num(e) => e.code(),
             Self::Time(e) => e.code(),
