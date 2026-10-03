@@ -25,8 +25,9 @@ builder, versioning, change classification, and the records kept.
   agent's resting sells come off the excess before it is rounded up on the grid, and a remainder
   beside a resting sell that is off the grid and is not the whole position is truncated onto it,
   an order the broker accepts, rather than proposed off it. `ref.py` takes both. On a whole-share
-  grid with whole quantities neither changes a figure, so no existing case changes; MC-B38 (a
-  7-share remainder on a 2-share grid is 6) and MC-B39 (2.49 shares less 1 resting is 1.49, rounded
+  grid with whole quantities neither changes a figure, so no existing case changes; MC-B38 (5
+  held at 999 are 4.25 shares over target; less 2 resting, rounded up on a 2-share grid to 4, more
+  than the 3 unsold, so the trim is the 3 truncated onto the grid, 2) and MC-B39 (2.49 shares less 1 resting is 1.49, rounded
   up on a 2-share grid to 2, where rounding first gives 3) are added (§11).
 - **v0.6, amended ([DEC-432](../project/decisions/DEC-432.md) item 18, under DEC-176):** §8.1's
   content-hash sentence lists everything the hash covers for a model called through the gateway, as
