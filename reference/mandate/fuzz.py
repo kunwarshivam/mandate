@@ -2074,6 +2074,28 @@ def fuzz_content(n):
         h = [escalation_step(st, {"kind": "ask", "approval": "ap1", "bound": b}, ctx)[0]["content_hash"] for b in (bound, other)]
         check(h[0] != h[1], "§6.4 every bound field moves the content hash", field)
 
+def fuzz_independence_floor(n):
+    """V-047 (DEC-411): under `independent_approval_required` a workspace of fewer than two users is refused at validation,
+    and the rule touches no other verdict. The oracle names the lone workspaces by count, not by comparison, and the
+    rest of the verdict is the same mandate validated without the policy."""
+    lone_workspaces = {0, 1}
+    for _ in range(n):
+        m = copy.deepcopy(base.BASES[rng.choice(sorted(base.BASES))])
+        if rng.random() < 0.3:
+            m["autonomy"]["approval"]["two_approver_above_usd"] = rng.choice(["500", "5000"])
+        required, users = rng.random() < 0.5, rng.choice([0, 1, 1, 2, 3, 5])
+        ctx = dict(base.CTX, disclosures_accepted=["sha256:" + "b" * 64], workspace_users=users,
+                   approver_users=rng.choice([1, 2, min(users, 2)]))
+        if rng.random() < 0.9:
+            ctx["independent_approval_required"] = required
+        else:
+            required = False
+        errs = semantic(m, ctx)[0]
+        check(("V-047" in errs) == (required and users in lone_workspaces),
+              "V-047 refuses exactly independent approval in a workspace without a second user", (required, users, errs))
+        without = semantic(m, dict(ctx, independent_approval_required=False))[0]
+        check([e for e in errs if e != "V-047"] == without, "V-047 changes no other verdict", (required, users, errs, without))
+
 if __name__ == "__main__":
     fuzz_ladder_precision(300)
     fuzz_risk(400)
@@ -2100,6 +2122,7 @@ if __name__ == "__main__":
     fuzz_tripwire_latch(300)
     fuzz_escalation(3000)
     fuzz_policy_quorum(1000)
+    fuzz_independence_floor(400)
     fuzz_drift(600)
     fuzz_ask_budget(600)
     fuzz_quiet_hours(600)

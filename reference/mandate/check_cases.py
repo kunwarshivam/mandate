@@ -53,7 +53,7 @@ exp = {"MC-V03": "V-002", "MC-V05": "V-003", "MC-V06": "V-005", "MC-V08": "V-006
        "MC-V49": "V-020", "MC-V50": "V-020", "MC-V51": "V-033",
        "MC-V53": "V-034", "MC-V54": "V-034", "MC-V55": "V-035", "MC-V56": "V-036", "MC-V57": "V-036",
        "MC-V58": "V-036", "MC-V59": "V-037", "MC-V61": "V-039", "MC-V62": "V-038", "MC-V63": "V-020",
-       "MC-V64": "V-022", "MC-V67": "V-020"}
+       "MC-V64": "V-022", "MC-V67": "V-020", "MC-V69": "V-047"}
 for cid, code in exp.items():
     req(cid, C[cid]["expect"]["violations"] == [code], f"expected exactly {code}")
 req("MC-V13", "W-003" in C["MC-V13"]["expect"]["warnings"], "W-003")
@@ -62,6 +62,12 @@ req("MC-V47", "W-005" in C["MC-V47"]["expect"]["warnings"], "W-005")
 req("MC-V48", len(C["MC-V48"]["expect"]["violations"]) >= 3, "multiple")
 req("MC-V60", C["MC-V60"]["expect"]["violations"] == ["V-003", "V-036"], "accumulate admits nothing, two ways")
 req("MC-V65", "W-006" in C["MC-V65"]["expect"]["warnings"], "W-006")
+for cid, required, users in (("MC-V69", True, 1), ("MC-V70", True, 2), ("MC-V71", False, 1)):
+    ctx = C[cid]["context"]
+    req(cid, C[cid]["patch"] == [] and ctx == {"independent_approval_required": required, "workspace_users": users},
+        "V-047's trio differs only in the policy and the workspace's users (DEC-411)")
+for cid in ("MC-V70", "MC-V71"):
+    req(cid, C[cid]["expect"]["violations"] == [], "a second user, or no independence, passes V-047")
 
 # risk state
 s = steps("MC-R01")

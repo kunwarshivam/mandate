@@ -8,6 +8,12 @@ MUTANTS = {
                                              "        if not breached:\n            self.acc = 0.0"),
     "additive capital base": ("self.C, self.L = H1, E01, C1, L1", "self.C, self.L = H1, E01, self.C + d, L1"),
     "hard trigger latches on one quote": ("        if quote and (t - self.hard_first[key]).total_seconds() >= self.hard_wait():", "        if True:"),
+    "V-047 reads a stated policy's presence, not its value": (
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
+        '    if "independent_approval_required" in ctx and ctx.get("workspace_users", 1) < 2:'),
+    "V-047 counts a one-user workspace as independent": (
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
+        '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 1:'),
     "loss carry ignores withdrawals": ("        self.net_contributed += d\n", ""),
     "release retires without a loss carry": ('                self._retire("goal_complete", ev)\n',
                                              '                self.restrictions["retired"] = "stopped"\n'),
@@ -302,7 +308,7 @@ PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if 
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
          "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(2500); fuzz_client_ceiling(300); "
          "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
-         "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
+         "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_independence_floor(300); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); "
          "print(len(FAIL))")
 
 TW_PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "

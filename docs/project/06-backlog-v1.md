@@ -316,7 +316,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   Also owed (#443 round 3, m14; #476 round 1, m4): no CI job runs `reference/journal/generate.py` or its seeded bugs, since
   `cargo xtask ci reference` runs only `reference/mandate/`. Its first cost: rule 28's report order went unpinned on
   the reference side until #476 round 1. Run `generate.py --check` per PR.
-  Also owed (#444, DEC-353; E6-13's code half, tests first): `mandate-spec`'s §9.2 classifier takes DEC-353's rule, so
+  ~~Also owed (#444, DEC-353; E6-13's code half, tests first)~~ Done ([#516](https://github.com/kunwarshivam/mandate/pull/516),
+  [#523](https://github.com/kunwarshivam/mandate/pull/523), [#527](https://github.com/kunwarshivam/mandate/pull/527);
+  [DEC-420](decisions/DEC-420.md)). Owed from #523's review: the next stream H tests PR pins that the delegations row
+  matches by `id`, not position (`[d1, d2]` to `[d2]` is reducing); and `reference/mandate/ref.py` gets three fixes,
+  none of which the Rust shares: `T()` drops fractional seconds and raises on a calendar-less instant where V-041 should
+  refuse; V-042's withheld previous document (identity only) is not modelled, where DEC-420 item 4 refuses every
+  delegation; and an absent list against `[]` classifies reducing where the Rust says neutral.
+  The original row: `mandate-spec`'s §9.2 classifier takes DEC-353's rule, so
   MC-J01, MC-J03 and MC-J05 pass, with MC-J06 and MC-J09, which stay reducing. Size it with what comes first: `mandate-spec` has no delegations at
   all. `Autonomy` has no `delegations` member and `parse::autonomy`'s member list is closed, so a mandate carrying one is
   refused at parse (`unknown_member`); the type, the parser and §9.2's `autonomy.delegations` row, which the Rust
@@ -327,9 +334,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   delegation, so the orders it was granted for escalate once it is spent. Every decision is stricter, so every invariant
   holds, but the owner is not told. Should the change's confirmation screen say which delegations the new version's
   orders will draw on? Product wording, so the founder's (§6.4's approval card already carries delegation shapes).
-  **Founder question** (#443 round 2): should a mandate be refused at validation
-  when `independent_approval_required` is on and the workspace has one user, since a fired tripwire (like a latched
-  drawdown ladder) then cannot be lifted until a second user exists?
+  ~~**Founder question** (#443 round 2): should a mandate be refused at validation
+  when `independent_approval_required` is on and the workspace has one user?~~ Decided yes (the founder, 2026-10-02):
+  spec V-047 and MC-V69 to MC-V71 ([DEC-411](decisions/DEC-411.md)); the code is owed on E10-1's row.
+  **Founder question** (DEC-411 item 6): a workspace that loses its second user, or turns
+  `independent_approval_required` on with one user, after a version is confirmed keeps its agents running with nothing
+  they latched liftable. Should removing the second user be refused, or flag the agents `policy_nonconforming`?
   Actions are `end_delegations` or `exits_only`, never `paused` (rule 13). *Accepted when:* a fired
   tripwire acts at its next evaluation, journals the event, alerts with opaque text, and lifts only
   by the owner's acknowledgment with step-up; adding or tightening one applies at once.
@@ -749,6 +759,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   against the [mandate spec](../specs/mandate.md) (schema, V-rules, policy hierarchy; reference
   cases MC-S, MC-V, and MC-P pass); proposed envelope values are marked as proposed and no envelope
   field activates unconfirmed ([DEC-97](04-decision-log.md#decisions)).
+  Owed ([DEC-411](decisions/DEC-411.md), stream H, DEC-77 tests then code): `mandate-spec`'s `ValidationContext` gains
+  the effective `independent_approval_required`, V-047 refuses it in a workspace of fewer than two users, and the
+  harness reads the cases' new context member, so MC-V69 to MC-V71 pass.
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
   increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C48 pass.
