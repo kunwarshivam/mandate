@@ -296,6 +296,25 @@ def order_drafts() -> list[dict]:
                 also=rest,
             )
         )
+    # Rules 35 to 37 share a path, so the pairs above pin the group's place but not rule 37's
+    # alone: here only rule 37 fails in the group (a refusal at check 17 with no corroboration), and
+    # rule 38 with it, so an implementation that checks 38 between 36 and 37 reports the wrong path
+    # first (#519 round 1, minor 1).
+    out.append(
+        invalid(
+            "order_rule_37_before_rule_38",
+            "report order: rule 37 alone in its group, then rule 38",
+            "proposed_refused",
+            [
+                change("payload.reason", "universe_full"),
+                change("payload.corroboration", None),
+                change("config_refs.model_version", FOREIGN_MODEL_REF),
+            ],
+            "schema",
+            "payload.reason",
+            also=[("schema", "payload.content_hash")],
+        )
+    )
     return out
 
 

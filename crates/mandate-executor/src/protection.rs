@@ -2302,9 +2302,10 @@ mod sequence_tests {
     use crate::state::{ExecutorState, OrderDetail};
     use crate::types::{
         AgentId, BrokerFill, BrokerOrder, BrokerOutcome, BrokerReject, BrokerRequest,
-        BrokerUnknown, BrokerUpdate, Effect, EventDraft, EventId, ExecutorConfig, ExitTier, FillId,
-        Input, IntentBody, IntentHandoff, MandateVersion, MarketObservation, Mode, OcoLegs, Order,
-        OrderState, OrderType, Purpose, ReconcileReason, RiskClock, SubmitOrder, TimeInForce,
+        BrokerUnknown, BrokerUpdate, Command, Effect, EventDraft, EventId, ExecutorConfig,
+        ExitTier, FillId, Initiator, Input, IntentBody, IntentHandoff, KillScope, MandateVersion,
+        MarketObservation, Mode, OcoLegs, Order, OrderState, OrderType, Purpose, ReconcileReason,
+        RiskClock, SubmitOrder, TimeInForce,
     };
 
     const OCO: &str = "md-held-1-p1";
@@ -7012,6 +7013,20 @@ mod sequence_tests {
         Fill(u32),
         Confirm,
         Pause(bool),
+        /// The agent stopped, or back to normal: a stop holds exits as a pause does.
+        Stop(bool),
+        /// The broker refuses the latest rung it holds unacknowledged (#485).
+        Reject,
+        /// The broker refuses the latest exit's first order it holds unacknowledged: a sell
+        /// beside a ladder that ends unsold (DEC-410 item 6).
+        RejectFirst,
+        /// The process restarts: the state is folded afresh from the journal.
+        Restart,
+        /// The owner's agent-scoped kill switch (§5.5).
+        KillSwitch,
+        /// The first protective order the broker holds live fills this many shares, as a stop
+        /// triggering does.
+        Triggered(u32),
         /// The broker refuses the latest cancel it was asked, as for an order it holds in no
         /// cancelable state (#508's review, M1).
         Refuse,
@@ -7073,6 +7088,34 @@ mod sequence_tests {
         fills: u32,
         paused: bool,
         quiet_since: i64,
+        /// Whether the Σ checks run ([`Desk::within_position`]): #485's scripts and properties run
+        /// them; the random property joins them with #485's fix (DEC-408 item 5).
+        sums: bool,
+        /// The rungs whose cancel was asked for a ladder step (§5.6 step 2). Never cleared: a
+        /// rung's id is unique to its exit and rung, so a later rung never matches an old one.
+        stepped: BTreeSet<String>,
+        /// Each exit between rungs, with its stepped rung's unfilled quantity once its cancel is
+        /// confirmed, until the exit's next rung is sent, the exit is abandoned, nothing is left
+        /// to send, or protection returns and ends a sequence that was not parked (#485). What
+        /// it counts is derived from this when read ([`Desk::counted_for`]), never stored.
+        between: BTreeMap<String, u32>,
+        /// The exits held `parked` for the next open (DEC-260 (18)): their remainder outlives the
+        /// protection's return.
+        parked: BTreeSet<String>,
+        /// The exits laddered with no sequence of their own (DEC-260 (14)): a pause since a step
+        /// was asked does not end them.
+        lone: BTreeSet<String>,
+        /// The exit whose sequence opened the latest interval, and the exits whose interval
+        /// reached its bound, which ends their climb (§5.6 step 2).
+        sequence: Option<String>,
+        bounded: BTreeSet<String>,
+        /// The exits whose ladder ended between rungs by the oracle's own record: paused, stopped
+        /// or bounded at the step's confirmation (DEC-409), or bounded later (DEC-410 item 1). No
+        /// later rung of theirs may be sent.
+        ended: BTreeSet<String>,
+        /// Each rung journaled short (DEC-410 item 4): its exit, what it did not send, and what
+        /// it sent.
+        shorts: Vec<(String, u32, u32)>,
         /// Every order a cancel was asked for: a refusal of that cancel is the cancel's, never the
         /// order's rejection (§5.7).
         cancelled: BTreeSet<String>,
@@ -7200,6 +7243,125 @@ mod sequence_tests {
             })
         }
 
+        /// §5.4's Σ protective sell quantity ≤ position, counted as `fits` counts it: every
+        /// protective order the broker holds live, with every exit it holds live, sells at most the
+        /// position (rule 12); and the live exits with every rung a ladder between rungs may still
+        /// send sell at most the position too (DEC-408). And no sell works beside a ladder between
+        /// rungs unless that ladder is parked for the open, the only state in which a remainder
+        /// lasts: so a sell beside it overlaps the rung for one step at most (DEC-410 item 7).
+        /// The oracle's own record, never the fold's.
+        fn within_position(&mut self) -> Result<(), String> {
+            if !self.sums {
+                return Ok(());
+            }
+            let selling: u32 = self
+                .venue
+                .values()
+                .filter(|held| held.live)
+                .map(|held| held.qty.saturating_sub(held.filled))
+                .sum();
+            if selling > self.position {
+                return Err(format!(
+                    "{selling} may sell against a position of {} at {}",
+                    self.position, self.now
+                ));
+            }
+            let exiting = self.working(None).saturating_add(self.counted());
+            if exiting > self.position {
+                return Err(format!(
+                    "{exiting} live exits and rungs still to send against a position of {} at {}: \
+                     {:?} between rungs",
+                    self.position, self.now, self.between
+                ));
+            }
+            for exit in self.between.keys() {
+                let beside = self.working(Some(exit));
+                if beside > 0 && !self.parked.contains(exit) {
+                    return Err(format!(
+                        "{beside} working beside {exit}'s remainder, which is not parked for the \
+                         open at {}: DEC-410 item 7 bounds that overlap to one step",
+                        self.now
+                    ));
+                }
+            }
+            Ok(())
+        }
+
+        /// Whether `exit`'s remainder will be sent, by the oracle's own record (DEC-410 item 1): a
+        /// lone ladder's unless it is parked while the agent is paused or stopped, a sequence's
+        /// while the agent is neither and its interval has not reached its bound.
+        fn counts(&self, exit: &str) -> bool {
+            if self.lone.contains(exit) {
+                !(self.parked.contains(exit) && self.paused)
+            } else {
+                !self.paused && !self.bounded.contains(exit)
+            }
+        }
+
+        /// What each remainder that will be sent counts, in its exits' id order, computed the
+        /// oracle's own way (DEC-410 item 1): its stepped rung's unfilled quantity, capped at the
+        /// position less the live exits at the broker less what the remainders ahead of it count.
+        fn counting(&self) -> Vec<(&str, u32)> {
+            let mut room = self.position.saturating_sub(self.working(None));
+            let mut counting = Vec::new();
+            for (exit, left) in self.between.iter().filter(|(exit, _)| self.counts(exit)) {
+                let counts = (*left).min(room);
+                room = room.saturating_sub(counts);
+                counting.push((exit.as_str(), counts));
+            }
+            counting
+        }
+
+        /// What `exit`'s remainder counts now, and so what its next rung must send.
+        fn counted_for(&self, exit: &str) -> u32 {
+            self.counting()
+                .into_iter()
+                .find(|(owner, _)| *owner == exit)
+                .map_or(0, |(_, counts)| counts)
+        }
+
+        /// What the remainders that will be sent add up to.
+        fn counted(&self) -> u32 {
+            self.counting().into_iter().map(|(_, counts)| counts).sum()
+        }
+
+        /// A stepped rung's cancel is confirmed with `left` unsold (§5.6 step 2): a lone ladder
+        /// sends its next rung for it, and so does a sequence whose ladder still climbs, neither
+        /// paused nor stopped nor bounded; a sequence that no longer climbs ends there, and
+        /// protection returns for what is left.
+        fn rung_cancelled(&mut self, id: &str, left: u32) {
+            let exit = exit_of(id);
+            let climbs = self.lone.contains(&exit) || !self.paused && !self.bounded.contains(&exit);
+            if self.stepped.contains(id) && left > 0 {
+                if climbs {
+                    self.between.insert(exit, left);
+                } else {
+                    self.ended.insert(exit);
+                }
+            }
+        }
+
+        /// What the live exits at the broker may still sell, `intent`'s own rungs left out.
+        fn working(&self, intent: Option<&str>) -> u32 {
+            self.venue
+                .iter()
+                .filter(|(id, held)| {
+                    held.live
+                        && held.purpose != Purpose::Protective
+                        && intent.is_none_or(|intent| exit_of(id) != intent)
+                })
+                .map(|(_, held)| held.qty.saturating_sub(held.filled))
+                .sum()
+        }
+
+        /// What is left for `intent` once the live exits and the rungs still to be sent are
+        /// counted (#485): the most a discretionary exit may be sized to (DEC-410 item 3).
+        fn room(&self, intent: &str) -> u32 {
+            self.position
+                .saturating_sub(self.working(Some(intent)))
+                .saturating_sub(self.counted())
+        }
+
         /// Whether `qty` more on top of what every other exit may still sell exceeds the
         /// position: the only denial an exit may meet (§5.3 rules 3 and 4).
         fn oversells(&self, intent: &str, qty: u32) -> bool {
@@ -7230,6 +7392,11 @@ mod sequence_tests {
                     "{id}: a refusal of its cancel was read as the order's rejection (§5.7)"
                 ));
             }
+            if draft.event_type == "OrderStateChanged"
+                && draft.payload.get("ladder_step") == Some(&Value::Bool(true))
+            {
+                self.stepped.insert(id.to_owned());
+            }
             match (draft.event_type.as_str(), field("action")) {
                 ("IntentReceived", _) if intent.starts_with("w-") => {
                     let qty = field("qty")
@@ -7259,12 +7426,24 @@ mod sequence_tests {
                 ("GateDecided", _) => {
                     let verdict = field("verdict").unwrap_or_default();
                     let reason = field("reason_code").unwrap_or_default();
-                    let oversells = self
-                        .exits
-                        .get(&intent)
-                        .is_some_and(|exit| self.oversells(&intent, exit.qty));
+                    if draft.payload.get("parked") == Some(&Value::Bool(true)) {
+                        self.parked.insert(intent.clone());
+                    }
                     let priceable = self.priceable();
                     let closed = self.closed();
+                    let oversells = self.exits.get(&intent).is_some_and(|exit| {
+                        self.oversells(&intent, exit.qty)
+                            || exit.purpose == Purpose::DiscretionaryExit
+                                && self.room(&intent) == 0
+                                && !closed
+                                && priceable
+                    });
+                    if self.sums && verdict == "hold" && reason == "unknown_order_in_flight" {
+                        return Err(format!(
+                            "{intent} held unknown_order_in_flight, though the script's broker \
+                             never leaves an order unknown"
+                        ));
+                    }
                     let now = self.now;
                     let Some(exit) = self.exits.get_mut(&intent) else {
                         return Ok(());
@@ -7302,11 +7481,94 @@ mod sequence_tests {
                     let extended = draft.payload.get("extended_hours") == Some(&Value::Bool(true));
                     let id = field("client_order_id").unwrap_or_default();
                     self.sent(id, purpose, extended)?;
+                    let qty = field("qty")
+                        .unwrap_or_default()
+                        .parse::<u32>()
+                        .map_err(|error| format!("{id}'s qty: {error}"))?;
+                    if self.sums && qty == 0 {
+                        return Err(format!("{id} sent for nothing"));
+                    }
+                    let later = id != format!("md-{intent}");
+                    if self.sums && self.ended.contains(&intent) && later {
+                        return Err(format!(
+                            "{id}: a rung of a ladder that ended between rungs (DEC-409, DEC-410)"
+                        ));
+                    }
+                    let counts = self.counted_for(&intent);
+                    if self.sums && later && self.between.contains_key(&intent) && qty != counts {
+                        return Err(format!(
+                            "{id} sent {qty}, where its remainder counts {counts} (DEC-410 item 4)"
+                        ));
+                    }
+                    let room = self.room(&intent);
+                    if let Some(exit) = self.exits.get(&intent)
+                        && self.sums
+                        && purpose != Purpose::Protective
+                        && id == format!("md-{intent}")
+                        && qty != exit.qty
+                        && (exit.purpose != Purpose::DiscretionaryExit || qty != room.min(exit.qty))
+                    {
+                        return Err(format!(
+                            "{intent} ({:?}) sent for {qty} of {}, with {room} left: only a \
+                             discretionary exit is sized (DEC-410)",
+                            exit.purpose, exit.qty
+                        ));
+                    }
+                    if self.between.remove(&intent).is_some() {
+                        self.parked.remove(&intent);
+                    }
+                    if draft.payload.get("laddered") == Some(&Value::Bool(true)) {
+                        self.lone.insert(intent.clone());
+                    }
                     if let Some(exit) = self.exits.get_mut(&intent) {
                         exit.done = true;
                     }
                 }
+                ("ProtectionChanged", Some("unprotected_end")) => {
+                    let parked = &self.parked;
+                    self.between.retain(|exit, _| parked.contains(exit));
+                    self.lone.extend(self.between.keys().cloned());
+                    self.bounded.clear();
+                    self.sequence = None;
+                }
+                ("ProtectionChanged", Some("unprotected_start")) if !intent.is_empty() => {
+                    self.lone.remove(&intent);
+                    self.sequence = Some(intent.clone());
+                }
+                ("ProtectionChanged", Some("interval_limit")) => {
+                    if let Some(sequence) = self.sequence.clone() {
+                        if self.between.remove(&sequence).is_some() {
+                            self.ended.insert(sequence.clone());
+                        }
+                        self.bounded.insert(sequence);
+                    }
+                }
+                ("ProtectionChanged", Some("rung_short")) => {
+                    let number = |name: &str| {
+                        field(name)
+                            .unwrap_or_default()
+                            .parse::<u32>()
+                            .map_err(|error| format!("a short rung's {name}: {error}"))
+                    };
+                    let (short, sent) = (number("qty")?, number("sent")?);
+                    let left = self.between.get(&intent).copied().unwrap_or(0);
+                    let counts = self.counted_for(&intent);
+                    if self.sums
+                        && (short == 0 || sent != counts || short != left.saturating_sub(counts))
+                    {
+                        return Err(format!(
+                            "{intent}: a rung short by {short}, sending {sent}, where {left} is left \
+                             and the remainder counts {counts} (DEC-410 item 4)"
+                        ));
+                    }
+                    if sent == 0 {
+                        self.between.remove(&intent);
+                        self.ended.insert(intent.clone());
+                    }
+                    self.shorts.push((intent.clone(), short, sent));
+                }
                 ("OrderAbandoned", _) => {
+                    self.between.remove(&intent);
                     let reason = field("reason_code").or(field("reason")).unwrap_or_default();
                     if let Some(exit) = self.exits.get_mut(&intent) {
                         if reason != "unprotected_interval_limit" {
@@ -7433,6 +7695,66 @@ mod sequence_tests {
         }
     }
 
+    /// The owner's pause, stop or resumption of `agent`, committed to the account stream as the
+    /// executor copies it (mandate spec §5.9) and folded, so a restart folds the mode each
+    /// decision was taken under. The copy itself is not stepped, since what the executor does on
+    /// a mode change is still E7-4's stub; the script steps a tick at the same instant instead, so
+    /// the executor acts on the new mode before the oracle checks it.
+    fn mode_applied(
+        executor: &mut Executor,
+        agent: &AgentId,
+        to: &str,
+        now: i64,
+    ) -> Result<(), String> {
+        let failed = |error: ExecutorError| format!("{error:?}");
+        let fact = object(vec![
+            ("agent", text(agent.0.clone())),
+            ("to", text(to)),
+            ("restriction", text("owner")),
+            ("originated", Value::Bool(true)),
+            (
+                "risk_clock",
+                clock(RiskClock::from_secs(now)).map_err(failed)?,
+            ),
+        ])
+        .map_err(failed)?;
+        executor
+            .commit_one("AgentModeApplied", fact)
+            .map_err(failed)
+    }
+
+    /// `executor`'s journal folded afresh, with what is process-local (quotes, the watchdog's clock,
+    /// the clock and the writer's epoch) carried over: the state a restart resumes from. The modes
+    /// are carried over too, though the scripts' journaled pauses already fold to them.
+    fn refolded(executor: &Executor) -> Result<ExecutorState, String> {
+        let mut restarted = ExecutorState::new(executor.state.scope.clone());
+        for event in &executor.journal {
+            fold(&mut restarted, event).map_err(|error| format!("{error:?}"))?;
+        }
+        restarted.quotes.clone_from(&executor.state.quotes);
+        restarted.sane_bids.clone_from(&executor.state.sane_bids);
+        restarted.trades.clone_from(&executor.state.trades);
+        restarted.breaches.clone_from(&executor.state.breaches);
+        restarted.modes.clone_from(&executor.state.modes);
+        restarted.now = executor.state.now;
+        restarted.epoch = executor.state.epoch;
+        restarted.started = executor.state.started;
+        restarted.started_at = executor.state.started_at;
+        Ok(restarted)
+    }
+
+    /// The exit a client order id belongs to, by §2.3's naming: `md-<intent>`, and `-l<n>` for a
+    /// later rung.
+    fn exit_of(id: &str) -> String {
+        let bare = id.strip_prefix("md-").unwrap_or(id);
+        match bare.rsplit_once("-l") {
+            Some((intent, rung)) if rung.bytes().all(|byte| byte.is_ascii_digit()) => {
+                intent.to_owned()
+            }
+            _ => bare.to_owned(),
+        }
+    }
+
     /// One order as the broker reports it.
     fn reported(id: &str, held: &Held) -> Result<BrokerOrder, ExecutorError> {
         let status = match (held.live, held.filled) {
@@ -7459,11 +7781,28 @@ mod sequence_tests {
     }
 
     fn rule_13_script(start: i64, script: &[Move]) -> Result<(), String> {
-        rule_13_script_from(start, false, script)
+        rule_13_script_with(start, false, false, script).map(|_| ())
+    }
+
+    /// [`rule_13_script`] with the Σ checks ([`Desk::within_position`], DEC-408).
+    fn rule_13_summed(start: i64, script: &[Move]) -> Result<(), String> {
+        rule_13_script_with(start, false, true, script).map(|_| ())
     }
 
     /// [`rule_13_script`], from [`beside_a_lone_exit`] where `lone` is set.
     fn rule_13_script_from(start: i64, lone: bool, script: &[Move]) -> Result<(), String> {
+        rule_13_script_with(start, lone, false, script).map(|_| ())
+    }
+
+    /// Runs `script` under the oracle, from [`beside_a_lone_exit`] where `lone` is set and with
+    /// the Σ checks where `sums` is, and answers the oracle's own record at its end, for a named
+    /// script to assert its claim on.
+    fn rule_13_script_with(
+        start: i64,
+        lone: bool,
+        sums: bool,
+        script: &[Move],
+    ) -> Result<Desk, String> {
         let failed = |error: ExecutorError| format!("{error:?}");
         let (config, fees) = (executor_config(), fees().map_err(failed)?);
         let ports = tiered_ports(&config, &fees);
@@ -7498,6 +7837,15 @@ mod sequence_tests {
             fills: 0,
             paused: false,
             quiet_since: 0,
+            sums,
+            stepped: BTreeSet::new(),
+            between: BTreeMap::new(),
+            parked: BTreeSet::new(),
+            lone: BTreeSet::new(),
+            sequence: None,
+            bounded: BTreeSet::new(),
+            ended: BTreeSet::new(),
+            shorts: Vec::new(),
             cancelled: BTreeSet::new(),
         };
         let agent = AgentId("agent-a".to_owned());
@@ -7599,6 +7947,8 @@ mod sequence_tests {
                         match desk.venue.get_mut(&id) {
                             Some(held) if held.live => {
                                 held.live = false;
+                                let left = held.qty.saturating_sub(held.filled);
+                                desk.rung_cancelled(&id, left);
                                 Some(cancel_accepted(&id))
                             }
                             Some(_) => Some(refused(&id, "order is not cancelable")),
@@ -7611,54 +7961,124 @@ mod sequence_tests {
                     .pop()
                     .map(|id| refused(&id, "order is not cancelable")),
                 Move::Pause(paused) => {
-                    let mode = if paused { Mode::Paused } else { Mode::Normal };
                     desk.paused = paused;
-                    executor.state.modes.insert(agent.clone(), mode);
+                    let to = if paused { "paused" } else { "normal" };
+                    mode_applied(&mut executor, &agent, to, desk.now)?;
+                    Some(Input::Tick(RiskClock::from_secs(desk.now)))
+                }
+                Move::Stop(stopped) => {
+                    desk.paused = stopped;
+                    let to = if stopped { "stopped" } else { "normal" };
+                    mode_applied(&mut executor, &agent, to, desk.now)?;
+                    Some(Input::Tick(RiskClock::from_secs(desk.now)))
+                }
+                Move::Reject => {
+                    let latest = desk
+                        .venue
+                        .iter_mut()
+                        .filter(|(id, held)| {
+                            held.live
+                                && !held.acked
+                                && held.purpose != Purpose::Protective
+                                && id.contains("-l")
+                        })
+                        .last();
+                    match latest {
+                        Some((id, held)) => {
+                            held.live = false;
+                            Some(refused(id, "rejected"))
+                        }
+                        None => None,
+                    }
+                }
+                Move::RejectFirst => {
+                    let latest = desk
+                        .venue
+                        .iter_mut()
+                        .filter(|(id, held)| {
+                            held.live
+                                && !held.acked
+                                && held.purpose != Purpose::Protective
+                                && !id.contains("-l")
+                        })
+                        .last();
+                    match latest {
+                        Some((id, held)) => {
+                            held.live = false;
+                            Some(refused(id, "rejected"))
+                        }
+                        None => None,
+                    }
+                }
+                Move::Restart => {
+                    executor.state = refolded(&executor)?;
                     None
                 }
+                Move::Triggered(qty) => {
+                    let first = desk
+                        .venue
+                        .iter_mut()
+                        .find(|(_, held)| held.live && held.purpose == Purpose::Protective);
+                    match first {
+                        Some((id, held)) => {
+                            let qty = qty.min(held.qty.saturating_sub(held.filled));
+                            held.filled = held.filled.saturating_add(qty);
+                            held.live = held.filled < held.qty;
+                            desk.position = desk.position.saturating_sub(qty);
+                            desk.fills = desk.fills.saturating_add(1);
+                            Some(Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
+                                fill_id: FillId(format!("f-{}", desk.fills)),
+                                client_order_id: Some(id.clone()),
+                                instrument: aapl().map_err(failed)?,
+                                side: Side::Sell,
+                                qty: Qty::parse(&qty.to_string())
+                                    .map_err(|error| error.to_string())?,
+                                price: Price::parse("140").map_err(|error| error.to_string())?,
+                                fees: Usd::ZERO,
+                                trade_date: Date::parse("2026-09-22")
+                                    .map_err(|error| error.to_string())?,
+                            })))
+                        }
+                        None => None,
+                    }
+                }
+                Move::KillSwitch => Some(Input::Command(Command::KillSwitch {
+                    scope: KillScope::Agent(agent.clone()),
+                    initiator: Initiator::Owner,
+                    confirmation: None,
+                })),
             };
             if let Some(input) = input {
                 desk.deliver(&mut executor, &ports, input)?;
             }
+            desk.within_position()?;
             if matches!(next, Move::Tick(_)) {
                 desk.bounded(&config)?;
             }
         }
-        let mut restarted = ExecutorState::new(executor.state.scope.clone());
-        for event in &executor.journal {
-            fold(&mut restarted, event).map_err(failed)?;
-        }
-        restarted.quotes.clone_from(&executor.state.quotes);
-        restarted.sane_bids.clone_from(&executor.state.sane_bids);
-        restarted.trades.clone_from(&executor.state.trades);
-        restarted.breaches.clone_from(&executor.state.breaches);
-        restarted.modes.clone_from(&executor.state.modes);
-        restarted.now = executor.state.now;
-        restarted.epoch = executor.state.epoch;
-        restarted.started = executor.state.started;
-        restarted.started_at = executor.state.started_at;
+        let restarted = refolded(&executor)?;
         if restarted != executor.state {
             return Err(format!(
                 "a restart from the journal differs from the live state:\n{restarted:#?}\n{:#?}",
                 executor.state
             ));
         }
-        Ok(())
+        Ok(desk)
     }
 
     /// Rule 13, by an oracle of its own over random scripts of ticks, quotes (a bid, a trade,
-    /// either, neither; sane or not; marks at, above and below the stop, so the watchdog fires), exits of every purpose and size, acknowledgments, partial
-    /// fills, cancel confirmations and pauses, against ten protected AAPL with an exit tier, from
-    /// an instant in each session (none the calendar covers, after-hours, just before the closing
-    /// auction window, the morning, overnight, and just before the open): no
-    /// input is refused; no exit is denied but for a genuine over-sell; no exit is held but for
-    /// rule 13's four, or a discretionary exit with nothing to price from (DEC-160 (12)); no
-    /// exit falls back to its own limit while something prices it; and none stays neither
+    /// either, neither; sane or not; marks at, above and below the stop, so the watchdog fires),
+    /// exits of every purpose and size, acknowledgments, partial fills, cancel confirmations and
+    /// pauses, against ten protected AAPL with an exit tier, from an instant in each session (none
+    /// the calendar covers, after-hours, just before the closing auction window, the morning,
+    /// overnight, and just before the open): no input is refused; no exit is denied but for an
+    /// over-sell of the position by the live sells and the rungs still to be sent; no exit is held
+    /// but for rule 13's four, or a discretionary exit with nothing to price from (DEC-160 (12));
+    /// no exit falls back to its own limit while something prices it; and none stays neither
     /// submitted, denied nor abandoned past the bounds but under those holds or the broker's
-    /// silence on a protective cancel. The oracle reads the drafts and its own record, never
-    /// the fold; and at the end the journal, folded afresh, equals the live state but for what is
-    /// process-local (quotes, the watchdog's clock, the clock, the writer's epoch, and the pause set
-    /// directly here).
+    /// silence on a protective cancel. The oracle reads the drafts and its own record, never the
+    /// fold; and at the end the journal, folded afresh, equals the live state but for what is
+    /// process-local (quotes, the watchdog's clock, the clock, and the writer's epoch).
     #[test]
     fn rule_13_holds_over_random_scripts() -> Result<(), String> {
         let config = ProptestConfig {
@@ -7686,6 +8106,405 @@ mod sequence_tests {
             .run(
                 &(starts, prop::collection::vec(moves(), 1..64)),
                 |(start, script)| rule_13_script(start, &script).map_err(TestCaseError::fail),
+            )
+            .map_err(|error| error.to_string())
+    }
+
+    /// #485's minimal script, from the rule-13 property: a risk exit's rung steps while the agent
+    /// is paused; two discretionary exits still selling keep protection from returning, so the
+    /// sequence lingered between rungs, and once the pause was lifted a new risk exit was allowed
+    /// against the whole position and the old ladder resumed beside it: 11 against 10. A ladder
+    /// that no longer climbs when its step is confirmed ends there (DEC-409).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_risk_exit_beside_a_sequence_between_rungs_never_over_sells() -> Result<(), String> {
+        rule_13_summed(0, &stepped_while(Move::Pause(true), Move::Pause(false)))
+    }
+
+    /// DEC-409, stopped: the same walk as [`a_risk_exit_beside_a_sequence_between_rungs_never_over_sells`]
+    /// with the agent stopped and resumed rather than paused.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_ladder_stopped_between_rungs_never_resumes_beside_a_new_exit() -> Result<(), String> {
+        rule_13_summed(0, &stepped_while(Move::Stop(true), Move::Stop(false)))
+    }
+
+    /// #485's script: three exits beside the OCO, the risk exit's rung stepped and confirmed while
+    /// `held` holds the agent, then `freed` lifts it and a new risk exit of 4 arrives.
+    fn stepped_while(held: Move, freed: Move) -> [Move; 11] {
+        [
+            Move::Exit(2, 1, 141),
+            Move::Exit(0, 4, 141),
+            Move::Exit(2, 2, 141),
+            Move::Confirm,
+            Move::Quote(Some(135), None, true),
+            Move::Tick(2),
+            Move::Tick(8),
+            held,
+            Move::Confirm,
+            freed,
+            Move::Exit(0, 4, 141),
+        ]
+    }
+
+    /// A risk exit of 4 at 19:59:50 ET goes after-hours, its step at 20:00:05 is confirmed with no
+    /// session open, so it parks for the next open and protection returns for the held 10
+    /// (DEC-260 (18)); a risk exit of 8 then arrives and is held `session_closed`.
+    const PARKED_BESIDE_A_HELD_EXIT: [Move; 7] = [
+        Move::Quote(Some(150), None, true),
+        Move::Exit(0, 4, 150),
+        Move::Confirm,
+        Move::Ack,
+        Move::Tick(15),
+        Move::Confirm,
+        Move::Exit(0, 8, 150),
+    ];
+
+    /// The night, to 04:00 ET, the pre-market open, with a fresh quote and both cancels confirmed.
+    const TO_THE_OPEN: [Move; 8] = [
+        Move::Tick(3_600),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(3_600),
+        Move::Quote(Some(150), None, true),
+        Move::Confirm,
+        Move::Confirm,
+    ];
+
+    /// #485, the parked route, with no pause at all: at the open the held exit of 8 was released
+    /// against the whole position and the parked ladder resumed beside it: 12 against 10. The
+    /// plan gives way, not the sell (DEC-410 item 2): the exit of 8 goes whole, the parked
+    /// remainder counts the 2 it leaves, and the ladder's next rung sends 2, journaled short by 2.
+    /// The oracle checks the rung and the record against its own figure.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_risk_exit_held_overnight_beside_a_parked_ladder_goes_whole_and_the_ladder_sends_what_is_left()
+    -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .chain(TO_THE_OPEN)
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// DEC-410 item 2, nothing left: the parked ladder would sell the whole position, so the risk
+    /// exit held overnight finds nothing left at the open beside its remainder. It goes whole, and
+    /// the ladder's next rung sends the other 6, journaled short by 4.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_risk_exit_beside_a_parked_ladder_selling_everything_goes_whole() -> Result<(), String> {
+        let script: Vec<Move> = [
+            Move::Quote(Some(150), None, true),
+            Move::Exit(0, 10, 150),
+            Move::Confirm,
+            Move::Ack,
+            Move::Tick(15),
+            Move::Confirm,
+            Move::Exit(0, 4, 150),
+        ]
+        .into_iter()
+        .chain(TO_THE_OPEN)
+        .chain([Move::Tick(60), Move::Ack, Move::Fill(3), Move::Tick(60)])
+        .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// The review of #494 (M2), a remainder that nothing sends: a risk exit's step parks at
+    /// 20:00:05 beside an owner exit still working, so the sequence stays parked, and its interval
+    /// reaches its bound in the night. Its ladder no longer climbs, so its remainder stops counting
+    /// and is never sent (DEC-410 item 1): a risk exit of 5 at the open goes whole, and no rung
+    /// of the old ladder follows it.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_parked_sequence_past_its_bound_never_sends_its_remainder() -> Result<(), String> {
+        let script = [
+            Move::Quote(Some(150), None, true),
+            Move::Exit(0, 4, 150),
+            Move::Exit(1, 2, 150),
+            Move::Confirm,
+            Move::Ack,
+            Move::Ack,
+            Move::Tick(15),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(3_600),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Tick(7_200),
+            Move::Tick(3_600),
+            Move::Quote(Some(150), None, true),
+            Move::Exit(0, 5, 150),
+            Move::Confirm,
+            Move::Confirm,
+            Move::Tick(30),
+            Move::Confirm,
+            Move::Ack,
+            Move::Fill(5),
+            Move::Tick(30),
+            Move::Confirm,
+            Move::Tick(30),
+            Move::Confirm,
+            Move::Tick(30),
+        ];
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// DEC-410 item 1, a ladder that resumes with nothing left: parked overnight with 4 unsold
+    /// while the agent is paused, its whole position is sold by the stop meanwhile. When the agent
+    /// resumes in the session, the remainder counts what is left, which is nothing, so no rung is
+    /// sent against a position of 0 and the ladder ends, journaled short by all 4.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_ladder_that_resumes_with_nothing_left_sends_nothing() -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .take(6)
+            .chain([Move::Pause(true), Move::Triggered(10)])
+            .chain(TO_THE_OPEN)
+            .chain([Move::Pause(false), Move::Tick(30), Move::Confirm])
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// DEC-410 item 1, a ladder that counts again: parked overnight with 4 unsold while the agent
+    /// is paused, it counts nothing; meanwhile the stop fills 8 of the 10. When the agent resumes,
+    /// the remainder counts again, but only the 2 shares left, so its rung at the open sends 2,
+    /// journaled short by 2.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_ladder_that_resumes_after_its_position_shrank_sends_only_what_is_left()
+    -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .take(6)
+            .chain([Move::Pause(true), Move::Triggered(8), Move::Pause(false)])
+            .chain(TO_THE_OPEN)
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// DEC-410, restart between rungs: the parked remainder is folded from the journal, so a
+    /// process restarted overnight, and again at the open, counts it as before. On
+    /// today's code it fails on its prefix's over-sell, as
+    /// [`a_risk_exit_held_overnight_beside_a_parked_ladder_goes_whole_and_the_ladder_sends_what_is_left`] does; the
+    /// restarts are what the fix must get right.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_restart_between_rungs_still_counts_the_parked_remainder() -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .chain([Move::Restart])
+            .chain(TO_THE_OPEN.into_iter().take(5))
+            .chain([Move::Restart])
+            .chain(TO_THE_OPEN.into_iter().skip(5))
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// DEC-410, a refused rung: once the broker refuses the parked ladder's next rung, its
+    /// remainder no longer counts, so a new risk exit of 4 goes beside what still sells. On today's
+    /// code it fails on its prefix's over-sell; the refusal and the exit
+    /// after it are what the fix must get right.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_refused_rung_leaves_its_remainder_to_the_next_exit() -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .chain(TO_THE_OPEN)
+            .chain([Move::Reject, Move::Exit(0, 4, 150), Move::Confirm])
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// The agent paused in the night, through the pre-market, and resumed at 09:30:05 ET, the
+    /// regular session's open, where a discretionary exit held overnight may go (rule 13). The
+    /// parked ladder of a paused agent counts nothing and waits (DEC-410 item 1), so on the
+    /// resumption the exit and the ladder's remainder are decided in the same step; then the
+    /// protective cancel is confirmed.
+    const PAUSED_TO_THE_REGULAR_OPEN: [Move; 12] = [
+        Move::Pause(true),
+        Move::Tick(3_600),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(7_200),
+        Move::Tick(3_600),
+        Move::Tick(19_800),
+        Move::Quote(Some(150), None, true),
+        Move::Pause(false),
+        Move::Confirm,
+        Move::Confirm,
+        Move::Tick(1),
+    ];
+
+    /// The exit of the script's step `step`: the oracle's own record of it, its verdict and
+    /// reason, and the quantity of its first order at the broker, if one was sent.
+    fn fate(desk: &Desk, step: usize) -> (String, String, Option<u32>) {
+        let intent = format!("01JABCDEFGHJKMNPQRSTV{step:05}");
+        let (verdict, reason) = desk.exits.get(&intent).map_or_else(
+            || (String::new(), String::new()),
+            |exit| (exit.verdict.clone(), exit.reason.clone()),
+        );
+        let sent = desk.venue.get(&format!("md-{intent}")).map(|held| held.qty);
+        (verdict, reason, sent)
+    }
+
+    /// DEC-410 item 3, sized: a remainder of 4 parks overnight, and a discretionary exit of 8
+    /// arrives in the night and is held `session_closed`. When the agent, paused meanwhile,
+    /// resumes at the regular open, the exit is sized to the 6 left,
+    /// and the ladder's next rung sends the other 4; the oracle checks both against its own
+    /// figures.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_discretionary_exit_beside_a_parked_remainder_is_sized_to_what_is_left()
+    -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .take(6)
+            .chain([Move::Exit(2, 8, 150)])
+            .chain(PAUSED_TO_THE_REGULAR_OPEN)
+            .collect();
+        let desk = rule_13_script_with(TEN_SECONDS_BEFORE_THE_NIGHT, false, true, &script)?;
+        assert_eq!(fate(&desk, 6), ("allow".to_owned(), String::new(), Some(6)));
+        Ok(())
+    }
+
+    /// The parked ladder selling the whole position: a risk exit of 10 at 19:59:50 ET parks at
+    /// 20:00:05 with all 10 unsold, then a discretionary exit of 3 arrives in the night.
+    const PARKED_WITH_NOTHING_LEFT: [Move; 7] = [
+        Move::Quote(Some(150), None, true),
+        Move::Exit(0, 10, 150),
+        Move::Confirm,
+        Move::Ack,
+        Move::Tick(15),
+        Move::Confirm,
+        Move::Exit(2, 3, 150),
+    ];
+
+    /// DEC-410 item 3, nothing left, decided at the open: in the night the discretionary exit is
+    /// held `session_closed`, not denied, because only the open orders' half of §5.3 rule 4 comes
+    /// before the holds. When the agent, paused meanwhile, resumes at the regular open, the
+    /// remainder of 10 counts again, so the exit is denied `sell_exceeds_available`, terminally.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_discretionary_exit_with_nothing_left_is_held_overnight_then_refused_at_the_open()
+    -> Result<(), String> {
+        let night = rule_13_script_with(
+            TEN_SECONDS_BEFORE_THE_NIGHT,
+            false,
+            true,
+            &PARKED_WITH_NOTHING_LEFT,
+        )?;
+        assert_eq!(
+            fate(&night, 6),
+            ("hold".to_owned(), "session_closed".to_owned(), None)
+        );
+        let script: Vec<Move> = PARKED_WITH_NOTHING_LEFT
+            .into_iter()
+            .chain(PAUSED_TO_THE_REGULAR_OPEN)
+            .collect();
+        let open = rule_13_script_with(TEN_SECONDS_BEFORE_THE_NIGHT, false, true, &script)?;
+        assert_eq!(
+            fate(&open, 6),
+            ("deny".to_owned(), "sell_exceeds_available".to_owned(), None)
+        );
+        Ok(())
+    }
+
+    /// DEC-410 items 4 and 7: at the open the risk exit of 8 held overnight goes whole, and the
+    /// parked ladder's next rung goes in the same step, short by the 2 the 8 took, journaled
+    /// `rung_short`. The broker then refuses the 8. The rung was already sent, so the 2 stay
+    /// unsold, disclosed by that record, and the ladder sends nothing more than its rung.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_rung_sent_short_beside_a_sell_the_broker_then_refuses_is_journaled_short()
+    -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .chain(TO_THE_OPEN)
+            .chain([
+                Move::RejectFirst,
+                Move::Tick(1),
+                Move::Ack,
+                Move::Fill(2),
+                Move::Tick(1),
+                Move::Confirm,
+                Move::Tick(1),
+            ])
+            .collect();
+        let desk = rule_13_script_with(TEN_SECONDS_BEFORE_THE_NIGHT, false, true, &script)?;
+        assert_eq!(
+            desk.shorts,
+            vec![("01JABCDEFGHJKMNPQRSTV00001".to_owned(), 2, 2)]
+        );
+        assert_eq!(fate(&desk, 6).2, Some(8), "the 8 went whole");
+        let covered: u32 = desk
+            .venue
+            .values()
+            .filter(|held| held.live && held.purpose == Purpose::Protective)
+            .map(|held| held.qty.saturating_sub(held.filled))
+            .sum();
+        assert_eq!(
+            (desk.position, desk.working(None), covered),
+            (8, 0, 8),
+            "the 8 left unsold are protected, no more and no less (§5.4)"
+        );
+        Ok(())
+    }
+
+    /// DEC-410, the kill switch: the owner's agent-scoped kill switch between rungs, with a ladder
+    /// parked and an exit held, leaves nothing selling past the position through the open
+    /// (`AGENTS.md` rule 13; E7-3 implements the kill switch).
+    #[test]
+    #[ignore = "pending E7-3"]
+    fn a_kill_switch_between_rungs_never_over_sells() -> Result<(), String> {
+        let script: Vec<Move> = PARKED_BESIDE_A_HELD_EXIT
+            .into_iter()
+            .chain([Move::KillSwitch])
+            .chain(TO_THE_OPEN)
+            .collect();
+        rule_13_summed(TEN_SECONDS_BEFORE_THE_NIGHT, &script)
+    }
+
+    /// #485, by the oracle over random scripts that put a ladder between rungs first: a rung
+    /// stepped while paused or stopped, or parked overnight beside a held exit, then any moves,
+    /// the new ones included. Live exits and the rungs still to send never exceed the position,
+    /// and no exit is denied for a remainder (DEC-408).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn rule_13_holds_over_random_scripts_from_between_rungs() -> Result<(), String> {
+        let config = ProptestConfig {
+            cases: 256,
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        };
+        let tail = prop_oneof![
+            8 => moves(),
+            1 => any::<bool>().prop_map(Move::Stop),
+            1 => Just(Move::Reject),
+            1 => Just(Move::Restart),
+        ];
+        TestRunner::new(config)
+            .run(
+                &(0_usize..3, prop::collection::vec(tail, 1..48)),
+                |(prefix, tail)| {
+                    let (start, head): (i64, Vec<Move>) = match prefix {
+                        0 => (
+                            0,
+                            stepped_while(Move::Pause(true), Move::Pause(false)).to_vec(),
+                        ),
+                        1 => (
+                            0,
+                            stepped_while(Move::Stop(true), Move::Stop(false)).to_vec(),
+                        ),
+                        _ => (
+                            TEN_SECONDS_BEFORE_THE_NIGHT,
+                            PARKED_BESIDE_A_HELD_EXIT.to_vec(),
+                        ),
+                    };
+                    let script: Vec<Move> = head.into_iter().chain(tail).collect();
+                    rule_13_summed(start, &script).map_err(TestCaseError::fail)
+                },
             )
             .map_err(|error| error.to_string())
     }

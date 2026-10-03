@@ -953,6 +953,20 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
     table types it `uuid`. Decide whether it becomes §9.3's `asset_id`: a §9.1 change, and its own
     story, spec first (ES-22, DEC-176). Type `PlatformOperatorAction`'s `research_thesis_halt`
     instrument (§9, DEC-100) the same way when that schema closes.
+  *Follow-ups (#519 review round 1):*
+  - Minor 1, done on `agent/j3-thesis-impl-minors`: the `order_rule_37_before_rule_38` draft pins rule
+    37's report order before rule 38's when it is the only rule of 35 to 37 that fails.
+  - Minor 2 (with minor 4): mandate spec §8.5's ordered seventeen refusal reasons live in three Rust
+    places with nothing pinning them equal: `mandate-research`'s `RefusalReason`,
+    `mandate-journal`'s `control::THESIS_REFUSALS`, and `mandate-spec`'s
+    `context::THESIS_REFUSALS`. Give the list one home on a higher rung: a type in `mandate-domain`
+    that the three read, or an xtask check that they agree. The same change should also give check
+    numbers one form: `control.rs` compares a 0-based index with `CORROBORATION_CHECK` (15), where
+    `context.rs` uses the 1-based check number.
+  - Minor 5: `control::horizon_agrees` fails closed (check 2 fails) on an instant or horizon it
+    cannot read, where the reference validator skips the comparison. The schema guarantees both
+    types today, so no record reaches the difference; if the schema ever stops guaranteeing them,
+    pick one reading and pin it with a vector.
 
   The writer that adds the model's identity, the instants, and the artifact references to
   `ThesisEntry` is a story of its own. DEC-413 item 5 lists the readings not taken, each a later
@@ -1056,6 +1070,10 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   on one completed DEC-99 evaluation on the DEC-103 thin slice. The lineage fold that reads `ThesisProposed` and
   `ThesisRevised` calls `mandate_spec::context::check_thesis_record` on each record before acting on
   it (DEC-414 item 3), as every reader of a thesis record must.
+  When that first reader lands, the re-derivation moves up the trust ladder: a reader gets a thesis
+  payload only through a type that carries `check_thesis_record`'s verdict, so none can act on one
+  unchecked (#519 review). The same change completes `check_thesis_record`'s doc comment so it lists
+  every `Err` it returns (#519 round 1, minor 3).
 
 ### E16 Kraken Derivatives US connector (Phase 3)
 
@@ -2262,22 +2280,29 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   quantity reading is the one that stays**: do not remove it.
   *Done (the minimum half, reference side):* #504 moves `ref.py` to the same quantity minimum, has
   §5.5 name it, and adds MC-B33 and MC-B34, which pin the two readings' difference.
-- **E6-4: a trim that sells everything left to sell is never withheld for the minimum
-  ([DEC-423](decisions/DEC-423.md); #504 review, M1, and the coordinator's ruling there).
-  Required next in stream G, ahead of MC-B33 and MC-B34's status PR and the harness cleanup.**
+- **E6-4: a trim of the whole position is never withheld for the minimum
+  ([DEC-423](decisions/DEC-423.md); #504 review, M1, the coordinator's ruling there, and its
+  narrowing on #520). Required next in stream G, ahead of MC-B33 and MC-B34's status PR and the
+  harness cleanup.**
   `trim::proposals` (DEC-399 item 5) and, since #504, `ref.py` withhold a trim below
-  `min_order_size` even when it is the whole unsold quantity. Trading spec §5.3 rule 2 exempts a
-  sell closing the full position, and `account_rules.rs` and `conduct.rs` both call it always
-  valid, so this is a risk exit held by a venue minimum. The review's case: 0.0002 BTC at a
-  600,000 bid (120 dollars), a cap of 100, a confirmed factor of 0.5, a 0.0001 increment and a
-  `min_order_size` of 0.001; the trim is 0.0002, the whole position, and it is withheld at every
-  evaluation. In order:
-  (1) a DEC-77 tests PR in `mandate-risk`: a trim equal to the unsold quantity is proposed below
-  `min_order_size` (this crypto case and an equity one), and a sub-minimum trim that is not a full
-  close is still withheld;
+  `min_order_size` even when it is the whole position held. Trading spec §5.3 rule 2 exempts a
+  sell closing the full position by its exact quantity, and nothing further down the gate refuses
+  a risk exit, so this is a risk exit held by a minimum the broker does not apply. A remainder
+  beside one of the agent's own resting sells is not that sell, and stays withheld. In order:
+  (1) a DEC-77 tests PR in `mandate-risk` (#520): a trim of the whole position is proposed below
+  `min_order_size` (equity, under a protective stop, and crypto at a zero and a non-zero target),
+  and a sub-minimum trim that is not the whole position is still withheld (beside a resting sell,
+  one increment short, and 3 of 10);
   (2) the gate change;
   (3) §5.5 gains the exemption, `ref.py` takes it, a new case states the full-close trim, and the
-  harness's `trim_guards` moves with them, as #498 did.
+  harness's `trim_guards` moves with them, as #498 did. The same PR corrects DEC-399 item 8's
+  known-defect clause, which says the #504 case's trim is the whole position: on the 1e-9 grid it
+  is not (the coordinator's ruling on #520).
+  *Done:* (1) in #520; (2) in the implementation PR, which replaces the stub with the condition
+  itself, so the exemption cannot fail.
+  The #504 review's own case (0.0002 BTC, a cap of 100, factor 0.5, a 0.001 minimum) is **not**
+  released by this: on the gate's 1e-9 grid its trim is 0.000116667, not the whole position. The
+  "real quantity grid" row below closes it.
 - **E6-4 reference: `ref.py` judges the trim's minimum on the whole excess, not on the remainder
   after open sells** (#504 review, m2). `ref.py`'s builder has no open-sell input, so it sizes the
   trim on the whole excess. The gate subtracts the agent's own resting sells first (DEC-399 items 5
@@ -2313,7 +2338,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   `trim.rs` and `conduct::slice` both take whole shares or nine places from `fractionable`, because
   `InstrumentSnapshot` carries no increment. DEC-128 item 27 found that reading wrong for the
   builder (increments of `0.0001` and `0.000001` exist). Once the snapshot carries the increment,
-  round the trim up on it, so a trim is never off the grid that §5.3 rule 2 refuses.
+  round the trim up on it, so a trim is never off the grid that §5.3 rule 2 refuses. **This is
+  also what releases the #504 review's case** ([DEC-423](decisions/DEC-423.md), Rationale): 0.0002
+  BTC, a cap of 100, factor 0.5 and a 0.001 minimum give a trim of 0.000116667 on the 1e-9 grid,
+  withheld below the minimum, but 0.0002 on the venue's 0.0001 grid, the whole position, which
+  DEC-423 exempts. Add that case as a trim test when this lands.
 - **E6-4 nits** (#466 review, round 1): `UsdExact::times_size_fraction`'s doc still lists "the
   ladder size factor applied to the target" though the gate's 24-place `Ratio` factor enters
   through `UsdExact::of_ratio`; say which number each serves (n2). `of_ratio` takes any `Ratio`,
@@ -2759,3 +2788,27 @@ From journal spec v0.8 §9.3's review (#470 round 2, DEC-403):
   - **`risk_state.classify`** raises `ValueError` on a path it does not encode instead of reporting
     a `drafts.classification` problem. It fails closed either way, but a reported problem reads
     better.
+
+From the #485 chain's round-3 review (#494 and #496; the coordinator's ruling, 23:58Z, freeze rule), and #508's round 2 (m3′):
+
+- **E7-4: pin that a crowded-out discretionary exit's denial is terminal** (#494 round 3, minor 1;
+  DEC-410 item 3). `a_discretionary_exit_with_nothing_left_is_held_overnight_then_refused_at_the_open`
+  ends one tick after the denial, and the oracle keeps only the latest verdict, so a denial repeated
+  at every tick would pass. Assert one `GateDecided deny` record for that intent over several ticks.
+- **E7-3: the kill switch between rungs** (#494 round 3, minor 2; DEC-410 item 5). Its only script,
+  `a_kill_switch_between_rungs_never_over_sells`, is `pending E7-3`; the claim in §5.5's agent row is
+  pinned only when E7-3 lands.
+- **E7-4: a sell beside a parked remainder that ends unsold before the rung is due** (#494 round 3,
+  minor 4; DEC-410 item 6). With the agent paused across the open, the sell's refusal frees its room
+  and the rung then sends the whole remainder. No script pins that direction: the existing ones shrink
+  the position (`Move::Triggered`) or refuse the ladder's own rung (`Move::Reject`).
+- **E7-4: the window guard's doc says no script reaches an unparked remainder today** (#496 round 3,
+  minor 1). `Desk::within_position`'s parked-only assertion should say in its doc that it holds by
+  construction today and exists to turn red if a change opens the window.
+- **E7-4: `Held` gains an `Unknown` state** (#496 round 3, minor 2). The oracle's
+  `unknown_order_in_flight` check fails every such hold because the script's broker never leaves an
+  order unknown. With an `Unknown` state in `Held`, it becomes a coincidence check against the
+  oracle's own venue record.
+- **E7-4: hoist `overtaken` out of `release_waiting`'s per-exit loop** (#508 round 2, m3′). It runs
+  once per waiting exit, not once per instrument; with the `Unknown` arm in its guard the repeats ask
+  nothing, so this is wasted work only.

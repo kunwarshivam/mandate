@@ -1,7 +1,8 @@
 //! Mandate spec §5.5's `trim_to_target` (DEC-56, DEC-65): once a `trim_to_target` rung has been
 //! active for `breach_confirm_s`, a position whose market value exceeds `factor × cap` by at least
 //! `rebalance_band × cap` is sold down to `factor × cap` as a risk exit, the quantity rounded **up**
-//! to the increment, if the sell meets the instrument's minimum, for an equity only in the regular
+//! to the increment, if the sell meets the instrument's minimum or is the whole position held
+//! (trading spec §5.3 rule 2's full-close exception, DEC-423), for an equity only in the regular
 //! session, and never while the goal is `Holding`. The agent's own open non-protective sells in the
 //! instrument are subtracted from the excess first, so a trim already working is never proposed
 //! again (DEC-399 item 7).
@@ -64,7 +65,11 @@ pub(crate) fn proposals(
             .checked_sub(UsdExact::of_qty(on_sale).checked_mul(market_value)?)?
             .ceiled_quotient(market_value, increment(instrument)?)?
             .min(unsold);
-        if qty.is_zero() || qty < instrument.min_order_size {
+        if qty.is_zero() {
+            continue;
+        }
+        let closes_the_position = qty == held;
+        if qty < instrument.min_order_size && !closes_the_position {
             continue;
         }
         trims.push(TrimProposal {
