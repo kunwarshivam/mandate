@@ -771,6 +771,8 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   round 2, major 1; the reference models V-047 at validation only, DEC-411 item 5). In progress (claim #124, stream
   H4; [DEC-428](decisions/DEC-428.md)): the tests PR, then the implementation, then the status PR; the apply-time case
   is a Rust test through `from_journal` (DEC-428 item 4), and `validate::recheck_at_application` rechecks V-002 and V-047.
+  Owed when `Membership` gets a producer (#536 round 1, minor 4): a test pins that pending invitations and deactivated
+  accounts do not count as users (spec V-047, DEC-411 item 2). `mandate-spec` receives a count, so it cannot pin it.
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
   increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C48 pass.

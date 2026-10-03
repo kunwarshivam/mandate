@@ -19,7 +19,9 @@ use mandate_domain::Environment;
 use mandate_num::Usd;
 use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, Membership};
 use mandate_spec::document::{ConnectionId, ModelId, Pointer, ProvenanceMap, Source};
-use mandate_spec::validate::{RegisteredModel, ValidationReport, recheck_at_application, validate};
+use mandate_spec::validate::{
+    PreviousVersion, RegisteredModel, ValidationReport, recheck_at_application, validate,
+};
 use mandate_spec::{Mandate, SpecError, ValidationContext, Violation};
 use mandate_time::Date;
 use proptest::prelude::*;
@@ -31,9 +33,6 @@ const MODEL_HASH: &str = "111111111111111111111111111111111111111111111111111111
 /// The user counts V-047 refuses under the policy: none, and one. Written out, never derived from
 /// `< 2`, so a boundary moved in the rule cannot move the oracle with it.
 const LONE: [u32; 2] = [0, 1];
-
-/// The rules §4.1 checks again when a version is applied: V-002 and V-047, and no other.
-const AT_APPLICATION: [Violation; 2] = [Violation::V002, Violation::V047];
 
 /// A property that drew no lone workspace under the policy would check nothing, so each counts the
 /// cases that reach that branch and requires at least this many.
@@ -293,18 +292,44 @@ fn an_absent_membership_is_no_second_user_under_the_policy() {
         codes(&[Violation::V047]),
         "no membership at application under the policy"
     );
-    let two = folded(&mandate, &facts, Some((2, 1)), true);
+    let two = report(&mandate, &folded(&mandate, &facts, Some((2, 1)), true));
     assert!(
-        report(&mandate, &two).is_valid(),
+        two.is_valid(),
         "two users under the policy: {:?}",
-        report(&mandate, &two).violations
+        two.violations
     );
-    assert!(
-        report(&mandate, &folded(&mandate, &facts, None, false))
-            .violations
-            .eq(&codes(&[Violation::V024])),
+    assert_eq!(
+        report(&mandate, &folded(&mandate, &facts, None, false)).violations,
+        codes(&[Violation::V024]),
         "no membership without the policy is V-024 alone"
     );
+}
+
+/// DEC-428 item 6: V-047 refuses every version in a lone workspace under the policy, a risk-reducing
+/// or neutral one included, because any exemption is DEC-411 item 6's founder question.
+#[test]
+#[ignore = "pending E10-1"]
+fn v047_refuses_a_reducing_or_neutral_version_too() {
+    let mandate = draft();
+    let looser = Mandate::parse(&with("/capital/allocation_usd", Some(s("20000"))))
+        .expect("the looser document parses");
+    for (label, previous) in [("reducing", looser), ("neutral", draft())] {
+        let mut ctx = context(1, true);
+        ctx.previous_version = Some(PreviousVersion {
+            environment: Environment::Paper,
+            connection_id: conn(OURS),
+            mandate: Some(previous),
+        });
+        assert!(
+            report(&mandate, &ctx).violations.contains(&Violation::V047),
+            "a {label} version in a lone workspace under the policy is still refused"
+        );
+        assert_eq!(
+            rechecked(&mandate, &ctx),
+            codes(&[Violation::V047]),
+            "a {label} version is refused at application too"
+        );
+    }
 }
 
 /// The apply-time case (#528 round 2, major 1): a version validated and confirmed in a two-user
@@ -412,11 +437,13 @@ fn the_recheck_reports_v002_and_v047_and_no_other_rule() {
             if lone_under_policy {
                 reached.set(reached.get() + 1);
             }
-            let expected: BTreeSet<Violation> = AT_APPLICATION
-                .into_iter()
-                .zip([short, lone_under_policy])
-                .filter_map(|(code, broken)| broken.then_some(code))
-                .collect();
+            let expected: BTreeSet<Violation> = [
+                (Violation::V002, short),
+                (Violation::V047, lone_under_policy),
+            ]
+            .into_iter()
+            .filter_map(|(code, broken)| broken.then_some(code))
+            .collect();
             let got = recheck_at_application(&mandate, &ctx)
                 .map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
             prop_assert_eq!(got, expected);
