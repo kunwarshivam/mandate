@@ -27,7 +27,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E12 Audit explorer | M9 | 6.7 | Must |
 | E13 Hybrid deployment | M11 | 6.9 | Must |
 | E14 Billing | M12 | 6.10 | Must |
-| E15 Signal models: LLM and fast models, scorecards | M5 (LLM research, scorecards); Phase 3 (fast models) | 6.3, 6.5 | Must (E15-1, E15-3); Should |
+| E15 Signal models: LLM and fast models, scorecards | M5 (LLM research, scorecards); Phase 3 (fast models) | 6.3, 6.5 | Must (E15-1, E15-3, E15-6 to E15-10); Should |
 | E16 Kraken Derivatives US connector | Phase 3 | 6.2 (FR-2.5) | Should |
 | E17 Research agent and dynamic universe | M5 | 6.3 (FR-3.9), 6.5 | Must |
 
@@ -911,6 +911,49 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   hypothesis and success criterion are journaled before it runs; promotion is only an owner action
   that creates a new confirmed mandate version, with no automatic winner-picking; and no mandate holds
   more than three variants.
+
+The stories below implement the [inference spec](../specs/inference.md) v0.1
+([DEC-432](decisions/DEC-432.md)) once it is reviewed. **SC** marks a safety-critical story (the
+model gateway feeds the order builder, holds provider credentials, and enforces spend caps). E15-2
+waits for the founder's answer to DEC-432 item 13, whose recommendation drops the fast tier from v1.
+
+- **E15-6 (Must, M5; SC)** As an operator, I want a model gateway that is the only component able to
+  call a model, so that every call is pinned, bounded by a deadline, and never substitutes a model.
+  *Accepted when:* the call contract of spec §3 is implemented behind a provider adapter interface
+  with a recorded-fixture adapter; property tests with independent oracles cover INF-1 to INF-5,
+  INF-9, INF-11, and INF-13 (spec §2.1), each oracle shown to catch a seeded bug; an output after its
+  deadline, from another identity, or failing its schema never reaches the caller; no request body
+  carries a tool or function member; the agent runtime has no direct route to a model endpoint;
+  live calls run only in internal paper workspaces (DEC-432 item 14).
+- **E15-7 (Must, M5; SC)** As an owner, I want each selectable model to be an immutable registry entry
+  whose content hash covers its identity, template, output schema, deadline, and endpoints' identity,
+  so that what I pin is exactly what runs. *Accepted when:* entries with a floating alias are refused;
+  an endpoint is added only after the spec §4.3 identity probe; deprecation and withdrawal follow
+  spec §4.4 and never replace a pinned model; V-007 checks the mandate against the registry.
+- **E15-8 (Must, M5; SC; journal spec first)** As an auditor, I want every model call journaled with
+  its cost and outcome, so that replay never calls a model and spend folds from the journal.
+  *Accepted when:* a journal spec change closes `ModelInvocationRecorded` with DEC-432 item 11's
+  members and adds the gateway's meter stream, with test vectors; the registration lands tests first
+  (DEC-77); replay of a journal with every model call failing yields the same fold (INF-10).
+- **E15-9 (Must, M5; SC)** As an owner, I want model spend metered and capped per agent and per
+  workspace, so that cost is bounded and a cap never adds risk. *Accepted when:* reservations precede
+  the first attempt, settle on completion, and stay counted after a crash (DEC-432 item 4); a fuzz of
+  calls, failures, cache hits, restarts, and risk-day changes shows spend never above any cap, by a
+  separate accumulator over journaled records; `research_spend_usd_today` for check 7 folds from the
+  meter stream; a refused call yields no output and changes no envelope field; the open question of a
+  per-model cap for fast and LLM signal models is decided (spec §13 item 3), with a mandate spec change
+  if it becomes an envelope field.
+- **E15-10 (Must, M5; SC)** As a workspace admin, I want to choose which model endpoints and regions my
+  workspace may use, including local-only, so that prompts never leave my site unless I allow it.
+  *Accepted when:* a policy key for allowed endpoints and regions (child ⊆ parent) is specified in the
+  mandate spec and `policy.schema.json` first; hybrid and on-prem default to local-only (DEC-432
+  item 8); a call to a disallowed endpoint sends no byte (INF-12); the deterministic prompt guard of
+  spec §8.3 refuses planted credentials, account identifiers, personal data, and another workspace's
+  values in every input source; egress to model hosts is an allowlist enforced at the network layer.
+- **E15-11 (Should, M12)** As an org owner, I want model usage in my bill at cost plus margin, so that
+  I pay for what my agents used. *Accepted when:* the billing feed of spec §7.4 sends counts and cost
+  only, never content, outputs, or instruments; hybrid sends signed reports; the result appears in
+  E14-3's usage view.
 
 ### E17 Research agent and dynamic universe
 
