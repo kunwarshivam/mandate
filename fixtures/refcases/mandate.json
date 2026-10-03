@@ -14230,6 +14230,7 @@
     "size_factor": "0.5",
     "scale_active_s": 120,
     "min_order_size": "1",
+    "open_sell_qty": "0",
     "outputs": [
      {
       "model_id": "quant.momentum",
@@ -14303,6 +14304,7 @@
     "size_factor": "0.5",
     "scale_active_s": 10,
     "min_order_size": "1",
+    "open_sell_qty": "0",
     "outputs": [
      {
       "model_id": "quant.momentum",
@@ -14381,6 +14383,7 @@
     "session": "after_hours",
     "holding": true,
     "min_order_size": "1",
+    "open_sell_qty": "0",
     "outputs": [
      {
       "model_id": "quant.momentum",
@@ -14458,6 +14461,7 @@
     "size_factor": "0.5",
     "scale_active_s": 120,
     "min_order_size": "1",
+    "open_sell_qty": "0",
     "outputs": [
      {
       "model_id": "quant.momentum",
@@ -14531,6 +14535,7 @@
     "size_factor": "0.5",
     "scale_active_s": 120,
     "min_order_size": "3",
+    "open_sell_qty": "0",
     "outputs": [
      {
       "model_id": "quant.momentum",
@@ -14604,6 +14609,7 @@
     "size_factor": "0.5",
     "scale_active_s": 120,
     "min_order_size": "4",
+    "open_sell_qty": "0",
     "outputs": [
      {
       "model_id": "quant.momentum",
@@ -14680,6 +14686,7 @@
     "size_factor": "0.5",
     "scale_active_s": 120,
     "min_order_size": "2",
+    "open_sell_qty": "0",
     "outputs": [
      {
       "model_id": "quant.momentum",
@@ -14713,6 +14720,157 @@
     "qty": "1",
     "limit_price": "999",
     "order_usd": "999",
+    "autonomy": {
+     "decision": "auto",
+     "by": "builtin_risk_reducing"
+    }
+   }
+  },
+  {
+   "id": "MC-B36",
+   "kind": "builder",
+   "title": "trim_to_target: a resting sell leaves a remainder below the minimum size, which is withheld",
+   "base": "two_stock_swing_trim",
+   "input": {
+    "now": "2026-09-22T14:00:00.000000000Z",
+    "instrument": "7b4a1c2e-2222-4a2b-9c3d-000000000002",
+    "asset_class": "us_equity",
+    "agent_equity": "10000",
+    "position_qty": "10",
+    "quote": {
+     "bid": "99.9",
+     "ask": "100"
+    },
+    "qty_increment": "1",
+    "min_order_usd": "1",
+    "gate_state": {
+     "agent_equity": "10000",
+     "positions_mv": {
+      "7b4a1c2e-2222-4a2b-9c3d-000000000002": "999"
+     },
+     "working_opening_orders": [],
+     "orders_today": 0,
+     "last_exit_fill_at": {},
+     "working_universe": [
+      "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+      "7b4a1c2e-3333-4a2b-9c3d-000000000003",
+      "7b4a1c2e-2222-4a2b-9c3d-000000000002"
+     ]
+    },
+    "size_factor": "0.5",
+    "scale_active_s": 120,
+    "min_order_size": "3",
+    "open_sell_qty": "2",
+    "outputs": [
+     {
+      "model_id": "quant.momentum",
+      "model_version": "1.0.0",
+      "content_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "instrument_id": "7b4a1c2e-2222-4a2b-9c3d-000000000002",
+      "as_of": "2026-09-22T13:59:00.000000000Z",
+      "expires_at": "2026-09-22T15:00:00.000000000Z",
+      "conviction": "0.8",
+      "confidence": "0.9"
+     },
+     {
+      "model_id": "llm.news_research",
+      "model_version": "0.3.0",
+      "content_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "instrument_id": "7b4a1c2e-2222-4a2b-9c3d-000000000002",
+      "as_of": "2026-09-22T13:59:00.000000000Z",
+      "expires_at": "2026-09-22T15:00:00.000000000Z",
+      "conviction": "0.2",
+      "confidence": "0.5"
+     }
+    ]
+   },
+   "expect": {
+    "cap": "1500",
+    "current_mv": "999",
+    "trim_withheld": [
+     "below_minimum_order"
+    ],
+    "outputs_used": [
+     "llm.news_research",
+     "quant.momentum"
+    ],
+    "combined_conviction": "0.472",
+    "buy_conviction": "0.472",
+    "combined_score": "0.74",
+    "target_value": "354",
+    "delta": "-645",
+    "action": "hold",
+    "reason": "at_or_above_target"
+   }
+  },
+  {
+   "id": "MC-B37",
+   "kind": "builder",
+   "title": "trim_to_target: a resting sell leaves a remainder, which is the trim",
+   "base": "two_stock_swing_trim",
+   "input": {
+    "now": "2026-09-22T14:00:00.000000000Z",
+    "instrument": "7b4a1c2e-2222-4a2b-9c3d-000000000002",
+    "asset_class": "us_equity",
+    "agent_equity": "10000",
+    "position_qty": "10",
+    "quote": {
+     "bid": "99.9",
+     "ask": "100"
+    },
+    "qty_increment": "1",
+    "min_order_usd": "1",
+    "gate_state": {
+     "agent_equity": "10000",
+     "positions_mv": {
+      "7b4a1c2e-2222-4a2b-9c3d-000000000002": "999"
+     },
+     "working_opening_orders": [],
+     "orders_today": 0,
+     "last_exit_fill_at": {},
+     "working_universe": [
+      "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+      "7b4a1c2e-3333-4a2b-9c3d-000000000003",
+      "7b4a1c2e-2222-4a2b-9c3d-000000000002"
+     ]
+    },
+    "size_factor": "0.5",
+    "scale_active_s": 120,
+    "min_order_size": "1",
+    "open_sell_qty": "2",
+    "outputs": [
+     {
+      "model_id": "quant.momentum",
+      "model_version": "1.0.0",
+      "content_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "instrument_id": "7b4a1c2e-2222-4a2b-9c3d-000000000002",
+      "as_of": "2026-09-22T13:59:00.000000000Z",
+      "expires_at": "2026-09-22T15:00:00.000000000Z",
+      "conviction": "0.8",
+      "confidence": "0.9"
+     },
+     {
+      "model_id": "llm.news_research",
+      "model_version": "0.3.0",
+      "content_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "instrument_id": "7b4a1c2e-2222-4a2b-9c3d-000000000002",
+      "as_of": "2026-09-22T13:59:00.000000000Z",
+      "expires_at": "2026-09-22T15:00:00.000000000Z",
+      "conviction": "0.2",
+      "confidence": "0.5"
+     }
+    ]
+   },
+   "expect": {
+    "cap": "1500",
+    "current_mv": "999",
+    "action": "sell",
+    "purpose": "risk_exit",
+    "origin": "risk_engine",
+    "reason": "trim_to_target",
+    "qty": "1",
+    "limit_price": "99.9",
+    "order_usd": "99.9",
     "autonomy": {
      "decision": "auto",
      "by": "builtin_risk_reducing"
