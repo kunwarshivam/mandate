@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Product** | Mandate (working name) |
+| **Product** | Owlhead, at owlhead.ai; Mandate is the internal name ([DEC-171](../project/04-decision-log.md#decisions)) |
 | **Owner** | Product |
 | **Status** | Draft v0.1 |
 
@@ -48,8 +48,8 @@ See [Personas and journeys](02-personas-and-journeys.md).
 
 ## Product principles
 
-1. **The mandate is the contract.** An agent can never act outside the goal, instruments, risk
-   limits, and autonomy rules its owner approved.
+1. **The mandate is the contract.** An agent can never act outside the goal, allowed asset classes,
+   risk limits, and autonomy rules its owner approved.
 2. **Reducing risk never needs approval; increasing risk beyond agreed limits always does.**
 3. **Ask only when it matters.** Escalation is driven by the user's autonomy rules and explicit
    rules, not by habit. Every unnecessary ping erodes trust.
