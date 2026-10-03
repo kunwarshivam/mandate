@@ -299,8 +299,11 @@ be restricted to local models only.
 
 ### Shared data plane
 
-Market data ingestion and factual classification of public events (filing type, entity tagging)
-are computed once and fanned out to subscribed workspaces. It emits no directional views: any
+Public data (SEC filings and XBRL facts, calendars, reference lists whose terms allow sharing) and
+its factual classification (filing type, entity tagging) are computed once and published as whole
+datasets that workspaces pull. It carries **no exchange market data and no licensed vendor text in
+v1**: each workspace reads market data and news through its own broker connection (§12 risk 3;
+[DEC-433](project/decisions/DEC-433.md) items 3, 9, and 15). It emits no directional views: any
 directional output is a signal model the user selects and pins
 ([mandate spec §8.1](specs/mandate.md#81-signal-model-contract-dec-52-dec-97);
 [DEC-62](project/04-decision-log.md#decisions)). This is the main cost lever for the managed
@@ -639,7 +642,9 @@ own monitor and halt from the same installer.
   user's review. They never change weights or approval routing; in v1 weights are fixed by the
   user and there is no calibration ([DEC-47](project/04-decision-log.md#decisions)).
 - **Market data service:** normalized live streams plus a point-in-time historical store.
-  Managed deployments ingest once and share; hybrid and on-prem deployments connect directly to venues.
+  In every mode each workspace reads market data through its own broker connection; nothing is
+  ingested once and shared in v1, because that would be redistribution (§12 risk 3;
+  [data plane spec](specs/data-plane.md), DEC-433 items 3 and 15).
 
 Speed tiers:
 
