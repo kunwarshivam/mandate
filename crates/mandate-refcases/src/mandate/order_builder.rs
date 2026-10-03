@@ -1645,7 +1645,8 @@ mod tests {
     /// for both fixtures. A cleanup drops the fixture without them once they land.
     const AWAITED: [&str; 2] = ["MC-B36", "MC-B37"];
     const DOCTORINGS_WITH: usize = 1092;
-    const PLANTS_WITH: usize = 37 * 4 + 69 + 2;
+    /// Four objects in each of 37 cases, 69 outputs, and two working orders.
+    const PLANTS_WITH: usize = 219;
     const REFUSED_WITH: usize = 1485;
 
     /// Whether the fixture already holds the [`AWAITED`] cases.
@@ -1679,7 +1680,11 @@ mod tests {
             .filter(|c| c["kind"] == "builder")
             .cloned()
             .collect();
-        let expected = counted(fixture, PASSING.len(), PASSING.len() + AWAITED.len())?;
+        let expected = counted(
+            fixture,
+            PASSING.len(),
+            PASSING.len().saturating_add(AWAITED.len()),
+        )?;
         crate::ensure(cases.len() == expected, || {
             format!("family B is {expected} cases, found {}", cases.len())
         })?;
@@ -2175,7 +2180,11 @@ mod tests {
         }
         crate::expect_eq(
             "cases listed",
-            counted(&fixture, PASSING.len(), PASSING.len() + AWAITED.len())?,
+            counted(
+                &fixture,
+                PASSING.len(),
+                PASSING.len().saturating_add(AWAITED.len()),
+            )?,
             seen,
         )
     }
