@@ -1,4 +1,11 @@
-"""Seeds known bugs into a copy of ref.py and checks that fuzz.py catches every one (AGENTS.md: independent oracles)."""
+"""Seeds known bugs into a copy of ref.py and checks that fuzz.py catches every one (AGENTS.md: independent oracles).
+
+A bug that makes a base mandate invalid cannot be carried here. `bases.py` asserts at import that
+every base passes `semantic()`, so such a probe crashes before any check runs, and `verdict()` scores
+the crash `ERROR`, which is neither a catch nor a survival. V-047 has two such bugs, an inverted
+policy and an ignored one: each fires V-047 on the bases. Do not add them, and do not read an
+`ERROR` as a catch (#528 round 2, minor 4).
+"""
 import pathlib, shutil, subprocess, sys, tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -130,7 +137,8 @@ MUTANTS = {
                                        '    if False:\n        return skip("reclassified_deny")'),
     "re-validation accepts an ask by another trigger": ('    if c["decision"] == "ask" and c["by"] != req["decided_by"]:', '    if False:'),
     "re-validation skips the gate dry run": ('    if now["dry_run"]["verdict"] != "allow":', '    if False:'),
-    "re-validation ignores the mode": ('    if now["mode"] != "normal":\n        return skip("mode")', '    if False:\n        return skip("mode")'),
+    "a response step judges before an exits-only mode cancels": ('        if inp["now"]["mode"] != "normal" and st["pending"]:',
+                                                                 '        if False:'),
     "drift without the absolute value": ('abs(D(m_now) - D(m_req)) * 10000', '(D(m_now) - D(m_req)) * 10000'),
     "drift uses the crypto band for equities": ('<= DRIFT_BAND_BP[asset_class] * D(m_req)', '<= 200 * D(m_req)'),
     "no mark is inside the band": ('    if m_req is None or m_now is None:\n        return False\n    return abs(',
@@ -300,13 +308,16 @@ TRIPWIRE_MUTANTS = {
 }
 # The trim's minimum (§5.5, DEC-399 item 5) is judged by the family-B cases rather than by a fuzz:
 # MC-B33 and MC-B34 sit where the instrument's minimum order size and the dollar minimum disagree,
-# and MC-B35 is the full close the minimum exempts (DEC-423).
+# MC-B33 also sits on the boundary, a trim exactly at the minimum, and MC-B35 is the full close the
+# minimum exempts (DEC-423).
 TRIM_MUTANTS = {
     "the trim's minimum is the dollar minimum order": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
                                                       '        if sell * bid < D(inp["min_order_usd"]) and sell != qty:'),
     "the trim's minimum is ignored": ('        if sell < D(inp["min_order_size"]) and sell != qty:', '        if False:'),
     "a full close is withheld below the minimum": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
                                                    '        if sell < D(inp["min_order_size"]):'),
+    "a trim at the minimum is withheld": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
+                                          '        if sell <= D(inp["min_order_size"]) and sell != qty:'),
 }
 
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "

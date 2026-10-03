@@ -529,12 +529,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   reaches check 7 (`mandate_approval::quorum` already computes it). Tests first in
   `mandate-runtime`, then the implementation; MC-E01, MC-E06, MC-E17, MC-E19 to MC-E24 and MC-E29
   fail on that member alone and flip in the status PR that follows.
-  *Decision needed (DEC-318, Proposed, the founder's under DEC-176):* MC-E18 re-validates a grant while
-  the mode is exits-only and expects `skip` for `mode`, but §6.4 "Cancellation" cancels every pending
-  approval in a step whose effective mode is exits-only or stricter before the step judges a
-  response, so the runtime refuses the grant as `not_pending` (both skip). Either the case is
-  restated as a cancellation (a `mandate.yaml` change) or check 9's `mode` is said to be reachable
-  only by a path the spec names; MC-E18 stays pending until then.
+  *Decided (DEC-318 option (a), the founder, 2026-10-02; DEC-430):* MC-E18 is restated as §6.4's
+  cancellation. Its response step cancels the pending grant as `mode_tightened` and refuses it as
+  `not_pending`, and the reference model, the fuzz oracle and the seeded bugs follow (reference PR).
+  Still open, in order:
+  1. The code PR: the harness strips the response step's `AgentModeChanged` (`restriction_changed`),
+     and `the_lifecycle_cases_split_as_the_runtime_stands` expects MC-E18 to pass, tests first.
+     `a_mode_other_than_normal_skips`'s doc comment stops naming MC-E18.
+  2. The status PR moving MC-E18 to `passing`.
+  3. A §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
+     (DEC-430 item 2). It is a spec PR and changes no rule.
   *Follow-up (the #416 review, minor 3):* every `ask_permit` case asks for one instrument, so
   family E cannot see the budget counted per instrument rather than per agent (`mandate-approval`'s
   own suite does). A future MC-E case should spread its ten asks across instruments. It changes
@@ -2352,6 +2356,10 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   lands, (a) applies to MC-B35. The same cleanup rewrites `trim_guards`' doc comment, which still
   says the exemption is one "which `ref.py` takes up in the reference PR after this harness"
   (#530 review, m5).
+  *Done (`agent/g8-e6-4-harness-cleanup`):* `AWAITED`, `awaited` and `counted` are gone, so family
+  B's thirty-five cases and the three sweep counts state one fixture; `trim_first` refuses a trim
+  case with no `min_order_size`, which a doctoring that drops it pins; and both doc comments say
+  what the harness does now.
 - **ES-22: the minors of #530's review, round 1** (DEC-423; freeze rule; m1, §5.5's binding clause, was done in #530):
   (1) §11 says 427 cases where `mandate.yaml` holds 430, and nothing compares the prose with the
   file. Correct the count, or have `generate.py` or an xtask check state it (m2);
@@ -2370,6 +2378,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   harness loudly. The "real quantity grid" row closes it; pin it there with such a case (m6);
   (5) add `<=` for `<` in the trim's minimum as a registered `mutants.py` trim mutant. MC-B33
   catches it today, but nothing registers it (the review's plants).
+  *Done (`agent/g8-530-minors`):* (1) §11 says 433, and `check_cases.py` now fails when §11's
+  count differs from the file; (2) the spec's DEC-399 entry names both grids; (3)
+  [DEC-426](decisions/DEC-426.md) records the two in-place edits as departures and keeps rule 4,
+  and DEC-399's status line points to it; (4) stays with the "real quantity grid" row; (5)
+  `mutants.py` registers "a trim at the minimum is withheld", which MC-B33 catches.
 - **E6-4 harness: one scene for both gate calls on a trim base** (#498 review, m3). `trim_first`
   sets the scene instrument's `min_order_size` from the case, but `judge` builds its own scene in
   `Scene::read`, which takes the minimum from `qty_increment`. A case where a trim is withheld and
@@ -2889,17 +2902,17 @@ From #528's round-2 review (DEC-411; the coordinator's ruling, 05:19Z on #528; f
   validation and again atomically when a version is applied", but `reference/mandate/ref.py` checks it in `semantic()`
   only, and no case or fuzz covers a version that validated and then fails V-002 when applied. V-047 has the same gap,
   owed on E10-1's row; this row is V-002's.
-- **§5.7's parenthetical says a workspace, where V-047 refuses a version** (#528 round 2, minor 1).
+- ~~**§5.7's parenthetical says a workspace, where V-047 refuses a version** (#528 round 2, minor 1).~~ Done ([DEC-429](decisions/DEC-429.md)).
   `docs/specs/mandate.md`'s §5.7 says "a single-user workspace (never one under `independent_approval_required`, which
   V-047 refuses at validation)", but such a workspace exists after confirmation (DEC-411 item 6). Reword to "a
   loosening version is refused there under `independent_approval_required` (V-047)".
-- **"Pin" for cases that are pending** (#528 round 2, minor 2). §6.7 and DEC-411 item 6 say MC-W50, MC-W53, MC-W54
+- ~~**"Pin" for cases that are pending** (#528 round 2, minor 2).~~ Done ([DEC-429](decisions/DEC-429.md)). §6.7 and DEC-411 item 6 say MC-W50, MC-W53, MC-W54
   and MC-W56 pin the item-6 state, but all MC-W cases are `pending` on E6-13 and enforce nothing yet. Say "specify",
   or name E6-13 as the story that makes them bind.
-- **V-047's reason list drops risk-increasing changes** (#528 round 2, minor 3). The row rests on deployment, the
+- ~~**V-047's reason list drops risk-increasing changes** (#528 round 2, minor 3).~~ Done ([DEC-429](decisions/DEC-429.md)). The row rests on deployment, the
   high-water-mark reset and the tripwire lift; §4.3 also lists a risk-increasing change, which a lone user cannot
   make either. Restore that clause (the latched-floor reason stays out, per round 1's M1).
-- **`mutants.py` cannot carry two natural V-047 bugs** (#528 round 2, minor 4). Inverting the policy, or ignoring it,
+- ~~**`mutants.py` cannot carry two natural V-047 bugs** (#528 round 2, minor 4).~~ Done ([DEC-429](decisions/DEC-429.md)). Inverting the policy, or ignoring it,
   makes V-047 fire on the base mandates, so `bases.py`'s import-time assertion crashes the probe and `verdict()`
   scores it `ERROR`, not caught. Say so in the module docstring, so nobody adds one and reads the `ERROR` as a catch.
 - **§11's case count is unchecked prose** (#528 round 2, minor 5). `main` said 427 where the file held 429. Add a

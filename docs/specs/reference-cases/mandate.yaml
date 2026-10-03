@@ -12814,7 +12814,8 @@ cases:
 - id: MC-E18
   kind: escalation
   op: lifecycle
-  title: Re-validation skips a grant while the mode is exits_only (mode)
+  title: An exits_only step cancels a pending grant first (mode_tightened), so it is refused as not pending and
+    never acts
   context:
     approvers: [u1, u2]
     author: u1
@@ -12881,6 +12882,7 @@ cases:
       clock: '2026-09-22T14:00:00.000000000Z'
     - {type: ApprovalDelivered, approval: ap1, channel: cli_inbox, status: delivered, clock: '2026-09-22T14:00:00.000000000Z'}
   - drafts:
+    - {type: ApprovalCanceled, approval: ap1, reason: mode_tightened, clock: '2026-09-22T14:00:00.000000000Z'}
     - type: ApprovalResponded
       approval: ap1
       source: ctl1
@@ -12888,11 +12890,9 @@ cases:
       verdict: approved
       step_up: {assertion: as-ctl1, authenticated_at: '2026-09-22T14:00:30.000000000Z', method: cli_confirm}
       clock: '2026-09-22T14:00:00.000000000Z'
-      result: admitted
-      reason: null
+      result: refused
+      reason: not_pending
       effective_at: '2026-09-22T14:00:30.000000000Z'
-      quorum: {required: 1, independent: false}
-    - {type: ApprovalRevalidated, approval: ap1, result: skip, reason: mode, clock: '2026-09-22T14:00:00.000000000Z'}
 - id: MC-E19
   kind: escalation
   op: lifecycle

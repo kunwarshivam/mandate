@@ -7,7 +7,7 @@ story. Fill every section; write "none" rather than deleting one.
 
 - **Story:** [E17-6](../06-backlog-v1.md) — "As an operator, I want to see and stop research-agent
   flow across the accounts of a deployment, so that one thesis cannot concentrate orders from many
-  accounts in one instrument unnoticed ([DEC-100](04-decision-log.md#decisions))."
+  accounts in one instrument unnoticed ([DEC-100](../04-decision-log.md#decisions))."
 - **Acceptance criteria (verbatim):** "no workspace's gate reads another workspace's state (a
   two-workspace test shows one's positions never change the other's decisions); the aggregate-flow
   monitor sums research-agent exposure per instrument over its deployment's workspaces, in dollars

@@ -7,7 +7,7 @@ story. Fill every section; write "none" rather than deleting one.
 
 - **Story:** [E17-8](../06-backlog-v1.md) — "As the founder, I want a forward paper evaluation
   harness, so that thesis quality is judged on outcomes the model cannot have seen
-  ([DEC-99](04-decision-log.md#decisions))."
+  ([DEC-99](../04-decision-log.md#decisions))."
 - **Acceptance criteria (verbatim):** "the evaluation window, metric, and pass threshold come from
   a recorded decision made before the evaluation starts; it runs on the team's internal paper
   workspaces (DEC-103), so no user's results are aggregated; every thesis is scored after its
