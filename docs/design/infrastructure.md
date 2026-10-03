@@ -96,23 +96,23 @@ startup or CI check that refuses to proceed.
 
 | ID | Invariant | Source | How it is checked |
 |---|---|---|---|
-| **INF-1** | Credentials exist in plaintext only inside the vault and in the memory of the one process that uses them. They never appear in logs, metrics, traces, the journal, artifacts, backups outside the vault's own encrypted snapshots, environment variables of live processes, or the repository | Rule 7; ES-09; ES-19; ES-23 | Log-scan test (ES-09); gitleaks per PR and full history weekly; a test that the live build reads credentials only from the vault client; a backup-scan drill that greps restored backups for known canary secrets |
-| **INF-2** | Journal before acting survives any crash. No order request leaves a process unless its intent and `OrderSubmitted` are durably committed (`Committed` or `AlreadyCommitted`), and durable means `synchronous_commit = on`, with a synchronous standby in a second failure domain in managed live deployments | Rule 5; journal §5.2, §5.3 | Fault injection killing the process, the database connection, and the database at every step of submission (07, Phase 1 gate); a configuration check at startup that refuses live trading when `synchronous_commit` or the standby requirement is not met |
-| **INF-3** | No single failure sends an order twice. Each order carries its journaled `client_order_id`; recovery resubmits only after the broker confirms the order is absent; one writer per stream is guaranteed by the writer epoch, not by the orchestrator | Rule 5; journal §5.1, §5.2; trading §5.7 | Fault injection: zero duplicates (Phase 1 gate); a test that starts two executors for one account and shows the older one is `Fenced` before it can send |
-| **INF-4** | No single failure loses a risk exit or protection. Protective orders rest at the broker and are never canceled by a deploy, restart, or failover; a journaled risk exit is re-driven by recovery; the kill switch depends on no model, research agent, global control plane, or telemetry | Rule 13; trading §5.4, §5.5; HLD §5 Durability | Fault injection during exit sequences; a test that runs the kill switch with the model gateway, the global control plane, and the metrics exporter all unreachable; the upgrade drill (INF-7) |
-| **INF-5** | Every environment except production has no path to live money: no live host compiled in, no live credential in its vault, and no network egress to a live trading host | Rule 8; ES-23 | CI forbids the `live` feature; an egress test in staging that a request to each live trading host fails at the network layer; the tracer refuses any host but Alpaca's paper host (E7-7) |
-| **INF-6** | Tenant isolation holds at every layer: agent processes are never shared across workspaces; rows carry `workspace_id` with row-level security; data and vault paths are per workspace, under per-workspace keys; telemetry and alerts carry opaque IDs only | HLD §8; journal §6.1, §6.5 | Cross-workspace access tests at the API, database, vault, and messaging layers (07, Isolation); a label lint on the metrics registry |
-| **INF-7** | A deploy, upgrade, restart, or rollback never drops a running agent's protection, and never interrupts an exit sequence in a way the trading spec does not already bound | Trading §5.4; FR-9.3 | The upgrade drill: upgrade every process type with open positions, exits in flight, and pending approvals, and assert no protective order was canceled by the deploy and every unprotected interval stayed within `max_unprotected_s` |
-| **INF-8** | Backups restore to a verifiable journal. After any restore, journal §11 verification passes over every stream from its trusted start to the restored head, and every anchor and `SegmentExported` is consistent with the restored heads; otherwise the restore is an integrity incident and no agent trades | Journal §10, §11 | The restore drill (§6.4) journals its verification result; a test that restores a backup older than the last anchor and asserts the incident path, not a silent resume |
-| **INF-9** | A restored or recovered agent trades only after replay and broker reconciliation pass; the broker is the source of truth for orders and positions; anything unexplained pauses the agent until the owner acknowledges with step-up | Trading §11; HLD §6 D | Fault injection and restore drills; reconciliation reference cases |
-| **INF-10** | Notifications and operator alerts carry no sensitive content: opaque IDs and generic text only | Rule 6 | Payload capture tests (07, Privacy) extended to the paging channel |
-| **INF-11** | Telemetry is never the audit record and never an input to a trading decision; losing all telemetry changes no order | DEC-73 | A test that runs the decision cycle with the exporter failing; a layering check that no core crate depends on the telemetry API |
-| **INF-12** | The global control plane is never in the trade path: its outage stops no trading, no kill switch, and no reconciliation | HLD §4; PRD §7 Availability | A staging drill with the outbound link cut |
-| **INF-13** | Schema changes are forward-only and applied only by `mandate-cli db migrate` under the migration-owner role, never at process startup; application roles have INSERT and SELECT only on journal tables | ES-08; journal §6.1 | The existing xtask lint and Postgres tests; DDL and superuser sessions alert (journal §6.1) |
-| **INF-14** | A host clock out of tolerance never adds risk: it is measured and journaled, events recorded meanwhile are flagged, and broker `event_time` stays authoritative for executions | Journal §5.4 | A test feeding an out-of-tolerance offset to the scheduler |
-| **INF-15** | Every release that runs against a broker is identified: its build digest is journaled from the first event (`actor.build`), and in staging and production it is a signed artifact whose signature is checked before start | ES-17 | A startup check that refuses an unsigned binary outside dev and CI |
+| **OPS-1** | Credentials exist in plaintext only inside the vault and in the memory of the one process that uses them. They never appear in logs, metrics, traces, the journal, artifacts, backups outside the vault's own encrypted snapshots, environment variables of live processes, or the repository | Rule 7; ES-09; ES-19; ES-23 | Log-scan test (ES-09); gitleaks per PR and full history weekly; a test that the live build reads credentials only from the vault client; a backup-scan drill that greps restored backups for known canary secrets |
+| **OPS-2** | Journal before acting survives any crash. No order request leaves a process unless its intent and `OrderSubmitted` are durably committed (`Committed` or `AlreadyCommitted`), and durable means `synchronous_commit = on`, with a synchronous standby in a second failure domain in managed live deployments | Rule 5; journal §5.2, §5.3 | Fault injection killing the process, the database connection, and the database at every step of submission (07, Phase 1 gate); a configuration check at startup that refuses live trading when `synchronous_commit` or the standby requirement is not met |
+| **OPS-3** | No single failure sends an order twice. Each order carries its journaled `client_order_id`; recovery resubmits only after the broker confirms the order is absent; one writer per stream is guaranteed by the writer epoch, not by the orchestrator | Rule 5; journal §5.1, §5.2; trading §5.7 | Fault injection: zero duplicates (Phase 1 gate); a test that starts two executors for one account and shows the older one is `Fenced` before it can send |
+| **OPS-4** | No single failure loses a risk exit or protection. Protective orders rest at the broker and are never canceled by a deploy, restart, or failover; a journaled risk exit is re-driven by recovery; the kill switch depends on no model, research agent, global control plane, or telemetry | Rule 13; trading §5.4, §5.5; HLD §5 Durability | Fault injection during exit sequences; a test that runs the kill switch with the model gateway, the global control plane, and the metrics exporter all unreachable; the upgrade drill (OPS-7) |
+| **OPS-5** | Every environment except production has no path to live money: no live host compiled in, no live credential in its vault, and no network egress to a live trading host | Rule 8; ES-23 | CI forbids the `live` feature; an egress test in staging that a request to each live trading host fails at the network layer; the tracer refuses any host but Alpaca's paper host (E7-7) |
+| **OPS-6** | Tenant isolation holds at every layer: agent processes are never shared across workspaces; rows carry `workspace_id` with row-level security; data and vault paths are per workspace, under per-workspace keys; telemetry and alerts carry opaque IDs only | HLD §8; journal §6.1, §6.5 | Cross-workspace access tests at the API, database, vault, and messaging layers (07, Isolation); a label lint on the metrics registry |
+| **OPS-7** | A deploy, upgrade, restart, or rollback never drops a running agent's protection, and never interrupts an exit sequence in a way the trading spec does not already bound | Trading §5.4; FR-9.3 | The upgrade drill: upgrade every process type with open positions, exits in flight, and pending approvals, and assert no protective order was canceled by the deploy and every unprotected interval stayed within `max_unprotected_s` |
+| **OPS-8** | Backups restore to a verifiable journal. After any restore, journal §11 verification passes over every stream from its trusted start to the restored head, and every anchor and `SegmentExported` is consistent with the restored heads; otherwise the restore is an integrity incident and no agent trades | Journal §10, §11 | The restore drill (§6.4) journals its verification result; a test that restores a backup older than the last anchor and asserts the incident path, not a silent resume |
+| **OPS-9** | A restored or recovered agent trades only after replay and broker reconciliation pass; the broker is the source of truth for orders and positions; anything unexplained pauses the agent until the owner acknowledges with step-up | Trading §11; HLD §6 D | Fault injection and restore drills; reconciliation reference cases |
+| **OPS-10** | Notifications and operator alerts carry no sensitive content: opaque IDs and generic text only | Rule 6 | Payload capture tests (07, Privacy) extended to the paging channel |
+| **OPS-11** | Telemetry is never the audit record and never an input to a trading decision; losing all telemetry changes no order | DEC-73 | A test that runs the decision cycle with the exporter failing; a layering check that no core crate depends on the telemetry API |
+| **OPS-12** | The global control plane is never in the trade path: its outage stops no trading, no kill switch, and no reconciliation | HLD §4; PRD §7 Availability | A staging drill with the outbound link cut |
+| **OPS-13** | Schema changes are forward-only and applied only by `mandate-cli db migrate` under the migration-owner role, never at process startup; application roles have INSERT and SELECT only on journal tables | ES-08; journal §6.1 | The existing xtask lint and Postgres tests; DDL and superuser sessions alert (journal §6.1) |
+| **OPS-14** | A host clock out of tolerance never adds risk: it is measured and journaled, events recorded meanwhile are flagged, and broker `event_time` stays authoritative for executions | Journal §5.4 | A test feeding an out-of-tolerance offset to the scheduler |
+| **OPS-15** | Every release that runs against a broker is identified: its build digest is journaled from the first event (`actor.build`), and in staging and production it is a signed artifact whose signature is checked before start | ES-17 | A startup check that refuses an unsigned binary outside dev and CI |
 
-**Known limit, stated rather than hidden.** INF-2 and INF-4 meet at one point: while the journal
+**Known limit, stated rather than hidden.** OPS-2 and OPS-4 meet at one point: while the journal
 is unavailable, the platform can send **no** order, exits included, because it cannot journal
 first. Protection resting at the broker is the backstop (trading §5.4, with its limits: equity
 stops trigger only in the regular session, crypto stop-limits can miss on gaps). The owner can
@@ -170,7 +170,7 @@ each other's events through journal tailing with Postgres `LISTEN`/`NOTIFY` as a
 |---|---|---|
 | **Liveness** | The process loop has handled an input or a heartbeat within its bound | The orchestrator restarts it |
 | **Readiness** | The process holds its writer epoch, has replayed its stream to the head, and its last reconciliation passed (executor) or its mode is known (runtime) | It is not ready: it takes no new openings, and the deployment manager reports the agent as `Recovering`. A runtime that is not ready still forwards kill-switch commands; an executor that is not ready still runs risk exits and protective re-placement once its own replay is done |
-| **Start-up checks** | Signed build (INF-15), environment matches the stream (ES-23), Postgres durability settings (INF-2), object lock mode (journal §6.2, hybrid and on-prem), clock offset (journal §5.4) | The process refuses to start trading and alerts |
+| **Start-up checks** | Signed build (OPS-15), environment matches the stream (ES-23), Postgres durability settings (OPS-2), object lock mode (journal §6.2, hybrid and on-prem), clock offset (journal §5.4) | The process refuses to start trading and alerts |
 
 Restart policy: always restart, with exponential back-off. After a crash loop (Proposed: five
 restarts in ten minutes), the deployment manager leaves the agent `Paused` and alerts; it does not
@@ -383,7 +383,7 @@ and no live credential exists anywhere.
 |---|---|---|
 | Process or node loss | 0 | Under 2 minutes per agent |
 | Postgres primary loss, managed live | 0 for acknowledged appends (synchronous standby, journal §5.3) | Under 2 minutes |
-| Region loss, managed live | Under 1 minute for the cold store (segments ship within a minute); the hot tail since the last segment is recovered from the cross-region replica if it survived | Under 4 hours, agents resuming only after reconciliation (INF-9) |
+| Region loss, managed live | Under 1 minute for the cold store (segments ship within a minute); the hot tail since the last segment is recovered from the cross-region replica if it survived | Under 4 hours, agents resuming only after reconciliation (OPS-9) |
 | Phase 1 paper | The WAL archive's lag (Proposed: under 5 minutes) | Best effort; paper only |
 
 Region-loss numbers are the founder's to set, because a second region is spend (DEC-79).
@@ -426,9 +426,9 @@ A restore never repairs the journal in place and never resumes trading on its ow
 
 | Drill | Where | Frequency (Proposed) | Pass condition, journaled |
 |---|---|---|---|
-| Hot-store restore and verify | Staging; the paper environment in Phase 1 | Monthly | Steps 1 to 4 pass; a canary scan finds no secret in the restored data (INF-1) |
+| Hot-store restore and verify | Staging; the paper environment in Phase 1 | Monthly | Steps 1 to 4 pass; a canary scan finds no secret in the restored data (OPS-1) |
 | Cold-store restore and verify (E5-7) | From the replica | Quarterly (journal §6.2) | §11 per-range checks pass against anchors |
-| Restore older than the last anchor | Staging | Each release that touches recovery | The integrity-incident path runs and no agent resumes (INF-8) |
+| Restore older than the last anchor | Staging | Each release that touches recovery | The integrity-incident path runs and no agent resumes (OPS-8) |
 | Postgres failover | Staging, under load with intents in flight | Monthly and each Postgres upgrade | Zero duplicates, zero lost acknowledged appends |
 | Region evacuation | Staging | Twice a year, once a second region exists | Agents resume only after reconciliation |
 
@@ -446,7 +446,7 @@ A restore never repairs the journal in place and never resumes trading on its ow
    ES-17).
 3. **Sign.** From M11 or the first external install, images and bundles are signed with cosign
    under the founder's hardware key, with build provenance (ES-17). Every process checks its own
-   signature at start (INF-15) and journals its build digest (`actor.build`).
+   signature at start (OPS-15) and journals its build digest (`actor.build`).
 4. **Promote.** `main` → staging automatically; staging → production by the founder's approval
    while live money is involved (DEC-79). Production rolls out one cell at a time, starting with a
    canary cell of internal workspaces (Proposed).
@@ -512,7 +512,7 @@ writes (golden tests, journal §8). A `fold_version` change requires a journaled
 ### 8.1 Telemetry
 
 - **The journal is the audit record; telemetry never is** (DEC-73). Telemetry may be lossy and is
-  never an input to a decision (INF-11).
+  never an input to a decision (OPS-11).
 - **Metrics** through the OpenTelemetry API with a Prometheus pull exporter from M6 (ES-18), which
   works air-gapped with no collector. Push export (OTLP) only under a data policy, from M8.
 - **Logs:** `tracing` JSON to local files, opaque IDs only (ES-09). A test scans log output for
@@ -526,7 +526,7 @@ writes (golden tests, journal §8). A `fold_version` change requires a journaled
 
 ### 8.2 Alerts tied to the safety rules
 
-Operator alerts are opaque (INF-10): an ID, a reason code, a runbook link. Owner alerts (FR-8.3)
+Operator alerts are opaque (OPS-10): an ID, a reason code, a runbook link. Owner alerts (FR-8.3)
 go through the notification path with the same rule. Most alerts derive from journal events, which
 are authoritative; a few come from metrics.
 
@@ -607,7 +607,7 @@ are authoritative; a few come from metrics.
   connection's hosts; the model gateway reaches only the providers the workspace policy allows
   (HLD "Where data lives"); the workspace deployment's only link to the global control plane is
   outbound mTLS (HLD §4). In non-production environments live trading hosts are unreachable
-  (INF-5).
+  (OPS-5).
 - **No inbound ports** into a hybrid or on-prem data plane (HLD §4). In managed mode, the only
   ingress is the workspace API gateway behind the identity provider.
 - **Least privilege:** per-process database roles with INSERT and SELECT on the journal; the
@@ -692,15 +692,15 @@ Each failure, walked to its exit: what detects it, what agents do, how it ends, 
 |---|---|---|---|
 | **Process crash** | Liveness; the orchestrator | Protection rests at the broker. On restart: replay, reconcile, resume, or `paused` on anything unexplained (HLD §6 D) | Automatic; owner acknowledges with step-up if paused |
 | **Node loss** | The orchestrator | The node's processes are rescheduled elsewhere; each new process fences the old epoch (§3.4) and recovers. On a single-host hybrid site, nothing runs until the host returns; protection rests at the broker | Automatic in a cluster; the customer restores the host otherwise |
-| **Postgres primary failure** | Failover manager; append `Unavailable` | Appends fail, so no order is sent (INF-2); writers retry or re-query by `event_id` after promotion (§4.1) | Promotion of the synchronous standby; agents resume without reconciliation gaps |
+| **Postgres primary failure** | Failover manager; append `Unavailable` | Appends fail, so no order is sent (OPS-2); writers retry or re-query by `event_id` after promotion (§4.1) | Promotion of the synchronous standby; agents resume without reconciliation gaps |
 | **No synchronous standby** | Postgres metrics | Commits wait; agents hold; protection rests at the broker | An operator restores a standby (RB-07); never by switching to asynchronous commit |
 | **Object store outage** | Exporter and artifact-writer errors | Trading continues on the hot store (the cold store is not in the trade path). An event that needs a new artifact (a model prompt) waits for the artifact, so the research agent and LLM-informed decisions pause; quant decisions, exits, and protection continue (§4.3 ordering). Cold export lags and alerts | The store returns; the exporter catches up. Before live capital, a lag past one minute is SEV-2 |
-| **Region outage (managed)** | Fleet health; synthetic probes | Agents in that region stop; protection rests at the broker; the owner can act directly at the broker | The founder or on-call decides to evacuate (RB-17): restore in the second region (§6.3), reconcile, resume only as INF-9 allows |
+| **Region outage (managed)** | Fleet health; synthetic probes | Agents in that region stop; protection rests at the broker; the owner can act directly at the broker | The founder or on-call decides to evacuate (RB-17): restore in the second region (§6.3), reconcile, resume only as OPS-9 allows |
 | **Vault outage** | Lease renewal failures | Running executors keep their leases until expiry; new processes cannot start, so their agents stay `Recovering` | The vault returns. If a lease expires first, that executor stops sending and its agents are paused; protection rests at the broker |
 | **Broker API outage** | Connector errors; `Unknown` orders | Orders in flight become `Unknown` and are looked up when the broker returns (trading §5.7); no new opening while the broker cannot confirm state; the kill switch is journaled and retried | The broker returns; reconciliation runs (trading §11), and mismatches pause |
 | **Market data outage** | Staleness checks | The gate refuses openings on stale data; risk exits use the exit price ladder's rules for missing prices (trading §5.6) | Feed returns |
 | **Model gateway or provider outage** | Gateway errors | The output counts as missing; no substitute model (DEC-67); the research agent pauses ideation; exits and the kill switch need no model | Provider returns |
-| **Global control plane outage** | Outbound link | Nothing changes for trading (INF-12); hybrid approvals use fallback channels; usage reports and updates queue (HLD §4) | Link returns |
+| **Global control plane outage** | Outbound link | Nothing changes for trading (OPS-12); hybrid approvals use fallback channels; usage reports and updates queue (HLD §4) | Link returns |
 | **Clock skew** | The scheduler's offset checks (journal §5.4) | `ClockToleranceExceeded` is journaled and events are flagged; broker `event_time` stays authoritative for executions; the risk clock comes from the scheduler, not each host | Time sync returns; the next measurement within tolerance ends the flag |
 | **Bad deploy** | Canary health, crash loops, alert spike | Drained processes hand over normally; a crashing new version leaves agents `Paused` after the crash-loop bound, with protection at the broker | Rollback through the same drain and hand-over (§7.4) |
 | **Network partition between executor and Postgres** | Append errors | The executor cannot journal, so it sends nothing; if a second executor is started on the other side, it fences the first | Partition heals; the fenced process exits |

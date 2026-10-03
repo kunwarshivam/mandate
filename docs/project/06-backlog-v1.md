@@ -1120,7 +1120,7 @@ safety-critical rules apply. Hosting, vendor, and budget choices stay with the f
 items 13 to 20); no story here buys a service or touches live money.
 
 - **E21-1 (Proposed, M6; SC)** As the founder, I want the paper/live boundary held at the network
-  as well as in the build, so that no non-production environment can reach live money (INF-5).
+  as well as in the build, so that no non-production environment can reach live money (OPS-5).
   *Accepted when:* each non-production environment's egress allow-list is default-deny per process
   type (design §3.1, §9); a test in the paper environment shows a request to each live trading host
   fails at the network layer; and an agent runtime has no route to any broker host.
@@ -1135,29 +1135,29 @@ items 13 to 20); no story here buys a service or touches live money.
   Prometheus pull exporter (DEC-73, ES-18), with only opaque labels, so that I can watch the system
   without leaking strategy. *Accepted when:* the exporter runs air-gapped; a lint fails any label
   outside the allowed set (design §8.1); and a test shows the decision cycle unchanged with the
-  exporter failing (INF-11).
+  exporter failing (OPS-11).
 - **E21-4 (Proposed, M7)** As an operator, I want the safety alerts of design §8.2 raised from
   journal events and metrics with opaque payloads, so that every FR-8.3 condition reaches someone.
   *Accepted when:* each alert in the table fires in a fault-injection or fixture test, and a
-  payload capture finds no symbol, price, quantity, or mandate content (INF-10).
+  payload capture finds no symbol, price, quantity, or mandate content (OPS-10).
 - **E21-5 (Proposed, M7; SC)** As the founder, I want the journal backed up by WAL archiving and
   base backups, and a restore procedure that verifies before anything trades, so that a lost
   database costs no record silently (design §6). *Accepted when:* a monthly drill restores the
   paper journal, passes journal spec §11 over every stream, compares heads with the latest anchors
   and cold manifests, and journals the result; a restore older than the last anchor takes the
-  integrity-incident path and no agent resumes (INF-8); and a canary scan finds no secret in the
+  integrity-incident path and no agent resumes (OPS-8); and a canary scan finds no secret in the
   restored data.
 - **E21-6 (Proposed, M13)** As on-call, I want runbooks RB-01 to RB-18 (design §8.4), so that the
   Phase 2 gate's "runbooks exist for every alert in FR-8.3" holds. *Accepted when:* each runbook
   names its alert, its checks, its safe actions, and its exit, and is exercised once in staging.
 - **E21-7 (Proposed, M8; SC)** As an owner, I want agents upgraded by drain and hand-over, so that
-  an upgrade never drops protection (INF-7, design §7.3). *Accepted when:* an upgrade drill with
+  an upgrade never drops protection (OPS-7, design §7.3). *Accepted when:* an upgrade drill with
   open positions, an exit sequence in flight, pending approvals, and a kill switch issued
   mid-hand-over shows no protective order canceled by the deploy, every unprotected interval within
   `max_unprotected_s`, the kill switch applied by the new process, and zero duplicates.
 - **E21-8 (Proposed, M6 then M11)** As the founder, I want release builds from `main` that are
   reproducible, carry an SBOM, and from M11 are signed with my hardware key and checked at start
-  (ES-14, ES-17, INF-15). *Accepted when:* two builds of one commit are byte-identical; each process
+  (ES-14, ES-17, OPS-15). *Accepted when:* two builds of one commit are byte-identical; each process
   journals its build digest; and outside dev and CI an unsigned binary refuses to start.
 - **E21-9 (Proposed, M8; SC)** As an owner, I want my broker credential held in the workspace vault,
   leased only to the executor for my connection, and checked for scope, environment, and account at
@@ -1172,7 +1172,7 @@ items 13 to 20); no story here buys a service or touches live money.
   backup, and each threat is blocked, detected, or disclosed.
 - **E21-11 (Proposed, M8; SC)** As an operator, I want the live journal on a synchronous standby
   with fenced failover, drilled under load, so that a database failure loses no acknowledged append
-  (INF-2, design §4.1). *Accepted when:* a staging drill fails the primary during intents in flight
+  (OPS-2, design §4.1). *Accepted when:* a staging drill fails the primary during intents in flight
   with zero duplicates and zero lost acknowledged appends, and with no synchronous standby, appends
   return `Unavailable` rather than commit asynchronously. Blocked on DEC-434 items 13, 15, and 19.
 - **E21-12 (Proposed, M12)** As the founder, I want usage counted per agent and per workspace
