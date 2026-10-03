@@ -5,7 +5,7 @@
 | **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
-| **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556), gap 6. Notification delivery and approval deep links: the [notifications spec](https://github.com/kunwarshivam/mandate/pull/558) (`docs/specs/notifications.md`, #558), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
+| **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
 
 This spec is the contract between the backend and everything that takes the owner's input or shows
 the owner their workspace: the web app, the CLI, and owner-connected agents over MCP. It adds no
@@ -161,7 +161,7 @@ the journal is the only channel (DEC-17).
 
 ### 3.3 Authentication and sessions
 
-Owned by the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556). What the API requires of it:
+Owned by the [identity spec](identity.md). What the API requires of it:
 
 1. **Browser sessions** in a `Secure`, `HttpOnly`, `SameSite=Strict` cookie, with a CSRF defence on
    every mutating call: the `Origin` header must be the app's own origin, and the call must carry a
@@ -236,7 +236,7 @@ Errors are RFC 9457 problem documents with these members:
 
 ### 3.6 Step-up
 
-The ceremony belongs to the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556) (E9-4). The API's part:
+The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
 
 - `POST /v1/workspaces/{ws}/step-up/challenges` with `{action: {kind, digest}}` returns a challenge
   for that one action. `kind` names one of the actions identity spec ID-4 lists, and the set grows
@@ -262,61 +262,62 @@ The ceremony belongs to the [identity spec](https://github.com/kunwarshivam/mand
 
 ### 3.7 Roles
 
-Roles, the permission matrix, and separation of duties belong to the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556). The API enforces
-that matrix and no other (API-2; the coordinator's settlement X1 on #560). It is printed here exactly
-as identity spec §4.2 states it (#556 at 8acb0bd1, plus the three rows for the owner request, the dry
-run, and the chat thread that the coordinator's round-2 ruling adds there), so the route test can
-parse it. #556's Host CLI column and break-glass operational set are left out because neither
-principal calls this API: the host CLI appends on site (DEC-436 item 3), and platform staff hold no
-workspace role; if the two ever differ, identity
-spec §4.2 wins and this copy is a defect. **S** marks a permission that needs step-up (§3.6). A blank
-cell is a denial. OO org owner, OA org admin, Bill billing admin, WA workspace admin, Op operator, Ap
-approver, Vi viewer, Au auditor, Cl client (DEC-141), SA service account. There is no inheritance
-from org roles: acting in a workspace needs a membership in it (identity spec §4.1).
+Roles, the permission matrix, and separation of duties belong to the [identity spec](identity.md).
+The API enforces that matrix and no other (API-2; the coordinator's settlement X1 on #560). It is
+printed here exactly as [identity spec §4.2](identity.md#42-permission-matrix) states it, so the
+route test can parse it; if the two ever differ, identity spec §4.2 wins and this copy is a defect.
+**S** marks a permission that needs step-up (§3.6). A blank cell is a denial. OO org owner, OA org
+admin, Bill billing admin, WA workspace admin, Op operator, Ap approver, Vi viewer, Au auditor, Cl
+client (DEC-141), SA service account, HC host CLI (identity spec §6.4 route 3), PO platform operator
+inside an approved break-glass window (identity spec §10.3). There is no inheritance from org roles:
+acting in a workspace needs a membership in it (identity spec §4.1). The HC and PO principals do not
+call this API: the host CLI appends on site (DEC-436 item 3), and a platform operator acts through
+break-glass. Their columns are printed so the copy stays exact.
 
-| Permission | S | OO | OA | Bill | WA | Op | Ap | Vi | Au | Cl | SA |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| View agents, positions, decisions | | | | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| Read records, verification; export (journal §7) | | | | | ✓ | | | | ✓ | | ✓ |
-| Draft a mandate version | | | | | | ✓ | | | | ✓ (propose only) | |
-| Confirm a version: reducing or neutral | | | | | | ✓ | | | | | |
-| Confirm a version: risk-increasing (incl. a delegation grant, V-022) | S | | | | | ✓ | | | | | |
-| Deploy, go live (E10-4) | S | | | | | ✓ | | | | | |
-| Pause | | | | | ✓ | ✓ | ✓ | | | | |
-| Hold new openings (`exits_only`, DEC-191) | | | | | ✓ | ✓ | | | | ✓ | |
-| Lift a hold a client set (DEC-191) | S | | | | ✓ | ✓ | | | | | |
-| Resume, Stop, Stop with release | S | | | | ✓ | ✓ | | | | | |
-| Kill switch, agent scope: engage | | | | | ✓ | ✓ | | | | | |
-| Kill switch, connection or workspace scope: engage | | | | | ✓ | ✓ | | | | | |
-| Kill switch, org scope: engage | | ✓ | ✓ | | | | | | | | |
-| Kill switch, any scope: privileges beyond the stop (mandate §6.1), for a scope one may engage | S | ✓ | ✓ | | ✓ | ✓ | | | | | |
-| Re-enable a halted scope (§4.4; only if DEC-437 item 21 creates the state) | S | ✓ (org) | ✓ (org) | | ✓ | | | | | | |
-| Owner exit (close a position) | S | | | | | ✓ | | | | | |
-| Acknowledge (ladder, tripwire, reconciliation) | S | | | | ✓ | ✓ | | | | | |
-| Answer an approval: approve | S | | | | | | ✓ | | | | |
-| Answer an approval: skip | | | | | | | ✓ | | | | |
-| Remove or narrow a delegation | | | | | | ✓ | | | | | |
-| Connect, change, or revoke a broker connection | S | | | | ✓ | | | | | | |
-| Accept a disclosure (V-005) | S | | | | | ✓ | | | | | |
-| Workspace policy: tighten | | | | | ✓ | | | | | | |
-| Workspace policy: loosen (within the org's) | S | | | | ✓ | | | | | | |
-| Invite, deactivate, remove a workspace member | S for invite | | | | ✓ | | | | | | |
-| Grant or remove a workspace role | S for grant | | | | ✓ | | | | | | |
-| Connect a client (issue its token) | S | | | | | ✓ | | | | | |
-| Revoke a client | | | | | ✓ | ✓ | | | | | |
-| Owner request through the builder and gate (DEC-141) | | | | | | ✓ | | | | ✓ | |
-| Dry run (DEC-190) | | | | | | ✓ | | | | ✓ | |
-| Chat thread (DEC-184) | | | | | | ✓ | | | | | |
-| Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | |
-| Org policy: tighten | | ✓ | ✓ | | | | | | | | |
-| Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | |
-| SSO configuration | S | ✓ | ✓ | | | | | | | | |
-| Create or archive a workspace | S | ✓ | ✓ | | | | | | | | |
-| Org memberships and org roles | S | ✓ | ✓ (not owner) | | | | | | | | |
-| Issue or revoke a service account | S | ✓ | ✓ | | | | | | | | |
-| Billing | | ✓ | | ✓ | | | | | | | |
-| Transfer org ownership; delete the org | S | ✓ | | | | | | | | | |
-| Approve a break-glass request (§10.3) | S | ✓ | | | ✓ | | | | | | |
+| Permission | S | OO | OA | Bill | WA | Op | Ap | Vi | Au | Cl | SA | HC | PO |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| View agents, positions, decisions | | | | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | |
+| Make an owner request through the owner-input API (builder, gate, and autonomy apply; DEC-141) | | | | | | ✓ | | | | ✓ | | | |
+| Dry run of a request (DEC-190) | | | | | | ✓ | | | | ✓ | | | |
+| Chat thread with the agent | | | | | | ✓ | | | | | | | |
+| Read records, verification; export (journal §7) | | | | | ✓ | | | | ✓ | | ✓ | | |
+| Draft a mandate version | | | | | | ✓ | | | | ✓ (propose only) | | | |
+| Confirm a version: reducing or neutral | | | | | | ✓ | | | | | | | |
+| Confirm a version: risk-increasing (incl. a delegation grant, V-022) | S | | | | | ✓ | | | | | | | |
+| Deploy, go live (E10-4) | S | | | | | ✓ | | | | | | | |
+| Pause | | | | | ✓ | ✓ | ✓ | | | | | ✓ | ✓ |
+| Hold new openings (`exits_only`, DEC-191) | | | | | ✓ | ✓ | | | | ✓ | | | |
+| Lift a hold a client set (DEC-191) | S | | | | ✓ | ✓ | | | | | | | |
+| Resume, Stop, Stop with release | S | | | | ✓ | ✓ | | | | | | | |
+| Kill switch, agent scope: engage | | | | | ✓ | ✓ | | | | | | ✓ | ✓ |
+| Kill switch, connection or workspace scope: engage | | | | | ✓ | ✓ | | | | | | ✓ | ✓ |
+| Kill switch, org scope: engage | | ✓ | ✓ | | | | | | | | | | |
+| Kill switch, any scope: privileges beyond the stop (mandate §6.1), for a scope one may engage | S | ✓ | ✓ | | ✓ | ✓ | | | | | | | |
+| Re-enable a halted scope (§4.4; only if DEC-437 item 21 creates the state) | S | ✓ (org) | ✓ (org) | | ✓ | | | | | | | | |
+| Owner exit (close a position) | S | | | | | ✓ | | | | | | | |
+| Acknowledge (ladder, tripwire, reconciliation) | S | | | | ✓ | ✓ | | | | | | | |
+| Answer an approval: approve | S | | | | | | ✓ | | | | | | |
+| Answer an approval: skip | | | | | | | ✓ | | | | | | |
+| Remove or narrow a delegation | | | | | | ✓ | | | | | | | |
+| Connect, change, or revoke a broker connection | S | | | | ✓ | | | | | | | | |
+| Accept a disclosure (V-005) | S | | | | | ✓ | | | | | | | |
+| Workspace policy: tighten | | | | | ✓ | | | | | | | | |
+| Workspace policy: loosen (within the org's) | S | | | | ✓ | | | | | | | | |
+| Invite, deactivate, remove a workspace member | S for invite | | | | ✓ | | | | | | | | |
+| Grant or remove a workspace role | S for grant | | | | ✓ | | | | | | | | |
+| Connect a client (issue its token) | S | | | | | ✓ | | | | | | | |
+| Revoke a client | | | | | ✓ | ✓ | | | | | | | |
+| Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
+| Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
+| Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | | | |
+| SSO configuration | S | ✓ | ✓ | | | | | | | | | | |
+| Create or archive a workspace | S | ✓ | ✓ | | | | | | | | | | |
+| Org memberships and org roles | S | ✓ | ✓ (not owner) | | | | | | | | | | |
+| Issue or revoke a service account | S | ✓ | ✓ | | | | | | | | | | |
+| Billing | | ✓ | | ✓ | | | | | | | | | |
+| Transfer org ownership; delete the org | S | ✓ | | | | | | | | | | | |
+| Approve a break-glass request (§10.3) | S | ✓ | | | ✓ | | | | | | | | |
+| Restart a process; read verification results (break-glass operational set, §10.3) | | | | | | | | | | | | | ✓ |
 
 How the API's operations map onto those rows:
 
@@ -332,7 +333,7 @@ How the API's operations map onto those rows:
 | Approve, Skip (§5.2) | Answer an approval, and listed in `autonomy.approval.approvers` (identity spec §4.1) |
 | Connect, revoke, revoke on compromise (§4.5) | Connect, change, or revoke a broker connection |
 | Policies, members, clients (§4.5) | The rows of the same names |
-| Owner request, dry run, chat (§4.6) | Owner request; dry run; chat thread. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
+| Owner request, dry run, chat (§4.6) | Make an owner request; dry run of a request; chat thread with the agent. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
 
 Separation of duties is enforced where the specs already enforce it: by the runtime at approval
 (check 7) and by the executor at acknowledgment (mandate spec §5.8), with a client counted as its
@@ -357,7 +358,7 @@ its next call; revocation needs no step-up because it only removes access.
 
 ### 3.9 Approval links
 
-The notification's payload is the [notifications spec](https://github.com/kunwarshivam/mandate/pull/558) (`docs/specs/notifications.md`, #558)'s to define (its §4.2); under the coordinator's
+The notification's payload is the [notifications spec](notifications.md)'s to define (its §4.2); under the coordinator's
 settlement X3 on #560 it carries a random **notice id** and generic text only. This section states
 what the API serves. The link is `/n/{notice_id}`. Opening it shows sign-in only (brief G4); after sign-in the API
 resolves the notice to its approval for that user, if the user may see it, and otherwise returns

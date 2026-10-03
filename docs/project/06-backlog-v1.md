@@ -163,12 +163,35 @@ the spec invariants (DP-n) its tests cover.
   row of spec §7 to its exit, so that feed failures are proven safe, not assumed.
   *Accepted when:* each row of §7 is a named test; with the shared plane and every news source down
   the exit suites still pass (DP-13); one outlier quote anywhere in a random sequence changes no
-  latched limit, trim, or flatten (DP-6), with the H and E₀ cases pending on DEC-433 item 17.
-- **E2-14 (Must, after DEC-433 item 17; SC)** As an owner, I want one wrong high print never to set
-  my high-water mark or my day's starting equity, so that later real prices cannot confirm a loss
-  that did not happen.
-  *Accepted when:* the founder decides item 17; the mandate spec and its reference cases change in
-  their own PR first; DP-6's H and E₀ cases pass.
+  latched limit, trim, flatten, or lifted restriction, and no admitted opening order's value, each
+  compared by an oracle with its own equity ledger (DP-6). The H and E₀ cases are pending tests on
+  DEC-433 items 17 and 21, and the admitted-value case on item 22; none is left out.
+- **E2-14 (Must, after DEC-433 items 17, 21, and 22; SC)** As an owner, I want one wrong high print
+  never to set my high-water mark or my day's starting equity, or to enlarge a buy, so that later
+  real prices cannot confirm a loss that did not happen and no order is sized on a wrong price.
+  *Accepted when:* the founder rules on items 21 and 22; the mandate spec and its reference cases
+  change in their own PR first; DP-6's pending cases pass. *Note (#553 review, finding 3 and minor
+  10):* item 17's E₀ mechanism cannot work as drafted. If the founder takes item 21's official-close
+  option, the E₀ criterion becomes "E₀ is set from the official close, with the last confirmed mark
+  as the fallback", and the H criterion follows whichever H option is chosen.
+- **E2-15 (Must, M5, before E2-10 is accepted; SC)** As an owner, I want mandate spec §8.5 check 15
+  to count syndicated copies of one story as one source, so that a planted story repeated by several
+  vetted outlets cannot corroborate itself at admission (DEC-433 item 14; #553 review, finding 6).
+  *Accepted when:* a mandate spec and reference-case PR states the rule (a tightening, DEC-176);
+  then tests first; then `crates/mandate-research`'s check 15 counts story groups, not raw cited
+  sources; a fixture with one story under five vetted sources is refused `no_corroboration`.
+
+*Data plane spec follow-ups* (minors of the post-merge review on
+[#553](https://github.com/kunwarshivam/mandate/pull/553), deferred by the freeze rule):
+
+- **E2-16 (Should)** Minor 7: spec §3.2's overflow report and §7's owner alerts say they go through
+  the notification path under rule 6 (opaque IDs and generic text; details load in the workspace).
+- **E2-17 (Should)** Minor 8: make DEC-433 item 6 visible from the trading spec: amend §4.4 so a
+  presumed halt also blocks openings, or extend the data plane spec's §11 question 4 to cover it.
+- **E2-18 (Should)** Minor 9: name the backlog story per invariant in spec §2 (DP-11, DP-12, and
+  DP-14 name a test kind but no story).
+- **E2-19 (Should)** Minor 11: name the story that holds the allowlist's contents (E17-7 or E2-9);
+  nothing holds them today.
 
 ### E3 Accounting
 
@@ -454,6 +477,17 @@ the spec invariants (DP-n) its tests cover.
   account only; every MCP exchange is journaled; beta terms are recorded; the connector requests and
   stores only the agentic account's data; account numbers are held by reference (journal spec §6.4)
   and never logged.
+  *Refined by the [connections spec](../specs/connections.md) §6 ([DEC-441](decisions/DEC-441.md);
+  safety-critical; tests first, DEC-77):* **blocked on E7-15** and on DEC-441 item 15; not built
+  unless the tool contract gives an idempotent client order id and query by it (U-R1, U-R2; item 10).
+  Tests run only against fixtures synthesized from the published contract and the simulated broker
+  with Robinhood's rules (DEC-124); no test or run calls Robinhood (rule 8; item 11). The connector
+  implements `BrokerConnector` through the E7-16 MCP client; calls only allowlisted tools, never an
+  options, exercise, watchlist, alert, or other write tool (CN-9); names the agentic account on every
+  request and drops other accounts' data before hashing (CN-8); maps unconfirmed statuses to
+  `blocked` (U-R6); keeps a reserved budget for exits, cancels, and kill-switch orders (§6.5);
+  refuses a tool list carrying any fund-movement tool (CN-2); and a fixture with injection text in
+  tool descriptions shows the text reaches no journal text, notification, or model (CN-9).
 - **E7-5 (Must)** As an owner, I want one account ledger per broker account and one agent per
   instrument per account, so that agents never overspend or cross each other.
   *Accepted when:* RC-17 passes; external activity switches agents to exits-only (RC-15).
@@ -507,6 +541,71 @@ the spec invariants (DP-n) its tests cover.
   doubles still name (DEC-303 item 15). *Tests PR*: 17 pending tests against stubs in
   `mandate-journal`'s `control` module and `mandate-spec`'s `JournaledFact::from_record`. Three live
   tests keep `AccountSnapshotRecorded` unregistered until stream K's writer conforms (DEC-261 item 7).
+
+The rows below come from the [connections spec](../specs/connections.md)
+([DEC-441](decisions/DEC-441.md) item 13). All are safety-critical (broker connectors, OAuth
+scopes, key-permission checks, credentials) and go tests first (DEC-77). E7-1 (Alpaca OAuth) follows
+spec §5.2 to §5.4: scopes `trading` and `data` only, never `account:write`; a grant that differs from
+the request is refused; and live Alpaca is OAuth only, API keys paper only (DEC-441 items 3 and 5),
+after U-A1 to U-A5 are recorded.
+
+- **E7-11 (Must, M8)** As a workspace admin, I want a connection record that holds references
+  only, so that no credential can leak through the platform's own records (spec §3, CN-1, CN-5).
+  *Accepted when:* the record has the §3 fields and no secret-shaped member; a canary-secret scan
+  of journal, logs, artifacts, and API responses finds nothing; a second connection with the same
+  account fingerprint in the deployment is refused; the fingerprint is never journaled or returned.
+- **E7-12 (Must, M8)** As an owner, I want every credential checked at connect, at each executor
+  start, and daily, so that the platform never holds a permission that can move my funds or reach
+  the wrong environment or account (spec §8.1, CN-2, CN-3, CN-10).
+  *Accepted when:* for each connector, fixtures with each fund-movement permission, a wider grant,
+  a credential answering the other environment, and another account are refused before any vault
+  write; a live key whose permissions cannot be read is refused; each result, refusals included, is
+  journaled without the credential (*depends on E7-17* for the check-result events); a later
+  failure moves the connection to `suspended`; a token documented as reaching both environments is
+  refused with no request to the other host (DEC-441 item 21).
+- **E7-13 (Must, M8)** As an owner, I want a degraded or invalid connection to stop new openings
+  at once while exits keep going, so that losing a broker link never adds risk (spec §8.2, §9,
+  CN-6). *Accepted when:* fault injection that revokes, expires, or fails refresh at every step of an
+  open, an exit, and a kill switch sends no opening after the event and every exit the fake broker
+  still accepts; `AccountRestrictionChanged` (`closing_only`, `account_restricted`, cause
+  `connection_unavailable`) and `AgentModeApplied` are committed before anything else (trading
+  §7.3 v0.15, connections spec §9.1; DEC-441 items 7 and 23); a broker reject or notice is journaled
+  with `broker_reject` or `broker_notice`, never the connection cause, and the reverse; the owner
+  alert for the connection cause is distinct from the broker-restriction alert; the restriction
+  lifts only after the connection's own condition clears and then the owner acknowledges, an
+  account refresh alone never lifts it, and clearing it leaves any broker restriction standing.
+  *Reference cases:* RC-15 is unchanged; the tests PR adds a trading-domain case for the
+  connection row and its lift order (YAML, then `cargo xtask refcases --write`), and the journal
+  spec closes `AccountRestrictionChanged` with `cause` when that schema is registered.
+- **E7-14 (Must, M8)** As an owner, I want reconnecting my account to keep its connection, so that
+  revoking and reconnecting can never reset my loss carry (spec §9.2, CN-12).
+  *Depends on E7-17* (the reconnect rule). *Accepted when:* revoke and reconnect of the same
+  account keeps `connection_id`, `account_ref`,
+  the stream, and the loss carry, and V-032 still binds; reconciliation runs before any agent
+  resumes.
+- **E7-15 (Must, M8, before E7-6; no code)** As the founder, I want Robinhood's tool contract and
+  platform terms confirmed in writing, so that the connector is built on facts rather than guesses
+  (spec §6.6). *Accepted when:* U-R1 to U-R12 each have a recorded answer with its source, from
+  published documentation or Robinhood's written reply, gathered without any call to a real account;
+  DEC-441 items 15, 16, 17, and 20 are decided.
+- **E7-16 (Must, M8)** As an owner, I want the broker MCP client limited to an allowlist of tools
+  pinned by contract hash, so that a malicious server or poisoned tool metadata cannot steer it
+  (spec §6.2, CN-9). *Accepted when:* a fixture server that adds a tool, changes a schema, or carries
+  injection text in descriptions or errors: the new tool is never called, a changed hash halts
+  openings, and the text appears in no journal text, notification, or model input; only the pinned
+  host is reachable and redirects are refused.
+- **E7-17 (Must, M8)** As an auditor, I want connection state changes, permission-check results,
+  refusals, and credential rotation journaled, so that every connection's history can be replayed
+  (spec §3, §9, CN-10). *Accepted when:* the journal spec defines their schemas; adds `account_ref`
+  to `ConnectionEstablished` as a new `schema_version` (DEC-261 item 10's binding clause); and
+  allows a second `ConnectionEstablished` for a `connection_id` only after its `ConnectionRevoked`,
+  with the same broker, environment, and `account_ref` (spec §3), with vectors, tests first.
+- **E7-18 (Must, M8)** As an auditor, I want a broker exchange record to say that it is filtered
+  as well as redacted, so that nobody reads it as the broker's raw bytes in a dispute (spec §6.2
+  rules 4 and 6; #563 round 1, minor 2). *Accepted when:* the journal spec's `BrokerExchangeRecorded`
+  text (§6.3) says the stored exchange has other accounts' data dropped before redaction and
+  hashing, that the dropped parts cannot be recovered, and that reconciliation disputes rest on
+  the filtered record; the connections spec §6.2 says the same.
 
 ### E8 Escalation and approvals
 
@@ -793,11 +892,17 @@ the spec invariants (DP-n) its tests cover.
   - add the per-order approval to §4.3's list of what `independent_approval_required` scopes.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
+  *Spec:* [notifications spec](../specs/notifications.md) ([DEC-438](decisions/DEC-438.md)). The
+  story is split into E8-9 to E8-14 below; E8-4 is done when they are.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded
   from our workspace deployment, so that trading intent stays private.
   *Accepted when:* captured relay and provider payloads contain no instrument, size, price, or thesis.
+  *Spec:* NT-1's canary test ([notifications spec §2](../specs/notifications.md#2-invariants)) is this
+  acceptance, run for every channel as E8-11, E8-12, and E8-14 land.
 - **E8-6 (Should)** As a fund, I want two approvers above a threshold.
 - **E8-7 (Should)** As an approver, I want SMS and phone escalation.
+  *Spec:* same payload and records as every push channel (notifications spec §4.1); the ordered
+  chain needs a mandate schema field first (spec §12 item 5).
 - **E8-8 (Should)** As an owner, I want to answer an ask with "let it do this for a while", within
   caps I set in dollars, orders, and days, so that the agent stops asking me about what I have
   already said yes to ([ADR-0003](../adr/0003-earned-autonomy.md) parts 2 and 3, [DEC-181](04-decision-log.md#decisions)). The spec is
@@ -813,6 +918,66 @@ the spec invariants (DP-n) its tests cover.
   bounds each delegation on its own, so twenty delegations can each carry `max_total_usd` equal to the allocation. That is
   the spec's reading, and the gate enforces every limit regardless (§6.5). The approval card and the MC-U family should
   consider the aggregate, which is the V-045 the criteria above name and the mandate spec does not yet define.
+- **E8-9 (Must, M7; SC)** As an owner, I want every notice, alerts included, built from one closed
+  payload type so that nothing about my trading can reach a provider
+  ([notifications spec §3, §4.2, §5.5](../specs/notifications.md), DEC-438 items 1, 2, 5, 17).
+  Tests first. *Accepted when:* `GenericText` holds `approval_needed`, `attention_needed`,
+  `account_changed`, and `brief_ready`; the payload is `{"notice", "text"}` with a minted
+  `NoticeId` that has no constructor from an event id (NT-1, NT-4); a closed kind enum replaces
+  `NotificationRef.message_key` in `mandate-runtime` and `mandate-executor`, and every kind in spec
+  §3.2 maps to its class and text key; each stream owner writes `OwnerAlertSent` with the kind in
+  the subject's batch, and none for a `KillSwitchActivated` caused by an owner command (spec §3.4);
+  the payload schemas of journal v0.12's `OwnerAlertSent`, `NoticeIssued`, and `NoticeAttempted`
+  are closed in the same tests PR; a wording test holds NT-12.
+- **E8-10 (Must, M7; SC)** As an owner, I want a dispatcher that turns committed events into sends,
+  retries them, and records every outcome, so that no alert is lost and none adds risk
+  (spec §5.1 to §5.8, DEC-438 items 4 to 9, 15, 16, 27 to 29). Tests first, against a fixture
+  channel. *Accepted when:* the dispatcher runs as its own process, writes only the notice stream,
+  sends only about committed causes, and journals every attempt (NT-8, crash injection at every
+  step, and a second dispatcher fenced by epoch); one user kill switch is one notice (spec §3.4);
+  recipients match the identity spec's receive column read as data (NT-10); quiet hours act by class (NT-7, the DST cases); safety
+  storms are coalesced and never dropped, with the journal-derived oracle of NT-6 seeded with a
+  dropping bug first to show it fails; with every channel failing, a soak's intents and modes match
+  perfect delivery except asks that skip (NT-5); the kill-switch and exit suites pass with the
+  dispatcher hung (NT-9); a lost address alerts on the other channels (spec §5.6).
+- **E8-11 (Must, M7; SC)** As an approver, I want email notices (spec §4.4). Provider per DEC-438
+  item 21; until the founder decides, the adapter runs against a recorded fixture only.
+  *Accepted when:* NT-1's canary test passes on captured messages; links match `<origin>/n/<ULID>`
+  (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider configuration check.
+- **E8-12 (Must, M7; SC)** As an approver, I want one chat channel (spec §4.5), Slack or Telegram
+  per DEC-438 item 20. *Accepted when:* NT-1's canary test passes; every inbound message, button, or
+  callback leaves the control stream unchanged (NT-3); the webhook URL or bot token is read only
+  from the vault and appears in no log (rule 7).
+- **E8-13 (Must, M9 and M10; SC)** As an approver, I want to open a notice, sign in, and answer
+  inside my workspace (spec §6, G4), with `web_inbox` as a pull channel (DEC-438 item 3). Depends on
+  the workspace API and identity specs (DEC-436, DEC-437). *Accepted when:* a captured link with no
+  session reaches only sign-in (NT-4); another workspace's subject answers as a missing one (NT-10);
+  a grant needs step-up per mandate spec §6.1 and a skip does not; a closed request shows its
+  terminal state; the service worker and pages cache no approval content (P5).
+- **E8-14 (Must, M10; SC)** As an approver, I want web push, through the relay where a deployment's
+  egress requires it (spec §4.6, DEC-438 item 13). *Accepted when:* payloads are encrypted to the
+  subscription; the relay refuses ciphertext over 512 bytes and stores none; NT-1's canary test
+  passes on relay and push-service captures; a relay outage changes no trading state (NT-9).
+- **E8-16 (Should, M7)** As a reviewer, I want the minors of the notifications spec's round 1
+  ([#558](https://github.com/kunwarshivam/mandate/pull/558); freeze rule) fixed in the spec:
+  - HLD §6 flow C step 4 still says "an escalation chain (push → SMS → phone call)"; align it with
+    DEC-438 item 6's fan-out.
+  - The Telegram linking code: state its lifetime, entropy, and single use, and add the residual to
+    §9 (whoever obtains the code binds their own chat and receives the opaque notices).
+  - NT-1's wording against the relay envelope: the `urgency` and TTL the relay and push service see
+    are fixed per class, and the push endpoint is an address under NT-2.
+  - A rung-2 guard that no mail adapter ships while `[[EMAIL-FOOTER]]` is unresolved.
+  - NT-5: state why check 4 is the only effect (no exit, protective order, or risk exit is ever
+    gated by an approval, rule 13), so the claim survives a later autonomy change.
+  - NT-6: say that a notice joining a coalescing window meets the 60-second bound at the window's
+    end.
+  - Round 2 nits: §3.2's preamble says every non-approval kind is caused by an `OwnerAlertSent`,
+    but `channel_lost` is caused by the dispatcher's own `NoticeAttempted` (§3.4 has it right);
+    say where the journal change is described that `StreamType` and `StreamId::parse` in
+    `mandate-journal` are a closed four-variant type E8-10 must extend first; E8-9 reconciles the
+    mandate reference cases' `OwnerAlertSent` `{subject, text: "tripwire_fired"}` with §3.2's
+    `kind`; keep one sentence, here or in the workspace API spec §3.9, for what
+    `ApprovalRef::of_requested_event` becomes.
 - **E8-15 (Must, M8, after E10-10; SC)** As an approver, I want to see and answer approval requests
   through the workspace API, so that the web app and the CLI share one approval service
   ([workspace API spec](../specs/workspace-api.md) §4.3, §5.2, §5.3; [DEC-436](decisions/DEC-436.md)).
@@ -830,16 +995,88 @@ the spec invariants (DP-n) its tests cover.
 
 ### E9 Identity, tenancy, and policy
 
-- **E9-1 (Must)** As a user, I want to sign in with passkey or OIDC SSO.
-- **E9-2 (Must)** As an admin, I want organizations, workspaces, and roles.
+The [identity spec](../specs/identity.md) (v0.1 draft, [DEC-437](decisions/DEC-437.md)) defines these
+stories. Rows marked **SC** are safety-critical: tests first under
+DEC-77, an independent review on a different model, and zero missed mutants. The identity provider
+for managed mode, SAML, and organization recovery stay with the founder (DEC-437 items 15 to 21); no
+story buys a service, and none uses a real identity-provider account in tests (spec §1.3).
+
+- **E9-1 (Must; SC)** As a user, I want to sign in with passkey or OIDC SSO.
+  *Accepted when:* passkey sign-in requires user verification and OIDC sign-in checks signature,
+  issuer, audience, expiry, nonce, and `email_verified` against the configured issuer only (spec §6.1),
+  each refusal tested against an in-memory issuer and a software authenticator; sessions meet spec
+  §6.2 (5-minute access tokens, uncached membership re-check, refresh rotation with reuse revoking the
+  family, idle and absolute limits an org can only shorten); the risk-reduction path of §6.4 pauses and
+  engages a kill switch with the identity provider unreachable (ID-10), while a refusal from the
+  provider (`invalid_grant`, a disabled subject, a back-channel logout) ends the session with every
+  permission and blocks the local passkey route (§6.4, §11.1); the host CLI commits only as its
+  registered principal (`HostCliRegistered`, ID-1); and the log scan finds no
+  canary token from any path (ID-9).
+- **E9-2 (Must; SC)** As an admin, I want organizations, workspaces, and roles.
+  *Accepted when:* `authorize` matches spec §4.2's matrix exactly, checked by an exhaustive test over
+  every role set, permission, and scope against a table parsed from the spec, not from the code (ID-2);
+  no principal changes its own roles (ID-13); and the last-owner and last-admin refusals hold (§5.2).
 - **E9-3 (Must)** As an admin, I want org-level limits that workspaces and agents can only
   tighten.
-- **E9-4 (Must)** As a security-conscious user, I want step-up authentication for sensitive
-  actions.
-- **E9-5 (Should)** As a fund, I want separation of duties between agent creators and approvers.
+- **E9-4 (Must; SC)** As a security-conscious user, I want step-up authentication for sensitive
+  actions. *Accepted when:* every permission marked S in spec §4.2 is refused, with nothing committed,
+  for a missing, stale, reused, wrong-method, wrong-principal, and wrong-digest assertion (ID-4, §7.2);
+  none of the ID-5 actions asks for step-up or fails without it; a challenge is consumed in the same
+  transaction as the event it authorizes; and the raw assertion artifact re-verifies against the stored
+  public key.
+- **E9-5 (Should; SC)** As a fund, I want separation of duties between agent creators and approvers.
+  *Accepted when:* under `independent_approval_required`, no grant, acknowledgment, or approval counts
+  where `human(responder)` equals `human(requester)` or, for approvals, `human(author)`, with clients
+  and service accounts mapped to their humans (ID-6, spec §8.2), checked by a fuzz whose oracle maps
+  principals independently; and the 24-hour cool-off of spec §8.3 holds for operator and approver grants.
 - **E9-6 (Must)** As a retail user, I want the retail profile (`auto` allowed, LLM ideas allowed,
   protection required, no leveraged ETPs, counsel-set loss ceiling and approval timeout minimum)
   applied to my workspace by default ([DEC-98](04-decision-log.md#decisions)).
+- **E9-7 (Must, M8; SC)** As an admin, I want memberships with states (invited, cooling off, active,
+  deactivated, removed) journaled on the control stream, so that who can act, and the user count V-047
+  reads, come from the record (spec §5). *Accepted when:* the tests PR adds spec §12.1's events to
+  journal §9 with schemas; `workspace_users` equals an independent fold of `Member*` events at
+  validation and at application over random histories, with invited, cooling-off, deactivated, and
+  removed members, clients, service accounts, and agents counting zero and an unreadable count reading
+  as one (ID-7); and no request authorized after a deactivation commits succeeds, with open streams
+  closed within 60 s (ID-3).
+- **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
+  *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
+  compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
+  security, journal stream prefixes, NATS accounts, cache keys, the inference cache, and the vault
+  (ID-8, spec §9.1).
+- **E9-9 (Must, M8; SC; before E10-6)** As an owner, I want my connected agent to hold a scoped,
+  sender-constrained, revocable token (DEC-141). *Accepted when:* clients connect through OAuth 2.1
+  with PKCE and DPoP (spec §6.6); the ID-2 test passes for the client column; a client cannot approve,
+  confirm, present step-up, pause, resume, stop, release, make an owner exit, or change a connection or
+  membership (ID-11); the tests PR adds the `client` actor kind with `on_behalf_of` to journal §3 and
+  makes the mandate spec's independence checks compare `human(…)` (spec §8.2, §12.2; DEC-437 item 10),
+  with a case showing check 3 refuses a `client` actor's approval from the record alone; no client
+  token is issued before those edits land; and revocation applies to every request authorized after it
+  commits.
+- **E9-10 (Should, M8; SC)** As a user, I want account recovery and, in managed mode, audited
+  break-glass. *Accepted when:* recovery codes are stored only as salted slow hashes and shown once; a
+  passkey enrolled through recovery cannot present step-up for 24 hours and its owner is notified
+  (opaque) (spec §10.1); and a `platform_operator` is refused every permission outside break-glass's
+  operational set, inside an approved, time-bound window only, with each step journaled to the
+  workspace's control stream (ID-12, §10.3). Organization recovery waits for DEC-437 item 18.
+- **E9-11 (Must, M8; SC)** As the founder, I want the identity invariants ID-1 to ID-15 each backed by
+  a property test with an independent oracle. *Accepted when:* each oracle is shown to fail on a
+  seeded bug (for example, a cached membership read, a role inherited from the org, a challenge not
+  bound to its digest, a client counted as a second user, an unprefixed cache key) before it is trusted.
+- **E9-12 (Should, M8)** Round-1 minors of the identity spec's review ([#556](https://github.com/kunwarshivam/mandate/pull/556),
+  freeze rule). *Accepted when the spec settles each:* (1) the workspace admin holds the kill switch's
+  privileges beyond the stop (mandate §6.1, selling equities outside the session) but not the owner
+  exit; make the two rows agree; (2) ID-2's exhaustive test needs a matrix row for every operation the
+  workspace API spec defines; the owner request, dry run, and chat thread rows were added by the
+  round-2 ruling, and saving a draft, running a backtest, and resolving a notice still need rows, or
+  ID-2 is scoped to the rows the matrix names; (3) a row for lifting a hold an operator
+  set, with its step-up; (4) ID-15's carve-out for the notification relay's envelope
+  (`{relay_id, endpoint, ciphertext}`, a capability URL) as HLD "Where data lives" lists it; (5) "release"
+  names both Stop with release (DEC-136) and re-enabling a halted scope, so one is renamed (round 2
+  renamed the second; confirm no other use remains); (6) the Status row matches DEC-437 after round 2.
+  ID-13's founding-grant exception and ID-10's note on item 15 were taken in round 2 because the
+  blocker fixes touched those lines.
 
 ### E10 Mandate authoring
 
@@ -1037,6 +1274,71 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
 - **E14-2 (Must)** As an org owner, I want a hybrid license key tied to my organization.
 - **E14-3 (Should)** As an org owner, I want usage metering visible in the app.
 
+From the [billing design](../design/billing.md) (v0.1 draft, DEC-442). **SC** marks a story on a
+safety-critical path, to which the `AGENTS.md` safety-critical rules apply. No story here opens a
+provider account, sets a price, or charges anyone until DEC-442 items 14 to 20 are decided; each is
+built against a recorded provider fake.
+
+- **E14-4 (Must, M12)** As an org owner, I want my usage counted from my workspace's own records, so
+  that I can check what I am billed. *Accepted when:* the usage builder seals one report per
+  deployment per period from the closed counter list (design §4.1), `UsageReportSealed` before it
+  is signed; a property test shows two journals that differ only in orders and fills give identical
+  reports (BL-2); the canary run finds no canary byte in any report (BL-1); and
+  `mandate-cli usage recount` equals every sealed report, failing on a seeded builder off-by-one
+  (BL-7).
+- **E14-5 (Must, M12)** As the platform, I want usage ingested exactly once and reconciled, so that
+  no organization is billed twice or by estimate. *Accepted when:* fuzzed duplicate, reordered, and
+  delayed deliveries with ingest crashes give clean-run totals (BL-6); a chain gap, a late
+  air-gapped file, or a bounds-check failure holds the line and never estimates it (design §4.3);
+  and corrections are new reports and new traced lines, never edits (BL-11).
+- **E14-6 (Must, M12)** As the platform, I want the billing provider behind one interface with
+  idempotent writes and verified webhooks, so that the provider choice stays reversible.
+  *Accepted when:* every write carries the deterministic key of design §5.1 and a retry after a
+  timeout bills once; an outbox resends after a crash; a forged, replayed, or contradicted webhook
+  changes no state the provider API does not confirm (§5.3); the fake records every request and a
+  scan finds only BL-1's fields.
+- **E14-7 (Must, M12)** As an org owner, I want prices fixed for each cycle and every invoice line
+  explained, so that I am never re-billed at a new price. *Accepted when:* price versions are
+  immutable and pinned per cycle (BL-10); re-rating every closed cycle reproduces each line to the
+  cent; each line names its counter, period, version, and report digest (BL-11); money is
+  fixed-point with one rounding per line (BL-12); and bring-your-own-key tokens rate to zero with
+  unchanged quota use (BL-9), with `key_owner` on the metering record (inference spec §7.1).
+- **E14-8 (Must, M12; SC)** As an org owner, I want non-payment to follow a noticed ladder that never
+  touches my positions or exits. *Accepted when:* licenses are issued from the plan through E20-4's
+  format; the ladder of design §6.2 runs on a simulated clock with no early step and a notice
+  before each; only an API-confirmed non-payment withholds renewal and a provider outage renews
+  (BL-5, BL-14); and through every state, paper agents' exits, protective orders, owner exits, and
+  kill switches pass, while after lapse every covered agent takes the `license_lapsed` restriction
+  (`exits_only`, #562 CP-6), an opening is refused by the gate's existing mode check, and no new gate
+  reason exists (design §3.4, BL-4); and every billing notice Mandate sends is `{notice,
+  text}` through the dispatcher, with no canary or amount in any captured byte (BL-15).
+- **E14-9 (Must, M12; SC)** As a billing admin, I want quotas and an organization spend cap enforced
+  before any spend, so that the bill never exceeds the cap. *Accepted when:* workspace, deployment,
+  seat, model-spend, and agent-hours quotas are checked at the points of design §3.4 with the
+  control plane unreachable; a fuzz over calls, deployments, stops, restarts, and cycle boundaries
+  shows spend never exceeds a cap by a separate accumulator; and no refusal appends a mode change,
+  cancel, or exit (BL-8).
+- **E14-10 (Should, M12)** As an org owner, I want sign-up, trial, plan changes, cancellation,
+  refunds, and organization deletion to behave as the design's lifecycle walk says. *Accepted
+  when:* each row of design §6.1 has a test from entry to exit; a downgrade below what runs stops no
+  agent; a refund is a traced credit to the original method; and deletion keeps billing records for
+  the retention period and the journal under its own rules.
+- **E14-11 (Should, M12)** As a reader of the billing design, I want the round 1 review's text
+  findings fixed (#565). *Accepted when:* BL-10 cites the price-change notice term (DEC-442 item 18)
+  instead of pricing principle 3; the `model_cost_usd` counter row says that for `key_owner =
+  customer` it is our price table applied to the customer's call, not anyone's actual cost; the
+  Lapsed row of design §6.1 names the terminal state for an organization that never pays (lapsed,
+  with read and export access for the records period); the free paper tier gets its own §6.1 row
+  with its renewal and payment state; and design §10 either lists its rows inline or is retitled.
+- **E14-12 (Should, M12)** As the coordinator, I want the billing design reconciled with the control
+  plane (#562) and identity (#556) designs once they merge. *Accepted when:* #562 §3.5's counter
+  list gains `key_owner`, `data_units`, and `cached_tokens` and renames `decisions` to
+  `decision_cycles`; CP-6 lists resumes into an opening mode, as its own §3.3 does; identity §11.2
+  takes the shared lapse wording (after grace a license refuses only new deployments and new
+  openings, and never blocks an exit, a protective order, the kill switch, or any risk reduction),
+  subject to the founder's DEC-440 item 13; and the identity invite walk checks `max_seats`, or the
+  seat row of design §3.4 moves to where identity places it.
+
 ### E15 Signal models: LLM and fast models, scorecards
 
 - **E15-1 (Must)** As an operator, I want an LLM research signal model that writes theses
@@ -1064,10 +1366,10 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   that creates a new confirmed mandate version, with no automatic winner-picking; and no mandate holds
   more than three variants.
 
-The stories below implement the [inference spec](../specs/inference.md) v0.1
+The stories below implement the [inference spec](../specs/inference.md) v0.2
 ([DEC-432](decisions/DEC-432.md)) once it is reviewed. **SC** marks a safety-critical story (the
 model gateway feeds the order builder, holds provider credentials, and enforces spend caps). E15-2
-waits for the founder's answer to DEC-432 item 13, whose recommendation drops the fast tier from v1.
+follows the founder's decision on DEC-432 item 13: a hosted fast model in v1, through the gateway.
 
 - **E15-6 (Must, M5; SC)** As an operator, I want a model gateway that is the only component able to
   call a model, so that every call is pinned, bounded by a deadline, and never substitutes a model.
@@ -1077,15 +1379,22 @@ waits for the founder's answer to DEC-432 item 13, whose recommendation drops th
   deadline, from another identity, or failing its schema never reaches the caller; no request body
   carries a tool or function member; the agent runtime has no direct route to a model endpoint;
   live calls run only in internal paper workspaces (DEC-432 item 14).
-- **E15-7 (Must, M5; SC)** As an owner, I want each selectable model to be an immutable registry entry
-  whose content hash covers its identity, template, output schema, deadline, and endpoints' identity,
-  so that what I pin is exactly what runs. *Accepted when:* entries with a floating alias are refused;
+- **E15-7 (Must, M5; SC)** As an owner, I want each selectable model to be a registry entry whose
+  content hash covers its pinned content (spec §4.1: identity, template, retrieval plan, output
+  schema, validation bounds, deadline, and the rest) and excludes `endpoints` and `status`, so that
+  what I pin is exactly what runs and a routing change never invalidates my pin (DEC-432 items 17
+  and 18). *Accepted when:* entries with a floating alias are refused; a test changes an entry's
+  endpoints and status and asserts the hash is unchanged, and changes each pinned member and asserts
+  it differs;
   an endpoint is added only after the spec §4.3 identity probe; deprecation and withdrawal follow
   spec §4.4 and never replace a pinned model; V-007 checks the mandate against the registry.
 - **E15-8 (Must, M5; SC; journal spec first)** As an auditor, I want every model call journaled with
   its cost and outcome, so that replay never calls a model and spend folds from the journal.
   *Accepted when:* a journal spec change closes `ModelInvocationRecorded` with DEC-432 item 11's
-  members and adds the gateway's meter stream, with test vectors; the registration lands tests first
+  members and the two the agent harness spec adds (DEC-432 item 22), names the stream that holds the
+  compiler's record (DEC-432 item 19; until then the compiler makes no gateway call), and adds the
+  gateway's meter stream with one writer per workspace and the `meter_unavailable` refusal (DEC-432
+  item 20), with test vectors; the registration lands tests first
   (DEC-77); replay of a journal with every model call failing yields the same fold (INF-10).
 - **E15-9 (Must, M5; SC)** As an owner, I want model spend metered and capped per agent and per
   workspace, so that cost is bounded and a cap never adds risk. *Accepted when:* reservations precede
@@ -1106,6 +1415,20 @@ waits for the founder's answer to DEC-432 item 13, whose recommendation drops th
   I pay for what my agents used. *Accepted when:* the billing feed of spec §7.4 sends counts and cost
   only, never content, outputs, or instruments; hybrid sends signed reports; the result appears in
   E14-3's usage view.
+- **E15-12 (Should; spec follow-ups, deferred by the freeze rule)** The minors of the independent
+  review of inference spec v0.1 (PR #551, round 1), for the spec's next revision:
+  - Minor 6: "withdrawal empties the cache" must not delete a write-once artifact a journaled record
+    names. Say withdrawal invalidates cache index entries only.
+  - Minor 7: INF-6's "exactly one metering record" against the meter stream's two appends
+    (reservation and settlement). State which the INF-6 and INF-7 oracle counts, and that a
+    `meter_unavailable` refusal has no meter-stream entry.
+  - Minor 8: spec §7.3 says a crashed call's reservation "stays counted"; §9's crash row says it is
+    "settled as spent at their maximum". Pick one fold and make the accumulator reproduce it.
+  - Minor 9: INF-15 and §4.4 rely on `PlatformOperatorAction`'s `model_withdrawn`, whose payload
+    schema the journal spec leaves open (DEC-261 item 9). Say so, so E15-7 assumes no closed schema.
+  - Minor 10: no longer a scope change. The founder chose a hosted fast model for v1 (DEC-432
+    item 13), so FR-3.7's P1 stands; update OD-02 to that decision.
+  - Nit: spec §11 places the spike's 60 s timeout in the client; it is in `http.py`.
 
 ### E17 Research agent and dynamic universe
 
@@ -1432,10 +1755,98 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   on its diff. DEC-431 item 20 says "if safety-critical" without deciding.
 - Round-2 minor 5: DEC-431 item 17 cites "journal spec §6.3, six years" for retention; retention is
   §6.2.
-- Round-2 cross-document: data-plane spec §4.6 says the drift detector folds `ObservationRecorded`;
-  correct it to the typed per-item observation the observation's artifact holds (agent harness spec
-  §6.3), in the data-plane spec's next change. Add `mandate-research`'s drift doc comment ("the shell
+- Round-2 cross-document: data-plane spec §4.6 said the drift detector folds `ObservationRecorded`;
+  corrected in data-plane spec v0.2 to the typed per-item observation the observation's artifact
+  holds (agent harness spec §6.3). Still open: add `mandate-research`'s drift doc comment ("the shell
   records") to E19-9's scope with the same reading.
+
+### E20 Global control plane (proposed, DEC-440)
+
+From the [control-plane design](../design/control-plane.md) (v0.1 draft). The epic joins the
+overview when the founder accepts it; until then each story is **(Proposed)** with the milestone it
+would serve. **SC** marks a story on a safety-critical path. License terms, vendors, and hosting stay
+with the founder (DEC-440 items 13 to 17); no story here buys a service or touches live money.
+
+- **E20-1 (Proposed, M8)** As an org admin, I want a directory of organizations, workspaces,
+  deployments, members, and role names, holding no personal data, so that seats and routing work
+  without the control plane learning who anyone is (design §3.2).
+  *Accepted when:* a schema test shows no table or message field for email, name, or IdP subject;
+  a client with a cached route reaches its deployment with the directory down.
+- **E20-2 (Proposed, M8; SC)** As an IT admin, I want to enroll a deployment with a single-use
+  token, a key generated on site, and a client certificate bound to its `deployment_id` (design §3.1,
+  E13-1).
+  *Accepted when:* a reused or expired token is refused; the private key never leaves the site's
+  vault; revoking the certificate behaves exactly as an outage in the CP-2 drill.
+- **E20-3 (Proposed, M8; SC; journal spec change first)** As an engineer, I want the closed message
+  set of design §3.8 and its journal events (`ControlPlaneEnrolled`, `LicenseApplied`,
+  `LicenseStateChanged`, `ReleaseOffered`, `ReleaseInstalled`, `ReleaseWithdrawnNoticed`,
+  `CatalogEntryRegistered` (kind, content hash, sequence), `DataBundleImported`, `UsageReportSealed`,
+  `ControlPlaneMessageRefused`) registered in the journal
+  spec with vectors, then implemented: verification in `cp-agent`, appends by workspace control
+  services, the control stream's single writer.
+  *Accepted when:* CP-1's type test and canary scan pass; CP-4's layering check and fuzz test pass;
+  CP-5's per-type tests show an unsigned, wrongly signed, replayed, or out-of-list instruction
+  refused and journaled, and a valid one journaled before its effect; CP-9's replay test passes for
+  all four kinds (license, release manifest, catalog entry, data bundle); `cp-agent` reaches the site
+  only through a port it declares and workspace services implement; a test shows `cp-agent` never
+  takes a writer epoch, and the kill switch commits with `cp-agent` hung.
+- **E20-4 (Proposed, M8; SC; mandate spec change first)** As an org owner, I want licenses
+  verified on site, with states `valid`, `renewal_due`, `grace`, and `lapsed`, where after grace a
+  lapsed license refuses only new deployments and new openings; it never blocks an exit, a
+  protective order, the kill switch, or any risk reduction (design §3.3; DEC-440 item 13 Proposed).
+  *Accepted when:* mandate spec §5.9 lists `license_lapsed` (mode `exits_only`) with its reference
+  cases before code; CP-6's test passes (expiry mid-session leaves positions and protection
+  untouched; exits and the kill switch pass; after grace every covered agent journals
+  `AgentModeApplied` into `exits_only` and an opening is refused by the existing mode check, with no
+  new gate check); CP-9's replay test passes; lowering an entitlement stops no running agent.
+- **E20-5 (Proposed, M8)** As an operator, I want heartbeats carrying versions and health only, and
+  a fleet view, where missing heartbeats only mark a site `unreachable` and alert (design §3.4,
+  CP-8).
+  *Accepted when:* a site silent for a day is shown `unreachable` and nothing about it is revoked.
+- **E20-6 (Proposed, M11; SC)** As an IT admin, I want signed release manifests offered over the
+  outbound link and installed only by my action or in my update window, by drain and hand-over
+  (design §3.4; DEC-434 item 7; with E21-8 signing).
+  *Accepted when:* a manifest not signed by the pinned release key is refused; the upgrade drill
+  (OPS-7) passes on a hybrid site; a withdrawal refuses new installs and changes no running process.
+- **E20-7 (Proposed, M12)** As an org owner, I want usage metered from signed, chained hourly
+  reports built from journaled facts and the inference meter (design §3.5).
+  *Accepted when:* CP-10's test passes (random cuts and duplicates bill the same totals; a gap is
+  flagged, never estimated); the canary scan finds no instrument or agent name in any report.
+- **E20-8 (Proposed, M10; SC)** As an approver on a hybrid site, I want the relay to forward
+  encrypted web push, keep nothing after the attempt, and log opaque IDs only (notifications spec
+  §4.6, E8-14).
+  *Accepted when:* a payload over 512 bytes is refused; captured relay storage and logs after a
+  test day hold no ciphertext and no canary string; the exit suites pass with the relay down.
+- **E20-9 (Proposed, M11)** As an IT admin, I want releases, connector packages, and model-registry
+  entries served by digest and verified on site against per-kind keys (design §3.6).
+  *Accepted when:* a bundle with a wrong digest or key is refused before any byte is used; a new
+  registry entry never changes an existing pin.
+- **E20-10 (Proposed, M11)** As an auditor, I want anchor roots received and receipted by the
+  control plane, so a restore can be compared with a copy held outside the site (journal spec §10;
+  infrastructure §6.3).
+  *Accepted when:* roots queued during an outage arrive in order; the restore drill compares against
+  the witness copy and flags a restored head behind a witnessed root.
+- **E20-11 (Proposed, M8; SC)** As the founder, I want the outage drill of design §4: the outbound
+  link cut for a simulated week, a half-open partition, and a revoked certificate (CP-2, CP-3, CP-7).
+  *Accepted when:* paper and kill-switch suites give the same outcomes as with the link up, except
+  relay push and queued reports; a connection attempt from the control-plane network into the site
+  fails at the network layer.
+- **E20-12 (Proposed, M8; SC)** As the founder, I want the managed global kill switch issuable only
+  from each cell's operator tooling with step-up, never from the global control plane (design §3.7;
+  DEC-440 item 8; members per DEC-261 item 9).
+  *Accepted when:* the control plane has no message type that maps to `PlatformOperatorAction`; a
+  hybrid site refuses one from outside its own operators.
+- **E20-13 (Proposed, M8)** As an org owner, I want one rule for the license clock: validity is
+  checked against the highest UTC time the site has journaled (#562 review minor 1).
+  *Accepted when:* setting the site clock back never extends a license; a frozen clock still raises
+  `renewal_due` from the journaled high-water time, and the design says so.
+- **E20-14 (Proposed, M8)** As an IT admin, I want the enrollment certificate's lifetime and renewal
+  threshold named, so CP-8 is checkable (#562 review minor 4).
+  *Accepted when:* the design states both; a test renews at the threshold; the CP-2 drill outlasts
+  the threshold with only an alert.
+- **E20-15 (Proposed, M8)** As the founder, I want the control plane's recovery targets stated, as a
+  Proposed item or as a reading under DEC-440 item 16 (#562 review minor 6).
+  *Accepted when:* design §5.1 and §8 agree on where the targets live and what they are.
 
 ### E21 Operations and infrastructure (proposed, DEC-434)
 
