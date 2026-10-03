@@ -11298,6 +11298,35 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// #515's script 2, this PR's route (DEC-421 item 4): beside an OCO for 6, the broker reports
+    /// [`LONE`], the risk exit of 4, `canceled` with 3 filled, a fill no update has applied yet. The
+    /// broker holds 7, so the top-up ([`re_cover`]) covers the 1 the OCO leaves, never the 4 the
+    /// fold's position of 10 would ask for.
+    #[test]
+    fn a_lone_exit_ended_with_a_fill_not_yet_applied_is_topped_up_for_what_the_broker_holds()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = beside_a_lone_exit(&ports)?;
+        let ended = reported(
+            LONE,
+            &Held {
+                purpose: Purpose::RiskExit,
+                qty: 4,
+                filled: 3,
+                acked: true,
+                live: false,
+            },
+        )?;
+        let after = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(ended)), &ports)?;
+        assert_eq!(
+            protection_sent(&after)?,
+            Qty::parse("1")?,
+            "the top-up covers the 1 of the 7 held that the OCO for 6 leaves: {:?}",
+            drafted(&after)
+        );
+        Ok(())
+    }
+
     /// A sell fill of `qty` AAPL that names no order: an activities row with no
     /// `client_order_id`, which the executor applies as external activity.
     fn unattributed(qty: &str) -> Result<Input, ExecutorError> {
