@@ -8742,7 +8742,9 @@ mod sequence_tests {
         /// still send sell at least the position, so no held share is left without a protective
         /// order, an exit or a rung to come, unless the executor journaled and alerted it. A
         /// ladder's rungs count as cover for their own shares only, so an order that ends beside
-        /// a stepping ladder is still seen (#468's seed 18; the round-4 review, B2). With the Σ checks on, the live exits with every rung a ladder between
+        /// a stepping ladder is still seen (#468's seed 18; the round-4 review, B2). A parked
+        /// remainder that counts nothing, its agent paused or stopped, is held by rule 13 and
+        /// alerted at its park (DEC-260 (18), (19)), so its shares are accounted for too. With the Σ checks on, the live exits with every rung a ladder between
         /// rungs may still send sell at most the position too (DEC-408). And no sell works beside a ladder between
         /// rungs unless that ladder is parked for the open, the only state in which a remainder
         /// lasts: so a sell beside it overlaps the rung for one step at most (DEC-410 item 7).
@@ -8760,7 +8762,13 @@ mod sequence_tests {
                     self.position, self.now
                 ));
             }
-            let rungs = self.counted();
+            let held_back: u32 = self
+                .between
+                .iter()
+                .filter(|(exit, _)| self.parked.contains(*exit) && !self.counts(exit))
+                .map(|(_, left)| *left)
+                .sum();
+            let rungs = self.counted().saturating_add(held_back);
             if selling >= self.position {
                 self.alerted = false;
             } else if !self.open && selling.saturating_add(rungs) < self.position && !self.alerted {
