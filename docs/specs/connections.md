@@ -4,8 +4,8 @@
 |---|---|
 | **Status** | Draft v0.1, not yet reviewed |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-441](../project/decisions/DEC-441.md) (items 1 to 14 Accepted by the agent; items 15 to 20 Proposed for the founder) |
-| **Backlog** | E7-1, E7-6, E7-11 to E7-17 ([backlog](../project/06-backlog-v1.md#e7-alpaca-connector-and-recovery)); E16-1 for Kraken |
+| **Decisions** | [DEC-441](../project/decisions/DEC-441.md) (items 1 to 14 and 21 Accepted by the agent; items 15 to 20 and 22 Proposed for the founder) |
+| **Backlog** | E7-1, E7-6, E7-11 to E7-18 ([backlog](../project/06-backlog-v1.md#e7-alpaca-connector-and-recovery)); E16-1 for Kraken |
 | **Safety-critical** | Yes: broker connectors, OAuth scopes, key-permission checks, and credential handling (`AGENTS.md`, "Safety-critical paths") |
 
 This spec covers how a workspace connects a broker or venue account, what the platform stores about
@@ -73,14 +73,14 @@ deployment mode, every environment, and every state of §9.
 |---|---|---|---|
 | **CN-1** | **Credentials live only in the vault** and in the memory of the one executor process that uses them. No credential, token, refresh token, API secret, or authorization code appears in a journal event, artifact, log, metric, trace, prompt, model context, notification, API response, error message, fixture, or backup outside the vault's own snapshots | Rule 7; FR-2.4; OPS-1; API-11 (#560) | Canary-secret scans of logs, journal, artifacts, API responses, and restored backups; a type test that every connection payload schema has no secret-shaped member; the Alpaca `Debug` test extended to every connector |
 | **CN-2** | **No permission that can move funds out.** A connection never holds a scope, key permission, or MCP tool that can withdraw, transfer, or send funds or assets out of the account. A credential that carries one is refused at connect time, before storage, with instructions for a trading-only credential. A live credential whose fund-movement permission cannot be shown absent is refused | HLD §6 A step 2; FR-2.2; infrastructure §5.3 (tightened, DEC-441 item 4) | Per connector: a fixture grant or key with each fund-movement permission is refused before any vault write; an MCP tool list containing a transfer tool is refused; a live key from a venue that cannot report permissions is refused |
-| **CN-3** | **Paper and live are distinct connections, and paper never reaches live.** A connection has one environment for life. A paper connection's executor has only paper hosts; a non-production build has no live host at all; a credential that works against the other environment is refused | Rule 8; V-001; V-031; OPS-5; ES-23 | Build test that no live host is compiled outside production; a staging egress test; a fixture test that a paper connection given a token that also answers on live is refused |
+| **CN-3** | **Paper and live are distinct connections, and paper never reaches live.** A connection has one environment for life. A paper connection's executor has only paper hosts; a non-production build has no live host at all. A credential that does not work against its own environment is refused, and so is one that also reaches the other environment, until the broker's documentation shows it cannot (U-A4; DEC-441 item 21). The other environment is never probed to find out | Rule 8; V-001; V-031; OPS-5; ES-23; DEC-441 item 21 | Build test that no live host is compiled outside production; a staging egress test; a fixture test that a token documented as reaching both environments is refused for a paper and for a live connection, with no request to the other host |
 | **CN-4** | **Agents never reach the broker.** Every account-level action goes through the account's executor and its ledger. The runtime holds no credential and has no route to a broker; a connector is reachable only from the executor | Rule 12; trading §7.1; infrastructure §3.1, §3.5 | Crate layering (`xtask/layers.toml`); a vault policy test that a runtime identity reads no connection; an egress test |
 | **CN-5** | **One account, one executor, one connection.** A broker account maps to exactly one `account_ref` and one active connection per environment in a workspace deployment, and its account stream has one writer, enforced by the writer epoch. A second connection to an account already connected is refused; a reconnect reuses the same connection | DEC-26; journal §5.1; OPS-3; DEC-441 item 6 | Two concurrent executors for one account: the older is `Fenced` before it can send; connecting the same account twice, from the same or a second workspace in the deployment, is refused |
-| **CN-6** | **Losing a credential stops openings at once and never blocks a risk reduction the broker still accepts.** Expiry, revocation, a failed refresh, or a failed permission check moves every agent on the connection to `exits_only` in the same executor step. While any credential still works, exits, protective re-placement, and kill-switch orders keep going | Rules 3, 13; trading §1 principle 4 | Fault injection: revoke, expire, and fail refresh at every step of an open, an exit, and a kill switch; no opening is sent after the event, and every exit the fake broker still accepts is sent |
+| **CN-6** | **Losing a credential stops openings at once and never blocks a risk reduction the broker still accepts.** Expiry, revocation, a failed refresh, or a failed permission check sets the account state `closing_only` (trading §7.3, reason `account_restricted`), which moves every agent on the account to `exits_only`; the executor journals `AccountRestrictionChanged` and `AgentModeApplied` before it acts, in the same step (§9.1). While any credential still works, exits, protective re-placement, and kill-switch orders keep going | Rules 3, 13; trading §1 principle 4 | Fault injection: revoke, expire, and fail refresh at every step of an open, an exit, and a kill switch; `AccountRestrictionChanged` (`closing_only`) is committed before anything else, no opening is sent after it, and every exit the fake broker still accepts is sent |
 | **CN-7** | **Activity the platform did not originate is external activity.** An order, fill, or position change on the account that has no `client_order_id` of ours, or that the connector cannot attribute, is ingested as external activity (trading §7.1), never adopted as ours | Trading §7.1, §11; DEC-26 | Reconciliation fixtures per connector with an owner order, an order from another platform, and an unattributable fill |
 | **CN-8** | **The allocation boundary is the connected account.** Every request a connector sends names the connection's own account. A connector never reads, stores, or acts on another account of the same customer; data about other accounts that a broker returns anyway is dropped at the connector before it is hashed, stored, or journaled | E7-6; R-25; journal §6.4 | Robinhood fixtures where reads return several accounts: only the agentic account's data reaches the executor or the journal; a request naming another account is `NotSent` |
 | **CN-9** | **Broker metadata is data, never instructions.** Tool names, tool descriptions, schemas, error text, and any text field a broker returns never reach a model, a prompt, or a notification, and never change what the connector may call. The connector calls only an allowlist of tools pinned by contract hash | R-05; rule 4; DEC-441 item 8 | A fixture MCP server whose tool descriptions carry injection text and whose tool list adds a tool: the text appears nowhere downstream and the new tool is never called; a changed contract hash halts openings |
-| **CN-10** | **Every connection change is journaled before it takes effect,** without secrets: connect, each permission-check result (including refusals), state changes, credential rotation, revocation | Rule 5; FR-2.2 acceptance; journal §9.2 | Fault injection on the append: no state change is acted on without its committed event; refusal events carry no credential |
+| **CN-10** | **Every connection change is journaled before it takes effect,** without secrets: connect, each permission-check result (including refusals), state changes, credential rotation, revocation. Today's schemas carry connect, revoke, and the account state a failure sets; the rest is the journal spec change E7-17, which E7-12 and E7-14 wait on (§3) | Rule 5; FR-2.2 acceptance; journal §9.2 | Fault injection on the append: no state change is acted on without its committed event; refusal events carry no credential |
 | **CN-11** | **A connection cannot be switched under a running agent.** `connection_id` and `environment` never change across mandate versions (V-031); moving an agent to another account means stopping it and deploying a new agent | V-031; mandate §5.7 | A version draft that changes `connection_id` is invalid; a deployment on the new connection starts with that connection's loss carry |
 | **CN-12** | **Reconnecting cannot reset a limit.** A reconnect, a token refresh, or a revoke-and-reconnect of the same account keeps the connection's `connection_id`, `account_ref`, account stream, and loss carry | Mandate §5.7 (MI-14, V-032); DEC-441 item 6 | Revoke and reconnect the same account; the loss carry and stream are unchanged and V-032 still binds |
 
@@ -96,20 +96,36 @@ around the loss carry, because a reconnect is never a new connection.
 A connection is a **reference**, never a credential (HLD §3: "a reference to its stored
 credential"). The workspace API returns these fields only (#560, API-11).
 
-| Field | Meaning | Where it lives |
-|---|---|---|
-| `connection_id` | Opaque id; mandates name it (V-001) | Control stream (`ConnectionEstablished`) |
-| `broker` | `alpaca`, `robinhood`, `kraken_derivatives_us` | Control stream |
-| `environment` | `paper` or `live`, for life (CN-3) | Control stream |
-| `auth_kind` | `api_key`, `oauth`, `mcp_oauth` | Connection record |
-| `scopes` | Granted scopes, strictly ascending (journal §9.2 rule 19). For MCP, the allowlisted tool names | Control stream |
-| `account_ref` | Opaque ULID naming the account stream `acct:{workspace_id}:{account_ref}` (journal §2) | Control stream; connection record |
-| `account_fingerprint` | A keyed hash of (broker, broker account id) under a deployment key. Detects a second connection to the same account (CN-5) without storing the number in clear | Connection record only; never journaled, never returned |
-| `vault_path` | Derived from workspace id and `connection_id`; never sent to a client | Derived, not stored |
-| `state` | §9 | Account stream (executor) and connection record |
-| `contract_hash` | MCP only: hash of the pinned tool contract (§6.3) | Connection record; journaled with checks |
-| `checks` | Latest result of each check in §8, with time | Account stream |
-| `terms_version` | Hash of the broker terms text the owner saw at connect, where a broker has platform terms (Robinhood) | Control stream |
+| Field | Meaning | Where it lives | Journaled today? |
+|---|---|---|---|
+| `connection_id` | Opaque id; mandates name it (V-001) | Control stream | Yes: `ConnectionEstablished`, `ConnectionRevoked` (journal §9.2) |
+| `broker` | `alpaca`, `robinhood`, `kraken_derivatives_us` | Control stream | Yes: `ConnectionEstablished` |
+| `environment` | `paper` or `live`, for life (CN-3) | Control stream | Yes: `ConnectionEstablished` |
+| `scopes` | Granted scopes, strictly ascending (journal §9.2 rule 19). For MCP, the allowlisted tool names | Control stream | Yes: `ConnectionEstablished` |
+| `auth_kind` | `api_key`, `oauth`, `mcp_oauth` | Connection record | No; not needed for replay |
+| `account_ref` | Opaque ULID naming the account stream `acct:{workspace_id}:{account_ref}` (journal §2) | Connection record; control stream once E7-17 lands | **No.** `ConnectionEstablished` is closed with four members. Journal spec change needed (E7-17): `account_ref` added to `ConnectionEstablished` as a new `schema_version`, the clause DEC-261 item 10 (Proposed) asks for that binds an account stream to its connection |
+| `account_fingerprint` | A keyed hash of (broker, broker account id), §3.1. Detects a second connection to the same account (CN-5) without storing the number in clear | Connection record only | Never journaled, never returned |
+| `vault_path` | Derived from workspace id and `connection_id`; never sent to a client | Derived, not stored | Never |
+| `state` | §9 | Connection record | Through the account state it sets: `AccountRestrictionChanged` and `AgentModeApplied` (§9.1). A connection-state event of its own waits for E7-17 |
+| `contract_hash` | MCP only: hash of the pinned tool contract (§6.2 rule 3) | Connection record | **No**; with the check results, E7-17 |
+| `checks` | Latest result of each check in §8, with time | Connection record | **No**; check results and refusals need a journal spec change (E7-17). Until then a failed check acts only through `AccountRestrictionChanged` |
+| `terms_version` | Hash of the broker terms text the owner saw at connect, where a broker has platform terms (Robinhood) | Control stream | Through the existing `DisclosureAccepted` (journal §9.2): `document` `robinhood_agentic_terms`, `version` the terms hash, the owner, and step-up. No new event is needed |
+
+**Reconnect (answers §13 question 2).** A reconnect is a second `ConnectionEstablished` for the same
+`connection_id`, valid only after that id's `ConnectionRevoked` and only with the same `broker`,
+`environment`, and (once journaled) `account_ref`. The journal spec change in E7-17 adds that rule;
+until it lands, reconnect is not built (E7-14 depends on E7-17).
+
+### 3.1 The fingerprint key
+
+The key is a per-deployment key held in the vault. It never leaves the vault: the connection
+manager asks the vault to compute the keyed hash and receives only the result. It is never stored
+beside the connection record, so a copy of the records cannot be reversed by trying every account
+number. On rotation, every fingerprint is recomputed under the new key from the account ids in the
+personal-data vault; until that finishes, every new connect is refused, so uniqueness is never
+checked against a mix of keys. A fingerprint is derived from personal data, so it stays inside the
+workspace deployment; moving it to the global control plane (§13 question 3) falls under the
+control plane's ban on personal data, not outside it.
 
 The broker's account number and its internal account id are **personal data**, held in the
 personal-data vault and referenced by `pii_refs` (journal §6.4), as the Alpaca connector already
@@ -191,8 +207,13 @@ capability table:
   included. If it does, live Alpaca crypto cannot be connected (CN-2) and the founder is asked.
 - **U-A3:** whether access tokens expire, whether a refresh token is issued, and how revocation is
   signalled (a 401 on the next call, or a notice).
-- **U-A4:** whether one token reaches both paper and live. If it does, the platform still stores
-  it once per connection and binds each executor to its own environment's host (CN-3).
+- **U-A4:** whether one token reaches both paper and live. Until Alpaca's documentation shows a
+  token reaches only the environment it was issued for, an Alpaca OAuth grant is refused for both
+  paper and live connections (CN-3; DEC-441 item 21), and no request is ever sent to the other
+  environment's host to find out. If the answer is that every token reaches both, the refusal
+  blocks Alpaca OAuth entirely; the alternative, accepting such a token with the executor bound to
+  its own environment's host, no live host outside production, egress limited to that host, and
+  the token's breadth journaled and disclosed, is the founder's (DEC-441 item 22).
 - **U-A5:** whether an OAuth app may read the 1× setting (trading §15 q3).
 
 ### 5.4 Refresh, rotation, and revocation
@@ -250,10 +271,11 @@ Rules for the MCP client:
    lists the server's tools and hashes the canonical form of the allowlisted tools' names and
    input and output schemas. A hash that differs from the pinned `contract_hash` is **contract
    drift** (§9).
-4. **Metadata never reaches a model.** The executor has no model, and the connector passes tool
-   descriptions, error text, and free-text fields nowhere: not to the journal as text, not to a
-   notification, not to the research agent (CN-9). Raw responses are journaled redacted as
-   `BrokerExchangeRecorded` artifacts, like Alpaca's.
+4. **Metadata never reaches a model.** The executor has no model. Tool descriptions, error text,
+   and free-text fields reach no model, prompt, notification, or research input (CN-9). They are
+   journaled only inside the redacted exchange records (`BrokerExchangeRecorded`, journal §6.3),
+   which no model, prompt, or notification ever reads. Tool names are journaled deliberately, as
+   `scopes` and inside the contract hash.
 5. **Numbers.** Prices and quantities are parsed from text by `mandate-num`; a JSON number that has
    been through a float is `Unreadable` (ES-23).
 6. **Data minimization.** Results naming any account other than the agentic account (and its
@@ -329,7 +351,7 @@ Each check's result is journaled without the credential (CN-10; infrastructure �
 | # | Check | Failure at connect | Failure later |
 |---|---|---|---|
 | 1 | **Scope:** granted scopes equal the requested set; no fund-movement permission; for MCP, the allowlisted tools are present and no fund-movement tool exists (CN-2) | Refused; vault entry deleted | `suspended`; agents `exits_only`; owner alerted |
-| 2 | **Environment:** the credential works against the connection's environment and not the other (CN-3) | Refused | `suspended` |
+| 2 | **Environment:** the credential works against the connection's environment, and the broker's documentation shows it does not reach the other; the other host is never probed (CN-3, U-A4) | Refused | `suspended` |
 | 3 | **Account:** the account the credential reaches is the one the connection names, by fingerprint; for Robinhood, the dedicated agentic account | Refused | `suspended`; reconciliation runs |
 | 4 | **Uniqueness:** no other active connection in the deployment has the same fingerprint (CN-5) | Refused, with the existing connection named by id | Not applicable |
 | 5 | **1× buying power** (FR-2.6, trading §7.2) | Connected, agents not deployable until fixed | Agents `paused`; owner prompted |
@@ -339,7 +361,8 @@ Each check's result is journaled without the credential (CN-10; infrastructure �
 ### 8.2 Health
 
 The executor runs a health probe on a schedule (Proposed: every 60 seconds while any agent is
-deployed, every 15 minutes otherwise) using a read the connector already has (`GetAccount`). It
+deployed, every 15 minutes otherwise) using a read the connector already has (`GetAccount`). The
+probe draws from the read budget, never from the reserved exit budget (§6.5). It
 records latency, error class, rate-limit headroom, and, for MCP, the contract hash. It changes state
 only through the transitions in §9; health never adds risk and never alone blocks an exit.
 
@@ -359,13 +382,23 @@ only through the transitions in §9; health never adds risk and never alone bloc
 |---|---|---|---|---|---|
 | `connecting` | Step-up and connect started | No agent yet | — | Checks pass (`active`) or fail (refused, no record kept beyond the refusal event) | System |
 | `active` | All §8.1 checks pass | As the gate allows | Yes | Any transition below | — |
-| `degraded` | Network errors, low headroom, or contract drift | **Halted** (restriction `connection_degraded`, agents `exits_only`) | Yes, while the broker accepts | Good probes; for drift, a reviewed contract update | System; drift needs a released connector version |
-| `suspended` | Credential invalid: expired, revoked at the broker, refresh failed, or a later permission check failed | Halted | Attempted while any call succeeds; otherwise protection rests at the broker | The owner reconnects the same account (`active`) | Owner, with step-up |
+| `degraded` | Network errors, low headroom, or contract drift | **Halted**: account state `closing_only`, agents `exits_only` | Yes, while the broker accepts | Good probes, or for drift a released connector version, **and** the owner's acknowledgment with the account refreshed (trading §7.3) | Owner, with step-up |
+| `suspended` | Credential invalid: expired, revoked at the broker, refresh failed, or a later permission check failed | **Halted**: account state `closing_only`, agents `exits_only` | Attempted while any call succeeds; otherwise protection rests at the broker | The owner reconnects the same account, then acknowledges (trading §7.3) | Owner, with step-up |
 | `revoked` | Platform-side revoke, refused unless every agent on it is stopped with no positions | None | None (no agents) | Reconnect of the same account reuses the record (CN-12) | Owner, with step-up |
 
-Account state (`blocked`, `closing_only`; trading §7.3) is separate and applies on top. An agent's
-mode is the strictest of its restrictions (trading §7.4), so `connection_degraded` lifts on its own
-when the connection recovers, without lifting any other restriction.
+**How `degraded` and `suspended` halt openings (DEC-441 item 7).** Neither the trading spec nor
+mandate spec §5.9 defines a connection restriction, and a halt that no spec names would fail open.
+So both states use the most restrictive opening block that already exists and never holds an exit:
+the account state `closing_only` (trading §7.3, reason `account_restricted`), which makes every
+agent on the account `exits_only` (mandate §5.9 already lists the trading spec's account
+restrictions). `blocked` is not used, because `paused` holds exits. The executor journals
+`AccountRestrictionChanged` and then `AgentModeApplied` before it sends or refuses anything else,
+so replay reaches the same mode from the journal alone; the health signals themselves are never an
+unjournaled input to the mode machine. Like every `closing_only`, it lifts only when the owner
+acknowledges and the account is refreshed, so recovery needs the owner even when the cause was
+transient. A dedicated connection restriction that lifts on its own is a separate spec-first change
+to trading §7.3 and mandate §5.9 (ES-22; backlog E7-13), shared with any other restriction from
+outside the trading specs.
 
 ### 9.2 Walk
 
@@ -374,9 +407,9 @@ when the connection recovers, without lifting any other restriction.
 | **Connect** | Step-up; OAuth or key entry; token to vault; §8.1 checks; `ConnectionEstablished`; executor started; first reconciliation | CN-1, CN-2, CN-3, CN-5, CN-10 |
 | **Verify permissions** | §8.1 at every executor start and daily | CN-2, CN-3 |
 | **Healthy** | `active`; health probe; daily 1× and permission checks | — |
-| **Degraded** | `exits_only` for openings; exits continue; owner alerted after a configured period (Proposed: 5 minutes) | CN-6, rule 13 |
+| **Degraded** | `closing_only`, so agents are `exits_only`; exits continue. The owner is alerted after a configured period (Proposed: 5 minutes) for network errors and low headroom, and **at once** for contract drift, which is not transient | CN-6, rule 13 |
 | **Token expiry** | Refreshed ahead of time where refresh exists. If refresh fails and the token expires, `suspended`; until expiry the old token keeps serving exits | CN-6 |
-| **Revoked by the user at the broker** | Authorization failures → `suspended` → agents `exits_only`, owner alerted. Protection already resting at the broker stays (trading §5.4). Any submit in flight is `Unknown` and blocks that instrument until resolved after reconnect (trading §5.7) | CN-6, CN-7 |
+| **Revoked by the user at the broker** | Authorization failures → `suspended` → `closing_only`, agents `exits_only`, owner alerted at once. Protection already resting at the broker stays (trading §5.4). Any submit in flight is `Unknown` and blocks that instrument until resolved after reconnect (trading §5.7) | CN-6, CN-7 |
 | **Broker outage** | `degraded`. Submits that time out are `Unknown`; reconciliation runs when the broker returns (trading §11). The kill switch keeps trying; the owner is told to act at the broker if needed, which is then ingested as external activity | CN-6, CN-7, OPS-4 |
 | **Account restricted** | Trading §7.3's table: `blocked` pauses agents, `closing_only` makes them `exits_only`. For Robinhood, any status not in the confirmed table is `blocked` (U-R6) | Rule 3 |
 | **Disconnect (platform)** | Refused while agents hold positions or are not stopped (#560). Otherwise: revoke at the broker where possible, delete the vault entry, `ConnectionRevoked`, executor stopped | CN-10 |
@@ -397,9 +430,9 @@ when the connection recovers, without lifting any other restriction.
 | **User connecting someone else's account** | Uses another person's broker login or keys | The broker's own authentication proves control of the login, not ownership. The owner attests ownership with step-up at connect; whether to match the account holder's name against the workspace user is DEC-441 item 19 (Proposed) |
 | **Same account connected twice** | Two workspaces, or two connections, to reset limits or run two executors on one account | Fingerprint uniqueness (CN-5) inside a deployment. Across deployments (another cell, a customer site, another platform) it cannot be detected; the second platform's orders are external activity (CN-7) |
 | **Revoke and reconnect to reset the loss carry** | Retire agents, revoke, reconnect as a "new" connection | The reconnect is the same connection (CN-12) |
-| **Paper deployment pointed at live** | A paper mandate on a live connection, or a token that answers both | V-001; one environment per connection; no live host outside production; environment check (CN-3) |
+| **Paper deployment pointed at live** | A paper mandate on a live connection, or a token that answers both | V-001; one environment per connection; no live host outside production; a token that reaches both is refused (CN-3, DEC-441 item 21) |
 | **A careless user** | Shares the Robinhood agentic account with another agent, or trades in it by hand | External activity stops openings until acknowledged (CN-7); disclosed at connect |
-| **A malicious insider** | Reads a credential from the vault | Credentials are write-only by vault policy; break-glass grants no read-out (infrastructure §5.5); vault audit log |
+| **A malicious insider** | Reads a credential from the vault | No human and no identity other than the account's executor may read a credential; that executor's identity reads exactly one (infrastructure §5.2); break-glass grants no read-out (§5.5); every read is in the vault's audit log |
 | **Bad tick or outage during a revocation race** | Opening sent after revocation began | CN-6: the state change and the executor's opening refusal are one executor step; anything in flight is `Unknown` and resolved by query |
 | **Rate-limit exhaustion** | Heavy reads starve an exit | Reserved exit budget (§6.5); trading §9.7 keeps orders below broker limits |
 
@@ -410,11 +443,11 @@ when the connection recovers, without lifting any other restriction.
 | `BrokerConnector` trait, `ConnectorError`, the account-wide scope type (`mandate-executor`) | **Exists** |
 | Alpaca paper connector: paper host only, endpoint allowlist, `SecretString` credentials, account number redaction (`mandate-alpaca`) | **Exists** (E7-2, E7-3, E7-8) |
 | Writer-epoch fencing for one writer per account stream (`mandate-journal`) | **Exists** |
-| `ConnectionEstablished`, `ConnectionRevoked` payload schemas (journal §9.2) | **Exists** (registered, E7-10) |
+| `ConnectionEstablished`, `ConnectionRevoked` payload schemas (journal §9.2) | **Exists** (registered, E7-10); does not yet carry `account_ref`, check results, or connection states (§3, E7-17) |
 | Connection manager service, connection record, fingerprint, states | Planned: E7-11 |
 | Permission checks (§8.1) and refusal events | Planned: E7-12 |
 | Alpaca OAuth | Planned: E7-1 (M8) |
-| Health probe and `connection_degraded` restriction | Planned: E7-13 |
+| Health probe, mapped onto `closing_only` (§9.1) | Planned: E7-13 |
 | Reconnect reusing the connection | Planned: E7-14 |
 | Robinhood contract confirmation | Planned: E7-15 (no code) |
 | MCP client with allowlist and pinning | Planned: E7-16 |
@@ -432,11 +465,12 @@ when the connection recovers, without lifting any other restriction.
 adds no risk: precedence (item 1); references only (item 2); Alpaca keys paper only (item 3); a
 live credential whose fund-movement permission cannot be shown absent is refused, tightening
 infrastructure §5.3 (item 4); Alpaca scopes `trading` and `data` only (item 5); one connection per
-account, reconnect reuses it (item 6); the connection state machine and `connection_degraded`
-(item 7); MCP allowlist, contract pinning, and no metadata to models (item 8); data minimization
+account, reconnect reuses it (item 6); the connection state machine, with `degraded` and `suspended` mapped onto
+`closing_only` (item 7); MCP allowlist, contract pinning, and no metadata to models (item 8); data minimization
 (item 9); no Robinhood order path without client order id idempotency (item 10); no live Robinhood
 call by any agent, fixtures from the published contract only (item 11); V-031 restated (item 12);
-backlog rows (item 13); health defaults (item 14).
+backlog rows (item 13); health defaults (item 14); a token that reaches both environments is
+refused until U-A4 is answered (item 21).
 
 **Proposed for the founder** (vendor terms, live accounts, legal text; DEC-79):
 
@@ -448,13 +482,15 @@ backlog rows (item 13); health defaults (item 14).
 | 18 | Alpaca OAuth app registration and its terms | Register at M8 after the founder reads Alpaca's app terms |
 | 19 | Verifying the account holder is the workspace user | No name matching in v1; owner attestation with step-up; counsel to confirm |
 | 20 | Robinhood customer-responsibility and data-scope disclosures | Counsel drafts the text (compliance question 32) before any Robinhood connection |
+| 22 | If every Alpaca token reaches both environments, so item 21 blocks Alpaca OAuth entirely | Accept such a token only with the executor bound to its own environment's host, no live host outside production, egress limited to that host, and the token's breadth journaled and disclosed to the owner |
 
 ## 13. Open questions
 
 1. U-A1 to U-A5 (Alpaca) and U-R1 to U-R12 (Robinhood), above.
-2. Whether a second `ConnectionEstablished` for the same `connection_id` (reconnect, CN-12) is
-   allowed by journal §9.2 as written, or needs a `ConnectionRenewed` event (E7-17).
+2. Answered in §3: a reconnect is a second `ConnectionEstablished` for the same `connection_id`,
+   valid only after its `ConnectionRevoked`; the rule is a journal spec change (E7-17).
 3. Whether cross-deployment duplicate detection (CN-5) is worth a fingerprint registry in the
-   global control plane; it would hold only a keyed hash, but it adds a dependency the trade path
+   global control plane. A keyed hash of an account id is derived from personal data, so the control
+   plane's ban on personal data applies to it (§3.1); it would also add a dependency the trade path
    must not have.
 4. Kraken's key-permission query shape, at E16.

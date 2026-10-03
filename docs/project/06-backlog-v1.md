@@ -536,16 +536,22 @@ after U-A1 to U-A5 are recorded.
   *Accepted when:* for each connector, fixtures with each fund-movement permission, a wider grant,
   a credential answering the other environment, and another account are refused before any vault
   write; a live key whose permissions cannot be read is refused; each result, refusals included, is
-  journaled without the credential; a later failure moves the connection to `suspended`.
+  journaled without the credential (*depends on E7-17* for the check-result events); a later
+  failure moves the connection to `suspended`; a token documented as reaching both environments is
+  refused with no request to the other host (DEC-441 item 21).
 - **E7-13 (Must, M8)** As an owner, I want a degraded or invalid connection to stop new openings
   at once while exits keep going, so that losing a broker link never adds risk (spec §8.2, §9,
   CN-6). *Accepted when:* fault injection that revokes, expires, or fails refresh at every step of an
   open, an exit, and a kill switch sends no opening after the event and every exit the fake broker
-  still accepts; the `connection_degraded` restriction lifts on its own after good probes. The new
-  restriction is added to mandate spec §5.9 and the journal spec in the tests PR's spec change.
+  still accepts, and `AccountRestrictionChanged` (`closing_only`, `account_restricted`) and
+  `AgentModeApplied` are committed before anything else (spec §9.1; DEC-441 item 7). A dedicated
+  connection restriction that lifts on its own is not part of this row: it needs its own
+  spec-first change to trading §7.3 and mandate §5.9 (ES-22), shared with any other restriction
+  from outside the trading specs.
 - **E7-14 (Must, M8)** As an owner, I want reconnecting my account to keep its connection, so that
   revoking and reconnecting can never reset my loss carry (spec §9.2, CN-12).
-  *Accepted when:* revoke and reconnect of the same account keeps `connection_id`, `account_ref`,
+  *Depends on E7-17* (the reconnect rule). *Accepted when:* revoke and reconnect of the same
+  account keeps `connection_id`, `account_ref`,
   the stream, and the loss carry, and V-032 still binds; reconciliation runs before any agent
   resumes.
 - **E7-15 (Must, M8, before E7-6; no code)** As the founder, I want Robinhood's tool contract and
@@ -561,8 +567,16 @@ after U-A1 to U-A5 are recorded.
   host is reachable and redirects are refused.
 - **E7-17 (Must, M8)** As an auditor, I want connection state changes, permission-check results,
   refusals, and credential rotation journaled, so that every connection's history can be replayed
-  (spec §9, CN-10). *Accepted when:* the journal spec defines their schemas, and whether a reconnect
-  is a second `ConnectionEstablished` or a new event (spec §13 question 2), with vectors, tests first.
+  (spec §3, §9, CN-10). *Accepted when:* the journal spec defines their schemas; adds `account_ref`
+  to `ConnectionEstablished` as a new `schema_version` (DEC-261 item 10's binding clause); and
+  allows a second `ConnectionEstablished` for a `connection_id` only after its `ConnectionRevoked`,
+  with the same broker, environment, and `account_ref` (spec §3), with vectors, tests first.
+- **E7-18 (Must, M8)** As an auditor, I want a broker exchange record to say that it is filtered
+  as well as redacted, so that nobody reads it as the broker's raw bytes in a dispute (spec §6.2
+  rules 4 and 6; #563 round 1, minor 2). *Accepted when:* the journal spec's `BrokerExchangeRecorded`
+  text (§6.3) says the stored exchange has other accounts' data dropped before redaction and
+  hashing, that the dropped parts cannot be recovered, and that reconciliation disputes rest on
+  the filtered record; the connections spec §6.2 says the same.
 
 ### E8 Escalation and approvals
 
