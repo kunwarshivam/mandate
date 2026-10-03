@@ -364,9 +364,10 @@ resolves the notice to its approval for that user, if the user may see it, and o
 404. The notice id is random and is not the approval's event id: a ULID's first 48 bits are its
 creation time, so an event id in a payload would tell the relay and the provider when the request
 was made. A link grants no authority and holds no token. Mandate spec §6.4's payload sentence is
-amended in this change to name the notice id, and `mandate_approval::ApprovalRef::of_requested_event`
-(`crates/mandate-approval/src/notify.rs`), which builds the reference from the event today, becomes a
-notice-id lookup (E8-15).
+amended by the notifications spec's change (#558, DEC-438), whose wording also excludes the event
+timestamp; this spec cites that sentence and does not edit it. As notifications spec §4.2 says,
+`mandate_approval::ApprovalRef::of_requested_event` (`crates/mandate-approval/src/notify.rs`) stays
+the in-workspace reference to the request and stops being what a payload carries.
 
 ### 3.10 Rate limits and quotas
 

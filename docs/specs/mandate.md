@@ -20,13 +20,6 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
-- **v0.6, amended ([DEC-436](../project/decisions/DEC-436.md) items 9 and 19, the workspace API
-  spec; tightening only, DEC-176):** §6.4's notification payload is an opaque, random notice id
-  that the workspace deployment maps to the request, never the request's event id, whose time
-  component would date the request. Check 7 counts an owner-connected client as the user it acts
-  for (`on_behalf_of`): a version proposed through a client has that user as its author, and a
-  grant can never come from a client (check 3 already refuses any actor not of kind `user`). No
-  rule loosens; no case or fixture changes.
 - **v0.6, amended ([DEC-429](../project/decisions/DEC-429.md), wording only; #528 round 2, minors 1 to
   3):** V-047's reasons name a risk-increasing change again, which §4.3 lists and a lone user cannot
   make either (the latched-floor reason stays out). §5.7's single-user sentence says what V-047
@@ -40,6 +33,11 @@ builder, versioning, change classification, and the records kept.
   `open_sell_qty`, which the seven trim cases state as `'0'` with no expectation changed. MC-B36
   (a 1-share remainder beside 2 resting, at a 3-share minimum the whole excess would meet, is
   withheld) and MC-B37 (the same remainder at a 1-share minimum is the trim) are added (§11).
+- **v0.6, amended ([DEC-436](../project/decisions/DEC-436.md) items 9 and 19, the workspace API
+  spec; tightening only, DEC-176):** §6.4's check 7 counts an owner-connected client as the user it
+  acts for (`on_behalf_of`): a version proposed through a client has that user as its author, and a
+  grant can never come from a client (check 3 already refuses any actor not of kind `user`). No
+  rule loosens; no case or fixture changes.
 - **v0.6, amended ([DEC-423](../project/decisions/DEC-423.md)):** §5.5's `trim_to_target`
   minimum no longer withholds a trim of the whole position. That trim is a sell closing the full
   position by its exact quantity, which [trading spec §5.3](trading-domain.md) rule 2 exempts from
@@ -893,9 +891,7 @@ own text, shown as theirs and never as the platform's.
   changed (DEC-111). No price targets, no profit estimates, and **no scorecard** until counsel
   answers [question 35](../product/08-compliance-and-regulatory.md), because a scorecard may count
   as hypothetical performance.
-- Notification payloads are exactly an opaque, random notice id, which the workspace deployment
-  maps to the request and which is never the request's event id ([workspace API spec
-  §3.9](workspace-api.md#39-approval-links)), and one generic text
+- Notification payloads are exactly the request's opaque approval id and one generic text
   (`AGENTS.md` rule 6): no instrument, side, quantity, price, order value, score, thesis, agent
   name, rule, or deadline ever reaches them.
 - Never persuasive language or profit estimates.

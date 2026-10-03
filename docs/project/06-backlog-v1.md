@@ -824,9 +824,9 @@ the spec invariants (DP-n) its tests cover.
   preview (API-6); a delegation preview is refused for an admission, a two-approver ask, a live
   environment, or a client, and the chosen shape commits `MandateVersionCreated`, `MandateConfirmed`,
   and the response in one batch under one step-up; the UI-facing status says "approved" only after
-  `ApprovalRevalidated` with `act` (API-12); `mandate_approval::ApprovalRef::of_requested_event`
-  becomes a lookup of a random notice id that is never the request's event id, and `/n/{notice_id}`
-  resolves only after sign-in (spec §3.9, DEC-436 item 19).
+  `ApprovalRevalidated` with `act` (API-12); `/n/{notice_id}` resolves a random notice id, never
+  the request's event id, and only after sign-in (spec §3.9, DEC-436 item 19; the payload is the
+  notifications spec's, E8-9).
 
 ### E9 Identity, tenancy, and policy
 
@@ -3415,13 +3415,5 @@ From the round-1 review of the workspace services API spec ([#560](https://githu
 
 From the round-2 review of the workspace services API spec ([#560](https://github.com/kunwarshivam/mandate/pull/560), nits and cross-document notes; [DEC-436](decisions/DEC-436.md)):
 
-- **One owner for mandate spec §6.4's notification bullet.** #560 and the notifications spec (#558)
-  both reword it and both add a change-history entry. The notifications spec's wording is the
-  stricter (its exclusion list ends "or event timestamp") and should stand, with the workspace API
-  spec's §3.9 link folded in; whichever merges second resolves to that wording and keeps #560's
-  check-7 sentence.
-- **One fate for `ApprovalRef::of_requested_event`.** Workspace API spec §3.9 says it becomes a
-  notice-id lookup (E8-15); notifications spec §4.2 says it stays the in-workspace reference and
-  stops being what a payload carries (E8-9). Keep the notifications spec's sentence and reword §3.9.
 - **Offer the kill switch alone on the revoke-on-compromise screen** (workspace API spec §5.6), as
   the alternative that keeps the connection so protection can be re-placed and exits re-driven.
