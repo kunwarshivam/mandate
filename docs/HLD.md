@@ -719,10 +719,12 @@ spike (`python/research_spike`).
    and exchange licenses. In v1, each user's market data comes through their own Alpaca
    account, so Mandate does not redistribute it; any shared data offering needs licensing first.
 4. **Custom code in v1.** Declarative specs only, or also WebAssembly plug-ins?
-5. **First connectors (decided, [DEC-23](project/04-decision-log.md#decisions)).** Alpaca
-   first (US stocks, ETFs, crypto spot; paper trading; OAuth), Kraken Derivatives US second
-   (CFTC-regulated crypto perpetuals), then Interactive Brokers and Coinbase US futures. The
-   platform serves the United States first.
+5. **First connectors (decided, [DEC-23](project/04-decision-log.md#decisions), reordered by
+   [DEC-98](project/04-decision-log.md#decisions)).** Alpaca first (US stocks, ETFs, crypto spot;
+   paper trading; OAuth), Robinhood Agentic Trading second (retail US equities and crypto spot over
+   MCP into the customer's dedicated agentic account), Kraken Derivatives US third (CFTC-regulated
+   crypto perpetuals), then Interactive Brokers and Coinbase US futures. The platform serves the
+   United States first.
 6. **Approval channels in v1.** A native mobile app for push, or SMS, email, and Slack / Telegram first.
 7. **Mobile access to on-site approval services.** Whether approvers reach the customer's
    approval service through the customer's VPN, through our relay with end-to-end encryption,
