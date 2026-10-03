@@ -696,9 +696,9 @@ after U-A1 to U-A5 are recorded.
   fail on that member alone and flip in the status PR that follows.
   *Decided (DEC-318 option (a), the founder, 2026-10-02; DEC-430):* MC-E18 is restated as §6.4's
   cancellation. Its response step cancels the pending grant as `mode_tightened` and refuses it as
-  `not_pending`, and the reference model, the fuzz oracle and the seeded bugs follow (reference PR).
-  Still open, in order:
-  1. The code PR: the harness strips the response step's `AgentModeChanged` (`restriction_changed`),
+  `not_pending`, and the reference model, the fuzz oracle and the seeded bugs follow (reference PR,
+  #538, merged). Still open, in order:
+  1. The code PR (in review): the harness strips the response step's `AgentModeChanged` (`restriction_changed`),
      and `the_lifecycle_cases_split_as_the_runtime_stands` expects MC-E18 to pass, tests first.
      `a_mode_other_than_normal_skips`'s doc comment stops naming MC-E18.
   2. The status PR moving MC-E18 to `passing`.
