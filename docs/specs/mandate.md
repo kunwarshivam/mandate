@@ -33,6 +33,13 @@ builder, versioning, change classification, and the records kept.
   refuses there, a loosening version, since a single-user workspace under the policy exists after
   confirmation (DEC-411 item 6). §6.7 says MC-W50, MC-W53, MC-W54 and MC-W56 specify the
   lone-workspace state, pending until E6-13. No rule, case, or fixture changes.
+- **v0.6, amended ([DEC-399](../project/decisions/DEC-399.md) item 7):** §5.5's `trim_to_target`
+  states what the risk gate already does: a trim is sized after the agent's own non-protective
+  sells resting in the instrument, the minimum is judged on what they leave, and no trim is due
+  when they cover the excess. The reference model takes it through a new trim input,
+  `open_sell_qty`, which the seven trim cases state as `'0'` with no expectation changed. MC-B36
+  (a 1-share remainder beside 2 resting, at a 3-share minimum the whole excess would meet, is
+  withheld) and MC-B37 (the same remainder at a 1-share minimum is the trim) are added (§11).
 - **v0.6, amended ([DEC-423](../project/decisions/DEC-423.md)):** §5.5's `trim_to_target`
   minimum no longer withholds a trim of the whole position. That trim is a sell closing the full
   position by its exact quantity, which [trading spec §5.3](trading-domain.md) rule 2 exempts from
@@ -618,7 +625,7 @@ exits, and the kill switch are never denied by them (MI-1).
 
 | Action | Trigger | Effect | Lifts when |
 |---|---|---|---|
-| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, a position with MV − factor × cap ≥ `rebalance_band` × cap is sold down to factor × cap as a `risk_exit` (quantity rounded up to the increment) at the next evaluation, only once the rung has been active for `breach_confirm_s`, only if its quantity is at least the instrument's minimum order size (`min_order_size`, the minimum the risk gate holds; not §8.3 step 5's minimum order value) or is the whole position held, a full close trading spec §5.3 rule 2 exempts ([DEC-423](../project/decisions/DEC-423.md)), which matches the gate; any other trim below the minimum is an order the broker would refuse for size, for equities only in the regular session, and never while Holding (DEC-65) | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
+| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, a position with MV − factor × cap ≥ `rebalance_band` × cap is sold down to factor × cap as a `risk_exit` (quantity rounded up to the increment, less the agent's own non-protective sells already resting in the instrument, [DEC-399](../project/decisions/DEC-399.md) item 7; none when they cover the excess) at the next evaluation, only once the rung has been active for `breach_confirm_s`, only if its quantity is at least the instrument's minimum order size (`min_order_size`, the minimum the risk gate holds; not §8.3 step 5's minimum order value) or is the whole position held, a full close trading spec §5.3 rule 2 exempts ([DEC-423](../project/decisions/DEC-423.md)), which matches the gate; any other trim below the minimum is an order the broker would refuse for size, for equities only in the regular session, and never while Holding (DEC-65) | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
 | `exits_only` | Confirmed (§5.6) | Restriction `drawdown_exits_only` (mode `exits_only`) | Owner acknowledgment (§5.8) |
 | `flatten_and_pause` | Confirmed (§5.6) | Agent-scoped kill switch; restriction `drawdown_flatten` (mode `paused`) | Owner acknowledgment once flat (§5.8) |
 
@@ -1600,7 +1607,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 437 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 439 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1617,7 +1624,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Risk state | MC-R01 to MC-R26 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |
 | Gate | MC-G01 to MC-G16 | Position cap, order size, group cooldown, orders per day, gross exposure, exits exempt, the working universe (including an empty one, which denies every opening) |
-| Order builder | MC-B01 to MC-B35 | Exit and buy conviction, freshness, clipping, band, trim and its guards and its full-close exemption, deferral, averaging down, accumulate clips with fees |
+| Order builder | MC-B01 to MC-B37 | Exit and buy conviction, freshness, clipping, band, trim and its guards and its full-close exemption, the trim after a resting sell, deferral, averaging down, accumulate clips with fees |
 | Autonomy | MC-A01 to MC-A16 | Built-in AUTO including `owner_exit`, rule order, thresholds, default, two approvers, the admission ceiling, `new_instrument`, `thesis_confidence` |
 | Agent flatten | MC-F01 to MC-F04 | Shared account, session deferral, owner kill switch with a floor price, and without confirmation |
 | Goal | MC-L01 to MC-L05 | `accumulate` completion, `on_complete`, end date (`profit_stop` is in the risk-state family) |
