@@ -4730,6 +4730,8 @@ mod tests {
     /// a merge's `-f` fields to `merge.log`, so the script's decisions run with no network. It
     /// refuses a workflow-runs query that is not filtered to the pull request's head and to
     /// `pull_request` events, and answers `mergeable: UNKNOWN` while `unknown_reads` counts down.
+    /// The label's events and the description's authorship come from `events.json` and
+    /// `graphql.json`.
     const STUB_GH: &str = r##"#!/usr/bin/env bash
 set -euo pipefail
 dir=$(dirname "$0")
@@ -4746,17 +4748,20 @@ fi
 filter=.
 path=
 put=
+fields=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --jq) filter=$2; shift 2 ;;
     -X) if [ "$2" = PUT ]; then put=1; fi; shift 2 ;;
-    -f) printf '%s\n' "$2" >>"$dir/merge.log"; shift 2 ;;
+    -f) fields+=("$2"); shift 2 ;;
+    -F) shift 2 ;;
     api | --paginate) shift ;;
     *) path=$1; shift ;;
   esac
 done
 head=$(jq -r .headRefOid "$dir/view.json")
 if [ -n "$put" ]; then
+  printf '%s\n' "${fields[@]}" >>"$dir/merge.log"
   src="$dir/reply.json"
   echo '{"sha":"merged"}' >"$src"
 else
@@ -4770,6 +4775,8 @@ else
     */actions/workflows/ci.yml/runs*) src="$dir/ci.json" ;;
     */actions/workflows/web.yml/runs*) src="$dir/web.json" ;;
     */files*) src="$dir/files.json" ;;
+    */issues/*/events*) src="$dir/events.json" ;;
+    graphql) src="$dir/graphql.json" ;;
     *) echo "unexpected gh api $path" >&2; exit 1 ;;
   esac
 fi
@@ -4788,6 +4795,11 @@ jq -r "$filter" "$src"
         web: Value,
         files: Vec<String>,
         unknown_reads: u32,
+        /// Who applied `coordinator-approved`, oldest first; the script trusts the last.
+        labeled_by: Vec<&'static str>,
+        /// Who opened the pull request, and who last edited its description, if anyone did.
+        author: &'static str,
+        editor: Option<&'static str>,
     }
 
     fn workflow_runs(list: &[(u64, &str, Option<&str>)]) -> Value {
@@ -4831,6 +4843,9 @@ jq -r "$filter" "$src"
                 web: workflow_runs(&[]),
                 files: vec!["crates/c/src/lib.rs".to_owned()],
                 unknown_reads: 0,
+                labeled_by: vec!["owner"],
+                author: "owner",
+                editor: None,
             }
         }
 
@@ -4858,6 +4873,28 @@ jq -r "$filter" "$src"
             fs::write(dir.join("web.json"), self.web.to_string())?;
             fs::write(dir.join("files.json"), Value::from(files).to_string())?;
             fs::write(dir.join("unknown_reads"), self.unknown_reads.to_string())?;
+            let mut events = vec![json!({
+                "event": "labeled",
+                "label": { "name": "needs-review" },
+                "actor": { "login": "someone-else" },
+            })];
+            events.extend(self.labeled_by.iter().map(|login| {
+                json!({
+                    "event": "labeled",
+                    "label": { "name": "coordinator-approved" },
+                    "actor": { "login": login },
+                })
+            }));
+            fs::write(dir.join("events.json"), Value::from(events).to_string())?;
+            let editor = self.editor.map(|login| json!({ "login": login }));
+            fs::write(
+                dir.join("graphql.json"),
+                json!({ "data": { "repository": { "pullRequest": {
+                    "author": { "login": self.author },
+                    "editor": editor,
+                } } } })
+                .to_string(),
+            )?;
             let gh = dir.join("gh");
             fs::write(&gh, STUB_GH)?;
             fs::set_permissions(&gh, fs::Permissions::from_mode(0o755))?;
@@ -4870,6 +4907,7 @@ jq -r "$filter" "$src"
                 .env("GH_TOKEN", "unused")
                 .env("MERGE_RETRY_S", "0")
                 .env_remove("MERGE_DRY_RUN")
+                .env_remove("MERGE_APPROVERS")
                 .output()?;
             let stdout = String::from_utf8(out.stdout)?;
             assert!(
@@ -4915,7 +4953,7 @@ jq -r "$filter" "$src"
     #[test]
     fn the_merge_script_refuses_anything_short_of_an_approved_green_head() -> Result<()> {
         let stale_head = "2".repeat(40);
-        let refusals: [Refusal<'_>; 18] = [
+        let refusals: [Refusal<'_>; 22] = [
             (
                 "closed",
                 &|c| c.view["state"] = json!("CLOSED"),
@@ -5036,6 +5074,26 @@ jq -r "$filter" "$src"
                 "has web.yml at failure",
             ),
             (
+                "labelled-by-a-collaborator",
+                &|c| c.labeled_by = vec!["collaborator"],
+                "applied by collaborator, who is not an approver",
+            ),
+            (
+                "relabelled-by-a-collaborator",
+                &|c| c.labeled_by = vec!["owner", "collaborator"],
+                "applied by collaborator, who is not an approver",
+            ),
+            (
+                "edited-by-a-collaborator",
+                &|c| c.editor = Some("collaborator"),
+                "last written by collaborator, who is not an approver",
+            ),
+            (
+                "written-by-a-collaborator",
+                &|c| c.author = "collaborator",
+                "last written by collaborator, who is not an approver",
+            ),
+            (
                 "empty",
                 &|c| {
                     c.view["body"] = json!(format!(
@@ -5089,6 +5147,20 @@ jq -r "$filter" "$src"
                 "{name}: {approval:?} approves the head once mergeability settles: {out}"
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn the_merge_script_takes_an_approval_only_from_an_approver() -> Result<()> {
+        let mut case = MergeCase::approved();
+        case.author = "collaborator";
+        case.editor = Some("owner");
+        case.labeled_by = vec!["collaborator", "owner"];
+        let (out, merged) = case.run("collaborators-pr-approved-by-the-owner")?;
+        assert!(
+            merged.is_some(),
+            "a collaborator's pull request the owner labelled and approved merges: {out}"
+        );
         Ok(())
     }
 
