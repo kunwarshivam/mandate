@@ -2377,6 +2377,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   Unreachable today, since every withheld-trim case ends in a hold. `holding` and `scale_active_s`
   have the same shape. Read the trim inputs in `Scene::read`, so both gate calls get one
   instrument.
+  *Done (`agent/g8-e6-4-one-trim-scene`):* `Inputs` reads `TrimInputs` on a trim base, and
+  `Scene::read` applies the minimum, the active rung and the Holding goal for both gate calls.
+  `both_gate_calls_on_a_trim_base_see_one_scene` moves MC-B01's 7-share buy onto the trim base: at
+  an 8-share minimum the dry run meets §5.3 rule 2, which it fails on a `qty_increment` minimum.
+  Holding and the rung reach the dry run too, but only `trim_proposals` reads them.
 - **E6-4: pin that the trim's minimum is judged on the remainder after open sells** (#498 review,
   m8; DEC-399 items 5 and 7). No test combines a resting sell with a minimum above one increment,
   so a gate that judged the whole excess passes every test in the workspace. Close it in
