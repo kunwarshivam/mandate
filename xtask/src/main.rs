@@ -1967,7 +1967,12 @@ const STUB_MARKERS: [&str; 5] = [
 /// (DEC-346 item 7). Slice 2 deleted the other two `properties` rows, whose minimal failure is now
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
+///
+/// The three `protection.rs` rows are #524's: a risk exit waits on a cancel nothing asks (behind
+/// a handed-on placement, or after a refused cancel the query finds still live), a wrong answer
+/// from code that runs, with no stub to stop at. Each fails on its own assertion; the fix
+/// (DEC-425) deletes the rows with the `#[ignore]` lines.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 7] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1983,6 +1988,18 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::seed_15_sends_every_allowed_risk_exit_within_the_bound",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::an_exit_waiting_on_protection_always_has_its_cancel_asked",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_refused_protective_cancel_found_live_is_asked_again",
     ),
 ];
 

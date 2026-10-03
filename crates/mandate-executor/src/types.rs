@@ -371,6 +371,11 @@ pub struct UnprotectedInterval {
     pub started_at: RiskClock,
     pub ended_at: Option<RiskClock>,
     pub alerted: bool,
+    /// Its sequence or re-placement ended with no prices to place protection at, journaled and
+    /// alerted (`expiry_unreplaceable`): the position is still not covered, so the interval stays
+    /// open and bounded until the next interval in the instrument starts (DEC-367 item 4, #468's
+    /// round-4 review, m2).
+    pub uncovered: bool,
 }
 
 /// One difference a reconciliation found.
