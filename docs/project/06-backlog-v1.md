@@ -954,7 +954,8 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   stream, `MandateConfirmed`'s `agent_id` and `base_version`, `OwnerRequestSubmitted`, the
   `hold_openings` and `lift_hold` commands, the `client` actor kind with `on_behalf_of` (refused by
   approval check 3, counted as its user by check 7), `ConnectionRevoked`'s reason `compromised`,
-  and `ClientConnected`, `ClientRevoked`, and `ScopeReleased` (with the identity spec's §12.1), each
+  and `ClientConnected` and `ClientRevoked` (with the identity spec's §12.1; `ScopeHalted` and
+  `ScopeReenabled` only if DEC-437 item 21 is accepted), each
   with test vectors and an invalid draft per rule.
 
 ### E11 Web app: dashboard and controls
@@ -3337,3 +3338,16 @@ From the round-1 review of the workspace services API spec ([#560](https://githu
   workspace from a body member.
 - **One wording for a client's reads** (minor 7). §3.7's client column and §3.8's `read` scope say
   the same rule two ways; keep one.
+
+From the round-2 review of the workspace services API spec ([#560](https://github.com/kunwarshivam/mandate/pull/560), nits and cross-document notes; [DEC-436](decisions/DEC-436.md)):
+
+- **One owner for mandate spec §6.4's notification bullet.** #560 and the notifications spec (#558)
+  both reword it and both add a change-history entry. The notifications spec's wording is the
+  stricter (its exclusion list ends "or event timestamp") and should stand, with the workspace API
+  spec's §3.9 link folded in; whichever merges second resolves to that wording and keeps #560's
+  check-7 sentence.
+- **One fate for `ApprovalRef::of_requested_event`.** Workspace API spec §3.9 says it becomes a
+  notice-id lookup (E8-15); notifications spec §4.2 says it stays the in-workspace reference and
+  stops being what a payload carries (E8-9). Keep the notifications spec's sentence and reword §3.9.
+- **Offer the kill switch alone on the revoke-on-compromise screen** (workspace API spec §5.6), as
+  the alternative that keeps the connection so protection can be re-placed and exits re-driven.

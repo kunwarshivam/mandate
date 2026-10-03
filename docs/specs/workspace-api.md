@@ -111,7 +111,7 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 | **API-14** | **Read models are derived and stamped.** Every read names, for each stream it read, the `seq` and hash it reflects, and the `recorded_at` of that event. No value comes from anywhere but the journal and stored artifacts. A value older than its freshness limit is returned marked stale with its age, never as current | Replay test: rebuilding every read model from the journal alone gives identical responses; a staleness test per freshness limit |
 | **API-15** | **Journal pages are complete and checkable.** Paging a stream by cursor yields every event in the range exactly once, in `seq` order, with each event's `hash` and `prev_hash`, so a client can check that each page joins the last | Fuzz: random page sizes and concurrent appends; concatenated pages equal the stream range, and the chain check passes |
 | **API-16** | **Exports are verifiable and recorded.** Every export is journaled (`ExportCreated`) before it is served. A canonical export verifies under journal spec §11 against its anchors; every derived JSON or CSV view names the manifest hash it came from | A test that runs the journal verifier over each export and fails a tampered one |
-| **API-17** | **Step-up is bound to one action.** A step-up challenge the API issues names one action digest (§3.6). Evidence is accepted only on the call for that digest, and an assertion id is used once per workspace (DEC-173 item 3) | Tests that evidence for one approval, version, or command is refused on another; replay of a used assertion is refused; the step-up kinds are enumerated from identity spec ID-4 and §4.2's **S** cells, and every one can issue a challenge |
+| **API-17** | **Step-up is bound to one action.** A step-up challenge the API issues names one action digest (§3.6). Evidence is accepted only on the call for that digest, and an assertion id is used once per workspace (DEC-173 item 3) | Tests that evidence for one approval, version, or command is refused on another; replay of a used assertion is refused; every step-up action **this API serves** (§1.4: identity spec ID-4's list and the **S** cells of the workspace-scope rows, never the org-scope rows, which are the global control plane's) has a kind and can issue a challenge |
 | **API-18** | **Model text is never an action.** Model output (chat replies, theses, compiler notes) is returned only in members typed as quoted, attributed content with an author label. Action cards come only from deterministic operations (§4.6), and acting on one needs its own call (rule 4, DEC-192) | A schema test: no action or button member's type can hold model text |
 | **API-19** | **Concurrent edits never merge silently.** A draft update and a version confirmation name the base they were made from; a call whose base is no longer current is refused with 409 and the current base, never applied over another person's change. Risk-reducing shortcuts (§4.5) rebase instead, and their result is re-classified | Fuzz with two writers; every version's recorded base is its real predecessor, and every rebased shortcut is still classified reducing |
 
@@ -241,11 +241,16 @@ The ceremony belongs to the [identity spec](https://github.com/kunwarshivam/mand
 - `POST /v1/workspaces/{ws}/step-up/challenges` with `{action: {kind, digest}}` returns a challenge
   for that one action. `kind` names one of the actions identity spec ID-4 lists, and the set grows
   with that list: `confirm_version` (risk-increasing, a delegation grant included), `deploy`,
-  `approve`, `connection` (connect, change, or revoke), `kill_switch_release`, `resume`, `stop`,
+  `approve`, `connection` (connect, change, or revoke), `resume`, `stop`,
   `acknowledge`, `owner_exit`, `kill_switch_privilege`, `disclosure`, `policy_loosen`,
   `member_invite`, `role_grant`, `client_connect`, `credential_enrol`, `break_glass_approve`, and
-  `lift_hold`. API-17's test enumerates the kinds from identity spec ID-4 and §4.2's **S** cells,
-  not from this list. `digest` is the SHA-256 of the action's canonical object: the approval's
+  `lift_hold`. There is no kind for re-enabling a halted scope: the halted state is Proposed
+  (DEC-437 item 21) and does not exist until the founder accepts it. API-17's test enumerates only
+  the step-up actions this API serves: identity spec ID-4's list and the **S** cells of §3.7's
+  workspace-scope rows. The org-scope **S** actions (SSO configuration, creating or archiving a
+  workspace, org memberships and roles, service accounts, org policy, transferring or deleting the
+  organization) belong to the global control plane's own API (gap 8, §1.4), so they have no kind
+  here. `digest` is the SHA-256 of the action's canonical object: the approval's
   content hash, the mandate version hash, or the command's canonical members (DEC-279 item 1's
   object for commands).
 - The evidence the call then carries is `{assertion_id, authenticated_at, method}`, the shape the
@@ -259,7 +264,11 @@ The ceremony belongs to the [identity spec](https://github.com/kunwarshivam/mand
 
 Roles, the permission matrix, and separation of duties belong to the [identity spec](https://github.com/kunwarshivam/mandate/pull/556) (`docs/specs/identity.md`, #556). The API enforces
 that matrix and no other (API-2; the coordinator's settlement X1 on #560). It is printed here exactly
-as identity spec §4.2 states it, so the route test can parse it; if the two ever differ, identity
+as identity spec §4.2 states it (#556 at 8acb0bd1, plus the three rows for the owner request, the dry
+run, and the chat thread that the coordinator's round-2 ruling adds there), so the route test can
+parse it. #556's Host CLI column and break-glass operational set are left out because neither
+principal calls this API: the host CLI appends on site (DEC-436 item 3), and platform staff hold no
+workspace role; if the two ever differ, identity
 spec §4.2 wins and this copy is a defect. **S** marks a permission that needs step-up (§3.6). A blank
 cell is a denial. OO org owner, OA org admin, Bill billing admin, WA workspace admin, Op operator, Ap
 approver, Vi viewer, Au auditor, Cl client (DEC-141), SA service account. There is no inheritance
@@ -281,7 +290,7 @@ from org roles: acting in a workspace needs a membership in it (identity spec §
 | Kill switch, connection or workspace scope: engage | | | | | ✓ | ✓ | | | | | |
 | Kill switch, org scope: engage | | ✓ | ✓ | | | | | | | | |
 | Kill switch, any scope: privileges beyond the stop (mandate §6.1), for a scope one may engage | S | ✓ | ✓ | | ✓ | ✓ | | | | | |
-| Kill switch release (re-enable a halted scope, §4.4) | S | ✓ (org) | ✓ (org) | | ✓ | | | | | | |
+| Re-enable a halted scope (§4.4; only if DEC-437 item 21 creates the state) | S | ✓ (org) | ✓ (org) | | ✓ | | | | | | |
 | Owner exit (close a position) | S | | | | | ✓ | | | | | |
 | Acknowledge (ladder, tripwire, reconciliation) | S | | | | ✓ | ✓ | | | | | |
 | Answer an approval: approve | S | | | | | | ✓ | | | | |
@@ -295,6 +304,9 @@ from org roles: acting in a workspace needs a membership in it (identity spec §
 | Grant or remove a workspace role | S for grant | | | | ✓ | | | | | | |
 | Connect a client (issue its token) | S | | | | | ✓ | | | | | |
 | Revoke a client | | | | | ✓ | ✓ | | | | | |
+| Owner request through the builder and gate (DEC-141) | | | | | | ✓ | | | | ✓ | |
+| Dry run (DEC-190) | | | | | | ✓ | | | | ✓ | |
+| Chat thread (DEC-184) | | | | | | ✓ | | | | | |
 | Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | |
 | Org policy: tighten | | ✓ | ✓ | | | | | | | | |
 | Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | |
@@ -315,11 +327,12 @@ How the API's operations map onto those rows:
 | Drafts, compile, validate, create a version (§4.1) | Draft a mandate version |
 | Confirm (§5.1) | Confirm a version, by the server's own classification |
 | End a delegation, away mode (§4.4) | Remove or narrow a delegation |
-| Pause, hold, lift a hold, resume, Stop, kill switch, release, owner exit, acknowledge (§4.2) | The row of the same name |
+| Pause, hold, lift a hold, resume, Stop (with or without release of positions), kill switch, owner exit, acknowledge (§4.2) | The row of the same name |
+| Re-enable a halted scope | **Inactive.** No route exists until DEC-437 item 21 is accepted (§4.2) |
 | Approve, Skip (§5.2) | Answer an approval, and listed in `autonomy.approval.approvers` (identity spec §4.1) |
 | Connect, revoke, revoke on compromise (§4.5) | Connect, change, or revoke a broker connection |
 | Policies, members, clients (§4.5) | The rows of the same names |
-| Owner request, dry run, chat (§4.6) | **No row yet.** Until identity spec §4.2 adds one, a user needs the operator role, and a client the `request` or `dry_run` scope (§3.8) |
+| Owner request, dry run, chat (§4.6) | Owner request; dry run; chat thread. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
 
 Separation of duties is enforced where the specs already enforce it: by the runtime at approval
 (check 7) and by the executor at acknowledgment (mandate spec §5.8), with a client counted as its
@@ -399,7 +412,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Owner exit | `POST /agents/{id}/exits` | `OwnerCommandIssued` (`owner_exit`) | §5.4. Never refused for step-up (mandate spec §6.1) |
 | Acknowledge | `POST /agents/{id}/acknowledgments` | `OwnerAcknowledged` | Names the event acknowledged; step-up; independence judged by the executor |
 | Kill switch | `POST /kill-switch` | `OwnerCommandIssued` (`kill_switch`) | §5.4. Agent, connection, or workspace scope |
-| Release a halted scope | `POST /kill-switch/release` | `ScopeReleased` (identity spec §12.1, journal change) | Identity spec §4.4: step-up; re-enables nothing by itself, so each agent still needs its own deploy or resume. An agent scope has no release (`stopped` is terminal) |
+| Re-enable a halted scope | **None in v0.1** | — | The halted state is Proposed (DEC-437 item 21; interim: no halted state), so a kill switch leaves no scope halted and there is nothing to re-enable. If the founder accepts item 21, this spec adds a route, a step-up kind, and the events `ScopeHalted` and `ScopeReenabled` (identity spec §12.1) in its own change |
 | Command status | `GET /commands/{event_id}` | — | §5.5 |
 
 ### 4.3 Approvals (approval service)
