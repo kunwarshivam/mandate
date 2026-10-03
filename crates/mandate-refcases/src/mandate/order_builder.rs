@@ -60,8 +60,8 @@ use mandate_builder::{
 };
 use mandate_domain::{AssetClass, AssetId, MarketSession, Purpose};
 use mandate_num::{
-    Conviction, CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, Ratio, Rounding, Signed,
-    SizeFraction, Unit, Usd, UsdExact,
+    Conviction, CostBasis, FeeRate, Fraction, MarkPrice, NumError, Price, Qty, Ratio, Rounding,
+    Signed, SizeFraction, Unit, Usd, UsdExact,
 };
 use mandate_risk as gate;
 use mandate_risk::spec_types::{GoalState, RiskLimits, Rung, RungAction, ScaleAction};
@@ -350,10 +350,9 @@ fn trim_guards(
 /// `from` less `taken`, or none when `taken` covers it: what resting sells leave of the excess and
 /// of the position (DEC-399 item 7).
 fn less_or_zero(from: Qty, taken: Qty) -> Result<Qty, String> {
-    if taken < from {
-        num(from.checked_sub(taken), "a quantity less the resting sells")
-    } else {
-        Ok(Qty::ZERO)
+    match from.checked_sub(taken) {
+        Err(NumError::Negative) => Ok(Qty::ZERO),
+        left => num(left, "a quantity less the resting sells"),
     }
 }
 
