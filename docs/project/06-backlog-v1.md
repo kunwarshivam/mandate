@@ -30,6 +30,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E15 Signal models: LLM and fast models, scorecards | M5 (LLM research, scorecards); Phase 3 (fast models) | 6.3, 6.5 | Must (E15-1, E15-3, E15-6 to E15-10); Should |
 | E16 Kraken Derivatives US connector | Phase 3 | 6.2 (FR-2.5) | Should |
 | E17 Research agent and dynamic universe | M5 | 6.3 (FR-3.9), 6.5 | Must |
+| E19 Agent harness | M5 (construction, the research loop, the bench); before live trading (E19-8) | 6.3 (FR-3.9), 6.5 (FR-5.1) | Must (E19-1 to E19-6, E19-8); Should |
 
 ## Stories
 
@@ -1153,6 +1154,74 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
 - **E16-2 (Should)** As a trader, I want perpetuals accounting (funding every eight hours,
   margin, liquidation thresholds) so that perpetual P&L and risk are correct.
 - **E16-3 (Should)** As an operator, I want a funding/carry signal model for perpetuals.
+
+### E19 Agent harness (DEC-431)
+
+Design: the [agent harness spec](../specs/agent-harness.md) v0.1 ([DEC-431](decisions/DEC-431.md)):
+how a confirmed mandate version becomes a running agent process, and the research loop inside it.
+It is the caller side of the [inference spec](../specs/inference.md) and assumes its INF-1 to INF-16.
+These stories cover only what E6-1, E15-1, E15-3, E15-6 to E15-10, E17-2, E17-5, E17-7, and E17-8 do
+not. **SC** marks a story on a safety-critical path (`AGENTS.md`): tests against approved reference
+cases first, property tests for its invariants (spec §3), an independent review by an agent on a
+different model, zero missed mutants, and green CI. No live model call runs outside the team's
+internal paper workspaces (DEC-432 item 14), and no product research run starts before the founder
+sets DEC-431 item 15's budgets.
+
+- **E19-1 (Must, M5; SC)** As an operator, I want an agent process built from a confirmed mandate
+  version, so that it runs exactly what the owner confirmed. *Accepted when:* spec §5.1's eight steps
+  are implemented with a test per failure row; the mandate's hash, the pinned models, and the
+  research entry are re-checked before the writer is taken; a research-only failure disables
+  research and leaves the agent running; a guard hit on the description disables research and sends
+  an opaque owner alert; the process states and exits of spec §5.2 are covered by a state-machine
+  property test, including a crash in every state; HI-12 holds with the vault and provider keys
+  absent from the environment.
+- **E19-2 (Must, M5)** As an owner, I want the research agent to read only what its pinned retrieval
+  plan names, so that what the model is shown is fixed and bounded. *Accepted when:* spec §6.3's
+  readers run against a data-plane double at a cut-off and store each result as an artifact; every
+  cap is enforced, oldest items dropped first, and the drop recorded; the readers' crate depends on
+  read ports only (HI-4, by `xtask/layers.toml`); no read returns data after the cut-off (HI-13);
+  every news and filing item is metered into E17-5's `DriftState` without its text; the retrieval
+  plan is inside the research entry's content hash (DEC-431 item 5), with the matching inference
+  spec revision first.
+- **E19-3 (Must, M5; SC)** As an owner, I want research runs scheduled, gated, and cancelled by the
+  runtime core, so that research never blocks or outlives the trading loop. *Accepted when:* the
+  core's new start, cancel, and result inputs and effects (spec §10.3) are added tests first
+  (DEC-77); spec §5.3 and §5.4's run states and boundaries are property-tested over random schedules,
+  mode changes, version changes, crashes, and midnight; HI-7 (research latency never changes the
+  non-research drafts), HI-8, HI-15, HI-16, and HI-17 hold, each oracle shown to catch a seeded bug;
+  the schedule counts from the later of the last call and the last reservation.
+- **E19-4 (Must, M5; SC)** As an owner, I want every model output checked and its facts filled by the
+  platform before admission, so that a model cannot decide an admission check for itself.
+  *Accepted when:* spec §6.5's field split and six harness checks are implemented with a case per
+  check; the judging batch journals the candidates' verdicts, the thesis records (journal spec
+  §9.4), and `ModelOutputRecorded` all-or-nothing; HI-2, HI-3 (replay with a gateway that fails the
+  test on any call), HI-6, and HI-18 hold against a compromised model.
+- **E19-5 (Must before research leaves the internal thin slice; SC; journal spec first)** As an
+  owner, I want an invalidated thesis to remove its instrument at once, so that a position whose
+  reason is gone is exited. *Accepted when:* a journal spec change adds the agent-stream invalidation
+  verdict and the executor's `UniverseChanged` (`thesis_invalidated`) copy from it, with vectors;
+  `exits_only` runs are review-only; an invalidation never admits, never adds risk, and is
+  journaled before the removal; MI-19 holds under a fuzz of random invalidations.
+- **E19-6 (Must, M5)** As the founder, I want an adversarial bench for the research loop, so that a
+  fully compromised model is shown to breach nothing. *Accepted when:* injection fixtures exist for
+  every reader and source (news, filings, screens, the description, memory); with a compromised
+  model, zero limit breaches and zero orders without a dry-run allow (HI-10); the canary scan of HI-11
+  finds nothing in any prompt artifact. It is the v1 subset of E18-7 and feeds E17-3's and E17-7's
+  injection clauses.
+- **E19-7 (Should, M5)** As the founder, I want regression evaluations for research entries, so that a
+  template, plan, or model change is checked for mechanics before it is offered. *Accepted when:* spec
+  §8.3's measures run on a fixed set of recorded runs in the internal paper workspaces; the report
+  states each pass condition; it is never shown to owners and never stands in for E17-8 (DEC-99).
+- **E19-8 (Must before live trading; SC)** As an owner, I want my agent's kill switch to work while
+  its process is down, so that rule 13 holds without the runtime. *Accepted when:* spec §13 item 1 is
+  decided in a DEC (the executor flattens from the control stream after a deadline, or the
+  deployment manager guarantees a restart that handles the kill switch first); a fault-injection test
+  kills the agent process, pulls the agent kill switch, and shows the agent-scoped flatten completes
+  with no cancel-all or close-position (trading spec §5.5).
+- **E19-9 (Should)** As a maintainer, I want `mandate-research`'s doc comments to say that the runtime
+  core appends thesis records and the executor copies `UniverseChanged`, so that the next agent copies
+  the single-writer rule (DEC-431 item 2). *Accepted when:* the comments on the crate and on
+  `ResearchEvent` match journal spec §2, with no code change.
 
 ## Won't (v1)
 

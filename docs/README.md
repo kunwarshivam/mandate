@@ -31,6 +31,7 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Journal spec](specs/journal.md) | Streams, event envelope, canonical serialization, hash chain, storage, replay, verification, export |
 | [Journal test vectors](specs/reference-cases/journal.yaml) | Exact canonical bytes and hashes, plus tamper cases |
 | [Inference and model gateway spec](specs/inference.md) | Draft v0.1: every model call, the model gateway, pinning and no substitution, deadlines, caching, the registry, metering and spend caps, security, failure walk, and the fast-tier and provider decisions ([DEC-432](project/decisions/DEC-432.md)) |
+| [Agent harness spec](specs/agent-harness.md) | Draft v0.1: how a confirmed mandate version becomes a running agent process; construction and lifecycle, the trading and research loops, retrieval, model inputs and output checks, budgets, evaluation and change control, adversaries, and the founder's budget, evaluation, and licence decisions ([DEC-431](project/decisions/DEC-431.md)) |
 
 ## Product
 
