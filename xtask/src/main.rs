@@ -1968,10 +1968,15 @@ const STUB_MARKERS: [&str; 5] = [
 /// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
 /// 4).
 ///
-/// The four `protection.rs` rows are the unapplied-fill over-cover's pins (#515, DEC-421): `main`
+/// The thirteen `protection` rows are #485's (DEC-408): an exit ladder between rungs over-sells
+/// beside a new exit, which is a wrong answer from code that runs, with no stub to stop at. Each
+/// fails on the rule-13 oracle's count or its own assertion; the fix (DEC-409, DEC-410) deletes
+/// the rows with the `#[ignore]` lines.
+///
+/// The last four `protection.rs` rows are the unapplied-fill over-cover's pins (#515, DEC-421): `main`
 /// sizes protection from the fold's position, so each fails on the size it asserts rather than at
 /// a stub, and the fix deletes them.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 8] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 21] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
@@ -1987,6 +1992,58 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 8] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_risk_exit_beside_a_sequence_between_rungs_never_over_sells",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_ladder_stopped_between_rungs_never_resumes_beside_a_new_exit",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_risk_exit_held_overnight_beside_a_parked_ladder_goes_whole_and_the_ladder_sends_what_is_left",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_risk_exit_beside_a_parked_ladder_selling_everything_goes_whole",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_parked_sequence_past_its_bound_never_sends_its_remainder",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_ladder_that_resumes_with_nothing_left_sends_nothing",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_ladder_that_resumes_after_its_position_shrank_sends_only_what_is_left",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_restart_between_rungs_still_counts_the_parked_remainder",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_refused_rung_leaves_its_remainder_to_the_next_exit",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::rule_13_holds_over_random_scripts_from_between_rungs",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_discretionary_exit_beside_a_parked_remainder_is_sized_to_what_is_left",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_discretionary_exit_with_nothing_left_is_held_overnight_then_refused_at_the_open",
+    ),
+    (
+        "crates/mandate-executor/src/protection.rs",
+        "sequence_tests::a_rung_sent_short_beside_a_sell_the_broker_then_refuses_is_journaled_short",
     ),
     (
         "crates/mandate-executor/src/protection.rs",

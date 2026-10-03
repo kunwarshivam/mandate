@@ -6712,6 +6712,23 @@ research:
         path: payload.reason
       - reason: schema
         path: payload.content_hash
+  - name: order_rule_37_before_rule_38
+    clause: 'report order: rule 37 alone in its group, then rule 38'
+    base_draft: proposed_refused
+    changes:
+    - path: payload.reason
+      value: universe_full
+    - path: payload.corroboration
+      value: null
+    - path: config_refs.model_version
+      value: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+      also:
+      - reason: schema
+        path: payload.content_hash
   - name: proposed_without_model_ref
     clause: '§9 required config_refs: mod'
     base_draft: proposed_admitted
