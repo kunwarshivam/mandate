@@ -2374,6 +2374,11 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   harness loudly. The "real quantity grid" row closes it; pin it there with such a case (m6);
   (5) add `<=` for `<` in the trim's minimum as a registered `mutants.py` trim mutant. MC-B33
   catches it today, but nothing registers it (the review's plants).
+  *Done (`agent/g8-530-minors`):* (1) §11 says 433, and `check_cases.py` now fails when §11's
+  count differs from the file; (2) the spec's DEC-399 entry names both grids; (3)
+  [DEC-426](decisions/DEC-426.md) records the two in-place edits as departures and keeps rule 4,
+  and DEC-399's status line points to it; (4) stays with the "real quantity grid" row; (5)
+  `mutants.py` registers "a trim at the minimum is withheld", which MC-B33 catches.
 - **E6-4 harness: one scene for both gate calls on a trim base** (#498 review, m3). `trim_first`
   sets the scene instrument's `min_order_size` from the case, but `judge` builds its own scene in
   `Scene::read`, which takes the minimum from `qty_increment`. A case where a trim is withheld and

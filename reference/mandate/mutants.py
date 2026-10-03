@@ -308,13 +308,16 @@ TRIPWIRE_MUTANTS = {
 }
 # The trim's minimum (§5.5, DEC-399 item 5) is judged by the family-B cases rather than by a fuzz:
 # MC-B33 and MC-B34 sit where the instrument's minimum order size and the dollar minimum disagree,
-# and MC-B35 is the full close the minimum exempts (DEC-423).
+# MC-B33 also sits on the boundary, a trim exactly at the minimum, and MC-B35 is the full close the
+# minimum exempts (DEC-423).
 TRIM_MUTANTS = {
     "the trim's minimum is the dollar minimum order": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
                                                       '        if sell * bid < D(inp["min_order_usd"]) and sell != qty:'),
     "the trim's minimum is ignored": ('        if sell < D(inp["min_order_size"]) and sell != qty:', '        if False:'),
     "a full close is withheld below the minimum": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
                                                    '        if sell < D(inp["min_order_size"]):'),
+    "a trim at the minimum is withheld": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
+                                          '        if sell <= D(inp["min_order_size"]) and sell != qty:'),
 }
 
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
