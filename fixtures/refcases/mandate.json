@@ -6634,6 +6634,77 @@
    }
   },
   {
+   "id": "MC-V69",
+   "kind": "semantic",
+   "title": "Independent approval required in a one-user workspace",
+   "base": "btc_accumulator",
+   "patch": [],
+   "context": {
+    "independent_approval_required": true,
+    "workspace_users": 1
+   },
+   "expect": {
+    "violations": [
+     "V-047"
+    ],
+    "warnings": [
+     "W-002"
+    ],
+    "worst_case": {
+     "one_position_at_stop_usd": "850",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-V70",
+   "kind": "semantic",
+   "title": "Independent approval required in a two-user workspace passes V-047",
+   "base": "btc_accumulator",
+   "patch": [],
+   "context": {
+    "independent_approval_required": true,
+    "workspace_users": 2
+   },
+   "expect": {
+    "violations": [],
+    "warnings": [
+     "W-002"
+    ],
+    "worst_case": {
+     "one_position_at_stop_usd": "850",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-V71",
+   "kind": "semantic",
+   "title": "A one-user workspace without independent approval is fine",
+   "base": "btc_accumulator",
+   "patch": [],
+   "context": {
+    "independent_approval_required": false,
+    "workspace_users": 1
+   },
+   "expect": {
+    "violations": [],
+    "warnings": [
+     "W-002"
+    ],
+    "worst_case": {
+     "one_position_at_stop_usd": "850",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
    "id": "MC-P01",
    "kind": "policy",
    "title": "Mandate looser than workspace, tighter than org",
