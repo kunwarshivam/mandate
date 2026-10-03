@@ -17,7 +17,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::orders::transition;
+use crate::orders::{legal, transition};
 use crate::payload::{int, text};
 use crate::ports::Ports;
 use crate::session::{
@@ -1615,12 +1615,15 @@ fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(),
     cancel_resting(batch, instrument)
 }
 
-/// Asks a cancel of every protective order resting in `instrument` that has none outstanding:
-/// never for one already `PendingCancel`, nor for one `Unknown` while a refused cancel's query
-/// is out (never cancelled blind), nor for one whose cancel was asked before the broker
-/// acknowledged it. So an exit waiting on that protection always waits on a cancel asked or
-/// outstanding, and a refused cancel is asked again once its query finds the order still live
-/// (§5.7; DEC-425 item 1).
+/// Asks a cancel of every protective order resting in `instrument`, whoever placed it (§5.4),
+/// that has none outstanding: never for one already `PendingCancel`, nor for one `Unknown` while
+/// a refused cancel's query is out (never cancelled blind), nor for one whose cancel was asked in
+/// a state that cannot record it, because §5.7 has no edge from there to `PendingCancel` (before
+/// the broker acknowledged it, or while the broker holds it `pending_replace`): that cancel stays
+/// outstanding until the broker reports the order in a state that can. So an exit waiting on that
+/// protection always waits on a cancel asked or outstanding, a refused cancel is asked again once
+/// its query finds the order still live, and a cancel is never asked again at every step (§5.7;
+/// DEC-425 item 1; #576's review, B1).
 fn cancel_resting(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
@@ -1635,7 +1638,7 @@ fn cancel_resting(
         let outstanding = batch.view.orders.get(&id).is_none_or(|order| {
             order.state == OrderState::PendingCancel
                 || order.state == OrderState::Unknown
-                || order.state == OrderState::Submitting && order.cancel_unconfirmed
+                || order.cancel_unconfirmed && !legal(order.state, OrderState::PendingCancel)
         });
         if outstanding {
             continue;
