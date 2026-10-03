@@ -8601,6 +8601,223 @@ mod sequence_tests {
         Move::Tick(1),
     ];
 
+    /// #533's two exits (DEC-424), both sent laddered in AAPL while nothing protects it.
+    const FIRST_LONE: &str = "01JABCDEFGHJKMNPQRSTV00001";
+    const SECOND_LONE: &str = "01JABCDEFGHJKMNPQRSTV00002";
+
+    /// What `effects` sent for `intent` other than its first rung: its later rungs' quantities.
+    fn later_rungs(effects: &[Effect], intent: &str) -> Vec<Qty> {
+        let first = format!("md-{intent}");
+        submissions(effects)
+            .iter()
+            .filter(|order| {
+                let id = order.client_order_id.as_str();
+                id.starts_with(&first) && id != first
+            })
+            .map(|order| order.qty)
+            .collect()
+    }
+
+    /// #533 (DEC-424): ten AAPL held with nothing protecting them and nothing to price from, a
+    /// risk exit of 1 is sent laddered and its step is asked; a second risk exit of 1 is then sent
+    /// laddered too. When the first exit's step is confirmed, its next rung sends its 1, and the
+    /// second exit's ladder steps and sends its own: each lone ladder is its own exit's, so the
+    /// second never replaces the first. Σ stays within the position: 2 live sells against 10.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_second_laddered_exit_never_drops_the_first_exits_remainder() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        executor.run(observation(None, None, false, 0)?, &ports)?;
+        executor.run(sell(FIRST_LONE, "1", "141", Purpose::RiskExit)?, &ports)?;
+        let stepped = executor.run(Input::Tick(RiskClock::from_secs(10)), &ports)?;
+        let first = format!("md-{FIRST_LONE}");
+        assert_eq!(
+            cancels(&stepped),
+            vec![first.clone()],
+            "the first exit's step"
+        );
+        executor.run(sell(SECOND_LONE, "1", "141", Purpose::RiskExit)?, &ports)?;
+        let resumed = executor.run(cancel_accepted(&first), &ports)?;
+        assert_eq!(
+            later_rungs(&resumed, FIRST_LONE),
+            vec![Qty::parse("1")?],
+            "the first exit's next rung sends its 1: {:?}",
+            drafted(&resumed)
+        );
+        let second = format!("md-{SECOND_LONE}");
+        let stepped = executor.run(Input::Tick(RiskClock::from_secs(20)), &ports)?;
+        assert!(
+            cancels(&stepped).contains(&second.as_str()),
+            "the second exit's step: {:?}",
+            drafted(&stepped)
+        );
+        let resumed = executor.run(cancel_accepted(&second), &ports)?;
+        assert_eq!(
+            later_rungs(&resumed, SECOND_LONE),
+            vec![Qty::parse("1")?],
+            "{:?}",
+            drafted(&resumed)
+        );
+        Ok(())
+    }
+
+    /// #533's two exits parked overnight (DEC-424): at 19:59:50 ET a risk exit of 6 is sent
+    /// laddered with nothing to price from, then one of 4 at 19:59:55; each step is confirmed
+    /// after 20:00, in the overnight session, so each ladder is parked between rungs with its
+    /// whole rung unsold. Both remainders count, in their exits' id order: 6 and then 4.
+    fn two_lone_ladders_parked(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        let at = TEN_SECONDS_BEFORE_THE_NIGHT;
+        executor.run(Input::Tick(RiskClock::from_secs(at)), ports)?;
+        executor.run(observation(None, None, false, at)?, ports)?;
+        executor.run(sell(FIRST_LONE, "6", "141", Purpose::RiskExit)?, ports)?;
+        executor.run(
+            Input::Tick(RiskClock::from_secs(at.saturating_add(5))),
+            ports,
+        )?;
+        executor.run(sell(SECOND_LONE, "4", "141", Purpose::RiskExit)?, ports)?;
+        executor.run(
+            Input::Tick(RiskClock::from_secs(at.saturating_add(10))),
+            ports,
+        )?;
+        executor.run(cancel_accepted(&format!("md-{FIRST_LONE}")), ports)?;
+        executor.run(
+            Input::Tick(RiskClock::from_secs(at.saturating_add(15))),
+            ports,
+        )?;
+        executor.run(cancel_accepted(&format!("md-{SECOND_LONE}")), ports)?;
+        Ok(executor)
+    }
+
+    /// What each remainder in AAPL counts, by its exit's intent.
+    fn counted(executor: &Executor) -> Result<Vec<(String, Qty)>, ExecutorError> {
+        Ok(super::remainders(&executor.state, &aapl()?)?
+            .into_iter()
+            .map(|(intent, counts)| (intent.0.0, counts))
+            .collect())
+    }
+
+    /// The account stream's next fact, committed at the executor's own clock.
+    fn committed_now(
+        executor: &mut Executor,
+        event_type: &str,
+        pairs: Vec<(&str, Value)>,
+    ) -> Result<(), ExecutorError> {
+        let mut pairs = pairs;
+        pairs.push(("risk_clock", clock(executor.state.clock())?));
+        executor.commit_one(event_type, object(pairs)?)
+    }
+
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn two_laddered_exits_parked_overnight_both_count_in_their_exits_id_order()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let executor = two_lone_ladders_parked(&ports)?;
+        assert_eq!(
+            counted(&executor)?,
+            vec![
+                (FIRST_LONE.to_owned(), Qty::parse("6")?),
+                (SECOND_LONE.to_owned(), Qty::parse("4")?),
+            ]
+        );
+        Ok(())
+    }
+
+    /// DEC-410 item 4 with two lone ladders (DEC-424): a short rung that sends nothing ends the
+    /// ladder of the exit it names and no other.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_short_rung_that_sends_nothing_ends_only_its_own_exits_lone_ladder()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = two_lone_ladders_parked(&ports)?;
+        committed_now(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("action", text("rung_short")),
+                ("instrument", text("AAPL")),
+                ("intent_id", text(SECOND_LONE)),
+                ("qty", text("4")),
+                ("sent", text("0")),
+                ("reason", text("position_taken")),
+            ],
+        )?;
+        assert_eq!(
+            counted(&executor)?,
+            vec![(FIRST_LONE.to_owned(), Qty::parse("6")?)]
+        );
+        Ok(())
+    }
+
+    /// DEC-410 item 1's guard with two lone ladders (DEC-424): the ladder of an abandoned exit
+    /// counts nothing, and the other exit's still counts.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn an_abandoned_exits_lone_ladder_counts_nothing_beside_another() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = two_lone_ladders_parked(&ports)?;
+        committed_now(
+            &mut executor,
+            "OrderAbandoned",
+            vec![
+                ("client_order_id", text(format!("md-{SECOND_LONE}"))),
+                ("intent_id", text(SECOND_LONE)),
+                ("reason", text("max_intent_age")),
+            ],
+        )?;
+        assert_eq!(
+            counted(&executor)?,
+            vec![(FIRST_LONE.to_owned(), Qty::parse("6")?)]
+        );
+        Ok(())
+    }
+
+    /// DEC-410 item 1, absorption, with two lone ladders (DEC-424): a sequence started for one
+    /// exit takes that exit's lone ladder in, stepping and parked as it was, and leaves the other
+    /// exit's lone ladder where it is, so both still count.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_sequence_for_one_laddered_exit_takes_only_that_exits_lone_ladder()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = two_lone_ladders_parked(&ports)?;
+        committed_now(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("action", text("unprotected_start")),
+                ("instrument", text("AAPL")),
+                ("intent_id", text(SECOND_LONE)),
+                ("entry", text("md-held-1")),
+                ("agent", text("agent-a")),
+            ],
+        )?;
+        let sequence = executor.state.exiting.get(&aapl()?).map(|sequence| {
+            (
+                sequence.intent.0.0.clone(),
+                sequence.ladder.stepping,
+                sequence.ladder.parked,
+            )
+        });
+        assert_eq!(sequence, Some((SECOND_LONE.to_owned(), true, true)));
+        assert_eq!(
+            counted(&executor)?,
+            vec![
+                (FIRST_LONE.to_owned(), Qty::parse("6")?),
+                (SECOND_LONE.to_owned(), Qty::parse("4")?),
+            ]
+        );
+        Ok(())
+    }
+
     /// The exit of the script's step `step`: the oracle's own record of it, its verdict and
     /// reason, and the quantity of its first order at the broker, if one was sent.
     fn fate(desk: &Desk, step: usize) -> (String, String, Option<u32>) {
