@@ -155,7 +155,7 @@ journal returns.
 | **Account executor** (`mandate-executor` plus a connector) | One per broker account | That account's stream (journal §2) | A vault lease for that one connection | Postgres; vault; that connection's broker hosts only | Reads the workspace's data service |
 | **Scheduler** | One per workspace | The scheduler stream (`clock:`) | Nothing secret | Postgres; time sources | None |
 | **Workspace control services** (Phase 1: the founder's CLI) | One set per workspace deployment | The control stream | Session keys for the identity provider | Postgres; identity provider; users | None |
-| **Model gateway** ([inference spec](../specs/inference.md)) | One **active** instance per workspace deployment; a warm standby may wait, but there are no load-sharing replicas (see below) | Each workspace's meter stream, `meter:{workspace_id}`, which it writes alone (inference spec §3.6; a proposed journal spec change, E15-8). The call record itself, `ModelInvocationRecorded`, is appended by the caller | Provider keys | Postgres; vault; allowed model providers only | None |
+| **Model gateway** ([inference spec](../specs/inference.md)) | One per workspace deployment, replicated; exactly one replica holds the meter writer role per workspace (inference spec §3.6; see below) | Each workspace's meter stream, `meter:{workspace_id}` (proposed, E15-8), by the holder only. The call record itself, `ModelInvocationRecorded`, is appended by the caller | Provider keys | Postgres; vault; the meter holder (other replicas); allowed model providers only | None |
 | **Cold exporter and anchorer** | One per workspace deployment | Control stream (`SegmentExported`, `AnchorComputed`) | Object-storage write credential | Postgres; object storage; timestamping authority | None |
 | **Market data service** ([data-plane spec](../specs/data-plane.md)) | Per workspace in v1 (no redistribution, HLD §12 item 3) | Parquet datasets; no journal stream | The workspace's data credential | That data host | Serves the workspace's runtimes and executors |
 
@@ -176,17 +176,24 @@ instrument goes stale, and every opening is denied. Nothing about the channel ch
 journaled: marks enter risk state only as journaled `MarkUpdated` events (data-plane §3.6).
 The placement this requires is in §3.2 (DEC-434 item 22).
 
-**The model gateway is a single writer.** The inference spec (§3.6) gives the gateway a meter
-stream per workspace and requires a call's reservation to be appended before its first attempt
-leaves. A stream has one writer, fenced by epoch (journal §2, §5.1), so two gateway instances
-cannot share a workspace's traffic: one would hold the epoch and the other's reservations would
-return `Fenced`. So one instance is active per workspace deployment and holds the meter epoch of
-each workspace it serves. A standby takes over by incrementing the epoch, as any writer does
-(§3.4, §7.3). An instance that finds itself fenced refuses every call with a typed refusal and
-exits; it sends nothing to a provider, because no call may start without its reservation (inference
-spec INF-7). The caller records the model's output as missing, which never adds risk (inference
-spec INF-4). Load-sharing replicas would need a meter stream per replica, which is an inference
-and journal spec change, not a deployment choice (DEC-434 item 23).
+**The model gateway has one meter writer per workspace.** The inference spec (§3.6, v0.2, DEC-432
+item 20) gives the gateway a meter stream per workspace and requires a call's reservation to be
+appended before its first attempt leaves. A stream has one writer, fenced by epoch (journal §2,
+§5.1). The gateway may run as several replicas, but exactly one holds the meter writer role for a
+workspace; it alone checks caps and appends, and every other replica asks the holder to reserve
+before it sends anything. Operationally:
+
+- A replica that cannot reserve refuses. If the holder is unreachable within the call's deadline,
+  or the replica's own append returns `Fenced`, the call ends `meter_unavailable`: nothing is sent
+  to a provider, and the caller records the output as missing, which never adds risk (inference
+  spec INF-4).
+- Each such refusal is counted and alerts the operator (§8.2), so a replica that lost the role is
+  never a silent partial outage.
+- Hand-over is by epoch, as for any writer (§3.4, §7.3): the new holder takes the next epoch and
+  folds the stream before it reserves, and unsettled reservations stay counted.
+
+DEC-434 item 23 records this reading. It replaces v0.1's row, which said the gateway wrote nothing
+to the journal.
 
 ### 3.2 Scheduling and placement
 
@@ -381,8 +388,10 @@ At connection time and at every executor start:
 
 1. **Scope:** an OAuth grant must contain only trading and account-read scopes (E7-1). An API key
    whose venue exposes its permissions must not allow withdrawals or transfers; one that does is
-   refused. Where a venue cannot report a key's permissions, the limit is recorded and disclosed
-   to the owner, and the venue's own setting is the control.
+   refused. Where a venue cannot report a key's permissions, a live key is refused; a paper or
+   demo key is accepted with the limit recorded and disclosed to the owner
+   ([connections spec](../specs/connections.md) CN-2, [DEC-441](../project/decisions/DEC-441.md)
+   item 4).
 2. **Environment:** the credential must work against the environment the stream records and only
    that one. In non-production builds only paper hosts exist (ES-23); in production a paper stream
    refuses a live credential and the reverse.
@@ -605,7 +614,7 @@ are authoritative; a few come from metrics.
 | Duplicate order detected | Reconciliation | SEV-1 | RB-04 |
 | Market data feed stale | Runtime observations; ingest metrics | SEV-3, SEV-2 at scale | RB-05 |
 | Research model spend cap reached | `ModelInvocationRecorded` totals (DEC-120) | Informational | RB-06 |
-| Model gateway errors or deadline misses above threshold | Gateway metrics | SEV-3 | RB-06 |
+| Model gateway errors, deadline misses, or `meter_unavailable` refusals above threshold | Gateway metrics | SEV-3 | RB-06 |
 | Journal append `Unavailable` or `Ambiguous`; p99 append over 5 ms | Writer metrics | SEV-2 | RB-07 |
 | Synchronous standby lost | Postgres metrics | SEV-2 | RB-07 |
 | Unexpected `Fenced` | Writer outcome | SEV-2 | RB-08 |
@@ -762,7 +771,7 @@ Each failure, walked to its exit: what detects it, what agents do, how it ends, 
 | **Vault outage** | Lease renewal failures | Running executors keep their leases until expiry; new processes cannot start, so their agents stay `Recovering` | The vault returns. If a lease expires first, that executor stops sending and its agents are paused; protection rests at the broker |
 | **Broker API outage** | Connector errors; `Unknown` orders | Orders in flight become `Unknown` and are looked up when the broker returns (trading §5.7); no new opening while the broker cannot confirm state; the kill switch is journaled and retried | The broker returns; reconciliation runs (trading §11), and mismatches pause |
 | **Market data outage** (the vendor feed, or the host-local channel of §3.1) | Staleness checks | The gate refuses openings on stale data; risk exits use the exit price ladder's rules for missing prices (trading §5.6) | Feed returns |
-| **Model gateway or provider outage** | Gateway errors; an unexpected `Fenced` on a meter stream | The output counts as missing; no substitute model (DEC-67); the research agent pauses ideation; exits and the kill switch need no model. A fenced gateway instance refuses every call and exits (§3.1) | Provider returns; the standby gateway takes the meter epoch |
+| **Model gateway or provider outage** | Gateway errors; `meter_unavailable` refusals | The output counts as missing; no substitute model (DEC-67); the research agent pauses ideation; exits and the kill switch need no model. A replica that cannot reach the meter holder, or is fenced, refuses the call and sends nothing (§3.1) | Provider returns; the holder is reachable again, or a new holder has taken the epoch and folded the stream |
 | **Global control plane outage** | Outbound link | Nothing changes for trading (OPS-12); hybrid approvals use fallback channels; usage reports and updates queue (HLD §4) | Link returns |
 | **Clock skew** | The scheduler's offset checks (journal §5.4) | `ClockToleranceExceeded` is journaled and events are flagged; broker `event_time` stays authoritative for executions; the risk clock comes from the scheduler, not each host | Time sync returns; the next measurement within tolerance ends the flag |
 | **Bad deploy** | Canary health, crash loops, alert spike | Drained processes hand over normally; a crashing new version leaves agents `Paused` after the crash-loop bound, with protection at the broker | Rollback through the same drain and hand-over (§7.4) |
@@ -803,8 +812,8 @@ fencing as the only at-most-one guarantee (item 3), readiness (item 4), artifact
 ordering (item 5), synchronous-only failover (item 6), drain and hand-over (item 7), rollback and
 expand-only migrations (item 8), restores that never auto-resume (item 9), opaque telemetry labels
 (item 10), default-deny egress (item 11), and the E21 epic (item 12). Added in v0.2: the host-local
-market-data channel and the co-location it requires (item 22), the single-writer model gateway
-(item 23), and the journal-spec-first story for backup and drill events (item 24).
+market-data channel and the co-location it requires (item 22), one meter writer per workspace in
+the model gateway (item 23), and the journal-spec-first story for backup and drill events (item 24).
 
 **Accepted by the founder (2026-10-03):** items 13 to 20, as recommended, and open question 4.
 

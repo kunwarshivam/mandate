@@ -1,11 +1,16 @@
-# Data Plane Spec (v0.1, draft)
+# Data Plane Spec (v0.2, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed |
+| **Status** | Draft v0.2: v0.1 plus the blockers and majors of the post-merge review on [#553](https://github.com/kunwarshivam/mandate/pull/553) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-433](../project/decisions/DEC-433.md) (items 1 to 14 Accepted; items 15 to 20 Proposed for the founder) |
-| **Backlog** | E2-5 to E2-14 ([backlog](../project/06-backlog-v1.md#e2-market-data)) |
+| **Decisions** | [DEC-433](../project/decisions/DEC-433.md) (items 1 to 14 accepted by the agent; items 15 to 20 decided by the founder on 2026-10-03; items 21 and 22 Proposed for the founder) |
+| **Backlog** | E2-5 to E2-19 ([backlog](../project/06-backlog-v1.md#e2-market-data)) |
+
+**v0.2** fixes the post-merge review's blockers and majors: DP-6 restated with its three known gaps
+and a wider oracle, DP-3's time clause marked pending, items 15 to 20 shown as decided, items 21 and
+22 put to the founder, the drift detector's input corrected in §4.6, and the check 15 gap recorded
+in §11. Minors are backlog rows E2-16 to E2-19.
 
 This spec covers the data the runtime and the research agent read: live market data, reference
 data, news, filings, and fundamentals. It says where each comes from, how fresh it must be, how it
@@ -51,8 +56,8 @@ Two sibling specs, drafted in parallel, consume what this one produces: the agen
 | Eligibility statistics | Price floor, 20-day median dollar volume, average daily volume | Derived from daily bars | Computed from the last completed session | Batch |
 | ETP and ETN classification | Eligibility floor item 6 | Open ([trading spec §15](trading-domain.md#15-open-questions) items 5 and 8) | Younger than the configured age, or ETP openings are denied | Batch |
 | SEC filings | Research agent | SEC EDGAR (public) | Minutes | Slow |
-| Fundamentals | Research agent, screens | SEC XBRL financial data (public); vendors are Proposed (DEC-433 item 16) | As filed | Slow |
-| News | Research agent | The workspace's own Alpaca news access in v1 (DEC-433 item 3); other vendors Proposed (item 16) | Minutes | Slow |
+| Fundamentals | Research agent, screens | SEC XBRL financial data (public); no paid vendor before the DEC-99 evaluation passes (DEC-433 item 16) | As filed | Slow |
+| News | Research agent | The workspace's own Alpaca news access in v1 (DEC-433 items 3 and 16) | Minutes | Slow |
 
 Equities and crypto spot only. Options, futures, and perpetual futures data are out of scope for v1
 (trading spec §16; perpetuals are E16).
@@ -67,8 +72,8 @@ Equities and crypto spot only. Options, futures, and perpetual futures data are 
 - **Shared data plane.** Optional, managed by us, computed once and fanned out ([HLD
   §4](../HLD.md#shared-data-plane)). In v1 it carries only data that may be shared without a license
   (DEC-433 item 3): SEC filings and fundamentals, their factual classification, calendars, and
-  reference lists whose terms allow it. It never carries exchange market data until the founder
-  decides on licensing (item 15, [HLD §12 risk 3](../HLD.md#12-risks-and-open-decisions), RAID
+  reference lists whose terms allow it. It carries no exchange market data in v1: the founder
+  decided against licensing redistribution (item 15, [HLD §12 risk 3](../HLD.md#12-risks-and-open-decisions), RAID
   R-12).
 
 ### 1.3 Deployment modes
@@ -105,10 +110,10 @@ predicate (AGENTS.md, "Getting it right the first time").
 |---|---|---|
 | DP-1 | **Point in time.** A query as of time *t* returns only records whose knowledge time (§5.2) is at or before *t*. No backtest, screen, or research query sees a record before it was knowable | Property test over random record streams, corrections, and late arrivals: an oracle that filters by its own knowledge-time ledger returns the same set |
 | DP-2 | **Nothing is revised in place.** A stored record, a dataset day, or a journaled observation is never edited or deleted within its retention. A correction is a new record that names the one it corrects, and its knowledge time is when it arrived | Store tests: a second write of different content for a stored key is refused (already true for DEC-89 datasets); a correction leaves the original readable as of any earlier time |
-| DP-3 | **What drives a decision is journaled.** Every quote, mark, bar window, news item, or filing that a decision, a gate check, or a thesis used is reachable from the journal: as `MarkUpdated` or `GateDecided.quotes_used` on the account stream, or as `ObservationRecorded` with its `data_ref` digest on the agent stream ([journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177)). Each carries its source, feed, vendor time, and receive time, and risk inputs carry `risk_clock` ([mandate spec §5.2](mandate.md#52-inputs-the-risk-clock-and-determinism)) | Replay test: rebuilding every decision from the journal and its artifacts alone gives the same outputs (MI-8); a decision whose input is missing from the journal fails the test |
+| DP-3 | **What drives a decision is journaled.** Every quote, mark, bar window, news item, or filing that a decision, a gate check, or a thesis used is reachable from the journal: as `MarkUpdated` or `GateDecided.quotes_used` on the account stream, or as `ObservationRecorded` with its `data_ref` digest on the agent stream ([journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177)). Each carries its source and feed, and risk inputs carry `risk_clock` ([mandate spec §5.2](mandate.md#52-inputs-the-risk-clock-and-determinism)). **Pending:** each should also carry its vendor time and receive time. `MarkUpdated` holds only instrument, price, source, and feed today, so this clause does not hold until the journal spec change in E2-6 lands (§11 question 2) | Replay test: rebuilding every decision from the journal and its artifacts alone gives the same outputs (MI-8); a decision whose input is missing from the journal fails the test. The vendor-time and receive-time assertions are pending on E2-6's journal spec change and are not to be dropped or weakened in the meantime |
 | DP-4 | **Stale or missing data never adds risk** (rule 3). Without a fresh sane quote, no opening or increasing order is allowed in that instrument, and a stale mark never triggers a flatten ([mandate spec §5.2](mandate.md#52-inputs-the-risk-clock-and-determinism)). Exits and protection continue: risk-reducing orders accept any mark source ([trading spec §8.2](trading-domain.md#82-marks-and-equity)) | Fault injection: drop, delay, or freeze the quote stream at every point; no opening is sent on a quote older than the threshold, and every exit still runs |
-| DP-5 | **Unknown status is not "trading".** An instrument whose status feed is down or not yet resynced is a presumed halt: no market orders, exits as marketable limits ([§4.4](trading-domain.md#44-halts)), and no openings (DEC-433 item 6) | Fault injection on the status channel alone, with quotes still flowing |
-| DP-6 | **One bad print cannot act alone.** A single wrong quote can at most tighten for a moment (a `scale_sizes` rung, a `hard_breach` pending restriction). It never latches a limit, starts a trim or a flatten, or lifts a restriction ([mandate spec §5.6](mandate.md#56-breach-confirmation-dec-49-dec-54); tripwires read no marks, mandate spec §6.7). **Known gap:** today a single high print can raise the high-water mark H, or set E₀ at the close, for good; DEC-433 item 17 proposes the fix | Fuzz: inject one outlier quote anywhere in a random mark sequence; the set of latched limits, trims, and flattens is the same as without it. The H and E₀ cases are pending on item 17 |
+| DP-5 | **Unknown status is not "trading".** An instrument whose status feed is down or not yet resynced is a presumed halt: no market orders, exits as marketable limits ([§4.4](trading-domain.md#44-halts)), and no openings (DEC-433 item 6). One exception, decided by the founder (item 18): on paper with the `iex` profile, if that feed carries no status channel, an opening is allowed on a fresh IEX quote plus an asset read no older than 60 s showing `tradable` | Fault injection on the status channel alone, with quotes still flowing; on a profile with no status channel, an opening without the fresh asset read is refused |
+| DP-6 | **One bad print cannot act alone on a limit.** A single wrong quote never latches a limit, starts a trim or a flatten, or lifts a restriction ([mandate spec §5.6](mandate.md#56-breach-confirmation-dec-49-dec-54); tripwires read no marks, mandate spec §6.7). **Three known gaps, where the invariant does not hold today:** (a) one high print raises the high-water mark H for good; (b) one high print that is the day's last regular-session quote sets E₀; (c) one high print on a held instrument raises E for that evaluation, which loosens the two E-scaled caps and the order builder's cap, so a larger buy is admitted (§8). Gaps (a) and (b) are DEC-433 items 17 and 21; gap (c) is item 22 | Fuzz: inject one outlier quote anywhere in a random mark sequence and compare two things against the run without it: the set of latched limits, trims, flattens, and lifted restrictions; and **the value of every admitted opening order** (computed by the oracle from its own equity ledger, not from the gate's). The H and E₀ cases are pending on items 17 and 21, and the admitted-value case on item 22; each is written as a pending test that fails today, never left out |
 | DP-7 | **Backfill never marks.** Data fetched to fill a gap feeds bars and the store only. A risk mark comes only from a live quote received after the connection was resynced (DEC-433 item 7) | Unit test: a backfilled quote is never a `MarkUpdated` source |
 | DP-8 | **Text is untrusted and inert.** News and filing text reach deterministic code only as bytes, a digest, a length, and structured vendor fields. Text can influence trading only through a research-agent thesis that passes every mandate spec §8.5 check (eligibility floor, allowlist, corroboration, `max_instruments`, autonomy) (RAID R-05) | Prompt-injection fixtures for every source never reach an order (E17-3, E17-7); a type test shows no text type reaches the order builder or the gate |
 | DP-9 | **Only vetted sources.** The data plane fetches only from sources on the allowlist version in effect, and the research query returns only items from it (E17-7, [DEC-101](../project/04-decision-log.md#decisions)) | A fetch to an unlisted endpoint is refused before any byte is sent; a query never returns an unlisted source's item |
@@ -225,9 +230,10 @@ connection problem ([HLD §5](../HLD.md#5-agent-runtime)).
 - **Instrument status.** Each instrument holds one of `trading`, `halted`, `paused_luld`,
   `cooling_off` (after a resume, for the trading spec's cooling-off period), or `unknown`. `unknown`
   is entered at start, at every reconnect, and whenever the status channel is down, and it is a
-  presumed halt (DP-5). On a profile whose feed carries no status channel, status stays `unknown`;
-  whether paper on `iex` may open anyway is DEC-433 item 18. The current LULD band is kept beside
-  the status.
+  presumed halt (DP-5). On a profile whose feed carries no status channel, status stays `unknown`.
+  Paper on `iex` may then still open on a fresh IEX quote plus an asset read no older than 60 s
+  showing `tradable` (DEC-433 item 18, the founder's decision); live stays SIP-only. The current
+  LULD band is kept beside the status.
 
 ### 3.6 How perception receives it
 
@@ -258,7 +264,8 @@ artifact (DP-3).
 
 ### 4.1 Sources
 
-The vendor choice is the founder's (DEC-433 item 16). Categories and options:
+The founder chose the v1 sources (DEC-433 item 16): SEC EDGAR and XBRL in the shared plane, Alpaca
+news per workspace, and no paid vendor before the DEC-99 evaluation passes. Categories and options:
 
 | Category | Options | Cost and license | Recommendation |
 |---|---|---|---|
@@ -314,8 +321,9 @@ Each item is a record: source id, allowlist version at ingestion, vendor id and 
 time, knowledge time, raw-bytes digest, byte length, structured fields, tags, and group key. Text is
 stored only as the raw artifact. Filings and XBRL facts are public and kept indefinitely. Licensed
 news text is kept as the license allows; what a thesis cited is captured as a journal artifact at
-use (DP-3), so a record survives the vendor's retention terms. Whether a license permits that
-six-year copy is DEC-433 item 20.
+use (DP-3), so a record survives the vendor's retention terms. Only what a thesis cited is kept for
+the six years, and a source is allowlisted only if its terms allow that copy; counsel confirms per
+vendor (DEC-433 item 20, the founder's decision).
 
 Amended filings (for example a 10-K/A) and restated XBRL facts are new records; the as-reported
 value stays readable as of any earlier time (DP-1).
@@ -332,9 +340,18 @@ interface in the workspace data service. The agent harness spec defines the tool
 | `instruments`, `kinds`, `window`, `limit` | Filters; instruments by `asset_id` |
 
 Every item returned is journaled as `ObservationRecorded` (source, instrument, `as_of`, `data_ref`)
-**before** the model reads it. Those observations are also what the E17-5 input-drift detector
-folds: source, class, time, digest, and byte length, never text
-([DEC-266](../project/04-decision-log.md#decisions)). In backtests the same interface runs against a
+**before** the model reads it.
+
+The E17-5 input-drift detector does not fold the event's own members. `ObservationRecorded` is
+closed with `source`, `instrument_id`, `as_of`, and `data_ref`, and `as_of` is the run's cut-off,
+the same for every item of a run, so it cannot show a source's arrival pattern. For each news or
+filing item the detector folds a **typed per-item observation**: the source, the class, the item's
+observation instant, the content hash, and the byte length, never text
+([DEC-266](../project/04-decision-log.md#decisions)). That typed record is the artifact the item's
+`ObservationRecorded` names in `data_ref`, so the fold replays from the journal and its artifacts
+([agent harness spec §6.3](agent-harness.md#63-retrieval)). The journal event needs no new member.
+
+In backtests the same interface runs against a
 store snapshot, so research inputs in a backtest are point in time too, although backtests of
 LLM theses are evidence of mechanics only ([DEC-99](../project/04-decision-log.md#decisions)).
 
@@ -451,7 +468,7 @@ has (trading spec §5.6).
 | **Calendar file near its end** | 90 days before its last valid date | Nothing yet; an alert | A release with the next file | Past its end, openings are blocked (§3.5) |
 | **Shared plane down** | Bundles stop or fail verification | Nothing on the trading path | Bundles resume (operator) | §6.4 |
 | **News source down** | Fetches fail | Nothing on the trading path; fewer theses | Source returns | The drift detector sees the arrival gap |
-| **Source revoked** from the allowlist | New allowlist version | New admissions citing it (mandate spec §8.5 check 14) | — | Live theses citing it: DEC-433 item 19 |
+| **Source revoked** from the allowlist | New allowlist version | New admissions citing it (mandate spec §8.5 check 14) | — | Live theses citing it are invalidated: each instrument leaves the working universe, exits only, protection kept (DEC-433 item 19, the founder's decision; it lands in the mandate spec in its own PR) |
 
 ---
 
@@ -460,7 +477,9 @@ has (trading spec §5.6).
 | Who or what | Attempt | What stops it | Residual |
 |---|---|---|---|
 | **Bad tick** (low) | A wrong low quote fires a drawdown or loss limit, or starts a flatten | Breach confirmation and the two-quote hard trigger ([mandate spec §5.6](mandate.md#56-breach-confirmation-dec-49-dec-54)); tripwires read no marks; `stale_mark` never flattens | A `scale_sizes` rung can tighten for a moment; it tightens only |
-| **Bad tick** (high) | A wrong high quote raises the high-water mark, so ordinary prices later look like a drawdown that confirms on real quotes; or a wrong last regular-session quote sets E₀ too high, so the next day's real prices confirm a daily loss | Nothing today | **Open gap.** DEC-433 item 17 proposes that a quote which would raise H, or become E₀, counts only once a second sane quote confirms it |
+| **Bad tick** (high), on H | A wrong high quote raises the high-water mark, so ordinary prices later look like a drawdown that confirms on real quotes | Nothing today | **Open gap.** The founder decided two-quote confirmation for H (DEC-433 item 17). That fix has a cost the decision did not have in view: a genuine spike that prints once at its peak no longer raises H, so a real drawdown from that peak is measured smaller and a rung may not fire. Item 21 puts the trade-off and the alternatives to the founder. Until then the mandate spec is unchanged |
+| **Bad tick** (high), on E₀ | A wrong high quote that is the day's last regular-session quote sets E₀ too high, so the next day's real prices confirm a daily loss | Nothing today | **Open gap.** Item 17's mechanism cannot work here: after the day's last quote there is no later regular-session quote to confirm it before E₀ is set at 00:00. Item 21 proposes the official close instead |
+| **Bad tick** (high), on the caps | A wrong high bid on a held instrument raises E for one evaluation. The per-instrument cap min(`max_position_usd`, `max_position_fraction` × E), the gross-exposure cap min(`max_gross_exposure_usd`, E), and the order builder's `cap` all rise with it, so a buy that should be clipped or denied is sized larger and admitted | The owner's absolute caps: `max_position_usd`, `max_order_usd`, and `max_gross_exposure_usd` are required fields, so the loosened fraction never exceeds them. Nothing else | **Open gap, and the current exposure.** One wrong high print can enlarge one buy, up to the absolute USD caps. E corrects on the next quote and later openings are checked against the true E, but nothing unwinds the position already opened. Example: equity 100,000, `max_position_fraction` 0.50, `max_position_usd` 60,000, one holding worth 40,000. A bid 40% high on it lifts E to 116,000 and the per-instrument cap from 50,000 to 58,000, so a 58,000 buy in another instrument is admitted where 50,000 was the limit. Item 22 asks the founder whether the caps should read a confirmed mark |
 | **Bad tick** (crossed or one-sided) | Mark from a nonsense quote | The sane-quote checks: 0 < bid ≤ ask, spread within the profile's limit (trading spec §8.2) | — |
 | **Poisoned news** | A planted article makes the research agent admit and buy an instrument | Allowlist (no open web, no social media); syndication grouping (one story corroborates nothing); corroboration by an independent source or market data; the drift detector; the eligibility floor; `max_instruments`; admission defaults to `ask`; deterministic sizing; the gate (DP-8, R-05) | A plausible false story on a vetted source can still produce a thesis an owner then approves; the envelope bounds the loss |
 | **Prompt injection in a filing or article** | Text that instructs the model | Text reaches deterministic code only as bytes (DP-8); the model's output is a thesis that passes §8.5 like any other | The harness spec owns model-side defenses |
@@ -513,7 +532,7 @@ All are in [DEC-433](../project/decisions/DEC-433.md).
 |---|---|
 | 1 | This spec is a draft that adds no gate rule; where it overlaps, the trading, mandate, and journal specs win |
 | 2 | Backlog stories continue epic E2 (E2-5 onward), not a new epic |
-| 3 | Until items 15 and 16 are decided: no exchange market data and no licensed text in the shared plane; each workspace uses its own connection |
+| 3 | No exchange market data and no licensed text in the shared plane; each workspace uses its own connection |
 | 4 | Two time axes, event time and knowledge time; point-in-time queries filter on knowledge time |
 | 5 | Quote age from the earlier of vendor time and receive time; future stamps beyond 1,000 ms are not sane; no fresh quote for openings while the host clock is out of tolerance |
 | 6 | A status channel that is down or not resynced is a presumed halt that also blocks openings |
@@ -526,16 +545,24 @@ All are in [DEC-433](../project/decisions/DEC-433.md).
 | 13 | A corporate action first seen after its preparation time blocks openings in the instrument until applied |
 | 14 | Syndicated copies of one story count as one source for corroboration |
 
-**Proposed for the founder** (work continues on the conservative option in brackets):
+**Decided by the founder on 2026-10-03**, each as recommended (DEC-433, "Founder decisions"):
 
-| Item | Question | Recommendation | Until decided |
+| Item | Decision |
+|---|---|
+| 15 | No redistribution of exchange market data in v1 |
+| 16 | SEC EDGAR filings and XBRL facts in the shared plane; Alpaca news per workspace; no paid vendor before the DEC-99 evaluation passes |
+| 17 | A quote that would raise H, or become E₀, counts only after a second sane quote at least min(`breach_confirm_s`, 10 s) later confirms it. It lands as a mandate spec and reference PR first. **Item 21 reports that the E₀ half cannot work as drafted and that the H half has a cost; until the founder rules on item 21, the mandate spec is unchanged** |
+| 18 | Paper on `iex` with no status channel may open on a fresh IEX quote plus an asset read no older than 60 s showing `tradable`; live stays SIP-only |
+| 19 | Revoking a source invalidates every live thesis that cites it |
+| 20 | Keep only what a thesis cited, as journal artifacts; allowlist only sources whose terms allow that; counsel confirms per vendor |
+
+**Proposed for the founder** (raised by the post-merge review; the mandate spec, the gate, and the
+order builder stay unchanged until decided):
+
+| Item | Question | Options | Recommendation |
 |---|---|---|---|
-| 15 | Shared exchange market data (licensing, spend) | Do not license redistribution in v1; revisit with a licensing review and a vendor quote when managed cells host enough workspaces to pay for it | No market data in the shared plane |
-| 16 | News and fundamentals vendors (spend, licensing) | SEC EDGAR and XBRL first; Alpaca news per workspace; no paid vendor before the DEC-99 evaluation passes | EDGAR and per-workspace Alpaca news only |
-| 17 | One high print sets H or E₀ for good (mandate spec gap; changes a safety-critical fold) | A quote that would raise H or become E₀ counts only when a second sane quote at least min(`breach_confirm_s`, 10 s) later confirms it, as the hard trigger already does | Spec unchanged; DP-6's H and E₀ cases stay pending |
-| 18 | Paper on `iex` if the IEX feed carries no status or LULD channel | Allow paper openings on a fresh IEX quote plus an asset read no older than 60 s showing `tradable`; live stays SIP-only (DEC-35) | DP-5 holds: once E2-6 ships, a profile with no status channel opens nothing. Until then the code reads a presumed halt from the latest quote only, as the backlog records |
-| 19 | Live theses that cite a source later revoked | Revocation invalidates them: the instrument is removed (exits only, protection stays) | Operator per-thesis halt; new admissions refused by check 14 |
-| 20 | Keeping licensed news text six years as a record (legal) | Keep only what a thesis cited, as artifacts; counsel to confirm against each vendor's terms | Keep cited items as artifacts; no other licensed text kept beyond the license |
+| 21 | Item 17 as decided does not work for E₀, and its H half weakens the drawdown ladder on a genuine single-print spike | **E₀:** (a) set it from the official close the trading spec already defines (§8.2, "End of day"), with the last confirmed regular-session mark as the fallback if no official close has arrived by 00:00; (b) the last confirmed mark only; (c) leave it. **H:** (a) item 17 as decided; (b) raise H to the lower of two consecutive sane quotes' equity, with no waiting time; (c) a shorter one-sided wait; (d) leave H unconfirmed | E₀ (a). H (b): a wrong print followed by a right one cannot raise H, and a genuine spike keeps all but its single highest quote |
+| 22 | One wrong high print raises E for one evaluation and so enlarges one buy (DP-6 gap (c)) | (a) leave it and disclose it: the absolute USD caps bound it; (b) the E-scaled caps and the builder's `cap` read the lower of the latest E and E on confirmed marks, which can only shrink an opening and never touches an exit; (c) hold any opening for a confirming quote after equity jumps | (b). It only tightens, but it changes the gate and the builder, so it is the founder's |
 
 ---
 
@@ -543,7 +570,7 @@ All are in [DEC-433](../project/decisions/DEC-433.md).
 
 1. Which channels each Alpaca feed carries: trading statuses, LULD bands, and corrections on `iex`
    and on `sip`; the symbol and connection limits per plan. Verify against the vendor's
-   documentation before E2-5 (feeds item 18).
+   documentation before E2-5 (it decides whether item 18's exception is ever used).
 2. `MarkUpdated` carries instrument, price, source, and feed ([journal spec §9](journal.md#9-event-catalogue)).
    DP-3 wants the quote's vendor time and receive time too. A journal spec change, proposed in its
    own PR (E2-6).
@@ -552,4 +579,11 @@ All are in [DEC-433](../project/decisions/DEC-433.md).
 5. Robinhood's data path over MCP: polling cadence, quote freshness, and whether status data
    exists (RAID R-25). Decided in its connector story.
 6. How a source is vetted and who signs off (mandate spec §12 item 8).
-7. Whether DP-6's fix (item 17) should also treat a quote outside the current LULD band as not sane.
+7. Whether DP-6's fix (items 17 and 21) should also treat a quote outside the current LULD band as
+   not sane.
+8. DEC-433 item 14 redefines "independent source" for mandate spec §8.5 check 15: syndicated copies
+   of one story are one source. The mandate spec does not say so yet, and the built check in
+   `crates/mandate-research` counts raw cited sources, so until both change a story repeated by
+   several vetted outlets still corroborates itself at admission. The amendment tightens only, so an
+   agent may take it under DEC-176; it lands as a mandate spec and reference-case PR first, then
+   tests, then code (E2-15). E2-10's grouping alone does not close the R-05 path.

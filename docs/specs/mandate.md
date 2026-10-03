@@ -20,6 +20,11 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-432](../project/decisions/DEC-432.md) item 18, under DEC-176):** §8.1's
+  content-hash sentence lists everything the hash covers for a model called through the gateway, as
+  inference spec §4.1 defines it, and says endpoints and status are outside it. It pins more, so it
+  only tightens; no rule, case, or fixture changes, since the reference cases carry hashes as
+  opaque values.
 - **v0.6, amended ([DEC-438](../project/decisions/DEC-438.md) item 10, under DEC-176):** §6.4's
   notification payload and §6.7's tripwire alert carry a random notice id instead of the approval's
   or the limit event's id, since a ULID's leading bits are its creation time. It only sends less to
@@ -38,6 +43,11 @@ builder, versioning, change classification, and the records kept.
   `open_sell_qty`, which the seven trim cases state as `'0'` with no expectation changed. MC-B36
   (a 1-share remainder beside 2 resting, at a 3-share minimum the whole excess would meet, is
   withheld) and MC-B37 (the same remainder at a 1-share minimum is the trim) are added (§11).
+- **v0.6, amended ([DEC-436](../project/decisions/DEC-436.md) items 9 and 19, the workspace API
+  spec; tightening only, DEC-176):** §6.4's check 7 counts an owner-connected client as the user it
+  acts for (`on_behalf_of`): a version proposed through a client has that user as its author, and a
+  grant can never come from a client (check 3 already refuses any actor not of kind `user`). No
+  rule loosens; no case or fixture changes.
 - **v0.6, amended ([DEC-423](../project/decisions/DEC-423.md)):** §5.5's `trim_to_target`
   minimum no longer withholds a trim of the whole position. That trim is a sell closing the full
   position by its exact quantity, which [trading spec §5.3](trading-domain.md) rule 2 exempts from
@@ -936,7 +946,7 @@ journaled on `ApprovalResponded` with result `refused`:
 | 4 | The request was delivered on at least one channel | `not_delivered` |
 | 5 | The response repeats the request's content hash | `content_mismatch` |
 | 6 | Step-up evidence is valid at the effective time (§6.1) | `step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method` |
-| 7 | The responder is not already in the approval's grant set, and, when independence is required, is not the mandate's author. The requirement is the **stricter** of the bound `approvers` and the workspace policy overlay (§4.3) current at the effective time: independence is required if either requires it, and the approver count is the larger of the bound `required` and the overlay's (2 when the overlay's `two_approver_above_usd` is set and `order_usd` exceeds it, else 1) | `duplicate_approver`, `not_independent` |
+| 7 | The responder is not already in the approval's grant set, and, when independence is required, is not the mandate's author. A version proposed through an owner-connected client is authored by the user the client acts for (`on_behalf_of`, [workspace API spec §3.3](workspace-api.md#33-authentication-and-sessions)), so proposing through one's own client never makes one independent of the result. The requirement is the **stricter** of the bound `approvers` and the workspace policy overlay (§4.3) current at the effective time: independence is required if either requires it, and the approver count is the larger of the bound `required` and the overlay's (2 when the overlay's `two_approver_above_usd` is set and `order_usd` exceeds it, else 1) | `duplicate_approver`, `not_independent` |
 
 A grant that passes all seven joins the approval's grant set. It is `admitted` if the set now holds
 check 7's approver count of distinct approvers, none of them the mandate's author while check 7
@@ -1282,7 +1292,13 @@ until the owner confirms them, §7), because they only reduce risk.
 - A signal model is a registered component with an id (`quant.`, `fast.`, or `llm.` prefix), a
   semantic version, and a **content hash** of its code, prompt, parameter schema, and underlying
   model identity (provider, model name, and version, or weights hash); the mandate pins all three
-  (V-007). **Signal models never place orders.**
+  (V-007). For a model called through the model gateway, the hash also covers the rest of the
+  registry entry's pinned content: the retrieval plan, the output schema and validation bounds, the
+  call deadline, the output-token limit, the sampling parameters, the quantization of open weights,
+  the methodology text, and the authorship label
+  ([inference spec §4.1](inference.md#41-registry-entry), DEC-432 items 17 and 18). The entry's
+  endpoints and status are **not** in the hash: a routing or status change never changes a pin.
+  **Signal models never place orders.**
 - **The model gateway never substitutes a model** (DEC-67): a fallback may route only to another
   endpoint serving the identical pinned model; otherwise the call fails and the output counts as
   missing (§8.3). The platform withdraws a model version only through a journaled

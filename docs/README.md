@@ -35,12 +35,16 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Notifications and approval channels spec](specs/notifications.md) | Draft v0.1: every outbound notice and channel, the opaque payload, the dispatcher and relay, acting from a notification inside the workspace, failure walk, and adversaries ([DEC-438](project/decisions/DEC-438.md)) |
 | [Identity, tenancy, and authentication spec](specs/identity.md) | Draft v0.1: principals, organizations, workspaces, memberships and the V-047 user count, roles and the permission matrix, passkeys and OIDC, sessions, action-bound step-up, separation of duties, tenant isolation at every layer, recovery and break-glass, hybrid identity providers, and adversaries ([DEC-437](project/decisions/DEC-437.md)) |
 | [Agent harness spec](specs/agent-harness.md) | Draft v0.1: how a confirmed mandate version becomes a running agent process; construction and lifecycle, the trading and research loops, retrieval, model inputs and output checks, budgets, evaluation and change control, adversaries, and the founder's budget, evaluation, and licence decisions ([DEC-431](project/decisions/DEC-431.md)) |
+| [Broker connections spec](specs/connections.md) | Draft v0.1: the connection object (references, never secrets), connector capabilities, Alpaca keys and OAuth, Robinhood Agentic Trading over MCP, permission and health checks, lifecycle walk, and adversaries ([DEC-441](project/decisions/DEC-441.md)) |
+| [Workspace services API spec](specs/workspace-api.md) | Draft v0.1: the contract between the backend and the web app, the CLI, and owner-connected agents: owner input journaled on the control stream, roles and client scopes, idempotency, errors, read models, exports, failure walk, and adversaries ([DEC-436](project/decisions/DEC-436.md)) |
 
 ## Design
 
 | Document | Purpose |
 |---|---|
 | [Infrastructure and operations](design/infrastructure.md) | Draft v0.2: environments, invariants, runtime topology, data stores, secrets and the vault, backups and disaster recovery, deploy and upgrade, observability and on-call, security baseline, cost model, failure walk (DEC-434) |
+| [Billing](design/billing.md) | Draft v0.1: invariants, plans and entitlements, quota enforcement before spend, the metering pipeline from journaled counts to invoices, the provider interface, the non-payment ladder that never touches exits, adversaries (DEC-442) |
+| [Global control plane](design/control-plane.md) | Draft v0.1: what the thin global plane holds and never holds, invariants CP-1 to CP-12, directory, licenses, fleet, relay, metering, distribution, anchor witness, the closed message set, the unavailability walk, adversaries (DEC-440) |
 
 ## Security
 

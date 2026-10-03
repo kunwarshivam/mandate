@@ -419,7 +419,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `CorporateActionPrepared`, `CorporateActionApplied` | ins | instrument, action, ratio or amount, ex-date |
 | `ProtectionChanged` | — | instrument, action, orders, unprotected-interval start or end |
 | `BrokerPositionObserved`, `ReconciliationRun`, `CompensatingEvent`, `AccountSnapshotRecorded` | — | observed values, differences, corrected event IDs, daily snapshot |
-| `AccountStateObserved`, `RejectObserved`, `AccountRestrictionChanged` | — | status, flags, reject code and message, restriction |
+| `AccountStateObserved`, `RejectObserved`, `AccountRestrictionChanged` | — | status, flags, reject code and message, restriction; for `AccountRestrictionChanged`, its `cause` (`broker_reject`, `broker_notice`, `connection_unavailable`; [trading spec §7.3](trading-domain.md#73-account-restrictions), [DEC-441](../project/decisions/DEC-441.md) item 23) |
 | `ExternalActivityIngested`, `RelatedAccountsCoordination` | — | unattributed activity; canceled opening orders across the group |
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
 | `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | gating facts, copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
