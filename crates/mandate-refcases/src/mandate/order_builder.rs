@@ -22,9 +22,11 @@
 //! **The gate's other inputs** are DEC-178's "every other check passes" environment, as for family
 //! G: a healthy risk state at the case's equity, a margin account at the fixture's
 //! `account_equity_usd`, and a liquid, tradable, unhalted listing of the pinned instrument, quoted at
-//! the case's own bid and ask at `now`, whose minimum order size is the case's `qty_increment`;
-//! on a `trim_to_target` base, the trim call reads the case's `min_order_size` instead, which such
-//! a case must state, as `ref.py` requires (DEC-399 item 8).
+//! the case's own bid and ask at `now`, whose minimum order size is the case's `qty_increment`.
+//! A `trim_to_target` base's trim inputs make one scene for both of its gate calls, the trim and
+//! the builder's dry run: the instrument's minimum is the case's `min_order_size`, which such a
+//! case must state, as `ref.py` requires (DEC-399 item 8), the confirmed `scale_sizes` rung has
+//! been active for `scale_active_s`, and the goal is Holding when `holding` says so.
 //!
 //! **What the harness fills.** The fixture header's four defaults (`session` regular,
 //! `in_close_window` false, fee rates 0, `has_prior_fill` = position above zero) and `ref.py`'s
@@ -181,7 +183,7 @@ pub(super) fn builder_case(fixture: &Json, case: &Json) -> Result<(), String> {
     let stated = Inputs::read(document, input)?;
     let config = test_default_gate_config()?;
     if document.risk.scale_action == spec_doc::ScaleAction::TrimToTarget {
-        return trim_first(fixture, document, &stated, &config, input, expect);
+        return trim_first(fixture, document, &stated, &config, expect);
     }
     for key in TRIM_INPUT_KEYS {
         ensure(input.get(key).is_none(), || {
@@ -217,30 +219,13 @@ fn trim_first(
     document: &Mandate,
     stated: &Inputs,
     config: &gate::GateConfig,
-    input: &Json,
     expect: &Json,
 ) -> Result<(), String> {
-    let active_s = match input.get("scale_active_s") {
-        None => 0,
-        Some(value) => value
-            .as_u64()
-            .ok_or("`scale_active_s` is not a whole number of seconds")?,
-    };
-    let holding = flag_or(input, "holding", false)?;
-    let min_order_size = num(
-        Qty::parse(str_at(input, "min_order_size")?),
-        "min_order_size",
-    )?;
-    let goal_state = if holding {
-        GoalState::Holding
-    } else {
-        GoalState::Running
-    };
-    let mut scene = Scene::read(fixture, document, stated, config, goal_state)?;
-    if let Some(rung) = scaling_rung(document, stated.gate_size_factor)? {
-        scene.risk.active_rungs.insert(rung, active_s);
-    }
-    scene.instrument.min_order_size = min_order_size;
+    let trim = stated
+        .trim
+        .as_ref()
+        .ok_or("a `trim_to_target` base read no trim inputs")?;
+    let scene = Scene::read(fixture, document, stated, config)?;
     let instruments = BTreeMap::from([(
         scene.instrument.instrument.clone(),
         scene.instrument.clone(),
@@ -272,13 +257,7 @@ fn trim_first(
         proposal.sizes.current_mv,
         exact(expect, "current_mv")?,
     )?;
-    let guards = trim_guards(
-        document,
-        stated,
-        &clock,
-        expect,
-        (active_s, holding, min_order_size),
-    )?;
+    let guards = trim_guards(document, stated, &clock, expect, trim)?;
     let unguarded = guards.as_ref().is_some_and(Vec::is_empty);
     let judged = match (trims.as_slice(), unguarded) {
         ([trim], true) => compare_trim(document, stated, &clock, &proposal, trim, expect),
@@ -315,7 +294,7 @@ fn trim_guards(
     stated: &Inputs,
     clock: &gate::SessionAt,
     expect: &Json,
-    (active_s, holding, min_order_size): (u64, bool, Qty),
+    trim: &TrimInputs,
 ) -> Result<Option<Vec<&'static str>>, String> {
     let factor = UsdExact::of_ratio(stated.gate_size_factor);
     let one = num(UsdExact::parse("1"), "one")?;
@@ -342,17 +321,17 @@ fn trim_guards(
     )?
     .min(stated.position);
     let mut guards = Vec::new();
-    if active_s < u64::from(document.risk.breach_confirm_s) {
+    if trim.active_s < u64::from(document.risk.breach_confirm_s) {
         guards.push("rung_not_confirmed");
     }
-    if holding {
+    if trim.holding {
         guards.push("holding");
     }
     if stated.asset_class == AssetClass::UsEquity && clock.session != gate::Session::Regular {
         guards.push("regular_session_only");
     }
     let closes_the_position = sell == stated.position;
-    if sell < min_order_size && !closes_the_position {
+    if sell < trim.min_order_size && !closes_the_position {
         guards.push("below_minimum_order");
     }
     Ok(Some(guards))
@@ -471,7 +450,7 @@ fn judge(
             )),
         };
     };
-    let scene = Scene::read(fixture, document, stated, config, GoalState::Running)?;
+    let scene = Scene::read(fixture, document, stated, config)?;
     let proposed = order.proposed(stated.instrument_id()?, scene.next_order_id);
     let decision = gate::evaluate(&scene.input(stated.now, &proposed))
         .map_err(|e| gate_error("evaluate", &e))?;
@@ -766,6 +745,36 @@ struct Inputs {
     state: GateState,
     stated_session: MarketSession,
     stated_close_window: bool,
+    /// §5.5's trim inputs, read on a `trim_to_target` base only. Both gate calls on such a base,
+    /// the trim and the builder's dry run, see them through one [`Scene`] (#498 review, m3).
+    trim: Option<TrimInputs>,
+}
+
+/// What a `trim_to_target` case states for §5.5's guards: how long the rung has been active, whether
+/// the goal is Holding, and the instrument's minimum order size, which `ref.py` requires.
+struct TrimInputs {
+    active_s: u64,
+    holding: bool,
+    min_order_size: Qty,
+}
+
+impl TrimInputs {
+    fn read(input: &Json) -> Result<Self, String> {
+        let active_s = match input.get("scale_active_s") {
+            None => 0,
+            Some(value) => value
+                .as_u64()
+                .ok_or("`scale_active_s` is not a whole number of seconds")?,
+        };
+        Ok(Self {
+            active_s,
+            holding: flag_or(input, "holding", false)?,
+            min_order_size: num(
+                Qty::parse(str_at(input, "min_order_size")?),
+                "min_order_size",
+            )?,
+        })
+    }
 }
 
 impl Inputs {
@@ -920,6 +929,10 @@ impl Inputs {
             )?)
             .map_err(|e| format!("`session`: {}", e.code()))?,
             stated_close_window: flag_or(input, "in_close_window", false)?,
+            trim: match document.risk.scale_action {
+                spec_doc::ScaleAction::TrimToTarget => Some(TrimInputs::read(input)?),
+                spec_doc::ScaleAction::LimitBuys => None,
+            },
         })
     }
 
@@ -1172,7 +1185,6 @@ impl Scene {
         document: &Mandate,
         stated: &Inputs,
         config: &gate::GateConfig,
-        goal_state: GoalState,
     ) -> Result<Self, String> {
         let account_equity = num(
             Usd::parse(str_at(
@@ -1216,6 +1228,18 @@ impl Scene {
             next_id = next_id.saturating_add(1);
         }
         let agent_equity = stated.account.agent_equity;
+        let mut instrument_snapshot = listing(stated, instrument, one)?;
+        let mut active_rungs = BTreeMap::new();
+        let mut goal_state = GoalState::Running;
+        if let Some(trim) = &stated.trim {
+            instrument_snapshot.min_order_size = trim.min_order_size;
+            if let Some(rung) = scaling_rung(document, stated.gate_size_factor)? {
+                active_rungs.insert(rung, trim.active_s);
+            }
+            if trim.holding {
+                goal_state = GoalState::Holding;
+            }
+        }
         Ok(Self {
             mandate: gate_mandate(document, goal_state)?,
             config: config.clone(),
@@ -1226,7 +1250,7 @@ impl Scene {
                 capital_base: agent_equity,
                 inherited_loss: Usd::ZERO,
                 latched: BTreeSet::new(),
-                active_rungs: BTreeMap::new(),
+                active_rungs,
                 size_factor: stated.gate_size_factor,
                 agent_mode: gate::AgentMode::Normal,
             },
@@ -1260,7 +1284,7 @@ impl Scene {
                 orders_today: state.orders_today,
                 day_trades: gate::DayTradeLedger::default(),
             },
-            instrument: listing(stated, instrument, one)?,
+            instrument: instrument_snapshot,
             market: gate::MarketSnapshot {
                 quote: Some(gate::SaneQuote {
                     bid: stated.bid,
@@ -1693,6 +1717,41 @@ mod tests {
         })?;
         run(whole_position, "MC-B17")
             .map_err(|e| format!("MC-B17 as 1 share below a 2-share minimum: {e}"))
+    }
+
+    /// Both gate calls on a `trim_to_target` base see one scene (#498 review, m3). MC-B01, a
+    /// 7-share opening buy, moved onto the trim base, where no trim is due at a factor of one, so
+    /// its order reaches the builder's dry run:
+    /// - at a `min_order_size` of 7 it passes as stated;
+    /// - at 8 the dry run reads that minimum too, so the gate meets trading spec §5.3 rule 2 for the
+    ///   opening, where a dry run on `qty_increment` would allow it. Until DEC-129 item 27 gives
+    ///   rule 2 its reason code the gate refuses to decide, naming the rule; after it, the case
+    ///   fails at `gate_dry_run`. Either names the minimum's rule or the dry run.
+    ///
+    /// The scene's Holding goal and active rung reach the dry run too, but only `trim_proposals`
+    /// reads either, so no dry run can show them.
+    #[test]
+    fn both_gate_calls_on_a_trim_base_see_one_scene() -> Result<(), String> {
+        let fixture = fixture()?;
+        let on_the_trim_base = |minimum: &str| {
+            doctored(&fixture, "MC-B01", "", |case| {
+                if let Some(members) = case.as_object_mut() {
+                    members.insert("base".to_owned(), json!("two_stock_swing_trim"));
+                }
+                put(case, "input", "min_order_size", json!(minimum));
+            })
+        };
+        run(on_the_trim_base("7")?, "MC-B01")
+            .map_err(|e| format!("MC-B01 on the trim base at a 7-share minimum: {e}"))?;
+        match run(on_the_trim_base("8")?, "MC-B01") {
+            Ok(()) => Err("MC-B01 on the trim base at an 8-share minimum: the case still passed")?,
+            Err(e) if e.contains("gate_dry_run") || e.contains("§5.3 rule 2") => {}
+            Err(e) => Err(format!(
+                "MC-B01 on the trim base at an 8-share minimum: the failure names neither \
+                 `gate_dry_run` nor §5.3 rule 2: {e}"
+            ))?,
+        }
+        Ok(())
     }
 
     /// Sets `key` in the case's `object` member, adding it if the case does not state it.
