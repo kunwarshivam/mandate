@@ -108,7 +108,9 @@
    controls, eligibility, day-trade budgets, buying power, or opening-session rules.** Risk exits,
    protective orders, and automated kill switches are exempt from all of them; owner exits are paced
    only by participation caps; discretionary exits (signal or goal driven) are paced by conduct
-   controls but never denied (§9.6). Exits and protective
+   controls but never denied (§9.6), except when the exits already allowed sell the whole position,
+   so nothing is left for it to sell; then it is refused `sell_exceeds_available` as DEC-410 item 3
+   says. Exits and protective
    orders may be held only by agent mode `paused` or `stopped` (state integrity), by an `Unknown`
    order in the same instrument, or by the broker. **The kill switch is always available** and
    does not depend on model state (§5.5).
@@ -344,7 +346,7 @@ queued by the broker for the next eligible session.
      With nothing left, it is denied `sell_exceeds_available`, but only once it is otherwise
      releasable now: one held `session_closed`, `session_unknown` or `exit_unpriced` keeps its
      hold and is decided again when it is released. The denial is terminal: the intent is not
-     retried, and a later proposal is judged afresh (DEC-410 item 3, Proposed).
+     retried, and a later proposal is judged afresh (DEC-410 item 3).
    - **Protective placements** are not gated here; §5.4 sizes them.
 5. **One side at a time:** an agent's non-protective orders in an instrument are all on the same
    side (`working_order_limit`). Before a risk-reducing sell, the executor cancels the agent's own
