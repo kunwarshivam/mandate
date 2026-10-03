@@ -523,17 +523,24 @@ mod tests {
     /// #571 review, B2). Half a share stays above target until the resting sell ends, and the trim
     /// is evaluated again then.
     ///
-    /// The instrument is marked fractionable with a grid of 1, so that until the implementation PR
-    /// the row stops at the grid stub's own report (DEC-77); the implementation reads only the grid.
+    /// The scene is run twice on a grid of 1: first marked fractionable, so that until the
+    /// implementation PR the row stops at the grid stub's own report (DEC-77), then untouched, a
+    /// whole-share instrument that is not fractionable, so that an implementation keying the
+    /// reading on `fractionable` fails here (#571 review, round 2, B4).
     #[test]
     #[ignore = "pending E6-4"]
     fn an_off_grid_remainder_beside_a_resting_sell_is_truncated_onto_the_grid()
     -> Result<(), GateError> {
-        let mut whole = Scene::new("2.5", "250")?;
-        whole.risk.size_factor = Ratio::ZERO;
-        whole.instrument.fractionable = true;
-        whole.resting(7, "1", Side::Sell, false, true)?;
-        assert_eq!(whole.trims()?, qty("1")?);
+        let scene = || -> Result<Scene, GateError> {
+            let mut whole = Scene::new("2.5", "250")?;
+            whole.risk.size_factor = Ratio::ZERO;
+            whole.resting(7, "1", Side::Sell, false, true)?;
+            Ok(whole)
+        };
+        let mut fractionable = scene()?;
+        fractionable.instrument.fractionable = true;
+        assert_eq!(fractionable.trims()?, qty("1")?, "marked fractionable");
+        assert_eq!(scene()?.trims()?, qty("1")?, "a whole-share instrument");
         Ok(())
     }
 

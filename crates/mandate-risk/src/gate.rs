@@ -2518,7 +2518,9 @@ mod tests {
     /// - an order cap of 1.0 at a 1.1 minimum slices at 1.25, the minimum rounded up onto the
     ///   grid, never at an off-grid 1.1 (#571 review, M1);
     /// - an order cap of 0.2, above zero but below one step of the grid, slices at the minimum of
-    ///   1 rather than releasing the exit whole (#571 review, B3).
+    ///   1 rather than releasing the exit whole (#571 review, B3);
+    /// - a daily cap of 10 with 9.9 used today leaves 0.1, the same corner on the daily cap: it
+    ///   slices at 1 under `DailyParticipation` (#571 review, round 2, M4).
     #[test]
     #[ignore = "pending E6-4"]
     fn a_slice_truncates_to_the_venue_s_quantity_grid() -> Result<(), GateError> {
@@ -2548,6 +2550,7 @@ mod tests {
                 owner("200", "0.6", "1")?,
                 owner("20", "0", "1.1")?,
                 owner("4", "0", "1")?,
+                owner("200", "9.9", "1")?,
             ],
             [
                 by_order_cap("9.75")?,
@@ -2557,6 +2560,10 @@ mod tests {
                 )),
                 by_order_cap("1.25")?,
                 by_order_cap("1")?,
+                Some((
+                    Qty::parse("1")?,
+                    [crate::PacingControl::DailyParticipation].into()
+                )),
             ],
             "a slice is a whole number of the venue's increment, at least the on-grid minimum"
         );
@@ -2610,31 +2617,39 @@ mod tests {
     /// slices nothing, which this row asserted on `main`; #571 review, B3). The exit leaves at 1
     /// share an interval, over ten intervals, instead of at once.
     ///
-    /// The instrument is marked fractionable with a grid of 1, so that until the implementation PR
-    /// the row stops at the grid stub's own report (DEC-77); the implementation reads only the grid.
+    /// Each exit is run twice on a grid of 1: first marked fractionable, so that until the
+    /// implementation PR the row stops at the grid stub's own report (DEC-77), then on the real
+    /// case, a whole-share instrument that is not fractionable, so that an implementation keying
+    /// the reading on `fractionable` fails here (#571 review, round 2, B4).
     #[test]
     #[ignore = "pending E6-4"]
     fn a_positive_cap_below_one_step_slices_at_the_minimum() -> Result<(), GateError> {
-        for origin in PACED_EXITS {
+        let exit = |origin: Origin, fractionable: bool| -> Result<_, GateError> {
             let mut o = allowing()?.selling(origin)?;
             o.market.trailing_5m_volume = Some(Qty::parse("19")?);
             o.market.adv_20d = Some(Qty::parse("200")?);
-            o.instrument.fractionable = true;
+            o.instrument.fractionable = fractionable;
             let d = o.decide()?;
-            assert_eq!(
-                (
-                    d.verdict,
-                    d.pacing.map(|pacing| (pacing.qty, pacing.applied))
-                ),
-                (
-                    Verdict::Allow,
-                    Some((
-                        Qty::parse("1")?,
-                        [crate::PacingControl::OrderSizeParticipation].into()
-                    ))
-                ),
-                "{origin:?}: a positive cap below one step slices at the on-grid minimum"
-            );
+            Ok((
+                d.verdict,
+                d.pacing.map(|pacing| (pacing.qty, pacing.applied)),
+            ))
+        };
+        for origin in PACED_EXITS {
+            for fractionable in [true, false] {
+                assert_eq!(
+                    exit(origin, fractionable)?,
+                    (
+                        Verdict::Allow,
+                        Some((
+                            Qty::parse("1")?,
+                            [crate::PacingControl::OrderSizeParticipation].into()
+                        ))
+                    ),
+                    "{origin:?}, fractionable {fractionable}: a positive cap below one step \
+                     slices at the on-grid minimum"
+                );
+            }
         }
         Ok(())
     }
