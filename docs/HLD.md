@@ -495,8 +495,9 @@ sequenceDiagram
 3. The agent keeps managing everything else while it waits. **Risk-reducing actions stay automatic.**
 4. The **approval service**, which runs in the workspace deployment, sends notifications
    according to user preferences and an escalation chain (push → SMS → phone call), respecting
-   quiet hours. **Notifications carry only an opaque ID and generic text** ("Agent
-   btc-accumulator needs approval"), never the trade itself. Push goes through our relay; SMS,
+   quiet hours. **Notifications carry only an opaque ID and generic text** ("An agent in your
+   workspace needs your approval"), never the trade itself or the agent's name
+   ([notifications spec](specs/notifications.md)). Push goes through our relay; SMS,
    email, and chat can go through the customer's own gateways. Large actions can require
    **two approvers**.
 5. The approver opens the request. The app fetches the details **directly from the approval
@@ -727,7 +728,9 @@ spike (`python/research_spike`).
    MCP into the customer's dedicated agentic account), Kraken Derivatives US third (CFTC-regulated
    crypto perpetuals), then Interactive Brokers and Coinbase US futures. The platform serves the
    United States first.
-6. **Approval channels in v1.** A native mobile app for push, or SMS, email, and Slack / Telegram first.
+6. **Approval channels in v1 (decided, [DEC-19](project/04-decision-log.md#decisions)).** Web push,
+   email, and one chat channel; SMS and phone next; a native mobile app later. The staging by
+   milestone is Proposed in [DEC-438](project/decisions/DEC-438.md).
 7. **Mobile access to on-site approval services.** Whether approvers reach the customer's
    approval service through the customer's VPN, through our relay with end-to-end encryption,
    or both; and how the mobile app is distributed to firms that require device management.

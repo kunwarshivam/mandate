@@ -793,11 +793,17 @@ the spec invariants (DP-n) its tests cover.
   - add the per-order approval to §4.3's list of what `independent_approval_required` scopes.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
+  *Spec:* [notifications spec](../specs/notifications.md) ([DEC-438](decisions/DEC-438.md)). The
+  story is split into E8-9 to E8-14 below; E8-4 is done when they are.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded
   from our workspace deployment, so that trading intent stays private.
   *Accepted when:* captured relay and provider payloads contain no instrument, size, price, or thesis.
+  *Spec:* NT-1's canary test ([notifications spec §2](../specs/notifications.md#2-invariants)) is this
+  acceptance, run for every channel as E8-11, E8-12, and E8-14 land.
 - **E8-6 (Should)** As a fund, I want two approvers above a threshold.
 - **E8-7 (Should)** As an approver, I want SMS and phone escalation.
+  *Spec:* same payload and records as every push channel (notifications spec §4.1); the ordered
+  chain needs a mandate schema field first (spec §12 item 5).
 - **E8-8 (Should)** As an owner, I want to answer an ask with "let it do this for a while", within
   caps I set in dollars, orders, and days, so that the agent stops asking me about what I have
   already said yes to ([ADR-0003](../adr/0003-earned-autonomy.md) parts 2 and 3, [DEC-181](04-decision-log.md#decisions)). The spec is
@@ -813,19 +819,151 @@ the spec invariants (DP-n) its tests cover.
   bounds each delegation on its own, so twenty delegations can each carry `max_total_usd` equal to the allocation. That is
   the spec's reading, and the gate enforces every limit regardless (§6.5). The approval card and the MC-U family should
   consider the aggregate, which is the V-045 the criteria above name and the mandate spec does not yet define.
+- **E8-9 (Must, M7; SC)** As an owner, I want every notice, alerts included, built from one closed
+  payload type so that nothing about my trading can reach a provider
+  ([notifications spec §3, §4.2, §5.5](../specs/notifications.md), DEC-438 items 1, 2, 5, 17).
+  Tests first. *Accepted when:* `GenericText` holds `approval_needed`, `attention_needed`,
+  `account_changed`, and `brief_ready`; the payload is `{"notice", "text"}` with a minted
+  `NoticeId` that has no constructor from an event id (NT-1, NT-4); a closed kind enum replaces
+  `NotificationRef.message_key` in `mandate-runtime` and `mandate-executor`, and every kind in spec
+  §3.2 maps to its class and text key; each stream owner writes `OwnerAlertSent` with the kind in
+  the subject's batch, and none for a `KillSwitchActivated` caused by an owner command (spec §3.4);
+  the payload schemas of journal v0.12's `OwnerAlertSent`, `NoticeIssued`, and `NoticeAttempted`
+  are closed in the same tests PR; a wording test holds NT-12.
+- **E8-10 (Must, M7; SC)** As an owner, I want a dispatcher that turns committed events into sends,
+  retries them, and records every outcome, so that no alert is lost and none adds risk
+  (spec §5.1 to §5.8, DEC-438 items 4 to 9, 15, 16, 27 to 29). Tests first, against a fixture
+  channel. *Accepted when:* the dispatcher runs as its own process, writes only the notice stream,
+  sends only about committed causes, and journals every attempt (NT-8, crash injection at every
+  step, and a second dispatcher fenced by epoch); one user kill switch is one notice (spec §3.4);
+  recipients match the identity spec's receive column read as data (NT-10); quiet hours act by class (NT-7, the DST cases); safety
+  storms are coalesced and never dropped, with the journal-derived oracle of NT-6 seeded with a
+  dropping bug first to show it fails; with every channel failing, a soak's intents and modes match
+  perfect delivery except asks that skip (NT-5); the kill-switch and exit suites pass with the
+  dispatcher hung (NT-9); a lost address alerts on the other channels (spec §5.6).
+- **E8-11 (Must, M7; SC)** As an approver, I want email notices (spec §4.4). Provider per DEC-438
+  item 21; until the founder decides, the adapter runs against a recorded fixture only.
+  *Accepted when:* NT-1's canary test passes on captured messages; links match `<origin>/n/<ULID>`
+  (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider configuration check.
+- **E8-12 (Must, M7; SC)** As an approver, I want one chat channel (spec §4.5), Slack or Telegram
+  per DEC-438 item 20. *Accepted when:* NT-1's canary test passes; every inbound message, button, or
+  callback leaves the control stream unchanged (NT-3); the webhook URL or bot token is read only
+  from the vault and appears in no log (rule 7).
+- **E8-13 (Must, M9 and M10; SC)** As an approver, I want to open a notice, sign in, and answer
+  inside my workspace (spec §6, G4), with `web_inbox` as a pull channel (DEC-438 item 3). Depends on
+  the workspace API and identity specs (DEC-436, DEC-437). *Accepted when:* a captured link with no
+  session reaches only sign-in (NT-4); another workspace's subject answers as a missing one (NT-10);
+  a grant needs step-up per mandate spec §6.1 and a skip does not; a closed request shows its
+  terminal state; the service worker and pages cache no approval content (P5).
+- **E8-14 (Must, M10; SC)** As an approver, I want web push, through the relay where a deployment's
+  egress requires it (spec §4.6, DEC-438 item 13). *Accepted when:* payloads are encrypted to the
+  subscription; the relay refuses ciphertext over 512 bytes and stores none; NT-1's canary test
+  passes on relay and push-service captures; a relay outage changes no trading state (NT-9).
+- **E8-16 (Should, M7)** As a reviewer, I want the minors of the notifications spec's round 1
+  ([#558](https://github.com/kunwarshivam/mandate/pull/558); freeze rule) fixed in the spec:
+  - HLD §6 flow C step 4 still says "an escalation chain (push → SMS → phone call)"; align it with
+    DEC-438 item 6's fan-out.
+  - The Telegram linking code: state its lifetime, entropy, and single use, and add the residual to
+    §9 (whoever obtains the code binds their own chat and receives the opaque notices).
+  - NT-1's wording against the relay envelope: the `urgency` and TTL the relay and push service see
+    are fixed per class, and the push endpoint is an address under NT-2.
+  - A rung-2 guard that no mail adapter ships while `[[EMAIL-FOOTER]]` is unresolved.
+  - NT-5: state why check 4 is the only effect (no exit, protective order, or risk exit is ever
+    gated by an approval, rule 13), so the claim survives a later autonomy change.
+  - NT-6: say that a notice joining a coalescing window meets the 60-second bound at the window's
+    end.
+  - Round 2 nits: §3.2's preamble says every non-approval kind is caused by an `OwnerAlertSent`,
+    but `channel_lost` is caused by the dispatcher's own `NoticeAttempted` (§3.4 has it right);
+    say where the journal change is described that `StreamType` and `StreamId::parse` in
+    `mandate-journal` are a closed four-variant type E8-10 must extend first; E8-9 reconciles the
+    mandate reference cases' `OwnerAlertSent` `{subject, text: "tripwire_fired"}` with §3.2's
+    `kind`; keep one sentence, here or in the workspace API spec §3.9, for what
+    `ApprovalRef::of_requested_event` becomes.
 
 ### E9 Identity, tenancy, and policy
 
-- **E9-1 (Must)** As a user, I want to sign in with passkey or OIDC SSO.
-- **E9-2 (Must)** As an admin, I want organizations, workspaces, and roles.
+The [identity spec](../specs/identity.md) (v0.1 draft, [DEC-437](decisions/DEC-437.md)) defines these
+stories. Rows marked **SC** are safety-critical: tests first under
+DEC-77, an independent review on a different model, and zero missed mutants. The identity provider
+for managed mode, SAML, and organization recovery stay with the founder (DEC-437 items 15 to 21); no
+story buys a service, and none uses a real identity-provider account in tests (spec §1.3).
+
+- **E9-1 (Must; SC)** As a user, I want to sign in with passkey or OIDC SSO.
+  *Accepted when:* passkey sign-in requires user verification and OIDC sign-in checks signature,
+  issuer, audience, expiry, nonce, and `email_verified` against the configured issuer only (spec §6.1),
+  each refusal tested against an in-memory issuer and a software authenticator; sessions meet spec
+  §6.2 (5-minute access tokens, uncached membership re-check, refresh rotation with reuse revoking the
+  family, idle and absolute limits an org can only shorten); the risk-reduction path of §6.4 pauses and
+  engages a kill switch with the identity provider unreachable (ID-10), while a refusal from the
+  provider (`invalid_grant`, a disabled subject, a back-channel logout) ends the session with every
+  permission and blocks the local passkey route (§6.4, §11.1); the host CLI commits only as its
+  registered principal (`HostCliRegistered`, ID-1); and the log scan finds no
+  canary token from any path (ID-9).
+- **E9-2 (Must; SC)** As an admin, I want organizations, workspaces, and roles.
+  *Accepted when:* `authorize` matches spec §4.2's matrix exactly, checked by an exhaustive test over
+  every role set, permission, and scope against a table parsed from the spec, not from the code (ID-2);
+  no principal changes its own roles (ID-13); and the last-owner and last-admin refusals hold (§5.2).
 - **E9-3 (Must)** As an admin, I want org-level limits that workspaces and agents can only
   tighten.
-- **E9-4 (Must)** As a security-conscious user, I want step-up authentication for sensitive
-  actions.
-- **E9-5 (Should)** As a fund, I want separation of duties between agent creators and approvers.
+- **E9-4 (Must; SC)** As a security-conscious user, I want step-up authentication for sensitive
+  actions. *Accepted when:* every permission marked S in spec §4.2 is refused, with nothing committed,
+  for a missing, stale, reused, wrong-method, wrong-principal, and wrong-digest assertion (ID-4, §7.2);
+  none of the ID-5 actions asks for step-up or fails without it; a challenge is consumed in the same
+  transaction as the event it authorizes; and the raw assertion artifact re-verifies against the stored
+  public key.
+- **E9-5 (Should; SC)** As a fund, I want separation of duties between agent creators and approvers.
+  *Accepted when:* under `independent_approval_required`, no grant, acknowledgment, or approval counts
+  where `human(responder)` equals `human(requester)` or, for approvals, `human(author)`, with clients
+  and service accounts mapped to their humans (ID-6, spec §8.2), checked by a fuzz whose oracle maps
+  principals independently; and the 24-hour cool-off of spec §8.3 holds for operator and approver grants.
 - **E9-6 (Must)** As a retail user, I want the retail profile (`auto` allowed, LLM ideas allowed,
   protection required, no leveraged ETPs, counsel-set loss ceiling and approval timeout minimum)
   applied to my workspace by default ([DEC-98](04-decision-log.md#decisions)).
+- **E9-7 (Must, M8; SC)** As an admin, I want memberships with states (invited, cooling off, active,
+  deactivated, removed) journaled on the control stream, so that who can act, and the user count V-047
+  reads, come from the record (spec §5). *Accepted when:* the tests PR adds spec §12.1's events to
+  journal §9 with schemas; `workspace_users` equals an independent fold of `Member*` events at
+  validation and at application over random histories, with invited, cooling-off, deactivated, and
+  removed members, clients, service accounts, and agents counting zero and an unreadable count reading
+  as one (ID-7); and no request authorized after a deactivation commits succeeds, with open streams
+  closed within 60 s (ID-3).
+- **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
+  *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
+  compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
+  security, journal stream prefixes, NATS accounts, cache keys, the inference cache, and the vault
+  (ID-8, spec §9.1).
+- **E9-9 (Must, M8; SC; before E10-6)** As an owner, I want my connected agent to hold a scoped,
+  sender-constrained, revocable token (DEC-141). *Accepted when:* clients connect through OAuth 2.1
+  with PKCE and DPoP (spec §6.6); the ID-2 test passes for the client column; a client cannot approve,
+  confirm, present step-up, pause, resume, stop, release, make an owner exit, or change a connection or
+  membership (ID-11); the tests PR adds the `client` actor kind with `on_behalf_of` to journal §3 and
+  makes the mandate spec's independence checks compare `human(…)` (spec §8.2, §12.2; DEC-437 item 10),
+  with a case showing check 3 refuses a `client` actor's approval from the record alone; no client
+  token is issued before those edits land; and revocation applies to every request authorized after it
+  commits.
+- **E9-10 (Should, M8; SC)** As a user, I want account recovery and, in managed mode, audited
+  break-glass. *Accepted when:* recovery codes are stored only as salted slow hashes and shown once; a
+  passkey enrolled through recovery cannot present step-up for 24 hours and its owner is notified
+  (opaque) (spec §10.1); and a `platform_operator` is refused every permission outside break-glass's
+  operational set, inside an approved, time-bound window only, with each step journaled to the
+  workspace's control stream (ID-12, §10.3). Organization recovery waits for DEC-437 item 18.
+- **E9-11 (Must, M8; SC)** As the founder, I want the identity invariants ID-1 to ID-15 each backed by
+  a property test with an independent oracle. *Accepted when:* each oracle is shown to fail on a
+  seeded bug (for example, a cached membership read, a role inherited from the org, a challenge not
+  bound to its digest, a client counted as a second user, an unprefixed cache key) before it is trusted.
+- **E9-12 (Should, M8)** Round-1 minors of the identity spec's review ([#556](https://github.com/kunwarshivam/mandate/pull/556),
+  freeze rule). *Accepted when the spec settles each:* (1) the workspace admin holds the kill switch's
+  privileges beyond the stop (mandate §6.1, selling equities outside the session) but not the owner
+  exit; make the two rows agree; (2) ID-2's exhaustive test needs a matrix row for every operation the
+  workspace API spec defines; the owner request, dry run, and chat thread rows were added by the
+  round-2 ruling, and saving a draft, running a backtest, and resolving a notice still need rows, or
+  ID-2 is scoped to the rows the matrix names; (3) a row for lifting a hold an operator
+  set, with its step-up; (4) ID-15's carve-out for the notification relay's envelope
+  (`{relay_id, endpoint, ciphertext}`, a capability URL) as HLD "Where data lives" lists it; (5) "release"
+  names both Stop with release (DEC-136) and re-enabling a halted scope, so one is renamed (round 2
+  renamed the second; confirm no other use remains); (6) the Status row matches DEC-437 after round 2.
+  ID-13's founding-grant exception and ID-10's note on item 15 were taken in round 2 because the
+  blocker fixes touched those lines.
 
 ### E10 Mandate authoring
 
