@@ -139,6 +139,7 @@ proptest! {
     ) {
         let mut s = Scenario::allowing();
         s.instrument.fractionable = fractionable;
+        s.instrument.qty_increment = qty(if fractionable { "0.000000001" } else { "1" });
         if let Some(text) = quote {
             let at = price(text);
             s.market.quote = Some(mandate_risk::SaneQuote {
@@ -708,6 +709,258 @@ proptest! {
             breaches,
             "{} orders to {} fills", orders, fills
         );
+    }
+}
+
+/// A quantity at 10^-9, written as the decimal the crate parses.
+fn decimal(units: i128) -> String {
+    let whole = units / common::SCALE;
+    let part = units % common::SCALE;
+    if part == 0 {
+        whole.to_string()
+    } else {
+        format!("{whole}.{part:09}")
+            .trim_end_matches('0')
+            .to_owned()
+    }
+}
+
+/// One draw of [`the_trim_and_the_slice_stay_on_the_venue_s_grid`]: the grid at 10^-9 and whether
+/// the instrument is fractionable, the price, the position in whole steps and tenths of a step, the
+/// tenths of it resting, the factor in thousandths, the minimum as a ratio of the grid, and the
+/// trailing volume in tenths.
+type GridCase = (
+    (i128, bool),
+    i128,
+    (i128, i128),
+    i128,
+    i128,
+    (i128, i128),
+    i128,
+);
+
+/// `numerator / denominator` rounded up, for positive figures.
+fn ceil_div(numerator: i128, denominator: i128) -> i128 {
+    (numerator + denominator - 1).div_euclid(denominator)
+}
+
+/// The trim and the participation slice on the venue's own quantity grid (DEC-427; #571 review,
+/// M2), over random grids, positions on and off the grid, the agent's own resting sells, factors
+/// and minimums. The oracle is its own accumulator in `i128` at 10^-9 and calls none of the
+/// crate's arithmetic. For the trim, on the 1500 cap with a 75 band, at the position's own price:
+/// - the trim is a whole number of the grid or the whole position held (§5.3 rule 2; B2);
+/// - it never exceeds the position or what the agent's resting sells leave unsold (rule 12);
+/// - it never rounds down: its value covers the excess less what is on sale (§5.5), unless it is
+///   what is unsold truncated onto the grid, which leaves less than one step of it (B2);
+/// - and it is exactly the oracle's: the excess less what is on sale, rounded up on the grid,
+///   clamped to what is unsold and, when that clamp is not the whole position, truncated onto the
+///   grid; nothing when that is zero, or below the minimum and not the whole position.
+///
+/// For an owner's exit of the whole position paced by an order cap of 5% of the trailing volume:
+/// - the slice is a whole number of the grid, below the proposal, and above zero (rule 13);
+/// - it is never above the largest of the cap truncated onto the grid, the minimum rounded up
+///   onto it, and one step of it, and exactly that figure where it is below the proposal (B3,
+///   M1; a zero minimum still slices at one step, #578 review, B1).
+///
+/// The venue grids are drawn on a fractionable crypto instrument, and a grid of 1 also on a
+/// whole-share equity that is not fractionable, so that an implementation keying either reading on
+/// `fractionable` fails (#571 review, round 2, B4).
+///
+/// A plain function driving a [`proptest::test_runner::TestRunner`], so that `ci pending` sees one
+/// pending test. A fixed venue-grid case runs before the runner draws, so that until the
+/// implementation PR the test stops at the grid stub's own report (DEC-77) whatever the runner
+/// draws first; a failing draw reports the gate's own error.
+#[test]
+fn the_trim_and_the_slice_stay_on_the_venue_s_grid() {
+    use proptest::test_runner::{Config, TestCaseError, TestRunner};
+
+    let grids = vec![
+        (100_000_i128, true),
+        (300_000, true),
+        (1_000_000, true),
+        (10_000_000, true),
+        (250_000_000, true),
+        (500_000_000, true),
+        (common::SCALE, true),
+        (common::SCALE, false),
+        (common::SCALE, false),
+    ];
+    let strategy = (
+        prop::sample::select(grids),
+        prop::sample::select(vec![100_i128, 6_000, 600_000]),
+        (1_i128..=40, 0_i128..10),
+        prop::sample::select(vec![0_i128, 0, 0, 2, 5, 9, 10]),
+        prop::sample::select(vec![0_i128, 100, 300, 500]),
+        prop::sample::select(vec![(0_i128, 1_i128), (1, 1), (2, 1), (3, 2)]),
+        0_i128..2_000,
+    );
+    let check = |(
+        (grid, fractionable),
+        price,
+        (steps, tenths),
+        sale_tenths,
+        factor_milli,
+        minimum_ratio,
+        volume_tenths,
+    ): GridCase|
+     -> Result<(), TestCaseError> {
+        let held = steps * grid + tenths * grid / 10;
+        let on_sale = held * sale_tenths / 10;
+        let minimum = grid * minimum_ratio.0 / minimum_ratio.1;
+        let market_value = held * price;
+        let row = format!(
+            "grid {}{}, {} held at {price}, {} resting, factor {}, minimum {}",
+            decimal(grid),
+            if fractionable { "" } else { " (whole shares)" },
+            decimal(held),
+            decimal(on_sale),
+            decimal(factor_milli * 1_000_000),
+            decimal(minimum)
+        );
+
+        let mut s = Scenario::allowing();
+        s.mandate = common::mandate_with(common::two_trimming_rungs());
+        s.risk.active_rungs = [(0_u8, 120_u64), (1, 120)].into_iter().collect();
+        s.risk.size_factor = common::ratio(&decimal(factor_milli * 1_000_000));
+        s.agent
+            .positions
+            .insert(asset(INSTRUMENT_2), qty(&decimal(held)));
+        s.agent
+            .market_values
+            .insert(asset(INSTRUMENT_2), usd(&decimal(market_value)));
+        if on_sale > 0 {
+            let mut sell = common::open_order(s.agent.agent, INSTRUMENT_2, "0");
+            sell.side = Side::Sell;
+            sell.opening = false;
+            sell.open_qty = qty(&decimal(on_sale));
+            s.account
+                .working_orders
+                .insert(mandate_risk::ClientOrderId(77), sell);
+            s.agent
+                .working_orders
+                .insert(mandate_risk::ClientOrderId(77));
+        }
+        let mut instrument = common::equity_instrument(INSTRUMENT_2);
+        if fractionable {
+            instrument.asset_class = mandate_risk::AssetClass::Crypto;
+            instrument.exchange = None;
+            instrument.fractionable = true;
+        }
+        instrument.qty_increment = qty(&decimal(grid));
+        instrument.min_order_size = qty(&decimal(minimum));
+        let instruments = std::collections::BTreeMap::from([(asset(INSTRUMENT_2), instrument)]);
+        let trims = mandate_risk::trim_proposals(
+            s.now,
+            &s.config,
+            &s.mandate,
+            &s.risk,
+            &s.agent,
+            &s.account,
+            &instruments,
+        )
+        .map_err(|e| TestCaseError::fail(format!("{row}: {e}")))?;
+
+        let target = 1_500 * factor_milli * common::SCALE / 1_000;
+        let excess = market_value - target;
+        let unsold = (held - on_sale).max(0);
+        let expected = if excess < 75 * common::SCALE {
+            None
+        } else {
+            let owed = excess - on_sale * price;
+            let rounded = if owed > 0 {
+                ceil_div(owed, price * grid) * grid
+            } else {
+                0
+            };
+            let sold = if rounded <= unsold {
+                rounded
+            } else if unsold == held {
+                held
+            } else {
+                unsold / grid * grid
+            };
+            (sold > 0 && (sold >= minimum || sold == held)).then_some(sold)
+        };
+        let got = trims
+            .first()
+            .map(|t| common::oracle::scaled(&t.qty.to_string()));
+        if let Some(sold) = got {
+            prop_assert!(
+                sold % grid == 0 || sold == held,
+                "{row}: a trim of {} is off the grid and not the whole position",
+                decimal(sold)
+            );
+            prop_assert!(
+                sold <= held && sold <= unsold,
+                "{row}: a trim of {} sells more than is unsold",
+                decimal(sold)
+            );
+            prop_assert!(
+                unsold - sold < grid || sold * price >= excess - on_sale * price,
+                "{row}: a trim of {} rounds down short of the excess",
+                decimal(sold)
+            );
+        }
+        prop_assert_eq!(got, expected, "{}: the trim", row);
+
+        let proposed = held;
+        let mut s = Scenario::allowing();
+        s.instrument.fractionable = fractionable;
+        s.instrument.qty_increment = qty(&decimal(grid));
+        s.instrument.min_order_size = qty(&decimal(minimum));
+        let volume = volume_tenths * common::SCALE / 10;
+        s.market.trailing_5m_volume = Some(qty(&decimal(volume)));
+        s.market.adv_20d = None;
+        s.agent
+            .positions
+            .insert(asset(INSTRUMENT_3), qty(&decimal(proposed)));
+        s.proposed = proposal(
+            INSTRUMENT_3,
+            Side::Sell,
+            &decimal(proposed),
+            "100",
+            Origin::OwnerClose,
+        );
+        let decision =
+            evaluate(&s.input()).map_err(|e| TestCaseError::fail(format!("{row}: {e}")))?;
+        let cap = volume * 5 / 100;
+        let expected = (cap > 0)
+            .then(|| {
+                (cap / grid * grid)
+                    .max(ceil_div(minimum, grid) * grid)
+                    .max(grid)
+            })
+            .filter(|slice| *slice < proposed);
+        let got = decision
+            .pacing
+            .map(|pacing| common::oracle::scaled(&pacing.qty.to_string()));
+        if let Some(slice) = got {
+            prop_assert!(
+                slice % grid == 0 && slice > 0 && slice < proposed,
+                "{row}: a slice of {} from a volume of {}",
+                decimal(slice),
+                decimal(volume)
+            );
+        }
+        prop_assert_eq!(
+            got,
+            expected,
+            "{}: the slice of an exit of {} under a volume of {}",
+            row,
+            decimal(proposed),
+            decimal(volume)
+        );
+        Ok(())
+    };
+    if let Err(failure) = check(((100_000, true), 600_000, (2, 0), 0, 500, (1, 1), 100)) {
+        panic!("the fixed venue-grid case: {failure}");
+    }
+    let mut runner = TestRunner::new(Config {
+        failure_persistence: None,
+        ..Config::default()
+    });
+    if let Err(failure) = runner.run(&strategy, check) {
+        panic!("{failure}");
     }
 }
 

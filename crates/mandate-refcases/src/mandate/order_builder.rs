@@ -1395,6 +1395,14 @@ fn listing(
         median_dollar_volume_20d: Some(liquid),
         median_dollar_volume_30d: Some(liquid),
         min_order_size: stated.increment,
+        qty_increment: num(
+            Qty::parse(if stated.increment < one {
+                "0.000000001"
+            } else {
+                "1"
+            }),
+            "qty_increment",
+        )?,
         halted: false,
         status_feed_current: true,
     })

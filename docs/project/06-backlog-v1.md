@@ -428,9 +428,11 @@ the spec invariants (DP-n) its tests cover.
   spec V-047 and MC-V69 to MC-V71 ([DEC-411](decisions/DEC-411.md)); the code is owed on E10-1's row.
   **Founder question** (DEC-411 item 6): a workspace that loses its second user, or turns
   `independent_approval_required` on with one user, after a version is confirmed keeps its agents running with nothing
-  they latched liftable, and no new version validates there, a reducing one and §4.3's conforming version included
-  (V-047 refuses every version; the exits are adding a user or stopping the agent). Should removing the second user be
-  refused, or flag the agents `policy_nonconforming`, and should a reducing version be exempt from V-047?
+  they latched liftable, and no new version validates there but a risk-reducing one (DEC-444, below; §4.3's conforming
+  version passes when it classifies as reducing). Should removing the second user be
+  refused, or flag the agents `policy_nonconforming`? ~~And should a reducing version be exempt from V-047?~~ Decided
+  yes, reducing only (the founder, 2026-10-03; [DEC-444](decisions/DEC-444.md)): a version §9.2 rates risk-reducing
+  passes V-047 there; a neutral one is still refused.
   Recorded beside it (DEC-411 item 2; #528 round 1, M3): two users of whom only the author is an approver pass V-047
   and V-024, but an ask needing an independent approver times out (§6.4). Not decided: it would extend V-047 past the
   founder's decision to approvers, which validation does not read independently of the author.
@@ -696,14 +698,15 @@ after U-A1 to U-A5 are recorded.
   fail on that member alone and flip in the status PR that follows.
   *Decided (DEC-318 option (a), the founder, 2026-10-02; DEC-430):* MC-E18 is restated as §6.4's
   cancellation. Its response step cancels the pending grant as `mode_tightened` and refuses it as
-  `not_pending`, and the reference model, the fuzz oracle and the seeded bugs follow (reference PR).
-  Still open, in order:
-  1. The code PR: the harness strips the response step's `AgentModeChanged` (`restriction_changed`),
-     and `the_lifecycle_cases_split_as_the_runtime_stands` expects MC-E18 to pass, tests first.
-     `a_mode_other_than_normal_skips`'s doc comment stops naming MC-E18.
-  2. The status PR moving MC-E18 to `passing`.
-  3. A §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
-     (DEC-430 item 2). It is a spec PR and changes no rule.
+  `not_pending`, and the reference model, the fuzz oracle and the seeded bugs follow (reference PR,
+  #538, merged). The harness sets the response step's `AgentModeChanged` (`restriction_changed`)
+  aside, so MC-E18 passes (#550, merged), and the status PR moves it to `passing` (in review). Still
+  open: a §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
+  (DEC-430 item 2). It is a spec PR and changes no rule.
+  *Follow-up (the #550 review, minors 1 and 2):* `mc_e18_holds_only_as_the_cancellation` asserts
+  only that its two plants fail. Pin each with `fails_naming` and the messages the review gives, so
+  a draft that stops being well formed cannot pass it by failing for another reason. `apply_now`'s
+  doc comment should say it is true whenever it folded a new mode, cancelling or not.
   *Follow-up (the #416 review, minor 3):* every `ask_permit` case asks for one instrument, so
   family E cannot see the budget counted per instrument rather than per agent (`mandate-approval`'s
   own suite does). A future MC-E case should spread its ten asks across instruments. It changes
@@ -1090,6 +1093,10 @@ story buys a service, and none uses a real identity-provider account in tests (s
   harness reads the cases' new context member, so MC-V69 to MC-V71 pass. V-047 also refuses again when a version is
   applied, as V-002 does, and a case covers a second user deactivated between confirmation and application (#528
   round 2, major 1; the reference models V-047 at validation only, DEC-411 item 5).
+  The founder's DEC-444 (2026-10-03) lets a version §9.2 rates risk-reducing through V-047; the spec, `ref.py` and
+  MC-V72 to MC-V77 carry it first (ES-22), then the tests PR (#536) follows. The exception reads the agent's current
+  version matched by hash (DEC-444 item 3); `PreviousVersion` has no digest yet, so the Rust side refuses every version
+  under V-047 until it does, and the test that a reducing version passes lands with the digest.
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
   increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C48 pass.
@@ -3335,6 +3342,46 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   BTC, a cap of 100, factor 0.5 and a 0.001 minimum give a trim of 0.000116667 on the 1e-9 grid,
   withheld below the minimum, but 0.0002 on the venue's 0.0001 grid, the whole position, which
   DEC-423 exempts. Add that case as a trim test when this lands.
+  *Tests (`agent/g8-e6-4-qty-grid-tests`, [DEC-427](decisions/DEC-427.md)):* `InstrumentSnapshot`
+  carries `qty_increment`; `trim::quantity_grid` is the stub, and three pending tests pin the trim
+  (the #504 case included) and the participation slice on a venue grid. The implementation PR, then
+  a harness PR stating the case's grid, follow.
+  *Round 1 of #571's review:* the #504 case's named figures, B2's truncation and B3's slice
+  ([DEC-445](decisions/DEC-445.md)), M1's on-grid minimum, M3's rows, and the property
+  `the_trim_and_the_slice_stay_on_the_venue_s_grid` are pending in the tests PR. Two live rows that
+  asserted DEC-445's superseded figures moved into pending tests.
+  *Implementation (`agent/g8-e6-4-qty-grid-impl`):* `quantity_grid` is the field read; the trim
+  truncates an off-grid remainder that is not the whole position (`down_onto`), and `slice` tests
+  the untruncated cap for zero, truncates it onto the grid and floors it at the minimum rounded up
+  onto the grid (`up_onto`). The six pending tests are live. The harness PR stating the case's grid
+  follows.
+- **E6-4: refuse a grid that is not above zero, per instrument** (#571 review, round 1, minor 2).
+  `InstrumentSnapshot::qty_increment` is a `Qty`, so zero is representable. `ceiled_quotient` and
+  `truncated_quotient` refuse it as `NotPositive`, but that error would leave `trim::proposals`
+  whole and withhold every instrument's trim (DEC-423 item 4 forbids it), and from `slice` it errors
+  the decision, denying an exit (rule 13). Give the field a type that cannot hold zero (trust ladder
+  rung 1), or refuse it per instrument where the snapshot is built from connector data, with a test.
+  Unreachable today: no production caller builds the snapshot. Also: `conduct::slice` computes the
+  on-grid minimum even when there is no cap to truncate, so a non-positive grid errors a decision
+  nothing would have paced; compute it only where a cap exists (#578 review, round 1, minor 1).
+- **E6-4: the reference and the family-B driver carry DEC-445 item 2 before the harness states the
+  case's grid** (#578 review, round 1, minor 2). `ref.py` and `order_builder.rs`' `trim_guards`
+  clamp to what is unsold without truncating an off-grid remainder onto the grid, and `ref.py`
+  rounds up before subtracting the resting sells where the gate subtracts first. The harness PR
+  that states each case's own grid (DEC-427 item 6) brings both: §5.5's sentence and `ref.py`
+  first, with a case whose remainder is off a coarse grid, then the harness.
+- **E6-4: draw the daily cap in the grid property** (#578 review, round 1, minor 3).
+  `properties::the_trim_and_the_slice_stay_on_the_venue_s_grid` sets `adv_20d` to `None`, so the
+  daily cap's grid behaviour rests on `a_slice_truncates_to_the_venue_s_quantity_grid`'s M4 row.
+  Draw `adv_20d` and today's participation too.
+- **E6-4: one ingest field for the quantity grid** (#571 review, round 1, minor 4).
+  `mandate-builder`'s `Market::increment` (DEC-128 item 27) and `InstrumentSnapshot::qty_increment`
+  are two grid fields that must come from the same instrument-master field. When ingest lands, read
+  both from it and add a check that they agree (DEC-427, Alternatives).
+- **E6-4: `trim::tests`' factor overrides disagree with the fixture's rung** (#571 review, round 1,
+  minor 5). Several `trim::tests` rows set `risk.size_factor` to a value no rung of the `Scene`'s
+  one-rung ladder (factor 0.5) carries, an internally inconsistent snapshot. Give `Scene` a rung
+  whose factor matches each row, or derive the factor from the rung.
 - **E6-4 nits** (#466 review, round 1): `UsdExact::times_size_fraction`'s doc still lists "the
   ladder size factor applied to the target" though the gate's 24-place `Ratio` factor enters
   through `UsdExact::of_ratio`; say which number each serves (n2). `of_ratio` takes any `Ratio`,
@@ -3909,6 +3956,9 @@ From #528's round-2 review (DEC-411; the coordinator's ruling, 05:19Z on #528; f
 - ~~**`mutants.py` cannot carry two natural V-047 bugs** (#528 round 2, minor 4).~~ Done ([DEC-429](decisions/DEC-429.md)). Inverting the policy, or ignoring it,
   makes V-047 fire on the base mandates, so `bases.py`'s import-time assertion crashes the probe and `verdict()`
   scores it `ERROR`, not caught. Say so in the module docstring, so nobody adds one and reads the `ERROR` as a catch.
+- **The README's mandate case counts lag `main`** (#570 round 1, minor 2). `README.md`'s mandate row and its spec
+  table give 433 cases where the file holds 441 after #570, and were already two behind before it. Update them, or
+  derive them from the case file as the §11 row below asks for the spec.
 - **§11's case count is unchecked prose** (#528 round 2, minor 5). `main` said 427 where the file held 429. Add a
   `cargo xtask` assertion that §11's count matches `docs/specs/reference-cases/mandate.yaml`.
 

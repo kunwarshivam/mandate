@@ -54,7 +54,8 @@ fn a_changed_version_skips() {
     assert_eq!(acted(&now), Revalidation::Skip(SkipReason::VersionChanged));
 }
 
-/// MC-E18, check 9: any mode stricter than normal skips.
+/// Check 9: any mode stricter than normal skips. No step the spec names reaches it, because such a
+/// step cancels every pending approval first (MC-E18; DEC-318, DEC-430); it stays as defence in depth.
 #[test]
 fn a_mode_other_than_normal_skips() {
     the_unchanged_fixture_acts();

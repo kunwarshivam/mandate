@@ -60,11 +60,18 @@ pub(crate) fn proposals(
             Err(NumError::Negative) => Qty::ZERO,
             Err(other) => return Err(other.into()),
         };
-        let qty = excess
+        let grid = quantity_grid(instrument);
+        let rounded = excess
             .checked_mul(UsdExact::of_qty(held))?
             .checked_sub(UsdExact::of_qty(on_sale).checked_mul(market_value)?)?
-            .ceiled_quotient(market_value, increment(instrument)?)?
-            .min(unsold);
+            .ceiled_quotient(market_value, grid)?;
+        let qty = if rounded <= unsold {
+            rounded
+        } else if unsold == held {
+            held
+        } else {
+            down_onto(unsold, grid)?
+        };
         if qty.is_zero() {
             continue;
         }
@@ -116,15 +123,24 @@ fn a_trimming_rung_is_confirmed(limits: &RiskLimits, risk: &RiskSnapshot) -> boo
     })
 }
 
-/// The instrument's quantity grid: whole shares unless it is fractionable, as the participation
-/// slice reads it (trading-domain spec §2.1).
-fn increment(instrument: &InstrumentSnapshot) -> Result<Qty, GateError> {
-    let grid = if instrument.fractionable {
-        "0.000000001"
-    } else {
-        "1"
-    };
-    Ok(Qty::parse(grid)?)
+/// The instrument's quantity grid, which a trim rounds up on and a participation slice truncates
+/// to (trading-domain spec §2.1, DEC-427): the venue's own `qty_increment`, never a grid read from
+/// `fractionable`. A grid that is not above zero is refused by the arithmetic that divides by it.
+pub(crate) fn quantity_grid(instrument: &InstrumentSnapshot) -> Qty {
+    instrument.qty_increment
+}
+
+/// `qty` truncated to a whole number of `grid`: the largest quantity on the grid at or below it.
+/// What the agent's resting sells leave unsold, when it is off the grid and not the whole position,
+/// is sold as this rather than as an order §5.3 rule 2 refuses (DEC-445 item 2).
+pub(crate) fn down_onto(qty: Qty, grid: Qty) -> Result<Qty, NumError> {
+    UsdExact::of_qty(qty).truncated_quotient(UsdExact::one(), grid)
+}
+
+/// `qty` rounded up to a whole number of `grid`, the floor of a participation slice: the
+/// instrument's minimum, on the grid (DEC-445 item 1).
+pub(crate) fn up_onto(qty: Qty, grid: Qty) -> Result<Qty, NumError> {
+    UsdExact::of_qty(qty).ceiled_quotient(UsdExact::one(), grid)
 }
 
 #[cfg(test)]
@@ -232,6 +248,7 @@ mod tests {
                     median_dollar_volume_20d: None,
                     median_dollar_volume_30d: None,
                     min_order_size: Qty::parse("1")?,
+                    qty_increment: Qty::parse("1")?,
                     halted: false,
                     status_feed_current: true,
                 },
@@ -264,11 +281,12 @@ mod tests {
             Ok(())
         }
 
-        fn crypto(mut self) -> Self {
+        fn crypto(mut self) -> Result<Self, GateError> {
             self.instrument.asset_class = AssetClass::Crypto;
             self.instrument.exchange = None;
             self.instrument.fractionable = true;
-            self
+            self.instrument.qty_increment = Qty::parse("0.000000001")?;
+            Ok(self)
         }
 
         fn trims(&self) -> Result<Vec<Qty>, GateError> {
@@ -343,7 +361,7 @@ mod tests {
             Vec::new(),
             "an equity waits for the session"
         );
-        let mut crypto = Scene::new("10", "1000")?.crypto();
+        let mut crypto = Scene::new("10", "1000")?.crypto()?;
         crypto.now = UtcNanos::parse_rfc3339("2026-09-22T21:00:00Z")?;
         assert_eq!(crypto.trims()?, qty("2.5")?);
         Ok(())
@@ -373,6 +391,42 @@ mod tests {
         assert_eq!(scene.trims()?, qty("1")?);
         scene.instrument.min_order_size = Qty::parse("3")?;
         assert_eq!(scene.trims()?, Vec::new());
+        Ok(())
+    }
+
+    /// A trim rounds up on the venue's own quantity grid, not on a grid read from `fractionable`
+    /// (DEC-427; #466 review, m3; #530 review, m6), and never proposes an order off it that is not
+    /// a full close (#571 review, B2). At a 600,000 price on a 0.0001 grid:
+    /// - the #504 review's case: 0.0002 held worth 120 under a cap of 100 at the fixture's factor
+    ///   0.5 is 70 over its 50 target, 0.000116667, rounded up to the 0.0002 held, a full close
+    ///   below a 0.001 minimum (DEC-423), where rounding to nearest or down withholds 0.0001;
+    /// - 0.002 held worth 1200 at factor 0.316 is 726 over its 474 target, 0.00121, below the
+    ///   half-way point, rounded up to 0.0013;
+    /// - 0.001 held at factor 0 with 0.00025 resting on the agent's own sell leaves 0.00075 unsold,
+    ///   off the grid and not the whole position, so the trim is truncated onto the grid, 0.0007.
+    #[test]
+    fn a_trim_rounds_up_on_the_venue_s_quantity_grid() -> Result<(), GateError> {
+        let on_the_grid = |held: &str, market_value: &str| -> Result<Scene, GateError> {
+            let mut scene = Scene::new(held, market_value)?.crypto()?;
+            scene.instrument.qty_increment = Qty::parse("0.0001")?;
+            scene.instrument.min_order_size = Qty::parse("0.0001")?;
+            Ok(scene)
+        };
+        let mut case_504 = on_the_grid("0.0002", "120")?;
+        case_504.limits.max_position_usd = Usd::parse("100")?;
+        case_504.instrument.min_order_size = Qty::parse("0.001")?;
+        assert_eq!(case_504.trims()?, qty("0.0002")?, "the #504 review's case");
+        let mut below_half_way = on_the_grid("0.002", "1200")?;
+        below_half_way.risk.size_factor = Ratio::parse("0.316")?;
+        assert_eq!(below_half_way.trims()?, qty("0.0013")?, "0.00121 rounds up");
+        let mut beside_a_resting_sell = on_the_grid("0.001", "600")?;
+        beside_a_resting_sell.risk.size_factor = Ratio::ZERO;
+        beside_a_resting_sell.resting(7, "0.00025", Side::Sell, false, true)?;
+        assert_eq!(
+            beside_a_resting_sell.trims()?,
+            qty("0.0007")?,
+            "an off-grid remainder is truncated onto the grid"
+        );
         Ok(())
     }
 
@@ -456,17 +510,40 @@ mod tests {
     }
 
     /// A resting partial trim leaves only the remainder: with 1 of the 2.5 shares' excess on sale,
-    /// 1.5 rounds up to 2. At a factor of 0 the remainder is capped at what is not yet on sale:
-    /// 2.5 held with 1 on sale leaves 1.5, not the 2 the whole-share ceiling of 1.5 asks for.
+    /// 1.5 rounds up to 2. The row where what is unsold is off the grid is
+    /// [`an_off_grid_remainder_beside_a_resting_sell_is_truncated_onto_the_grid`] (DEC-445).
     #[test]
     fn a_resting_partial_trim_proposes_only_the_remainder() -> Result<(), GateError> {
         let mut scene = Scene::new("10", "1000")?;
         scene.resting(7, "1", Side::Sell, false, true)?;
         assert_eq!(scene.trims()?, qty("2")?);
-        let mut whole = Scene::new("2.5", "250")?;
-        whole.risk.size_factor = Ratio::ZERO;
-        whole.resting(7, "1", Side::Sell, false, true)?;
-        assert_eq!(whole.trims()?, qty("1.5")?);
+        Ok(())
+    }
+
+    /// At a factor of 0, 2.5 held with 1 share resting on the agent's own sell leaves 1.5 unsold.
+    /// Rounding up on a grid of 1 gives 2, more than is unsold, and the 1.5 left is off the grid
+    /// and not the whole position, an order §5.3 rule 2 refuses. The trim is the largest quantity
+    /// on the grid at or below it, 1 (DEC-445, superseding the 1.5 this row asserted on `main`;
+    /// #571 review, B2). Half a share stays above target until the resting sell ends, and the trim
+    /// is evaluated again then.
+    ///
+    /// The scene is run twice on a grid of 1: first marked fractionable, so that until the
+    /// implementation PR the row stops at the grid stub's own report (DEC-77), then untouched, a
+    /// whole-share instrument that is not fractionable, so that an implementation keying the
+    /// reading on `fractionable` fails here (#571 review, round 2, B4).
+    #[test]
+    fn an_off_grid_remainder_beside_a_resting_sell_is_truncated_onto_the_grid()
+    -> Result<(), GateError> {
+        let scene = || -> Result<Scene, GateError> {
+            let mut whole = Scene::new("2.5", "250")?;
+            whole.risk.size_factor = Ratio::ZERO;
+            whole.resting(7, "1", Side::Sell, false, true)?;
+            Ok(whole)
+        };
+        let mut fractionable = scene()?;
+        fractionable.instrument.fractionable = true;
+        assert_eq!(fractionable.trims()?, qty("1")?, "marked fractionable");
+        assert_eq!(scene()?.trims()?, qty("1")?, "a whole-share instrument");
         Ok(())
     }
 
