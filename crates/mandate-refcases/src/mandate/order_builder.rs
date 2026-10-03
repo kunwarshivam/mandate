@@ -102,9 +102,15 @@ const INPUT_KEYS: &[&str] = &[
     "scale_active_s",
     "holding",
     "min_order_size",
+    "open_sell_qty",
 ];
-/// §5.5's trim guards, which only a `trim_to_target` mandate reads.
-const TRIM_INPUT_KEYS: [&str; 3] = ["scale_active_s", "holding", "min_order_size"];
+/// §5.5's trim inputs, which only a `trim_to_target` mandate reads.
+const TRIM_INPUT_KEYS: [&str; 4] = [
+    "scale_active_s",
+    "holding",
+    "min_order_size",
+    "open_sell_qty",
+];
 const TRIM_EXPECT_KEYS: [&str; 2] = ["origin", "trim_withheld"];
 /// Every member a trim's expectation may state (MC-B17).
 const TRIM_KEYS: [&str; 10] = [
@@ -315,11 +321,15 @@ fn trim_guards(
     if !num(factor.is_below(one), "size_factor")? || num(excess.is_below(band), "excess")? {
         return Ok(None);
     }
-    let sell = num(
+    let whole_excess = num(
         excess.ceiled_quotient(UsdExact::of_price(stated.bid), stated.increment),
         "the trim's quantity",
-    )?
-    .min(stated.position);
+    )?;
+    let on_sale = trim.open_sell_qty;
+    let sell = less_or_zero(whole_excess, on_sale)?.min(less_or_zero(stated.position, on_sale)?);
+    if sell.is_zero() {
+        return Ok(None);
+    }
     let mut guards = Vec::new();
     if trim.active_s < u64::from(document.risk.breach_confirm_s) {
         guards.push("rung_not_confirmed");
@@ -335,6 +345,16 @@ fn trim_guards(
         guards.push("below_minimum_order");
     }
     Ok(Some(guards))
+}
+
+/// `from` less `taken`, or none when `taken` covers it: what resting sells leave of the excess and
+/// of the position (DEC-399 item 7).
+fn less_or_zero(from: Qty, taken: Qty) -> Result<Qty, String> {
+    if taken < from {
+        num(from.checked_sub(taken), "a quantity less the resting sells")
+    } else {
+        Ok(Qty::ZERO)
+    }
 }
 
 /// MC-B17's members for a trim, its cap and market value already compared: the risk exit itself,
@@ -751,11 +771,15 @@ struct Inputs {
 }
 
 /// What a `trim_to_target` case states for §5.5's guards: how long the rung has been active, whether
-/// the goal is Holding, and the instrument's minimum order size, which `ref.py` requires.
+/// the goal is Holding, the instrument's minimum order size, which `ref.py` requires, and the
+/// quantity of the agent's own non-protective sells already resting in the instrument, which the
+/// trim is sized after (DEC-399 item 7). Until the reference PR states `open_sell_qty` on every trim
+/// case, an unstated one is none resting.
 struct TrimInputs {
     active_s: u64,
     holding: bool,
     min_order_size: Qty,
+    open_sell_qty: Qty,
 }
 
 impl TrimInputs {
@@ -773,6 +797,10 @@ impl TrimInputs {
                 Qty::parse(str_at(input, "min_order_size")?),
                 "min_order_size",
             )?,
+            open_sell_qty: match input.get("open_sell_qty") {
+                None => Qty::ZERO,
+                Some(_) => num(Qty::parse(str_at(input, "open_sell_qty")?), "open_sell_qty")?,
+            },
         })
     }
 }
@@ -1222,6 +1250,22 @@ impl Scene {
                     open_qty: one,
                     protective: false,
                     opening: true,
+                    submitted_on: today,
+                },
+            );
+            next_id = next_id.saturating_add(1);
+        }
+        if let Some(trim) = stated.trim.as_ref().filter(|t| !t.open_sell_qty.is_zero()) {
+            working_orders.insert(
+                gate::ClientOrderId(next_id),
+                gate::WorkingOrder {
+                    agent: THE_AGENT,
+                    instrument: instrument.clone(),
+                    side: gate::Side::Sell,
+                    max_cost: Usd::ZERO,
+                    open_qty: trim.open_sell_qty,
+                    protective: false,
+                    opening: false,
                     submitted_on: today,
                 },
             );
@@ -1719,6 +1763,59 @@ mod tests {
             .map_err(|e| format!("MC-B17 as 1 share below a 2-share minimum: {e}"))
     }
 
+    /// A trim is sized after the agent's own resting sells (DEC-399 item 7), in the gate's scene and
+    /// in the case's guards alike. MC-B17's excess is 3 shares of its 10:
+    /// - with 2 shares resting, the trim is the 1-share remainder, and a case that states the
+    ///   whole excess's 3 fails naming `qty`;
+    /// - MC-B30 confirmed, with 2 resting and a 3-share minimum, withholds that remainder as
+    ///   `below_minimum_order`, which the whole excess would meet, so a reading that ignored the
+    ///   resting sell fails naming both answers;
+    /// - with 3 or more resting, no trim is due at all, and the case states no `trim_withheld`.
+    #[test]
+    fn a_trim_is_sized_after_the_agent_s_resting_sells() -> Result<(), String> {
+        let fixture = fixture()?;
+        let remainder = doctored(&fixture, "MC-B17", "", |case| {
+            put(case, "input", "open_sell_qty", json!("2"));
+            put(case, "expect", "qty", json!("1"));
+            put(case, "expect", "order_usd", json!("99.9"));
+        })?;
+        run(remainder, "MC-B17").map_err(|e| format!("MC-B17 beside 2 resting shares: {e}"))?;
+        let whole_excess = doctored(&fixture, "MC-B17", "", |case| {
+            put(case, "input", "open_sell_qty", json!("2"));
+        })?;
+        fails_naming(
+            run(whole_excess, "MC-B17"),
+            "qty",
+            "MC-B17 beside 2 resting shares, stating the whole excess",
+        )?;
+        let below = doctored(&fixture, "MC-B30", "", |case| {
+            put(case, "input", "scale_active_s", json!(120));
+            put(case, "input", "open_sell_qty", json!("2"));
+            put(case, "input", "min_order_size", json!("3"));
+            put(
+                case,
+                "expect",
+                "trim_withheld",
+                json!(["below_minimum_order"]),
+            );
+        })?;
+        run(below, "MC-B30").map_err(|e| {
+            format!("MC-B30 confirmed, a 1-share remainder at a 3-share minimum: {e}")
+        })?;
+        for resting in ["3", "10"] {
+            let covered = doctored(&fixture, "MC-B30", "", |case| {
+                put(case, "input", "scale_active_s", json!(120));
+                put(case, "input", "open_sell_qty", json!(resting));
+                case.get_mut("expect")
+                    .and_then(Json::as_object_mut)
+                    .map(|members| members.remove("trim_withheld"));
+            })?;
+            run(covered, "MC-B30")
+                .map_err(|e| format!("MC-B30 confirmed with {resting} shares resting: {e}"))?;
+        }
+        Ok(())
+    }
+
     /// Both gate calls on a `trim_to_target` base see one scene (#498 review, m3). MC-B01, a
     /// 7-share opening buy, moved onto the trim base, where no trim is due at a factor of one, so
     /// its order reaches the builder's dry run:
@@ -2204,6 +2301,7 @@ mod tests {
                 ("scale_active_s", json!(0)),
                 ("holding", json!(false)),
                 ("min_order_size", json!("1")),
+                ("open_sell_qty", json!("0")),
             ] {
                 if trims(&fixture, &case)? {
                     break;
