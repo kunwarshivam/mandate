@@ -984,7 +984,9 @@ built against a recorded provider fake.
   format; the ladder of design §6.2 runs on a simulated clock with no early step and a notice
   before each; only an API-confirmed non-payment withholds renewal and a provider outage renews
   (BL-5, BL-14); and through every state, paper agents' exits, protective orders, owner exits, and
-  kill switches pass, while after lapse an opening is refused with `license_lapsed` (BL-4).
+  kill switches pass, while after lapse an opening is refused with `license_lapsed` by the risk gate
+  and no other component (design §3.4, BL-4); and every billing notice Mandate sends is `{notice,
+  text}` through the dispatcher, with no canary or amount in any captured byte (BL-15).
 - **E14-9 (Must, M12; SC)** As a billing admin, I want quotas and an organization spend cap enforced
   before any spend, so that the bill never exceeds the cap. *Accepted when:* workspace, deployment,
   seat, model-spend, and agent-hours quotas are checked at the points of design §3.4 with the
@@ -996,6 +998,21 @@ built against a recorded provider fake.
   when:* each row of design §6.1 has a test from entry to exit; a downgrade below what runs stops no
   agent; a refund is a traced credit to the original method; and deletion keeps billing records for
   the retention period and the journal under its own rules.
+- **E14-11 (Should, M12)** As a reader of the billing design, I want the round 1 review's text
+  findings fixed (#565). *Accepted when:* BL-10 cites the price-change notice term (DEC-442 item 18)
+  instead of pricing principle 3; the `model_cost_usd` counter row says that for `key_owner =
+  customer` it is our price table applied to the customer's call, not anyone's actual cost; the
+  Lapsed row of design §6.1 names the terminal state for an organization that never pays (lapsed,
+  with read and export access for the records period); the free paper tier gets its own §6.1 row
+  with its renewal and payment state; and design §10 either lists its rows inline or is retitled.
+- **E14-12 (Should, M12)** As the coordinator, I want the billing design reconciled with the control
+  plane (#562) and identity (#556) designs once they merge. *Accepted when:* #562 §3.5's counter
+  list gains `key_owner`, `data_units`, and `cached_tokens` and renames `decisions` to
+  `decision_cycles`; CP-6 lists resumes into an opening mode, as its own §3.3 does; identity §11.2
+  takes the shared lapse wording (after grace a license refuses only new deployments and new
+  openings, and never blocks an exit, a protective order, the kill switch, or any risk reduction),
+  subject to the founder's DEC-440 item 13; and the identity invite walk checks `max_seats`, or the
+  seat row of design §3.4 moves to where identity places it.
 
 ### E15 Signal models: LLM and fast models, scorecards
 

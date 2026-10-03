@@ -51,8 +51,8 @@ it is built (§8).
 - **Never reads strategy.** Billing sees counts, costs, opaque IDs, and role names. It never sees a
   mandate, an instrument, a position, a thesis, a model prompt or output, or an order.
 - **Never a trading control.** Billing cannot pause, stop, or flatten an agent, cancel an order, or
-  engage a kill switch. Its one lever on a site is the license, and the license can only refuse
-  new deployments and, after grace, new openings (control plane design CP-6).
+  engage a kill switch. Its one lever on a site is the license: after grace it refuses only new deployments and new openings, and never blocks an exit, a protective order, the kill switch, or any risk reduction (control plane design
+  §3.3, DEC-440 item 13).
 - **Not our own cost control.** The platform's internal monthly caps on infrastructure and
   inference spend (DEC-434 item 18) and the internal paper budgets ($5 per agent per risk day, $20
   per internal workspace per day; DEC-431 item 15) are operating budgets. They reuse this design's
@@ -70,7 +70,7 @@ journaled events by a separate accumulator, never by calling the code under test
 | **BL-1** | **Counts and opaque IDs only.** A usage report, a metered total, and every message to the billing provider carry only opaque IDs, closed enumerations, counts, fixed-point costs, period bounds, versions, and digests. No field can hold an instrument, quantity, price of a security, mandate field, model content, or personal datum | HLD §10; CP-1; rule 6 | Type test on the report and provider-request types (no free `String` outside closed enumerations). Canary run: a workspace whose instruments, agent names, and users are unique canary strings trades a paper day; every byte sent to ingest and to the provider fake is scanned for every canary |
 | **BL-2** | **No billable unit from trading activity.** The counter list (§4.1) is closed and none of its members reads an order, fill, intent, `DecisionMade`, position, P&L, or account value event | Compliance; pricing principle 2 | A counter-source test: each counter names its source event types, and a lint fails if any is on the deny list. Property test: two journals identical except for orders and fills (one trades, one holds) give identical usage reports |
 | **BL-3** | **No custody, no trading account.** Billing has no dependency path to the vault, a broker connection, the account ledger, or the executor, and the price book has no stored-value or withdrawable balance type | Compliance; rule 7; rule 12 | Layering (`xtask/layers.toml`): the billing crates cannot depend on `mandate-executor`, connector, or vault crates. Schema test: credits exist only as invoice adjustments |
-| **BL-4** | **Billing never stops risk reduction and never liquidates.** No billing state maps to a pause, stop, exit, cancel, or kill switch. Non-payment acts only by withholding license renewal; the license, after its own grace, refuses new deployments and new opening or increasing orders, never an exit, protective order, owner exit, risk exit, kill switch, reconciliation, journal read, or export | Rules 2, 3, 13; CP-3, CP-6; identity spec §11.2 | Fault injection: an organization driven through every billing state (§6) while its paper agents hold positions; every exit, protective order, and kill switch passes in every state; after lapse, an opening is refused with `license_lapsed` and an exit is not |
+| **BL-4** | **Billing never stops risk reduction and never liquidates.** No billing state maps to a pause, stop, exit, cancel, or kill switch. Non-payment acts only by withholding license renewal; the license after grace it refuses only new deployments and new openings, and never blocks an exit, a protective order, the kill switch, or any risk reduction. It never stops a running agent; reconciliation, journal reads, and exports continue | Rules 2, 3, 13; CP-3, CP-6; identity spec §11.2 | Fault injection: an organization driven through every billing state (§6) while its paper agents hold positions; every exit, protective order, owner exit, risk exit, and kill switch passes in every state; after lapse, an opening is refused with `license_lapsed`, the refusal is raised by the risk gate (its gate record names the reason), and an exit in the same instrument is not refused |
 | **BL-5** | **Non-payment follows a fixed, noticed ladder.** Openings are refused for non-payment no sooner than the end of dunning plus the license grace (§6.2), and each step is preceded by a notice to the org's owners and billing admins. Only a non-payment confirmed by the provider's API, never a webhook body or an outage, moves an organization down the ladder | Rule 3 (ambiguity never adds risk); DEC-440 item 13 | Clock-driven test over the ladder: no step happens early; a webhook claiming failure with the provider API showing paid moves nothing; a provider outage at renewal time renews |
 | **BL-6** | **Metering is idempotent.** Any number of deliveries of the same reports, in any order, gives the same ingested totals and the same provider usage, because reports de-duplicate by `report_id` and provider calls carry deterministic idempotency keys (§5.2) | CP-10 | Fuzz: random duplicate, reordered, and delayed deliveries plus ingest and provider crashes give totals equal to a clean single delivery |
 | **BL-7** | **Metering reconciles with the journal.** For every deployment and closed period, the sealed report equals a recount from the journal and the inference meter stream, and the billed total equals the sum of ingested reports. A mismatch or a chain gap holds the affected invoice line for review; it is never filled with an estimate | CP-10; inference spec §7.4 | Separate accumulator over journaled events and `meter:{workspace_id}` recomputes every counter; a seeded off-by-one in the report builder must fail it. Ingest test: a missing report holds the line |
@@ -81,6 +81,8 @@ journaled events by a separate accumulator, never by calling the code under test
 | **BL-12** | **Fixed-point money, one rounding.** Costs are fixed-point decimals (6 places, as inference spec §7.1); amounts are summed unrounded and rounded once per invoice line, half up, to the currency's minor unit | `AGENTS.md` conventions | Property test: line totals equal the rounded exact sum; no floating-point type in the billing crates (clippy `float_arithmetic` deny) |
 | **BL-13** | **Tenant scope.** Billing records are keyed by `org_id` and read only by that organization's owners and billing admins and by platform billing staff; a deployment writes only its own reports | CP-11; HLD §8 | Cross-organization tests on every billing endpoint and on ingest |
 | **BL-14** | **A billing outage never affects trading or an issued license.** With billing, ingest, or the provider down, sites run unchanged and reports queue; an unknown payment state renews a license rather than withholding it | CP-2, CP-8; rule 3 | Drill with billing and the provider fake down for longer than a renewal threshold: no license is withheld, no site changes behaviour, and queued reports drain with BL-6 totals |
+
+| **BL-15** | **Billing notices are opaque** (rule 6). A notice Mandate sends about billing, a license, a quota, or a cap goes through the notification dispatcher (notifications spec, #558, NT-1) with exactly the payload `{notice, text}`: a random notice id and one text key from the closed set. Amounts, plan names, workspace names, counts, and invoice contents are never pushed; the recipient reads them after signing in. Emails the billing provider sends itself (receipts, dunning) are outside this path and are named as such in §6.1; they carry only what BL-1 lets the provider hold | Rule 6; NT-1; `AGENTS.md` safety-critical paths | BL-1's canary run extended to every billing notice kind through every channel adapter and the relay: every captured byte matches `{notice, text}` with a key from the closed set, and no canary or amount appears |
 
 **Known limit, stated.** BL-7 holds for sites that run our software unmodified. A hybrid or
 air-gapped customer controls its own software and could forge counts; §7 bounds what that buys.
@@ -135,7 +137,12 @@ unreachable (CP-2), and each refuses only new activity (BL-8).
 | Seats | Invitation (identity) | Count against `max_seats` | Invitation refused |
 | Model spend | Model gateway (inference spec §7.3) | Reservation of the call's maximum cost against the workspace's monthly allotment and the daily caps | `budget_exhausted`; no fresh model output, which only shrinks buys (INF-4) |
 | Agent-hours (only if the plan caps them) | Deployment manager | At deployment and at each cycle start, commit the hours left in the cycle for each running agent; deploy only if `used + committed + new ≤ cap` | Deployment refused. A running agent is never stopped for hours: its hours were committed when it was deployed |
-| Org spend cap (set by a billing admin) | Split into per-workspace allotments carried in the license | As the rows above | As the rows above, plus a notice to billing admins at 50%, 80%, and 100% (the DEC-434 item 18 pattern) |
+| Org spend cap (set by a billing admin) | Split into per-workspace allotments carried in the license | As the rows above | As the rows above, plus a notice to billing admins at 50%, 80%, and 100% (the DEC-434 item 18 pattern; opaque, BL-15) |
+| Opening or increasing orders (after lapse) | The risk gate, as gate reason `license_lapsed` (control plane design §3.3), reading the license state the site verified locally from the signed license | The gate checks it with every other check, before the order is sent | The opening is refused. Risk exits, protective orders, owner exits, discretionary exits, and kill switches are exempt as always (rule 13); the check lives in the gate because the exemptions do. No other enforcement point refuses an order |
+
+The cycle allotment is a fourth cap in inference spec §7.3's table, per billing cycle, and is
+enforced alongside the per-risk-day caps (the envelope's research cost cap and the workspace's daily
+model spend), never instead of them. A call starts only if it fits under all of them.
 
 **Why per-workspace allotments.** An organization's monthly model spend cap cannot be checked
 exactly across workspaces in different cells without a network call in the path of a model call.
@@ -174,7 +181,7 @@ what leaves the site.
 |---|---|---|
 | `agent_hours_paper`, `agent_hours_live` | Deployment and mode events (`AgentDeployed`, `AgentModeChanged`, `AgentStopped`), in seconds, summed | Mode from the stream's `environment` (ES-23), never self-declared |
 | `decision_cycles` | The runtime's completed evaluation cycles, holds included | Never `DecisionMade`, which is intent-level (BL-2). Recommended unpriced in v1 (DEC-442 item 15) |
-| `model_calls`, `input_tokens`, `output_tokens`, `cached_tokens` | Inference metering records (inference spec §7.1) | Split by `endpoint_class`, provider, and `key_owner` |
+| `model_calls`, `input_tokens`, `output_tokens`, `cached_tokens` | Inference metering records (inference spec §7.1) | Split by `endpoint_class`, provider, and `key_owner`, carried through the site's sum (inference spec §7.4) to ingest. A customer key is the customer's own aggregator account, or a provider key that aggregator routes, under the same routing lock (DEC-432 items 14, 16) |
 | `model_cost_usd` | The same records' `cost_usd` | Our cost, before margin; the margin is applied in rating, never on the site |
 | `workspaces`, `seats` | Workspace and membership events | Peak in the period |
 | `data_units` | Zero in v1: each user's data comes through their own Alpaca account (HLD §12 item 3) | Reserved so a shared data offering needs no format change |
@@ -281,10 +288,24 @@ depends on the provider; either way the price-book version and report digests st
 | **Dunning** | `past_due` | Provider retries on its schedule (Proposed: 14 days); notices at each retry. Trading unchanged | Paid: active. Unpaid at the end: renewal withheld |
 | **Renewal withheld** | Dunning ended unpaid, confirmed by API read (BL-5) | The license service stops issuing renewals. The site's license runs to `not_after` | Payment: a renewal is issued at once. Otherwise the license reaches `not_after` |
 | **License grace** | Site clock past `not_after` (control plane §3.3) | Banners only; nothing new beyond the license's limits | Payment and a new license, or `grace_days` elapse (Proposed: 30, DEC-440 item 13) |
-| **Lapsed** | Grace elapsed | New deployments, resumes into an opening mode, and opening or increasing orders refused (`license_lapsed`). Exits, protection, owner exits, risk exits, kill switch, reconciliation, journal, exports continue (BL-4) | A new license after payment; agents return to their journaled mode, and nothing paused for another reason resumes |
+| **Lapsed** | Grace elapsed | Refuses only new deployments (and resumes into an opening mode) and new openings, through the risk gate's `license_lapsed` (§3.4); never blocks an exit, a protective order, the kill switch, or any risk reduction. Reconciliation, journal reads, and exports continue (BL-4) | A new license after payment; agents return to their journaled mode, and nothing paused for another reason resumes |
 | **Cancellation** | Owner cancels | Effective at the cycle end (Proposed); the final invoice carries that cycle's usage; renewal is not issued past it, so the license then follows grace and lapse | Reactivation before lapse; or the organization stays lapsed with read and export access for the records period |
 | **Refund** | Billing staff, under the refund terms (counsel) | A credit through `issue_credit` against named invoice lines (BL-11). Paid back by the provider to the original method, never to or from a trading account | The credit is journaled in billing's audit log |
 | **Organization deletion** | Owner, after every agent is stopped and every live connection removed | Billing closes the subscription, settles the final invoice, and deletes the provider customer's personal data where the provider allows. Billing records (invoices, report digests) are kept for the tax and records retention period | Retention ends; journal retention is the journal spec's (§6.2), not billing's |
+
+**Notice channels.** Every notice above that Mandate sends is an opaque notice (BL-15): `{notice,
+text}` through the notification dispatcher, read in full only after sign-in. Banners are in the
+signed-in app, not notices. The provider's own emails are a separate channel we do not template.
+
+| Notice | Sent by | Channel |
+|---|---|---|
+| Trial ending, renewal withheld, license `renewal_due`, grace, lapse | Mandate | Opaque notice through the dispatcher (#558), to owners and org admins; an in-app banner for billing admins, who receive nothing pushed (#558 §3.3) |
+| Payment failed, dunning retries, receipts, invoices, refunds | The billing provider | The provider's own email to the billing contact entered on its hosted page; outside rule 6's payload path, and holding only BL-1's fields plus the invoice the provider rendered |
+| Spend at 50%, 80%, 100% of a cap | Mandate | Opaque notice and an in-app banner |
+| A correction against the customer (§4.4) | Mandate | Opaque notice; the correction is read in the app |
+
+The closed text set in #558 §4.2 has no billing key today; `account_changed` covers these notices
+until a `billing_update` key is added by a spec change (§11).
 
 ### 6.2 The non-payment ladder
 
@@ -301,11 +322,11 @@ invoice unpaid ─▶ dunning (Proposed 14 d) ─▶ renewal withheld ─▶ lic
   Non-payment mid-term is a contract matter for counsel's terms; the license lapses only at term
   end plus grace.
 - **Reconciling DEC-440 item 13 with the identity spec §11.2.** The identity spec says a license past
-  grace is "a billing matter, never a trading stop". This design reads that as: never a stop of what
-  runs, never an exit blocked, never a liquidation. Refusing new openings after grace is stricter
-  than nothing and adds no risk, so DEC-442 item 2 takes DEC-440 item 13's reading while that item is
-  Proposed, and the identity spec's sentence should say "never a stop of running agents or exits"
-  when it merges (§11).
+  grace is "a billing matter, never a trading stop". This design is built against DEC-440 item 13's
+  recommendation, as DEC-440 instructs while the item is Proposed: after grace a license refuses
+  only new deployments and new openings, and never blocks an exit, a protective order, the kill
+  switch, or any risk reduction. That adds no risk. The final wording, in CP-6, BL-4, and identity
+  §11.2 alike, stays the founder's under DEC-440 item 13 (DEC-442 item 2).
 
 ---
 
@@ -347,13 +368,14 @@ As of 2026-10-03, no billing code exists.
 [DEC-442](../project/decisions/DEC-442.md) records this document's choices.
 
 **Accepted (agent; DEC-79 reversible engineering, DEC-176 readings that only tighten):** the closed
-counter list with no trading-derived unit (item 1); the license as billing's only lever and
-DEC-440 item 13's reading while it is Proposed (item 2); the ladder's order and its API-confirmed
+counter list with no trading-derived unit (item 1); the license as billing's only lever, designed
+against DEC-440 item 13's recommendation with the final wording left to the founder (item 2); the ladder's order and its API-confirmed
 steps (item 3); enforcement before spend with per-workspace allotments and committed agent-hours
 (item 4); idempotency keys, reconciliation holds, and no estimates (item 5); corrections as new
 lines (item 6); price versions pinned per cycle (item 7); webhooks as hints (item 8); `key_owner`
 on the metering record (item 9); no stored value and hosted payment pages (item 10); billing's
-layering (item 11); the E14 rows (item 12); decision cycles, never `DecisionMade` (item 13).
+layering (item 11); the E14 rows (item 12); decision cycles, never `DecisionMade` (item 13);
+opaque billing notices (item 21).
 
 **Proposed for the founder** (spending, prices, legal text; DEC-79). Until each is decided: no
 billing provider account, no prices, no charges; the code is built against a recorded fake.
@@ -372,7 +394,7 @@ billing provider account, no prices, no charges; the code is built against a rec
 
 ## 10. Backlog
 
-Rows E14-4 to E14-10, added to the [backlog](../project/06-backlog-v1.md#e14-billing). **SC** marks a
+Rows E14-4 to E14-12, added to the [backlog](../project/06-backlog-v1.md#e14-billing). **SC** marks a
 story on a safety-critical path (the license's effect on openings borders the risk gate).
 
 ## 11. Open questions
@@ -380,9 +402,11 @@ story on a safety-critical path (the license's effect on openings borders the ri
 1. **The cycle-level event.** No journal event marks a completed evaluation cycle today; the
    `decision_cycles` counter needs one, or the counter is dropped if the founder leaves it unpriced.
 2. **The control plane's counter list** (#562 §3.5) names tokens by endpoint class and provider but
-   not by `key_owner`; whichever PR lands second adds it.
+   not by `key_owner`; whichever PR lands second adds it (E14-12 lists the other deltas).
 3. **Identity spec §11.2's sentence** (#556) should match BL-4 and DEC-440 item 13 once both merge.
 4. **Overage on a downgrade.** Billing overage for agents the owner keeps running after a downgrade
    is the safe reading (nothing stops); whether to cap that overage is a pricing question.
 5. **Platform staff refunds and two-person rules.** Whether credits above a threshold need two
    staff, as license changes do (DEC-440 item 10).
+6. **A `billing_update` text key** in the notifications spec's closed set (#558 §4.2), so billing
+   notices read differently from account-security ones (BL-15).
