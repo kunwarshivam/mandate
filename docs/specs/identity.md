@@ -75,7 +75,7 @@ is trusted (§14, E9-11).
 | ID | Invariant | Source | Test |
 |---|---|---|---|
 | **ID-1** | **Every action is attributed.** Every mutation workspace services accept, and every event they commit to the control stream, carries the authenticated principal (`actor.kind`, opaque `actor.id`) and the session it came through. The principal comes from the authenticated channel, never from the request body. Nothing anonymous is committed | Journal §3; HLD §8 "Agent identity" | A fuzz of API calls with forged `actor`, `user`, `responder`, and `workspace_id` fields in bodies asserts every committed event's actor equals the oracle's record of who authenticated |
-| **ID-2** | **A role grants exactly its matrix row.** `authorize(principal, scope, permission)` allows exactly when some role the principal holds through an `active` membership in that scope has the permission in §4.2's matrix. Everything else is denied, including a permission the matrix leaves blank | §4 | An exhaustive test over every (role set, permission, scope) triple against a table parsed from §4.2 itself, not from the code |
+| **ID-2** | **A role grants exactly its matrix row.** `authorize(principal, scope, permission)` allows exactly when some role the principal holds through an `active` membership in that scope has the permission in §4.2's matrix, or, for a principal that holds no membership (a client, a service account, the host CLI, a platform operator in break-glass), when its own column has it within that column's stated scope. Everything else is denied, including a permission the matrix leaves blank | §4 | An exhaustive test over every (role set or non-member principal kind, permission, scope) triple against a table parsed from §4.2 itself, not from the code |
 | **ID-3** | **Only an active member reaches a workspace.** A principal with no `active` membership in workspace W can neither read nor write W. A deactivation applies to every request authorized after it commits, and open streams (server-sent events, websockets) of that principal in W close within 60 s | §5 | A fuzz interleaving requests with membership changes; the oracle replays `Member*` events and asserts no request authorized after a deactivation succeeded, and every stream closed within the bound |
 | **ID-4** | **Step-up where risk can grow.** These need valid step-up (§7): confirming a risk-increasing mandate version, deploying (going live or paper), approving under policy (mandate §6.4 check 6), granting a delegation, connecting or changing a connection, revoking a connection, re-enabling a halted scope if DEC-437 item 21 creates one (§4.4), resume, Stop, acknowledgments (mandate §6.1), owner exits, accepting a disclosure (V-005), loosening a policy, granting a role, connecting a client, enrolling a step-up credential, and break-glass | FR-1.4; mandate §6.1 | A table test per command: with each failure mode (missing, stale, reused, wrong method, wrong action digest, wrong principal) the command is refused and nothing else is committed |
 | **ID-5** | **Never for risk reduction.** No step-up, session freshness, or identity-provider round trip is required to pause, to engage a kill switch at any scope (its stop and flatten; only its extra privileges need step-up, mandate §6.1), to skip an approval, to tighten a policy, to remove or narrow a delegation, or to revoke a client. Automated exits, protective orders, and risk exits involve no principal at all | `AGENTS.md` rules 2, 3, 13; MI-23 | With step-up absent, stale, and with the identity provider unreachable, each of these commits, and the kill switch stops and flattens |
@@ -85,7 +85,7 @@ is trusted (§14, E9-11).
 | **ID-9** | **Secrets stay secret.** Session tokens, refresh tokens, recovery codes, OIDC client secrets, and WebAuthn challenges never appear in logs, metrics, traces, the journal, artifacts, or notifications. Recovery codes are stored only as salted slow hashes and shown once. No password is stored at all | `AGENTS.md` rules 6, 7; OPS-1 | The log-scan test with canary tokens through every authentication path; a test that the recovery-code table holds no plaintext |
 | **ID-10** | **An identity-provider outage never blocks risk reduction.** With the identity provider (ours or the customer's) and the global control plane unreachable, a member can still pause and engage a kill switch, through a session the outage interrupted, workspace-local passkey verification, or the host CLI's registered principal (§6.4). The workspace-held passkey verifier is not part of what DEC-437 item 15 leaves open | Rules 3, 13; OPS-4, OPS-12 | The kill-switch drill with the identity provider, the global control plane, and the model gateway all unreachable |
 | **ID-11** | **A client is never the human.** A client principal (DEC-141) is recorded as `actor.kind` `client` with `on_behalf_of` its user, never as a `user` (§12.2); it is scoped to one user in one workspace, holds a revocable sender-constrained token, and never approves, confirms a version, presents step-up, pauses (DEC-191), resumes, stops, releases, makes an owner exit, changes a connection, or changes a membership. Revoking it takes effect for every request authorized after the revocation commits | DEC-141 items 1 to 5; DEC-191; E10-6 | The ID-2 table run for the `client` principal; a test that a `client` actor's approval response is refused by mandate §6.4 check 3 from the record alone; a revocation race test as in ID-3 |
-| **ID-12** | **Platform staff never decide for a customer.** No platform operator approves, confirms, acknowledges, or holds a workspace role. Break-glass is time-bound, approved by the customer with no other route (§10.3), limited to operational actions, and journaled to a stream the customer reads | Journal §7; infrastructure §5.5; mandate §6.4 check 3 | A test that a `platform_operator` actor is refused by every permission except the break-glass operational set, and only inside an approved window |
+| **ID-12** | **Platform staff never decide for a customer.** No platform operator approves, confirms, acknowledges, or holds a workspace role. Break-glass is time-bound, approved by the customer with no other route (§10.3), limited to operational actions, and journaled to a stream the customer reads | Journal §7; infrastructure §5.5; mandate §6.4 check 3 | A test that a `platform_operator` actor is refused by every permission except the PO column of §4.2, and only inside an approved window in the workspace it names |
 | **ID-13** | **Roles change only by journaled membership events, and never by their holder.** No principal grants a role to itself, raises its own roles, or lifts its own cool-off; every grant is a committed `MemberRoleChanged` with step-up. The one exception is the founding grant when an organization or workspace is created (§3.2), which the system issues and journals as `MemberActivated` with reason `founding` | §5, §8.3 | A fuzz of membership commands asserting the oracle's role state equals the fold of `Member*` events and no grant names its own author as subject |
 | **ID-14** | **Identity notices are opaque.** The identity and account-security notice kinds (a new device or passkey, a role grant, a member deactivated, a recovery started, a break-glass) carry only an opaque ID and generic text, and go to the recipients of §4.1's receive column; their kinds are those the notifications spec adds to its catalogue (DEC-438) | Rule 6; OPS-10 | Payload capture tests (07, Privacy) on each notice |
 | **ID-15** | **The global directory holds IDs and roles only.** The global control plane holds organization, workspace, and user IDs and role names for seats and routing. It never holds sessions, tokens, credential material, recovery codes, step-up evidence, or approval content, and it is never in the path of a sign-in to a hybrid or on-prem deployment | HLD §4 "Where data lives" | A schema test on the directory's tables and the outbound sync payload; the drill with the outbound link cut |
@@ -181,48 +181,57 @@ what makes them an approver of that agent.
 
 **S** marks a permission that needs step-up (§7). A blank cell is a denial (ID-2). OO org owner,
 OA org admin, Bill billing admin, WA workspace admin, Op operator, Ap approver, Vi viewer, Au auditor,
-Cl client (DEC-141), SA service account.
+Cl client (DEC-141), SA service account, HC host CLI (§6.4 route 3), PO platform operator inside an
+approved break-glass window (§10.3).
 
-| Permission | S | OO | OA | Bill | WA | Op | Ap | Vi | Au | Cl | SA |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| View agents, positions, decisions | | | | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| Read records, verification; export (journal §7) | | | | | ✓ | | | | ✓ | | ✓ |
-| Draft a mandate version | | | | | | ✓ | | | | ✓ (propose only) | |
-| Confirm a version: reducing or neutral | | | | | | ✓ | | | | | |
-| Confirm a version: risk-increasing (incl. a delegation grant, V-022) | S | | | | | ✓ | | | | | |
-| Deploy, go live (E10-4) | S | | | | | ✓ | | | | | |
-| Pause | | | | | ✓ | ✓ | ✓ | | | | |
-| Hold new openings (`exits_only`, DEC-191) | | | | | ✓ | ✓ | | | | ✓ | |
-| Lift a hold a client set (DEC-191) | S | | | | ✓ | ✓ | | | | | |
-| Resume, Stop, Stop with release | S | | | | ✓ | ✓ | | | | | |
-| Kill switch, agent scope: engage | | | | | ✓ | ✓ | | | | | |
-| Kill switch, connection or workspace scope: engage | | | | | ✓ | ✓ | | | | | |
-| Kill switch, org scope: engage | | ✓ | ✓ | | | | | | | | |
-| Kill switch, any scope: privileges beyond the stop (mandate §6.1), for a scope one may engage | S | ✓ | ✓ | | ✓ | ✓ | | | | | |
-| Re-enable a halted scope (§4.4; only if DEC-437 item 21 creates the state) | S | ✓ (org) | ✓ (org) | | ✓ | | | | | | |
-| Owner exit (close a position) | S | | | | | ✓ | | | | | |
-| Acknowledge (ladder, tripwire, reconciliation) | S | | | | ✓ | ✓ | | | | | |
-| Answer an approval: approve | S | | | | | | ✓ | | | | |
-| Answer an approval: skip | | | | | | | ✓ | | | | |
-| Remove or narrow a delegation | | | | | | ✓ | | | | | |
-| Connect, change, or revoke a broker connection | S | | | | ✓ | | | | | | |
-| Accept a disclosure (V-005) | S | | | | | ✓ | | | | | |
-| Workspace policy: tighten | | | | | ✓ | | | | | | |
-| Workspace policy: loosen (within the org's) | S | | | | ✓ | | | | | | |
-| Invite, deactivate, remove a workspace member | S for invite | | | | ✓ | | | | | | |
-| Grant or remove a workspace role | S for grant | | | | ✓ | | | | | | |
-| Connect a client (issue its token) | S | | | | | ✓ | | | | | |
-| Revoke a client | | | | | ✓ | ✓ | | | | | |
-| Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | |
-| Org policy: tighten | | ✓ | ✓ | | | | | | | | |
-| Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | |
-| SSO configuration | S | ✓ | ✓ | | | | | | | | |
-| Create or archive a workspace | S | ✓ | ✓ | | | | | | | | |
-| Org memberships and org roles | S | ✓ | ✓ (not owner) | | | | | | | | |
-| Issue or revoke a service account | S | ✓ | ✓ | | | | | | | | |
-| Billing | | ✓ | | ✓ | | | | | | | |
-| Transfer org ownership; delete the org | S | ✓ | | | | | | | | | |
-| Approve a break-glass request (§10.3) | S | ✓ | | | ✓ | | | | | | |
+The HC column applies only in the deployment's own workspace, the one whose admin registered the
+CLI (§3.1). The PO column applies only inside a window the customer approved, in the one workspace
+it names; outside such a window a platform operator has no permission at all (ID-12).
+
+| Permission | S | OO | OA | Bill | WA | Op | Ap | Vi | Au | Cl | SA | HC | PO |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| View agents, positions, decisions | | | | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | |
+| Make an owner request through the owner-input API (builder, gate, and autonomy apply; DEC-141) | | | | | | ✓ | | | | ✓ | | | |
+| Dry run of a request (DEC-190) | | | | | | ✓ | | | | ✓ | | | |
+| Chat thread with the agent | | | | | | ✓ | | | | | | | |
+| Read records, verification; export (journal §7) | | | | | ✓ | | | | ✓ | | ✓ | | |
+| Draft a mandate version | | | | | | ✓ | | | | ✓ (propose only) | | | |
+| Confirm a version: reducing or neutral | | | | | | ✓ | | | | | | | |
+| Confirm a version: risk-increasing (incl. a delegation grant, V-022) | S | | | | | ✓ | | | | | | | |
+| Deploy, go live (E10-4) | S | | | | | ✓ | | | | | | | |
+| Pause | | | | | ✓ | ✓ | ✓ | | | | | ✓ | ✓ |
+| Hold new openings (`exits_only`, DEC-191) | | | | | ✓ | ✓ | | | | ✓ | | | |
+| Lift a hold a client set (DEC-191) | S | | | | ✓ | ✓ | | | | | | | |
+| Resume, Stop, Stop with release | S | | | | ✓ | ✓ | | | | | | | |
+| Kill switch, agent scope: engage | | | | | ✓ | ✓ | | | | | | ✓ | ✓ |
+| Kill switch, connection or workspace scope: engage | | | | | ✓ | ✓ | | | | | | ✓ | ✓ |
+| Kill switch, org scope: engage | | ✓ | ✓ | | | | | | | | | | |
+| Kill switch, any scope: privileges beyond the stop (mandate §6.1), for a scope one may engage | S | ✓ | ✓ | | ✓ | ✓ | | | | | | | |
+| Re-enable a halted scope (§4.4; only if DEC-437 item 21 creates the state) | S | ✓ (org) | ✓ (org) | | ✓ | | | | | | | | |
+| Owner exit (close a position) | S | | | | | ✓ | | | | | | | |
+| Acknowledge (ladder, tripwire, reconciliation) | S | | | | ✓ | ✓ | | | | | | | |
+| Answer an approval: approve | S | | | | | | ✓ | | | | | | |
+| Answer an approval: skip | | | | | | | ✓ | | | | | | |
+| Remove or narrow a delegation | | | | | | ✓ | | | | | | | |
+| Connect, change, or revoke a broker connection | S | | | | ✓ | | | | | | | | |
+| Accept a disclosure (V-005) | S | | | | | ✓ | | | | | | | |
+| Workspace policy: tighten | | | | | ✓ | | | | | | | | |
+| Workspace policy: loosen (within the org's) | S | | | | ✓ | | | | | | | | |
+| Invite, deactivate, remove a workspace member | S for invite | | | | ✓ | | | | | | | | |
+| Grant or remove a workspace role | S for grant | | | | ✓ | | | | | | | | |
+| Connect a client (issue its token) | S | | | | | ✓ | | | | | | | |
+| Revoke a client | | | | | ✓ | ✓ | | | | | | | |
+| Enrol or remove one's own passkey | S | own | own | own | own | own | own | own | own | | | | |
+| Org policy: tighten | | ✓ | ✓ | | | | | | | | | | |
+| Org policy: loosen (within the platform's) | S | ✓ | ✓ | | | | | | | | | | |
+| SSO configuration | S | ✓ | ✓ | | | | | | | | | | |
+| Create or archive a workspace | S | ✓ | ✓ | | | | | | | | | | |
+| Org memberships and org roles | S | ✓ | ✓ (not owner) | | | | | | | | | | |
+| Issue or revoke a service account | S | ✓ | ✓ | | | | | | | | | | |
+| Billing | | ✓ | | ✓ | | | | | | | | | |
+| Transfer org ownership; delete the org | S | ✓ | | | | | | | | | | | |
+| Approve a break-glass request (§10.3) | S | ✓ | | | ✓ | | | | | | | | |
+| Restart a process; read verification results (break-glass operational set, §10.3) | | | | | | | | | | | | | ✓ |
 
 Notes:
 
@@ -412,7 +421,10 @@ device. It is held server side; the browser holds only an opaque, `HttpOnly`, `S
   family (stolen-token detection).
 - **Sign-out and revocation** end the session server side at once; the user can end any listed
   session.
-- **New device notice.** A sign-in from a device the principal has not used sends an opaque notice
+- **New device notice.** Every sign-in commits `SessionOpened` (§12.1), whose `first_seen_device`
+  flag is true when the principal has not used that device before (a device is its DPoP key
+  thumbprint, or for a browser a long-lived device cookie's opaque ID; a synced passkey on a new
+  machine is a new device). A first-seen sign-in sends an opaque notice
   (ID-14).
 
 ### 6.3 Device binding
@@ -421,7 +433,7 @@ device. It is held server side; the browser holds only an opaque, `HttpOnly`, `S
   authenticator. Synced passkeys move with the user's platform account; this is accepted in v1 and
   disclosed in the security settings.
 - Non-browser clients (the mobile app, the CLI, owner-connected clients) hold sender-constrained
-  tokens (DPoP, RFC 9449), never plain bearer tokens,: a token is usable only with a proof signed by the key it was issued to,
+  tokens (DPoP, RFC 9449), never plain bearer tokens: a token is usable only with a proof signed by the key it was issued to,
   so a copied token alone is useless.
 - A session records its device's key thumbprint (for DPoP clients) or the cookie's session ID; the
   journal's `session` reference (§12) is an opaque ID, never the cookie or the token.
@@ -654,7 +666,8 @@ As infrastructure §5.5 and journal §7 set it, and made exact here:
 - Deprovisioning: the customer's IdP is the source of truth for who still works there. A
   **deprovision signal** (the IdP answers a refresh with `invalid_grant` or a disabled or revoked
   subject, or sends a back-channel logout) ends every session of that subject in the workspace at
-  once, with every permission, blocks §6.4 route 2 for it, and alerts the workspace admins to
+  once, each journaled as `SessionRevoked` with reason `deprovisioned` (§12.1), with every permission,
+  blocks §6.4 route 2 for it, and from that event alerts the workspace admins to
   deactivate the membership (opaque). An **unreachable** IdP is an outage, not a deprovision (§6.4
   route 1). SCIM provisioning is planned (§14); with it, a deprovision commits `MemberDeactivated`
   directly.
@@ -690,7 +703,8 @@ them to journal §9 with schemas (DEC-437 item 9):
 | `MemberRoleChanged` | member, roles added and removed, granting user, step-up evidence for a grant, cool-off end per added role |
 | `MemberDeactivated`, `MemberReactivated`, `MemberRemoved` | member, by whom, reason code |
 | `CredentialEnrolled`, `CredentialRemoved` | member, credential (opaque reference, never the key), kind, enrolment cool-off end |
-| `SessionRevoked` | member, session (opaque), reason (`sign_out`, `deactivated`, `refresh_reuse`, `admin`) |
+| `SessionOpened` | member, session (opaque), method, device (opaque), `first_seen_device` (true when the principal has not used the device before); the subject event of the notifications spec's `new_device` kind |
+| `SessionRevoked` | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `admin`); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
 | `ClientConnected`, `ClientRevoked` | client id, user, scopes, step-up evidence |
 | `ServiceAccountIssued`, `ServiceAccountRevoked` | account, scopes, workspaces, expiry, issuing user |
 | `HostCliRegistered`, `HostCliRevoked` | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence |

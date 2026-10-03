@@ -889,8 +889,9 @@ story buys a service, and none uses a real identity-provider account in tests (s
   freeze rule). *Accepted when the spec settles each:* (1) the workspace admin holds the kill switch's
   privileges beyond the stop (mandate §6.1, selling equities outside the session) but not the owner
   exit; make the two rows agree; (2) ID-2's exhaustive test needs a matrix row for every operation the
-  workspace API spec defines (owner request, dry run, chat thread, saving a draft, backtest, resolving
-  a notice), or ID-2 is scoped to the rows the matrix names; (3) a row for lifting a hold an operator
+  workspace API spec defines; the owner request, dry run, and chat thread rows were added by the
+  round-2 ruling, and saving a draft, running a backtest, and resolving a notice still need rows, or
+  ID-2 is scoped to the rows the matrix names; (3) a row for lifting a hold an operator
   set, with its step-up; (4) ID-15's carve-out for the notification relay's envelope
   (`{relay_id, endpoint, ciphertext}`, a capability URL) as HLD "Where data lives" lists it; (5) "release"
   names both Stop with release (DEC-136) and re-enabling a halted scope, so one is renamed (round 2
