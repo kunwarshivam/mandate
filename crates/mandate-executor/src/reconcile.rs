@@ -2097,8 +2097,21 @@ pub(crate) mod tests {
         )?;
         assert_eq!(
             drafted(&confirmed),
-            vec!["OrderStateChanged", "ProtectionChanged"],
-            "and, a protective order, it leaves the instrument's protection (slice 3a)"
+            vec![
+                "OrderStateChanged",
+                "ProtectionChanged",
+                "ProtectionChanged"
+            ],
+            "and, a protective order, it leaves the instrument's protection (slice 3a); with no \
+             prices to re-place it at, the shortfall is journaled and the owner alerted, never \
+             silent (the founder's decision on #468, DEC-367 item 4)"
+        );
+        assert!(
+            confirmed.iter().any(|effect| matches!(
+                effect,
+                Effect::Notify(note) if note.message_key == "protection_expiring"
+            )),
+            "{confirmed:?}"
         );
         assert!(
             confirmed.iter().any(|effect| matches!(

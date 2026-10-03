@@ -1702,19 +1702,16 @@ fn drive(case: Case) {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_14_equity_exit_sequence_with_protective_oco() {
     drive(case("RC-14", None));
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_14_passive_exit_becomes_oco_take_profit() {
     drive(case("RC-14", Some("passive_exit_becomes_oco_take_profit")));
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_14_add_via_bracket() {
     drive(case("RC-14", Some("add_via_bracket")));
 }
@@ -1741,7 +1738,6 @@ fn trading_domain_rc_06_protective_orders_kept_through_dividend() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn trading_domain_rc_07_unposted_crypto_fees_reconcile() {
     drive(case("RC-07", None));
 }
@@ -1753,49 +1749,41 @@ fn trading_domain_rc_20_crypto_stop_limit_add_and_exit_sequences() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_21_bracket_partly_filled_and_re_placed_before_expiry() {
     drive(case("RC-21", None));
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_22_resting_buys_cancelled_before_the_exit() {
     drive(case("RC-22", None));
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_24_exit_price_ladder_in_extended_hours() {
     drive(case("RC-24", None));
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_24_presumed_halt_regular_session() {
     drive(case("RC-24", Some("presumed_halt_regular_session")));
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn trading_domain_rc_15_restriction_from_a_closing_only_reject() {
     drive(case("RC-15", None));
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn trading_domain_rc_15_status_not_active() {
     drive(case("RC-15", Some("status_not_active")));
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn trading_domain_rc_15_external_order_detected() {
     drive(case("RC-15", Some("external_order_detected")));
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn trading_domain_rc_15_unexplained_403s() {
     drive(case("RC-15", Some("unexplained_403s")));
 }
