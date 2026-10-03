@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft v0.1, not yet reviewed |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-441](../project/decisions/DEC-441.md) (items 1 to 14 and 21 Accepted by the agent; items 15 to 20 and 22 Proposed for the founder) |
+| **Decisions** | [DEC-441](../project/decisions/DEC-441.md) (items 1 to 14, 21, and 23 Accepted by the agent; items 15 to 20 and 22 Proposed for the founder) |
 | **Backlog** | E7-1, E7-6, E7-11 to E7-18 ([backlog](../project/06-backlog-v1.md#e7-alpaca-connector-and-recovery)); E16-1 for Kraken |
 | **Safety-critical** | Yes: broker connectors, OAuth scopes, key-permission checks, and credential handling (`AGENTS.md`, "Safety-critical paths") |
 
@@ -76,7 +76,7 @@ deployment mode, every environment, and every state of §9.
 | **CN-3** | **Paper and live are distinct connections, and paper never reaches live.** A connection has one environment for life. A paper connection's executor has only paper hosts; a non-production build has no live host at all. A credential that does not work against its own environment is refused, and so is one that also reaches the other environment, until the broker's documentation shows it cannot (U-A4; DEC-441 item 21). The other environment is never probed to find out | Rule 8; V-001; V-031; OPS-5; ES-23; DEC-441 item 21 | Build test that no live host is compiled outside production; a staging egress test; a fixture test that a token documented as reaching both environments is refused for a paper and for a live connection, with no request to the other host |
 | **CN-4** | **Agents never reach the broker.** Every account-level action goes through the account's executor and its ledger. The runtime holds no credential and has no route to a broker; a connector is reachable only from the executor | Rule 12; trading §7.1; infrastructure §3.1, §3.5 | Crate layering (`xtask/layers.toml`); a vault policy test that a runtime identity reads no connection; an egress test |
 | **CN-5** | **One account, one executor, one connection.** A broker account maps to exactly one `account_ref` and one active connection per environment in a workspace deployment, and its account stream has one writer, enforced by the writer epoch. A second connection to an account already connected is refused; a reconnect reuses the same connection | DEC-26; journal §5.1; OPS-3; DEC-441 item 6 | Two concurrent executors for one account: the older is `Fenced` before it can send; connecting the same account twice, from the same or a second workspace in the deployment, is refused |
-| **CN-6** | **Losing a credential stops openings at once and never blocks a risk reduction the broker still accepts.** Expiry, revocation, a failed refresh, or a failed permission check sets the account state `closing_only` (trading §7.3, reason `account_restricted`), which moves every agent on the account to `exits_only`; the executor journals `AccountRestrictionChanged` and `AgentModeApplied` before it acts, in the same step (§9.1). While any credential still works, exits, protective re-placement, and kill-switch orders keep going | Rules 3, 13; trading §1 principle 4 | Fault injection: revoke, expire, and fail refresh at every step of an open, an exit, and a kill switch; `AccountRestrictionChanged` (`closing_only`) is committed before anything else, no opening is sent after it, and every exit the fake broker still accepts is sent |
+| **CN-6** | **Losing a credential stops openings at once and never blocks a risk reduction the broker still accepts.** Expiry, revocation, a failed refresh, or a failed permission check sets the account state `closing_only` (trading §7.3, reason `account_restricted`, cause `connection_unavailable`), which moves every agent on the account to `exits_only`; the executor journals `AccountRestrictionChanged` and `AgentModeApplied` before it acts, in the same step (§9.1). While any credential still works, exits, protective re-placement, and kill-switch orders keep going | Rules 3, 13; trading §1 principle 4 | Fault injection: revoke, expire, and fail refresh at every step of an open, an exit, and a kill switch; `AccountRestrictionChanged` (`closing_only`) is committed before anything else, no opening is sent after it, and every exit the fake broker still accepts is sent |
 | **CN-7** | **Activity the platform did not originate is external activity.** An order, fill, or position change on the account that has no `client_order_id` of ours, or that the connector cannot attribute, is ingested as external activity (trading §7.1), never adopted as ours | Trading §7.1, §11; DEC-26 | Reconciliation fixtures per connector with an owner order, an order from another platform, and an unattributable fill |
 | **CN-8** | **The allocation boundary is the connected account.** Every request a connector sends names the connection's own account. A connector never reads, stores, or acts on another account of the same customer; data about other accounts that a broker returns anyway is dropped at the connector before it is hashed, stored, or journaled | E7-6; R-25; journal §6.4 | Robinhood fixtures where reads return several accounts: only the agentic account's data reaches the executor or the journal; a request naming another account is `NotSent` |
 | **CN-9** | **Broker metadata is data, never instructions.** Tool names, tool descriptions, schemas, error text, and any text field a broker returns never reach a model, a prompt, or a notification, and never change what the connector may call. The connector calls only an allowlist of tools pinned by contract hash | R-05; rule 4; DEC-441 item 8 | A fixture MCP server whose tool descriptions carry injection text and whose tool list adds a tool: the text appears nowhere downstream and the new tool is never called; a changed contract hash halts openings |
@@ -372,7 +372,7 @@ only through the transitions in §9; health never adds risk and never alone bloc
 | Authorization failure | 2 consecutive | `suspended` |
 | Rate-limit headroom | Under 20% of the published or default budget | `degraded` |
 | Contract hash differs | Any | `degraded` with openings halted (contract drift) |
-| Recovery | 3 consecutive good probes | `active` |
+| Recovery | 3 consecutive good probes | The connection's condition has cleared; the state returns to `active` only as §9.1 says, after the owner's acknowledgment |
 
 ## 9. Lifecycle walk
 
@@ -382,23 +382,24 @@ only through the transitions in §9; health never adds risk and never alone bloc
 |---|---|---|---|---|---|
 | `connecting` | Step-up and connect started | No agent yet | — | Checks pass (`active`) or fail (refused, no record kept beyond the refusal event) | System |
 | `active` | All §8.1 checks pass | As the gate allows | Yes | Any transition below | — |
-| `degraded` | Network errors, low headroom, or contract drift | **Halted**: account state `closing_only`, agents `exits_only` | Yes, while the broker accepts | Good probes, or for drift a released connector version, **and** the owner's acknowledgment with the account refreshed (trading §7.3) | Owner, with step-up |
-| `suspended` | Credential invalid: expired, revoked at the broker, refresh failed, or a later permission check failed | **Halted**: account state `closing_only`, agents `exits_only` | Attempted while any call succeeds; otherwise protection rests at the broker | The owner reconnects the same account, then acknowledges (trading §7.3) | Owner, with step-up |
+| `degraded` | Network errors, low headroom, or contract drift | **Halted**: account state `closing_only`, agents `exits_only` | Yes, while the broker accepts | Good probes, or for drift a released connector version, **then** the owner's acknowledgment (trading §7.3, cause `connection_unavailable`) | Owner, with step-up |
+| `suspended` | Credential invalid: expired, revoked at the broker, refresh failed, or a later permission check failed | **Halted**: account state `closing_only`, agents `exits_only` | Attempted while any call succeeds; otherwise protection rests at the broker | The owner reconnects the same account, then acknowledges (trading §7.3, cause `connection_unavailable`) | Owner, with step-up |
 | `revoked` | Platform-side revoke, refused unless every agent on it is stopped with no positions | None | None (no agents) | Reconnect of the same account reuses the record (CN-12) | Owner, with step-up |
 
-**How `degraded` and `suspended` halt openings (DEC-441 item 7).** Neither the trading spec nor
-mandate spec §5.9 defines a connection restriction, and a halt that no spec names would fail open.
-So both states use the most restrictive opening block that already exists and never holds an exit:
-the account state `closing_only` (trading §7.3, reason `account_restricted`), which makes every
-agent on the account `exits_only` (mandate §5.9 already lists the trading spec's account
-restrictions). `blocked` is not used, because `paused` holds exits. The executor journals
+**How `degraded` and `suspended` halt openings (DEC-441 items 7 and 23).** Trading spec §7.3
+(v0.15) has a row for exactly this: the connector reporting `degraded` or `suspended` sets the
+account state `closing_only` (reason `account_restricted`), which makes every agent on the account
+`exits_only` (mandate §5.9 lists the trading spec's account restrictions). `blocked` is not used,
+because `paused` holds exits. `AccountRestrictionChanged` carries the cause
+`connection_unavailable`, so the journal never says the broker restricted the account when it did
+not, and the owner gets a distinct alert. The executor journals
 `AccountRestrictionChanged` and then `AgentModeApplied` before it sends or refuses anything else,
 so replay reaches the same mode from the journal alone; the health signals themselves are never an
-unjournaled input to the mode machine. Like every `closing_only`, it lifts only when the owner
-acknowledges and the account is refreshed, so recovery needs the owner even when the cause was
-transient. A dedicated connection restriction that lifts on its own is a separate spec-first change
-to trading §7.3 and mandate §5.9 (ES-22; backlog E7-13), shared with any other restriction from
-outside the trading specs.
+unjournaled input to the mode machine. It lifts on the connection's own condition (good probes, a
+released connector version for drift, or a reconnect) and then the owner's acknowledgment; an
+account refresh is not the condition. Recovery therefore needs the owner even when the cause was
+transient. A restriction that lifts with no acknowledgment would be a separate spec-first change
+(ES-22).
 
 ### 9.2 Walk
 
@@ -469,7 +470,8 @@ account, reconnect reuses it (item 6); the connection state machine, with `degra
 `closing_only` (item 7); MCP allowlist, contract pinning, and no metadata to models (item 8); data minimization
 (item 9); no Robinhood order path without client order id idempotency (item 10); no live Robinhood
 call by any agent, fixtures from the published contract only (item 11); V-031 restated (item 12);
-backlog rows (item 13); health defaults (item 14); a token that reaches both environments is
+backlog rows (item 13); health defaults (item 14); trading §7.3's connection row and the `cause` on
+`AccountRestrictionChanged` (item 23); a token that reaches both environments is
 refused until U-A4 is answered (item 21).
 
 **Proposed for the founder** (vendor terms, live accounts, legal text; DEC-79):

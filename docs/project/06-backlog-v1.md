@@ -544,11 +544,16 @@ after U-A1 to U-A5 are recorded.
   at once while exits keep going, so that losing a broker link never adds risk (spec §8.2, §9,
   CN-6). *Accepted when:* fault injection that revokes, expires, or fails refresh at every step of an
   open, an exit, and a kill switch sends no opening after the event and every exit the fake broker
-  still accepts, and `AccountRestrictionChanged` (`closing_only`, `account_restricted`) and
-  `AgentModeApplied` are committed before anything else (spec §9.1; DEC-441 item 7). A dedicated
-  connection restriction that lifts on its own is not part of this row: it needs its own
-  spec-first change to trading §7.3 and mandate §5.9 (ES-22), shared with any other restriction
-  from outside the trading specs.
+  still accepts; `AccountRestrictionChanged` (`closing_only`, `account_restricted`, cause
+  `connection_unavailable`) and `AgentModeApplied` are committed before anything else (trading
+  §7.3 v0.15, connections spec §9.1; DEC-441 items 7 and 23); a broker reject or notice is journaled
+  with `broker_reject` or `broker_notice`, never the connection cause, and the reverse; the owner
+  alert for the connection cause is distinct from the broker-restriction alert; the restriction
+  lifts only after the connection's own condition clears and then the owner acknowledges, an
+  account refresh alone never lifts it, and clearing it leaves any broker restriction standing.
+  *Reference cases:* RC-15 is unchanged; the tests PR adds a trading-domain case for the
+  connection row and its lift order (YAML, then `cargo xtask refcases --write`), and the journal
+  spec closes `AccountRestrictionChanged` with `cause` when that schema is registered.
 - **E7-14 (Must, M8)** As an owner, I want reconnecting my account to keep its connection, so that
   revoking and reconnecting can never reset my loss carry (spec §9.2, CN-12).
   *Depends on E7-17* (the reconnect rule). *Accepted when:* revoke and reconnect of the same
