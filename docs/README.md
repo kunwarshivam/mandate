@@ -2,6 +2,7 @@
 
 Mandate is built by the founder working with AI coding agents. Agents follow
 [AGENTS.md](../AGENTS.md).
+People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 
 ## Architecture
 
