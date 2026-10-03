@@ -262,6 +262,12 @@
 'MC-V69' = { status = "pending", story = "E10-1" }
 'MC-V70' = { status = "pending", story = "E10-1" }
 'MC-V71' = { status = "pending", story = "E10-1" }
+'MC-V72' = { status = "pending", story = "E10-1" }
+'MC-V73' = { status = "pending", story = "E10-1" }
+'MC-V74' = { status = "pending", story = "E10-1" }
+'MC-V75' = { status = "pending", story = "E10-1" }
+'MC-V76' = { status = "pending", story = "E10-1" }
+'MC-V77' = { status = "pending", story = "E10-1" }
 'MC-T01' = { status = "passing", story = "E6-4" }
 'MC-T02' = { status = "passing", story = "E6-4" }
 'MC-T03' = { status = "passing", story = "E6-4" }
