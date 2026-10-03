@@ -19,6 +19,7 @@
 //! `mandate_spec::context::check_thesis_record` before acting on it (DEC-414 item 3).
 
 use mandate_canon::Value;
+use mandate_domain::ThesisRefusal;
 use mandate_num::Usd;
 use mandate_time::UtcNanos;
 
@@ -311,35 +312,11 @@ fn ascending(items: &[&str], path: &str) -> Result<(), Invalid> {
     )
 }
 
-/// Mandate spec §8.5's refusal reasons in check order: a reason's check number is its position, from
-/// 1 (journal spec §9.4).
-const THESIS_REFUSALS: [&str; 17] = [
-    "direction_not_allowed",
-    "horizon_mismatch",
-    "revision_without_predecessor",
-    "research_disabled",
-    "universe_pinned",
-    "admission_denied",
-    "cost_cap_reached",
-    "not_in_data_universe",
-    "operator_halt",
-    "not_allowed_asset_class",
-    "leveraged_etp_not_enabled",
-    "eligibility_floor",
-    "instrument_group_claimed",
-    "source_not_allowlisted",
-    "no_corroboration",
-    "lineage_retired",
-    "universe_full",
-];
-
-/// Check 15, corroboration (mandate spec §8.5), which rule 37 recomputes.
-const CORROBORATION_CHECK: usize = 15;
-
 /// Journal spec §9.4's rules 34 to 38 on a well-typed `ThesisProposed` or `ThesisRevised`, the first
 /// that fails reported, in number order (DEC-413, DEC-414). Rules 35 to 37 all report at
 /// `payload.reason`. Rule 36 recomputes checks 1 to 3 from the record's own members, with check 2
-/// compared to the nanosecond; rule 38 reads the envelope's `config_refs.model_version`, as rule 22
+/// compared to the nanosecond, and rule 37 check 15. Each reason is a [`ThesisRefusal`], named by its
+/// check number from 1 as §8.5 numbers it (DEC-415). Rule 38 reads the envelope's `config_refs.model_version`, as rule 22
 /// reads `AgentDeployed`'s mandate version.
 fn thesis_rules(
     event_type: &str,
@@ -367,28 +344,32 @@ fn thesis_rules(
         InvalidReason::Schema,
         "payload.reason",
     )?;
-    let reason = p.text("reason");
-    let failing = [
-        p.text("direction") != "long",
-        !horizon_agrees(p),
-        !p.is_null("predecessor_thesis_id") != revised,
+    let refusal = ThesisRefusal::parse(p.text("reason")).ok();
+    let checks = [
+        (
+            ThesisRefusal::DirectionNotAllowed,
+            p.text("direction") != "long",
+        ),
+        (ThesisRefusal::HorizonMismatch, !horizon_agrees(p)),
+        (
+            ThesisRefusal::RevisionWithoutPredecessor,
+            !p.is_null("predecessor_thesis_id") != revised,
+        ),
     ];
-    let first_failing = failing.iter().position(|fails| *fails);
-    let decided = match first_failing.and_then(|check| THESIS_REFUSALS.get(check)) {
-        Some(first) => reason == *first,
-        None => !THESIS_REFUSALS
-            .iter()
-            .take(failing.len())
-            .any(|check| *check == reason),
+    let first_failing = checks
+        .into_iter()
+        .find_map(|(check, fails)| fails.then_some(check));
+    let decided = match first_failing {
+        Some(first) => refusal == Some(first),
+        None => !refusal.is_some_and(ThesisRefusal::is_ignored_output),
     };
     ensure(decided, InvalidReason::Schema, "payload.reason")?;
     let corroborated = if p.is_null("corroboration") {
-        THESIS_REFUSALS
-            .iter()
-            .position(|known| *known == reason)
-            .is_some_and(|index| index < CORROBORATION_CHECK)
+        refusal.is_some_and(|refusal| {
+            refusal.check_number() <= ThesisRefusal::NoCorroboration.check_number()
+        })
     } else {
-        reason != "no_corroboration"
+        refusal != Some(ThesisRefusal::NoCorroboration)
     };
     ensure(corroborated, InvalidReason::Schema, "payload.reason")?;
     let model = config_refs
@@ -563,7 +544,7 @@ static THESIS_RECORD: Ty = Ty::Record(&[
     ("prompt_ref", Ty::DigestRef),
     ("response_ref", Ty::DigestRef),
     ("admitted", Ty::Bool),
-    ("reason", Ty::Nullable(&Ty::OneOf(&THESIS_REFUSALS))),
+    ("reason", Ty::Nullable(&Ty::OneOf(&ThesisRefusal::CODES))),
 ]);
 
 static ACCOUNT_SNAPSHOT_RECORDED: Ty = Ty::Record(&[

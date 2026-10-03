@@ -64,9 +64,11 @@ pub struct ExecutorState {
     /// The latest trading day a copied `TradingDayStarted` began: the creation date of the GTC
     /// protection placed from then on, and the day §5.4's re-placement buffer is counted from.
     pub(crate) trading_day: Option<Date>,
-    /// Each instrument's exit laddered outside a sequence (§5.6: extended hours, the closing
-    /// auction window, a presumed halt), folded from its rungs' `OrderSubmitted`.
-    pub(crate) ladders: BTreeMap<InstrumentId, LoneLadder>,
+    /// Each exit laddered outside a sequence (§5.6: extended hours, the closing auction window, a
+    /// presumed halt), by its instrument and its intent, folded from its rungs' `OrderSubmitted`:
+    /// one for each exit, so a second exit laddered in the instrument never replaces the first
+    /// one's (DEC-424).
+    pub(crate) ladders: BTreeMap<(InstrumentId, IntentId), LoneLadder>,
     /// The latest quote per instrument: process-local, an input never journaled (like the tick).
     pub(crate) quotes: BTreeMap<InstrumentId, MarketObservation>,
     /// The latest-observed sane quote with a bid per instrument, kept past newer quotes that are
