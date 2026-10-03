@@ -1507,6 +1507,77 @@ items 13 to 20); no story here buys a service or touches live money.
   without content, and a workspace's monthly counts reproduce from its journal.
 - **E21-24 (Proposed, M8)** As the founder, I want the cost model (`docs/product/12-cost-model.md`, DEC-443) kept current. *Accepted when:* `T_in` and `T_out` are measured from the research spike's call records and replace the assumptions; `active_seconds_per_day` is one explicit row per use (research around the clock, the equities session); §2.4's storage notation matches §3.2 and the hot-store term is carried or shown to be negligible; scenario C's storage row names its year; DEC-443 item 7's lean-workspace design moves to an infrastructure row, leaving only the pricing dependency with the founder; and a staleness check (vendor price or pinned model changed) is considered for `cargo xtask`. From #566's round-1 review, minors 1, 2, 3, 7 and 8 (freeze rule). Numbered after #557's E21-13 to E21-23.
 
+Rows E21-13 to E21-22 come from the [threat model](../security/threat-model.md) v0.1
+([DEC-439](decisions/DEC-439.md)); E21-10 is that document. Rows blocked on a Proposed DEC-439 item
+wait for the founder.
+
+- **E21-13 (Proposed, now)** As the founder, I want the coordinator to act through its own GitHub
+  identity, the only login in `MERGE_APPROVERS`, so that a builder session cannot approve its own
+  PR (threat model §7.5). *Accepted when:* a label or approved-head line set by a builder's identity
+  leaves the PR unmerged, shown by a dry run of `merge-approved.sh`; and the coordinator's identity
+  holds no push access to agent branches. Blocked on DEC-439 item 9.
+- **E21-14 (Proposed, now)** As the founder, I want `merge-approved.sh` to refuse a PR that touches
+  the self-protecting paths (DEC-439 items 7 and 12) unless the founder approved its current head,
+  so that a merged change cannot weaken the checks that guard every other change. *Accepted when:*
+  dry runs show such a PR skipped without the founder's approving review on its head, skipped again
+  after a push moves the head, and merged with it; and ES-13's text matches what is enforced.
+  Blocked on DEC-439 item 12.
+- **E21-15 (Proposed, now)** As the coordinator, I want the untrusted-author rule (DEC-439 items 2
+  and 3) in the coordination and review playbooks, so that public text never steers an agent
+  session. *Accepted when:* the playbooks say it; the monitor acts only on coordination lines from
+  accounts with write access; review briefs are built from the story, specs, and diff; and a planted
+  comment from an outside account, tried once in a test PR, is ignored.
+- **E21-16 (Proposed, now)** As the founder, I want merging on `main` restricted to the merge
+  workflow and the founder, the ruleset's admin bypass limited to pull requests or removed, and
+  collaborators at Triage with fork-based PRs, so that neither write access nor the account agents
+  use can change `main` outside the PR path. *Accepted when:* a collaborator account's attempt to
+  merge a green PR is refused by GitHub; the ruleset shows no bypass with mode "always"; a direct
+  push to `main` from the account agents use is refused; and `COLLABORATION.md` describes the fork
+  flow. Blocked on DEC-439 items 18, 10, and 11.
+- **E21-17 (Proposed, M8)** As the founder, I want the aggregator's exposure bounded (DEC-432 item
+  14, DEC-439 items 6 and 14), so that one third party in every prompt path costs as little as it
+  can. *Accepted when:* each environment has its own key with a provider-side spend limit; users'
+  agents never share a key with development sessions; routing requests zero retention where offered
+  and the terms are on file per endpoint; and a canary probe per pinned model runs on a schedule and
+  alerts on drift. Blocked on DEC-439 item 14.
+- **E21-18 (Proposed, now)** As the founder, I want each development lane to hold its own capped
+  paper and model keys, so that a steered session can spend little and leak only what one rotation
+  fixes (DEC-439 item 17). *Accepted when:* no two lanes share a model key; each key has a
+  provider-side cap; and a rotation runbook names the trigger (any suspected injection). Blocked on
+  DEC-439 item 17.
+- **E21-19 (Proposed, M8)** As the founder, I want the `web/` npm tree held to the same bar as the
+  Rust tree, so that a compromised package cannot reach owner sessions (threat model §7.6).
+  *Accepted when:* a check fails a top-level package in `web/package.json` without a row in
+  `docs/dependencies.md`; CI installs with lifecycle scripts disabled except for named packages;
+  and registry signatures are verified in CI.
+- **E21-20 (Proposed, M8)** As the founder, I want the threat model cross-linked to the identity,
+  notifications, and workspace API specs by invariant number, and their out-of-band notices in
+  place (DEC-439 items 4 and 5), so that each gap has one owner. *Accepted when:* every gap in
+  threat model §6.1 to §6.3 names an `ID-`, `NT-`, or `API-` invariant or a backlog row; the
+  notifications spec lists the risk-increasing events of DEC-439 item 5; and who approves a
+  source-allowlist change is written down.
+- **E21-21 (Proposed, M10; SC)** As an approver, I want model text in an approval card shown as
+  quoted, plain, length-capped text with only platform-resolved source links, so that text written
+  to persuade me is visibly the research agent's (threat model §6.2). *Accepted when:* a fixture
+  thesis containing urgent instructions, markup, and links renders as inert quoted text, with no
+  link that the platform did not resolve from an allowlisted source.
+- **E21-22 (Proposed, M13)** As the founder, I want an external penetration test and a research-path
+  red-team scoped by the threat model, so that the Phase 2 gate's test has a defined target.
+  *Accepted when:* the scope lists every boundary of threat model §4.3 in the deployed modes; findings
+  of high severity are fixed and retested before the first design partner; and §8 is re-ranked from
+  the results. Blocked on DEC-439 item 13.
+- **E21-23 (Proposed, now)** As the founder, I want the threat model's round-1 minor findings (#557
+  review, freeze rule) applied in its next version, so that the register stays exact. *Accepted
+  when:* §6.12's Merge-button row says `web` is not a required status check, so a hand merge of a
+  `web/` PR also skips the web checks; §7.5 adds that ADR-0001 ES-13's "signs merges with a
+  hardware-backed key" is not what the squash-merge path does; the §4.2 diagram has an edge from
+  public and agent-written text into the reviewer; rank 12 (an injected owner-connected agent
+  flattens the book) is re-rated M/M; the aggregator residual says prompts also reveal timing;
+  §6.11 carries break-glass without the customer as a gap until #556's ruling lands; §6.1's
+  email-link gap moves to the control column citing `identity.md` §6.1 and §7.3, and its E row
+  names `identity.md` (#556) as the authoritative role matrix (settlement X1); and every control row
+  in §6 is marked built or specified.
+
 ## Won't (v1)
 
 Live retail trading before counsel signs off; users outside the US; options; Interactive Brokers and Coinbase connectors; native mobile apps; WebAssembly plug-ins; SAML and SCIM;
@@ -2741,6 +2812,9 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   and sizes `trim_guards`' trim on what it leaves, as the gate does. It awaits MC-B36 and MC-B37
   (`AWAITED`, with the counts for both fixtures). The reference PR follows, then the status rows,
   then a cleanup that drops `AWAITED` and makes the input required.
+  *Done:* the reference side in #567 (MC-B36, MC-B37, §5.5 states the subtraction); the cleanup
+  (`agent/g8-e6-4-open-sell-cleanup`) drops `AWAITED`, so family B's thirty-seven cases and the
+  sweep counts state one fixture, and refuses a trim case with no `open_sell_qty`.
 - **E6-4 harness cleanup: drop the transitional branches once MC-B33 and MC-B34 are on `main`**
   (#498 review, M1). In `crates/mandate-refcases/src/mandate/order_builder.rs`:
   (a) drop `AWAITED`, `awaited`, `counted` and the without-branch, so the case list and the sweep
