@@ -32,6 +32,7 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 | [Journal test vectors](specs/reference-cases/journal.yaml) | Exact canonical bytes and hashes, plus tamper cases |
 | [Data plane spec](specs/data-plane.md) (draft v0.1) | Live market data, reference data, news, filings, fundamentals, the point-in-time store, fan-out to workspaces, failure walk, and adversaries |
 | [Inference and model gateway spec](specs/inference.md) | Draft v0.1: every model call, the model gateway, pinning and no substitution, deadlines, caching, the registry, metering and spend caps, security, failure walk, and the fast-tier and provider decisions ([DEC-432](project/decisions/DEC-432.md)) |
+| [Workspace services API spec](specs/workspace-api.md) | Draft v0.1: the contract between the backend and the web app, the CLI, and owner-connected agents: owner input journaled on the control stream, roles and client scopes, idempotency, errors, read models, exports, failure walk, and adversaries ([DEC-436](project/decisions/DEC-436.md)) |
 
 ## Design
 
