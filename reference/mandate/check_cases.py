@@ -451,7 +451,7 @@ req("MC-E11", C["MC-E11"]["script"][1]["response"]["actor_kind"] == "platform_op
 req("MC-E12", C["MC-E12"]["script"][1]["response"]["responder"] not in C["MC-E12"]["context"]["approvers"], "not listed")
 req("MC-E15", esc_last("MC-E15") == refused("step_up_reused"), "reused")
 req("MC-E16", C["MC-E16"]["context"]["environment"] == "live", "live")
-for cid, reason in [("MC-E17", "version_changed"), ("MC-E18", "mode"), ("MC-E19", "reclassified_deny"),
+for cid, reason in [("MC-E17", "version_changed"), ("MC-E19", "reclassified_deny"),
                     ("MC-E20", "reclassified_other_trigger"), ("MC-E22", "drift"), ("MC-E23", "drift")]:
     req(cid, esc_last(cid) == skipped(reason), reason)
 for cid, ok in [("MC-E21", True), ("MC-E22", False)]:
@@ -473,6 +473,9 @@ req("MC-E30", [q["status"] for q in C["MC-E30"]["expect"]] ==
     ["suppressed_quiet_hours", "delivered", "suppressed_quiet_hours", "delivered", "delivered"], "push hours, both DST states")
 offsets = {datetime.fromisoformat(q["at"][:19] + "+00:00").astimezone(ZoneInfo("America/New_York")).utcoffset() for q in C["MC-E30"]["queries"]}
 req("MC-E30", len(offsets) == 2, "both DST states")
+req("MC-E18", esc_last("MC-E18") == [("ApprovalCanceled", None, "mode_tightened")] + refused("not_pending") and
+    C["MC-E18"]["script"][-1]["kind"] == "response" and C["MC-E18"]["script"][-1]["now"]["mode"] == "exits_only",
+    "an exits-only step cancels before it judges the grant (DEC-318 option (a))")
 req("MC-E31", esc_last("MC-E31") == [("ApprovalCanceled", None, "mode_tightened")] + refused("not_pending"), "cancelled first, in one step")
 # MC-E32: each query is inside quiet hours by one zone and outside by the other, so the expected
 # statuses are the New York reading and the negation of the UTC one. A UTC implementation fails it

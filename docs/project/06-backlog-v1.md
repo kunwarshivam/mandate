@@ -529,12 +529,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   reaches check 7 (`mandate_approval::quorum` already computes it). Tests first in
   `mandate-runtime`, then the implementation; MC-E01, MC-E06, MC-E17, MC-E19 to MC-E24 and MC-E29
   fail on that member alone and flip in the status PR that follows.
-  *Decision needed (DEC-318, Proposed, the founder's under DEC-176):* MC-E18 re-validates a grant while
-  the mode is exits-only and expects `skip` for `mode`, but §6.4 "Cancellation" cancels every pending
-  approval in a step whose effective mode is exits-only or stricter before the step judges a
-  response, so the runtime refuses the grant as `not_pending` (both skip). Either the case is
-  restated as a cancellation (a `mandate.yaml` change) or check 9's `mode` is said to be reachable
-  only by a path the spec names; MC-E18 stays pending until then.
+  *Decided (DEC-318 option (a), the founder, 2026-10-02; DEC-430):* MC-E18 is restated as §6.4's
+  cancellation. Its response step cancels the pending grant as `mode_tightened` and refuses it as
+  `not_pending`, and the reference model, the fuzz oracle and the seeded bugs follow (reference PR).
+  Still open, in order:
+  1. The code PR: the harness strips the response step's `AgentModeChanged` (`restriction_changed`),
+     and `the_lifecycle_cases_split_as_the_runtime_stands` expects MC-E18 to pass, tests first.
+     `a_mode_other_than_normal_skips`'s doc comment stops naming MC-E18.
+  2. The status PR moving MC-E18 to `passing`.
+  3. A §6.4 sentence saying check 9's `mode` arm is defence in depth that no named step reaches
+     (DEC-430 item 2). It is a spec PR and changes no rule.
   *Follow-up (the #416 review, minor 3):* every `ask_permit` case asks for one instrument, so
   family E cannot see the budget counted per instrument rather than per agent (`mandate-approval`'s
   own suite does). A future MC-E case should spread its ten asks across instruments. It changes

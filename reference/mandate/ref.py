@@ -1941,7 +1941,8 @@ def within_drift(m_req, m_now, asset_class):
 
 def approval_revalidate(req, now):
     """§6.4 re-validation, checks 8 to 12 in order, for a grant admitted in the same step. It only skips: the act
-    carries the bound fields unchanged."""
+    carries the bound fields unchanged. Check 9's `mode` arm is reached by no step the spec names: a step whose
+    mode is exits-only or stricter cancels every pending approval before it judges a response (DEC-318, DEC-430)."""
     skip = lambda reason: {"result": "skip", "reason": reason}
     if now["mandate_version"] != req["mandate_version"]:
         return skip("version_changed")
@@ -2051,6 +2052,9 @@ def escalation_fold(journal, t0):
 
 def escalation_step(st, inp, ctx):
     """One runtime step over the approval lifecycle (§6.4). Returns the drafts, in order; the caller folds them.
+    A response read in a step whose mode is exits-only or stricter first cancels every pending approval as
+    `mode_tightened` (§6.4 "Cancellation", DEC-318 option (a)); the runtime's `AgentModeChanged` before it is the
+    mode's record, which the model does not draft.
     Every draft carries the step's risk clock. The reference hashes the canonical request as a stand-in for the
     content object, which `approval_content` builds and `fuzz_content` checks on its own."""
     kind = inp["kind"]
@@ -2083,6 +2087,12 @@ def escalation_step(st, inp, ctx):
             drafts += out
     elif kind == "response":
         resp = inp["response"]
+        if inp["now"]["mode"] != "normal" and st["pending"]:
+            for a in sorted(st["pending"]):
+                drafts.append({"type": "ApprovalCanceled", "approval": a, "reason": "mode_tightened", "clock": c})
+            st = copy.deepcopy(st)
+            for d in drafts:
+                escalation_apply(st, d)
         if resp["source"] in st["copied"]:
             return drafts
         req = st["pending"].get(resp["approval"])
