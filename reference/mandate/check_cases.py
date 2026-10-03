@@ -1,4 +1,6 @@
 """Asserts that every reference case demonstrates what its title claims (AGENTS.md: validate fixtures)."""
+import hashlib
+import json
 import pathlib
 import re
 import sys
@@ -69,6 +71,35 @@ for cid, required, users in (("MC-V69", True, 1), ("MC-V70", True, 2), ("MC-V71"
         "V-047's trio differs only in the policy and the workspace's users (DEC-411)")
 for cid in ("MC-V70", "MC-V71"):
     req(cid, C[cid]["expect"]["violations"] == [], "a second user, or no independence, passes V-047")
+lone = {"independent_approval_required": True, "workspace_users": 1}
+current = d["bases"]["btc_accumulator"]["mandate"]
+current_version = d["bases"]["btc_accumulator"]["canonical_sha256"]
+fewer_orders = [{"op": "replace", "path": "/risk/max_orders_per_day", "value": 40}]
+for cid, patch, previous, refused in (
+        ("MC-V72", fewer_orders, "current", False),
+        ("MC-V73", [{"op": "replace", "path": "/name", "value": "btc-accumulator-renamed"}], "current", True),
+        ("MC-V74", fewer_orders + [{"op": "replace", "path": "/risk/max_order_usd", "value": "1500"}], "current", True),
+        ("MC-V75", fewer_orders, "identity", True),
+        ("MC-V76", [{"op": "replace", "path": "/risk/max_order_usd", "value": "5000"}], "forged", True),
+        ("MC-V77", fewer_orders, "over_schema", True)):
+    ctx = C[cid]["context"]
+    prev = ctx["previous_version"]
+    shape = {"current": lambda: prev == current,
+             "identity": lambda: set(prev) == {"environment", "connection_id"},
+             "forged": lambda: prev != current
+             and dict(prev, risk=dict(prev["risk"], max_order_usd=None))
+             == dict(current, risk=dict(current["risk"], max_order_usd=None))
+             and Decimal(prev["risk"]["max_order_usd"]) > Decimal(patch[0]["value"])
+             > Decimal(current["risk"]["max_order_usd"]),
+             "over_schema": lambda: prev == dict(current, risk=dict(current["risk"], max_orders_per_day=10001))}[previous]()
+    own_hash = "sha256:" + hashlib.sha256(json.dumps(prev, sort_keys=True, separators=(",", ":"),
+                                                     ensure_ascii=False).encode()).hexdigest()
+    hash_named = own_hash if previous in ("identity", "over_schema") else current_version
+    req(cid, C[cid]["base"] == "btc_accumulator" and C[cid]["patch"] == patch and shape
+        and {k: v for k, v in ctx.items() if k != "previous_version"} == dict(lone, current_mandate_version=hash_named),
+        "V-047's exception cases differ from the base only in the patch named and the previous version (DEC-444)")
+    req(cid, C[cid]["expect"]["violations"] == (["V-047"] if refused else []),
+        "only a risk-reducing version against the agent's current document passes V-047 in a lone workspace (DEC-444)")
 
 # risk state
 s = steps("MC-R01")
@@ -233,7 +264,9 @@ def trim_sell(cid):
     inp, exp = BIN[cid], B[cid]
     inc, bid = Decimal(inp["qty_increment"]), Decimal(inp["quote"]["bid"])
     excess = Decimal(exp["current_mv"]) - Decimal(inp["size_factor"]) * Decimal(exp["cap"])
-    return min(Decimal(inp["position_qty"]), (excess / bid / inc).to_integral_value(rounding=ROUND_CEILING) * inc)
+    on_sale = Decimal(inp["open_sell_qty"])
+    whole = (excess / bid / inc).to_integral_value(rounding=ROUND_CEILING) * inc
+    return max(Decimal(0), min(Decimal(inp["position_qty"]) - on_sale, whole - on_sale))
 req("MC-B34", B["MC-B34"].get("trim_withheld") == ["below_minimum_order"]
     and trim_sell("MC-B34") < Decimal(BIN["MC-B34"]["min_order_size"])
     and trim_sell("MC-B34") * Decimal(BIN["MC-B34"]["quote"]["bid"]) >= Decimal(BIN["MC-B34"]["min_order_usd"]),
@@ -242,6 +275,13 @@ req("MC-B35", B["MC-B35"].get("purpose") == "risk_exit" and B["MC-B35"]["qty"] =
     and trim_sell("MC-B35") == Decimal(BIN["MC-B35"]["position_qty"])
     and Decimal(B["MC-B35"]["qty"]) < Decimal(BIN["MC-B35"]["min_order_size"]),
     "a trim of the whole position below the minimum size is a full close, and goes")
+req("MC-B36", B["MC-B36"].get("trim_withheld") == ["below_minimum_order"] and Decimal(BIN["MC-B36"]["open_sell_qty"]) > 0
+    and 0 < trim_sell("MC-B36") < Decimal(BIN["MC-B36"]["min_order_size"])
+    and trim_sell("MC-B36") + Decimal(BIN["MC-B36"]["open_sell_qty"]) >= Decimal(BIN["MC-B36"]["min_order_size"]),
+    "the remainder a resting sell leaves is below the minimum size, though the whole excess is not, and is withheld")
+req("MC-B37", B["MC-B37"].get("purpose") == "risk_exit" and Decimal(BIN["MC-B37"]["open_sell_qty"]) > 0
+    and Decimal(B["MC-B37"]["qty"]) == trim_sell("MC-B37") < trim_sell("MC-B37") + Decimal(BIN["MC-B37"]["open_sell_qty"]),
+    "the trim is the remainder a resting sell leaves, not the whole excess")
 req("MC-B18", B["MC-B18"]["reason"] == "within_rebalance_band", "band")
 req("MC-B19", B["MC-B19"]["reason"] == "below_band_after_clipping", "band after clipping")
 req("MC-B20", B["MC-B20"]["reason"] == "no_fresh_outputs", "none")

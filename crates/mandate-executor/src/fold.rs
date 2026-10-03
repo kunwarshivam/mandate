@@ -17,7 +17,7 @@ use crate::payload::{
 use crate::protection::climbs;
 use crate::state::{
     Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
-    ObservedAccount, OrderDetail,
+    ObservedAccount, OrderDetail, Replacement,
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
@@ -29,7 +29,12 @@ use crate::types::{
 /// `causation_id` naming its origin, unless the executor originated it itself and says so with
 /// `originated`. `OwnerAcknowledged` and `TradingDayStarted` join them with the slices that
 /// interpret them, and until then answer those slices' stubs like every other event not reached.
-const COPIED: [&str; 3] = ["AgentModeApplied", "ClockAdvanced", "UniverseChanged"];
+const COPIED: [&str; 4] = [
+    "AgentModeApplied",
+    "ClockAdvanced",
+    "TradingDayStarted",
+    "UniverseChanged",
+];
 
 /// Replays one journaled event into the state.
 ///
@@ -134,6 +139,11 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
+        "TradingDayStarted" => {
+            let date = Date::parse(required_text(payload, "date")?)?;
+            state.trading_day = Some(state.trading_day.map_or(date, |current| current.max(date)));
+            Ok(())
+        }
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload, event.seq),
         "FeesCharged" => fees_charged(state, payload),
         "ExternalActivityIngested" => Ok(()),
@@ -960,7 +970,13 @@ fn protection_changed(
             let orders = protective_orders(payload)?;
             let covered = qty(payload, "qty")?;
             let prices = prices_of(payload)?;
-            legs(state, &instrument, &orders, covered, created_on(payload)?);
+            let created = created_on(payload)?;
+            legs(state, &instrument, &orders, covered, created);
+            for id in &orders {
+                if let Some(order) = state.orders.get_mut(id) {
+                    order.created_on = order.created_on.or(created);
+                }
+            }
             if state
                 .exiting
                 .get(&instrument)
@@ -1004,6 +1020,21 @@ fn protection_changed(
                 let detail = state.details.entry(entry).or_default();
                 detail.bracket_since = detail.bracket_since.or(Some(at));
             }
+            if flag(payload, "replacing")
+                && let (Some(entry), Some(agent)) = (
+                    optional_text(payload, "entry"),
+                    optional_text(payload, "agent"),
+                )
+            {
+                state.replacing.insert(
+                    instrument.clone(),
+                    Replacement {
+                        entry: ClientOrderId::parse(entry)?,
+                        agent: AgentId(agent.to_owned()),
+                        prices: prices_of(payload)?,
+                    },
+                );
+            }
             if let (Some(intent), Some(entry), Some(agent)) = (
                 optional_text(payload, "intent_id"),
                 optional_text(payload, "entry"),
@@ -1028,11 +1059,12 @@ fn protection_changed(
                 );
             }
             if !passive {
-                if state.awaiting.remove(&instrument).is_some()
-                    && let Some(waiting) = state.unprotected.iter_mut().find(|interval| {
-                        interval.instrument == instrument && interval.ended_at.is_none()
-                    })
-                {
+                let awaited = state.awaiting.remove(&instrument).is_some();
+                if let Some(waiting) = state.unprotected.iter_mut().find(|interval| {
+                    interval.instrument == instrument
+                        && interval.ended_at.is_none()
+                        && (awaited || interval.uncovered)
+                }) {
                     waiting.ended_at = Some(at);
                 }
                 state.unprotected.push(UnprotectedInterval {
@@ -1040,13 +1072,14 @@ fn protection_changed(
                     started_at: at,
                     ended_at: None,
                     alerted: false,
+                    uncovered: false,
                 });
             }
         }
         "watchdog" => {
             state.watchdogged.insert(instrument.clone(), at);
         }
-        "exit_unpriced" | "ladder_floor" => {}
+        "exit_unpriced" | "ladder_floor" | "expiry_unreplaceable" => {}
         "rung_short" if optional_qty(payload, "sent")? == Some(Qty::ZERO) => {
             let intent = required_text(payload, "intent_id")?;
             if let Some(sequence) = state
@@ -1073,7 +1106,8 @@ fn protection_changed(
         }
         "interval_limit" | "unprotected_end" => {
             let awaiting = protective_orders_named(payload, "awaiting")?;
-            let ends = action == "unprotected_end" && awaiting.is_empty();
+            let uncovered = flag(payload, "uncovered");
+            let ends = action == "unprotected_end" && awaiting.is_empty() && !uncovered;
             if !awaiting.is_empty() {
                 state
                     .awaiting
@@ -1083,6 +1117,9 @@ fn protection_changed(
             if let Some(entry) = optional_text(payload, "bracket").filter(|_| finished) {
                 let entry = ClientOrderId::parse(entry)?;
                 state.details.entry(entry).or_default().bracket_placed = true;
+            }
+            if finished {
+                state.replacing.remove(&instrument);
             }
             let bounded = state.unprotected.iter().any(|interval| {
                 interval.instrument == instrument && interval.ended_at.is_none() && interval.alerted
@@ -1108,6 +1145,8 @@ fn protection_changed(
             {
                 if ends {
                     open.ended_at = Some(at);
+                } else if uncovered {
+                    open.uncovered = true;
                 } else if !finished {
                     open.alerted = true;
                 }
@@ -2865,6 +2904,45 @@ mod interval_tests {
 
     fn action(name: &str) -> (&'static str, Value) {
         ("action", Value::Str(name.to_owned()))
+    }
+
+    /// DEC-367 item 4 (#468's round-4 review, m2): a sequence that ends with no prices to place
+    /// protection at leaves its interval open, bounded and alerted, since nothing covers the
+    /// position; the next start in the instrument ends it there, as it ends one waiting on an
+    /// acknowledgment, so it never stays open beside a new interval.
+    #[test]
+    fn an_uncovered_end_leaves_the_interval_open_until_the_next_start() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        protection_changed(&mut executor, 1, vec![action("unprotected_start")])?;
+        let uncovered = ("uncovered", Value::Bool(true));
+        protection_changed(&mut executor, 2, vec![action("unprotected_end"), uncovered])?;
+        let spans = |executor: &Executor| -> Vec<(i64, Option<i64>, bool)> {
+            executor
+                .state
+                .unprotected
+                .iter()
+                .map(|interval| {
+                    (
+                        interval.started_at.secs(),
+                        interval.ended_at.map(RiskClock::secs),
+                        interval.uncovered,
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(spans(&executor), vec![(1, None, true)]);
+        protection_changed(&mut executor, 3, vec![action("unprotected_start")])?;
+        assert_eq!(spans(&executor), vec![(1, Some(3), true), (3, None, false)]);
+        Ok(())
     }
 
     /// DEC-348 item 2: an interval waiting on the broker's acknowledgment of new protection is

@@ -345,6 +345,7 @@ fn on_grid(input: &GateInput<'_>, price: Price, adverse: Adverse) -> Result<Pric
 /// smaller than `min_order_size` goes whole.
 fn slice(input: &GateInput<'_>, pacing: &mut Pacing) -> Result<(), GateError> {
     let proposed = input.proposed.qty;
+    crate::trim::quantity_grid(input.instrument)?;
     let increment = if input.instrument.fractionable {
         ShareIncrement::Fractional
     } else {

@@ -295,6 +295,19 @@ def without_delegations(m, review_by_of=None):
             out["autonomy"]["review_by"] = review_by_of["autonomy"]["review_by"]
     return out
 
+def reduces_previous(prev, current, m):
+    """V-047's one exception (DEC-444): `m` is a new version that §9.2 classifies as risk-reducing against the agent's
+    current version. `prev` is that version only if it is a whole schema-valid document whose canonical hash is
+    `current`, the agent's current `mandate_version`, which the platform supplies and the requester never does
+    (#570 round 1, B1): a predecessor nobody confirmed would let an increasing version pass. `classify`'s own result
+    decides the rest. No previous version (a deployment), no current version, only an identity or part of a document,
+    a document with a value the schema refuses, or one that hashes to anything else is not reducing: validation cannot
+    classify against the agent's version (rule 3). The member test is `classify`'s precondition, so a partial document
+    is refused without being classified; the schema test is the one that refuses a whole document with a bad value."""
+    return (prev is not None and current is not None and set(SCHEMA["required"]) <= set(prev)
+            and V.is_valid(prev) and version(prev) == current
+            and classify(prev, m)[0] == "risk_reducing")
+
 def semantic(m, ctx):
     errs, warns = set(), set()
     u = m["universe"]
@@ -396,7 +409,8 @@ def semantic(m, ctx):
     if n_users < 1 or (ap["two_approver_above_usd"] is not None and n_users < 2):
         errs.add("V-024")
     if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:
-        errs.add("V-047")
+        if not reduces_previous(ctx.get("previous_version"), ctx.get("current_mandate_version"), m):
+            errs.add("V-047")
     if g.get("end_date") is not None and valid_date(g["end_date"]) and g["end_date"] < ctx["validation_date"]:
         errs.add("V-030")
     prev = ctx.get("previous_version")
@@ -1309,8 +1323,14 @@ def builder(m, inp):
     out = {"cap": norm(cap), "current_mv": norm(mv)}
     # risk engine first: trim_to_target (§5.5, DEC-65)
     band_usd = D(beh["sizing"]["rebalance_band"]) * cap
+    # The agent's own non-protective sells already resting in the instrument are a trim in progress: the
+    # trim is what they leave of the excess and of the position, and the minimum is judged on that
+    # (DEC-399 item 7). When they cover the excess, no trim is due.
+    on_sale = D(inp["open_sell_qty"]) if r["scale_action"] == "trim_to_target" else D(0)
+    sell = D(0)
     if r["scale_action"] == "trim_to_target" and factor < 1 and mv - factor * cap >= band_usd:
-        sell = min(qty, ceil_inc((mv - factor * cap) / bid, inc))
+        sell = max(D(0), min(qty - on_sale, ceil_inc((mv - factor * cap) / bid, inc) - on_sale))
+    if sell > 0:
         guards = []
         if inp.get("scale_active_s", 0) < r["breach_confirm_s"]:
             guards.append("rung_not_confirmed")
@@ -1319,8 +1339,8 @@ def builder(m, inp):
         if inp["asset_class"] == "us_equity" and inp.get("session", "regular") != "regular":
             guards.append("regular_session_only")
         # §5.5's minimum is the instrument's minimum order size (trading spec §5.3 rule 2; DEC-399 item 5),
-        # except for a trim of the whole position, a full close rule 2 exempts (DEC-423). The model has
-        # no resting sell, so the whole position is the quantity held.
+        # except for a trim of the whole position, a full close rule 2 exempts (DEC-423). Beside a resting
+        # sell the trim is never the whole position, so the exemption does not reach it.
         if sell < D(inp["min_order_size"]) and sell != qty:
             guards.append("below_minimum_order")
         if not guards:

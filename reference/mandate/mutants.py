@@ -24,6 +24,30 @@ MUTANTS = {
     "V-047 counts an unknown workspace as two users": (
         '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
         '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 2) < 2:'),
+    "V-047 exempts a neutral version too": (
+        '            and classify(prev, m)[0] == "risk_reducing")',
+        '            and classify(prev, m)[0] in ("risk_reducing", "neutral"))'),
+    "V-047 exempts every version of a running agent": (
+        '            and classify(prev, m)[0] == "risk_reducing")',
+        '            and True)'),
+    "V-047 exempts a version when no current version is supplied": (
+        '    return (prev is not None and current is not None and set(SCHEMA["required"]) <= set(prev)\n'
+        '            and V.is_valid(prev) and version(prev) == current\n',
+        '    return (prev is not None and set(SCHEMA["required"]) <= set(prev)\n'
+        '            and V.is_valid(prev) and (current is None or version(prev) == current)\n'),
+    "V-047 exempts a version whose previous document it does not have": (
+        '    return (prev is not None and current is not None and set(SCHEMA["required"]) <= set(prev)\n'
+        '            and V.is_valid(prev) and version(prev) == current\n'
+        '            and classify(prev, m)[0] == "risk_reducing")',
+        '    return (prev is not None and current is not None\n'
+        '            and (not V.is_valid(prev)\n'
+        '                 or (version(prev) == current and classify(prev, m)[0] == "risk_reducing")))'),
+    "V-047 exempts a previous document the schema refuses": (
+        '            and V.is_valid(prev) and version(prev) == current\n',
+        '            and version(prev) == current\n'),
+    "V-047 exempts against a document that is not the agent's current version": (
+        '            and V.is_valid(prev) and version(prev) == current\n',
+        '            and V.is_valid(prev)\n'),
     "loss carry ignores withdrawals": ("        self.net_contributed += d\n", ""),
     "release retires without a loss carry": ('                self._retire("goal_complete", ev)\n',
                                              '                self.restrictions["retired"] = "stopped"\n'),
@@ -308,8 +332,8 @@ TRIPWIRE_MUTANTS = {
 }
 # The trim's minimum (§5.5, DEC-399 item 5) is judged by the family-B cases rather than by a fuzz:
 # MC-B33 and MC-B34 sit where the instrument's minimum order size and the dollar minimum disagree,
-# MC-B33 also sits on the boundary, a trim exactly at the minimum, and MC-B35 is the full close the
-# minimum exempts (DEC-423).
+# MC-B33 also sits on the boundary, a trim exactly at the minimum, MC-B35 is the full close the
+# minimum exempts (DEC-423), and MC-B36 and MC-B37 size the trim after a resting sell (DEC-399 item 7).
 TRIM_MUTANTS = {
     "the trim's minimum is the dollar minimum order": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
                                                       '        if sell * bid < D(inp["min_order_usd"]) and sell != qty:'),
@@ -318,6 +342,8 @@ TRIM_MUTANTS = {
                                                    '        if sell < D(inp["min_order_size"]):'),
     "a trim at the minimum is withheld": ('        if sell < D(inp["min_order_size"]) and sell != qty:',
                                           '        if sell <= D(inp["min_order_size"]) and sell != qty:'),
+    "a trim ignores the agent's resting sells": ('        sell = max(D(0), min(qty - on_sale, ceil_inc((mv - factor * cap) / bid, inc) - on_sale))',
+                                                 '        sell = max(D(0), min(qty, ceil_inc((mv - factor * cap) / bid, inc)))'),
 }
 
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "

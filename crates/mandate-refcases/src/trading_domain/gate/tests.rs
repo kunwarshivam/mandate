@@ -136,6 +136,7 @@ fn the_listing_and_market_are_dec_199_item_6s() -> Result<(), String> {
         median_dollar_volume_20d,
         median_dollar_volume_30d,
         min_order_size,
+        qty_increment,
         halted,
         status_feed_current,
     } = listing(msft.clone(), (Some(Exchange::Nyse), None), true, limit, at)?;
@@ -158,6 +159,11 @@ fn the_listing_and_market_are_dec_199_item_6s() -> Result<(), String> {
     )?;
     expect_eq("median_dollar_volume_30d", median_dollar_volume_30d, None)?;
     expect_eq("min_order_size", min_order_size, num(Qty::parse("1"))?)?;
+    expect_eq(
+        "qty_increment, the fractionable reading until the harness reads the venue's grid",
+        qty_increment,
+        num(Qty::parse("0.000000001"))?,
+    )?;
     expect_eq("halted", halted, false)?;
     expect_eq("status_feed_current", status_feed_current, true)?;
 
