@@ -1,12 +1,12 @@
-# Infrastructure, Deployment, and Operations (design v0.1, draft)
+# Infrastructure, Deployment, and Operations (design v0.2, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.1. The engineering readings are Accepted (agent) in [DEC-434](../project/decisions/DEC-434.md); hosting, vendors, targets, and spend are Proposed for the founder (DEC-79) |
+| **Status** | Draft v0.2: the fixes from the post-merge review of v0.1 (#552). The engineering readings are Accepted (agent) in [DEC-434](../project/decisions/DEC-434.md), items 1 to 12 and 22 to 24. The founder accepted items 13 to 20 on 2026-10-03. Item 21, what an exit does while the journal is unavailable (§2.1), is Proposed for the founder |
 | **Date** | 2026-10-03 |
 | **Owner** | Engineering (founder) |
 | **Builds on** | [HLD](../HLD.md) §4, §5, §6 D, §7, §8, §11; [ADR-0001](../adr/0001-engineering-setup.md) ES-08, ES-09, ES-14, ES-17 to ES-20, ES-23; [journal spec](../specs/journal.md) §5, §6, §10, §11; [trading domain spec](../specs/trading-domain.md) §5.4, §5.5, §5.7, §11; [quality and release plan](../project/07-quality-and-release.md) |
-| **Siblings** | Drafted in parallel: `docs/specs/agent-harness.md` (the process shell around the runtime), `docs/specs/inference.md` (the model gateway and providers), `docs/specs/data-plane.md` (market data ingestion and storage). This document covers how those components are hosted and operated, not what they compute |
+| **Siblings** | The [agent harness spec](../specs/agent-harness.md) (the process shell around the runtime), the [inference spec](../specs/inference.md) (the model gateway and providers; its invariants are `INF-n`), and the [data-plane spec](../specs/data-plane.md) (market data ingestion and storage; `DP-n`). This document covers how those components are hosted and operated, not what they compute. The [threat model](../security/threat-model.md) cites this document's `OPS-n` invariants |
 
 This document says how Mandate runs: which processes exist, where they run, where data is
 stored, how secrets are held, how the system is deployed, upgraded, backed up, restored, watched,
@@ -99,11 +99,11 @@ startup or CI check that refuses to proceed.
 | **OPS-1** | Credentials exist in plaintext only inside the vault and in the memory of the one process that uses them. They never appear in logs, metrics, traces, the journal, artifacts, backups outside the vault's own encrypted snapshots, environment variables of live processes, or the repository | Rule 7; ES-09; ES-19; ES-23 | Log-scan test (ES-09); gitleaks per PR and full history weekly; a test that the live build reads credentials only from the vault client; a backup-scan drill that greps restored backups for known canary secrets |
 | **OPS-2** | Journal before acting survives any crash. No order request leaves a process unless its intent and `OrderSubmitted` are durably committed (`Committed` or `AlreadyCommitted`), and durable means `synchronous_commit = on`, with a synchronous standby in a second failure domain in managed live deployments | Rule 5; journal §5.2, §5.3 | Fault injection killing the process, the database connection, and the database at every step of submission (07, Phase 1 gate); a configuration check at startup that refuses live trading when `synchronous_commit` or the standby requirement is not met |
 | **OPS-3** | No single failure sends an order twice. Each order carries its journaled `client_order_id`; recovery resubmits only after the broker confirms the order is absent; one writer per stream is guaranteed by the writer epoch, not by the orchestrator | Rule 5; journal §5.1, §5.2; trading §5.7 | Fault injection: zero duplicates (Phase 1 gate); a test that starts two executors for one account and shows the older one is `Fenced` before it can send |
-| **OPS-4** | No single failure loses a risk exit or protection. Protective orders rest at the broker and are never canceled by a deploy, restart, or failover; a journaled risk exit is re-driven by recovery; the kill switch depends on no model, research agent, global control plane, or telemetry | Rule 13; trading §5.4, §5.5; HLD §5 Durability | Fault injection during exit sequences; a test that runs the kill switch with the model gateway, the global control plane, and the metrics exporter all unreachable; the upgrade drill (OPS-7) |
+| **OPS-4** | **Given an available journal,** no single failure loses a risk exit or protection: a journaled risk exit is re-driven by recovery, and the kill switch depends on no model, research agent, global control plane, or telemetry. **Whether or not the journal is available,** no deploy, restart, failover, or journal outage cancels a protective order resting at the broker. While the journal is unavailable, a new risk exit is **held**, not sent: that is the disclosed limit of §2.1, not part of this invariant | Rule 13; rule 5; trading §5.4, §5.5; HLD §5 Durability; §2.1 | Fault injection during exit sequences with the journal up; a test that runs the kill switch with the model gateway, the global control plane, and the metrics exporter all unreachable; the upgrade drill (OPS-7). For the journal-down case, a separate test asserts what §2.1 states and nothing more: no order of any kind is sent, no resting protective order is canceled, the hold is alerted, and the owed exit is the first thing sent once appends succeed |
 | **OPS-5** | Every environment except production has no path to live money: no live host compiled in, no live credential in its vault, and no network egress to a live trading host | Rule 8; ES-23 | CI forbids the `live` feature; an egress test in staging that a request to each live trading host fails at the network layer; the tracer refuses any host but Alpaca's paper host (E7-7) |
 | **OPS-6** | Tenant isolation holds at every layer: agent processes are never shared across workspaces; rows carry `workspace_id` with row-level security; data and vault paths are per workspace, under per-workspace keys; telemetry and alerts carry opaque IDs only | HLD §8; journal §6.1, §6.5 | Cross-workspace access tests at the API, database, vault, and messaging layers (07, Isolation); a label lint on the metrics registry |
 | **OPS-7** | A deploy, upgrade, restart, or rollback never drops a running agent's protection, and never interrupts an exit sequence in a way the trading spec does not already bound | Trading §5.4; FR-9.3 | The upgrade drill: upgrade every process type with open positions, exits in flight, and pending approvals, and assert no protective order was canceled by the deploy and every unprotected interval stayed within `max_unprotected_s` |
-| **OPS-8** | Backups restore to a verifiable journal. After any restore, journal §11 verification passes over every stream from its trusted start to the restored head, and every anchor and `SegmentExported` is consistent with the restored heads; otherwise the restore is an integrity incident and no agent trades | Journal §10, §11 | The restore drill (§6.4) journals its verification result; a test that restores a backup older than the last anchor and asserts the incident path, not a silent resume |
+| **OPS-8** | Backups restore to a verifiable journal. After any restore, journal §11 verification passes over every stream from its trusted start to the restored head, and every anchor and `SegmentExported` is consistent with the restored heads; otherwise the restore is an integrity incident and no agent trades | Journal §10, §11 | The restore drill (§6.4) runs journal §11 verification, whose result is journaled as `VerificationRun`; the drill's own record (which backup, which drill, pass or fail) is journaled once the journal spec defines its events (E21-25, journal spec first); a test that restores a backup older than the last anchor and asserts the incident path, not a silent resume |
 | **OPS-9** | A restored or recovered agent trades only after replay and broker reconciliation pass; the broker is the source of truth for orders and positions; anything unexplained pauses the agent until the owner acknowledges with step-up | Trading §11; HLD §6 D | Fault injection and restore drills; reconciliation reference cases |
 | **OPS-10** | Notifications and operator alerts carry no sensitive content: opaque IDs and generic text only | Rule 6 | Payload capture tests (07, Privacy) extended to the paging channel |
 | **OPS-11** | Telemetry is never the audit record and never an input to a trading decision; losing all telemetry changes no order | DEC-73 | A test that runs the decision cycle with the exporter failing; a layering check that no core crate depends on the telemetry API |
@@ -112,12 +112,36 @@ startup or CI check that refuses to proceed.
 | **OPS-14** | A host clock out of tolerance never adds risk: it is measured and journaled, events recorded meanwhile are flagged, and broker `event_time` stays authoritative for executions | Journal §5.4 | A test feeding an out-of-tolerance offset to the scheduler |
 | **OPS-15** | Every release that runs against a broker is identified: its build digest is journaled from the first event (`actor.build`), and in staging and production it is a signed artifact whose signature is checked before start | ES-17 | A startup check that refuses an unsigned binary outside dev and CI |
 
-**Known limit, stated rather than hidden.** OPS-2 and OPS-4 meet at one point: while the journal
-is unavailable, the platform can send **no** order, exits included, because it cannot journal
-first. Protection resting at the broker is the backstop (trading §5.4, with its limits: equity
-stops trigger only in the regular session, crypto stop-limits can miss on gaps). The owner can
-always act directly at their broker; reconciliation then ingests that as external activity
-(trading §7.1). Journal availability is therefore the first thing §6 and §11 protect.
+### 2.1 The journal-outage hold: a disclosed limit, and the founder's decision
+
+Rule 5 (journal before acting) and rule 13 (risk reduction is never denied) meet at one point.
+While the journal is unavailable, an executor cannot commit `OrderSubmitted`, so it can send **no**
+order: no opening, and also no risk exit, no owner exit, no kill-switch close, and no re-placement
+of protection. One failure, the journal, therefore holds every new exit.
+
+Rule 13 lists the only things that may hold an exit: agent mode `paused` or `stopped`, an `Unknown`
+order in the same instrument, or the broker. Journal unavailability is not on that list, and neither
+the trading spec nor the mandate spec says what an exit does then. So this is a gap between two
+non-negotiable rules, and closing it is the founder's decision (DEC-79), recorded as Proposed in
+[DEC-434](../project/decisions/DEC-434.md) item 21. This document does not resolve it.
+
+**What the design does meanwhile: the most conservative option.** Nothing is ever sent without
+being journaled first. During a journal outage:
+
+| Question | Answer |
+|---|---|
+| What is held | Every order the executor would send, exits and kill-switch closes included |
+| What still protects the position | Orders already resting at the broker: bracket and OCO legs, and crypto stop-limits (trading §5.4). No outage, deploy, restart, or failover cancels them (OPS-4) |
+| The backstop's own limits | Equity stops trigger in the regular session only; a crypto stop-limit can miss on a gap; a fractional remainder and a position inside an unprotected interval have no resting order (trading §5.4) |
+| The kill switch | The owner's command cannot be journaled either, so the platform's kill switch does not act until the journal returns (§3.6). The owner can always cancel and close directly at their broker; reconciliation later ingests that as external activity (trading §7.1) |
+| Who is told | The operator, by the journal-unavailable alert (§8.2, RB-07) |
+| How it ends | Appends succeed again. The executor reads fresh state, and exits owed are evaluated and sent before anything else (the priority channel, ES-06) |
+| What narrows the window | The synchronous standby and fenced failover (§4.1), and the failover drill (§6.4). Journal availability is the first thing §6 and §11 protect |
+
+**Exposure, stated plainly.** If the journal is down, a risk limit confirms, and the market moves
+through a stop outside the regular session (equities) or gaps through a stop-limit (crypto), the
+position can lose more than the mandate's limit intends, and the platform does nothing until the
+journal returns.
 
 ---
 
@@ -125,26 +149,53 @@ always act directly at their broker; reconciliation then ingests that as externa
 
 ### 3.1 Processes in a workspace deployment
 
-| Process | How many | Writes | Holds | Network |
-|---|---|---|---|---|
-| **Agent runtime** (`mandate-runtime` inside the shell; see `docs/specs/agent-harness.md`) | One per agent deployment (DEC-08) | Its agent stream | No broker credential (rule 12) | Postgres; model gateway. No broker, no internet |
-| **Account executor** (`mandate-executor` plus a connector) | One per broker account | That account's stream (journal §2) | A vault lease for that one connection | Postgres; vault; that connection's broker hosts only |
-| **Scheduler** | One per workspace | The scheduler stream (`clock:`) | Nothing secret | Postgres; time sources |
-| **Workspace control services** (Phase 1: the founder's CLI) | One set per workspace deployment | The control stream | Session keys for the identity provider | Postgres; identity provider; users |
-| **Model gateway** (see `docs/specs/inference.md`) | One per workspace deployment, replicated | Nothing in the journal; its invocations are recorded by the calling runtime | Provider keys | Allowed model providers only |
-| **Cold exporter and anchorer** | One per workspace deployment | Control stream (`SegmentExported`, `AnchorComputed`) | Object-storage write credential | Postgres; object storage; timestamping authority |
-| **Market data ingest** (see `docs/specs/data-plane.md`) | Per workspace in v1 (no redistribution, HLD §12 item 3) | Parquet datasets | The workspace's data credential | That data host |
+| Process | How many | Writes | Holds | Network (egress allow-list, §9) | Host-local channels (not network) |
+|---|---|---|---|---|---|
+| **Agent runtime** (`mandate-runtime` inside the shell; see `docs/specs/agent-harness.md`) | One per agent deployment (DEC-08) | Its agent stream | No broker credential (rule 12) | Postgres; model gateway; artifact store. No broker, no internet | Reads the workspace's data service |
+| **Account executor** (`mandate-executor` plus a connector) | One per broker account | That account's stream (journal §2) | A vault lease for that one connection | Postgres; vault; that connection's broker hosts only | Reads the workspace's data service |
+| **Scheduler** | One per workspace | The scheduler stream (`clock:`) | Nothing secret | Postgres; time sources | None |
+| **Workspace control services** (Phase 1: the founder's CLI) | One set per workspace deployment | The control stream | Session keys for the identity provider | Postgres; identity provider; users | None |
+| **Model gateway** ([inference spec](../specs/inference.md)) | One **active** instance per workspace deployment; a warm standby may wait, but there are no load-sharing replicas (see below) | Each workspace's meter stream, `meter:{workspace_id}`, which it writes alone (inference spec §3.6; a proposed journal spec change, E15-8). The call record itself, `ModelInvocationRecorded`, is appended by the caller | Provider keys | Postgres; vault; allowed model providers only | None |
+| **Cold exporter and anchorer** | One per workspace deployment | Control stream (`SegmentExported`, `AnchorComputed`) | Object-storage write credential | Postgres; object storage; timestamping authority | None |
+| **Market data service** ([data-plane spec](../specs/data-plane.md)) | Per workspace in v1 (no redistribution, HLD §12 item 3) | Parquet datasets; no journal stream | The workspace's data credential | That data host | Serves the workspace's runtimes and executors |
 
 Two writers, two streams: the runtime writes the agent stream and the executor writes the account
 stream (DEC-131). Facts cross between them only as journaled copies (journal §2). Processes find
 each other's events through journal tailing with Postgres `LISTEN`/`NOTIFY` as a wake-up hint
 (DEC-17); a lost notification costs latency, not correctness.
 
+**The market-data channel is host-local, and it is not in the egress allow-list.** The data-plane
+spec (§3.6) has the data service push normalized quotes, instrument statuses, and LULD bands to the
+workspace's runtimes and executors over an in-process or same-host channel. Here that is a Unix
+socket or loopback endpoint on the shared host, bounded and read-only for the consumers, one per
+workspace and never reachable from another workspace's processes (OPS-6). It crosses
+no network boundary, so the "Network" column, which §9 turns into the egress allow-list, does not
+list it; the last column does. An allow-list built from this table must leave that local channel
+open: without it no quote reaches the executor, no `MarkUpdated` is appended, every held
+instrument goes stale, and every opening is denied. Nothing about the channel changes what is
+journaled: marks enter risk state only as journaled `MarkUpdated` events (data-plane §3.6).
+The placement this requires is in §3.2 (DEC-434 item 22).
+
+**The model gateway is a single writer.** The inference spec (§3.6) gives the gateway a meter
+stream per workspace and requires a call's reservation to be appended before its first attempt
+leaves. A stream has one writer, fenced by epoch (journal §2, §5.1), so two gateway instances
+cannot share a workspace's traffic: one would hold the epoch and the other's reservations would
+return `Fenced`. So one instance is active per workspace deployment and holds the meter epoch of
+each workspace it serves. A standby takes over by incrementing the epoch, as any writer does
+(§3.4, §7.3). An instance that finds itself fenced refuses every call with a typed refusal and
+exits; it sends nothing to a provider, because no call may start without its reservation (inference
+spec INF-7). The caller records the model's output as missing, which never adds risk (inference
+spec INF-4). Load-sharing replicas would need a meter stream per replica, which is an inference
+and journal spec change, not a deployment choice (DEC-434 item 23).
+
 ### 3.2 Scheduling and placement
 
 - **Managed:** one Kubernetes cell per region (HLD §11). Each process is its own pod. A workspace's
-  processes stay in one cell. The executor and the agents that use its account may run on different
-  nodes; the journal is their only channel.
+  processes stay in one cell. In v1 a workspace's data service, executors, and runtimes are placed
+  on one node (pod affinity), because the market-data channel is host-local (§3.1, data-plane
+  §3.6). The journal stays the only channel between a runtime and an executor. Spreading a
+  workspace over nodes later turns the data channel into a network route: a data-plane spec change
+  and a new allow-list entry, not a scheduling setting.
 - **Hybrid:** Helm on the customer's cluster, or Docker Compose on one host (FR-9.2). A single host
   is a supported shape for a small workspace; its failure walk is §11's "node loss" with no
   standby node.
@@ -204,7 +255,8 @@ stream owners, which journal `KillSwitchActivated` in their own streams (journal
 needs exactly three things: Postgres, the executor process, and the broker (with the executor's
 cached vault lease). It does not need the model gateway, the research agent, market data beyond
 the current status the spec requires, the global control plane, telemetry, or the web app (an
-owner can also use the CLI). Kill-switch and risk-exit commands are read first from a priority
+owner can also use the CLI). Postgres is on that list: while the journal is unavailable the
+platform's kill switch does not act, which is the limit §2.1 discloses. Kill-switch and risk-exit commands are read first from a priority
 channel (ES-06), so a full input queue cannot delay them. The managed global switch cannot reach
 into hybrid or on-prem deployments (HLD §8).
 
@@ -358,9 +410,9 @@ Each check's result is journaled on the control stream with the connection, neve
   write-only by policy.
 - The managed global switch cannot reach into customer deployments (HLD §8).
 
-### 5.6 The vault product (Proposed)
+### 5.6 The vault product
 
-The founder chooses the product (it may be a paid service). Options:
+The founder chose OpenBao (DEC-434 item 14, accepted 2026-10-03). The options considered:
 
 | Option | Fits every mode? | Notes |
 |---|---|---|
@@ -369,15 +421,15 @@ The founder chooses the product (it may be a paid service). Options:
 | A cloud secrets manager plus key service | Managed only | Breaks the same-installer rule; on-prem would need a second implementation |
 | Our own envelope encryption over a key service | Yes | Least new software, most new safety-critical code to write and review |
 
-**Recommendation:** OpenBao in every mode, behind a narrow `SecretSource` interface in the shell
-so the choice stays reversible. Until the founder decides, Phase 1 keeps ES-19's local paper keys
-and no live credential exists anywhere.
+**Decided:** OpenBao in every mode, behind a narrow `SecretSource` interface in the shell so the
+choice stays reversible. Phase 1 keeps ES-19's local paper keys, and no live credential exists
+anywhere.
 
 ---
 
 ## 6. Backups and disaster recovery
 
-### 6.1 Targets (Proposed)
+### 6.1 Targets
 
 | Scope | Recovery point (data loss) | Recovery time (to trading again) |
 |---|---|---|
@@ -386,7 +438,12 @@ and no live credential exists anywhere.
 | Region loss, managed live | Under 1 minute for the cold store (segments ship within a minute); the hot tail since the last segment is recovered from the cross-region replica if it survived | Under 4 hours, agents resuming only after reconciliation (OPS-9) |
 | Phase 1 paper | The WAL archive's lag (Proposed: under 5 minutes) | Best effort; paper only |
 
-Region-loss numbers are the founder's to set, because a second region is spend (DEC-79).
+The founder accepted these targets (DEC-434 item 17). **The region-loss row depends on item 13.**
+It assumes a second region, which is chosen with the hosting provider at M8. Until a second region
+exists, the row is a target and not a capability: a region loss then ends only when the region
+returns or a new one is built, and what survives is what the cold store's replica holds (journal
+§6.2 requires that replica before live capital). The two items take effect together, and the
+region-evacuation drill (§6.4) starts only then.
 
 ### 6.2 What is backed up, and how
 
@@ -423,6 +480,12 @@ A restore never repairs the journal in place and never resumes trading on its ow
    agent requires the owner's acknowledgment with step-up authentication.
 
 ### 6.4 Drills
+
+**Where a drill's result is recorded.** The journal's event catalogue is a closed list, and it has
+no backup or drill event today. Telemetry cannot hold the record (OPS-11). So the journal spec
+change comes first: E21-25 adds the backup and drill events with test vectors, and E21-5 is blocked
+on it. Until then a drill journals only what the catalogue already has (`VerificationRun`,
+journal §11), and "journaled" in the table below means "journaled once E21-25 lands".
 
 | Drill | Where | Frequency (Proposed) | Pass condition, journaled |
 |---|---|---|---|
@@ -555,7 +618,7 @@ are authoritative; a few come from metrics.
 | Broker API errors, rate limits, or outage | Connector metrics | SEV-2 | RB-13 |
 | Crash loop; agent left paused | Deployment manager | SEV-2 | RB-14 |
 | Approval not delivered | Approval service | SEV-2 (07) | RB-15 |
-| Backup failed; drill overdue or failed | Backup job; drill events | SEV-2 | RB-16 |
+| Backup failed; drill overdue or failed | Backup job metrics; the drill events E21-25 defines | SEV-2 | RB-16 |
 
 ### 8.3 SLOs (Proposed)
 
@@ -692,18 +755,18 @@ Each failure, walked to its exit: what detects it, what agents do, how it ends, 
 |---|---|---|---|
 | **Process crash** | Liveness; the orchestrator | Protection rests at the broker. On restart: replay, reconcile, resume, or `paused` on anything unexplained (HLD §6 D) | Automatic; owner acknowledges with step-up if paused |
 | **Node loss** | The orchestrator | The node's processes are rescheduled elsewhere; each new process fences the old epoch (§3.4) and recovers. On a single-host hybrid site, nothing runs until the host returns; protection rests at the broker | Automatic in a cluster; the customer restores the host otherwise |
-| **Postgres primary failure** | Failover manager; append `Unavailable` | Appends fail, so no order is sent (OPS-2); writers retry or re-query by `event_id` after promotion (§4.1) | Promotion of the synchronous standby; agents resume without reconciliation gaps |
-| **No synchronous standby** | Postgres metrics | Commits wait; agents hold; protection rests at the broker | An operator restores a standby (RB-07); never by switching to asynchronous commit |
+| **Postgres primary failure** | Failover manager; append `Unavailable` | Appends fail, so no order is sent, exits included (OPS-2, §2.1); protection rests at the broker; writers retry or re-query by `event_id` after promotion (§4.1) | Promotion of the synchronous standby; agents resume without reconciliation gaps |
+| **No synchronous standby** | Postgres metrics | Commits wait; agents hold every order, exits included (§2.1); protection rests at the broker; the owner can act directly at the broker | An operator restores a standby (RB-07); never by switching to asynchronous commit |
 | **Object store outage** | Exporter and artifact-writer errors | Trading continues on the hot store (the cold store is not in the trade path). An event that needs a new artifact (a model prompt) waits for the artifact, so the research agent and LLM-informed decisions pause; quant decisions, exits, and protection continue (§4.3 ordering). Cold export lags and alerts | The store returns; the exporter catches up. Before live capital, a lag past one minute is SEV-2 |
 | **Region outage (managed)** | Fleet health; synthetic probes | Agents in that region stop; protection rests at the broker; the owner can act directly at the broker | The founder or on-call decides to evacuate (RB-17): restore in the second region (§6.3), reconcile, resume only as OPS-9 allows |
 | **Vault outage** | Lease renewal failures | Running executors keep their leases until expiry; new processes cannot start, so their agents stay `Recovering` | The vault returns. If a lease expires first, that executor stops sending and its agents are paused; protection rests at the broker |
 | **Broker API outage** | Connector errors; `Unknown` orders | Orders in flight become `Unknown` and are looked up when the broker returns (trading §5.7); no new opening while the broker cannot confirm state; the kill switch is journaled and retried | The broker returns; reconciliation runs (trading §11), and mismatches pause |
-| **Market data outage** | Staleness checks | The gate refuses openings on stale data; risk exits use the exit price ladder's rules for missing prices (trading §5.6) | Feed returns |
-| **Model gateway or provider outage** | Gateway errors | The output counts as missing; no substitute model (DEC-67); the research agent pauses ideation; exits and the kill switch need no model | Provider returns |
+| **Market data outage** (the vendor feed, or the host-local channel of §3.1) | Staleness checks | The gate refuses openings on stale data; risk exits use the exit price ladder's rules for missing prices (trading §5.6) | Feed returns |
+| **Model gateway or provider outage** | Gateway errors; an unexpected `Fenced` on a meter stream | The output counts as missing; no substitute model (DEC-67); the research agent pauses ideation; exits and the kill switch need no model. A fenced gateway instance refuses every call and exits (§3.1) | Provider returns; the standby gateway takes the meter epoch |
 | **Global control plane outage** | Outbound link | Nothing changes for trading (OPS-12); hybrid approvals use fallback channels; usage reports and updates queue (HLD §4) | Link returns |
 | **Clock skew** | The scheduler's offset checks (journal §5.4) | `ClockToleranceExceeded` is journaled and events are flagged; broker `event_time` stays authoritative for executions; the risk clock comes from the scheduler, not each host | Time sync returns; the next measurement within tolerance ends the flag |
 | **Bad deploy** | Canary health, crash loops, alert spike | Drained processes hand over normally; a crashing new version leaves agents `Paused` after the crash-loop bound, with protection at the broker | Rollback through the same drain and hand-over (§7.4) |
-| **Network partition between executor and Postgres** | Append errors | The executor cannot journal, so it sends nothing; if a second executor is started on the other side, it fences the first | Partition heals; the fenced process exits |
+| **Network partition between executor and Postgres** | Append errors | The executor cannot journal, so it sends nothing, exits included (§2.1); protection rests at the broker; if a second executor is started on the other side, it fences the first | Partition heals; the fenced process exits |
 | **Journal integrity failure** | `VerificationRun` | Affected agents pause; the kill switch still works; control-stream failures freeze mandate and deployment changes (journal §11) | SEV-1 incident; a new writer epoch from `IntegrityIncidentRecorded`; nothing repaired in place |
 | **Credential leak suspected** | Secret scanning; vault audit; the owner | Revoke the connection (`ConnectionRevoked`); the executor stops sending for it; protection rests at the broker | Owner reconnects with a new credential; SEV-1 postmortem (07) |
 
@@ -739,21 +802,34 @@ risk: the environment ladder and its paper-only rule (item 1), the process topol
 fencing as the only at-most-one guarantee (item 3), readiness (item 4), artifact-before-event
 ordering (item 5), synchronous-only failover (item 6), drain and hand-over (item 7), rollback and
 expand-only migrations (item 8), restores that never auto-resume (item 9), opaque telemetry labels
-(item 10), default-deny egress (item 11), and the E21 epic (item 12).
+(item 10), default-deny egress (item 11), and the E21 epic (item 12). Added in v0.2: the host-local
+market-data channel and the co-location it requires (item 22), the single-writer model gateway
+(item 23), and the journal-spec-first story for backup and drill events (item 24).
 
-**Proposed for the founder** (spending, live money; DEC-79), with recommendations. Work continues
-on the most conservative option: no new paid service, paper only, the founder's own host.
+**Accepted by the founder (2026-10-03):** items 13 to 20, as recommended, and open question 4.
 
-| Item | Decision | Recommendation |
+| Item | Decision | As accepted |
 |---|---|---|
-| 13 | Hosting provider and regions for managed cells | Decide at M8, not now. Require compliance-mode object lock, a key management service, managed Kubernetes, and two US regions. Phase 1 stays on the founder's host |
+| 13 | Hosting provider and regions for managed cells | Decided at M8, not now. Compliance-mode object lock, a key management service, managed Kubernetes, and two US regions are required. Phase 1 stays on the founder's host |
 | 14 | Vault product | OpenBao in every mode behind a `SecretSource` interface (§5.6) |
-| 15 | Managed Postgres service or self-run | Self-run with a failover manager for portability, unless the provider's managed service supports synchronous standby with fencing and the same version floor |
-| 16 | Object storage on the edge | Require the customer's S3-compatible store with object lock; do not bundle MinIO until counsel reviews AGPL-3.0 |
-| 17 | Recovery point, recovery time, and SLO targets | Adopt §6.1 and §8.3 as written |
+| 15 | Managed Postgres service or self-run | Self-run with a fenced synchronous standby, unless a managed service meets item 15's conditions |
+| 16 | Object storage on the edge | The customer's S3-compatible store with object lock; no bundled MinIO |
+| 17 | Recovery point, recovery time, and SLO targets | §6.1 and §8.3 as written. The region-loss row takes effect with item 13's second region (§6.1) |
 | 18 | Budgets | A monthly cap each for infrastructure and inference, with alerts at 50%, 80%, and 100% |
-| 19 | Staging | Stand up a minimal staging cell at the start of M8 |
+| 19 | Staging | A minimal staging cell at the start of M8 |
 | 20 | On-call | The founder alone until design partners, with a paging tool chosen then |
+
+**Proposed for the founder:** item 21, what an exit does while the journal is unavailable (§2.1).
+It touches two non-negotiable rules, so DEC-79 reserves it.
+
+| Option | What it means | Cost |
+|---|---|---|
+| **(a) Name the hold** (recommended) | Rule 13's list of permitted holds gains "the journal is unavailable", and the trading spec says what happens then: nothing is sent, resting protection is untouched, the hold is alerted, and owed exits go first when appends return | The exposure of §2.1 stays, disclosed to owners; rule 5 keeps no exception |
+| (b) A fallback record for exits | A risk exit may be sent after its intent is written to a second durable record (a local write-ahead file), later copied into the journal | Rule 5 gains an exception and the journal a second source of truth, the class of bug DEC-16 rejected; recovery must merge two logs; a duplicate order becomes possible |
+| (c) Send exits unjournaled | Rule 13 wins outright during an outage | Breaks rule 5 and the idempotency that OPS-3 rests on |
+
+Until the founder decides, the design proceeds on the most conservative option: never send
+without journaling, which is what option (a) would write down.
 
 ---
 
@@ -765,12 +841,14 @@ harness; E19 and E20 are left to the sibling specs drafted in parallel. The rows
 
 ## 15. Open questions
 
-1. Whether the executor for an account and the runtimes trading it should be co-located on one node
-   to shorten the kill-switch path, or spread for blast radius (§3.2). Measure first.
+1. Whether a workspace's processes may later spread over nodes for blast radius. v1 co-locates
+   them because the market-data channel is host-local (§3.2); spreading needs a data-plane spec
+   change first.
 2. Lease length for broker credentials versus how long a vault outage can last (§5.2).
 3. Whether hybrid customers may keep anchors away from the global plane (journal §13 question 2),
    which changes what step 4 of the restore (§6.3) can compare against.
-4. Whether `Unknown` orders found after a restore that carry our `client_order_id` prefix may be
-   adopted rather than treated as external activity. This document takes the conservative reading
-   (§6.3 step 5); loosening it is the founder's call.
-5. The drill and backup event names, which the journal spec does not define yet.
+4. **Decided by the founder (2026-10-03, DEC-434):** an order that carries our `client_order_id`
+   prefix but is unknown to a restored journal is external activity (§6.3 step 5), never adopted
+   by its prefix.
+5. **Now a story:** the backup and drill events are E21-25, journal spec first (§6.4).
+6. What an exit does while the journal is unavailable (§2.1): the founder's, DEC-434 item 21.

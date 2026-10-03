@@ -40,7 +40,7 @@ People with write access start with [COLLABORATION.md](../COLLABORATION.md).
 
 | Document | Purpose |
 |---|---|
-| [Infrastructure and operations](design/infrastructure.md) | Draft v0.1: environments, invariants, runtime topology, data stores, secrets and the vault, backups and disaster recovery, deploy and upgrade, observability and on-call, security baseline, cost model, failure walk (DEC-434) |
+| [Infrastructure and operations](design/infrastructure.md) | Draft v0.2: environments, invariants, runtime topology, data stores, secrets and the vault, backups and disaster recovery, deploy and upgrade, observability and on-call, security baseline, cost model, failure walk (DEC-434) |
 
 ## Security
 

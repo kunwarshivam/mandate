@@ -1491,7 +1491,7 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
 
 ### E21 Operations and infrastructure (proposed, DEC-434)
 
-From the [infrastructure design](../design/infrastructure.md) (v0.1 draft). The epic joins the
+From the [infrastructure design](../design/infrastructure.md) (v0.2 draft). The epic joins the
 overview when the founder accepts it; until then each story is **(Proposed)** with the milestone it
 would serve. **SC** marks a story on a safety-critical path, to which the `AGENTS.md`
 safety-critical rules apply. Hosting, vendor, and budget choices stay with the founder (DEC-434
@@ -1524,7 +1524,7 @@ items 13 to 20); no story here buys a service or touches live money.
   paper journal, passes journal spec §11 over every stream, compares heads with the latest anchors
   and cold manifests, and journals the result; a restore older than the last anchor takes the
   integrity-incident path and no agent resumes (OPS-8); and a canary scan finds no secret in the
-  restored data.
+  restored data. Blocked on E21-25, which defines the events the result is journaled as.
 - **E21-6 (Proposed, M13)** As on-call, I want runbooks RB-01 to RB-18 (design §8.4), so that the
   Phase 2 gate's "runbooks exist for every alert in FR-8.3" holds. *Accepted when:* each runbook
   names its alert, its checks, its safe actions, and its exit, and is exercised once in staging.
@@ -1629,6 +1629,33 @@ wait for the founder.
   email-link gap moves to the control column citing `identity.md` §6.1 and §7.3, and its E row
   names `identity.md` (#556) as the authoritative role matrix (settlement X1); and every control row
   in §6 is marked built or specified.
+
+Rows E21-25 to E21-27 come from the post-merge review of the infrastructure design (#552) and its
+v0.2 fixes ([DEC-434](decisions/DEC-434.md) items 21 to 24).
+
+- **E21-25 (Proposed, M7; SC; journal spec first)** As an auditor, I want backup runs and restore,
+  failover, and evacuation drills recorded as journal events, so that OPS-8's "journaled" has
+  somewhere to go (design §6.4, DEC-434 item 24). *Accepted when:* a journal spec change adds the
+  backup and drill events to §9's catalogue on the control stream, each naming what was restored or
+  exercised, the `VerificationRun` it relied on, and pass or fail, with test vectors; the
+  registration lands tests first (DEC-77); and an unregistered drill event is still rejected at
+  append. Blocks E21-5.
+- **E21-26 (Proposed, M6; SC)** As an owner, I want the journal-outage hold tested for exactly what
+  the design discloses, so that OPS-4's test is honest (design §2.1). *Accepted when:* with the
+  journal unavailable and a risk exit owed, a fault-injection test shows no order of any kind is
+  sent, no resting protective order is canceled, the hold raises its alert, and the owed exit is
+  the first order sent once appends succeed. What the executor may do beyond that waits for the
+  founder (DEC-434 item 21); the test changes with that decision.
+- **E21-27 (Proposed, M8)** As the founder, I want the minor findings of the #552 review applied in
+  the design's next version (freeze rule), so that the document stays exact. *Accepted when:* §8.2
+  or §8.4 says RB-17 and RB-18 are procedures reached from the failure walk, not alert
+  destinations; §4.1 or §6.1 says the Phase 1 paper recovery point can lose committed order
+  intents up to the WAL archive's lag, that this is accepted for paper, and that a restore then
+  treats those orders as external activity; DEC-434 or the design says who decides the engineering
+  defaults marked "(Proposed)" in prose (the crash-loop bound, the drain bound, the vault lease
+  length, two-person break-glass, the retention rows of §4.5); §12's process row names the open
+  executor implementation (#174); and §14 and DEC-434 item 12 say once whether E21 is in the epic
+  overview.
 
 ## Won't (v1)
 
