@@ -1239,19 +1239,25 @@ with the founder (DEC-440 items 13 to 17); no story here buys a service or touch
 - **E20-3 (Proposed, M8; SC; journal spec change first)** As an engineer, I want the closed message
   set of design §3.8 and its journal events (`ControlPlaneEnrolled`, `LicenseApplied`,
   `LicenseStateChanged`, `ReleaseOffered`, `ReleaseInstalled`, `ReleaseWithdrawnNoticed`,
-  `UsageReportSealed`, `ControlPlaneMessageRefused`) registered in the journal spec with vectors,
-  then implemented in `cp-agent`.
+  `DataBundleImported`, `UsageReportSealed`, `ControlPlaneMessageRefused`) registered in the journal
+  spec with vectors, then implemented: verification in `cp-agent`, appends by workspace control
+  services, the control stream's single writer.
   *Accepted when:* CP-1's type test and canary scan pass; CP-4's layering check and fuzz test pass;
   CP-5's per-type tests show an unsigned, wrongly signed, replayed, or out-of-list instruction
-  refused and journaled, and a valid one journaled before its effect.
-- **E20-4 (Proposed, M8; SC)** As an org owner, I want licenses verified on site, with states
-  `valid`, `renewal_due`, `grace`, and `lapsed`, whose only effects are refusing new deployments and,
-  when `lapsed`, new openings (design §3.3; DEC-440 item 13 Proposed).
-  *Accepted when:* CP-6's test passes (expiry mid-session leaves positions and protection untouched;
-  exits and the kill switch pass; an opening after grace is refused with `license_lapsed`); CP-9's
-  replay test passes; lowering an entitlement stops no running agent.
-- **E20-5 (Proposed, M8)** As an operator, I want heartbeats and a fleet view, where missing
-  heartbeats only mark a site `unreachable` and alert (design §3.4, CP-8).
+  refused and journaled, and a valid one journaled before its effect; a test shows `cp-agent` never
+  takes a writer epoch, and the kill switch commits with `cp-agent` hung.
+- **E20-4 (Proposed, M8; SC; mandate spec change first)** As an org owner, I want licenses
+  verified on site, with states `valid`, `renewal_due`, `grace`, and `lapsed`, where after grace a
+  lapsed license refuses only new deployments and new openings; it never blocks an exit, a
+  protective order, the kill switch, or any risk reduction (design §3.3; DEC-440 item 13 Proposed).
+  *Accepted when:* mandate spec §5.9 lists `license_lapsed` (mode `exits_only`) with its reference
+  cases before code; CP-6's test passes (expiry mid-session leaves positions and protection
+  untouched; exits and the kill switch pass; after grace every covered agent journals
+  `AgentModeApplied` into `exits_only` and an opening is refused by the existing mode check, with no
+  new gate check); CP-9's replay test passes; lowering an entitlement stops no running agent.
+- **E20-5 (Proposed, M8)** As an operator, I want heartbeats carrying versions and health only, and
+  a fleet view, where missing heartbeats only mark a site `unreachable` and alert (design §3.4,
+  CP-8).
   *Accepted when:* a site silent for a day is shown `unreachable` and nothing about it is revoked.
 - **E20-6 (Proposed, M11; SC)** As an IT admin, I want signed release manifests offered over the
   outbound link and installed only by my action or in my update window, by drain and hand-over
@@ -1286,6 +1292,17 @@ with the founder (DEC-440 items 13 to 17); no story here buys a service or touch
   DEC-440 item 8; members per DEC-261 item 9).
   *Accepted when:* the control plane has no message type that maps to `PlatformOperatorAction`; a
   hybrid site refuses one from outside its own operators.
+- **E20-13 (Proposed, M8)** As an org owner, I want one rule for the license clock: validity is
+  checked against the highest UTC time the site has journaled (#562 review minor 1).
+  *Accepted when:* setting the site clock back never extends a license; a frozen clock still raises
+  `renewal_due` from the journaled high-water time, and the design says so.
+- **E20-14 (Proposed, M8)** As an IT admin, I want the enrollment certificate's lifetime and renewal
+  threshold named, so CP-8 is checkable (#562 review minor 4).
+  *Accepted when:* the design states both; a test renews at the threshold; the CP-2 drill outlasts
+  the threshold with only an alert.
+- **E20-15 (Proposed, M8)** As the founder, I want the control plane's recovery targets stated, as a
+  Proposed item or as a reading under DEC-440 item 16 (#562 review minor 6).
+  *Accepted when:* design §5.1 and §8 agree on where the targets live and what they are.
 
 ### E21 Operations and infrastructure (proposed, DEC-434)
 

@@ -59,6 +59,8 @@ or can request:
 - credentials of any kind: broker keys and tokens, sessions, passkeys, recovery codes, or
   provider keys;
 - personal data: names, email addresses, phone numbers, or IdP subjects (identity spec §3.3, #556).
+  The one exception is a web-push `endpoint` passing through the relay, forwarded and not kept
+  (CP-1, §3.6).
 
 It is never in the path of a trade, a sign-in to a hybrid site (ID-15), an approval, or a kill
 switch.
@@ -93,14 +95,14 @@ staging exercise with the outbound link cut or altered, whose result is journale
 
 | ID | Invariant | Source | How it is checked |
 |---|---|---|---|
-| **CP-1** | **No content leaves a workspace deployment for the control plane.** Every message a deployment sends it is one of a closed set of types (§3.8) whose fields are opaque IDs, enumerations, counts, costs, versions, digests, and timestamps. No type has a free-text field or a field that can hold an instrument, quantity, price, mandate field, or personal datum | HLD "Where data lives"; PRD §7 Privacy; rule 6 | Type test: the outbound message types have no `String` field outside a closed enumeration. Canary test: a workspace whose instruments, agent names, rule IDs, prices, and user names are unique canary strings runs a trading day; every byte sent on the outbound link is captured and scanned for every canary |
+| **CP-1** | **No content leaves a workspace deployment for the control plane.** Every message a deployment sends it is one of a closed set of types (§3.8) whose fields are opaque IDs, enumerations, counts, costs, versions, digests, and timestamps. No type has a free-text field or a field that can hold an instrument, quantity, price, mandate field, or personal datum. **Two stated exceptions**, both in `RelaySend` only: `endpoint`, a push-service URL unique to one browser, and `ciphertext`, at most 512 bytes of an end-to-end encrypted opaque notice. This design treats `endpoint` as personal data: the relay forwards both and keeps neither after the attempt (§3.6). Whether a push endpoint is personal data, and its retention, is owned by the notifications spec (NT-1, #558) and the threat model (#557) | HLD "Where data lives"; PRD §7 Privacy; rule 6 | Type test: every outbound field is an ID newtype, a closed enumeration, a number, a fixed-point decimal, a digest, a timestamp, a semantic version, or one of the two named relay exceptions (`PushEndpoint`, validated against the allowed push-service origins, and `Ciphertext`, at most 512 bytes); no other `String` field exists. Canary test: a workspace whose instruments, agent names, rule IDs, prices, and user names are unique canary strings runs a trading day; every byte sent on the outbound link, outside the relay's `ciphertext`, is captured and scanned for every canary |
 | **CP-2** | **The control plane being down never stops trading.** With the outbound link cut, every agent keeps its decision cycle, openings within its mandate, exits, protection, reconciliation, approvals through customer channels, and owner commands | OPS-12; PRD §7 Availability | Drill: the paper suites and the kill-switch suite run with the link cut for a simulated week; outcomes equal those of a run with the link up, except relay push and queued reports |
 | **CP-3** | **Nothing from the control plane blocks risk reduction.** No exit, protective order, risk exit, owner exit, or kill switch waits on, is ordered after, or fails because of any control-plane message, license state, release state, or outage | Rules 3, 13; OPS-4 | Fault injection: the exit and kill-switch suites pass with the link cut, a hung link, an expired license, a withdrawn release, and a revoked enrollment certificate |
-| **CP-4** | **The control plane never changes a mandate or an agent.** No message from it can create, confirm, or apply a mandate version, change an envelope field or policy, deploy, resume, pause, or stop an agent, submit or cancel an order, engage a kill switch, or touch a credential | Rules 1, 11; HLD §8 | Layering: the control-plane client crate cannot depend on the mandate registry, control-stream writer for owner commands, executor, or vault (`xtask/layers.toml`); a fuzz test feeds every inbound message type with random content and asserts no such event is appended |
-| **CP-5** | **Every instruction is signed, journaled, and bounded.** An inbound instruction (license, release offer, release withdrawal, catalog entry, data bundle) takes effect only if (a) its signature verifies against a key pinned in the installed release, not against the TLS channel; (b) it is journaled on the control stream before it takes effect; and (c) its effect is in §3.8's closed list, which only restricts new activity or offers something for local approval. Anything else is refused and the refusal journaled | DEC-440 item 3; ES-17 | Tests per message type: an unsigned, wrongly signed, replayed (older sequence), or out-of-list instruction is refused with a journaled refusal; a valid one is journaled before its effect |
-| **CP-6** | **License expiry never forces a liquidation and never blocks an exit.** The most a lapsed license can do, after its grace period, is refuse new deployments and new opening or increasing orders (DEC-440 item 13, Proposed). Positions, protection, exits, owner exits, the kill switch, reconciliation, journal reads, and exports continue | Rules 2, 3, 13 | Test: a license that expires mid-session leaves every open position and resting protective order untouched, and every exit and kill switch passes; after grace, an opening is refused with a license reason code and an exit is not |
+| **CP-4** | **The control plane never changes a mandate or an agent.** No message from it can create, confirm, or apply a mandate version, change an envelope field or policy, deploy, resume, pause, or stop an agent, submit or cancel an order, engage a kill switch, or touch a credential | Rules 1, 11; HLD §8 | Layering: the planned `cp-agent` crate depends on no journal, runtime, executor, mandate registry, or vault crate (a crate-level rule in `xtask/layers.toml`, which checks crate dependencies, not types). Its only way into the site is workspace services' instruction intake, whose input type is §3.8's inbound messages and whose handlers can append only §3.8's listed events. A fuzz test feeds every inbound message type with random content and asserts no such event is appended |
+| **CP-5** | **Every instruction is signed, journaled, and bounded.** An inbound instruction (license, release offer, release withdrawal, catalog entry, data bundle; no inbound item is exempt) takes effect only if (a) its signature verifies against a key pinned in the installed release, not against the TLS channel; (b) workspace control services, the control stream's single writer (journal spec §2, under the fencing of §5.1), journal it before it takes effect. `cp-agent` verifies and hands over; it never appends; and (c) its effect is in §3.8's closed list, which only restricts new activity or offers something for local approval. Anything else is refused and the refusal journaled | DEC-440 item 3; ES-17 | Tests per message type: an unsigned, wrongly signed, replayed (older sequence), or out-of-list instruction is refused with a journaled refusal; a valid one is journaled before its effect |
+| **CP-6** | **License expiry never forces a liquidation and never blocks an exit.** In the shared wording: after grace a lapsed license refuses only new deployments and new openings; it never blocks an exit, a protective order, the kill switch, or any risk reduction (DEC-440 item 13, Proposed). The openings are refused through the existing mechanism only: an agent restriction of mode `exits_only` (mandate spec §5.9; trading spec §7.4, "risk-reducing and protective orders only"), journaled as `AgentModeApplied`. It is never a new risk-gate check, and never a liquidation. Positions, protection, owner exits, risk exits, reconciliation, journal reads, and exports continue | Rules 2, 3, 13 | Test: a license that expires mid-session leaves every open position and resting protective order untouched, and every exit and kill switch passes; after grace, every agent of the deployment's workspaces enters `exits_only` with the restriction `license_lapsed`, an opening is refused by the existing mode check, and an exit is not |
 | **CP-7** | **Outbound only.** A hybrid site and a managed cell open every connection to the control plane; the control plane has no route, port, or credential that reaches into either | HLD §4; FR-9.2 | Installer check: no listening port is opened for the control plane; drill: a connection attempt from the control-plane network to a site fails at the network layer |
-| **CP-8** | **No deadline the control plane controls can stop trading during an outage.** Licenses, enrollment certificates, and pinned keys carry validity far longer than the outage the design tolerates (§4), and are renewed well before expiry while the link is up. Missing heartbeats never revoke anything | CP-2; rule 3 | Test: the site's next-expiry alert fires at the renewal threshold; a drill with the link cut for longer than the renewal threshold shows only the alert |
+| **CP-8** | **No deadline the control plane controls can stop trading during an outage.** Licenses, enrollment certificates, and pinned keys carry validity far longer than the outage the design tolerates (§4), and are renewed well before expiry while the link is up. The enrollment certificate's lifetime and renewal threshold are named in E20-14. Missing heartbeats never revoke anything | CP-2; rule 3 | Test: the site's next-expiry alert fires at the renewal threshold; a drill with the link cut for longer than the renewal threshold shows only the alert |
 | **CP-9** | **Anti-rollback.** A site refuses a license, release manifest, catalog entry, or data bundle whose sequence number is below the highest it has journaled for that kind, except a release rollback its own operator starts under infrastructure §7.4 | DEC-440 item 6 | Test: replaying an older signed license or manifest is refused and journaled |
 | **CP-10** | **Usage reports are complete and idempotent.** Every usage period produces exactly one signed report per deployment, chained to the previous one by hash; reports queue on the site's disk while the link is down and are never dropped; ingest de-duplicates by report ID and flags a gap in the chain | HLD §10; inference spec §7.4 | Test: random link cuts and duplicate sends give the same billed totals as a clean run; a missing report is flagged, never estimated silently |
 | **CP-11** | **Tenant scope at the control plane.** A deployment's credential reads and writes only its own records: its license, its heartbeats, its usage reports, its relay sends, and the public artifacts. A cell's credential covers only the workspaces the directory places on that cell | HLD §8; OPS-6 | Cross-deployment tests: every endpoint called with another deployment's IDs is refused |
@@ -122,6 +124,13 @@ workspace deployment, owns the link, the local queues, and signature checks, and
 process allowed that egress (infrastructure §9). Runtimes, executors, and the vault never talk to
 the control plane.
 
+`cp-agent` is **not a journal writer**. It verifies each inbound instruction and hands it to
+workspace control services, the control stream's single owner (journal spec §2), which append it
+under their writer epoch (journal spec §5.1) and only then apply it. This is the same one-writer
+shape the agent harness uses for its research worker (DEC-431 item 1). Nothing on the kill-switch
+path depends on `cp-agent`: owner commands are journaled by workspace services whether `cp-agent`
+is running, hung, or absent (CP-3).
+
 ```mermaid
 flowchart LR
     subgraph GCP["Global control plane"]
@@ -141,8 +150,9 @@ flowchart LR
     sign["Offline signing<br/>(release, license, data keys)"]
     cpa -->|"outbound mTLS: heartbeats, usage,<br/>anchor roots, relay sends, pulls"| GCP
     GCP -.->|"signed licenses, manifests,<br/>bundles (responses only)"| cpa
-    cpa -->|"journal instruction,<br/>then apply"| ctl
-    ws --> cpa
+    cpa -->|"verified instruction"| ws
+    ws -->|"journal, then apply<br/>(single writer)"| ctl
+    ws -->|"usage, sync, relay sends"| cpa
     sign -.->|"signatures"| lic
     sign -.-> dist
 ```
@@ -165,7 +175,7 @@ view (§4), never a trading stop.
 
 | Record | Fields |
 |---|---|
-| Organization | `org_id`, plan reference, opaque display handle |
+| Organization | `org_id`, plan reference, display handle generated by the plane from a fixed alphabet (never customer-set; the organization's real name stays in the workspace) |
 | Deployment | `deployment_id`, `org_id`, mode (`managed_cell`, `hybrid`), region, client certificate fingerprint |
 | Workspace | `workspace_id`, `org_id`, `deployment_id` |
 | Member | `user_id`, `workspace_id` or `org_id`, role name, state |
@@ -191,7 +201,7 @@ A license is a signed document:
 | `license_id`, `sequence` | `sequence` increases per organization; CP-9 refuses a lower one |
 | `org_id`, `deployment_ids` | Which deployments may use it |
 | `entitlements` | `max_workspaces`, `max_agents_deployed`, feature flags from a closed list (for example `hybrid`, `connected_clients`) |
-| `not_before`, `not_after`, `grace_days` | Validity, checked against the site's clock |
+| `not_before`, `not_after`, `grace_days` | Validity, checked against the highest UTC time the site has journaled (§6; the frozen-clock behaviour is E20-13) |
 | `key_id`, `signature` | Signed by the license key, held in the offline signing service, never in the control plane's general compute |
 
 The site's behaviour, all journaled (`LicenseApplied`, `LicenseStateChanged`):
@@ -201,7 +211,7 @@ The site's behaviour, all journaled (`LicenseApplied`, `LicenseStateChanged`):
 | `valid` | A valid license is in effect | Deploying beyond `max_agents_deployed`, or a workspace beyond `max_workspaces`. Each is a refused request, never a stop of what runs | Running agents, mandates, exits, protection, kill switch |
 | `renewal_due` | Within the renewal threshold of `not_after` (Proposed: 30 days) | Nothing. Admins see a banner | As above |
 | `grace` | Past `not_after`, within `grace_days` | Nothing new beyond `valid`'s limits. Banners to org owners and admins | As above |
-| `lapsed` | Past grace (DEC-440 item 13, Proposed) | New deployments, resumes into an opening mode, and opening or increasing orders (gate reason `license_lapsed`) | Exits, protection, owner exits, risk exits, kill switch, reconciliation, journal, audit reads, exports, acknowledgments |
+| `lapsed` | Past grace (DEC-440 item 13, Proposed) | New deployments (the deployment manager refuses them), and openings: every agent in the covered workspaces takes the agent restriction `license_lapsed` with mode `exits_only` (mandate spec §5.9; trading spec §7.4), journaled as `AgentModeApplied` | Exits, protection, owner exits, risk exits, kill switch, reconciliation, journal, audit reads, exports, acknowledgments |
 
 - **Lowering an entitlement** below what runs refuses new deployments only. It never stops a
   running agent. Stopping one is the owner's act.
@@ -210,14 +220,22 @@ The site's behaviour, all journaled (`LicenseApplied`, `LicenseStateChanged`):
 - **Managed cells** receive a license per organization from the plan, through the same code, so the
   path is exercised every day.
 - **Air-gapped** licenses are files with the same format.
-- **Leaving `lapsed`** takes a new valid license, journaled; agents return to their journaled mode.
-  Nothing resumes automatically that was paused for another reason.
+- **The shared wording** (#556, #562, #565): after grace a lapsed license refuses only new deployments and new openings; it never blocks an exit, a protective order, the kill switch, or any risk reduction.
+- **No new gate check.** The gate already enforces the effective mode (trading spec §9.1); a lapse
+  only adds one restriction to the strictest-of set. Entering `exits_only` cancels working opening
+  orders and pending approvals, as for every restriction (mandate spec §5.9); it never cancels an
+  exit or a protective order. The name `license_lapsed` joins mandate spec §5.9's list in the
+  spec change E20-4 lands first; until then no license state reaches an agent at all, which is the
+  current behaviour.
+- **Leaving `lapsed`** takes a new valid license, journaled by workspace services
+  (`LicenseStateChanged`); the restriction lifts on its own, as each restriction lifts
+  independently (mandate spec §5.9). Any other restriction stays.
 
 ### 3.4 Fleet manager
 
 | Message | Direction | Content |
 |---|---|---|
-| `Heartbeat` | Site to plane, every 60 s | `deployment_id`, release digest, component versions, enumerated health per component (`ok`, `degraded`, `down`), counts of workspaces and of agents per mode, queue depths |
+| `Heartbeat` | Site to plane, every 60 s | `deployment_id`, release digest, component versions, enumerated health per component (`ok`, `degraded`, `down`). In v1, versions and health only: counts arrive in the usage report (§3.5), which billing already needs |
 | `ReleaseManifest` | Plane to site, on pull | Release ID, `sequence`, image and bundle digests, minimum readable `schema_version`s, notes ID; signed by the release key (ES-17) |
 | `ReleaseWithdrawn` | Plane to site, on pull | Release ID and a reason enumeration; signed by the release key |
 | `InstallReport` | Site to plane | Release ID, outcome enumeration, timestamps |
@@ -291,7 +309,8 @@ DEC-261 item 9.
 ### 3.8 The closed message set
 
 Every message on the link, its direction, and what it may cause on the site. Names are provisional
-until the journal spec registers the events (E20-3).
+until the journal spec registers the events (E20-3). Every event in the "Journaled" column is
+appended by workspace control services, the control stream's single writer, never by `cp-agent`.
 
 | Message | Direction | Signed by | Journaled on the site as | Allowed effect on the site |
 |---|---|---|---|---|
@@ -301,11 +320,11 @@ until the journal spec registers the events (E20-3).
 | `AnchorRoot` | Out | Deployment key | Already in `AnchorComputed` | None |
 | `DirectorySync` | Out | mTLS | Membership events already journaled | None |
 | `RelaySend` | Out | mTLS | The notice's delivery record (#558 §5.5) | None |
-| `License` | In | License key | `LicenseApplied`, `LicenseStateChanged` | Refuse new deployments, workspaces, and (when `lapsed`) openings. Never more |
+| `License` | In | License key | `LicenseApplied`, `LicenseStateChanged` | Refuse new deployments and workspaces; when `lapsed`, the `license_lapsed` restriction (`exits_only`). Never more |
 | `ReleaseManifest` | In | Release key | `ReleaseOffered`; `ReleaseInstalled` when the site installs | Offer to the site's operator or update window. Never installs by itself in hybrid |
 | `ReleaseWithdrawn` | In | Release key | `ReleaseWithdrawnNoticed` | Refuse new installs of it; alert |
 | `CatalogEntry` | In | Release or registry key | `ConfigSnapshotRegistered` (existing) | Becomes selectable after the local evaluation gate and the owner's pin (inference spec §4.2). Never changes an existing pin |
-| `DataBundle` | In | Data key | Bundle digest in the data service's records | New data for queries. Never an order input except through a thesis that passes every check (DP-8) |
+| `DataBundle` | In | Data key | `DataBundleImported` (bundle digest, kind, sequence), journaled before any byte of the bundle is used, so CP-9 has a journaled highest sequence and an observation can name its bundle (data plane spec §6.1) | New data for queries. Never an order input except through a thesis that passes every check (DP-8) |
 | `Receipt` | In | Plane key | Stored with the report or anchor | None |
 
 Any other message, or any field outside its schema, is refused and journaled as
@@ -325,7 +344,7 @@ certificate; the site cannot tell them apart and treats them the same.
 | **Hours** | Unchanged | Hybrid: customer channels only for relay-push users | Releases cannot be pulled; new clients without a cached route cannot find a deployment they never used | Status strip: "control plane unreachable" with the time | As above |
 | **Days** | Unchanged | As above | Queues grow on disk; an alert at a size threshold (Proposed: 30 days of reports, which is kilobytes) | Admin banner | As above; billing reviews any period with a late report |
 | **Past a renewal threshold** | Unchanged until `not_after` plus grace (§3.3) | As above | License renewal | License banner from `renewal_due` | Link returns and renewal lands; or an air-gapped license file is installed by hand |
-| **Past license grace** (only if the outage outlasts the whole license term plus grace) | New openings refused (`lapsed`, if DEC-440 item 13 is accepted); everything in CP-6 continues | Unchanged | As above | License banner and a refusal reason on any blocked opening | A license file installed by hand; this is why hybrid licenses run a full term (§3.3) and air-gapped delivery exists for every message |
+| **Past license grace** (only if the outage outlasts the whole license term plus grace) | Agents in `exits_only` under `license_lapsed` (if DEC-440 item 13 is accepted); everything in CP-6 continues | Unchanged | As above | License banner and the agent's mode reason | A license file installed by hand; this is why hybrid licenses run a full term (§3.3) and air-gapped delivery exists for every message |
 | **Partition** (site up, link half-open) | Unchanged | As above | The site sees send failures; the plane sees missing heartbeats and marks `unreachable` | As for hours | Heals; duplicate reports are de-duplicated by `report_id` (CP-10) |
 | **Plane restored from backup** | Unchanged | Unchanged | The plane may have lost recent heartbeats, reports, and anchor roots | Nothing | Sites resend unacknowledged reports and roots; the chain shows any gap; licenses on sites are not affected because sites keep the highest sequence (CP-9) |
 
@@ -356,7 +375,7 @@ CP-7, CP-12). If a signing key is also stolen, see §6.
 - **Cells are regional** (HLD §4, infrastructure §1.2); the control plane is global and small.
 - **One home region in v1** (US), with a warm standby in a second region (DEC-434 item 13's two US
   regions). Because nothing it holds is in the trade path, its recovery targets are looser than the
-  journal's (Proposed with DEC-434 item 17's targets: hours, not seconds).
+  journal's: hours, not seconds, read under DEC-440 item 16 with DEC-434 item 17's targets (E20-15).
 - **Data residency.** The directory and usage reports hold no personal data and no content (§1.2),
   so a single home region does not move customer data across borders. Users outside the US are
   Won't in v1.
@@ -386,12 +405,12 @@ needs a live link.
 
 | Adversary | Tries to | Blocked or disclosed by | Residual |
 |---|---|---|---|
-| **Careless user** | Lets a license lapse and expects agents to keep opening | `renewal_due` and `grace` banners; `lapsed` refuses only openings, with a reason code; exits and the kill switch continue (CP-6) | Missed opportunities after grace, by design |
+| **Careless user** | Lets a license lapse and expects agents to keep opening | `renewal_due` and `grace` banners; `lapsed` puts agents in `exits_only`; exits and the kill switch continue (CP-6) | Missed opportunities after grace, by design |
 | **Careless user** | Installs an upgrade during market hours | Drain and hand-over (DEC-434 item 7); the update window for hybrid | A drained agent skips decision cycles during the hand-over |
 | **Bad model** | Uses the control plane to exfiltrate | Models run in the workspace with no route to it; only `cp-agent` has that egress; outbound messages have no free-text field (CP-1) | None found |
 | **Malicious insider at the platform** | Pushes a malicious release, a forged license, or a poisoned data bundle | Signing keys offline and per kind (DEC-440 item 5); release signing under the founder's hardware key (ES-17); hybrid installs need the site's operator by default; anti-rollback (CP-9) | A stolen release key plus a site on automatic updates runs attacker code: that is the supply-chain threat (#557 §6.10, E21-8). Hybrid default `manual` limits it |
 | **Malicious insider at the platform** | Issues the global kill switch to liquidate managed workspaces | Not issuable from the control plane (CP-12); issued per cell with step-up and journaled in each workspace (§3.7) | An insider with cell operator rights; the operator-approval member of `PlatformOperatorAction` is still Proposed (DEC-261 item 9) |
-| **Malicious insider at the platform** | Withholds license renewal to stop a customer's trading | `lapsed` only stops openings; hybrid licenses run a full term; air-gapped file delivery | Commercial leverage over openings at term end; disclosed in terms (counsel) |
+| **Malicious insider at the platform** | Withholds license renewal to stop a customer's trading | `lapsed` only refuses new deployments and openings; hybrid licenses run a full term; air-gapped file delivery | Commercial leverage over openings at term end; disclosed in terms (counsel) |
 | **Stolen license key** | Forges licenses | Forging lower entitlements only restricts new activity; higher ones only allow deployments that still need the owner's confirmation; rotation through a new release pinning a new key | Billing loss; no trading risk |
 | **Stolen data key** | Publishes false filings to steer theses | Text is untrusted (DP-8); every thesis passes §8.5's checks, the eligibility floor, corroboration, and autonomy; source revocation invalidates theses (DEC-433 item 19) | Bounded by the envelope like any bad input |
 | **Malicious tenant** | Reads another tenant's directory rows, licenses, or reports | Scope by certificate (CP-11); cross-deployment tests | None found |
@@ -440,7 +459,7 @@ holds until each is decided.
 
 | Item | Decision | Recommendation |
 |---|---|---|
-| 13 | What a lapsed license does after grace | Refuse new deployments and new openings; never liquidate; never block an exit, protection, owner exit, kill switch, reconciliation, or export. Grace 30 days; renewal threshold 30 days. Identity spec §11.2 (#556) says "never a trading stop"; this reading is stricter about openings, so the two are reconciled in whichever PR lands second |
+| 13 | What a lapsed license does after grace | The shared wording with #556 and #565: after grace a lapsed license refuses only new deployments and new openings; it never blocks an exit, a protective order, the kill switch, or any risk reduction. Openings are refused by the `license_lapsed` agent restriction (`exits_only`, mandate spec §5.9). Grace 30 days; renewal threshold 30 days |
 | 14 | License term for hybrid | The contract term (annual, per [pricing](../product/07-pricing-and-packaging.md)), so a control-plane outage can never reach a lapse inside it |
 | 15 | Billing provider | Gap 11 decides it (HLD §10 names three); the ingest forwards totals through an interface so the choice stays reversible |
 | 16 | Hosting of the control plane | With DEC-434 item 13 at M8: the same provider as managed cells, separate accounts and keys from every cell |
@@ -467,5 +486,5 @@ the [backlog](../project/06-backlog-v1.md#e20-global-control-plane-proposed-dec-
 4. **Organization-wide views across cells.** An org owner with workspaces in two cells sees each
    cell's data from that cell; the client merges. Whether that is enough for M9's dashboard is the
    workspace API's call.
-5. **Heartbeat counts.** Agents per mode per site reveal activity levels. Whether hybrid customers
-   may reduce heartbeats to versions and health only, with counts arriving only in usage reports.
+5. **Recovery targets for the control plane** (§5.1). Stated as a reading under DEC-440 item 16
+   for now; E20-15 settles whether they become their own Proposed item.
