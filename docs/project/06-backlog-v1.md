@@ -2611,19 +2611,6 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `session_unknown` like one after it. Among them `hand::a_risk_exit_submits_inside_the_close_window` runs at
   clock 25, so its venue is the regular session: it proves the conduct exemption, not the close
   window its name claims (#400 round 1, minor 4).
-- **E7-4 slice 5's trading-day part (stream K), from the session part ([DEC-260](04-decision-log.md#decisions)
-  (13)):** fold `TradingDayStarted` together with what the reference-case harness then reaches:
-  §5.4's GTC re-placement at the buffer day (`hand::protection_is_re_placed_at_the_buffer_day`,
-  `protection_is_not_re_placed_early`, `a_protective_order_submits_with_no_buying_power`), the
-  harness's startup reconciliation, which today holds its openings
-  `startup_reconciliation_pending` (RC-14 `add_via_bracket`, RC-15
-  `restriction_from_a_closing_only_reject`, RC-21, RC-22), RC-14's journal order
-  (`unprotected_window_start` expected after the gate), and the cases the fold alone lets pass
-  (RC-07 `unposted_crypto_fees_reconcile`, RC-14 `passive_exit_becomes_oco_take_profit`, RC-15
-  `status_not_active`, `external_order_detected`, `unexplained_403s`). RC-24 ×2 go live with it:
-  the session part already prices them (both pass with the fold, shown in its PR). Restore
-  `TradingDayStarted` to `properties::every_catalogue_event_is_interpreted_or_named`'s
-  `INTERPRETED` in the same change (#400 round 1, major 3).
 - **E7-4 slice 7 (stream K), moved from slice 5 by the coordinator's ruling D3 on
   [#174](https://github.com/kunwarshivam/mandate/pull/174) (5926142854):** the four kill-switch
   session tests (`hand::an_automated_flatten_defers_equity_sells_to_the_session`,
@@ -2651,6 +2638,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   protection again, and §5.4's bound alerts once per interval. The position then stays unprotected
   indefinitely, with that one owner alert as its only signal. Re-place (or escalate) when an
   awaited order is refused, and keep alerting while the interval stays open.
+  The same holds for a re-placement before expiry ([DEC-367](decisions/DEC-367.md)), where the
+  executor itself chose to open the interval: a refused re-placement is alerted once at the bound
+  and never retried (#468 round 1, minor 5).
 - **E7-4 (stream K), from #463 round 1 (minor 1):** a protective order the broker replaced
   (`Accepted → Replaced`, §5.7's `ReplacedPair`) is not counted as acknowledged. Its successor is
   live under another `client_order_id` that `awaiting` does not name, so the interval stays open
@@ -2671,6 +2661,26 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   never exceeds the position (rule 12). RC-04 reaches only a forward split on whole shares, and
   RC-05 and RC-23 are accounting-only. The slice-5 corporate-actions implementation PR does not
   merge before this pin exists.
+- **E7-4 (stream K), from [#468](https://github.com/kunwarshivam/mandate/pull/468) round 1
+  (minors 3, 4, 6):** (3) `expiring`'s date-arithmetic error resolves toward re-placing early
+  (`.unwrap_or(true)` in `new_day`), but nothing pins it; it fails only at `Date::next`'s upper
+  bound, so no test reaches it today. (4) `expiring` never checks that the order is GTC, though its
+  doc says so; §5.2 makes protective orders GTC, so a `tif` check would make it unrepresentable.
+  (6) `ExchangeCalendar::us_equities()` is parsed inside `expiring`, once per resting protective
+  order per instrument per trading day, as `session.rs` also does; parse it once.
+- **The US-equities calendar's horizon (stream K), from #468 round 2 (M1):** extend
+  `crates/mandate-time/data/us-equities.calendar` well past the GTC window the executor can reach,
+  and alert the owner and the operator when the calendar's end is closer than `gtc_expiry_days`
+  plus `protective_replace_buffer_trading_days`. DEC-367 item 2's two counts are the net under this
+  fix, not the fix.
+- **E7-4 (stream K), from #468 round 2 (minors 3 and 5):**
+  - (3) `working_exits` never checks the side, unlike `still_selling`. A buy with an exit purpose,
+    such as a `Flatten` of a short, would count as selling. v1 has no shorts; copy
+    `still_selling`'s `side == Side::Sell` filter.
+  - (5) `new_day`'s `if let Some(prices)` cannot fail now: protection with no prices is alerted
+    and skipped just before it (DEC-367 item 4 (a′)). Make the unreachable branch
+    unrepresentable. Minor (4) went with `exit_working`, which the founder's decision on #468
+    removed.
 - **E7-4's tests correction (stream K), from the acknowledgment PR ([DEC-348](decisions/DEC-348.md)
   item 2):** the refcase harness's guard that an `unprotected_end` naming what it is `awaiting` is
   not read as the interval's end is reached by no live test, since every case that lists the end
@@ -2747,12 +2757,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   restriction in place. Pre-existing on main; the cash slice is the first to raise it from every
   reconciliation run (#205 review, round 2, minor 3).
 - Pin or drop the two unreachable overflow sites in `ExecutorState::buying_power`: the reservations sum and the final `min(model, broker) − reserved`. `Usd` is signed, so each fails only at the decimal range, which no reservation reaches, and replacing either `None` with zero passes every test; the reachable site, the model's cash, is pinned (#198 review, round 2, finding 3).
-- **Blocks running the executor across a session boundary:** fold `TradingDayStarted` and
-  `RiskDayStarted` in `mandate-executor`. Since #194's round 1 both answer the later slice's
-  `Unimplemented` stub, so the first day rollover stops the executor, failing closed. The slice that
-  owns the day fold (protection re-placement at the GTC buffer day, §5.4) must interpret both, move
-  them back into `properties::INTERPRETED` with live tests that fail when either arm is stubbed, and
-  land before the executor runs across a session boundary (#194 review, round 2).
+- **Blocks running the executor across a session boundary:** fold `RiskDayStarted` in
+  `mandate-executor`. `TradingDayStarted` is folded since E7-4 slice 5's trading-day part
+  ([DEC-367](decisions/DEC-367.md)). `RiskDayStarted` still answers the later slice's
+  `Unimplemented` stub, so the first risk-day rollover stops the executor, failing closed. Interpret
+  it, move it back into `properties::INTERPRETED` with a live test that fails when its arm is
+  stubbed, and land that before the executor runs across a session boundary (#194 review, round 2).
 - Report a safety-critical function whose only mutants are unviable. `ci mutants` counted the one
   mutant of `mandate-executor`'s `every_agent` (a body of `Ok(Default::default())`, which does not
   compile because `EventId` has no `Default`) as unviable, so "0 missed" said nothing about the
@@ -3794,6 +3804,17 @@ From the #485 chain's round-3 review (#494 and #496; the coordinator's ruling, 2
 - **E7-4: hoist `overtaken` out of `release_waiting`'s per-exit loop** (#508 round 2, m3′). It runs
   once per waiting exit, not once per instrument; with the `Unknown` arm in its guard the repeats ask
   nothing, so this is wasted work only.
+
+From #468's round-5 review (the coordinator's ruling, 09:34Z on #468; freeze rule):
+
+- **E7-4: the oracle checks the park alert its exemption relies on** (#468 round 5, m2).
+  `Desk::within_position` accepts a parked remainder held by a paused or stopped agent because rule
+  13 permits the hold and the park alerts it, but `Desk::alerted` is set only by
+  `expiry_unreplaceable`, so the alert half is asserted, not checked. Record the park's
+  `GateDecided … parked` and its notification in the oracle and require it, or drop the clause
+  from the doc. The park's single alert is pinned elsewhere today.
+- **E7-4: wrap `within_position`'s long doc line** (#468 round 5, m5). A sentence spliced onto an
+  existing line left a line of about 190 characters; `fmt` does not wrap doc comments.
 
 From #518's round-2 review (the coordinator's ruling, 00:28Z on #518; freeze rule):
 
