@@ -264,7 +264,7 @@ tests on `main`; everything else is specified. Gaps link to backlog rows (§11) 
 | S | Session theft | Cookie sessions refreshed by the proxy, none in browser storage (DEC-211) | Session lifetime and binding belong to `identity.md` |
 | T | Request tampering to raise a limit | Mandate changes are versioned, validated, classified, and need step-up to raise risk (mandate spec §9; HLD §8) | — |
 | R | Owner denies a change they made | Every version, approval, and owner command is journaled with actor and auth method (HLD §6 C step 8) | Signed approvals and versions are E18-5 (not scheduled) |
-| I | Reading another workspace's data by changing an ID (broken object-level authorization) | Workspace ID on every record; row-level security (HLD §8; OPS-6) | The API is not yet specified; `workspace-api.md` must make every query workspace-scoped by construction; E18-8 fuzz |
+| I | Reading another workspace's data by changing an ID (broken object-level authorization) | Workspace ID on every record; row-level security, specified but not built (HLD §8; journal §6.1; OPS-6) | The API is not yet specified; `workspace-api.md` must make every query workspace-scoped by construction; E18-8 fuzz |
 | D | Flooding the API | Per-workspace quotas (HLD §8) | Rate-limit values belong to `workspace-api.md` |
 | E | A viewer or approver acts as an admin | Roles (HLD §8, E9-2); separation of duties (E9-5); `independent_approval_required` (MI-24) | Built only in the mandate core; the role model is `identity.md`'s |
 
@@ -284,7 +284,8 @@ tests on `main`; everything else is specified. Gaps link to backlog rows (§11) 
 
 | | Threat | Controls | Gap |
 |---|---|---|---|
-| S | A stolen client token used by an attacker | Tokens issued to Mandate only, never passed through (E18-4); revocable connection | Token scope and lifetime belong to `identity.md` and `workspace-api.md` |
+| S | A stolen client token used by an attacker | Tokens issued to Mandate only, never passed through (E18-4); sender-constrained, not plain bearer tokens (`identity.md`, settlement X5 on #557); revocable connection | Token scope and lifetime belong to `identity.md` and `workspace-api.md` |
+| R | Nobody can tell whether an order or an answer came from the owner or their client | A client acts as its own actor kind, `client`, never recorded as a `user`, with the human named beside it as `on_behalf_of` (`workspace-api.md` DEC-436 item 9; `identity.md` DEC-437 item 10; settlement X2 on #557). The runtime's approval checks therefore refuse a client's answer from the record alone (MI-24) | — once #556 and #560 merge with X2 |
 | T | Prompt injection into the owner's own agent makes it request a buy | Client opens and increases are never `auto` (MI-30); same builder, gate, and autonomy as owner input (rule 11) | — |
 | T | The same injection makes it request exits that churn or flatten the book | Exits are risk reduction (rule 2), paced only by participation caps for owner exits (rule 13) | **Residual:** an injected client can liquidate positions, at a cost in spread, fees, and taxes. Read-only default scope for clients (E18-4; DEC-439 item 16) |
 | E | The client widens the envelope | Client requests never change the envelope (rule 11; DEC-141) | — |
@@ -295,7 +296,7 @@ The full chain is in §7.1. In short:
 
 | | Threat | Controls | Gap |
 |---|---|---|---|
-| T | Injected instructions in an article or filing | Text is inert to deterministic code (DP-8); the model has no tools (INF-5, HI-4); output is a thesis that passes mandate spec §8.5; admission is `ask` by default (MI-17) | Plausible false content on a vetted source (§8 rank 2) |
+| T | Injected instructions in an article or filing | Text is inert to deterministic code (DP-8); the model has no tools (INF-5, HI-4); output is a thesis that passes mandate spec §8.5; admission is `ask` by default (MI-17) | Plausible false content on a vetted source (§8 rank 3) |
 | T | A vetted source turns malicious | Allowlist versions (DP-9, DEC-101); corroboration; drift detector (E17-5); operator per-thesis halt (E17-6) | Live theses citing a revoked source: DEC-433 item 19 |
 | I | Injection tries to exfiltrate data | No outbound path; inputs hold only public data and the agent's own memory (HI-11, INF-8) | The prompt itself still reaches the aggregator (B5) |
 | D | Flooding sources | Bounded queues; the slow tier never blocks the hot tier (data plane §3.6; HI-7) | — |
@@ -309,7 +310,7 @@ prompt, writes every output, reports which model answered, and holds a key that 
 |---|---|---|---|
 | S | The aggregator or an upstream host serves a different or cheaper model under the pinned name | Routing locked per pin; a reported identity that differs fails as `identity_mismatch` (INF-2, DEC-432 items 9, 10); canary probes (inference §10) | The reported identity is the aggregator's own claim. A dishonest aggregator can report the pin and serve anything. Bounded by T below |
 | T | Outputs altered or invented | Every output is treated as a possibly compromised model's: schema and limits, then §8.5, the builder, autonomy, and the gate, none of which read model text (HI-6, HI-10, INF-4) | None for safety; quality harm is caught only by forward-paper scorecards |
-| I | Prompts read, retained, or trained on | Prompts hold no credential, account ID, personal data, dollar figure, or other tenant's data (INF-8, HI-11); terms that exclude training, shortest retention (DEC-432 item 15) | **Residual:** the aggregator sees, across all managed tenants, which instruments agents hold and consider and when. That is a strategy and front-running exposure that no prompt guard removes (§8 rank 4; DEC-439 items 6, 14) |
+| I | Prompts read, retained, or trained on | Prompts hold no credential, account ID, personal data, dollar figure, or other tenant's data (INF-8, HI-11); terms that exclude training, shortest retention (DEC-432 item 15) | **Residual:** the aggregator sees, across all managed tenants, which instruments agents hold and consider and when. That is a strategy and front-running exposure that no prompt guard removes (§8 rank 5; DEC-439 items 6, 14) |
 | I | Cross-tenant leak through provider-side prompt caching | Only data-free prefixes may be cached (INF-9) | Test with two workspaces (INF-9 test) not yet built |
 | D | Aggregator outage | Missing is safe (INF-4); research never blocks trading (HI-7, INF-13) | One aggregator is one outage for every model; accepted |
 | E | Key theft runs up spend | Key in the vault, gateway-only (INF-14); per-call reservation and caps (INF-7) | The same aggregator key family is also used by development sessions today; no provider-side hard limit is recorded (DEC-439 items 6, 17) |
@@ -341,7 +342,7 @@ prompt, writes every output, reports which model answered, and holds a key that 
 |---|---|---|---|
 | E | A compromised runtime (for example through a parser bug on model output) places orders | The runtime holds no credential and has no broker route; it can only propose to the executor, whose gate re-checks everything (rules 1, 12; HI-12) | Egress rules E21-1 |
 | E | A compromised runtime writes another agent's stream | One writer per stream, fenced by epoch (journal §1 principle 3; OPS-3) | Database roles per process (infrastructure §9) not yet built |
-| I | Cross-tenant read in a shared cell: database, artifacts, caches, message subjects, metrics labels | RLS and workspace ID on rows; per-workspace keys (journal §6.5); exact per-workspace model cache (INF-9, INF-11); NATS accounts per workspace (HLD §8); opaque metrics labels (OPS-6); agent processes never shared (HLD §8) | No cross-layer isolation suite yet (07, Isolation; E18-8). See §7.3 |
+| I | Cross-tenant read in a shared cell: database, artifacts, caches, message subjects, metrics labels | Built today: workspace carried in `stream_id`, per-role INSERT and SELECT grants, append-only triggers (journal §6.1). Specified, not built: a `workspace_id` column with row-level security (journal §6.1; identity spec §14, #556), per-workspace keys (journal §6.5); exact per-workspace model cache (INF-9, INF-11); NATS accounts per workspace (HLD §8); opaque metrics labels (OPS-6); agent processes never shared (HLD §8) | No cross-layer isolation suite yet (07, Isolation; E18-8). See §7.3 |
 | D | A noisy tenant starves others | Per-workspace quotas, rate buckets, and process limits (HLD §8; inference §8.4) | Values unset |
 | I | A memory dump or core file holds a credential | Credentials only in the using process's memory (OPS-1) | Core dumps off and memory locking for executors: E21-9's acceptance should state it |
 
@@ -379,6 +380,7 @@ See §7.5 for the full analysis.
 | | Threat | Controls | Gap |
 |---|---|---|---|
 | S | A builder session approves its own PR | Approval needs the label and an approved-head line, and the label's last application and the description's last edit must come from an approver login (`merge-approved.sh`, #541) | **Every agent session acts through the founder's account,** which is also the approver login. The check cannot tell the coordinator from a builder (DEC-439 item 9; E21-13) |
+| E | **Anything acting as an admin writes to `main` directly.** The `main` ruleset's one bypass entry is the repository admin role with bypass mode "always", which exempts it from every rule: the PR requirement, the `fast` and `full` checks, and linear history. The founder's account holds that role, and every agent session acts through it | None on that path: no PR, label, approved head, merge script, CI, or review applies | **The shortest path to `main`** (§7.5 item 1; §8 rank 1). Bypass by pull request only, or no bypass (DEC-439 item 18) |
 | S | A collaborator merges with GitHub's Merge button | `COLLABORATION.md` rule 2 forbids it | **Not enforced:** the ruleset requires green checks but no approving review, so write access can merge a green PR (DEC-439 item 10; E21-16) |
 | T | A merged change weakens a control: a CI check, `merge-approved.sh`, `deny.toml`, the layer rules, a test | Independent review on a different model (DEC-79); mutants on safety-critical diffs; spec guard; CODEOWNERS lists these paths | CODEOWNERS requests a founder review but nothing waits for it, since DEC-79 made founder review after the fact. The checks guard everything except changes to themselves (DEC-439 items 7, 12; E21-14) |
 | T | Public text steers an agent: an issue, a comment, or text planted in a PR | None written down | DEC-439 items 2, 3; E21-15 |
@@ -450,7 +452,7 @@ move no money (rule 8); a model key spends it (DEC-439 item 17, E21-18).
 | Provider-side prompt cache | Timing or content reveals another tenant's prefix | Only data-free prefixes cached (INF-9) |
 | The aggregator | Sees all tenants' prompts together | Prompt contents limited (INF-8); residual in §6.5 |
 | Shared data plane | One tenant's universe visible to others | Whole-dataset broadcast, pull only; no tenant datum enters it (DP-10) |
-| Database | Missing workspace filter | RLS on every table with `workspace_id` (journal §6.1) |
+| Database | Missing workspace filter | **Specified, not built:** row-level security on every table with `workspace_id` (journal §6.1). The only migration today has neither; isolation rests on the workspace in `stream_id` and per-role grants |
 | Artifact store | Guessable or shared keys | Content-addressed by hash, encrypted per workspace (journal §6.3, §6.5): a hash is not an access right, so reads must be authorized by workspace, not by knowing the hash |
 | Messaging | Subject wildcard across workspaces | NATS accounts per workspace (HLD §8) |
 | Metrics and alerts | Labels carry symbols or sizes | Opaque labels, linted (OPS-6, E21-3) |
@@ -483,35 +485,42 @@ and applies the `coordinator-approved` label; the merge workflow runs `merge-app
 default branch, which re-reads everything from GitHub and squash-merges only when the head matches,
 CI is green on that head, and the label and description were last set by an approver login
 (DEC-175, #541). The founder reviews after the fact and can revert (DEC-79). Safety-critical diffs
-need zero missed mutants.
+need zero missed mutants. All of this applies only to changes that go through a pull request.
 
 This is strong against a **careless** agent and against a collaborator who applies the label (the
 approver check withdraws it). It is weaker against a **compromised** or **steered** agent, because:
 
-1. **One identity for all agents.** Builders, reviewers, and the coordinator act through the
+1. **The ruleset's bypass is the shortest path to `main`.** The `main` ruleset exempts the
+   repository admin role from every rule, always. The founder's account holds that role, and it is
+   the account every agent session acts through. A session steered by text it read, or anyone holding
+   a credential of that account, does not need to defeat the approver check: it can change `main`
+   with no pull request, no CI, and no review. The grant is to a role, not to one named account.
+   The fix, bypass by pull request only or no bypass, is the founder's (DEC-439 item 18).
+2. **One identity for all agents.** Builders, reviewers, and the coordinator act through the
    founder's GitHub account, which is the approver login. A steered builder can therefore apply the
    label and write the approved head, and the approver check passes. Independent review is a process
    step the coordinator follows, not something the merge path can verify.
-2. **The checks do not protect themselves.** A PR can change `merge-approved.sh`, a CI workflow, an
+3. **The checks do not protect themselves.** A PR can change `merge-approved.sh`, a CI workflow, an
    `xtask` check, `deny.toml`, or `.gitleaks.toml`. The merge workflow runs the default-branch copy,
    so a malicious change takes effect for the PRs after it. CODEOWNERS lists these paths, but no
    rule waits for the founder, and ADR-0001 ES-13 still says the ruleset requires CODEOWNERS review,
    which DEC-79 superseded in practice. This text and the configuration disagree; the founder decides
    which to keep (DEC-439 item 12).
-3. **The repository is public.** Anyone can open issues and comment. Sessions that read issues and
+4. **The repository is public.** Anyone can open issues and comment. Sessions that read issues and
    PR comments (the coordinator watches for `ready` and `Decision needed:` lines) read attacker text.
    Code, fixtures, PR descriptions, and test data written by one agent are read by the next, including
    the reviewer.
-4. **The Merge button.** Write access can merge any green PR directly; `COLLABORATION.md` forbids it
+5. **The Merge button.** Write access can merge any green PR directly; `COLLABORATION.md` forbids it
    but nothing enforces it.
-5. **Same-family review.** Reviews run on a different model, but models share failure modes, and a
+6. **Same-family review.** Reviews run on a different model, but models share failure modes, and a
    reviewer briefed from the PR's own description inherits its framing.
 
-What already limits the damage: CI must be green; safety-critical crates need zero missed mutants;
+What already limits the damage, **for changes that go through a pull request** (none of it applies
+to a bypass write, item 1): CI must be green; safety-critical crates need zero missed mutants;
 reference cases are founder-approved and generated, never hand-edited; spec changes need a cited
 DEC and cannot ship with code (ES-22); history is linear and force-push is refused; everything is
 revertible; and no environment but production can reach live money (OPS-5), and no production
-exists yet. **Before live money, items 9, 10, 11, and 12 of DEC-439 should be decided,** because
+exists yet. **Before live money, items 18, 9, 10, 11, and 12 of DEC-439 should be decided,** because
 from then on a merged change is one deploy from real accounts.
 
 ### 7.6 Supply chain
@@ -531,30 +540,32 @@ Ranked by likelihood times impact after today's controls, then by how soon the r
 
 | Rank | Residual risk | L | I | Why it remains | Mapped to |
 |---|---|---|---|---|---|
-| 1 | **A steered or compromised agent session merges a change that weakens a safety control or the checks themselves** | M | H | One shared identity; checks that do not protect their own files; public text read by agents (§7.5) | R-29; E21-13 to E21-16; DEC-439 items 2, 3, 7, 9, 10, 12 |
-| 2 | **A plausible false story on a vetted source becomes an approved or auto-admitted position, across many accounts at once** | M | H | Every layer of §7.1 holds, but none judges truth; the envelope bounds the loss | R-05, R-26; E17-5, E17-6, E17-7, E19-6 |
-| 3 | **An owner account taken over raises the envelope and trades the account,** for example buying a thin stock the attacker sells into | L | H | Step-up guards the change, but a stolen step-up device or a phished session plus a weak factor passes; no delay or out-of-band notice today | R-31; E9-1, E9-4, E21-20; DEC-439 items 4, 5, 15 |
-| 4 | **The model aggregator sees every managed tenant's research prompts** and is the only witness to which model answered | M | M | DEC-432 item 14; prompt limits remove secrets, not strategy | R-30; E21-17; DEC-439 items 6, 14 |
-| 5 | **A compromised dependency** in the build, CI, or the web app | L | H | Transitive code unreviewed; npm install scripts; signing from M11 | R-33; E21-8, E21-19 |
-| 6 | **A collaborator's or the founder's GitHub account is compromised** | L | H | Write access merges green PRs; the founder's account is the approver identity | R-32; DEC-439 items 10, 11 |
-| 7 | **Broker credentials stolen from the managed vault or an executor** | L | H | Vault product and leasing not built; trading-only scopes bound it | R-04; E21-9; DEC-434 item 14 |
-| 8 | **Cross-tenant read in a shared cell** through an untested layer | L | H | No cross-layer isolation suite yet | OPS-6; E18-8; 07 Isolation |
-| 9 | **One bad high tick** raises the high-water mark or start-of-day equity for good | M | M | Known gap | DP-6; DEC-433 item 17 |
-| 10 | **Approver persuaded by quoted model text** | M | L | Disclosed, not blocked | E21-21 |
-| 11 | **An injected owner-connected agent flattens the book** | L | M | Exits never need approval (rule 2) | DEC-439 item 16; E18-4 |
-| 12 | **Model key spend run up** from a dev or builder session | M | L | Keys in session environments; no provider-side cap recorded | DEC-439 item 17; E21-18 |
-| 13 | **Unanchored journal tail rewritten by a superuser** | L | M | Up to one anchor interval | Journal §6.1, §10; accepted |
+| 1 | **The founder's GitHub account is a single point of failure for the repository.** It is the identity every agent session acts through, the only approver login, the holder of the ruleset's admin bypass ("always": direct writes to `main` with no PR, CI, or review), and from M11 the holder of the release signing key. Steered (a session acting on injected text) or compromised (a stolen credential), it reaches `main` without defeating any check | M | H | The bypass exempts the admin role from every rule; one account carries every role; no hardware-key requirement is stated today (§6.12, §7.5 items 1 and 2) | R-29, R-32; E21-13, E21-16; DEC-439 items 18, 9, 11 |
+| 2 | **A steered or compromised agent session merges, through the PR path, a change that weakens a safety control or the checks themselves** | M | H | Checks that do not protect their own files; public text read by agents; reviews briefed from the PR (§7.5 items 3 to 6) | R-29; E21-14, E21-15; DEC-439 items 2, 3, 7, 12 |
+| 3 | **A plausible false story on a vetted source becomes an approved or auto-admitted position, across many accounts at once** | M | H | Every layer of §7.1 holds, but none judges truth; the envelope bounds the loss | R-05, R-26; E17-5, E17-6, E17-7, E19-6 |
+| 4 | **An owner account taken over raises the envelope and trades the account,** for example buying a thin stock the attacker sells into | L | H | Step-up guards the change, but a stolen step-up device or a phished session plus a weak factor passes; no delay or out-of-band notice today, and the notices arrive only when `notifications.md` carries settlement X4's kinds | R-31; E9-1, E9-4, E21-20; DEC-439 items 4, 5, 15 |
+| 5 | **The model aggregator sees every managed tenant's research prompts** and is the only witness to which model answered | M | M | DEC-432 item 14; prompt limits remove secrets, not strategy | R-30; E21-17; DEC-439 items 6, 14 |
+| 6 | **A compromised dependency** in the build, CI, or the web app | L | H | Transitive code unreviewed; npm install scripts; signing from M11 | R-33; E21-8, E21-19 |
+| 7 | **A collaborator's GitHub account is compromised** | L | H | Write access can merge a green PR by hand; the ruleset requires no approving review (§7.5 item 5) | R-32; E21-16; DEC-439 items 10, 11 |
+| 8 | **Broker credentials stolen from the managed vault or an executor** | L | H | Vault product and leasing not built; trading-only scopes bound it | R-04; E21-9; DEC-434 item 14 |
+| 9 | **Cross-tenant read in a shared cell** through an untested layer | L | H | No cross-layer isolation suite yet, and row-level security is specified, not built | OPS-6; E18-8; 07 Isolation; DEC-439 item 8 |
+| 10 | **One bad high tick** raises the high-water mark or start-of-day equity for good | M | M | Known gap | DP-6; DEC-433 item 17 |
+| 11 | **Approver persuaded by quoted model text** | M | L | Disclosed, not blocked | E21-21 |
+| 12 | **An injected owner-connected agent flattens the book** | L | M | Exits never need approval (rule 2) | DEC-439 item 16; E18-4 |
+| 13 | **Model key spend run up** from a dev or builder session | M | L | Keys in session environments; no provider-side cap recorded | DEC-439 item 17; E21-18 |
+| 14 | **Unanchored journal tail rewritten by a superuser** | L | M | Up to one anchor interval | Journal §6.1, §10; accepted |
 
 ---
 
 ## 9. For the founder
 
-These touch your accounts, spending, a safety rule's enforcement, or a founder decision already
+Item 18 comes first because it is the shortest path to `main`. These touch your accounts, spending, a safety rule's enforcement, or a founder decision already
 taken, so they stay **Proposed** in [DEC-439](../project/decisions/DEC-439.md). Work continues on the
 most conservative option meanwhile.
 
 | DEC-439 item | Question | Recommendation |
 |---|---|---|
+| 18 | Change the `main` ruleset's bypass: the admin role now bypasses every rule "always". Either bypass only by pull request (the role must still open a PR, though it may skip the review requirement), or no bypass at all, with a named break-glass account that no agent uses if one is needed for recovery, its use reviewed from the ruleset's bypass events | Bypass by pull request only, now. It is a configuration change with no engineering cost or spend, and it closes the shortest path to `main` (§7.5 item 1) |
 | 9 | Give the coordinator its own GitHub identity (a GitHub App or a machine account) and make it the only approver login; builders and reviewers use another | Yes, before more builder lanes start |
 | 10 | Human collaborators: keep Write, or move to Triage and fork-based PRs; and restrict merging on `main` to the merge workflow and the founder | Triage plus forks, and restrict merging |
 | 11 | Require two-factor authentication with hardware security keys or passkeys for the founder and every collaborator | Yes, now |
@@ -587,7 +598,8 @@ The document's version rises with each change; the change history goes in the PR
 E21-13 (separate agent identities), E21-14 (self-protecting paths), E21-15 (untrusted-author rule for
 agent sessions), E21-16 (merge restricted to the merge path), E21-17 (aggregator controls), E21-18
 (development key hygiene), E21-19 (npm supply chain), E21-20 (cross-links and out-of-band notices),
-E21-21 (quoted model text in approval cards), and E21-22 (penetration test). E21-10 is this document.
+E21-21 (quoted model text in approval cards), E21-22 (penetration test), and E21-23 (round-1 minor
+findings). E21-10 is this document.
 
 **New RAID risks:** R-29 to R-33 ([RAID log](../project/03-raid-log.md#risks)).
 

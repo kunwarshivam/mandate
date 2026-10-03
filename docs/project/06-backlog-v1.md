@@ -1309,10 +1309,12 @@ wait for the founder.
   accounts with write access; review briefs are built from the story, specs, and diff; and a planted
   comment from an outside account, tried once in a test PR, is ignored.
 - **E21-16 (Proposed, now)** As the founder, I want merging on `main` restricted to the merge
-  workflow and the founder, and collaborators at Triage with fork-based PRs, so that write access
-  cannot merge a green PR by hand. *Accepted when:* a collaborator account's attempt to merge a green
-  PR is refused by GitHub, and `COLLABORATION.md` describes the fork flow. Blocked on DEC-439
-  items 10 and 11.
+  workflow and the founder, the ruleset's admin bypass limited to pull requests or removed, and
+  collaborators at Triage with fork-based PRs, so that neither write access nor the account agents
+  use can change `main` outside the PR path. *Accepted when:* a collaborator account's attempt to
+  merge a green PR is refused by GitHub; the ruleset shows no bypass with mode "always"; a direct
+  push to `main` from the account agents use is refused; and `COLLABORATION.md` describes the fork
+  flow. Blocked on DEC-439 items 18, 10, and 11.
 - **E21-17 (Proposed, M8)** As the founder, I want the aggregator's exposure bounded (DEC-432 item
   14, DEC-439 items 6 and 14), so that one third party in every prompt path costs as little as it
   can. *Accepted when:* each environment has its own key with a provider-side spend limit; users'
@@ -1345,6 +1347,17 @@ wait for the founder.
   *Accepted when:* the scope lists every boundary of threat model §4.3 in the deployed modes; findings
   of high severity are fixed and retested before the first design partner; and §8 is re-ranked from
   the results. Blocked on DEC-439 item 13.
+- **E21-23 (Proposed, now)** As the founder, I want the threat model's round-1 minor findings (#557
+  review, freeze rule) applied in its next version, so that the register stays exact. *Accepted
+  when:* §6.12's Merge-button row says `web` is not a required status check, so a hand merge of a
+  `web/` PR also skips the web checks; §7.5 adds that ADR-0001 ES-13's "signs merges with a
+  hardware-backed key" is not what the squash-merge path does; the §4.2 diagram has an edge from
+  public and agent-written text into the reviewer; rank 12 (an injected owner-connected agent
+  flattens the book) is re-rated M/M; the aggregator residual says prompts also reveal timing;
+  §6.11 carries break-glass without the customer as a gap until #556's ruling lands; §6.1's
+  email-link gap moves to the control column citing `identity.md` §6.1 and §7.3, and its E row
+  names `identity.md` (#556) as the authoritative role matrix (settlement X1); and every control row
+  in §6 is marked built or specified.
 
 ## Won't (v1)
 
