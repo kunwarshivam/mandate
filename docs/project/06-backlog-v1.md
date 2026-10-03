@@ -793,11 +793,17 @@ the spec invariants (DP-n) its tests cover.
   - add the per-order approval to §4.3's list of what `independent_approval_required` scopes.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
+  *Spec:* [notifications spec](../specs/notifications.md) ([DEC-438](decisions/DEC-438.md)). The
+  story is split into E8-9 to E8-14 below; E8-4 is done when they are.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded
   from our workspace deployment, so that trading intent stays private.
   *Accepted when:* captured relay and provider payloads contain no instrument, size, price, or thesis.
+  *Spec:* NT-1's canary test ([notifications spec §2](../specs/notifications.md#2-invariants)) is this
+  acceptance, run for every channel as E8-11, E8-12, and E8-14 land.
 - **E8-6 (Should)** As a fund, I want two approvers above a threshold.
 - **E8-7 (Should)** As an approver, I want SMS and phone escalation.
+  *Spec:* same payload and records as every push channel (notifications spec §4.1); the ordered
+  chain needs a mandate schema field first (spec §12 item 5).
 - **E8-8 (Should)** As an owner, I want to answer an ask with "let it do this for a while", within
   caps I set in dollars, orders, and days, so that the agent stops asking me about what I have
   already said yes to ([ADR-0003](../adr/0003-earned-autonomy.md) parts 2 and 3, [DEC-181](04-decision-log.md#decisions)). The spec is
@@ -813,6 +819,66 @@ the spec invariants (DP-n) its tests cover.
   bounds each delegation on its own, so twenty delegations can each carry `max_total_usd` equal to the allocation. That is
   the spec's reading, and the gate enforces every limit regardless (§6.5). The approval card and the MC-U family should
   consider the aggregate, which is the V-045 the criteria above name and the mandate spec does not yet define.
+- **E8-9 (Must, M7; SC)** As an owner, I want every notice, alerts included, built from one closed
+  payload type so that nothing about my trading can reach a provider
+  ([notifications spec §3, §4.2, §5.5](../specs/notifications.md), DEC-438 items 1, 2, 5, 17).
+  Tests first. *Accepted when:* `GenericText` holds `approval_needed`, `attention_needed`,
+  `account_changed`, and `brief_ready`; the payload is `{"notice", "text"}` with a minted
+  `NoticeId` that has no constructor from an event id (NT-1, NT-4); a closed kind enum replaces
+  `NotificationRef.message_key` in `mandate-runtime` and `mandate-executor`, and every kind in spec
+  §3.2 maps to its class and text key; each stream owner writes `OwnerAlertSent` with the kind in
+  the subject's batch, and none for a `KillSwitchActivated` caused by an owner command (spec §3.4);
+  the payload schemas of journal v0.12's `OwnerAlertSent`, `NoticeIssued`, and `NoticeAttempted`
+  are closed in the same tests PR; a wording test holds NT-12.
+- **E8-10 (Must, M7; SC)** As an owner, I want a dispatcher that turns committed events into sends,
+  retries them, and records every outcome, so that no alert is lost and none adds risk
+  (spec §5.1 to §5.8, DEC-438 items 4 to 9, 15, 16, 27 to 29). Tests first, against a fixture
+  channel. *Accepted when:* the dispatcher runs as its own process, writes only the notice stream,
+  sends only about committed causes, and journals every attempt (NT-8, crash injection at every
+  step, and a second dispatcher fenced by epoch); one user kill switch is one notice (spec §3.4);
+  recipients match the identity spec's receive column read as data (NT-10); quiet hours act by class (NT-7, the DST cases); safety
+  storms are coalesced and never dropped, with the journal-derived oracle of NT-6 seeded with a
+  dropping bug first to show it fails; with every channel failing, a soak's intents and modes match
+  perfect delivery except asks that skip (NT-5); the kill-switch and exit suites pass with the
+  dispatcher hung (NT-9); a lost address alerts on the other channels (spec §5.6).
+- **E8-11 (Must, M7; SC)** As an approver, I want email notices (spec §4.4). Provider per DEC-438
+  item 21; until the founder decides, the adapter runs against a recorded fixture only.
+  *Accepted when:* NT-1's canary test passes on captured messages; links match `<origin>/n/<ULID>`
+  (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider configuration check.
+- **E8-12 (Must, M7; SC)** As an approver, I want one chat channel (spec §4.5), Slack or Telegram
+  per DEC-438 item 20. *Accepted when:* NT-1's canary test passes; every inbound message, button, or
+  callback leaves the control stream unchanged (NT-3); the webhook URL or bot token is read only
+  from the vault and appears in no log (rule 7).
+- **E8-13 (Must, M9 and M10; SC)** As an approver, I want to open a notice, sign in, and answer
+  inside my workspace (spec §6, G4), with `web_inbox` as a pull channel (DEC-438 item 3). Depends on
+  the workspace API and identity specs (DEC-436, DEC-437). *Accepted when:* a captured link with no
+  session reaches only sign-in (NT-4); another workspace's subject answers as a missing one (NT-10);
+  a grant needs step-up per mandate spec §6.1 and a skip does not; a closed request shows its
+  terminal state; the service worker and pages cache no approval content (P5).
+- **E8-14 (Must, M10; SC)** As an approver, I want web push, through the relay where a deployment's
+  egress requires it (spec §4.6, DEC-438 item 13). *Accepted when:* payloads are encrypted to the
+  subscription; the relay refuses ciphertext over 512 bytes and stores none; NT-1's canary test
+  passes on relay and push-service captures; a relay outage changes no trading state (NT-9).
+- **E8-16 (Should, M7)** As a reviewer, I want the minors of the notifications spec's round 1
+  ([#558](https://github.com/kunwarshivam/mandate/pull/558); freeze rule) fixed in the spec:
+  - HLD §6 flow C step 4 still says "an escalation chain (push → SMS → phone call)"; align it with
+    DEC-438 item 6's fan-out.
+  - The Telegram linking code: state its lifetime, entropy, and single use, and add the residual to
+    §9 (whoever obtains the code binds their own chat and receives the opaque notices).
+  - NT-1's wording against the relay envelope: the `urgency` and TTL the relay and push service see
+    are fixed per class, and the push endpoint is an address under NT-2.
+  - A rung-2 guard that no mail adapter ships while `[[EMAIL-FOOTER]]` is unresolved.
+  - NT-5: state why check 4 is the only effect (no exit, protective order, or risk exit is ever
+    gated by an approval, rule 13), so the claim survives a later autonomy change.
+  - NT-6: say that a notice joining a coalescing window meets the 60-second bound at the window's
+    end.
+  - Round 2 nits: §3.2's preamble says every non-approval kind is caused by an `OwnerAlertSent`,
+    but `channel_lost` is caused by the dispatcher's own `NoticeAttempted` (§3.4 has it right);
+    say where the journal change is described that `StreamType` and `StreamId::parse` in
+    `mandate-journal` are a closed four-variant type E8-10 must extend first; E8-9 reconciles the
+    mandate reference cases' `OwnerAlertSent` `{subject, text: "tripwire_fired"}` with §3.2's
+    `kind`; keep one sentence, here or in the workspace API spec §3.9, for what
+    `ApprovalRef::of_requested_event` becomes.
 
 ### E9 Identity, tenancy, and policy
 
