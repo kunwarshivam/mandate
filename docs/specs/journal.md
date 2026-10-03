@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.11 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.13 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, and `research` section of §9.4; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -12,6 +12,28 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.13 ([DEC-446](../project/decisions/DEC-446.md), [DEC-447](../project/decisions/DEC-447.md)):**
+  §9.5 closes the account stream's executor records ([DEC-360](../project/decisions/DEC-360.md),
+  option (c)). `IntentReceived`, `GateDecided`, and `OrderSubmitted` gain `risk_clock` at
+  `schema_version` 2, each its version 1's members with `risk_clock` last; version 1 is never
+  edited (§8) and stays registered. `OrderSubmitted`'s executor-only members move to a companion
+  record, `OrderRequestRecorded` (version 1), journaled immediately before its order in one
+  `append` batch and named by its `causation_id` (rule 45). `ProtectionChanged` is closed with
+  the members the fold reads (rules 39 to 44), its action vocabulary gaining `intended` for the
+  receipt-time protective prices, which leave `IntentReceived`, never a member there at either
+  version. `StreamOpened` and `OwnerCommandRefused` carry no `risk_clock` (DEC-447). The vectors
+  gain a generated `account_stream` section and stay version 3.
+  - **Why:** §9.2 already says the executor writes `risk_clock` on every account-stream event,
+    and the fold requires it (DEC-302 item 1); the three records were the only ones that sentence
+    and the version-3 form left without it. A schema once closed is never edited in place, so the
+    member joins at a new version, which no conforming version-1 record is refused by. The rest
+    keeps `IntentReceived` the exact copy of the proposal §9 and rule 10 make it, and
+    `OrderSubmitted` the version-3 request, instead of widening either toward the code (DEC-360
+    item 2, the founder's ruling). The fold's reads of legacy records stay as tolerant as they
+    were, so a recorded stream stays replayable (§8); `append` is what tightens.
+  - **Order of the changes (ES-22).** Spec and vectors first, as DEC-174 item 4 and the
+    coordinator's comment on #482 sequence §9.x work; the `mandate-journal` registration and the
+    fold's reads follow in the tests PR and the implementation PR.
 - **v0.12 ([DEC-438](../project/decisions/DEC-438.md) items 5 and 28):** the notice stream. A new
   stream type, `ntf:{workspace_id}`, whose single writer is the workspace's notification dispatcher
   ([notifications spec §5.1](notifications.md#51-the-dispatcher)), holds `NoticeIssued` and
@@ -411,13 +433,14 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `IntentReceived` | man | intent ID, agent, instrument, side, type, TIF, quantity, limit, purpose |
 | `GateDecided` | fee, cal, ins, rule, man | intent ID, verdict, reason code, **`checks: [{id, result, inputs, computed}]`** with IDs matching trading spec §9.1 (`account_status`, `agent_mode`, `eligibility`, `concentration`, `order_size`, `session`, `halt`, `order_constraints`, `mark_freshness`, `collar`, `conduct`, `buying_power`, `gross_exposure`, `day_trade_budget`), `quotes_used`, `marks_used`, `data_profile` |
 | `OrderSubmitted`, `OrderStateChanged`, `OrderAbandoned` | — | client order ID, attempt, broker status, internal state |
+| `OrderRequestRecorded` | — | the exact request a version-2 `OrderSubmitted` names (DEC-360 option (c)): agent, intent, purpose, extended hours, the protective trigger and legs, and a ladder rung's; closed in §9.5 |
 | `BrokerExchangeRecorded` | — | direction, endpoint, `raw` (or artifact), status; credentials redacted |
 | `FillApplied`, `LateFillApplied` | fee, cal, set, ins | fill ID, client order ID, gross quantity, price, fees, trade date |
 | `FeesCharged` | fee | family, day, accrued, charged |
 | `MarkUpdated` | — | instrument, price, source, feed |
 | `SettlementPosted`, `DividendPaid`, `CashInLieuPosted` | set | date, instrument, amount |
 | `CorporateActionPrepared`, `CorporateActionApplied` | ins | instrument, action, ratio or amount, ex-date |
-| `ProtectionChanged` | — | instrument, action, orders, unprotected-interval start or end |
+| `ProtectionChanged` | — | instrument, action, orders, unprotected-interval start or end; closed in §9.5 |
 | `BrokerPositionObserved`, `ReconciliationRun`, `CompensatingEvent`, `AccountSnapshotRecorded` | — | observed values, differences, corrected event IDs, daily snapshot |
 | `AccountStateObserved`, `RejectObserved`, `AccountRestrictionChanged` | — | status, flags, reject code and message, restriction; for `AccountRestrictionChanged`, its `cause` (`broker_reject`, `broker_notice`, `connection_unavailable`; [trading spec §7.3](trading-domain.md#73-account-restrictions), [DEC-441](../project/decisions/DEC-441.md) item 23) |
 | `ExternalActivityIngested`, `RelatedAccountsCoordination` | — | unattributed activity; canceled opening orders across the group |
@@ -1098,6 +1121,186 @@ one thesis the research agent proposed, and the admission's verdict on it.
 account stream's `UniverseChanged` (§9.3), which the executor writes with its `causation_id` naming
 the agent stream's `ThesisProposed` or `ThesisRevised`. The lineage fold's reading of these records
 (mandate spec §8.6) follows with its own story.
+
+### 9.5 Account-stream executor records ([DEC-446](../project/decisions/DEC-446.md), [DEC-447](../project/decisions/DEC-447.md))
+
+This subsection closes the payload schemas of the account stream's `IntentReceived`,
+`GateDecided`, and `OrderSubmitted` at `schema_version` 2, and of the account stream's
+`OrderRequestRecorded` and `ProtectionChanged` at `schema_version` 1
+([DEC-360](../project/decisions/DEC-360.md), option (c)). For these events it replaces the "Key
+payload fields" column of §9, as §9.1 to §9.4 do for theirs. §9.2's conventions apply unchanged:
+§9.1's types and §9.2's, the absent-member rule, the report order, the required `config_refs` as
+§9 lists them, and the rules numbered on from §9.4's.
+
+The three version-2 schemas are their version 1's members with `risk_clock` last and nothing else
+moved: version 1 is never edited (§8), stays registered, and keeps replaying as it always has,
+pinned byte for byte by the version-3 vectors. Each version-2 record carries `risk_clock` because
+§9.2 says the executor writes it on every account-stream event and folds each at it, and the fold
+requires it (DEC-302 item 1). `StreamOpened` carries none — at seq 1 the stream has seen no tick —
+and `OwnerCommandRefused` none, whose schema is shared with the agent stream
+([DEC-447](../project/decisions/DEC-447.md)). `FillApplied` and `MarkUpdated` carry it already at
+version 1 (DEC-81); the rest of the account catalogue closes with its own stories. At either
+version the protective prices are never members of `IntentReceived`
+([DEC-446](../project/decisions/DEC-446.md) item 5): they move to the `intended`
+`ProtectionChanged`, journaled beside the intent in its own batch, so the copy of the proposal
+stays exact and replay restores the protection the opening was handed in with (`AGENTS.md` rule
+13).
+
+`OrderRequestRecorded` is the companion DEC-360 option (c) rules for: journaled immediately
+before its `OrderSubmitted` in the same `append` batch, named by its `causation_id` (rule 45). It
+carries what the fold rebuilds the exact request and the order's owner from, so a resubmission
+after a confirmed absence re-sends the same body under the same id (trading spec §5.7), and the
+restrictions and the exit rules read the same agent and purpose after a restart. One batch writes
+both, so a crash cannot leave one without the other (§5.1: a batch is refused whole).
+
+`ProtectionChanged` is closed whole. A schema closes per record, not per action, and the fold
+reads members across every action, so the `intended` action cannot close alone. The members are
+the fold's reads, traced per member in [DEC-446](../project/decisions/DEC-446.md) item 6; no
+member is inferred. Every member is present on every record (§4.2, §9.1's absent-member rule);
+rules 41 to 44 say per action which are null or empty. A legacy record — written while the schema
+was open, with `instrument` for `instrument_id`, `agent` for `agent_id`, or `orders` as space- or
+comma-joined text — stays replayable: the fold's reads are unchanged, tolerance of name and form
+included, and `append` is what tightens to the closed form from here on.
+
+The test vectors' `account_stream` section holds a hash-chained account stream from
+`StreamOpened` at seq 1, with at least one chain event per closed schema; the `intended` record
+in its intent's batch; the companion and its order in the next; a `placed` and an
+`unprotected_start` for replay; the fold oracle (`fold_oracle`) the chain replays to — the
+restored protection and the request the companion rebuilds; an invalid draft for every rule and
+each member-typing case; valid drafts for the cases a rule might be misread to refuse; and rule
+45's valid and invalid batches. The vectors stay version 3.
+
+**`IntentReceived`** on the account stream at `schema_version` 2: §9's nine members, as the
+version-1 schema registers them (DEC-174 item 5), and `risk_clock`.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `intent_id` | `ulid` | The intent: the agent stream's `IntentProposed` event (§2) |
+| `agent_id` | `id` | The agent the intent is for |
+| `instrument_id` | `text` | |
+| `side` | `text` | As proposed |
+| `type` | `text` | `limit`: an intent's body carries a limit and nothing else (`AGENTS.md` rule 12) |
+| `tif` | `text` | As proposed, never the submission's (DEC-389 item 3) |
+| `qty` | `decimal` | |
+| `limit_price` | `decimal?` | |
+| `purpose` | `text` | As proposed |
+| `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
+
+**`GateDecided`** on the account stream at `schema_version` 2: the version-1 members and
+`risk_clock`. The check id vocabulary is §9's, matching trading spec §9.1.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `intent_id` | `ulid` | The intent decided |
+| `verdict` | `text` | `allow`, `deny`, `hold`, or `defer` |
+| `reason_code` | `text?` | The gate's reason code (trading spec §9.1); `null` on `allow` |
+| `data_profile` | `text` | The data profile the decision read |
+| `quotes_used` | `[{instrument_id: text, bid: decimal, ask: decimal, as_of: timestamp, feed: text}]` | |
+| `marks_used` | `[{instrument_id: text, price: decimal, source: text, kind: text}]` | |
+| `checks` | `[{id: §9's check ids, result: text, inputs: {}, computed: {}}]` | Each check run, in trading spec §9.1's order |
+| `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
+
+**`OrderSubmitted`** on the account stream at `schema_version` 2: the version-1 members and
+`risk_clock`. Its `causation_id` names its `OrderRequestRecorded` (rule 45).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `client_order_id` | `text` | The broker's name for the order, derived from the intent (trading spec §2.3) |
+| `attempt` | `integer` | The submission attempt under this id; 1 for the first |
+| `instrument_id` | `text` | |
+| `side` | `text` | |
+| `type` | `text` | The order type submitted |
+| `tif` | `text` | The time in force submitted |
+| `qty` | `decimal` | |
+| `limit_price` | `decimal?` | `null` for a market order |
+| `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
+
+**`OrderRequestRecorded`** on the account stream at `schema_version` 1: the executor-only members
+of the order that follows it (DEC-446 item 2).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `agent_id` | `id` | The order's owner: the restrictions and the exit rules read it |
+| `intent_id` | `ulid`? | The intent the order is for, when it is for one |
+| `purpose` | `open` \| `increase` \| `discretionary_exit` \| `risk_exit` \| `owner_exit` \| `protective` \| `flatten` | The order's purpose (trading-domain spec §6.1) |
+| `extended_hours` | `boolean` | Whether the order may trade outside the regular session |
+| `stop_price` | `decimal?` | A protective or stop order's trigger |
+| `order_class` | `bracket` \| `oco`, or `null` | The protective legs' class: rule 39 |
+| `take_profit` | `decimal?` | The take-profit leg: rule 39 |
+| `stop` | `decimal?` | The stop leg: rule 39 |
+| `rung` | `integer?` | The exit price ladder's rung, from 0; non-null exactly for a ladder's submission (trading spec §5.6): rule 40 |
+| `at_floor` | `boolean?` | Whether the rung is the ladder's floor: rule 40 |
+| `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
+
+**Consistency rules** for the companion (reason `schema`; the path is the member named):
+
+39. `order_class` is null exactly when `take_profit` is, and `take_profit` null exactly when
+    `stop` is, reported at the first offending member in the order `order_class`, `take_profit`,
+    `stop`. The bracket's and the OCO's legs travel together: the fold rebuilds a class from both
+    legs or from neither.
+40. `at_floor` is null exactly when `rung` is (`payload.at_floor`). A ladder's rung carries its
+    floor flag with it; there is no `laddered` member ([DEC-446](../project/decisions/DEC-446.md)
+    item 2): `rung` non-null says a ladder rung, and a lone ladder's first rung writes `rung` 0.
+
+**`ProtectionChanged`** on the account stream at `schema_version` 1: §5.4's protective orders and
+unprotected intervals, and the receipt-time protective prices of `intended` (DEC-446 item 4).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `instrument_id` | `text` | |
+| `action` | `intended` \| `placed` \| `cancelled` \| `passive_start` \| `unprotected_start` \| `watchdog` \| `exit_unpriced` \| `ladder_floor` \| `expiry_unreplaceable` \| `rung_short` \| `interval_limit` \| `unprotected_end` | What changed: rule 41 on |
+| `orders` | `[text]` | The protective orders the action names, as client order ids: rule 41 |
+| `awaiting` | `[text]` | The orders an interval still awaits the confirmed cancel of: rule 41 |
+| `qty` | `decimal?` | `placed`: the quantity the orders cover; `cancelled`: the quantity they uncovered, where journaled: rule 42 |
+| `stop` | `decimal?` | The protective stop: rule 43 |
+| `take_profit` | `decimal?` | The protective take-profit, `null` where the sequence has none (crypto's): rule 43 |
+| `intent_id` | `ulid`? | `intended`: the intent the prices came in with; `rung_short` and the starts: the exit's intent: rule 44 |
+| `bracket` | `text?` | The entry a bracket action names: rule 44 |
+| `entry` | `text?` | The exit sequence's entry: rule 44 |
+| `agent_id` | `id?` | The exit sequence's owner: rule 44 |
+| `replacing` | `boolean?` | The start replaces resting protection: rule 44 |
+| `created_on` | `date?` | `placed`: the day the resting orders were created: rule 44 |
+| `sent` | `decimal?` | `rung_short`: the quantity the short rung sent: rule 44 |
+| `uncovered` | `boolean?` | The interval ends with the position uncovered: rule 44 |
+| `acknowledged` | `boolean?` | `unprotected_end`: the owner acknowledged the interval: rule 44 |
+| `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
+
+**Consistency rules** for `ProtectionChanged` (reason `schema`; the path is the member named):
+
+41. `orders` is empty except on `placed`, `cancelled`, `passive_start`, and `unprotected_start`,
+    where it names at least one order (`payload.orders`); `awaiting` is empty except on
+    `interval_limit` and `unprotected_end` (`payload.awaiting`).
+42. `qty` is non-null on `placed` — the record's covered quantity — and null on every action but
+    `placed` and `cancelled` (`payload.qty`).
+43. `stop` and `take_profit` are null on every action but `intended`, `placed`, `passive_start`,
+    and `unprotected_start`, reported at `payload.stop`; and `take_profit` is null when `stop`
+    is, reported at `payload.take_profit`.
+44. The remaining members are null except where the fold reads them, each reported at its own
+    member in the table's order, from `intent_id` to `acknowledged`: `intent_id` is non-null on
+    `intended` and `rung_short`, and on `passive_start` and `unprotected_start` `intent_id`,
+    `entry`, and `agent_id` are null together or non-null together — an exit sequence names all
+    three — reported at the first that disagrees, in the order `intent_id`, `entry`, `agent_id`;
+    `replacing` may be non-null only on those two starts; `bracket` may be non-null only on
+    `placed`, the two starts, and `unprotected_end`; `created_on` only on `placed`; `sent` only
+    on `rung_short`; `uncovered` only on `interval_limit` and `unprotected_end`; and
+    `acknowledged` only on `unprotected_end`.
+
+**Batch rule** (reason `schema`):
+
+45. An `OrderSubmitted` at `schema_version` 2 is immediately preceded in its `append` batch by
+    exactly one `OrderRequestRecorded`, and names it as its `causation_id`. A submission with no
+    companion immediately before it, or with more than one `OrderRequestRecorded` in the run of
+    records immediately before it, is reported at `event_type`; one whose `causation_id` does not
+    name that companion is reported at `causation_id`. An `OrderRequestRecorded` is then reported
+    at its own `event_type` when no `OrderSubmitted` in the batch names it. Checked draft by
+    draft first, in §9.1's order, then on the submissions in batch order, then the orphans. A
+    version-1 `OrderSubmitted` carries no rule here: it precedes the companion (DEC-446 item 1).
+    No §11 check repeats rule 45: the pairing sits inside one batch, which a range never splits
+    (DEC-446 item 3).
+
+**No mapping to `JournaledFact`.** None of these records is a `ValidationContext` input: §9.2's
+mapping covers the context's reads alone (DEC-446 item 7), and the executor's own fold reads
+these directly.
 
 ## 10. Anchoring
 
