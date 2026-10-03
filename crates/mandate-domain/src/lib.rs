@@ -235,6 +235,170 @@ impl core::fmt::Display for MarketSession {
     }
 }
 
+/// Why mandate spec §8.5 refuses a thesis: its seventeen ordered checks, each named by the reason a
+/// refusal journals (journal spec §9.4's `reason`).
+///
+/// This is the one home of the list (DEC-415). `mandate-research` decides the checks,
+/// `mandate-journal` types a thesis record's `reason` with [`ThesisRefusal::CODES`], and
+/// `mandate-spec` re-derives the mandate's checks from a stored record; each reads this type, so the
+/// three cannot disagree about a code or an order.
+///
+/// The declaration order **is** the check order, so [`Ord`] sorts by check and the first failing
+/// check is a minimum. A check is named by its number from 1, as §8.5 numbers it, and nowhere by a
+/// position from 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ThesisRefusal {
+    /// Check 1: `direction` is not `long` (DEC-32); an ignored output.
+    DirectionNotAllowed,
+    /// Check 2: `expires_at` is not `as_of + horizon_s` (§8.2); an ignored output.
+    HorizonMismatch,
+    /// Check 3: `predecessor_thesis_id` is not present exactly when `revision > 0`; an ignored output.
+    RevisionWithoutPredecessor,
+    /// Check 4: no signal model has `admits_instruments`, or `behavior.research` is unset (V-036).
+    ResearchDisabled,
+    /// Check 5: `universe.pinned` is true (MI-20).
+    UniversePinned,
+    /// Check 6: `autonomy.admission` is `deny` (§6.2).
+    AdmissionDenied,
+    /// Check 7: the day's research spend has reached `cost_cap_usd_per_day` (DEC-120).
+    CostCapReached,
+    /// Check 8: a profile pins a data universe the instrument is not in (DEC-103).
+    NotInDataUniverse,
+    /// Check 9: the instrument is under an operator per-thesis halt (DEC-100).
+    OperatorHalt,
+    /// Check 10: the instrument's asset class is not in `universe.asset_classes`.
+    NotAllowedAssetClass,
+    /// Check 11: a leveraged or inverse ETP without `universe.leveraged_etps_enabled` and its disclosure (V-005).
+    LeveragedEtpNotEnabled,
+    /// Check 12: the instrument fails the eligibility floor (trading spec §3.2).
+    EligibilityFloor,
+    /// Check 13: another agent on the account claims the instrument's group (trading spec §7.1).
+    InstrumentGroupClaimed,
+    /// Check 14: a cited evidence source is not on the allowlist (DEC-101).
+    SourceNotAllowlisted,
+    /// Check 15: neither an independent source nor market data corroborates the thesis (DEC-101).
+    NoCorroboration,
+    /// Check 16: the lineage is retired, or `revision` exceeds `max_revisions_per_lineage` (DEC-111).
+    LineageRetired,
+    /// Check 17: the working universe already holds at least `universe.max_instruments` instruments (MI-15); the only check a renewal skips.
+    UniverseFull,
+}
+
+impl ThesisRefusal {
+    /// Every reason's code, in check order: the closed set journal spec §9.4 accepts at `reason`.
+    pub const CODES: [&'static str; 17] = [
+        Self::DirectionNotAllowed.code(),
+        Self::HorizonMismatch.code(),
+        Self::RevisionWithoutPredecessor.code(),
+        Self::ResearchDisabled.code(),
+        Self::UniversePinned.code(),
+        Self::AdmissionDenied.code(),
+        Self::CostCapReached.code(),
+        Self::NotInDataUniverse.code(),
+        Self::OperatorHalt.code(),
+        Self::NotAllowedAssetClass.code(),
+        Self::LeveragedEtpNotEnabled.code(),
+        Self::EligibilityFloor.code(),
+        Self::InstrumentGroupClaimed.code(),
+        Self::SourceNotAllowlisted.code(),
+        Self::NoCorroboration.code(),
+        Self::LineageRetired.code(),
+        Self::UniverseFull.code(),
+    ];
+
+    /// Every reason, in check order.
+    pub const fn all() -> [Self; 17] {
+        [
+            Self::DirectionNotAllowed,
+            Self::HorizonMismatch,
+            Self::RevisionWithoutPredecessor,
+            Self::ResearchDisabled,
+            Self::UniversePinned,
+            Self::AdmissionDenied,
+            Self::CostCapReached,
+            Self::NotInDataUniverse,
+            Self::OperatorHalt,
+            Self::NotAllowedAssetClass,
+            Self::LeveragedEtpNotEnabled,
+            Self::EligibilityFloor,
+            Self::InstrumentGroupClaimed,
+            Self::SourceNotAllowlisted,
+            Self::NoCorroboration,
+            Self::LineageRetired,
+            Self::UniverseFull,
+        ]
+    }
+
+    /// The journaled reason (ADR-0001 ES-09), the identifier §8.5's table states.
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::DirectionNotAllowed => "direction_not_allowed",
+            Self::HorizonMismatch => "horizon_mismatch",
+            Self::RevisionWithoutPredecessor => "revision_without_predecessor",
+            Self::ResearchDisabled => "research_disabled",
+            Self::UniversePinned => "universe_pinned",
+            Self::AdmissionDenied => "admission_denied",
+            Self::CostCapReached => "cost_cap_reached",
+            Self::NotInDataUniverse => "not_in_data_universe",
+            Self::OperatorHalt => "operator_halt",
+            Self::NotAllowedAssetClass => "not_allowed_asset_class",
+            Self::LeveragedEtpNotEnabled => "leveraged_etp_not_enabled",
+            Self::EligibilityFloor => "eligibility_floor",
+            Self::InstrumentGroupClaimed => "instrument_group_claimed",
+            Self::SourceNotAllowlisted => "source_not_allowlisted",
+            Self::NoCorroboration => "no_corroboration",
+            Self::LineageRetired => "lineage_retired",
+            Self::UniverseFull => "universe_full",
+        }
+    }
+
+    /// The §8.5 check number, 1 to 17.
+    pub const fn check_number(self) -> u8 {
+        match self {
+            Self::DirectionNotAllowed => 1,
+            Self::HorizonMismatch => 2,
+            Self::RevisionWithoutPredecessor => 3,
+            Self::ResearchDisabled => 4,
+            Self::UniversePinned => 5,
+            Self::AdmissionDenied => 6,
+            Self::CostCapReached => 7,
+            Self::NotInDataUniverse => 8,
+            Self::OperatorHalt => 9,
+            Self::NotAllowedAssetClass => 10,
+            Self::LeveragedEtpNotEnabled => 11,
+            Self::EligibilityFloor => 12,
+            Self::InstrumentGroupClaimed => 13,
+            Self::SourceNotAllowlisted => 14,
+            Self::NoCorroboration => 15,
+            Self::LineageRetired => 16,
+            Self::UniverseFull => 17,
+        }
+    }
+
+    /// §8.2's ignored outputs: checks 1 to 3 are refusals that also mark the model output ignored.
+    pub const fn is_ignored_output(self) -> bool {
+        matches!(
+            self,
+            Self::DirectionNotAllowed | Self::HorizonMismatch | Self::RevisionWithoutPredecessor
+        )
+    }
+
+    /// The reason a code names, or [`DomainError::UnknownThesisRefusal`]. Exact spelling only; the
+    /// codes are spelled once, in [`ThesisRefusal::code`].
+    pub fn parse(text: &str) -> Result<Self, DomainError> {
+        Self::all()
+            .into_iter()
+            .find(|reason| reason.code() == text)
+            .ok_or(DomainError::UnknownThesisRefusal)
+    }
+}
+
+impl core::fmt::Display for ThesisRefusal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum DomainError {
     #[error("not an asset class this platform trades")]
@@ -243,6 +407,8 @@ pub enum DomainError {
     UnknownSession,
     #[error("not the schema's lowercase uuid form")]
     MalformedAssetId,
+    #[error("not a reason mandate spec §8.5 refuses a thesis for")]
+    UnknownThesisRefusal,
     /// The stubs of this story's tests PR return this, so every pending test fails on them
     /// (DEC-77, DEC-83); the implementation PR replaces the stubs and removes the variant.
     #[error("this part of the shared vocabulary is not implemented yet")]
@@ -256,6 +422,7 @@ impl DomainError {
             Self::UnknownAssetClass => "unknown_asset_class",
             Self::UnknownSession => "unknown_session",
             Self::MalformedAssetId => "malformed_asset_id",
+            Self::UnknownThesisRefusal => "unknown_thesis_refusal",
             Self::Unimplemented => "unimplemented",
         }
     }
