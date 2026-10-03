@@ -2303,6 +2303,9 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   is not (the coordinator's ruling on #520).
   *Done:* (1) in #520; (2) in the implementation PR, which replaces the stub with the condition
   itself, so the exemption cannot fail.
+  *(3), harness side (`agent/g-e6-4-full-close-harness`):* `trim_guards` exempts a trim of the
+  whole position, MC-B17 reshaped as 1 share at a 2-share minimum pins it, and MC-B35 is awaited.
+  The reference PR follows.
   The #504 review's own case (0.0002 BTC, a cap of 100, factor 0.5, a 0.001 minimum) is **not**
   released by this: on the gate's 1e-9 grid its trim is 0.000116667, not the whole position. The
   "real quantity grid" row below closes it.

@@ -349,8 +349,9 @@ mod tests {
         Ok(())
     }
 
-    /// "Only if the order meets the minimum": a 3-share trim is proposed at a minimum of 3 and not
-    /// at 4.
+    /// "Only if the order meets the minimum", unless it is the whole position (DEC-423): a 3-share
+    /// trim of 10 is proposed at a minimum of 3 and not at 4. The full-close exemption is
+    /// `hand::a_trim_of_the_whole_position_is_never_withheld_for_the_minimum`.
     #[test]
     fn a_trim_below_the_minimum_is_not_proposed() -> Result<(), GateError> {
         let mut scene = Scene::new("10", "1000")?;
