@@ -1661,7 +1661,8 @@ def transition_label(e):
 
 def fuzz_escalation(n):
     """MI-21 to MI-25 (EI-1 to EI-7, EI-10, EI-11, EI-13 to EI-16) over random asks, ticks, responses, re-tailed
-    responses, cancellations, a cancellation batched with responses, and workspace `PolicyChanged` events between a
+    responses (some read in a step whose mode is exits-only or stricter, which cancels first), cancellations, a
+    cancellation batched with responses, and workspace `PolicyChanged` events between a
     request and its responses. Every response the oracle judges timely, human, listed, delivered, matching, freshly
     and singly stepped-up, in the quorum of the stricter of the bound requirement and the oracle's own record of the
     current policy, and passing every re-validation value must act, and no other may; every grant that reaches check 7,
@@ -1754,7 +1755,8 @@ def fuzz_escalation(n):
                 own["clock"] = max(own["clock"], int(T(inp["at"]).timestamp()))
                 for a in [a for a in own["pending"] if deadline_of[a] <= own["clock"]]:
                     del own["pending"][a]
-            if inp["kind"] in ("cancel", "batch"):
+            tightened = inp["kind"] == "response" and inp["now"]["mode"] != "normal"
+            if inp["kind"] in ("cancel", "batch") or tightened:
                 own["pending"].clear()
             for r in ([inp["response"]] if inp["kind"] == "response" else inp.get("responses", [])):
                 if r["source"] in own["sources"]:
@@ -1812,7 +1814,7 @@ def fuzz_escalation(n):
                 else:
                     check(produced.get(src, False) == want, "MI-21 a response acts exactly when every check passes",
                           (inp["kind"], src, want, produced.get(src), [d for d in drafts if d["type"] != "ApprovalDelivered"]))
-            if inp["kind"] in ("cancel", "batch"):
+            if inp["kind"] in ("cancel", "batch") or tightened:
                 check(not st["pending"], "MI-21 no approval outlives the tightening or version that cancelled it", st["pending"])
             check(proposal_route(st["pending"], rng.choice(sorted(REDUCING))) == "handed",
                   "MI-23 no exit waits on an approval", st["pending"])

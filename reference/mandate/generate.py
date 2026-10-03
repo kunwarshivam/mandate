@@ -1085,7 +1085,8 @@ E_LIVE = dict(E_CTX, environment="live")
 e_grant_case("MC-E16", "cli_confirm on a live connection is refused as step_up_method", ctx=E_LIVE)
 e_grant_case("MC-E17", "Re-validation skips a grant whose mandate version changed (version_changed)",
              now=dict(E_NOW, mandate_version="sha256:v2"))
-e_grant_case("MC-E18", "Re-validation skips a grant while the mode is exits_only (mode)", now=dict(E_NOW, mode="exits_only"))
+e_grant_case("MC-E18", "An exits_only step cancels a pending grant first (mode_tightened), so it is refused as not pending and never acts",
+             now=dict(E_NOW, mode="exits_only"))
 e_grant_case("MC-E19", "Re-validation skips a grant re-classified deny (reclassified_deny)",
              now=dict(E_NOW, classification={"decision": "deny", "by": "rule:no_more"}))
 e_grant_case("MC-E20", "Re-validation skips a grant re-classified ask by another rule (reclassified_other_trigger)",
