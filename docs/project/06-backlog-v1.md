@@ -1287,6 +1287,7 @@ items 13 to 20); no story here buys a service or touches live money.
   (agent-hours, events, artifacts, model tokens) against the cost model's variables (design §10),
   so that budgets and pricing rest on measured numbers. *Accepted when:* counts reach metering
   without content, and a workspace's monthly counts reproduce from its journal.
+- **E21-24 (Proposed, M8)** As the founder, I want the cost model (`docs/product/12-cost-model.md`, DEC-443) kept current. *Accepted when:* `T_in` and `T_out` are measured from the research spike's call records and replace the assumptions; `active_seconds_per_day` is one explicit row per use (research around the clock, the equities session); §2.4's storage notation matches §3.2 and the hot-store term is carried or shown to be negligible; scenario C's storage row names its year; DEC-443 item 7's lean-workspace design moves to an infrastructure row, leaving only the pricing dependency with the founder; and a staleness check (vendor price or pinned model changed) is considered for `cargo xtask`. From #566's round-1 review, minors 1, 2, 3, 7 and 8 (freeze rule). Numbered after #557's E21-13 to E21-23.
 
 ## Won't (v1)
 

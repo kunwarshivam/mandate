@@ -126,7 +126,7 @@ workspace per day, DEC-431 item 15).
 | Paid vendor | 0 until the DEC-99 evaluation passes | DEC-433 item 16 |
 
 `C_data = C_shared_plane / W_total`, where `C_shared_plane` is the EDGAR ingest's compute and
-storage. A future licensed feed adds `C_licence` (fixed) plus any per-user display fee; both are
+storage. A future licensed feed adds `C_license` (fixed) plus any per-user display fee; both are
 new decisions.
 
 ### 2.3 Compute
@@ -220,7 +220,7 @@ vendor's current list price or measure before relying on it.
 | Research, daily (`interval_s` = 86,400) | `1 · c_call · D_m` | $3.85 |
 | Research, every 4 hours (`interval_s` = 14,400) | `6 · c_call · D_m` | $23.09 |
 | Research, hourly (`interval_s` = 3,600) | `24 · c_call · D_m` | $92.37 |
-| Research at the internal cap | `cap_agent_day · D_m` = $5 × 30.4 | $152.00 (upper bound; about 39 typical calls a day) |
+| Research at the internal cap | `cap_agent_day · D_m` = $5 × 30.4 | $152.00 (upper bound; about 38 typical calls a day are admissible under the reservation rule, so about $146 is reachable) |
 | Fast tier, equities (`cadence_interval_s` = 300 over a 6.5-hour session, `E_day` = 78) | `78 · c_fast · D_m` | $1.25 |
 | Fast tier, crypto (`E_day` = 288) | `288 · c_fast · D_m` | $4.62 |
 | Compute | `(0.1 · C_cpu + 0.25 · C_mem) · 730 / 0.6` | $5.63 |
@@ -268,7 +268,7 @@ set.
 | Fixed share ($1,050 / 5) | $210.00 | 28% |
 | **Total** | **$756.99** | |
 
-Hourly research would need a design partner's `cost_cap_usd_per_day` of at least $3.04 per agent.
+Hourly research would need a design partner's `cost_cap_usd_per_day` of at least $3.19 per agent. The cap is sized by the gateway's admission test, not by the expected total: the last call of a day is admitted only if `spent + c_call_max ≤ cap` (inference spec §7.3), so `cap ≥ (R_day − 1) · c_call + c_call_max` = 23 × $0.1266 + $0.2785.
 
 ### 3.6 Scenario C: retail scale (Individual plan, after the Phase 2 gate)
 
@@ -322,7 +322,7 @@ P_floor(m)  = C_workspace / (1 − m)
 | B, design partner | Team | $756.99 | $1,513.98 | $2,523.29 | $3,784.94 |
 | C, retail, every 4 hours | Individual | $62.24 | $124.48 | $207.46 | $311.19 |
 | C, retail, daily research | Individual | $33.37 | $66.75 | $111.25 | $166.87 |
-| Hybrid or on-prem | Enterprise | Support and releases only; inference 0 with the customer's own keys (DEC-432 item 16) | Set by the licence | | |
+| Hybrid or on-prem | Enterprise | Support and releases only; inference 0 with the customer's own keys (DEC-432 item 16) | Set by the license | | |
 
 **With inference passed through** (07 principle 3, HLD §10: model tokens at cost plus margin `k`),
 the platform fee only has to cover the rest:
@@ -354,8 +354,8 @@ owner's own `cost_cap_usd_per_day` the visible control on the variable half of t
 
 | Guardrail | Decided in | Where it acts | How it maps to this model |
 |---|---|---|---|
-| $5 per agent per risk day for internal research agents | DEC-431 item 15 | Gateway reservation (inference spec §7.3); mandate spec §8.5 check 7 | `cap_agent_day`; caps `I_research` at $152 per agent-month |
-| $20 per internal workspace per day | DEC-431 item 15 | Gateway quota (`budget_exhausted`) | Caps all inference at $608 per workspace-month; binds before the agent caps once a workspace has more than 4 research agents |
+| $5 per agent per risk day for internal research agents | DEC-431 item 15 (founder-accepted 2026-10-03; the figures are also recorded in DEC-432) | Gateway reservation (inference spec §7.3); mandate spec §8.5 check 7 | `cap_agent_day`; caps `I_research` at $152 per agent-month |
+| $20 per internal workspace per day | DEC-431 item 15 (founder-accepted 2026-10-03; also in DEC-432) | Gateway quota (`budget_exhausted`) | Caps all inference at $608 per workspace-month; binds before the agent caps once a workspace has more than 4 research agents |
 | Caps degrade to fewer ideas, never more risk | DEC-431 item 15, INF-7, HI-9 | Gateway and harness | A binding cap lowers `R_day` in effect; it never changes an envelope field |
 | Cost reserved at maximum before each call; a crash's reservation counts as spent | DEC-432 item 4 | Gateway meter stream | Effective daily spend can stop up to one `c_call_max` ($0.28) short of the cap |
 | Monthly caps for infrastructure and for inference, alerts at 50%, 80%, 100% | DEC-434 item 18 | Operations | The inference cap should sit between expected spend (§3) and the sum of daily caps; the infrastructure cap covers §2.3 to §2.5. Values not yet set (§7) |
