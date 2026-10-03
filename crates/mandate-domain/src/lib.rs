@@ -280,7 +280,7 @@ pub enum ThesisRefusal {
     NoCorroboration,
     /// Check 16: the lineage is retired, or `revision` exceeds `max_revisions_per_lineage` (DEC-111).
     LineageRetired,
-    /// Check 17: the working universe already holds `universe.max_instruments` instruments (MI-15); the only check a renewal skips.
+    /// Check 17: the working universe already holds at least `universe.max_instruments` instruments (MI-15); the only check a renewal skips.
     UniverseFull,
 }
 
@@ -383,28 +383,13 @@ impl ThesisRefusal {
         )
     }
 
-    /// The reason a code names, or [`DomainError::UnknownThesisRefusal`]. Exact spelling only.
+    /// The reason a code names, or [`DomainError::UnknownThesisRefusal`]. Exact spelling only; the
+    /// codes are spelled once, in [`ThesisRefusal::code`].
     pub fn parse(text: &str) -> Result<Self, DomainError> {
-        match text {
-            "direction_not_allowed" => Ok(Self::DirectionNotAllowed),
-            "horizon_mismatch" => Ok(Self::HorizonMismatch),
-            "revision_without_predecessor" => Ok(Self::RevisionWithoutPredecessor),
-            "research_disabled" => Ok(Self::ResearchDisabled),
-            "universe_pinned" => Ok(Self::UniversePinned),
-            "admission_denied" => Ok(Self::AdmissionDenied),
-            "cost_cap_reached" => Ok(Self::CostCapReached),
-            "not_in_data_universe" => Ok(Self::NotInDataUniverse),
-            "operator_halt" => Ok(Self::OperatorHalt),
-            "not_allowed_asset_class" => Ok(Self::NotAllowedAssetClass),
-            "leveraged_etp_not_enabled" => Ok(Self::LeveragedEtpNotEnabled),
-            "eligibility_floor" => Ok(Self::EligibilityFloor),
-            "instrument_group_claimed" => Ok(Self::InstrumentGroupClaimed),
-            "source_not_allowlisted" => Ok(Self::SourceNotAllowlisted),
-            "no_corroboration" => Ok(Self::NoCorroboration),
-            "lineage_retired" => Ok(Self::LineageRetired),
-            "universe_full" => Ok(Self::UniverseFull),
-            _ => Err(DomainError::UnknownThesisRefusal),
-        }
+        Self::all()
+            .into_iter()
+            .find(|reason| reason.code() == text)
+            .ok_or(DomainError::UnknownThesisRefusal)
     }
 }
 

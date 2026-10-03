@@ -1415,6 +1415,7 @@ name = "mandate-journal"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-domain",
  "mandate-num",
  "mandate-time",
  "proptest",
@@ -1502,6 +1503,7 @@ name = "mandate-research"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-domain",
  "mandate-num",
  "mandate-time",
  "proptest",

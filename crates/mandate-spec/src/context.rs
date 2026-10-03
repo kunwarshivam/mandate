@@ -24,7 +24,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value};
-use mandate_domain::{AssetClass, AssetId, AutonomyDecision, Environment};
+use mandate_domain::{AssetClass, AssetId, AutonomyDecision, Environment, ThesisRefusal};
 use mandate_num::Usd;
 use mandate_time::Date;
 
@@ -367,12 +367,9 @@ pub fn check_thesis_record(
         },
         Some(Value::Bool(false)) => {
             let reason = record.text("reason")?;
-            let check = THESIS_REFUSALS
-                .iter()
-                .position(|known| *known == reason)
-                .and_then(|index| u8::try_from(index).ok())
-                .and_then(|index| index.checked_add(1))
-                .ok_or(malformed("reason"))?;
+            let check = ThesisRefusal::parse(reason)
+                .map_err(|_| malformed("reason"))?
+                .check_number();
             let later_than_first = first.is_some_and(|first| check > first);
             let unfailed_by_the_mandate = MANDATE_ALONE_CHECKS.contains(&check) && !fails(check);
             if later_than_first || unfailed_by_the_mandate {
@@ -384,28 +381,6 @@ pub fn check_thesis_record(
         _ => Err(malformed("admitted")),
     }
 }
-
-/// Mandate spec §8.5's refusal reasons in check order: a reason's check number is its position, from
-/// 1 (journal spec §9.4).
-const THESIS_REFUSALS: [&str; 17] = [
-    "direction_not_allowed",
-    "horizon_mismatch",
-    "revision_without_predecessor",
-    "research_disabled",
-    "universe_pinned",
-    "admission_denied",
-    "cost_cap_reached",
-    "not_in_data_universe",
-    "operator_halt",
-    "not_allowed_asset_class",
-    "leveraged_etp_not_enabled",
-    "eligibility_floor",
-    "instrument_group_claimed",
-    "source_not_allowlisted",
-    "no_corroboration",
-    "lineage_retired",
-    "universe_full",
-];
 
 /// The §8.5 checks the stored mandate decides, in check order (DEC-413 item 5): a research agent
 /// that admits instruments (4), an unpinned universe (5), admission not `deny` (6), the instrument's
