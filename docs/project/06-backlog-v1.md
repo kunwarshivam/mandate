@@ -882,16 +882,88 @@ the spec invariants (DP-n) its tests cover.
 
 ### E9 Identity, tenancy, and policy
 
-- **E9-1 (Must)** As a user, I want to sign in with passkey or OIDC SSO.
-- **E9-2 (Must)** As an admin, I want organizations, workspaces, and roles.
+The [identity spec](../specs/identity.md) (v0.1 draft, [DEC-437](decisions/DEC-437.md)) defines these
+stories. Rows marked **SC** are safety-critical: tests first under
+DEC-77, an independent review on a different model, and zero missed mutants. The identity provider
+for managed mode, SAML, and organization recovery stay with the founder (DEC-437 items 15 to 21); no
+story buys a service, and none uses a real identity-provider account in tests (spec §1.3).
+
+- **E9-1 (Must; SC)** As a user, I want to sign in with passkey or OIDC SSO.
+  *Accepted when:* passkey sign-in requires user verification and OIDC sign-in checks signature,
+  issuer, audience, expiry, nonce, and `email_verified` against the configured issuer only (spec §6.1),
+  each refusal tested against an in-memory issuer and a software authenticator; sessions meet spec
+  §6.2 (5-minute access tokens, uncached membership re-check, refresh rotation with reuse revoking the
+  family, idle and absolute limits an org can only shorten); the risk-reduction path of §6.4 pauses and
+  engages a kill switch with the identity provider unreachable (ID-10), while a refusal from the
+  provider (`invalid_grant`, a disabled subject, a back-channel logout) ends the session with every
+  permission and blocks the local passkey route (§6.4, §11.1); the host CLI commits only as its
+  registered principal (`HostCliRegistered`, ID-1); and the log scan finds no
+  canary token from any path (ID-9).
+- **E9-2 (Must; SC)** As an admin, I want organizations, workspaces, and roles.
+  *Accepted when:* `authorize` matches spec §4.2's matrix exactly, checked by an exhaustive test over
+  every role set, permission, and scope against a table parsed from the spec, not from the code (ID-2);
+  no principal changes its own roles (ID-13); and the last-owner and last-admin refusals hold (§5.2).
 - **E9-3 (Must)** As an admin, I want org-level limits that workspaces and agents can only
   tighten.
-- **E9-4 (Must)** As a security-conscious user, I want step-up authentication for sensitive
-  actions.
-- **E9-5 (Should)** As a fund, I want separation of duties between agent creators and approvers.
+- **E9-4 (Must; SC)** As a security-conscious user, I want step-up authentication for sensitive
+  actions. *Accepted when:* every permission marked S in spec §4.2 is refused, with nothing committed,
+  for a missing, stale, reused, wrong-method, wrong-principal, and wrong-digest assertion (ID-4, §7.2);
+  none of the ID-5 actions asks for step-up or fails without it; a challenge is consumed in the same
+  transaction as the event it authorizes; and the raw assertion artifact re-verifies against the stored
+  public key.
+- **E9-5 (Should; SC)** As a fund, I want separation of duties between agent creators and approvers.
+  *Accepted when:* under `independent_approval_required`, no grant, acknowledgment, or approval counts
+  where `human(responder)` equals `human(requester)` or, for approvals, `human(author)`, with clients
+  and service accounts mapped to their humans (ID-6, spec §8.2), checked by a fuzz whose oracle maps
+  principals independently; and the 24-hour cool-off of spec §8.3 holds for operator and approver grants.
 - **E9-6 (Must)** As a retail user, I want the retail profile (`auto` allowed, LLM ideas allowed,
   protection required, no leveraged ETPs, counsel-set loss ceiling and approval timeout minimum)
   applied to my workspace by default ([DEC-98](04-decision-log.md#decisions)).
+- **E9-7 (Must, M8; SC)** As an admin, I want memberships with states (invited, cooling off, active,
+  deactivated, removed) journaled on the control stream, so that who can act, and the user count V-047
+  reads, come from the record (spec §5). *Accepted when:* the tests PR adds spec §12.1's events to
+  journal §9 with schemas; `workspace_users` equals an independent fold of `Member*` events at
+  validation and at application over random histories, with invited, cooling-off, deactivated, and
+  removed members, clients, service accounts, and agents counting zero and an unreadable count reading
+  as one (ID-7); and no request authorized after a deactivation commits succeeds, with open streams
+  closed within 60 s (ID-3).
+- **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
+  *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
+  compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
+  security, journal stream prefixes, NATS accounts, cache keys, the inference cache, and the vault
+  (ID-8, spec §9.1).
+- **E9-9 (Must, M8; SC; before E10-6)** As an owner, I want my connected agent to hold a scoped,
+  sender-constrained, revocable token (DEC-141). *Accepted when:* clients connect through OAuth 2.1
+  with PKCE and DPoP (spec §6.6); the ID-2 test passes for the client column; a client cannot approve,
+  confirm, present step-up, pause, resume, stop, release, make an owner exit, or change a connection or
+  membership (ID-11); the tests PR adds the `client` actor kind with `on_behalf_of` to journal §3 and
+  makes the mandate spec's independence checks compare `human(…)` (spec §8.2, §12.2; DEC-437 item 10),
+  with a case showing check 3 refuses a `client` actor's approval from the record alone; no client
+  token is issued before those edits land; and revocation applies to every request authorized after it
+  commits.
+- **E9-10 (Should, M8; SC)** As a user, I want account recovery and, in managed mode, audited
+  break-glass. *Accepted when:* recovery codes are stored only as salted slow hashes and shown once; a
+  passkey enrolled through recovery cannot present step-up for 24 hours and its owner is notified
+  (opaque) (spec §10.1); and a `platform_operator` is refused every permission outside break-glass's
+  operational set, inside an approved, time-bound window only, with each step journaled to the
+  workspace's control stream (ID-12, §10.3). Organization recovery waits for DEC-437 item 18.
+- **E9-11 (Must, M8; SC)** As the founder, I want the identity invariants ID-1 to ID-15 each backed by
+  a property test with an independent oracle. *Accepted when:* each oracle is shown to fail on a
+  seeded bug (for example, a cached membership read, a role inherited from the org, a challenge not
+  bound to its digest, a client counted as a second user, an unprefixed cache key) before it is trusted.
+- **E9-12 (Should, M8)** Round-1 minors of the identity spec's review ([#556](https://github.com/kunwarshivam/mandate/pull/556),
+  freeze rule). *Accepted when the spec settles each:* (1) the workspace admin holds the kill switch's
+  privileges beyond the stop (mandate §6.1, selling equities outside the session) but not the owner
+  exit; make the two rows agree; (2) ID-2's exhaustive test needs a matrix row for every operation the
+  workspace API spec defines; the owner request, dry run, and chat thread rows were added by the
+  round-2 ruling, and saving a draft, running a backtest, and resolving a notice still need rows, or
+  ID-2 is scoped to the rows the matrix names; (3) a row for lifting a hold an operator
+  set, with its step-up; (4) ID-15's carve-out for the notification relay's envelope
+  (`{relay_id, endpoint, ciphertext}`, a capability URL) as HLD "Where data lives" lists it; (5) "release"
+  names both Stop with release (DEC-136) and re-enabling a halted scope, so one is renamed (round 2
+  renamed the second; confirm no other use remains); (6) the Status row matches DEC-437 after round 2.
+  ID-13's founding-grant exception and ID-10's note on item 15 were taken in round 2 because the
+  blocker fixes touched those lines.
 
 ### E10 Mandate authoring
 
