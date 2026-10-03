@@ -3100,6 +3100,26 @@ From #524's ruling ((A), 05:52Z on #524) and the reviews of #534 and #535 (the c
   repeats `LoneLadder.intent`, so the two can disagree: enforce the agreement where entries are
   inserted, or drop the field and read the intent from the key.
 
+From #559's round-1 review (#524's tests; the coordinator's ruling, 09:35Z on #559; freeze rule):
+
+- **E7-4: model #524's refused-cancel answer as §5.7's query answer** (#559 round 1, minor 2).
+  `a_refused_protective_cancel_found_live_is_asked_again` feeds the answer as
+  `Input::BrokerUpdate(BrokerUpdate::Order(..))`. The path is the same, but its sibling
+  `a_refused_cancel_is_queried_then_asked_again_once` uses `Input::Broker(Ok(BrokerOutcome::Order(..)))`,
+  which is literally the answer to the query the test asserts. Use that.
+- **E7-4: #524's invariant fails on a resting id with no order record** (#559 round 1, minor 3).
+  `an_exit_waiting_on_protection_always_has_its_cancel_asked` reads an id in `protection.resting`
+  that `orders` does not know as outstanding, so an exit waiting on it forever would go unreported.
+  Fail on the unknown id instead.
+- **E7-4: ask the per-move check of the initial state and after the refold** (#559 round 1,
+  minor 4). `rule_13_script_checked` asks it only inside the step loop. Nothing is reachable there
+  today, since `protected(..)` starts with no sequence.
+- **E7-4: two doc lines in #559 run to 101 columns** (#559 round 1, minor 6). Wrap them with the
+  `remainders` row above.
+- **The saturation-pin row's wording** (#559 round 1, minor 7). The 05:08Z ruling put it in the
+  tests-correction row #532 started; the row added here points at the next tests correction to
+  `remainder_tests`. The substance is the same, so no change is needed.
+
 From #528's round-2 review (DEC-411; the coordinator's ruling, 05:19Z on #528; freeze rule):
 
 - **The reference does not model V-002's apply-time re-check** (#528 round 2, major 1). V-002 says it is "checked at

@@ -2385,6 +2385,7 @@ mod probe_tests {
 
 #[cfg(test)]
 mod sequence_tests {
+    use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
     use mandate_accounting::{AssetClass, InstrumentId, Side};
@@ -2405,7 +2406,7 @@ mod sequence_tests {
         Everything, Executor, Ids, aapl, account, drafted, executor_config, fees, missing,
         submitted,
     };
-    use crate::state::{ExecutorState, OrderDetail};
+    use crate::state::{ExecutorState, IntentOutcome, OrderDetail};
     use crate::types::{
         AgentId, BrokerFill, BrokerOrder, BrokerOutcome, BrokerReject, BrokerRequest,
         BrokerUnknown, BrokerUpdate, Command, Effect, EventDraft, EventId, ExecutorConfig,
@@ -8258,23 +8259,54 @@ mod sequence_tests {
         rule_13_summed(0, &SEED_15)
     }
 
-    /// #524's invariant at the step, which does not decide how the fix keeps it: while resting
-    /// protection holds an instrument's exits back, every resting protective order there has a
-    /// cancel asked or outstanding. So an exit waiting on protection always waits on a cancel
-    /// that is coming, or is released to go beside it.
+    /// #524's invariant at the step, which does not decide how the fix keeps it. Where a sequence
+    /// runs beside resting protection and an exit there waits with no order yet, neither held at
+    /// the gate (`state.held`) nor waiting on a live opening of its own agent, every resting
+    /// protective order there has a cancel asked or outstanding. So an exit waiting on protection
+    /// always waits on a cancel that is coming, or is released to go beside it; a held exit is
+    /// owed no cancel (DEC-425 constraint 3). The antecedent is read from the state, not from
+    /// `protection_holds`, the predicate the fix is likeliest to rewrite (#559's review, M1). It
+    /// is asked first of the review's pause script, where the only exit beside the placement is
+    /// held and none is owed a cancel, so it passes there; then of seed 15, where it fails on
+    /// `main`.
     #[test]
     #[ignore = "pending E7-4"]
     fn an_exit_waiting_on_protection_always_has_its_cancel_asked() -> Result<(), String> {
         let asked = |state: &ExecutorState| -> Result<(), String> {
             for instrument in state.exiting.keys() {
-                if !super::protection_holds(state, instrument) {
-                    continue;
-                }
                 let resting = state
                     .protection
                     .get(instrument)
                     .map(|protection| protection.resting.clone())
                     .unwrap_or_default();
+                let opening = |agent: &AgentId| {
+                    state.orders.values().any(|order| {
+                        order.purpose.adds_risk()
+                            && &order.instrument == instrument
+                            && order.agent.as_ref() == Some(agent)
+                            && !order.state.is_terminal()
+                            && order.state != OrderState::Intent
+                    })
+                };
+                let waits = state.intents.values().any(|record| {
+                    let exit_here = matches!(
+                        state.bodies.get(&record.intent_id),
+                        Some(IntentBody::Order { instrument: held_in, purpose, .. })
+                            if held_in == instrument
+                                && *purpose != Purpose::Protective
+                                && !purpose.adds_risk()
+                    );
+                    let unordered = ClientOrderId::for_intent(&record.intent_id)
+                        .is_ok_and(|id| !state.orders.contains_key(&id));
+                    record.outcome == IntentOutcome::Received
+                        && exit_here
+                        && unordered
+                        && !state.held.contains(&record.intent_id)
+                        && !opening(&record.agent)
+                });
+                if resting.is_empty() || !waits {
+                    continue;
+                }
                 for id in resting {
                     let outstanding = state.orders.get(&id).is_none_or(|order| {
                         order.cancel_unconfirmed
@@ -8293,6 +8325,18 @@ mod sequence_tests {
             }
             Ok(())
         };
+        let paused = [
+            Move::Pause(true),
+            Move::Exit(0, 1, 141),
+            Move::Exit(0, 1, 141),
+            Move::Quote(Some(135), None, true),
+            Move::Pause(false),
+            Move::Confirm,
+            Move::Pause(true),
+            Move::Exit(0, 1, 141),
+        ];
+        rule_13_script_checked(0, false, true, &paused, &asked)
+            .map_err(|error| format!("a held exit read as waiting: {error}"))?;
         rule_13_script_checked(0, false, true, &SEED_15, &asked).map(|_| ())
     }
 
@@ -8338,13 +8382,64 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-425 constraint 3, which already holds on `main`, in a shape neither direction of the fix
+    /// changes (#559's review, minor 5): a held exit never causes a protective cancel. Two risk
+    /// exits of 1 arrive while the agent is paused; on the resumption the first is handed on as
+    /// the take-profit of a placement and the cancel is confirmed; the agent is paused again and a
+    /// third exit of 1 arrives, held `paused` at the gate (rule 13). With no exit waiting that is
+    /// not held, nothing is owed a cancel: at no step while an exit is held does a protective
+    /// order there get a cancel asked that it did not have the step before. (The script is the one the review found
+    /// (b)'s first antecedent misread.)
+    #[test]
+    fn a_held_exit_alone_never_causes_a_protective_cancel() -> Result<(), String> {
+        let script = [
+            Move::Pause(true),
+            Move::Exit(0, 1, 141),
+            Move::Exit(0, 1, 141),
+            Move::Quote(Some(135), None, true),
+            Move::Pause(false),
+            Move::Confirm,
+            Move::Pause(true),
+            Move::Exit(0, 9, 141),
+            Move::Tick(1),
+        ];
+        let before: RefCell<BTreeSet<ClientOrderId>> = RefCell::new(BTreeSet::new());
+        let held_at_end = RefCell::new(false);
+        let untouched = |state: &ExecutorState| -> Result<(), String> {
+            let cancelling: BTreeSet<ClientOrderId> = state
+                .protection
+                .values()
+                .flat_map(|protection| protection.resting.iter())
+                .filter(|id| {
+                    state.orders.get(*id).is_some_and(|order| {
+                        order.cancel_unconfirmed || order.state == OrderState::PendingCancel
+                    })
+                })
+                .cloned()
+                .collect();
+            let held = !state.held.is_empty();
+            *held_at_end.borrow_mut() = held;
+            let previous = before.replace(cancelling.clone());
+            match cancelling.difference(&previous).next() {
+                Some(id) if held => Err(format!("{} cancelled for a held exit", id.as_str())),
+                _ => Ok(()),
+            }
+        };
+        rule_13_script_checked(0, false, false, &script, &untouched)?;
+        if held_at_end.into_inner() {
+            Ok(())
+        } else {
+            Err("the third exit is no longer held at the end".to_owned())
+        }
+    }
+
     /// #524's claim 2, which already holds on `main`: an exit the gate holds counts nothing
     /// toward the room later exits are allowed in. Seed 15's discretionary exit of 4 is held
     /// `exit_unpriced`, and the two risk exits of 2 beside it are both allowed, 3 + 2 + 2 within 10.
     #[test]
     fn a_held_exit_counts_nothing_toward_the_gates_room() -> Result<(), String> {
         let prefix = SEED_15.get(..6).ok_or("seed 15's arrivals")?;
-        let desk = rule_13_script_with(0, false, true, prefix)?;
+        let desk = rule_13_script_with(0, false, false, prefix)?;
         let mut decided: Vec<(Purpose, u32, &str, &str)> = desk
             .exits
             .values()
