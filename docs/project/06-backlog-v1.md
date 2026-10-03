@@ -2348,6 +2348,10 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   lands, (a) applies to MC-B35. The same cleanup rewrites `trim_guards`' doc comment, which still
   says the exemption is one "which `ref.py` takes up in the reference PR after this harness"
   (#530 review, m5).
+  *Done (`agent/g8-e6-4-harness-cleanup`):* `AWAITED`, `awaited` and `counted` are gone, so family
+  B's thirty-five cases and the three sweep counts state one fixture; `trim_first` refuses a trim
+  case with no `min_order_size`, which a doctoring that drops it pins; and both doc comments say
+  what the harness does now.
 - **ES-22: the minors of #530's review, round 1** (DEC-423; freeze rule; m1, §5.5's binding clause, was done in #530):
   (1) §11 says 427 cases where `mandate.yaml` holds 430, and nothing compares the prose with the
   file. Correct the count, or have `generate.py` or an xtask check state it (m2);
