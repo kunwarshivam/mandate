@@ -137,7 +137,6 @@ fn instant(text: &str) -> UtcNanos {
 }
 
 #[test]
-#[ignore = "pending E6-13"]
 fn a_delegation_parses_member_by_member() {
     let mandate = parse(&delegated(vec![
         delegation(),
@@ -211,7 +210,6 @@ fn a_delegation_parses_member_by_member() {
 /// Each bound `$defs/delegation` and the autonomy block put on a delegation, refused with the code
 /// and the pointer a strict parse names (ES-22): what `jsonschema` refuses, this refuses.
 #[test]
-#[ignore = "pending E6-13"]
 fn every_schema_bound_of_a_delegation_is_refused_where_it_fails() {
     let at = |member: &str| Pointer::new(&format!("/autonomy/delegations/0/{member}"));
     let cases: Vec<(&str, Value, ParseError)> = vec![
@@ -309,7 +307,6 @@ fn every_schema_bound_of_a_delegation_is_refused_where_it_fails() {
 /// V-041: ids unique; `lifts` is `default` while the default is `ask`, or names a rule whose `then`
 /// is `ask`; and `starts_at` < `expires_at` ≤ `starts_at` + 30 days.
 #[test]
-#[ignore = "pending E6-13"]
 fn v041_bounds_what_a_delegation_names_and_how_long_it_lasts() {
     let refused = |document: Value, what: &str| {
         assert!(
@@ -412,7 +409,6 @@ fn v041_bounds_what_a_delegation_names_and_how_long_it_lasts() {
 /// `capital.allocation_usd`, and with `two_approver_above_usd` set, `max_order_usd` ≤ it. Each edge
 /// is allowed and one cent past it refused.
 #[test]
-#[ignore = "pending E6-13"]
 fn v043_keeps_a_delegations_caps_inside_the_envelope() {
     let check = |changes: &[(&str, Option<Value>)], extra: &[(&str, Option<Value>)], v043: bool| {
         let document = edit(&delegated(vec![delegation_with(changes)]), extra);
@@ -461,7 +457,6 @@ fn v043_keeps_a_delegations_caps_inside_the_envelope() {
 /// previous document withheld, no delegation can be shown new, so V-042 refuses every one
 /// (DEC-420).
 #[test]
-#[ignore = "pending E6-13"]
 fn v042_carries_no_delegation_past_a_risk_increasing_version() {
     let previous = delegated(vec![delegation()]);
     let raised = edit(&previous, &[("/risk/max_daily_loss", Some(s("0.03")))]);
@@ -528,7 +523,6 @@ fn v042_carries_no_delegation_past_a_risk_increasing_version() {
 /// V-022: every delegation is `user_entered` and confirmed; V-023 types its `when` as it types a
 /// rule's.
 #[test]
-#[ignore = "pending E6-13"]
 fn a_delegation_is_the_owners_and_its_condition_is_typed() {
     let document = delegated(vec![delegation()]);
     let sourced = |source: Source, confirmed: bool| {
@@ -629,7 +623,6 @@ fn typed(id: &str, lifts: Lifts) -> Delegation {
 /// §9.2's `autonomy.delegations` row, matched by `id`: removing or narrowing is reducing; adding,
 /// widening, reordering, or changing `lifts`, `when`, or `source_approval_id` is increasing.
 #[test]
-#[ignore = "pending E6-13"]
 fn the_delegations_row_reduces_only_by_removing_or_narrowing() {
     let d1 = typed("d1", Lifts::Rule(rule_id("large_orders")));
     let d2 = typed("d2", Lifts::Default);
@@ -773,7 +766,6 @@ fn block(
 /// going `auto` to `ask`, stays reducing wherever its orders land, since they were `auto` and stay
 /// `auto` (item 2). The MC-J cases pin the same shapes through the whole mandate.
 #[test]
-#[ignore = "pending E6-13"]
 fn a_rule_change_that_routes_an_undelegated_ask_to_a_delegation_is_increasing() {
     use Operator::{Gt, Lt};
     let lifting = |source: Lifts| vec![typed("d1", source)];
@@ -943,7 +935,6 @@ fn verdict() -> impl Strategy<Value = AutonomyDecision> {
 /// A property that classified nothing reducing would check nothing, so it counts the cases that
 /// reach the decision assertion and requires at least [`REACHED_FLOOR`] of them.
 #[test]
-#[ignore = "pending E6-13"]
 fn a_reducing_rule_change_never_decides_less_strictly_with_the_delegations_in_force() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 8192,

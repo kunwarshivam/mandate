@@ -10,13 +10,14 @@ use std::collections::BTreeSet;
 
 use mandate_canon::{Digest, Key, Object, Value};
 use mandate_domain::{AssetClass, AssetId, AutonomyDecision, Environment};
-use mandate_time::Date;
+use mandate_time::{Date, UtcNanos};
 
 use super::{
-    AgentName, Approval, ApproverRef, Autonomy, Behavior, Cadence, Capital, Channel, ConnectionId,
-    EventSource, Goal, HourMinute, InstrumentRef, LadderAction, LadderRung, LimitAction, Mandate,
-    ModelId, ModelParam, Notifications, OnComplete, OnTimeout, ParamValue, Protection, QuietHours,
-    Research, Risk, Rule, RuleId, ScaleAction, SignalModel, Sizing, SizingMethod, Universe,
+    AgentName, Approval, ApprovalId, ApproverRef, Autonomy, Behavior, Cadence, Capital, Channel,
+    ConnectionId, Delegation, DelegationId, EventSource, Goal, HourMinute, InstrumentRef,
+    LadderAction, LadderRung, Lifts, LimitAction, Mandate, ModelId, ModelParam, Notifications,
+    OnComplete, OnTimeout, ParamValue, Protection, QuietHours, Research, Risk, Rule, RuleId,
+    ScaleAction, SignalModel, Sizing, SizingMethod, Universe,
 };
 use crate::condition::{
     Condition, ConditionField, ConditionValue, FieldKind, MAX_CONDITION_DEPTH, Operator,
@@ -297,6 +298,12 @@ impl<'a> Node<'a> {
         })
     }
 
+    /// `$defs/instant`, a pattern and not a calendar: `YYYY-MM-DDTHH:MM:SS.nnnnnnnnnZ`. A text it
+    /// matches that names no instant is no instant, as [`Node::date`] reads a date (DEC-151).
+    fn instant(&self) -> Parsed<Option<UtcNanos>> {
+        Ok(UtcNanos::parse(&self.patterned(is_instant)?).ok())
+    }
+
     /// `$defs/uuid`.
     fn asset_id(&self) -> Parsed<AssetId> {
         AssetId::parse(self.text()?).map_err(|_| self.off_pattern())
@@ -323,6 +330,19 @@ pub(super) fn is_id(text: &str) -> bool {
 /// Two ASCII digits between `low` and `high` inclusive. Text order is numeric order at a fixed width.
 fn two_digits(text: Option<&str>, low: &str, high: &str) -> bool {
     text.is_some_and(|t| t.bytes().all(|b| b.is_ascii_digit()) && (low..=high).contains(&t))
+}
+
+/// `$defs/instant`: `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{9}Z$`.
+fn is_instant(text: &str) -> bool {
+    text.len() == 30
+        && text.bytes().enumerate().all(|(i, b)| match i {
+            4 | 7 => b == b'-',
+            10 => b == b'T',
+            13 | 16 => b == b':',
+            19 => b == b'.',
+            29 => b == b'Z',
+            _ => b.is_ascii_digit(),
+        })
 }
 
 /// `$defs/date`: `^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$`.
@@ -644,9 +664,6 @@ fn ladder_rung(node: &Node<'_>) -> Parsed<LadderRung> {
 
 fn autonomy(node: &Node<'_>) -> Parsed<Autonomy> {
     let m = node.members("rules default admission approval review_by delegations")?;
-    if m.optional("delegations").is_some() {
-        return Err(ParseError::Unimplemented);
-    }
     let approval = m.get("approval")?;
     let approval = approval.members("timeout_s on_timeout approvers two_approver_above_usd")?;
     Ok(Autonomy {
@@ -668,7 +685,38 @@ fn autonomy(node: &Node<'_>) -> Parsed<Autonomy> {
                 .dec_or_null("two_approver_above_usd", DecGrammar::PositiveDecimal)?,
         },
         review_by: m.optional("review_by").map(review_date).transpose()?,
-        delegations: Vec::new(),
+        delegations: match m.optional("delegations") {
+            Some(list) => list
+                .items(0, 20, false)?
+                .iter()
+                .map(delegation)
+                .collect::<Parsed<_>>()?,
+            None => Vec::new(),
+        },
+    })
+}
+
+/// `$defs/delegation` (§6.5, DEC-181): each member read as the schema types it. An instant the
+/// schema's pattern matches and the calendar does not have is no instant, for V-041 to refuse
+/// (DEC-420 item 3).
+fn delegation(node: &Node<'_>) -> Parsed<Delegation> {
+    let m = node.members(
+        "id lifts when max_order_usd max_orders max_total_usd starts_at expires_at source_approval_id",
+    )?;
+    let id = m.get("id")?;
+    let lifts = m.get("lifts")?;
+    Ok(Delegation {
+        id: DelegationId::parse(id.text()?).map_err(|_| id.off_pattern())?,
+        lifts: Lifts::parse(lifts.text()?).map_err(|_| lifts.off_pattern())?,
+        when: condition(&m.get("when")?, 1)?,
+        max_order_usd: m.dec("max_order_usd", DecGrammar::PositiveDecimal)?,
+        max_orders: m.int("max_orders", 1, 1000)?,
+        max_total_usd: m.dec("max_total_usd", DecGrammar::PositiveDecimal)?,
+        starts_at: m.get("starts_at")?.instant()?,
+        expires_at: m.get("expires_at")?.instant()?,
+        source_approval_id: m
+            .get("source_approval_id")?
+            .nullable(|n| ApprovalId::parse(n.text()?).map_err(|_| n.off_pattern()))?,
     })
 }
 
