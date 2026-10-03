@@ -49,8 +49,8 @@ Stop and write a DEC proposal instead of continuing if any of these happen:
 - the spec is ambiguous or seems wrong;
 - a new dependency seems necessary;
 - a test would have to be weakened, skipped, or deleted;
-- anything would deviate from an accepted decision, including any exemption from V-047 for a
-  reducing or neutral version (DEC-411 item 6 is the founder's).
+- anything would deviate from an accepted decision, including any exemption from V-047 wider than
+  DEC-444's (a version §9.2 classifies as risk-reducing, and nothing else).
 
 ## Definition of done
 

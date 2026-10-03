@@ -13,7 +13,7 @@ mod common;
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
-use common::{base, s, with};
+use common::{base, s, with, with_all};
 use mandate_canon::Digest;
 use mandate_domain::Environment;
 use mandate_num::Usd;
@@ -305,29 +305,88 @@ fn an_absent_membership_is_no_second_user_under_the_policy() {
     );
 }
 
-/// DEC-428 item 6: V-047 refuses every version in a lone workspace under the policy, a risk-reducing
-/// or neutral one included, because any exemption is DEC-411 item 6's founder question.
+/// The draft's context in a lone workspace under the policy, with a previous version behind it whose
+/// document is `previous`, or only its identity when `previous` is `None`.
+fn after(previous: Option<Mandate>) -> ValidationContext {
+    let mut ctx = context(1, true);
+    ctx.previous_version = Some(PreviousVersion {
+        environment: Environment::Paper,
+        connection_id: conn(OURS),
+        mandate: previous,
+    });
+    ctx
+}
+
+/// The base with each `(pointer, value)` written in turn, parsed.
+fn edited(changes: &[(&str, &str)]) -> Mandate {
+    let changes: Vec<_> = changes
+        .iter()
+        .map(|(path, value)| (*path, Some(s(value))))
+        .collect();
+    Mandate::parse(&with_all(&changes)).expect("the edited document parses")
+}
+
+/// DEC-444 item 3: the exception reads the agent's current version, the document whose canonical hash
+/// is its current `mandate_version`, and a document validation cannot match to that hash is refused.
+/// `PreviousVersion` carries no digest, so no previous document can be matched yet, and even a version
+/// §9.2 rates risk-reducing against the document given (the previous version allowed $20,000 and the
+/// draft $10,000) is refused, at validation and at application. The exception passes once
+/// `PreviousVersion` can be matched by hash; that test lands with the digest.
 #[test]
 #[ignore = "pending E10-1"]
-fn v047_refuses_a_reducing_or_neutral_version_too() {
+fn v047_refuses_a_reducing_version_it_cannot_match_to_the_current_version() {
     let mandate = draft();
-    let looser = Mandate::parse(&with("/capital/allocation_usd", Some(s("20000"))))
-        .expect("the looser document parses");
-    for (label, previous) in [("reducing", looser), ("neutral", draft())] {
-        let mut ctx = context(1, true);
-        ctx.previous_version = Some(PreviousVersion {
-            environment: Environment::Paper,
-            connection_id: conn(OURS),
-            mandate: Some(previous),
-        });
+    let ctx = after(Some(edited(&[("/capital/allocation_usd", "20000")])));
+    assert!(
+        report(&mandate, &ctx).violations.contains(&Violation::V047),
+        "a reducing version against a document no digest ties to the agent's version is refused"
+    );
+    assert_eq!(
+        rechecked(&mandate, &ctx),
+        codes(&[Violation::V047]),
+        "and refused at application too"
+    );
+}
+
+/// DEC-444: every other version stays refused in a lone workspace under the policy, at validation and
+/// at application. A neutral version, unchanged or renamed. One that lowers a maximum and raises
+/// another, which §9.2 rates risk-increasing because any path is. A risk-increasing one. And a
+/// reducing one whose previous document validation does not have, only its identity (rule 3; the
+/// reviewer's must-catch plant from #536 round 1, `previous_version.is_none()`, is this file's
+/// first-version case).
+#[test]
+#[ignore = "pending E10-1"]
+fn v047_refuses_every_other_version_in_a_lone_workspace() {
+    let mandate = draft();
+    let shapes = [
+        ("neutral, unchanged", Some(draft())),
+        (
+            "neutral, renamed",
+            Some(edited(&[("/name", "two-stock-swing-before")])),
+        ),
+        (
+            "lowers the allocation and raises the order size",
+            Some(edited(&[
+                ("/capital/allocation_usd", "20000"),
+                ("/risk/max_order_usd", "500"),
+            ])),
+        ),
+        (
+            "raises the allocation",
+            Some(edited(&[("/capital/allocation_usd", "5000")])),
+        ),
+        ("reducing, its previous document withheld", None),
+    ];
+    for (label, previous) in shapes {
+        let ctx = after(previous);
         assert!(
             report(&mandate, &ctx).violations.contains(&Violation::V047),
-            "a {label} version in a lone workspace under the policy is still refused"
+            "{label}: refused at validation in a lone workspace under the policy"
         );
         assert_eq!(
             rechecked(&mandate, &ctx),
             codes(&[Violation::V047]),
-            "a {label} version is refused at application too"
+            "{label}: refused at application too"
         );
     }
 }
