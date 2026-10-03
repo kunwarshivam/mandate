@@ -137,8 +137,8 @@ pub(crate) fn down_onto(qty: Qty, grid: Qty) -> Result<Qty, NumError> {
     UsdExact::of_qty(qty).truncated_quotient(UsdExact::one(), grid)
 }
 
-/// `qty` rounded up to a whole number of `grid`: the instrument's minimum on the grid, of which the
-/// larger and one step of the grid is the floor of a participation slice (DEC-445 item 1).
+/// `qty` rounded up to a whole number of `grid`. A participation slice is floored at the larger of
+/// the instrument's minimum rounded up onto the grid and one step of the grid (DEC-445 item 1).
 pub(crate) fn up_onto(qty: Qty, grid: Qty) -> Result<Qty, NumError> {
     UsdExact::of_qty(qty).ceiled_quotient(UsdExact::one(), grid)
 }

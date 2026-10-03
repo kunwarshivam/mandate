@@ -1833,6 +1833,10 @@ mod tests {
     ///   `below_minimum_order`, which the whole excess would meet, so a reading that ignored the
     ///   resting sell fails naming both answers;
     /// - with 3 or more resting, no trim is due at all, and the case states no `trim_withheld`;
+    /// - MC-B30 confirmed on a 2-share grid with 1 resting: the 2.49-share excess less the 1 on sale
+    ///   is 1.49, rounded up on the grid to 2, below a 3-share minimum, so it is withheld. Rounding
+    ///   up first (4) and then subtracting (3) would meet the minimum, so guards in that order
+    ///   disagree with the gate (DEC-445 item 2; #579 review, M1);
     /// - a trim case that states no `open_sell_qty` is refused naming it, never given a default.
     ///
     /// Once MC-B38 is in the fixture: its 3-share remainder beside 2 resting is off a 2-share grid
@@ -1872,6 +1876,23 @@ mod tests {
             "qty",
             "MC-B17 beside 2 resting shares, stating the whole excess",
         )?;
+        let rounded_after_the_resting_sell = doctored(&fixture, "MC-B30", "", |case| {
+            put(case, "input", "scale_active_s", json!(120));
+            put(case, "input", "qty_increment", json!("2"));
+            put(case, "input", "open_sell_qty", json!("1"));
+            put(case, "input", "min_order_size", json!("3"));
+            put(
+                case,
+                "expect",
+                "trim_withheld",
+                json!(["below_minimum_order"]),
+            );
+        })?;
+        run(rounded_after_the_resting_sell, "MC-B30").map_err(|e| {
+            format!(
+                "MC-B30 confirmed on a 2-share grid beside 1 resting, at a 3-share minimum: {e}"
+            )
+        })?;
         let below = doctored(&fixture, "MC-B30", "", |case| {
             put(case, "input", "scale_active_s", json!(120));
             put(case, "input", "open_sell_qty", json!("2"));

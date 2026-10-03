@@ -213,6 +213,13 @@ fn the_listing_states_the_venue_s_quantity_grid() -> Result<(), String> {
             num(Qty::parse("0.0001"))?,
         )?;
     }
+    let unstated = super::pair("BTC/USD", &json!({ "symbol": "BTC/USD" }))?;
+    let defaulted = listing(btc, (None, Some(unstated)), true, limit, at)?;
+    expect_eq(
+        "a crypto pair stating no min_trade_increment, on the smallest Qty",
+        defaulted.qty_increment,
+        num(Qty::parse("0.000000001"))?,
+    )?;
     Ok(())
 }
 
