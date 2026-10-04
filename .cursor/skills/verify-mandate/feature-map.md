@@ -272,7 +272,9 @@ upstream and its inputs exist.
   permitting arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
   deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
   `src/bin/mandate-tracer.rs` the binary; `src/adapters.rs` the production adapters: `StoredBars`,
-  `MovingAverage` and `AlpacaConnector` live, and the rest refusing (DEC-166). It holds no trading logic — no sizing, no gating, no pricing, no state machine, and
+  `MovingAverage`, `AlpacaConnector` and `RiskExitPath` live — the risk exit plans over the journal,
+  stream, clock, and agent the run's bridge hands it (DEC-449, amended by DEC-451) — and the rest
+  refusing (DEC-166). It holds no trading logic — no sizing, no gating, no pricing, no state machine, and
   no arithmetic on money or quantity — and binds `mandate-runtime` (`handle`, `fold`) for real today.
 - **Tests:** `src/stages/fail_closed.rs` over the permissive doubles of `src/stages/doubles.rs`: one
   case per `Stage`, each asserting at the furthest boundary its stage could reach (zero submissions;
@@ -285,7 +287,9 @@ upstream and its inputs exist.
   shadow order book over the committed bytes, and the host, transport, and defaulting-combinator
   source scans; `src/map.rs`'s properties that no source error or gate answer maps to a permitting
   verdict (TI-3) and that an opening `Allow` with a `NotReached` check is refused (TI-11);
-  `src/adapters.rs`'s cases for the stored-data trust rule and the crossover's envelope windows. Then
+  `src/adapters.rs`'s cases for the stored-data trust rule, the crossover's envelope windows, and the
+  purpose-flag and ownerless-exit mappings of the flatten adapter; `tests/flatten_probe.rs` the
+  flatten adapter's nine pins over a self-proving §9.5 journal (DEC-449, DEC-451). Then
   `tests/tracer.rs`, pending on E7-7: the production path over recorded Alpaca paper responses and a
   bar dataset written by `mandate-marketdata`'s own writer (`happy`, `happy_is_deterministic`,
   `autonomy_ask`, `signal_flat`, `signal_undecided`, `oversized_proposal`, `outlier_close`,

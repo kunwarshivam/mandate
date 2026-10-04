@@ -317,9 +317,10 @@ fn scope_of(stream: &str) -> Result<mandate_executor::AccountScope, Cause> {
 }
 
 /// The state the stream's records fold to, through the executor's public fold over the records
-/// as the journal normalized them: each row parses through the journal's own draft validation,
-/// and the fold sees the draft's normalized payload, never the stored bytes' form (DEC-449
-/// item 1).
+/// as the journal normalized them: each stored body's journal-assigned `seq`, `prev_hash`, and
+/// `recorded_at` must equal the row's columns, exactly those three are removed, and the
+/// remaining draft is validated — the fold sees the draft's normalized payload, never the
+/// stored bytes' form (DEC-449 item 1, amended by DEC-451 item 1).
 fn fold_of(
     scope: &mandate_executor::AccountScope,
     stored: &[StoredEvent],
