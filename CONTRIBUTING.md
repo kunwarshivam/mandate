@@ -1,4 +1,4 @@
-# Collaborating on Mandate
+# CONTRIBUTING on Mandate
 
 This guide is for people with write access to this repository. Most of the code here is written by
 AI agents under a merge coordinator, and the repository's rules, checks, and merge flow are built
