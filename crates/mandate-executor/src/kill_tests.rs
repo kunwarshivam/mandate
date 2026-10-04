@@ -4,12 +4,11 @@
 //! missed mutant was invisible to the integration oracles, which read only intent-placed orders
 //! (§5.5; DEC-451 item 1).
 
-use mandate_accounting::{InstrumentId, Side};
+use mandate_accounting::InstrumentId;
 use mandate_canon::Value;
 use mandate_num::Qty;
 
 use crate::error::ExecutorError;
-use crate::kill;
 use crate::payload::{clock, text};
 use crate::ports::Ports;
 use crate::reconcile::tests::{Everything, Executor, Ids, executor_config, fees};
@@ -27,25 +26,6 @@ fn ports() -> Result<Ports<'static>, ExecutorError> {
         instruments: &Everything,
         config: Box::leak(Box::new(config)),
         fees: Box::leak(Box::new(fees)),
-    })
-}
-
-fn event(
-    executor: &Executor,
-    kind: &str,
-    mut pairs: Vec<(&str, Value)>,
-) -> Result<crate::types::FoldedEvent, ExecutorError> {
-    pairs.push((
-        "risk_clock",
-        clock(RiskClock::from_secs(executor.journal.len() as i64 + 10))?,
-    ));
-    Ok(crate::types::FoldedEvent {
-        stream: executor.state.account_stream(),
-        seq: crate::types::Seq(executor.state.account_head().0.saturating_add(1)),
-        event_id: crate::types::EventId(format!("j-{}", executor.state.account_head().0 + 1)),
-        event_type: kind.to_owned(),
-        causation_id: None,
-        payload: crate::payload::object(pairs)?,
     })
 }
 
@@ -153,7 +133,14 @@ fn a_restart_reasks_the_account_wide_cancel() -> Result<(), ExecutorError> {
     state.started = false;
     let mut next = Executor::from_state(state, 2);
     let started = next.run_keeping(
-        Input::Started(WriterEpoch(executor.journal.len() as u64 + 5)),
+        Input::Started(WriterEpoch(
+            u64::try_from(executor.journal.len())
+                .map_err(|_| ExecutorError::NotInterpreted {
+                    what: "journal len".to_owned(),
+                    story: "E7-4",
+                })?
+                .saturating_add(5),
+        )),
         &ports,
         usize::MAX,
     )?;
@@ -174,8 +161,6 @@ fn a_restart_reasks_the_account_wide_cancel() -> Result<(), ExecutorError> {
 fn the_deferred_sell_waits_for_the_session() -> Result<(), ExecutorError> {
     let ports = ports()?;
     let mut executor = Executor::opened(&ports)?;
-    // Saturday, 2026-09-26 12:00 UTC: no v1 session is open. The tick is process-local, never
-    // journaled, and is what the switch's session deferral reads.
     let saturday = 1_790_438_400_i64;
     executor.run_keeping(
         Input::Tick(RiskClock::from_secs(saturday)),

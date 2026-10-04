@@ -770,8 +770,8 @@ pub(crate) mod tests {
 
         /// A crash and a restart: a new process folds the same journal and takes a new epoch.
         /// A fresh process over the same journal: the state refolded from seq 1, quotes and
-        /// modes beside it, for a restart the caller drives itself — `Input::Started` on it
-        /// resumes what the switch left.
+        /// modes beside it, with no epoch and no start, so `Input::Started` on it resumes what
+        /// the switch left (§5.5's close, whose scope's cancel-all is re-asked).
         pub(crate) fn refold(executor: &Executor) -> Result<ExecutorState, ExecutorError> {
             let mut state = ExecutorState::new(executor.state.scope.clone());
             for event in &executor.journal {
@@ -786,7 +786,9 @@ pub(crate) mod tests {
             Ok(state)
         }
 
-        /// An executor over an already-folded state, which `Input::Started` takes a new epoch on.
+        /// An executor over an already-folded state, which `Input::Started` takes a new epoch on;
+        /// the tick before a switch is process-local, never journaled, and is what the switch's
+        /// session deferral reads.
         pub(crate) fn from_state(state: ExecutorState, epoch: u64) -> Self {
             Self {
                 state,
