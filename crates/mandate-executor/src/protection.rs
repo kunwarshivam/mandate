@@ -8413,7 +8413,14 @@ mod sequence_tests {
                 .ok_or("the broker's answers never settle")?;
             for effect in executor.run(input, ports).map_err(failed)? {
                 match effect {
-                    Effect::Journal(draft) => watch.saw(&draft)?,
+                    Effect::Journal(draft) => {
+                        eprintln!(
+                            "DBG saw {} {:?}",
+                            draft.event_type,
+                            draft.payload.get("action")
+                        );
+                        watch.saw(&draft)?
+                    }
                     Effect::Broker(BrokerRequest::Cancel { client_order_id }) => {
                         for venue in venues
                             .iter_mut()
@@ -9287,12 +9294,18 @@ mod sequence_tests {
                         }
                     }
                     Some("unprotected_end") => {
-                        self.open = false;
+                        // An end that names the protection it awaits stays open until the broker
+                        // acknowledges it (DEC-348 item 2); the fold keeps the interval.
+                        if draft.payload.get("awaiting").is_none() {
+                            self.open = false;
+                        }
                         if let Some(ended) = self.sequence.clone() {
                             self.sequenced.remove(&ended);
                         }
                     }
-                    Some("expiry_unreplaceable") => self.alerted = true,
+                    // The bound's end journals its record and alerts the owner (§5.4): the
+                    // shares it leaves uncovered are accounted for from that instant.
+                    Some("interval_limit" | "expiry_unreplaceable") => self.alerted = true,
                     _ => {}
                 }
             }
