@@ -27,6 +27,7 @@ from common import (
     BOOL,
     DEC,
     ENVELOPE,
+    ULID,
     INT,
     REF,
     STEP_UP,
@@ -263,6 +264,107 @@ THESIS = rec(
 )
 SCHEMAS[("agent", "ThesisProposed")] = THESIS
 SCHEMAS[("agent", "ThesisRevised")] = THESIS
+
+# §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
+# `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
+ACCOUNT_STREAM_REF_ALT = "01J8Z2ACCT00000000000000A2"
+EXECUTOR_CLOSED = (
+    "IntentReceived",
+    "GateDecided",
+    "OrderSubmitted",
+    "OrderRequestRecorded",
+    "ProtectionChanged",
+)
+GATE_CHECK_IDS = tuple(
+    "account_status agent_mode eligibility concentration order_size session halt order_constraints "
+    "mark_freshness collar conduct buying_power gross_exposure day_trade_budget".split()
+)
+INTENT_V1 = rec(
+    ("intent_id", ULID),
+    ("agent_id", IDENT_T),
+    ("instrument_id", STR),
+    ("side", STR),
+    ("type", STR),
+    ("tif", STR),
+    ("qty", DEC),
+    ("limit_price", opt(DEC)),
+    ("purpose", STR),
+)
+GATE_V1 = rec(
+    ("intent_id", ULID),
+    ("verdict", STR),
+    ("reason_code", opt(STR)),
+    ("data_profile", STR),
+    ("quotes_used", list_of(rec(("instrument_id", STR), ("bid", DEC), ("ask", DEC), ("as_of", TS), ("feed", STR)))),
+    ("marks_used", list_of(rec(("instrument_id", STR), ("price", DEC), ("source", STR), ("kind", STR)))),
+    ("checks", list_of(rec(("id", one_of(*GATE_CHECK_IDS)), ("result", STR), ("inputs", T("object")), ("computed", T("object"))))),
+)
+SUBMITTED_V1 = rec(
+    ("client_order_id", STR),
+    ("attempt", INT),
+    ("instrument_id", STR),
+    ("side", STR),
+    ("type", STR),
+    ("tif", STR),
+    ("qty", DEC),
+    ("limit_price", opt(DEC)),
+)
+COMPANION = rec(
+    ("agent_id", IDENT_T),
+    ("intent_id", opt(ULID)),
+    ("purpose", one_of("open", "increase", "discretionary_exit", "risk_exit", "owner_exit", "protective", "flatten")),
+    ("extended_hours", BOOL),
+    ("stop_price", opt(DEC)),
+    ("order_class", opt(one_of("bracket", "oco"))),
+    ("take_profit", opt(DEC)),
+    ("stop", opt(DEC)),
+    ("rung", opt(INT)),
+    ("at_floor", opt(BOOL)),
+    ("risk_clock", RISK_CLOCK),
+)
+PROTECTION_CHANGED = rec(
+    ("instrument_id", STR),
+    ("action", one_of("intended", "placed", "cancelled", "passive_start", "unprotected_start", "watchdog", "exit_unpriced", "ladder_floor", "expiry_unreplaceable", "rung_short", "interval_limit", "unprotected_end")),
+    ("orders", list_of(STR)),
+    ("awaiting", list_of(STR)),
+    ("qty", opt(DEC)),
+    ("stop", opt(DEC)),
+    ("take_profit", opt(DEC)),
+    ("intent_id", opt(ULID)),
+    ("bracket", opt(STR)),
+    ("entry", opt(STR)),
+    ("agent_id", opt(IDENT_T)),
+    ("replacing", opt(BOOL)),
+    ("created_on", opt(DATE)),
+    ("sent", opt(DEC)),
+    ("uncovered", opt(BOOL)),
+    ("acknowledged", opt(BOOL)),
+    ("risk_clock", RISK_CLOCK),
+)
+VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
+    ("acct", "StreamOpened"): (1,),
+    ("acct", "IntentReceived"): (1, 2),
+    ("acct", "GateDecided"): (1, 2),
+    ("acct", "OrderSubmitted"): (1, 2),
+    ("acct", "OrderRequestRecorded"): (1,),
+    ("acct", "ProtectionChanged"): (1,),
+}
+VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
+    ("acct", "StreamOpened", 1): rec(
+        ("stream_type", one_of("account")),
+        ("workspace_id", IDENT_T),
+        ("broker", STR),
+        ("account_ref", IDENT_T),
+    ),
+    ("acct", "IntentReceived", 1): INTENT_V1,
+    ("acct", "IntentReceived", 2): rec(*INTENT_V1.fields, ("risk_clock", RISK_CLOCK)),
+    ("acct", "GateDecided", 1): GATE_V1,
+    ("acct", "GateDecided", 2): rec(*GATE_V1.fields, ("risk_clock", RISK_CLOCK)),
+    ("acct", "OrderSubmitted", 1): SUBMITTED_V1,
+    ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
+    ("acct", "OrderRequestRecorded", 1): COMPANION,
+    ("acct", "ProtectionChanged", 1): PROTECTION_CHANGED,
+}
 
 
 def is_pointer(text: str) -> bool:
@@ -508,6 +610,50 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             check()
     if event_type in ("ThesisProposed", "ThesisRevised"):
         out += thesis_violations(event_type, draft, skip)
+    if event_type == "OrderRequestRecorded":
+        flags = [p["order_class"] is None, p["take_profit"] is None, p["stop"] is None]
+        scan = list(zip(("order_class", "take_profit"), flags, flags[1:]))
+        if "order.rule_39_last" in skip:
+            scan = list(reversed(scan))
+        wrong = next((m for m, a, b in scan if a != b), None)
+        rule("39", wrong is None or "rule.39" in skip, "schema", f"payload.{wrong}" if wrong else "")
+        rule("40", (p["at_floor"] is None) == (p["rung"] is None) or "rule.40" in skip, "schema", "payload.at_floor")
+    if event_type == "ProtectionChanged":
+        action = p["action"]
+        priced = action in ("intended", "placed", "passive_start", "unprotected_start")
+        covers_orders = action in ("placed", "cancelled", "passive_start", "unprotected_start")
+        rule("41", (len(p["orders"]) == 0) != covers_orders or "rule.41" in skip, "schema", "payload.orders")
+        covers_awaiting = action in ("interval_limit", "unprotected_end")
+        rule("41.awaiting", (len(p["awaiting"]) == 0) != covers_awaiting or "rule.41" in skip, "schema", "payload.awaiting")
+        if action == "placed":
+            rule("42", p["qty"] is not None or "rule.42" in skip, "schema", "payload.qty")
+        elif action != "cancelled":
+            rule("42", p["qty"] is None or "rule.42" in skip, "schema", "payload.qty")
+        rule("43", priced or (p["stop"] is None and p["take_profit"] is None) or "rule.43" in skip, "schema", "payload.stop")
+        rule("43.tp", p["stop"] is not None or p["take_profit"] is None or "rule.43" in skip, "schema", "payload.take_profit")
+        intents = action in ("intended", "rung_short")
+        if action in ("passive_start", "unprotected_start"):
+            set_ = p["intent_id"] is not None
+            wrong = [m for m in ("intent_id", "entry", "agent_id") if (p[m] is not None) != set_]
+            rule("44.trio", not wrong or "rule.44.trio" in skip, "schema", f"payload.{wrong[0]}" if wrong else "")
+        else:
+            if (p["intent_id"] is not None) != intents:
+                rule("44.intent", False, "schema", "payload.intent_id")
+            for member in ("entry", "agent_id"):
+                if p[member] is not None:
+                    rule(f"44.{member}", False, "schema", f"payload.{member}")
+        if p["replacing"] is not None and action not in ("passive_start", "unprotected_start"):
+            rule("44.replacing", False, "schema", "payload.replacing")
+        if p["bracket"] is not None and action not in ("placed", "passive_start", "unprotected_start", "unprotected_end"):
+            rule("44.bracket", False, "schema", "payload.bracket")
+        if p["created_on"] is not None and action != "placed":
+            rule("44.created_on", False, "schema", "payload.created_on")
+        if p["sent"] is not None and action != "rung_short":
+            rule("44.sent", False, "schema", "payload.sent")
+        if p["uncovered"] is not None and action not in ("interval_limit", "unprotected_end"):
+            rule("44.uncovered", False, "schema", "payload.uncovered")
+        if p["acknowledged"] is not None and action != "unprotected_end":
+            rule("44.acknowledged", False, "schema", "payload.acknowledged")
     return out
 
 
@@ -588,12 +734,13 @@ def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     p = draft["payload"]
     kind = draft["stream_id"].split(":")[0]
     out = []
-    if (
-        event_type == "StreamOpened"
-        and draft["stream_id"] != f"ctl:{p['workspace_id']}"
-        and "rule.25" not in skip
-    ):
-        out.append(Violation("rule.25", "stream_mismatch", "stream_id"))
+    if event_type == "StreamOpened" and "rule.25" not in skip:
+        if kind == "acct":
+            opened = f"acct:{p['workspace_id']}:{p['account_ref']}"
+        else:
+            opened = f"ctl:{p['workspace_id']}"
+        if draft["stream_id"] != opened:
+            out.append(Violation("rule.25", "stream_mismatch", "stream_id"))
     refused = event_type == "OwnerCommandRefused" and p["command"] not in REFUSED_COMMANDS[kind]
     if refused and f"rule.26.{kind}" not in skip:
         out.append(Violation(f"rule.26.{kind}", "stream_mismatch", "payload.command"))
@@ -625,6 +772,7 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     event_type = draft["event_type"]
     stream = draft["stream_id"].split(":")
     kinds = {k for k, e in SCHEMAS if e == event_type}
+    kinds |= {k for k, e, _ in VERSIONED_SCHEMAS if e == event_type}
     if not kinds:
         return [Violation("catalogue", "unknown_event_type", "event_type")]
     shape = {"acct": 3, "agent": 3, "ctl": 2}.get(stream[0])
@@ -645,9 +793,13 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         out += [
             Violation("config_refs.required", "missing_config_ref", f"config_refs.{k}") for k in missing[:1]
         ]
-    if draft["schema_version"] != 1:
+    versions = VERSIONED_VERSIONS.get((stream[0], event_type), (1,))
+    if draft["schema_version"] not in versions:
         return [*out, Violation("catalogue", "unknown_schema", "payload")]
-    schema = SCHEMAS[(stream[0], event_type)]
+    if (stream[0], event_type) in SCHEMAS and draft["schema_version"] == 1:
+        schema = SCHEMAS[(stream[0], event_type)]
+    else:
+        schema = VERSIONED_SCHEMAS[(stream[0], event_type, draft["schema_version"])]
     payload_types = payload_type_violations(schema, draft["payload"], "payload", skip)
     out += payload_types
     schema_names = [name for name, _ in schema.fields]
