@@ -665,6 +665,11 @@ impl Fold {
         )
     }
 
+    /// The folded context: the validation-time shape, where the previous version **is** the version
+    /// in force and its digest equals [`ValidationContext::current_mandate_version`]. The
+    /// application recheck must not reuse this shape as-is: it threads the version the draft was
+    /// validated against as `previous_version`, so a predecessor the fold has advanced past shows
+    /// up as a digest mismatch and V-047 refuses (DEC-444 item 3's stale-predecessor rule).
     fn context(self, args: ContextArgs) -> Result<ValidationContext, SpecError> {
         let ours = &args.connection_id;
         let mut other_allocations_usd = Usd::ZERO;

@@ -402,6 +402,32 @@ fn v047_exempts_a_reducing_version_matched_to_the_current_version() {
     );
 }
 
+/// DEC-444 item 3's fifth bullet: at application the current version is read again, and a version
+/// validated against a predecessor that is no longer current is refused by V-047 rather than
+/// classified against the newer one. The application context carries the draft's validated-against
+/// predecessor as `previous_version` and the fold's now-current version as
+/// `current_mandate_version`; the digests differ, so even a version §9.2 rates risk-reducing
+/// against its own predecessor is refused — never re-classified against the version in force,
+/// which would fail open exactly where the founder's decision closed it (#591 review round 2,
+/// major).
+#[test]
+fn v047_refuses_at_application_a_version_whose_predecessor_is_no_longer_current() {
+    let mandate = draft();
+    let predecessor = edited(&[("/capital/allocation_usd", "20000")]);
+    let validated_against = predecessor.version().expect("the predecessor hashes");
+    let advanced_past =
+        MandateVersion::named(Digest::of(b"a later applied version the fold now holds"));
+    let ctx = after(
+        Some(predecessor),
+        Some(validated_against),
+        Some(advanced_past),
+    );
+    assert!(
+        rechecked(&mandate, &ctx).contains(&Violation::V047),
+        "a version whose validated-against predecessor is no longer current is refused at application"
+    );
+}
+
 /// DEC-444: every other version stays refused in a lone workspace under the policy, at validation and
 /// at application — each with its previous document matched to the agent's current version, so the
 /// refusal is the classification's and not a missing digest. A neutral version, unchanged or

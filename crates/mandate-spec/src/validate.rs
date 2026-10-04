@@ -209,6 +209,12 @@ pub struct ValidationContext {
     /// The agent's current version, as the journal's latest applied version folds it: the document
     /// whose canonical hash (§9.1) this is (DEC-444 item 3). `None` when the platform holds no
     /// current version — a first deployment — and V-047 then refuses every version.
+    ///
+    /// At application the recheck reads this **again**, from the context folded at the moment of
+    /// application, while `previous_version` is the version the draft was **validated against**,
+    /// threaded from that validation and never re-derived from the version in force, which may
+    /// have advanced past it: a version whose validated-against predecessor no longer equals this
+    /// is refused by V-047, not classified against the newer one (DEC-444 item 3's fifth bullet).
     pub current_mandate_version: Option<MandateVersion>,
 }
 
@@ -234,6 +240,11 @@ pub struct PreviousVersion {
     /// The previous version's document, which V-042 classifies the new one against. `None` when the
     /// caller holds only the version's identity: V-042 then cannot tell a carried delegation from a
     /// new one, so it refuses every delegation the new version holds, failing closed (DEC-420).
+    ///
+    /// At validation this is the version in force; at application it is the version the draft was
+    /// validated against, threaded from that validation — never the version in force at
+    /// application, which may have advanced and would silently re-classify the draft against a
+    /// newer document instead of refusing it (DEC-444 item 3's stale-predecessor rule).
     pub mandate: Option<Mandate>,
     /// The version's digest as the journal recorded it beside the document, so the pair is never
     /// assembled per request (DEC-444 item 3): V-047 matches it against
@@ -375,10 +386,12 @@ fn lone_under_independent_approval(
 /// DEC-444 items 1 and 3: the exemption needs the agent's current version — the journal's
 /// [`ValidationContext::current_mandate_version`] matched against the previous version's
 /// journal-recorded digest, the pair never assembled per request — and §9.2's plain `classify`
-/// calling the new version risk-reducing against that document. Everything else is refused: no
-/// previous version (a deployment), identity only, a document the schema refuses, a digest that
-/// matches no current version, no current version, a neutral version, and a version with any
-/// risk-increasing path (MC-V72 to MC-V77).
+/// calling the new version risk-reducing against that document. A digest that matches no current
+/// version is the stale-predecessor refusal: at application the draft's validated-against
+/// predecessor is no longer the version in force, and the version is refused rather than
+/// classified against the newer one. Everything else is refused too: no previous version (a
+/// deployment), identity only, a document the schema refuses, no current version, a neutral
+/// version, and a version with any risk-increasing path (MC-V72 to MC-V77).
 fn exempted_reducing_version(
     mandate: &Mandate,
     context: &ValidationContext,

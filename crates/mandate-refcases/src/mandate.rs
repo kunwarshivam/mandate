@@ -1696,6 +1696,8 @@ fn spec<T>(result: Result<T, SpecError>, what: &str) -> Result<T, String> {
 mod tests {
     use std::path::Path;
 
+    use mandate_spec::MandateVersion;
+
     use super::policy_case;
     use crate::{Json, read_fixture};
 
@@ -1834,6 +1836,46 @@ mod tests {
         if edited < 22 * 2 {
             return Err(format!("only {edited} edits were tried"));
         }
+        Ok(())
+    }
+
+    /// MC-V77's previous document, which the schema refuses (#591 review round 2, minor 4): the
+    /// harness carries no mandate for it — `None`, not a case error — and still computes its
+    /// digest over the document's canonical form. The oracle is the case's own
+    /// `current_mandate_version`, which `check_cases.py` derives as the document's own hash, so
+    /// the two agree exactly when the harness hashed what the case wrote.
+    #[test]
+    fn a_schema_refused_previous_document_carries_no_mandate_but_its_own_hash() -> Result<(), String>
+    {
+        let fixture = fixture()?;
+        let case = fixture
+            .pointer("/cases")
+            .and_then(Json::as_array)
+            .and_then(|cases| {
+                cases
+                    .iter()
+                    .find(|case| case.get("id").and_then(Json::as_str) == Some("MC-V77"))
+            })
+            .ok_or("the fixture holds MC-V77")?;
+        let stated = case.get("context").ok_or("MC-V77 states a context")?;
+        let context = super::semantic_context(&fixture, stated)?;
+        let previous = context
+            .previous_version
+            .ok_or("MC-V77 carries a previous version")?;
+        assert!(
+            previous.mandate.is_none(),
+            "the schema-refused document is not a mandate"
+        );
+        let stated_current = stated
+            .get("current_mandate_version")
+            .and_then(Json::as_str)
+            .ok_or("MC-V77 states the agent's current version")?;
+        let expected = MandateVersion::named(super::digest(stated_current)?);
+        assert_eq!(
+            previous.mandate_version,
+            Some(expected),
+            "the harness hashed the document the case says is current"
+        );
         Ok(())
     }
 }
