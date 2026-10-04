@@ -1639,7 +1639,6 @@ proptest! {
     /// §5.4: a completely filled bracket entry activates its legs, and Σ protective sell quantity
     /// never exceeds the position.
     #[test]
-    #[ignore = "pending E7-4"]
     fn protective_sell_quantity_never_exceeds_the_position(
         script in scripted_protected_complete()
     ) {
