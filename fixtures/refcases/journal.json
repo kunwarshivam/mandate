@@ -11194,6 +11194,36 @@
     }
    },
    {
+    "name": "watchdog_take_profit_alone",
+    "clause": "rule 43: a price without its stop is still a price off the four",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "watchdog"
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.stop",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.take_profit"
+      },
+      {
+       "reason": "schema",
+       "path": "payload.intent_id"
+      }
+     ]
+    }
+   },
+   {
     "name": "intended_names_an_entry",
     "clause": "rule 44: entry only in a start's trio",
     "base_seq": 3,
@@ -12056,6 +12086,35 @@
     "expect": {
      "outcome": "Invalid",
      "draft_index": 0,
+     "reason": "schema",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "an_orphan_after_a_paired_submission",
+    "clause": "rule 45: a companion no submission names is refused, even beside a named one",
+    "drafts": [
+     {
+      "base_seq": 5,
+      "changes": []
+     },
+     {
+      "base_seq": 6,
+      "changes": []
+     },
+     {
+      "base_seq": 5,
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8ZQA8A000000000000000E9"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 2,
      "reason": "schema",
      "path": "event_type"
     }

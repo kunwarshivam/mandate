@@ -222,7 +222,6 @@ pub(crate) fn payload(
             )?;
         }
         "ThesisProposed" | "ThesisRevised" => thesis_rules(event_type, p, config_refs)?,
-        "IntentReceived" | "GateDecided" | "OrderSubmitted" => {}
         COMPANION => companion_rules(p)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
@@ -2098,7 +2097,7 @@ mod tests {
     fn every_account_invalid_draft_is_refused_with_its_reason_at_its_path() -> Result<(), String> {
         let section = account_section()?;
         let invalid = list(&section, "invalid_drafts");
-        assert_eq!(invalid.len(), 43);
+        assert_eq!(invalid.len(), 44);
         for case in invalid {
             let expect = case.get("expect").ok_or("no expect")?;
             let refused = Draft::parse(&draft(&section, case)?)
@@ -2120,7 +2119,7 @@ mod tests {
         let section = account_section()?;
         let valid = list(&section, "valid_batches");
         let invalid = list(&section, "invalid_batches");
-        assert_eq!((valid.len(), invalid.len()), (1, 5));
+        assert_eq!((valid.len(), invalid.len()), (1, 6));
         for case in valid.iter().chain(invalid) {
             let drafts = list(case, "drafts")
                 .iter()

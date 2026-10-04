@@ -340,6 +340,16 @@ def invalid_batches() -> list[dict]:
             ],
             {"outcome": "Invalid", "draft_index": 0, "reason": "schema", "path": "event_type"},
         ),
+        batch_case(
+            "an_orphan_after_a_paired_submission",
+            "rule 45: a companion no submission names is refused, even beside a named one",
+            [
+                {"base_seq": SEQ["request"], "changes": []},
+                {"base_seq": SEQ["submitted"], "changes": []},
+                {"base_seq": SEQ["request"], "changes": [change("event_id", "01J8ZQA8A000000000000000E9")]},
+            ],
+            {"outcome": "Invalid", "draft_index": 2, "reason": "schema", "path": "event_type"},
+        ),
     ]
 
 
@@ -531,6 +541,15 @@ def invalid_drafts() -> list[dict]:
             "schema",
             "payload.stop",
             also=[("schema", "payload.intent_id")],
+        ),
+        invalid(
+            "watchdog_take_profit_alone",
+            "rule 43: a price without its stop is still a price off the four",
+            s["intended"],
+            [change("payload.action", "watchdog"), change("payload.stop", None)],
+            "schema",
+            "payload.stop",
+            also=[("schema", "payload.take_profit"), ("schema", "payload.intent_id")],
         ),
         invalid(
             "intended_names_an_entry",
