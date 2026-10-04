@@ -737,11 +737,14 @@ impl Protection for ExecutorProtection {
             config: &config,
             fees: &fees,
         };
-        if ports.instruments.asset_class(&instrument) != Some(AssetClass::UsEquity)
-            || ports.instruments.increment(&instrument) != Some(ShareIncrement::Whole)
-        {
+        if ports.instruments.asset_class(&instrument) != Some(AssetClass::UsEquity) {
             return Err(Cause::Absent {
-                what: "the protection probe's instrument snapshot",
+                what: "the protection probe's instrument asset class",
+            });
+        }
+        if ports.instruments.increment(&instrument) != Some(ShareIncrement::Whole) {
+            return Err(Cause::Absent {
+                what: "the protection probe's instrument increment",
             });
         }
         let mut state = ExecutorState::new(AccountScope {
