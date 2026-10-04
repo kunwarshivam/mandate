@@ -25,6 +25,7 @@
 //! | [`AlpacaConnector`] | `mandate_alpaca::TradingClient` over a `TradingTransport` (stream K) |
 //! | [`ExecutorReconciler`] | `mandate_executor::reconcile` on the connector's snapshot (E7-3) |
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
@@ -34,8 +35,10 @@ use mandate_journal::{AppendOutcome, StoredEvent};
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
 use mandate_marketdata::model::{Kind, Records, TimeUnit, Timeframe};
-use mandate_num::{Bps, Price, Usd};
-use mandate_risk::Decision;
+use mandate_num::{Bps, Fraction, Price, Qty, Usd};
+use mandate_risk::{
+    AgentId as RiskAgentId, AgentPosition, AssetId, ClientOrderId, Decision, Session, WorkingOrder,
+};
 use mandate_runtime::{
     AgentId, Autonomy, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal,
     SignalInputs,
@@ -47,11 +50,58 @@ use crate::stages::{
     ModelRef, Protection, Reconciled, Reconciler, SignalModel, Sink, Sizing, Stages,
 };
 
+/// The folded state a flatten is planned over, in `mandate-risk`'s own types: the state half of
+/// the risk crate's `FlattenInput`. The adapter holds it so `plan` binds the risk crate without
+/// the shell inventing an input (DEC-166 item 2). The request supplies the rest: the initiator,
+/// the owner confirmation, and the client order ids the fold still holds outstanding.
+#[derive(Debug, Clone)]
+pub struct FlattenState {
+    /// The agent being flattened, as the risk crate numbers agents. The probe's synthetic state
+    /// carries agent zero, which no session assigns.
+    pub agent: RiskAgentId,
+    pub open_orders: BTreeMap<ClientOrderId, WorkingOrder>,
+    pub agent_positions: Vec<AgentPosition>,
+    /// The broker's own quantities, which the plan ignores: it sells exactly the agent's
+    /// sub-ledger, never the broker's position (§5.5).
+    pub broker_positions: BTreeMap<AssetId, Qty>,
+    pub session: Session,
+    pub max_exit_offset: Fraction,
+    pub owner_floor_price: Option<Price>,
+}
+
 /// `mandate_risk::agent_flatten`, probed once against a synthetic request before anything starts.
-pub struct RiskExitPath;
+pub struct RiskExitPath {
+    state: FlattenState,
+}
+
+impl RiskExitPath {
+    /// The adapter over one folded state. The probe's synthetic request is the state's own kill
+    /// switch: every working order cancelled, every position sold, nothing confirmed.
+    pub fn new(state: FlattenState) -> RiskExitPath {
+        RiskExitPath { state }
+    }
+
+    /// The production probe's state: no orders, no positions, a regular session, and the whole as
+    /// the exit offset. The probe asks only whether a plan can be computed at all (TI-4), so the
+    /// offset's value is irrelevant to computability; no session assigns agent zero.
+    pub fn synthetic() -> RiskExitPath {
+        RiskExitPath {
+            state: FlattenState {
+                agent: RiskAgentId(0),
+                open_orders: BTreeMap::new(),
+                agent_positions: Vec::new(),
+                broker_positions: BTreeMap::new(),
+                session: Session::Regular,
+                max_exit_offset: Fraction::ONE,
+                owner_floor_price: None,
+            },
+        }
+    }
+}
 
 impl ExitPath for RiskExitPath {
     fn probe(&self) -> Result<(), Cause> {
+        let _ = &self.state;
         Err(Cause::Unimplemented { story: "E7-7" })
     }
 
@@ -384,7 +434,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
 /// [`production`]'s.
 pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
     Stages {
-        exit: Box::new(RiskExitPath),
+        exit: Box::new(RiskExitPath::synthetic()),
         protection: Box::new(ExecutorProtection),
         mandate: Box::new(SpecMandate {
             path: sources.mandate,

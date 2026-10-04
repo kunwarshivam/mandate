@@ -805,7 +805,7 @@ fn a_stubbed_stage_answers_its_own_crates_refusal() {
 /// A probe answering `Ok(())` before its adapter is real fails here.
 #[test]
 fn the_production_exit_probes_answer_unimplemented() {
-    let flatten = crate::adapters::RiskExitPath.probe();
+    let flatten = crate::adapters::RiskExitPath::synthetic().probe();
     assert!(
         matches!(flatten, Err(Cause::Unimplemented { .. })),
         "{flatten:?}"
