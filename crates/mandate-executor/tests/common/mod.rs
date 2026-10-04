@@ -26,8 +26,8 @@ use mandate_executor::{
     BrokerPosition, BrokerReject, BrokerRequest, BrokerSnapshot, BrokerUnknown, Effect, EventDraft,
     EventId, ExecutorConfig, ExecutorError, ExecutorState, ExitTier, FillId, FoldedEvent, IdGen,
     Input, InstrumentSnapshot, IntentId, MandateVersion, MandateView, MarketObservation,
-    OrderState, Ports, ReconcileReason, RiskClock, Seq, TimerId, TimerRequest, WorkspaceId,
-    WriterEpoch, fold, handle,
+    OrderState, Ports, ReconcileReason, RiskClock, Seq, TimeInForce, TimerId, TimerRequest,
+    WorkspaceId, WriterEpoch, fold, handle,
 };
 use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
 use mandate_time::Date;
@@ -451,6 +451,7 @@ pub fn handoff(intent: &str, who: &str, body: mandate_executor::IntentBody) -> I
     Input::Intent(mandate_executor::IntentHandoff {
         intent_id: IntentId(EventId(intent.to_owned())),
         agent: agent(who),
+        tif: TimeInForce::Day,
         body,
     })
 }

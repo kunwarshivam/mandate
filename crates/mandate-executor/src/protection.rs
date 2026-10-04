@@ -143,11 +143,13 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         let record = changed(batch, &instrument, "watchdog", pairs)?;
         batch.notify(record.clone(), "stop_watchdog");
         let intent_id = IntentId(EventId(format!("{WATCHDOG}{}", record.0)));
+        let tif = order_tif(batch, &instrument);
         received(
             batch,
             IntentHandoff {
                 intent_id,
                 agent,
+                tif,
                 body: IntentBody::Order {
                     instrument,
                     side: Side::Sell,
@@ -519,7 +521,6 @@ fn next_rung(
     instrument: &InstrumentId,
     (intent, rung): (&IntentId, u32),
     qty: Qty,
-    lone: bool,
 ) -> Result<(), ExecutorError> {
     let (agent, body) = intent_of(batch, intent)?;
     let IntentBody::Order {
@@ -559,13 +560,10 @@ fn next_rung(
         extended_hours: extended_hours(batch.ports, instrument, batch.at(), purpose),
         purpose,
     };
-    let mut extra = vec![
+    let extra = vec![
         ("rung", int(u64::from(step))?),
         ("at_floor", Value::Bool(at_floor)),
     ];
-    if lone {
-        extra.push(("laddered", Value::Bool(true)));
-    }
     journal_rung(batch, &request, Some(intent), &agent, 1, extra)?;
     if at_floor {
         let alerted = changed(batch, instrument, "ladder_floor", Vec::new())?;
@@ -965,7 +963,7 @@ fn lone_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             let sends = sendable(batch, &instrument, &lone.intent, left)?;
             if sends > Qty::ZERO {
                 let at = (&lone.intent, lone.ladder.rung);
-                next_rung(batch, &instrument, at, sends, true)?;
+                next_rung(batch, &instrument, at, sends)?;
             }
         }
     }
@@ -1054,7 +1052,7 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                         true
                     } else {
                         let at = (&sequence.intent, sequence.ladder.rung);
-                        next_rung(batch, &instrument, at, sends, false)?;
+                        next_rung(batch, &instrument, at, sends)?;
                         continue;
                     }
                 }
@@ -1171,7 +1169,7 @@ fn bracket(
         let qty = filled.min(room);
         let mut request = None;
         if qty > Qty::ZERO {
-            let id = ClientOrderId::for_protection(entry, &batch.id_after(1))?;
+            let id = ClientOrderId::for_protection(entry, &batch.id_after(2))?;
             let oco = oco(
                 id,
                 &instrument,
@@ -1889,7 +1887,7 @@ fn re_place(
         _ => return Err(ExecutorError::Unimplemented { story: "E7-4" }),
     };
     let request = SubmitOrder {
-        client_order_id: ClientOrderId::for_protection(&sequence.entry, &batch.id_after(1))?,
+        client_order_id: ClientOrderId::for_protection(&sequence.entry, &batch.id_after(2))?,
         instrument: instrument.clone(),
         side: Side::Sell,
         qty,
@@ -2019,7 +2017,7 @@ pub(crate) fn passive_exit(
         .unwrap_or(Qty::ZERO);
     let mut requests = vec![first];
     if rest > Qty::ZERO {
-        let id = ClientOrderId::for_protection(&sequence.entry, &batch.id_after(1))?;
+        let id = ClientOrderId::for_protection(&sequence.entry, &batch.id_after(2))?;
         let legs = OcoLegs {
             take_profit,
             stop: prices.stop,
@@ -2789,7 +2787,7 @@ mod sequence_tests {
     use crate::error::ExecutorError;
     use crate::fold::fold;
     use crate::ids::{ClientOrderId, IntentId};
-    use crate::payload::{clock, object, text};
+    use crate::payload::{clock, int, object, text};
     use crate::ports::{InstrumentSnapshot, MandateView, Ports};
     use crate::reconcile::tests::{
         Everything, Executor, Ids, aapl, account, drafted, executor_config, fees, missing,
@@ -2995,6 +2993,7 @@ mod sequence_tests {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(intent.to_owned())),
             agent: AgentId(agent.to_owned()),
+            tif: TimeInForce::Day,
             body: IntentBody::Order {
                 instrument: aapl()?,
                 side: Side::Sell,
@@ -4134,7 +4133,7 @@ mod sequence_tests {
                     };
                     Some((
                         field("intent_id"),
-                        field("agent"),
+                        field("agent_id"),
                         field("purpose"),
                         field("qty"),
                     ))
@@ -4801,6 +4800,7 @@ mod sequence_tests {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(intent.to_owned())),
             agent: AgentId("agent-a".to_owned()),
+            tif: TimeInForce::Day,
             body: IntentBody::Order {
                 instrument: InstrumentId::new(name)?,
                 side,
@@ -8613,6 +8613,15 @@ mod sequence_tests {
         /// The exits laddered with no sequence of their own (DEC-260 (14)): a pause since a step
         /// was asked does not end them.
         lone: BTreeSet<String>,
+        /// The exits whose sequence is running, as the fold's `exiting` holds them: an
+        /// `unprotected_start` whose trio names the exit starts one, and an `unprotected_end`
+        /// ends it — a rung of a sequenced exit ends with its sequence (DEC-409), a rung of an
+        /// unsequenced one is a lone ladder's (DEC-260 (14)).
+        sequenced: BTreeSet<String>,
+        /// The last `OrderRequestRecorded`'s payload, which the `OrderSubmitted` that names it
+        /// reads its executor-only members from (§9.5, rule 45) — the oracle reads them the same
+        /// way the fold does.
+        companion: Option<Value>,
         /// The exit whose sequence opened the latest interval, and the exits whose interval
         /// reached its bound, which ends their climb (§5.6 step 2).
         sequence: Option<String>,
@@ -8921,12 +8930,39 @@ mod sequence_tests {
         }
 
         fn saw(&mut self, draft: &EventDraft) -> Result<(), String> {
-            let field = |name: &str| draft.payload.get(name).and_then(Value::as_str);
+            if draft.event_type == "OrderRequestRecorded" {
+                self.companion = Some(draft.payload.clone());
+            }
+            let mut payload = draft.payload.clone();
+            if draft.event_type == "OrderSubmitted"
+                && let Some(companion) = &self.companion
+                && let (Value::Object(merged), Value::Object(companion)) = (&mut payload, companion)
+            {
+                for (key, value) in companion {
+                    merged.entry(key.clone()).or_insert_with(|| value.clone());
+                }
+            }
+            let field = |name: &str| payload.get(name).and_then(Value::as_str);
             let intent = field("intent_id").unwrap_or_default().to_owned();
             if draft.event_type == "ProtectionChanged" {
                 match field("action") {
-                    Some("unprotected_start" | "passive_start") => self.open = true,
-                    Some("unprotected_end") => self.open = false,
+                    Some("unprotected_start" | "passive_start") => {
+                        self.open = true;
+                        if field("intent_id").is_some()
+                            && field("entry").is_some()
+                            && (field("agent_id").is_some() || field("agent").is_some())
+                            && let Some(opened) = field("intent_id")
+                        {
+                            self.sequenced.insert(opened.to_owned());
+                            self.sequence = Some(opened.to_owned());
+                        }
+                    }
+                    Some("unprotected_end") => {
+                        self.open = false;
+                        if let Some(ended) = self.sequence.clone() {
+                            self.sequenced.remove(&ended);
+                        }
+                    }
                     Some("expiry_unreplaceable") => self.alerted = true,
                     _ => {}
                 }
@@ -9026,7 +9062,7 @@ mod sequence_tests {
                         Some("protective") => Purpose::Protective,
                         _ => Purpose::RiskExit,
                     };
-                    let extended = draft.payload.get("extended_hours") == Some(&Value::Bool(true));
+                    let extended = payload.get("extended_hours") == Some(&Value::Bool(true));
                     let id = field("client_order_id").unwrap_or_default();
                     self.sent(id, purpose, extended)?;
                     let qty = field("qty")
@@ -9081,7 +9117,8 @@ mod sequence_tests {
                     if self.between.remove(&intent).is_some() {
                         self.parked.remove(&intent);
                     }
-                    if draft.payload.get("laddered") == Some(&Value::Bool(true)) {
+                    let rung = !matches!(payload.get("rung"), None | Some(Value::Null));
+                    if rung && !self.sequenced.contains(&intent) {
                         self.lone.insert(intent.clone());
                     }
                     if let Some(exit) = self.exits.get_mut(&intent) {
@@ -9426,6 +9463,8 @@ mod sequence_tests {
             between: BTreeMap::new(),
             parked: BTreeSet::new(),
             lone: BTreeSet::new(),
+            sequenced: BTreeSet::new(),
+            companion: None,
             sequence: None,
             bounded: BTreeSet::new(),
             ended: BTreeSet::new(),
@@ -11371,6 +11410,17 @@ mod sequence_tests {
         at: i64,
         age: i64,
     ) -> Result<(Executor, SubmitOrder, EventDraft), ExecutorError> {
+        let (executor, order, _, draft) = alone_at_with_companion(purpose, limit, at, age)?;
+        Ok((executor, order, draft))
+    }
+
+    /// The exit's submission and the `OrderRequestRecorded` beside it (§9.5, rule 45).
+    fn alone_at_with_companion(
+        purpose: Purpose,
+        limit: &str,
+        at: i64,
+        age: i64,
+    ) -> Result<(Executor, SubmitOrder, EventDraft, EventDraft), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = tiered_ports(&config, &fees);
         let mut executor = held(&ports)?;
@@ -11385,6 +11435,15 @@ mod sequence_tests {
             .copied()
             .cloned()
             .ok_or_else(|| missing("the exit's submission"))?;
+        let mut companions = ran.iter().filter_map(|effect| match effect {
+            Effect::Journal(draft) if draft.event_type == "OrderRequestRecorded" => Some(draft),
+            _ => None,
+        });
+        let companion = companions
+            .next()
+            .cloned()
+            .ok_or_else(|| missing("its OrderRequestRecorded"))?;
+        assert_eq!(companions.count(), 0, "one companion per submission");
         let draft = ran
             .iter()
             .find_map(|effect| match effect {
@@ -11393,7 +11452,7 @@ mod sequence_tests {
             })
             .cloned()
             .ok_or_else(|| missing("its OrderSubmitted"))?;
-        Ok((executor, order, draft))
+        Ok((executor, order, companion, draft))
     }
 
     /// §4.3, §5.6, DEC-260 (13), (14): in after-hours an unprotected position's risk exit goes as an
@@ -11402,16 +11461,25 @@ mod sequence_tests {
     /// broker queues to the session (§5.5, §9.6), and so does an exit priced above the bid.
     #[test]
     fn an_after_hours_risk_exit_is_laddered_and_extended() -> Result<(), ExecutorError> {
-        let laddered = Some(Value::Bool(true));
-        let (_, order, draft) = alone_at(Purpose::RiskExit, "150", AFTER_HOURS, 0)?;
+        let first_rung = Some(int(0)?);
+        let (_, order, companion, _) =
+            alone_at_with_companion(Purpose::RiskExit, "150", AFTER_HOURS, 0)?;
         assert_eq!(order.limit_price, Some(Price::parse("149.25")?));
         assert!(order.extended_hours);
-        assert_eq!(draft.payload.get("laddered").cloned(), laddered);
+        assert_eq!(
+            companion.payload.get("rung").cloned(),
+            first_rung,
+            "a lone ladder's first rung writes rung 0 (DEC-446 item 2)"
+        );
         for purpose in [Purpose::DiscretionaryExit, Purpose::OwnerExit] {
-            let (_, order, draft) = alone_at(purpose, "150", AFTER_HOURS, 0)?;
+            let (_, order, companion, _) = alone_at_with_companion(purpose, "150", AFTER_HOURS, 0)?;
             assert_eq!(order.limit_price, Some(Price::parse("150")?), "{purpose:?}");
             assert!(!order.extended_hours, "{purpose:?}");
-            assert_eq!(draft.payload.get("laddered"), None, "{purpose:?}");
+            assert_eq!(
+                companion.payload.get("rung"),
+                Some(&Value::Null),
+                "{purpose:?}"
+            );
         }
         let (_, passive, _) = alone_at(Purpose::RiskExit, "151", AFTER_HOURS, 0)?;
         assert_eq!(
@@ -13027,6 +13095,7 @@ mod bracket_tests {
             Input::Intent(IntentHandoff {
                 intent_id: IntentId(EventId(ENTRY.to_owned())),
                 agent: AgentId("agent-a".to_owned()),
+                tif: TimeInForce::Day,
                 body: IntentBody::Order {
                     instrument: aapl()?,
                     side: Side::Buy,
