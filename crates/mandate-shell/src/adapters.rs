@@ -30,14 +30,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use mandate_accounting::{InstrumentId, Side};
+use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
 use mandate_backtest::{Signal, Strategy, StrategyConfig};
+use mandate_canon::{Key, Object, Value};
 use mandate_executor::{
     AccountRef, AccountScope, AgentId as ExecutorAgentId, BrokerConnector, BrokerOutcome,
-    BrokerRequest, ConnectorError, EventId, ExecutorConfig, ExecutorState, IdGen,
+    BrokerRequest, ConnectorError, EventId, ExecutorConfig, ExecutorState, FoldedEvent, IdGen,
     InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView, Order as ExecutorOrder,
-    Ports, Seq, WorkspaceId, WriterEpoch, is_protected, paper_only_fee_config,
+    Ports, Seq, WorkspaceId, WriterEpoch, fold, is_protected, paper_only_fee_config,
 };
 use mandate_journal::{AppendOutcome, StoredEvent};
 use mandate_marketdata::dataset;
@@ -580,10 +581,10 @@ fn working_order_of(
     })
 }
 
-/// The executor's public protection probe over the mandate's first pinned instrument in a flat
-/// synthetic state. A flat instrument needs no resting order, but the call still proves the
-/// executor can answer the protection question before the tracer arms anything; the executor's
-/// own tests pin held positions and every coverage shape.
+/// The executor's public protection probe over an uncovered synthetic one-share position in the
+/// mandate's first pinned US equity. The position forces the executor to read the instrument
+/// snapshot and answer `false`; that answer proves the protection question is available before the
+/// tracer arms anything, rather than taking `is_protected`'s flat-position shortcut.
 pub struct ExecutorProtection {
     mandate: PathBuf,
 }
@@ -595,7 +596,9 @@ impl ExecutorProtection {
     }
 }
 
-struct ProtectionProbePorts;
+struct ProtectionProbePorts {
+    instrument: InstrumentId,
+}
 
 impl IdGen for ProtectionProbePorts {
     fn event_id(&self, _epoch: WriterEpoch, _head: Seq, _ordinal: u32) -> EventId {
@@ -612,18 +615,18 @@ impl ExecutorMandateView for ProtectionProbePorts {
         None
     }
 
-    fn covers(&self, _agent: &ExecutorAgentId, _instrument: &InstrumentId) -> bool {
-        false
+    fn covers(&self, _agent: &ExecutorAgentId, instrument: &InstrumentId) -> bool {
+        instrument == &self.instrument
     }
 }
 
 impl InstrumentSnapshot for ProtectionProbePorts {
-    fn asset_class(&self, _instrument: &InstrumentId) -> Option<mandate_accounting::AssetClass> {
-        None
+    fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
+        (instrument == &self.instrument).then_some(AssetClass::UsEquity)
     }
 
-    fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
-        None
+    fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
+        (instrument == &self.instrument).then_some(ShareIncrement::Whole)
     }
 
     fn exit_tier(&self, _instrument: &InstrumentId) -> Option<mandate_executor::ExitTier> {
@@ -637,6 +640,67 @@ fn protection_probe_date(raw: &str) -> Result<Date, Cause> {
     })
 }
 
+fn protection_probe_payload(fields: &[(&str, &str)]) -> Result<Value, Cause> {
+    let mut payload = Object::new();
+    for (name, value) in fields {
+        let key = Key::new(name).map_err(|_| Cause::Absent {
+            what: "a protection probe payload key",
+        })?;
+        payload.insert(key, Value::Str((*value).to_owned()));
+    }
+    Ok(Value::Object(payload))
+}
+
+fn fold_protection_probe_position(
+    state: &mut ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<(), Cause> {
+    let stream = "acct:protection-probe:protection-probe";
+    let clock = "1970-01-01T00:00:10.000000000Z";
+    for (seq, event_type, fields) in [
+        (1, "StreamOpened", vec![("environment", "paper")]),
+        (
+            2,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", "md-protection-probe"),
+                ("agent", "protection-probe"),
+                ("instrument", instrument.as_str()),
+                ("side", "buy"),
+                ("qty", "1"),
+                ("limit", "1"),
+                ("risk_clock", clock),
+            ],
+        ),
+        (
+            3,
+            "FillApplied",
+            vec![
+                ("fill_id", "fill-protection-probe"),
+                ("client_order_id", "md-protection-probe"),
+                ("instrument", instrument.as_str()),
+                ("side", "buy"),
+                ("qty_gross", "1"),
+                ("price", "1"),
+                ("risk_clock", clock),
+            ],
+        ),
+    ] {
+        fold(
+            state,
+            &FoldedEvent {
+                stream: stream.to_owned(),
+                seq: Seq(seq),
+                event_id: EventId(format!("protection-probe-{seq}")),
+                event_type: event_type.to_owned(),
+                causation_id: None,
+                payload: protection_probe_payload(&fields)?,
+            },
+        )?;
+    }
+    Ok(())
+}
+
 impl Protection for ExecutorProtection {
     fn probe(&self) -> Result<(), Cause> {
         let document = mandate_document(&self.mandate)?;
@@ -647,6 +711,11 @@ impl Protection for ExecutorProtection {
             .ok_or(Cause::Absent {
                 what: "a pinned instrument to probe for protection",
             })?;
+        if pinned.asset_class != AssetClass::UsEquity {
+            return Err(Cause::Absent {
+                what: "the tracer's pinned US equity",
+            });
+        }
         let first = protection_probe_date("2026-01-01")?;
         let last = protection_probe_date("2026-12-31")?;
         let calendar = TradingCalendar::new(first, last, [], []).map_err(|_| Cause::Absent {
@@ -654,27 +723,38 @@ impl Protection for ExecutorProtection {
         })?;
         let fees = paper_only_fee_config("paper", calendar, "2026-01-01")?;
         let config = ExecutorConfig::PROPOSED;
-        let ports = Ports {
-            ids: &ProtectionProbePorts,
-            mandates: &ProtectionProbePorts,
-            instruments: &ProtectionProbePorts,
-            config: &config,
-            fees: &fees,
-        };
-        let state = ExecutorState::new(AccountScope {
-            account: AccountRef("protection-probe".to_owned()),
-            workspace: WorkspaceId("protection-probe".to_owned()),
-        });
         let instrument =
             InstrumentId::new(pinned.asset_id.as_str()).map_err(|_| Cause::Absent {
                 what: "the protection probe's instrument",
             })?;
+        let probe_ports = ProtectionProbePorts {
+            instrument: instrument.clone(),
+        };
+        let ports = Ports {
+            ids: &probe_ports,
+            mandates: &probe_ports,
+            instruments: &probe_ports,
+            config: &config,
+            fees: &fees,
+        };
+        if ports.instruments.asset_class(&instrument) != Some(AssetClass::UsEquity)
+            || ports.instruments.increment(&instrument) != Some(ShareIncrement::Whole)
+        {
+            return Err(Cause::Absent {
+                what: "the protection probe's instrument snapshot",
+            });
+        }
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("protection-probe".to_owned()),
+            workspace: WorkspaceId("protection-probe".to_owned()),
+        });
+        fold_protection_probe_position(&mut state, &instrument)?;
         if is_protected(&state, &instrument, &ports)? {
-            Ok(())
-        } else {
             Err(Cause::Absent {
-                what: "the executor's protective path",
+                what: "the uncovered protection probe position",
             })
+        } else {
+            Ok(())
         }
     }
 }
@@ -1053,11 +1133,13 @@ mod tests {
         let instrument =
             mandate_accounting::InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
                 .map_err(|e| e.to_string())?;
-        assert!(!ExecutorMandateView::covers(
-            &ProtectionProbePorts,
-            &agent,
-            &instrument
-        ));
+        let ports = ProtectionProbePorts {
+            instrument: instrument.clone(),
+        };
+        assert!(ExecutorMandateView::covers(&ports, &agent, &instrument));
+        let other = mandate_accounting::InstrumentId::new("7b4a1c2e-2222-4a2b-9c3d-000000000002")
+            .map_err(|e| e.to_string())?;
+        assert!(!ExecutorMandateView::covers(&ports, &agent, &other));
         Ok(())
     }
 
