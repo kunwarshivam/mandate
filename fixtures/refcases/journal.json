@@ -10442,5 +10442,1667 @@
     "event_type": "ThesisRevised"
    }
   ]
+ },
+ "account_stream": {
+  "spec": "docs/specs/journal.md v0.13 §9.5 (DEC-446, DEC-447)",
+  "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+  "genesis_prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "chain": [
+   {
+    "seq": 1,
+    "event_type": "StreamOpened",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZQA0A000000000000000E1",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+     "seq": 1,
+     "event_type": "StreamOpened",
+     "schema_version": 1,
+     "event_time": "2026-09-21T14:00:00.000000000Z",
+     "recorded_at": "2026-09-21T14:00:00.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "executor",
+      "version": "0.1.0",
+      "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "config_refs": {},
+     "payload": {
+      "stream_type": "account",
+      "workspace_id": "ws_01J8Z2",
+      "broker": "alpaca",
+      "account_ref": "01J8Z2ACCT00000000000000A2"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"executor\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZQA0A000000000000000E1\",\"event_time\":\"2026-09-21T14:00:00.000000000Z\",\"event_type\":\"StreamOpened\",\"payload\":{\"account_ref\":\"01J8Z2ACCT00000000000000A2\",\"broker\":\"alpaca\",\"stream_type\":\"account\",\"workspace_id\":\"ws_01J8Z2\"},\"pii_refs\":[],\"prev_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorded_at\":\"2026-09-21T14:00:00.000000400Z\",\"schema_version\":1,\"seq\":1,\"stream_id\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2\"}",
+    "hash": "0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6"
+   },
+   {
+    "seq": 2,
+    "event_type": "IntentReceived",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZQA1A000000000000000E2",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+     "seq": 2,
+     "event_type": "IntentReceived",
+     "schema_version": 2,
+     "event_time": "2026-09-21T14:00:05.000000000Z",
+     "recorded_at": "2026-09-21T14:00:05.000000400Z",
+     "clock_source": "local",
+     "causation_id": "01J8ZT80A000000000000000D1",
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "executor",
+      "version": "0.1.0",
+      "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "config_refs": {
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "intent_id": "01J8ZT90A000000000000000P1",
+      "agent_id": "agent_a",
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "side": "buy",
+      "type": "limit",
+      "tif": "day",
+      "qty": "10",
+      "limit_price": "150",
+      "purpose": "open",
+      "risk_clock": "2026-09-21T14:00:05.000000000Z"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"executor\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZT80A000000000000000D1\",\"clock_source\":\"local\",\"config_refs\":{\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZQA1A000000000000000E2\",\"event_time\":\"2026-09-21T14:00:05.000000000Z\",\"event_type\":\"IntentReceived\",\"payload\":{\"agent_id\":\"agent_a\",\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"intent_id\":\"01J8ZT90A000000000000000P1\",\"limit_price\":\"150\",\"purpose\":\"open\",\"qty\":\"10\",\"risk_clock\":\"2026-09-21T14:00:05.000000000Z\",\"side\":\"buy\",\"tif\":\"day\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6\",\"recorded_at\":\"2026-09-21T14:00:05.000000400Z\",\"schema_version\":2,\"seq\":2,\"stream_id\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2\"}",
+    "hash": "f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5"
+   },
+   {
+    "seq": 3,
+    "event_type": "ProtectionChanged",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZQA2A000000000000000E3",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+     "seq": 3,
+     "event_type": "ProtectionChanged",
+     "schema_version": 1,
+     "event_time": "2026-09-21T14:00:10.000000000Z",
+     "recorded_at": "2026-09-21T14:00:10.000000400Z",
+     "clock_source": "local",
+     "causation_id": "01J8ZQA1A000000000000000E2",
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "executor",
+      "version": "0.1.0",
+      "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "config_refs": {},
+     "payload": {
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "action": "intended",
+      "orders": [],
+      "awaiting": [],
+      "qty": null,
+      "stop": "139",
+      "take_profit": "159",
+      "intent_id": "01J8ZT90A000000000000000P1",
+      "bracket": null,
+      "entry": null,
+      "agent_id": null,
+      "replacing": null,
+      "created_on": null,
+      "sent": null,
+      "uncovered": null,
+      "acknowledged": null,
+      "risk_clock": "2026-09-21T14:00:10.000000000Z"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"executor\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZQA1A000000000000000E2\",\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZQA2A000000000000000E3\",\"event_time\":\"2026-09-21T14:00:10.000000000Z\",\"event_type\":\"ProtectionChanged\",\"payload\":{\"acknowledged\":null,\"action\":\"intended\",\"agent_id\":null,\"awaiting\":[],\"bracket\":null,\"created_on\":null,\"entry\":null,\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"intent_id\":\"01J8ZT90A000000000000000P1\",\"orders\":[],\"qty\":null,\"replacing\":null,\"risk_clock\":\"2026-09-21T14:00:10.000000000Z\",\"sent\":null,\"stop\":\"139\",\"take_profit\":\"159\",\"uncovered\":null},\"pii_refs\":[],\"prev_hash\":\"f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5\",\"recorded_at\":\"2026-09-21T14:00:10.000000400Z\",\"schema_version\":1,\"seq\":3,\"stream_id\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2\"}",
+    "hash": "8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc"
+   },
+   {
+    "seq": 4,
+    "event_type": "GateDecided",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZQA3A000000000000000E4",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+     "seq": 4,
+     "event_type": "GateDecided",
+     "schema_version": 2,
+     "event_time": "2026-09-21T14:00:15.000000000Z",
+     "recorded_at": "2026-09-21T14:00:15.000000400Z",
+     "clock_source": "local",
+     "causation_id": "01J8ZQA1A000000000000000E2",
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "executor",
+      "version": "0.1.0",
+      "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "config_refs": {
+      "fee_config": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "trading_calendar": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+      "instrument_snapshot": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "rule_set": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+     },
+     "payload": {
+      "intent_id": "01J8ZT90A000000000000000P1",
+      "verdict": "allow",
+      "reason_code": null,
+      "data_profile": "iex",
+      "quotes_used": [
+       {
+        "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+        "bid": "149.98",
+        "ask": "150.02",
+        "as_of": "2026-09-21T14:00:05.000000000Z",
+        "feed": "iex"
+       }
+      ],
+      "marks_used": [
+       {
+        "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+        "price": "149.98",
+        "source": "quote",
+        "kind": "risk"
+       }
+      ],
+      "checks": [
+       {
+        "id": "buying_power",
+        "result": "pass",
+        "inputs": {
+         "buying_power": "10000"
+        },
+        "computed": {
+         "order_cost": "1500"
+        }
+       },
+       {
+        "id": "day_trade_budget",
+        "result": "not_applicable",
+        "inputs": {
+         "regime": "intraday_margin"
+        },
+        "computed": {}
+       }
+      ],
+      "risk_clock": "2026-09-21T14:00:15.000000000Z"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"executor\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZQA1A000000000000000E2\",\"clock_source\":\"local\",\"config_refs\":{\"fee_config\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"instrument_snapshot\":\"sha256:4444444444444444444444444444444444444444444444444444444444444444\",\"mandate_version\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\",\"rule_set\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"trading_calendar\":\"sha256:7777777777777777777777777777777777777777777777777777777777777777\"},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZQA3A000000000000000E4\",\"event_time\":\"2026-09-21T14:00:15.000000000Z\",\"event_type\":\"GateDecided\",\"payload\":{\"checks\":[{\"computed\":{\"order_cost\":\"1500\"},\"id\":\"buying_power\",\"inputs\":{\"buying_power\":\"10000\"},\"result\":\"pass\"},{\"computed\":{},\"id\":\"day_trade_budget\",\"inputs\":{\"regime\":\"intraday_margin\"},\"result\":\"not_applicable\"}],\"data_profile\":\"iex\",\"intent_id\":\"01J8ZT90A000000000000000P1\",\"marks_used\":[{\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"kind\":\"risk\",\"price\":\"149.98\",\"source\":\"quote\"}],\"quotes_used\":[{\"as_of\":\"2026-09-21T14:00:05.000000000Z\",\"ask\":\"150.02\",\"bid\":\"149.98\",\"feed\":\"iex\",\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\"}],\"reason_code\":null,\"risk_clock\":\"2026-09-21T14:00:15.000000000Z\",\"verdict\":\"allow\"},\"pii_refs\":[],\"prev_hash\":\"8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc\",\"recorded_at\":\"2026-09-21T14:00:15.000000400Z\",\"schema_version\":2,\"seq\":4,\"stream_id\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2\"}",
+    "hash": "ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467"
+   },
+   {
+    "seq": 5,
+    "event_type": "OrderRequestRecorded",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZQA4A000000000000000E5",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+     "seq": 5,
+     "event_type": "OrderRequestRecorded",
+     "schema_version": 1,
+     "event_time": "2026-09-21T14:00:20.000000000Z",
+     "recorded_at": "2026-09-21T14:00:20.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "executor",
+      "version": "0.1.0",
+      "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "config_refs": {},
+     "payload": {
+      "agent_id": "agent_a",
+      "intent_id": "01J8ZT90A000000000000000P1",
+      "purpose": "open",
+      "extended_hours": false,
+      "stop_price": null,
+      "order_class": "bracket",
+      "take_profit": "159",
+      "stop": "139",
+      "rung": null,
+      "at_floor": null,
+      "risk_clock": "2026-09-21T14:00:20.000000000Z"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"executor\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZQA4A000000000000000E5\",\"event_time\":\"2026-09-21T14:00:20.000000000Z\",\"event_type\":\"OrderRequestRecorded\",\"payload\":{\"agent_id\":\"agent_a\",\"at_floor\":null,\"extended_hours\":false,\"intent_id\":\"01J8ZT90A000000000000000P1\",\"order_class\":\"bracket\",\"purpose\":\"open\",\"risk_clock\":\"2026-09-21T14:00:20.000000000Z\",\"rung\":null,\"stop\":\"139\",\"stop_price\":null,\"take_profit\":\"159\"},\"pii_refs\":[],\"prev_hash\":\"ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467\",\"recorded_at\":\"2026-09-21T14:00:20.000000400Z\",\"schema_version\":1,\"seq\":5,\"stream_id\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2\"}",
+    "hash": "7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae"
+   },
+   {
+    "seq": 6,
+    "event_type": "OrderSubmitted",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZQA5A000000000000000E6",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+     "seq": 6,
+     "event_type": "OrderSubmitted",
+     "schema_version": 2,
+     "event_time": "2026-09-21T14:00:25.000000000Z",
+     "recorded_at": "2026-09-21T14:00:25.000000400Z",
+     "clock_source": "local",
+     "causation_id": "01J8ZQA4A000000000000000E5",
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "executor",
+      "version": "0.1.0",
+      "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "config_refs": {},
+     "payload": {
+      "client_order_id": "md-01J8ZT90A000000000000000P1",
+      "attempt": 1,
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "side": "buy",
+      "type": "limit",
+      "tif": "gtc",
+      "qty": "10",
+      "limit_price": "150",
+      "risk_clock": "2026-09-21T14:00:25.000000000Z"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"executor\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":\"01J8ZQA4A000000000000000E5\",\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZQA5A000000000000000E6\",\"event_time\":\"2026-09-21T14:00:25.000000000Z\",\"event_type\":\"OrderSubmitted\",\"payload\":{\"attempt\":1,\"client_order_id\":\"md-01J8ZT90A000000000000000P1\",\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"limit_price\":\"150\",\"qty\":\"10\",\"risk_clock\":\"2026-09-21T14:00:25.000000000Z\",\"side\":\"buy\",\"tif\":\"gtc\",\"type\":\"limit\"},\"pii_refs\":[],\"prev_hash\":\"7d75645781848a14678f26c2b590ebbaeb20a57ff985f9ae03e9df9570eb9cae\",\"recorded_at\":\"2026-09-21T14:00:25.000000400Z\",\"schema_version\":2,\"seq\":6,\"stream_id\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2\"}",
+    "hash": "eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d"
+   },
+   {
+    "seq": 7,
+    "event_type": "ProtectionChanged",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZQA6A000000000000000E7",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+     "seq": 7,
+     "event_type": "ProtectionChanged",
+     "schema_version": 1,
+     "event_time": "2026-09-21T14:00:30.000000000Z",
+     "recorded_at": "2026-09-21T14:00:30.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "executor",
+      "version": "0.1.0",
+      "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "config_refs": {},
+     "payload": {
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "action": "placed",
+      "orders": [
+       "md-01J8ZT90A000000000000000P1-p1"
+      ],
+      "awaiting": [],
+      "qty": "10",
+      "stop": "139",
+      "take_profit": "159",
+      "intent_id": null,
+      "bracket": null,
+      "entry": null,
+      "agent_id": null,
+      "replacing": null,
+      "created_on": "2026-09-21",
+      "sent": null,
+      "uncovered": null,
+      "acknowledged": null,
+      "risk_clock": "2026-09-21T14:00:30.000000000Z"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"executor\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZQA6A000000000000000E7\",\"event_time\":\"2026-09-21T14:00:30.000000000Z\",\"event_type\":\"ProtectionChanged\",\"payload\":{\"acknowledged\":null,\"action\":\"placed\",\"agent_id\":null,\"awaiting\":[],\"bracket\":null,\"created_on\":\"2026-09-21\",\"entry\":null,\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"intent_id\":null,\"orders\":[\"md-01J8ZT90A000000000000000P1-p1\"],\"qty\":\"10\",\"replacing\":null,\"risk_clock\":\"2026-09-21T14:00:30.000000000Z\",\"sent\":null,\"stop\":\"139\",\"take_profit\":\"159\",\"uncovered\":null},\"pii_refs\":[],\"prev_hash\":\"eca4842a1a3dc3b41e15c6f5d65164e13728b004e11a0b2c99ac1b67ba819f8d\",\"recorded_at\":\"2026-09-21T14:00:30.000000400Z\",\"schema_version\":1,\"seq\":7,\"stream_id\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2\"}",
+    "hash": "45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d"
+   },
+   {
+    "seq": 8,
+    "event_type": "ProtectionChanged",
+    "body": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8ZQA7A000000000000000E8",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+     "seq": 8,
+     "event_type": "ProtectionChanged",
+     "schema_version": 1,
+     "event_time": "2026-09-21T14:00:35.000000000Z",
+     "recorded_at": "2026-09-21T14:00:35.000000400Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "executor",
+      "version": "0.1.0",
+      "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "config_refs": {},
+     "payload": {
+      "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "action": "unprotected_start",
+      "orders": [
+       "md-01J8ZT90A000000000000000P1-p1"
+      ],
+      "awaiting": [],
+      "qty": null,
+      "stop": "139",
+      "take_profit": "159",
+      "intent_id": "01J8ZT90A000000000000000P1",
+      "bracket": null,
+      "entry": "md-01J8ZT90A000000000000000P1",
+      "agent_id": "agent_a",
+      "replacing": true,
+      "created_on": null,
+      "sent": null,
+      "uncovered": null,
+      "acknowledged": null,
+      "risk_clock": "2026-09-21T14:00:35.000000000Z"
+     },
+     "artifact_refs": [],
+     "pii_refs": [],
+     "prev_hash": "45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d"
+    },
+    "canonical": "{\"actor\":{\"build\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"executor\",\"kind\":\"system\",\"version\":\"0.1.0\"},\"artifact_refs\":[],\"causation_id\":null,\"clock_source\":\"local\",\"config_refs\":{},\"correlation_id\":null,\"envelope_version\":1,\"environment\":\"paper\",\"event_id\":\"01J8ZQA7A000000000000000E8\",\"event_time\":\"2026-09-21T14:00:35.000000000Z\",\"event_type\":\"ProtectionChanged\",\"payload\":{\"acknowledged\":null,\"action\":\"unprotected_start\",\"agent_id\":\"agent_a\",\"awaiting\":[],\"bracket\":null,\"created_on\":null,\"entry\":\"md-01J8ZT90A000000000000000P1\",\"instrument_id\":\"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415\",\"intent_id\":\"01J8ZT90A000000000000000P1\",\"orders\":[\"md-01J8ZT90A000000000000000P1-p1\"],\"qty\":null,\"replacing\":true,\"risk_clock\":\"2026-09-21T14:00:35.000000000Z\",\"sent\":null,\"stop\":\"139\",\"take_profit\":\"159\",\"uncovered\":null},\"pii_refs\":[],\"prev_hash\":\"45396f23bc9ee436555d91ec87c84c25a6c0b5338200af3b7b78bb1b38d1bb5d\",\"recorded_at\":\"2026-09-21T14:00:35.000000400Z\",\"schema_version\":1,\"seq\":8,\"stream_id\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2\"}",
+    "hash": "affcbd9dfdc92b04f0af282bed0ccd0b24d4ddd3c0fa718107fe19a51786c57e"
+   }
+  ],
+  "batches": [
+   [
+    1
+   ],
+   [
+    2,
+    3
+   ],
+   [
+    4
+   ],
+   [
+    5,
+    6
+   ],
+   [
+    7
+   ],
+   [
+    8
+   ]
+  ],
+  "invalid_drafts": [
+   {
+    "name": "companion_class_without_take_profit",
+    "clause": "rule 39",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.take_profit",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.order_class"
+    }
+   },
+   {
+    "name": "companion_take_profit_without_stop",
+    "clause": "rule 39",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.take_profit"
+    }
+   },
+   {
+    "name": "companion_stop_without_class_or_take_profit",
+    "clause": "rule 39: the legs travel together, at the first offending member",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.order_class",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.take_profit"
+    }
+   },
+   {
+    "name": "companion_rung_without_floor",
+    "clause": "rule 40",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.rung",
+      "value": 1
+     },
+     {
+      "path": "payload.at_floor",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.at_floor"
+    }
+   },
+   {
+    "name": "companion_floor_without_rung",
+    "clause": "rule 40",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.at_floor",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.at_floor"
+    }
+   },
+   {
+    "name": "companion_rung_as_text",
+    "clause": "§9.5 integer",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.rung",
+      "value": "1"
+     },
+     {
+      "path": "payload.at_floor",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.rung"
+    }
+   },
+   {
+    "name": "companion_agent_not_an_id",
+    "clause": "§9.1 id",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.agent_id",
+      "value": "agent a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.agent_id"
+    }
+   },
+   {
+    "name": "companion_intent_not_a_ulid",
+    "clause": "§9.1 ulid",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "intent 01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "companion_carries_a_laddered_flag",
+    "clause": "§9.5 closed schema: there is no laddered member (DEC-446 item 2)",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.laddered",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.laddered"
+    }
+   },
+   {
+    "name": "companion_without_extended_hours",
+    "clause": "§4.2 absent member",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.extended_hours",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.extended_hours"
+    }
+   },
+   {
+    "name": "companion_risk_clock_off_the_second",
+    "clause": "§9.2 risk_clock",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-09-21T14:15:00.500000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "companion_without_risk_clock",
+    "clause": "§9.1 absent member",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "intended_names_an_order",
+    "clause": "rule 41",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.orders",
+      "value": [
+       "md-01J8ZT90A000000000000000P1-p1"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.orders"
+    }
+   },
+   {
+    "name": "placed_names_no_order",
+    "clause": "rule 41",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.orders",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.orders"
+    }
+   },
+   {
+    "name": "placed_awaits_a_cancel",
+    "clause": "rule 41",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.awaiting",
+      "value": [
+       "md-01J8ZT90A000000000000000P1-p1"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.awaiting"
+    }
+   },
+   {
+    "name": "intended_carries_a_qty",
+    "clause": "rule 42",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "10"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "placed_without_qty",
+    "clause": "rule 42",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "intended_take_profit_without_stop",
+    "clause": "rule 43: take_profit is null when stop is",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.take_profit"
+    }
+   },
+   {
+    "name": "watchdog_carrying_prices",
+    "clause": "rule 43: the prices are null on every action but the four",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "watchdog"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.stop",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.intent_id"
+      }
+     ]
+    }
+   },
+   {
+    "name": "intended_names_an_entry",
+    "clause": "rule 44: entry only in a start's trio",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.entry",
+      "value": "md-01J8ZT90A000000000000000P1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.entry"
+    }
+   },
+   {
+    "name": "intended_names_an_agent",
+    "clause": "rule 44: agent_id only in a start's trio",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.agent_id",
+      "value": "agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.agent_id"
+    }
+   },
+   {
+    "name": "rung_short_without_intent",
+    "clause": "rule 44",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "rung_short"
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "a_start_whose_trio_disagrees",
+    "clause": "rule 44: an exit sequence names all three, at the first that disagrees",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.entry",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.entry"
+    }
+   },
+   {
+    "name": "placed_replaces",
+    "clause": "rule 44: replacing only on the two starts",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.replacing",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.replacing"
+    }
+   },
+   {
+    "name": "watchdog_names_a_bracket",
+    "clause": "rule 44: bracket only on placed, the two starts, and unprotected_end",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "watchdog"
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.bracket",
+      "value": "md-01J8ZT90A000000000000000P1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bracket"
+    }
+   },
+   {
+    "name": "a_start_created_on",
+    "clause": "rule 44: created_on only on placed",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.created_on",
+      "value": "2026-09-21"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.created_on"
+    }
+   },
+   {
+    "name": "watchdog_sent_a_quantity",
+    "clause": "rule 44: sent only on rung_short",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "watchdog"
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.sent",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.sent"
+    }
+   },
+   {
+    "name": "watchdog_uncovered",
+    "clause": "rule 44: uncovered only on interval_limit and unprotected_end",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "watchdog"
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.uncovered",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.uncovered"
+    }
+   },
+   {
+    "name": "a_start_acknowledged",
+    "clause": "rule 44: acknowledged only on unprotected_end",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.acknowledged",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.acknowledged"
+    }
+   },
+   {
+    "name": "orders_as_text",
+    "clause": "§9.5 list",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.orders",
+      "value": "md-01J8ZT90A000000000000000P1-p1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.orders"
+    }
+   },
+   {
+    "name": "placed_without_instrument",
+    "clause": "§4.2 absent member",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.instrument_id",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument_id"
+    }
+   },
+   {
+    "name": "an_unknown_action",
+    "clause": "§9.5 action vocabulary",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "replaced"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.action"
+    }
+   },
+   {
+    "name": "created_on_not_a_date",
+    "clause": "§9.1 date",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.created_on",
+      "value": "09/21/2026"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.created_on"
+    }
+   },
+   {
+    "name": "intent_v2_without_risk_clock",
+    "clause": "§9.1 absent member: version 2 carries the clock",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "intent_v2_carries_protective_prices",
+    "clause": "§9.5 closed schema: never a member, at either version (DEC-446 item 5)",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": "139"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.stop"
+    }
+   },
+   {
+    "name": "intent_v2_carries_the_legacy_kind",
+    "clause": "§9.5 closed schema: the legacy member is refused",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.kind",
+      "value": "order"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.kind"
+    }
+   },
+   {
+    "name": "intent_v2_agent_not_an_id",
+    "clause": "§9.1 id",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "payload.agent_id",
+      "value": "agent a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.agent_id"
+    }
+   },
+   {
+    "name": "gate_v2_without_risk_clock",
+    "clause": "§9.1 absent member",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "gate_v2_carries_the_legacy_evaluation",
+    "clause": "§9.5 closed schema",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "payload.evaluation",
+      "value": "account_stream_only"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.evaluation"
+    }
+   },
+   {
+    "name": "submitted_v2_carries_the_agent",
+    "clause": "§9.5 closed schema: the executor-only members live on the companion (DEC-360 item 2)",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.agent",
+      "value": "agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.agent"
+    }
+   },
+   {
+    "name": "submitted_v2_without_risk_clock",
+    "clause": "§9.1 absent member",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "submitted_v2_at_version_3",
+    "clause": "§9.5: the closed versions are 1 and 2",
+    "base_seq": 6,
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 3
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "companion_on_the_agent_stream",
+    "clause": "§9 stream",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "v1_intent_received_still_appends",
+    "clause": "§8: version 1 is never edited and stays registered",
+    "base_seq": 2,
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 1
+     },
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "intended_without_take_profit",
+    "clause": "rule 43: take_profit is null where the sequence has none (crypto's)",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.take_profit",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "cancelled_with_qty",
+    "clause": "rule 42: cancelled carries the quantity it uncovered, where journaled",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "cancelled"
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.created_on",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "cancelled_without_qty",
+    "clause": "rule 42",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "cancelled"
+     },
+     {
+      "path": "payload.qty",
+      "value": null
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.created_on",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "placed_names_its_bracket",
+    "clause": "rule 44: bracket may be non-null on placed",
+    "base_seq": 7,
+    "changes": [
+     {
+      "path": "payload.bracket",
+      "value": "md-01J8ZT90A000000000000000P1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "a_start_without_its_trio",
+    "clause": "rule 44: the three are null together",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "companion_first_rung_zero",
+    "clause": "rule 40: a lone ladder's first rung writes rung 0 (DEC-446 item 2)",
+    "base_seq": 5,
+    "changes": [
+     {
+      "path": "payload.rung",
+      "value": 0
+     },
+     {
+      "path": "payload.at_floor",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "interval_limit_with_awaiting",
+    "clause": "rules 41 to 44: the interval's bound, awaiting its confirmed cancels",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "interval_limit"
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.awaiting",
+      "value": [
+       "md-01J8ZT90A000000000000000P1-p1"
+      ]
+     },
+     {
+      "path": "payload.uncovered",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "watchdog_minimal",
+    "clause": "rules 41 to 44: a watchdog with nothing else to say",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "watchdog"
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "unprotected_end_with_awaiting",
+    "clause": "rules 41 to 44: the interval ends awaiting a confirmed cancel, uncovered",
+    "base_seq": 8,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "unprotected_end"
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.awaiting",
+      "value": [
+       "md-01J8ZT90A000000000000000P1-p1"
+      ]
+     },
+     {
+      "path": "payload.uncovered",
+      "value": true
+     },
+     {
+      "path": "payload.acknowledged",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "rung_short_with_sent",
+    "clause": "rule 44: the short rung names the quantity it sent",
+    "base_seq": 3,
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "rung_short"
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.sent",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ],
+  "valid_batches": [
+   {
+    "name": "the_companion_and_its_order_in_one_batch",
+    "clause": "rule 45: one batch writes both",
+    "drafts": [
+     {
+      "base_seq": 5,
+      "changes": []
+     },
+     {
+      "base_seq": 6,
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Committed"
+    }
+   }
+  ],
+  "invalid_batches": [
+   {
+    "name": "a_submission_without_its_companion",
+    "clause": "rule 45: no OrderRequestRecorded immediately before it",
+    "drafts": [
+     {
+      "base_seq": 4,
+      "changes": []
+     },
+     {
+      "base_seq": 6,
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 1,
+     "reason": "schema",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "two_companions_before_a_submission",
+    "clause": "rule 45: more than one in the run of records immediately before it",
+    "drafts": [
+     {
+      "base_seq": 5,
+      "changes": []
+     },
+     {
+      "base_seq": 5,
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8ZQA8A000000000000000E9"
+       }
+      ]
+     },
+     {
+      "base_seq": 6,
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 2,
+     "reason": "schema",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "a_submission_naming_another_event",
+    "clause": "rule 45: the causation_id does not name the companion",
+    "drafts": [
+     {
+      "base_seq": 5,
+      "changes": []
+     },
+     {
+      "base_seq": 6,
+      "changes": [
+       {
+        "path": "causation_id",
+        "value": "01J8ZQA3A000000000000000E4"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 1,
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "a_companion_no_submission_names",
+    "clause": "rule 45: an orphan OrderRequestRecorded",
+    "drafts": [
+     {
+      "base_seq": 5,
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 0,
+     "reason": "schema",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "the_out_of_order_pair",
+    "clause": "rule 45: the submission cannot precede its companion",
+    "drafts": [
+     {
+      "base_seq": 6,
+      "changes": []
+     },
+     {
+      "base_seq": 5,
+      "changes": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "draft_index": 0,
+     "reason": "schema",
+     "path": "event_type"
+    }
+   }
+  ],
+  "fold_oracle": {
+   "intent": {
+    "intent_id": "01J8ZT90A000000000000000P1",
+    "agent_id": "agent_a",
+    "outcome": "submitted",
+    "protection": {
+     "stop": "139",
+     "take_profit": "159"
+    }
+   },
+   "request": {
+    "client_order_id": "md-01J8ZT90A000000000000000P1",
+    "intent_id": "01J8ZT90A000000000000000P1",
+    "agent_id": "agent_a",
+    "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+    "side": "buy",
+    "type": "limit",
+    "tif": "gtc",
+    "qty": "10",
+    "limit_price": "150",
+    "stop_price": null,
+    "order_class": "bracket",
+    "take_profit": "159",
+    "stop": "139",
+    "extended_hours": false,
+    "purpose": "open"
+   },
+   "protection": {
+    "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+    "resting": [
+     "md-01J8ZT90A000000000000000P1-p1"
+    ],
+    "covered_qty": "10",
+    "stop": "139",
+    "take_profit": "159"
+   },
+   "unprotected_open": true,
+   "resubmission": {
+    "client_order_id": "md-01J8ZT90A000000000000000P1",
+    "attempt": 2,
+    "changes_nothing_else": true
+   }
+  }
  }
 }
