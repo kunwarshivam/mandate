@@ -576,10 +576,20 @@ fn working_order_of(
     })
 }
 
-/// The executor's public protection probe over a flat synthetic state. A flat instrument needs no
-/// resting order, but the call still proves the executor can answer the protection question before
-/// the tracer arms anything; the executor's own tests pin held positions and every coverage shape.
-pub struct ExecutorProtection;
+/// The executor's public protection probe over the mandate's first pinned instrument in a flat
+/// synthetic state. A flat instrument needs no resting order, but the call still proves the
+/// executor can answer the protection question before the tracer arms anything; the executor's
+/// own tests pin held positions and every coverage shape.
+pub struct ExecutorProtection {
+    mandate: PathBuf,
+}
+
+impl ExecutorProtection {
+    /// A protection probe over the deployment's mandate document.
+    pub fn new(mandate: PathBuf) -> ExecutorProtection {
+        ExecutorProtection { mandate }
+    }
+}
 
 struct ProtectionProbePorts;
 
@@ -625,6 +635,18 @@ fn protection_probe_date(raw: &str) -> Result<Date, Cause> {
 
 impl Protection for ExecutorProtection {
     fn probe(&self) -> Result<(), Cause> {
+        let document = RiskExitPath {
+            agent: AgentId(String::new()),
+            mandate: self.mandate.clone(),
+        }
+        .document()?;
+        let pinned = document
+            .universe
+            .pinned_instruments
+            .first()
+            .ok_or(Cause::Absent {
+                what: "a pinned instrument to probe for protection",
+            })?;
         let first = protection_probe_date("2026-01-01")?;
         let last = protection_probe_date("2026-12-31")?;
         let calendar = TradingCalendar::new(first, last, [], []).map_err(|_| Cause::Absent {
@@ -644,10 +666,8 @@ impl Protection for ExecutorProtection {
             workspace: WorkspaceId("protection-probe".to_owned()),
         });
         let instrument =
-            InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415").map_err(|_| {
-                Cause::Absent {
-                    what: "the protection probe's instrument",
-                }
+            InstrumentId::new(pinned.asset_id.as_str()).map_err(|_| Cause::Absent {
+                what: "the protection probe's instrument",
             })?;
         if is_protected(&state, &instrument, &ports)? {
             Ok(())
@@ -976,7 +996,7 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
             sources.agent.clone(),
             sources.mandate.clone(),
         )),
-        protection: Box::new(ExecutorProtection),
+        protection: Box::new(ExecutorProtection::new(sources.mandate.clone())),
         mandate: Box::new(SpecMandate {
             path: sources.mandate,
         }),
@@ -1005,7 +1025,10 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use super::{ExecutorOrder, is_unattributed_exit, working_order_of};
+    use super::{
+        ExecutorMandateView, ExecutorOrder, ExecutorProtection, Protection, ProtectionProbePorts,
+        is_unattributed_exit, working_order_of,
+    };
     use mandate_backtest::{BacktestError, Signal};
     use mandate_canon::DecStr;
     use mandate_marketdata::actions::{RecordedActions, write_actions};
@@ -1017,6 +1040,26 @@ mod tests {
     };
     use mandate_num::{Price, Qty};
     use mandate_time::{Date, UtcNanos};
+
+    #[test]
+    fn the_protection_probe_refuses_without_its_mandate() {
+        let probe = ExecutorProtection::new(PathBuf::from("a-mandate-that-does-not-exist.json"));
+        assert!(probe.probe().is_err());
+    }
+
+    #[test]
+    fn the_protection_probe_ports_never_invent_mandate_coverage() -> Result<(), String> {
+        let agent = mandate_executor::AgentId("agent-a".to_owned());
+        let instrument =
+            mandate_accounting::InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+                .map_err(|e| e.to_string())?;
+        assert!(!ExecutorMandateView::covers(
+            &ProtectionProbePorts,
+            &agent,
+            &instrument
+        ));
+        Ok(())
+    }
 
     /// The purpose mapping the risk crate's inputs owe (DEC-449 item 3): the executor's
     /// protective purpose is the risk crate's protective flag, and an opening purpose is the
