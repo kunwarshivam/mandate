@@ -1961,7 +1961,7 @@ wait for the founder.
   collaborators at Triage with fork-based PRs, so that neither write access nor the account agents
   use can change `main` outside the PR path. *Accepted when:* a collaborator account's attempt to
   merge a green PR is refused by GitHub; the ruleset shows no bypass with mode "always"; a direct
-  push to `main` from the account agents use is refused; and `CONTRIBUTING.md` describes the fork
+  push to `main` from the account agents use is refused; and `COLLABORATION.md` describes the fork
   flow. Blocked on DEC-439 items 18, 10, and 11.
 - **E21-17 (Proposed, M8)** As the founder, I want the aggregator's exposure bounded (DEC-432 item
   14, DEC-439 items 6 and 14), so that one third party in every prompt path costs as little as it

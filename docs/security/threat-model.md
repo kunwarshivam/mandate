@@ -381,7 +381,7 @@ See §7.5 for the full analysis.
 |---|---|---|---|
 | S | A builder session approves its own PR | Approval needs the label and an approved-head line, and the label's last application and the description's last edit must come from an approver login (`merge-approved.sh`, #541) | **Every agent session acts through the founder's account,** which is also the approver login. The check cannot tell the coordinator from a builder (DEC-439 item 9; E21-13) |
 | E | **Anything acting as an admin writes to `main` directly.** The `main` ruleset's one bypass entry is the repository admin role with bypass mode "always", which exempts it from every rule: the PR requirement, the `fast` and `full` checks, and linear history. The founder's account holds that role, and every agent session acts through it | None on that path: no PR, label, approved head, merge script, CI, or review applies | **The shortest path to `main`** (§7.5 item 1; §8 rank 1). Bypass by pull request only, or no bypass (DEC-439 item 18) |
-| S | A collaborator merges with GitHub's Merge button | `CONTRIBUTING.md` rule 2 forbids it | **Not enforced:** the ruleset requires green checks but no approving review, so write access can merge a green PR (DEC-439 item 10; E21-16) |
+| S | A collaborator merges with GitHub's Merge button | `COLLABORATION.md` rule 2 forbids it | **Not enforced:** the ruleset requires green checks but no approving review, so write access can merge a green PR (DEC-439 item 10; E21-16) |
 | T | A merged change weakens a control: a CI check, `merge-approved.sh`, `deny.toml`, the layer rules, a test | Independent review on a different model (DEC-79); mutants on safety-critical diffs; spec guard; CODEOWNERS lists these paths | CODEOWNERS requests a founder review but nothing waits for it, since DEC-79 made founder review after the fact. The checks guard everything except changes to themselves (DEC-439 items 7, 12; E21-14) |
 | T | Public text steers an agent: an issue, a comment, or text planted in a PR | None written down | DEC-439 items 2, 3; E21-15 |
 | I | A session leaks the paper or model keys it holds | gitleaks per PR and over full history; paper keys only (rule 8) | Model key spend; DEC-439 item 17; E21-18 |
@@ -510,7 +510,7 @@ approver check withdraws it). It is weaker against a **compromised** or **steere
    PR comments (the coordinator watches for `ready` and `Decision needed:` lines) read attacker text.
    Code, fixtures, PR descriptions, and test data written by one agent are read by the next, including
    the reviewer.
-5. **The Merge button.** Write access can merge any green PR directly; `CONTRIBUTING.md` forbids it
+5. **The Merge button.** Write access can merge any green PR directly; `COLLABORATION.md` forbids it
    but nothing enforces it.
 6. **Same-family review.** Reviews run on a different model, but models share failure modes, and a
    reviewer briefed from the PR's own description inherits its framing.
