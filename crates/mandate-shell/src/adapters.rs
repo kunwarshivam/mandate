@@ -979,12 +979,18 @@ mod tests {
             mandate_executor::ClientOrderId::parse("md-w-01J8Z3M1Q0000000000000000W")
                 .map_err(|e| e.to_string())?;
         ownerless_watchdog.agent = None;
+        let mut executor_sentinel_watchdog = the_order(mandate_executor::Purpose::RiskExit)?;
+        executor_sentinel_watchdog.client_order_id =
+            mandate_executor::ClientOrderId::parse("md-w-01J8Z3M1Q0000000000000000S")
+                .map_err(|e| e.to_string())?;
+        executor_sentinel_watchdog.agent = Some(mandate_executor::AgentId("*".to_owned()));
         let mut other_agent = the_order(mandate_executor::Purpose::Protective)?;
         other_agent.agent = Some(mandate_executor::AgentId("agent-b".to_owned()));
         let mut ownerless_opening = the_order(mandate_executor::Purpose::Open)?;
         ownerless_opening.agent = None;
         assert!(is_unattributed_exit(&ownerless_protective));
         assert!(is_unattributed_exit(&ownerless_watchdog));
+        assert!(is_unattributed_exit(&executor_sentinel_watchdog));
         assert!(!is_unattributed_exit(&other_agent));
         assert!(!is_unattributed_exit(&ownerless_opening));
         Ok(())
