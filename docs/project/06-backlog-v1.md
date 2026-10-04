@@ -4003,3 +4003,10 @@ From the round-2 review of the workspace services API spec ([#560](https://githu
 
 - **Offer the kill switch alone on the revoke-on-compromise screen** (workspace API spec §5.6), as
   the alternative that keeps the connection so protection can be re-placed and exits re-driven.
+
+From the round-6 review of the flatten adapter's implementation PR ([#596](https://github.com/kunwarshivam/mandate/pull/596), minors; [DEC-449](decisions/DEC-449.md), [DEC-451](decisions/DEC-451.md)):
+
+- **Expose the journal's unsealing rule from `mandate-journal`** — `stored_draft` (or a
+  `StoredEvent::draft()` that also checks the columns) is private, so the flatten adapter holds a
+  second copy of the three assigned-field names, the digest form, and the re-seal, the exact
+  things that must not drift from `seal`.
