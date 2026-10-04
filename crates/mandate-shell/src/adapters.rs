@@ -48,27 +48,32 @@ use crate::stages::{
 };
 
 /// `mandate_risk::agent_flatten`, probed once against a synthetic request before anything starts
-/// and, mid-run, planned over a fold of the journal taken at request time (DEC-449): the agent's
-/// positions and working orders from the account-stream fold, asset classes from the mandate's
-/// universe, and the session derived from the step's risk clock. The journal's read capability,
-/// the account stream's id, and the clock arrive with each `plan` call from the run's bridge —
-/// the adapter holds no journal and no clock of its own, so no plan can be taken over a fold the
-/// run has written past or a session the clock has left — and the mandate's path is held for the
-/// probe's synthetic request and the universe's asset classes.
+/// and, mid-run, planned over a fold of the journal taken at request time (DEC-449): the
+/// agent's sub-ledger — attributed from the account-stream records, each fill's client order
+/// resolving through the fold's order records to the agent that submitted it — and its working
+/// orders, with asset classes from the mandate's universe and the session derived from the
+/// step's risk clock. The journal's read capability, the account stream's id, and the clock
+/// arrive with each `plan` call from the run's bridge — the adapter holds no journal and no
+/// clock of its own, so no plan can be taken over a fold the run has written past or a session
+/// the clock has left — while the agent and the mandate's path are held from construction, as
+/// `Sources` carries both: the agent is the deployment's, fixed for the run, and the mandate is
+/// the probe's synthetic request and the universe's asset classes.
 pub struct RiskExitPath {
+    agent: AgentId,
     mandate: PathBuf,
 }
 
 impl RiskExitPath {
-    /// The adapter over one mandate document, as `Sources` carries it (DEC-449).
-    pub fn new(mandate: PathBuf) -> RiskExitPath {
-        RiskExitPath { mandate }
+    /// The adapter for one agent over one mandate document, the two `Sources` members the fold
+    /// reads (DEC-449).
+    pub fn new(agent: AgentId, mandate: PathBuf) -> RiskExitPath {
+        RiskExitPath { agent, mandate }
     }
 }
 
 impl ExitPath for RiskExitPath {
     fn probe(&self) -> Result<(), Cause> {
-        let _ = &self.mandate;
+        let _ = (&self.agent, &self.mandate);
         Err(Cause::Unimplemented { story: "E7-7" })
     }
 
@@ -79,7 +84,7 @@ impl ExitPath for RiskExitPath {
         stream: &str,
         clock: Option<RiskClock>,
     ) -> Result<FlattenPlan, Cause> {
-        let _ = (request, journal, stream, clock);
+        let _ = (request, journal, stream, clock, &self.agent);
         Err(Cause::Unimplemented { story: "E7-7" })
     }
 }
@@ -407,7 +412,10 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
 /// [`production`]'s.
 pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
     Stages {
-        exit: Box::new(RiskExitPath::new(sources.mandate.clone())),
+        exit: Box::new(RiskExitPath::new(
+            sources.agent.clone(),
+            sources.mandate.clone(),
+        )),
         protection: Box::new(ExecutorProtection),
         mandate: Box::new(SpecMandate {
             path: sources.mandate,
