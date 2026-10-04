@@ -471,27 +471,34 @@ fn working_orders_of(
                 what: "a working-order id",
             })?);
         order_ids.insert(numeric, order.client_order_id.as_str().to_owned());
-        open_orders.insert(
-            numeric,
-            mandate_risk::WorkingOrder {
-                agent: mandate_risk::AgentId(1),
-                instrument: mandate_risk::AssetId::new(order.instrument.as_str()).map_err(
-                    |_| {
-                        Cause::Spec(mandate_spec::SpecError::InvalidInput {
-                            what: "an instrument the risk crate cannot read",
-                        })
-                    },
-                )?,
-                side: order.side,
-                max_cost: Usd::parse("0")?,
-                open_qty: order.qty.checked_sub(order.filled_qty)?,
-                protective: order.purpose == mandate_executor::Purpose::Protective,
-                opening: order.purpose.adds_risk(),
-                submitted_on: today,
-            },
-        );
+        open_orders.insert(numeric, working_order_of(order, today)?);
     }
     Ok((open_orders, order_ids))
+}
+
+/// One working order in the risk crate's shape, mapped from the fold's own order (DEC-449
+/// item 3): the executor's protective purpose is the risk crate's protective flag, an opening
+/// purpose is the opening flag, and the open quantity is what still rests unfilled. `max_cost`
+/// and `submitted_on` are unread by the flatten; the fold's order carries no price, so the
+/// cost is zero and the date is the plan's own.
+fn working_order_of(
+    order: &ExecutorOrder,
+    today: mandate_time::Date,
+) -> Result<mandate_risk::WorkingOrder, Cause> {
+    Ok(mandate_risk::WorkingOrder {
+        agent: mandate_risk::AgentId(1),
+        instrument: mandate_risk::AssetId::new(order.instrument.as_str()).map_err(|_| {
+            Cause::Spec(mandate_spec::SpecError::InvalidInput {
+                what: "an instrument the risk crate cannot read",
+            })
+        })?,
+        side: order.side,
+        max_cost: Usd::parse("0")?,
+        open_qty: order.qty.checked_sub(order.filled_qty)?,
+        protective: order.purpose == mandate_executor::Purpose::Protective,
+        opening: order.purpose.adds_risk(),
+        submitted_on: today,
+    })
 }
 
 /// The executor's protective sequence, probed through `mandate_executor::handle`, since
@@ -850,6 +857,7 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
+    use super::{ExecutorOrder, working_order_of};
     use mandate_backtest::{BacktestError, Signal};
     use mandate_canon::DecStr;
     use mandate_marketdata::actions::{RecordedActions, write_actions};
@@ -861,6 +869,53 @@ mod tests {
     };
     use mandate_num::{Price, Qty};
     use mandate_time::{Date, UtcNanos};
+
+    /// The purpose mapping the risk crate's inputs owe (DEC-449 item 3): the executor's
+    /// protective purpose is the risk crate's protective flag, and an opening purpose is the
+    /// opening flag. `agent_flatten` itself cancels every working order whatever its flags, so
+    /// no plan-level test can see a flip — this pin is what makes one wrong.
+    #[test]
+    fn the_purpose_flags_map_from_the_folds_own_order() -> Result<(), String> {
+        let today = day("2026-09-21")?;
+        let protective =
+            working_order_of(&the_order(mandate_executor::Purpose::Protective)?, today)
+                .map_err(|e| e.to_string())?;
+        assert!(protective.protective);
+        assert!(!protective.opening);
+
+        let opening = working_order_of(&the_order(mandate_executor::Purpose::Open)?, today)
+            .map_err(|e| e.to_string())?;
+        assert!(!opening.protective);
+        assert!(opening.opening);
+        assert_eq!(
+            opening.open_qty,
+            mandate_num::Qty::parse("4").map_err(|e| e.to_string())?
+        );
+        Ok(())
+    }
+
+    /// One resting executor order of the fixture's instrument: four to sell, none filled.
+    fn the_order(purpose: mandate_executor::Purpose) -> Result<ExecutorOrder, String> {
+        Ok(ExecutorOrder {
+            client_order_id: mandate_executor::ClientOrderId::parse("md-resting")
+                .map_err(|e| e.to_string())?,
+            intent_id: None,
+            agent: Some(mandate_executor::AgentId("agent-a".to_owned())),
+            instrument: InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+                .map_err(|e| e.to_string())?,
+            side: Side::Sell,
+            qty: mandate_num::Qty::parse("4").map_err(|e| e.to_string())?,
+            filled_qty: mandate_num::Qty::parse("0").map_err(|e| e.to_string())?,
+            state: mandate_executor::OrderState::Submitting,
+            attempt: 1,
+            purpose,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        })
+    }
 
     use mandate_accounting::{InstrumentId, Side};
     use mandate_executor::{
