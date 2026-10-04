@@ -34,33 +34,64 @@ pub(crate) fn received(
     }
     let IntentBody::Order {
         instrument,
-        side,
-        qty,
-        limit,
-        purpose,
         protection,
+        ..
     } = &handoff.body
     else {
         return flatten_plan();
     };
-    let mut pairs = vec![
-        ("intent_id", text(handoff.intent_id.0.0.clone())),
-        ("agent", text(handoff.agent.0.clone())),
-        ("kind", text("order")),
-        ("instrument", text(instrument.as_str())),
-        ("side", text(side_name(*side))),
-        ("qty", text(qty.to_string())),
-        ("limit", text(limit.to_string())),
-        ("purpose", text(purpose_name(*purpose))),
-    ];
+    batch.journal(
+        "IntentReceived",
+        None,
+        intent_received_fields(
+            &handoff.intent_id,
+            &handoff.agent,
+            &handoff.body,
+            handoff.tif,
+        )?,
+    )?;
     if let Some(prices) = protection {
-        pairs.push(("stop", text(prices.stop.to_string())));
-        if let Some(take_profit) = prices.take_profit {
-            pairs.push(("take_profit", text(take_profit.to_string())));
-        }
+        batch.journal(
+            "ProtectionChanged",
+            None,
+            intended_fields(instrument, &handoff.intent_id, *prices)?,
+        )?;
     }
-    batch.journal("IntentReceived", None, pairs)?;
     gate_and_submit(batch, &handoff.intent_id)
+}
+
+/// The `intended` `ProtectionChanged` (§9.5, DEC-446 item 5): the receipt-time protective prices
+/// an opening was handed in with, journaled beside its `IntentReceived` in the same batch, so
+/// replay restores the protection (`AGENTS.md` rule 13). Every member present (§4.2); the prices
+/// leave `IntentReceived`, never a member there at either version.
+fn intended_fields(
+    instrument: &InstrumentId,
+    intent: &IntentId,
+    prices: ProtectionPrices,
+) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
+    Ok(vec![
+        ("instrument_id", text(instrument.as_str())),
+        ("action", text("intended")),
+        ("orders", Value::Array(Vec::new())),
+        ("awaiting", Value::Array(Vec::new())),
+        ("qty", Value::Null),
+        ("stop", text(prices.stop.to_string())),
+        (
+            "take_profit",
+            prices
+                .take_profit
+                .map_or(Value::Null, |price| text(price.to_string())),
+        ),
+        ("intent_id", text(intent.0.0.clone())),
+        ("bracket", Value::Null),
+        ("entry", Value::Null),
+        ("agent_id", Value::Null),
+        ("replacing", Value::Null),
+        ("created_on", Value::Null),
+        ("sent", Value::Null),
+        ("uncovered", Value::Null),
+        ("acknowledged", Value::Null),
+    ])
 }
 
 /// A flatten plan handed over as an intent: the agent-scoped flatten's sells are the protective
@@ -326,8 +357,8 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     if !lone {
         return send(batch, request, Some(intent), &agent, 1);
     }
-    let laddered = vec![("laddered", Value::Bool(true))];
-    journal_rung(batch, &request, Some(intent), &agent, 1, laddered)?;
+    let first = vec![("rung", int(0)?), ("at_floor", Value::Bool(false))];
+    journal_rung(batch, &request, Some(intent), &agent, 1, first)?;
     batch.broker(BrokerRequest::Submit(request));
     Ok(())
 }
@@ -385,6 +416,12 @@ pub(crate) fn journal_submission(
 }
 
 /// [`journal_submission`] with `extra` fields: a ladder rung's `rung` and `at_floor` (§5.6).
+///
+/// One batch writes two events (§9.5, DEC-446 item 3): the `OrderRequestRecorded` companion
+/// carrying the executor-only members the fold rebuilds the exact request and the order's owner
+/// from, immediately followed by the version-2 `OrderSubmitted` that names it as its
+/// `causation_id` — the request the broker sees, its eight members with `limit_price` null when
+/// the order has none, and the batch's `risk_clock`. A crash cannot leave one without the other.
 pub(crate) fn journal_rung(
     batch: &mut Batch<'_, '_>,
     request: &SubmitOrder,
@@ -393,39 +430,65 @@ pub(crate) fn journal_rung(
     attempt: u32,
     extra: Vec<(&'static str, Value)>,
 ) -> Result<(), ExecutorError> {
-    let mut pairs = vec![
-        ("client_order_id", text(request.client_order_id.as_str())),
-        ("agent", text(agent.0.clone())),
-        ("instrument", text(request.instrument.as_str())),
-        ("side", text(side_name(request.side))),
-        ("qty", text(request.qty.to_string())),
-        ("order_type", text(order_type_name(request.order_type))),
-        ("tif", text(tif_name(request.tif))),
+    let rung = extra
+        .iter()
+        .find(|(name, _)| *name == "rung")
+        .and_then(|(_, value)| value.as_int());
+    let at_floor = rung.is_some()
+        && extra
+            .iter()
+            .any(|(name, value)| *name == "at_floor" && *value == Value::Bool(true));
+    let (order_class, take_profit, stop) = match (&request.bracket, &request.oco) {
+        (Some(legs), _) => (Some("bracket"), Some(legs.take_profit), Some(legs.stop)),
+        (_, Some(legs)) => (Some("oco"), Some(legs.take_profit), Some(legs.stop)),
+        _ => (None, None, None),
+    };
+    let rung_value = match rung {
+        Some(rung) => int(rung)?,
+        None => Value::Null,
+    };
+    let companion = vec![
+        ("agent_id", text(agent.0.clone())),
+        (
+            "intent_id",
+            intent.map_or(Value::Null, |intent| text(intent.0.0.clone())),
+        ),
         ("purpose", text(purpose_name(request.purpose))),
-        ("attempt", int(u64::from(attempt))?),
         ("extended_hours", Value::Bool(request.extended_hours)),
+        (
+            "stop_price",
+            request
+                .stop_price
+                .map_or(Value::Null, |price| text(price.to_string())),
+        ),
+        ("order_class", order_class.map_or(Value::Null, text)),
+        (
+            "take_profit",
+            take_profit.map_or(Value::Null, |price| text(price.to_string())),
+        ),
+        (
+            "stop",
+            stop.map_or(Value::Null, |price| text(price.to_string())),
+        ),
+        ("rung", rung_value),
+        (
+            "at_floor",
+            rung.map_or(Value::Null, |_| Value::Bool(at_floor)),
+        ),
     ];
-    if let Some(intent) = intent {
-        pairs.push(("intent_id", text(intent.0.0.clone())));
-    }
-    if let Some(limit) = request.limit_price {
-        pairs.push(("limit", text(limit.to_string())));
-    }
-    if let Some(stop) = request.stop_price {
-        pairs.push(("stop_price", text(stop.to_string())));
-    }
-    if let Some(bracket) = &request.bracket {
-        pairs.push(("order_class", text("bracket")));
-        pairs.push(("take_profit", text(bracket.take_profit.to_string())));
-        pairs.push(("stop", text(bracket.stop.to_string())));
-    }
-    if let Some(oco) = &request.oco {
-        pairs.push(("order_class", text("oco")));
-        pairs.push(("take_profit", text(oco.take_profit.to_string())));
-        pairs.push(("stop", text(oco.stop.to_string())));
-    }
-    pairs.extend(extra);
-    batch.journal("OrderSubmitted", None, pairs)?;
+    let companion_id = batch.next_id();
+    batch.journal("OrderRequestRecorded", None, companion)?;
+    let mut submission = vec![
+        ("client_order_id", text(request.client_order_id.as_str())),
+        ("attempt", int(u64::from(attempt))?),
+        ("instrument_id", text(request.instrument.as_str())),
+        ("side", text(side_name(request.side))),
+        ("type", text(order_type_name(request.order_type))),
+        ("tif", text(tif_name(request.tif))),
+        ("qty", text(request.qty.to_string())),
+    ];
+    submission.extend(order_submitted_optional_fields(request)?);
+    batch.journal("OrderSubmitted", Some(companion_id), submission)?;
     Ok(())
 }
 
@@ -444,16 +507,8 @@ pub(crate) fn journal_rung(
 /// proposal said `day` (`protection::crypto_add`). `type` is `limit`: an intent's body carries a
 /// limit and nothing else, since opening orders are limit orders (`AGENTS.md` rule 12).
 ///
-/// `received` still journals its own pairs: `IntentHandoff` carries no proposed `tif`, and the
-/// fold reads the protective prices and the old member names from this record, so the writer is
-/// wired in once DEC-360 is ruled and a tests change brings the proposed `tif` (DEC-389 item 3).
-///
 /// # Errors
 /// [`ExecutorError::NotInterpreted`] for a flatten plan, which is no proposed order (E7-4).
-#[allow(
-    dead_code,
-    reason = "`received` writes this form once DEC-360 is ruled and `IntentHandoff` carries the proposed tif (DEC-389 item 3)"
-)]
 pub(crate) fn intent_received_fields(
     intent_id: &IntentId,
     agent: &AgentId,
@@ -631,6 +686,262 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
     Ok(())
 }
 
+/// The writer/fold round-trip for an OCO submission (§9.5, rule 45): `journal_rung` journals the
+/// companion carrying the OCO's class and legs beside the executor-only members, then the
+/// causation-naming version-2 submission; the fold rebuilds the exact request from the pair — the
+/// OCO's quantity from the submission's — and the order's owner and intent from the companion.
+#[cfg(test)]
+mod oco_round_trip_tests {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_canon::Value;
+    use mandate_num::{Price, Qty};
+
+    use super::journal_rung;
+    use crate::batch::Batch;
+    use crate::error::ExecutorError;
+    use crate::fold::fold;
+    use crate::ids::{ClientOrderId, IntentId};
+    use crate::payload::text;
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Executor, Ids, executor_config, fees};
+    use crate::state::ExecutorState;
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, EventId, FoldedEvent, OcoLegs, Purpose, Seq,
+        SubmitOrder, TimeInForce, WorkspaceId,
+    };
+
+    fn refused(what: &str) -> ExecutorError {
+        crate::error::ExecutorError::UnknownOrder {
+            client_order_id: what.to_owned(),
+        }
+    }
+
+    /// The OCO risk exit the round trip submits: four shares with a take-profit at $170 and a
+    /// stop at $140, no ladder rung.
+    fn oco_exit_request() -> Result<SubmitOrder, ExecutorError> {
+        let intent = IntentId(EventId("01JABCDEFGHJKMNPQRSTVWXYZ1".to_owned()));
+        Ok(SubmitOrder {
+            client_order_id: ClientOrderId::for_intent(&intent)?,
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Sell,
+            qty: Qty::parse("4")?,
+            order_type: crate::types::OrderType::Limit,
+            tif: TimeInForce::Gtc,
+            limit_price: Some(Price::parse("149")?),
+            stop_price: None,
+            bracket: None,
+            oco: Some(OcoLegs {
+                take_profit: Price::parse("170")?,
+                stop: Price::parse("140")?,
+                qty: Qty::parse("4")?,
+            }),
+            extended_hours: false,
+            purpose: Purpose::RiskExit,
+        })
+    }
+
+    #[test]
+    fn an_oco_submission_journals_its_companion_and_rebuilds_the_request()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let executor = Executor::opened(&ports)?;
+        let mut batch = Batch::new(&executor.state, &ports)?;
+        let intent = IntentId(EventId("01JABCDEFGHJKMNPQRSTVWXYZ1".to_owned()));
+        let agent = AgentId("agent-a".to_owned());
+        let request = oco_exit_request()?;
+        journal_rung(&mut batch, &request, Some(&intent), &agent, 1, Vec::new())?;
+        let drafts: Vec<_> = batch
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                crate::types::Effect::Journal(draft) => Some(draft.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            drafts.len(),
+            2,
+            "one batch, two events: the companion then the order"
+        );
+        let companion_draft = drafts.first().ok_or_else(|| refused("the companion"))?;
+        let submission = drafts.get(1).ok_or_else(|| refused("the submission"))?;
+        assert_eq!(companion_draft.event_type, "OrderRequestRecorded");
+        assert_eq!(submission.event_type, "OrderSubmitted");
+        assert_eq!(
+            submission.causation_id.as_ref(),
+            Some(&companion_draft.event_id),
+            "the submission names its companion as its causation_id"
+        );
+        let companion = &companion_draft.payload;
+        assert_eq!(companion.get("order_class"), Some(&text("oco")));
+        assert_eq!(companion.get("take_profit"), Some(&text("170")));
+        assert_eq!(companion.get("stop"), Some(&text("140")));
+        assert_eq!(companion.get("agent_id"), Some(&text("agent-a")));
+        assert_eq!(
+            companion.get("intent_id"),
+            Some(&text("01JABCDEFGHJKMNPQRSTVWXYZ1"))
+        );
+        assert_eq!(companion.get("purpose"), Some(&text("risk_exit")));
+        assert_eq!(companion.get("rung"), Some(&Value::Null));
+        assert_eq!(companion.get("at_floor"), Some(&Value::Null));
+
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let opened = FoldedEvent {
+            stream: state.account_stream(),
+            seq: Seq(1),
+            event_id: EventId("01JABCDEFGHJKMNPQRSTVWXYZ0".to_owned()),
+            event_type: "StreamOpened".to_owned(),
+            causation_id: None,
+            payload: crate::payload::object(vec![("environment", text("paper"))])?,
+        };
+        fold(&mut state, &opened)?;
+        let stream = state.account_stream();
+        for (index, draft) in drafts.iter().enumerate() {
+            fold(
+                &mut state,
+                &FoldedEvent {
+                    stream: stream.clone(),
+                    seq: Seq(u64::try_from(index).unwrap_or(0) + 2),
+                    event_id: draft.event_id.clone(),
+                    event_type: draft.event_type.clone(),
+                    causation_id: draft.causation_id.clone(),
+                    payload: draft.payload.clone(),
+                },
+            )?;
+        }
+        let rebuilt = state
+            .request_of(&request.client_order_id)
+            .ok_or_else(|| crate::error::ExecutorError::UnknownOrder {
+                client_order_id: request.client_order_id.as_str().to_owned(),
+            })?
+            .clone();
+        assert_eq!(
+            rebuilt.oco.as_ref().map(|legs| legs.qty),
+            Some(Qty::parse("4")?),
+            "the OCO's quantity is the submission's"
+        );
+        assert_eq!(
+            rebuilt.oco.as_ref().map(|legs| legs.stop.to_string()),
+            Some("140".to_owned())
+        );
+        assert_eq!(rebuilt.purpose, Purpose::RiskExit);
+        assert!(!rebuilt.extended_hours);
+        assert_eq!(rebuilt.stop_price, None);
+        let order = state.order(&request.client_order_id).ok_or_else(|| {
+            crate::error::ExecutorError::UnknownOrder {
+                client_order_id: request.client_order_id.as_str().to_owned(),
+            }
+        })?;
+        assert_eq!(
+            order.agent.as_ref().map(|agent| agent.0.clone()),
+            Some("agent-a".to_owned())
+        );
+        assert_eq!(order.intent_id, Some(intent));
+        Ok(())
+    }
+
+    /// The journal accepts both companion shapes the executor writes: a plain submission, whose
+    /// `rung` and `at_floor` are both null (rule 40's pair — the review of #589's code half,
+    /// blocking 1), and a ladder rung, whose `rung` and `at_floor` are both present. The envelope
+    /// is the vectors' own `OrderRequestRecorded` with the writer's payload swapped in, so the
+    /// journal's own `Draft::parse`, rule 40 included, judges the real writer rather than a
+    /// restatement of it.
+    #[test]
+    fn the_journal_accepts_both_companion_shapes_the_executor_writes() -> Result<(), ExecutorError>
+    {
+        use mandate_canon::to_canonical;
+        use mandate_journal::Draft;
+        use serde_json::{Map, Value as Json};
+
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let executor = Executor::opened(&ports)?;
+        let agent = AgentId("agent-a".to_owned());
+        let request = oco_exit_request()?;
+        let mut batches = Vec::new();
+        for extra in [
+            Vec::new(),
+            vec![
+                ("rung", crate::payload::int(0)?),
+                ("at_floor", Value::Bool(false)),
+            ],
+        ] {
+            let mut batch = Batch::new(&executor.state, &ports)?;
+            let intent = IntentId(EventId("01JABCDEFGHJKMNPQRSTVWXYZ1".to_owned()));
+            journal_rung(&mut batch, &request, Some(&intent), &agent, 1, extra)?;
+            batches.push(batch);
+        }
+
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/refcases/journal.json"
+        );
+        let fixture: Json =
+            serde_json::from_str(&std::fs::read_to_string(path).map_err(|_| refused("fixture"))?)
+                .map_err(|_| refused("fixture"))?;
+        let envelope = fixture
+            .pointer("/account_stream/chain/4/body")
+            .and_then(Json::as_object)
+            .cloned()
+            .ok_or_else(|| refused("the vectors' OrderRequestRecorded"))?;
+        assert_eq!(
+            envelope.get("event_type").and_then(Json::as_str),
+            Some("OrderRequestRecorded"),
+            "the vectors' account-stream chain event 4 is the companion"
+        );
+
+        for batch in batches {
+            let companion = batch
+                .effects
+                .iter()
+                .find_map(|effect| match effect {
+                    crate::types::Effect::Journal(draft)
+                        if draft.event_type == "OrderRequestRecorded" =>
+                    {
+                        Some(&draft.payload)
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| refused("the companion"))?;
+            let carried: Json = serde_json::from_slice(&to_canonical(companion))
+                .map_err(|_| refused("the companion's canonical form"))?;
+            let mut body = Map::new();
+            for (name, member) in &envelope {
+                if !["seq", "recorded_at", "prev_hash"].contains(&name.as_str()) {
+                    body.insert(name.clone(), member.clone());
+                }
+            }
+            body.insert("payload".to_owned(), carried);
+            let bytes =
+                serde_json::to_vec(&Json::Object(body)).map_err(|_| refused("the draft"))?;
+            let refused_by = Draft::parse(&bytes)
+                .err()
+                .map(|refusal| format!("{refusal:?}"));
+            assert_eq!(
+                refused_by, None,
+                "the journal refuses a companion the executor wrote"
+            );
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod bracket_call_tests {
     use mandate_accounting::{AssetClass, InstrumentId, Side};
@@ -736,6 +1047,7 @@ mod bracket_call_tests {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(intent.to_owned())),
             agent: AgentId("agent-a".to_owned()),
+            tif: TimeInForce::Day,
             body: IntentBody::Order {
                 instrument: InstrumentId::new("AAPL")?,
                 side: Side::Buy,

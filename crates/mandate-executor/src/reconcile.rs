@@ -559,7 +559,7 @@ pub(crate) mod tests {
         BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate,
         DifferenceKind, Effect, EventId, ExecutorConfig, ExitTier, FoldedEvent, Input, IntentBody,
         IntentHandoff, MandateVersion, Mode, Order, OrderState, Purpose, ReconcileReason, Seq,
-        WorkspaceId, WriterEpoch,
+        TimeInForce, WorkspaceId, WriterEpoch,
     };
 
     /// Ids derived from the epoch, the head and the ordinal, as a production id generator does,
@@ -672,6 +672,7 @@ pub(crate) mod tests {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(id.to_owned())),
             agent: AgentId(agent.to_owned()),
+            tif: TimeInForce::Day,
             body: IntentBody::Order {
                 instrument: aapl()?,
                 side,

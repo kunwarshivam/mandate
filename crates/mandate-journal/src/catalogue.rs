@@ -62,6 +62,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "GoalCompleted"
         | "UniverseChanged" => entry(ACCOUNT, &[MAN]),
         "OrderSubmitted"
+        | "OrderRequestRecorded"
         | "OrderStateChanged"
         | "OrderAbandoned"
         | "BrokerExchangeRecorded"

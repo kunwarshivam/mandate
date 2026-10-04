@@ -527,6 +527,11 @@ impl JournalWriter for LedgerJournal {
     }
 }
 
+/// The TIF the tracer's proposals carry, which `IntentReceived` copies exactly: the tracer's
+/// handoffs are regular-session limit proposals (`AGENTS.md` rule 12); the sink this double stands
+/// in for carries the proposal's own tif from E7-7 on (DEC-448 item 7).
+const TRACER_PROPOSED_TIF: mandate_executor::TimeInForce = mandate_executor::TimeInForce::Day;
+
 /// Converts the runtime's handoff into the executor's, joining the deployment's `AgentId`, and
 /// checks the ledger for the `IntentProposed` before counting the hand.
 pub struct ConvertingSink(pub World);
@@ -571,6 +576,7 @@ impl Sink for ConvertingSink {
         Ok(mandate_executor::IntentHandoff {
             intent_id: IntentId(mandate_executor::EventId(handoff.intent_id.0.clone())),
             agent: mandate_executor::AgentId(AGENT.to_owned()),
+            tif: TRACER_PROPOSED_TIF,
             body,
         })
     }

@@ -17,14 +17,21 @@
 //! that read the mandate the record names (§8.5 checks 4, 5, 6, 10 and 16's cap) are not schema
 //! rules: `append` holds no document store, so every reader of a thesis record runs
 //! `mandate_spec::context::check_thesis_record` before acting on it (DEC-414 item 3).
+//!
+//! The account stream's executor records are journal spec v0.13 §9.5's, with consistency rules 39
+//! to 44 and the batch rule 45 (`DEC-360 option (c), DEC-446, DEC-447`): `IntentReceived`,
+//! `GateDecided`, and `OrderSubmitted` at `schema_version` 2, each their version 1's members with
+//! `risk_clock` last; `OrderRequestRecorded`, the companion a version-2 submission names; and
+//! `ProtectionChanged` closed whole. The version-1 schemas of the three stay registered (§8): a
+//! stream that holds version-1 records keeps replaying and appending them.
 
 use mandate_canon::Value;
 use mandate_domain::ThesisRefusal;
 use mandate_num::Usd;
 use mandate_time::UtcNanos;
 
-use crate::schema::Ty;
-use crate::{Invalid, InvalidReason, StreamId, StreamType};
+use crate::schema::{GATE_CHECK_IDS, Ty};
+use crate::{Draft, Invalid, InvalidReason, StreamId, StreamType};
 
 /// The event types §9.2 closes on the control stream.
 const CONTROL: [&str; 9] = [
@@ -51,13 +58,30 @@ const RISK_STATE: [&str; 2] = ["MandateVersionApplied", "UniverseChanged"];
 /// The agent stream's research-agent thesis records journal spec §9.4 closes, with rules 34 to 38.
 const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 
+/// The account stream's executor records journal spec §9.5 closes, with rules 39 to 45 (DEC-446).
+/// `ProtectionChanged` closes at `schema_version` 1; the other three close at 2 and stay at 1.
+const EXECUTOR: [&str; 5] = [
+    "IntentReceived",
+    "GateDecided",
+    "OrderSubmitted",
+    "OrderRequestRecorded",
+    "ProtectionChanged",
+];
+
+/// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
+/// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
+const COMPANION: &str = "OrderRequestRecorded";
+
 /// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     match stream.stream_type() {
         StreamType::Control => CONTROL.contains(&event_type),
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
-            event_type == REFUSAL || event_type == SNAPSHOT || RISK_STATE.contains(&event_type)
+            event_type == REFUSAL
+                || event_type == SNAPSHOT
+                || RISK_STATE.contains(&event_type)
+                || EXECUTOR.contains(&event_type)
         }
         StreamType::Scheduler => false,
     }
@@ -198,6 +222,8 @@ pub(crate) fn payload(
             )?;
         }
         "ThesisProposed" | "ThesisRevised" => thesis_rules(event_type, p, config_refs)?,
+        COMPANION => companion_rules(p)?,
+        "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
             for member in ["cash_band", "cash_in_band"] {
@@ -264,6 +290,121 @@ const NOT_INDEPENDENT: &str = "not_independent";
 
 /// `ConfigSnapshotRegistered`'s kind for a signal model.
 const MODEL_KIND: &str = "model_version";
+
+/// §9.5's rules 39 and 40 on a well-typed `OrderRequestRecorded` (DEC-446 item 2), the first
+/// offending member in the order the spec reports: 39's pairs at `order_class` then
+/// `take_profit`, 40 at `at_floor`.
+fn companion_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    let class = !p.is_null("order_class");
+    let take_profit = !p.is_null("take_profit");
+    let stop = !p.is_null("stop");
+    if class != take_profit {
+        return Err(Invalid::new(InvalidReason::Schema, "payload.order_class"));
+    }
+    if take_profit != stop {
+        return Err(Invalid::new(InvalidReason::Schema, "payload.take_profit"));
+    }
+    ensure(
+        p.is_null("at_floor") == p.is_null("rung"),
+        InvalidReason::Schema,
+        "payload.at_floor",
+    )
+}
+
+/// The actions §9.5 closes `ProtectionChanged` with, and the members rules 41 to 44 read. Every
+/// member is present on every record (§4.2); these say per action which are null or empty.
+const PROTECTION_ACTIONS: &[&str] = &[
+    "intended",
+    "placed",
+    "cancelled",
+    "passive_start",
+    "unprotected_start",
+    "watchdog",
+    "exit_unpriced",
+    "ladder_floor",
+    "expiry_unreplaceable",
+    "rung_short",
+    "interval_limit",
+    "unprotected_end",
+];
+
+/// §9.5's rules 41 to 44 on a well-typed `ProtectionChanged`, each clause in the order §9.5 gives
+/// it and reported at the member it names (DEC-446 item 6): 41's two lists, 42's quantity, 43's
+/// prices, then 44's remaining members from `intent_id` to `acknowledged`, each at its own member
+/// in the table's order.
+fn protection_changed_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    let schema = InvalidReason::Schema;
+    let action = p.text("action");
+    let named = |members: &[&str]| members.contains(&action);
+    let covers_orders = named(&["placed", "cancelled", "passive_start", "unprotected_start"]);
+    ensure(
+        p.list("orders").is_empty() != covers_orders,
+        schema,
+        "payload.orders",
+    )?;
+    let covers_awaiting = named(&["interval_limit", "unprotected_end"]);
+    ensure(
+        p.list("awaiting").is_empty() != covers_awaiting,
+        schema,
+        "payload.awaiting",
+    )?;
+    ensure(
+        match action {
+            "placed" => !p.is_null("qty"),
+            "cancelled" => true,
+            _ => p.is_null("qty"),
+        },
+        schema,
+        "payload.qty",
+    )?;
+    let priced = named(&["intended", "placed", "passive_start", "unprotected_start"]);
+    let stop = !p.is_null("stop");
+    ensure(
+        priced || (p.is_null("stop") && p.is_null("take_profit")),
+        schema,
+        "payload.stop",
+    )?;
+    ensure(
+        stop || p.is_null("take_profit"),
+        schema,
+        "payload.take_profit",
+    )?;
+    let has = |member: &str| !p.is_null(member);
+    let intents = named(&["intended", "rung_short"]);
+    if named(&["passive_start", "unprotected_start"]) {
+        let set = has("intent_id");
+        for member in ["intent_id", "entry", "agent_id"] {
+            ensure(has(member) == set, schema, &format!("payload.{member}"))?;
+        }
+    } else {
+        ensure(has("intent_id") == intents, schema, "payload.intent_id")?;
+        ensure(!has("entry"), schema, "payload.entry")?;
+        ensure(!has("agent_id"), schema, "payload.agent_id")?;
+    }
+    for (member, actions) in [
+        ("replacing", &["passive_start", "unprotected_start"][..]),
+        (
+            "bracket",
+            &[
+                "placed",
+                "passive_start",
+                "unprotected_start",
+                "unprotected_end",
+            ][..],
+        ),
+        ("created_on", &["placed"][..]),
+        ("sent", &["rung_short"][..]),
+        ("uncovered", &["interval_limit", "unprotected_end"][..]),
+        ("acknowledged", &["unprotected_end"][..]),
+    ] {
+        ensure(
+            !has(member) || named(actions),
+            schema,
+            &format!("payload.{member}"),
+        )?;
+    }
+    Ok(())
+}
 
 /// A normalized payload, read member by member; a `null` or absent member reads as empty.
 #[derive(Clone, Copy)]
@@ -437,26 +578,77 @@ fn cash_in_band(p: Payload<'_>) -> Result<(), Invalid> {
 }
 
 fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
-    if schema_version != 1 {
-        return None;
+    match (event_type, schema_version) {
+        ("IntentReceived", 1) => Some(&crate::schema::INTENT_RECEIVED_V1),
+        ("GateDecided", 1) => Some(&crate::schema::GATE_DECIDED_V1),
+        ("OrderSubmitted", 1) => Some(&crate::schema::ORDER_SUBMITTED_V1),
+        ("IntentReceived", 2) => Some(&INTENT_RECEIVED_V2),
+        ("GateDecided", 2) => Some(&GATE_DECIDED_V2),
+        ("OrderSubmitted", 2) => Some(&ORDER_SUBMITTED_V2),
+        (COMPANION, 1) => Some(&ORDER_REQUEST_RECORDED),
+        ("ProtectionChanged", 1) => Some(&PROTECTION_CHANGED),
+        ("StreamOpened", 1) => Some(&STREAM_OPENED),
+        ("ConnectionEstablished", 1) => Some(&CONNECTION_ESTABLISHED),
+        ("ConnectionRevoked", 1) => Some(&CONNECTION_REVOKED),
+        ("DisclosureAccepted", 1) => Some(&DISCLOSURE_ACCEPTED),
+        ("ConfigSnapshotRegistered", 1) => Some(&CONFIG_SNAPSHOT_REGISTERED),
+        ("MandateVersionCreated", 1) => Some(&MANDATE_VERSION_CREATED),
+        ("MandateConfirmed", 1) => Some(&MANDATE_CONFIRMED),
+        ("AgentDeployed", 1) => Some(&AGENT_DEPLOYED),
+        ("AgentStopped", 1) => Some(&AGENT_STOPPED),
+        ("OwnerCommandRefused", 1) => Some(&OWNER_COMMAND_REFUSED),
+        (SNAPSHOT, 1) => Some(&ACCOUNT_SNAPSHOT_RECORDED),
+        ("MandateVersionApplied", 1) => Some(&MANDATE_VERSION_APPLIED),
+        ("UniverseChanged", 1) => Some(&UNIVERSE_CHANGED),
+        ("ThesisProposed" | "ThesisRevised", 1) => Some(&THESIS_RECORD),
+        _ => None,
     }
-    Some(match event_type {
-        "StreamOpened" => &STREAM_OPENED,
-        "ConnectionEstablished" => &CONNECTION_ESTABLISHED,
-        "ConnectionRevoked" => &CONNECTION_REVOKED,
-        "DisclosureAccepted" => &DISCLOSURE_ACCEPTED,
-        "ConfigSnapshotRegistered" => &CONFIG_SNAPSHOT_REGISTERED,
-        "MandateVersionCreated" => &MANDATE_VERSION_CREATED,
-        "MandateConfirmed" => &MANDATE_CONFIRMED,
-        "AgentDeployed" => &AGENT_DEPLOYED,
-        "AgentStopped" => &AGENT_STOPPED,
-        "OwnerCommandRefused" => &OWNER_COMMAND_REFUSED,
-        SNAPSHOT => &ACCOUNT_SNAPSHOT_RECORDED,
-        "MandateVersionApplied" => &MANDATE_VERSION_APPLIED,
-        "UniverseChanged" => &UNIVERSE_CHANGED,
-        "ThesisProposed" | "ThesisRevised" => &THESIS_RECORD,
-        _ => return None,
-    })
+}
+
+/// §9.5's batch rule 45 over one `append` batch whose drafts each passed [`Draft::parse`] (DEC-446
+/// item 3): a version-2 `OrderSubmitted` is immediately preceded in the batch by exactly one
+/// `OrderRequestRecorded` and names it as its `causation_id`; an `OrderRequestRecorded` no
+/// `OrderSubmitted` in the batch names is its own refusal. Checked draft by draft first (each
+/// draft's own rules, in [`payload`]), then on the submissions in batch order, then the orphans.
+/// A version-1 `OrderSubmitted` carries no rule here: it precedes the companion. Batches of any
+/// other stream pass.
+pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
+    fn names(draft: &Draft) -> &str {
+        draft
+            .fields()
+            .get("causation_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    }
+    let mut run = 0usize;
+    let mut companion: Option<&str> = None;
+    for (i, draft) in drafts.iter().enumerate() {
+        if draft.event_type() == COMPANION {
+            run = run.saturating_add(1);
+            companion = Some(draft.event_id());
+            continue;
+        }
+        if draft.event_type() == "OrderSubmitted" && draft.schema_version() == 2 {
+            if run != 1 {
+                return Err((i, Invalid::new(InvalidReason::Schema, "event_type")));
+            }
+            if names(draft) != companion.unwrap_or_default() {
+                return Err((i, Invalid::new(InvalidReason::Schema, "causation_id")));
+            }
+        }
+        run = 0;
+        companion = None;
+    }
+    for (i, draft) in drafts.iter().enumerate() {
+        if draft.event_type() == COMPANION
+            && !drafts
+                .iter()
+                .any(|d| d.event_type() == "OrderSubmitted" && names(d) == draft.event_id())
+        {
+            return Err((i, Invalid::new(InvalidReason::Schema, "event_type")));
+        }
+    }
+    Ok(())
 }
 
 static MANDATE_VERSION_APPLIED: Ty = Ty::Record(&[
@@ -562,6 +754,126 @@ static ACCOUNT_SNAPSHOT_RECORDED: Ty = Ty::Record(&[
     ("model_cash", Ty::Nullable(&Ty::Decimal)),
     ("cash_band", Ty::Nullable(&Ty::Decimal)),
     ("cash_in_band", Ty::Nullable(&Ty::Bool)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `IntentReceived` at `schema_version` 2: version 1's nine members with `risk_clock` last
+/// and nothing else moved (DEC-446 item 1). The protective prices are never members, at either
+/// version: they move to the `intended` `ProtectionChanged` (DEC-446 item 5).
+static INTENT_RECEIVED_V2: Ty = Ty::Record(&[
+    ("intent_id", Ty::Ulid),
+    ("agent_id", Ty::Ident),
+    ("instrument_id", Ty::Str),
+    ("side", Ty::Str),
+    ("type", Ty::Str),
+    ("tif", Ty::Str),
+    ("qty", Ty::Decimal),
+    ("limit_price", Ty::Nullable(&Ty::Decimal)),
+    ("purpose", Ty::Str),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `GateDecided` at `schema_version` 2: version 1's members with `risk_clock` last. The
+/// check id vocabulary is §9's, matching trading spec §9.1.
+static GATE_DECIDED_V2: Ty = Ty::Record(&[
+    ("intent_id", Ty::Ulid),
+    ("verdict", Ty::Str),
+    ("reason_code", Ty::Nullable(&Ty::Str)),
+    ("data_profile", Ty::Str),
+    (
+        "quotes_used",
+        Ty::List(&Ty::Record(&[
+            ("instrument_id", Ty::Str),
+            ("bid", Ty::Decimal),
+            ("ask", Ty::Decimal),
+            ("as_of", Ty::Timestamp),
+            ("feed", Ty::Str),
+        ])),
+    ),
+    (
+        "marks_used",
+        Ty::List(&Ty::Record(&[
+            ("instrument_id", Ty::Str),
+            ("price", Ty::Decimal),
+            ("source", Ty::Str),
+            ("kind", Ty::Str),
+        ])),
+    ),
+    (
+        "checks",
+        Ty::List(&Ty::Record(&[
+            ("id", Ty::OneOf(GATE_CHECK_IDS)),
+            ("result", Ty::Str),
+            ("inputs", Ty::OpenObject),
+            ("computed", Ty::OpenObject),
+        ])),
+    ),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `OrderSubmitted` at `schema_version` 2: version 1's eight members with `risk_clock`
+/// last. Its `causation_id` names its `OrderRequestRecorded` (rule 45).
+static ORDER_SUBMITTED_V2: Ty = Ty::Record(&[
+    ("client_order_id", Ty::Str),
+    ("attempt", Ty::Int),
+    ("instrument_id", Ty::Str),
+    ("side", Ty::Str),
+    ("type", Ty::Str),
+    ("tif", Ty::Str),
+    ("qty", Ty::Decimal),
+    ("limit_price", Ty::Nullable(&Ty::Decimal)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's companion at `schema_version` 1: the executor-only members the fold rebuilds the exact
+/// request and the order's owner from (DEC-446 item 2). Every member is present (§4.2); rules 39
+/// and 40 say which are null.
+static ORDER_REQUEST_RECORDED: Ty = Ty::Record(&[
+    ("agent_id", Ty::Ident),
+    ("intent_id", Ty::Nullable(&Ty::Ulid)),
+    (
+        "purpose",
+        Ty::OneOf(&[
+            "open",
+            "increase",
+            "discretionary_exit",
+            "risk_exit",
+            "owner_exit",
+            "protective",
+            "flatten",
+        ]),
+    ),
+    ("extended_hours", Ty::Bool),
+    ("stop_price", Ty::Nullable(&Ty::Decimal)),
+    ("order_class", Ty::Nullable(&Ty::OneOf(&["bracket", "oco"]))),
+    ("take_profit", Ty::Nullable(&Ty::Decimal)),
+    ("stop", Ty::Nullable(&Ty::Decimal)),
+    ("rung", Ty::Nullable(&Ty::Int)),
+    ("at_floor", Ty::Nullable(&Ty::Bool)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `ProtectionChanged` at `schema_version` 1, closed whole: the fold's reads, canonically
+/// named, with the `intended` action's receipt-time protective prices (DEC-446 items 4 to 6).
+/// Every member is present on every record (§4.2); rules 41 to 44 say per action which are null
+/// or empty.
+static PROTECTION_CHANGED: Ty = Ty::Record(&[
+    ("instrument_id", Ty::Str),
+    ("action", Ty::OneOf(PROTECTION_ACTIONS)),
+    ("orders", Ty::List(&Ty::Str)),
+    ("awaiting", Ty::List(&Ty::Str)),
+    ("qty", Ty::Nullable(&Ty::Decimal)),
+    ("stop", Ty::Nullable(&Ty::Decimal)),
+    ("take_profit", Ty::Nullable(&Ty::Decimal)),
+    ("intent_id", Ty::Nullable(&Ty::Ulid)),
+    ("bracket", Ty::Nullable(&Ty::Str)),
+    ("entry", Ty::Nullable(&Ty::Str)),
+    ("agent_id", Ty::Nullable(&Ty::Ident)),
+    ("replacing", Ty::Nullable(&Ty::Bool)),
+    ("created_on", Ty::Nullable(&Ty::Date)),
+    ("sent", Ty::Nullable(&Ty::Decimal)),
+    ("uncovered", Ty::Nullable(&Ty::Bool)),
+    ("acknowledged", Ty::Nullable(&Ty::Bool)),
     ("risk_clock", Ty::RiskClock),
 ]);
 
@@ -1738,6 +2050,135 @@ mod tests {
                 refusal(body),
                 Some(("unknown_schema".to_owned(), "payload".to_owned())),
                 "{name}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The §9.5 account-stream section (DEC-446), read here as well as by `mandate-refcases`, so
+    /// the executor records' registration is judged by this crate's own tests against the same
+    /// vectors the reference implementation generates.
+    fn account_section() -> Result<Value, String> {
+        named_section("account_stream")
+    }
+
+    #[test]
+    fn every_account_chain_event_and_valid_draft_parses() -> Result<(), String> {
+        let section = account_section()?;
+        let chain = list(&section, "chain");
+        let valid = list(&section, "valid_drafts");
+        assert_eq!((chain.len(), valid.len()), (8, 11));
+        for entry in chain {
+            let seq = entry.get("seq").and_then(Value::as_int).unwrap_or_default();
+            let case = Value::Object(
+                [(
+                    Key::new("base_seq").map_err(|_| "key")?,
+                    entry.get("seq").cloned().ok_or("seq")?,
+                )]
+                .into_iter()
+                .collect(),
+            );
+            let bytes = draft(&section, &case)?;
+            let parsed = Draft::parse(&bytes).map(|d| d.event_type().to_owned());
+            assert_eq!(
+                parsed,
+                Ok(text(entry, "event_type").to_owned()),
+                "seq {seq}"
+            );
+        }
+        for case in valid {
+            let parsed = Draft::parse(&draft(&section, case)?).map(|_| ());
+            assert_eq!(parsed, Ok(()), "{}", text(case, "name"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn every_account_invalid_draft_is_refused_with_its_reason_at_its_path() -> Result<(), String> {
+        let section = account_section()?;
+        let invalid = list(&section, "invalid_drafts");
+        assert_eq!(invalid.len(), 44);
+        for case in invalid {
+            let expect = case.get("expect").ok_or("no expect")?;
+            let refused = Draft::parse(&draft(&section, case)?)
+                .err()
+                .map(|e| (e.reason.code().to_owned(), e.path));
+            let wanted = (
+                text(expect, "reason").to_owned(),
+                text(expect, "path").to_owned(),
+            );
+            assert_eq!(refused, Some(wanted), "{}", text(case, "name"));
+        }
+        Ok(())
+    }
+
+    /// Rule 45 over the vectors' batches: a valid batch commits, and each invalid batch is refused
+    /// whole at its draft, for the reason and at the member the section lists.
+    #[test]
+    fn each_rule_45_batch_commits_or_is_refused_at_its_draft_and_member() -> Result<(), String> {
+        let section = account_section()?;
+        let valid = list(&section, "valid_batches");
+        let invalid = list(&section, "invalid_batches");
+        assert_eq!((valid.len(), invalid.len()), (1, 6));
+        for case in valid.iter().chain(invalid) {
+            let drafts = list(case, "drafts")
+                .iter()
+                .map(|member| Draft::parse(&draft(&section, member)?).map_err(|e| format!("{e}")))
+                .collect::<Result<Vec<_>, String>>()?;
+            let expect = case.get("expect").ok_or("no expect")?;
+            let got = crate::check_batch(&drafts)
+                .err()
+                .map(|(i, e)| (u64::try_from(i).ok(), e.reason.code().to_owned(), e.path));
+            let wanted = (text(expect, "outcome") == "Invalid").then(|| {
+                (
+                    expect.get("draft_index").and_then(Value::as_int),
+                    text(expect, "reason").to_owned(),
+                    text(expect, "path").to_owned(),
+                )
+            });
+            assert_eq!(got, wanted, "{}", text(case, "name"));
+        }
+        Ok(())
+    }
+
+    /// The three records §9.5 closes at `schema_version` 2 keep their version-1 schemas registered
+    /// (§8): a version-1 record parses beside a version-2 one, and a version-3 one is unknown.
+    #[test]
+    fn the_executor_records_keep_version_1_registered() -> Result<(), String> {
+        let section = account_section()?;
+        let case = list(&section, "valid_drafts")
+            .iter()
+            .find(|c| text(c, "name") == "v1_intent_received_still_appends")
+            .ok_or("no v1 case")?
+            .clone();
+        assert_eq!(Draft::parse(&draft(&section, &case)?).map(|_| ()), Ok(()));
+        for (event_type, base_seq) in [
+            ("IntentReceived", 2u64),
+            ("GateDecided", 4),
+            ("OrderSubmitted", 6),
+        ] {
+            let mut body = {
+                let mut body = list(&section, "chain")
+                    .iter()
+                    .find(|e| e.get("seq").and_then(Value::as_int) == Some(base_seq))
+                    .and_then(|e| e.get("body"))
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .ok_or("no chain event")?;
+                for field in ["seq", "prev_hash", "recorded_at"] {
+                    body.remove(field);
+                }
+                body
+            };
+            let key = Key::new("schema_version").map_err(|e| e.to_string())?;
+            body.insert(key, Value::Int(Int::new(3).ok_or("an integer")?));
+            let refused = Draft::parse(&to_canonical(&Value::Object(body)))
+                .err()
+                .map(|e| (e.reason.code().to_owned(), e.path));
+            assert_eq!(
+                refused,
+                Some(("unknown_schema".to_owned(), "payload".to_owned())),
+                "{event_type} at version 3"
             );
         }
         Ok(())

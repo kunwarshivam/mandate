@@ -26,6 +26,7 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("IntentReceived", &[ACCT], &[MAN]),
     ("GateDecided", &[ACCT], &[FEE, CAL, INS, RULE, MAN]),
     ("OrderSubmitted", &[ACCT], &[]),
+    ("OrderRequestRecorded", &[ACCT], &[]),
     ("OrderStateChanged", &[ACCT], &[]),
     ("OrderAbandoned", &[ACCT], &[]),
     ("BrokerExchangeRecorded", &[ACCT], &[]),
@@ -162,11 +163,23 @@ const RISK_STATE_ON_ACCOUNT: [(&str, &str); 2] =
 /// The agent stream's research-agent thesis records journal spec §9.4 closes (DEC-413, DEC-414).
 const THESIS_ON_AGENT: [(&str, &str); 2] = [("ThesisProposed", AGENT), ("ThesisRevised", AGENT)];
 
+/// The account stream's executor records journal spec v0.13 §9.5 closes (DEC-446, DEC-447):
+/// `ProtectionChanged` at `schema_version` 1, and the other three at 2 with their version-1
+/// schemas staying registered (§8).
+const EXECUTOR_ON_ACCOUNT: [(&str, &str); 5] = [
+    ("IntentReceived", ACCT),
+    ("GateDecided", ACCT),
+    ("OrderSubmitted", ACCT),
+    ("OrderRequestRecorded", ACCT),
+    ("ProtectionChanged", ACCT),
+];
+
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {
     CLOSED_BY_SECTION_9_2.contains(&(event_type, kind))
         || (event_type, kind) == SNAPSHOT_ON_ACCOUNT
         || RISK_STATE_ON_ACCOUNT.contains(&(event_type, kind))
         || THESIS_ON_AGENT.contains(&(event_type, kind))
+        || EXECUTOR_ON_ACCOUNT.contains(&(event_type, kind))
 }
 
 fn stream_of(kind: &str) -> &'static str {
