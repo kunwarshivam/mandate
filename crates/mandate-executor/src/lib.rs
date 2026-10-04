@@ -84,6 +84,8 @@ mod gate;
 mod ids;
 mod intent;
 pub(crate) mod kill;
+#[cfg(test)]
+mod kill_tests;
 mod orders;
 mod payload;
 mod ports;

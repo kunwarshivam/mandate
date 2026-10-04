@@ -1971,7 +1971,14 @@ const STUB_MARKERS: [&str; 5] = [
 /// rule-5 wait on the lead's partly filled entry ran out against the broker's silence, which is
 /// the release DEC-160 (18) pins in `protection::sequence_tests` and its oracle counts as an
 /// unconfirmed cancel.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 3] = [
+///
+/// The remaining six rows are E7-2 pins the kill switch moved past their old stub: the kill
+/// switch's own orders are not intents (they are exempt from the agent's mode, §5.5), so the
+/// oracles that read only intent-placed orders reject or miscount the runs the switch appears in —
+/// the id-citation pair, the reservation and fold-replay pairs, the random-script Σ quantity, and
+/// the risk-clock walk (the kill switch's `FillApplied` copy). Each is released when its oracle
+/// reads the kill flow, in E7-2's tests correction.
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
@@ -1983,6 +1990,30 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 3] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "a_client_order_id_is_a_function_of_the_intent_id_alone",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "distinct_intents_never_share_a_client_order_id",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "a_reservation_is_never_released_before_a_terminal_state",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "folding_the_journaled_drafts_reproduces_the_live_state",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "protective_sell_quantity_never_exceeds_the_position_in_any_script",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "every_risk_input_draft_carries_a_non_decreasing_risk_clock",
     ),
 ];
 

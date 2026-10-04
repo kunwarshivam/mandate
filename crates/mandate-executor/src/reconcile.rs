@@ -730,7 +730,7 @@ pub(crate) mod tests {
         }
 
         /// Handles one input and commits at most `keep` of its drafts; `usize::MAX` commits all.
-        fn run_keeping(
+        pub(crate) fn run_keeping(
             &mut self,
             input: Input,
             ports: &Ports<'_>,
@@ -769,6 +769,32 @@ pub(crate) mod tests {
         }
 
         /// A crash and a restart: a new process folds the same journal and takes a new epoch.
+        /// A fresh process over the same journal: the state refolded from seq 1, quotes and
+        /// modes beside it, for a restart the caller drives itself — `Input::Started` on it
+        /// resumes what the switch left.
+        pub(crate) fn refold(executor: &Executor) -> Result<ExecutorState, ExecutorError> {
+            let mut state = ExecutorState::new(executor.state.scope.clone());
+            for event in &executor.journal {
+                fold(&mut state, event)?;
+            }
+            state.quotes.clone_from(&executor.state.quotes);
+            state.sane_bids.clone_from(&executor.state.sane_bids);
+            state.trades.clone_from(&executor.state.trades);
+            state.breaches.clone_from(&executor.state.breaches);
+            state.modes.clone_from(&executor.state.modes);
+            state.now = executor.state.now;
+            Ok(state)
+        }
+
+        /// An executor over an already-folded state, which `Input::Started` takes a new epoch on.
+        pub(crate) fn from_state(state: ExecutorState, epoch: u64) -> Self {
+            Self {
+                state,
+                journal: Vec::new(),
+                epoch,
+            }
+        }
+
         pub(crate) fn restarted(&self, ports: &Ports<'_>) -> Result<Self, ExecutorError> {
             let mut next = Self {
                 state: ExecutorState::new(AccountScope {
