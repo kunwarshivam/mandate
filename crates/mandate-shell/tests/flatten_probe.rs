@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use mandate_accounting::InstrumentId;
 use mandate_canon::{Int, Key, Object, Value};
 use mandate_executor::{ExecutorState, FoldedEvent, fold};
-use mandate_journal::{AppendOutcome, Draft, StoredEvent};
+use mandate_journal::{AppendOutcome, Draft, MemoryJournal, StoredEvent, StreamId};
 use mandate_num::{Fraction, Qty, Usd};
 use mandate_risk::{
     AgentPosition, AssetId, ClientOrderId as RiskClientId, FlattenInitiator, FlattenInput,
@@ -54,6 +54,11 @@ const OTHER_INTENT: &str = "01J8Z3M1P0000000000000000Z";
 /// The intent behind agent-b's resting protective sell of one: unfilled, so a plan that
 /// cancelled every agent's working orders would name it and fail the cancel pin.
 const OTHER_PROTECTIVE_INTENT: &str = "01J8Z3M1P0000000000000000V";
+/// A broker-created protective leg whose id names no entry and whose instrument has two holders,
+/// so DEC-160's attribution rule leaves its folded order ownerless.
+const UNATTRIBUTED_PROTECTIVE_ORDER: &str = "md-broker-protective-aapl";
+/// The same ownerless shape in an instrument the deciding agent does not close.
+const UNRELATED_PROTECTIVE_ORDER: &str = "md-broker-protective-unrelated";
 /// A Monday mid-morning in New York: the regular session, so an equity sell plans now.
 const REGULAR_CLOCK: &str = "2026-09-21T14:00:01.000000000Z";
 /// The same Monday, before the open: an equity sell waits for the regular session.
@@ -98,6 +103,50 @@ impl JournalWriter for ScriptedJournal {
     ) -> AppendOutcome {
         let _ = (stream, expected_head, writer_epoch, drafts);
         AppendOutcome::Unavailable
+    }
+}
+
+/// A journal populated through the real append path, so every returned row carries the three
+/// journal-assigned sealed-body members.
+struct MemoryBackedJournal {
+    journal: MemoryJournal,
+    stream: StreamId,
+}
+
+impl JournalWriter for MemoryBackedJournal {
+    fn take_ownership(&mut self, stream: &str) -> Result<u64, mandate_shell::Cause> {
+        let parsed = StreamId::parse(stream).ok_or(mandate_shell::Cause::Absent {
+            what: "an account stream id",
+        })?;
+        Ok(self.journal.take_ownership(&parsed))
+    }
+
+    fn read(&self, stream: &str) -> Result<Vec<StoredEvent>, mandate_shell::Cause> {
+        if stream == self.stream.as_str() {
+            Ok(self.journal.rows(&self.stream).to_vec())
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    fn append(
+        &mut self,
+        stream: &str,
+        expected_head: u64,
+        writer_epoch: u64,
+        drafts: &[Vec<u8>],
+    ) -> AppendOutcome {
+        let Some(parsed) = StreamId::parse(stream) else {
+            return AppendOutcome::Unavailable;
+        };
+        let refs: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
+        self.journal.append(
+            &parsed,
+            expected_head,
+            writer_epoch,
+            UtcNanos::parse(REGULAR_CLOCK).expect("the fixture's recorded time"),
+            &refs,
+        )
     }
 }
 
@@ -170,6 +219,18 @@ fn row(
     for (name, value) in members {
         body.insert(Key::new(name).expect("a canonical key"), value);
     }
+    body.insert(
+        Key::new("seq").expect("the assigned sequence key"),
+        Value::Int(Int::new(seq).expect("a sequence")),
+    );
+    body.insert(
+        Key::new("prev_hash").expect("the assigned previous-hash key"),
+        Value::Str(mandate_canon::Digest::ZERO.to_hex()),
+    );
+    body.insert(
+        Key::new("recorded_at").expect("the assigned recorded-at key"),
+        Value::Str("2026-09-21T14:00:00.000000000Z".to_owned()),
+    );
     StoredEvent {
         stream_id: STREAM.to_owned(),
         seq,
@@ -394,6 +455,96 @@ fn journal() -> ScriptedJournal {
     journal
 }
 
+fn sealed_journal() -> MemoryBackedJournal {
+    let fixture = journal();
+    let stream = StreamId::parse(STREAM).expect("the fixture's stream");
+    let mut journal = MemoryJournal::new();
+    let epoch = journal.take_ownership(&stream);
+    let draft_bodies: Vec<Vec<u8>> = fixture.0.iter().map(draft_body).collect();
+    let drafts: Vec<&[u8]> = draft_bodies.iter().map(Vec::as_slice).collect();
+    let appended = journal.append(
+        &stream,
+        0,
+        epoch,
+        UtcNanos::parse(REGULAR_CLOCK).expect("the fixture's recorded time"),
+        &drafts,
+    );
+    assert!(
+        matches!(appended, AppendOutcome::Committed(_)),
+        "the real memory journal seals the fixture: {appended:?}"
+    );
+    let first = journal.rows(&stream).first().expect("a sealed row");
+    let sealed = mandate_canon::parse(&first.body).expect("the sealed canonical body");
+    for assigned in ["seq", "prev_hash", "recorded_at"] {
+        assert!(
+            sealed.get(assigned).is_some(),
+            "the real stored body carries journal-assigned `{assigned}`"
+        );
+    }
+    MemoryBackedJournal { journal, stream }
+}
+
+fn draft_body(row: &StoredEvent) -> Vec<u8> {
+    let Value::Object(mut body) =
+        mandate_canon::parse(&row.body).expect("the fixture's canonical stored body")
+    else {
+        panic!("the fixture's stored body is an object")
+    };
+    for assigned in ["seq", "prev_hash", "recorded_at"] {
+        body.remove(assigned)
+            .unwrap_or_else(|| panic!("the fixture carries assigned `{assigned}`"));
+    }
+    mandate_canon::to_canonical(&Value::Object(body))
+}
+
+fn protection_changed(seq: u64, instrument: &str, order: &str, event: &str) -> StoredEvent {
+    row(
+        seq,
+        event,
+        "ProtectionChanged",
+        1,
+        None,
+        Vec::new(),
+        payload(vec![
+            ("instrument_id", text(instrument)),
+            ("action", text("placed")),
+            ("orders", Value::Array(vec![text(order)])),
+            ("awaiting", Value::Array(Vec::new())),
+            ("qty", decimal("1")),
+            ("stop", decimal("140")),
+            ("take_profit", decimal("170")),
+            ("intent_id", Value::Null),
+            ("bracket", Value::Null),
+            ("entry", Value::Null),
+            ("agent_id", Value::Null),
+            ("replacing", Value::Null),
+            ("created_on", text("2026-09-21")),
+            ("sent", Value::Null),
+            ("uncovered", Value::Null),
+            ("acknowledged", Value::Null),
+            ("risk_clock", text("2026-09-21T14:00:01.000000000Z")),
+        ]),
+    )
+}
+
+fn journal_with_unattributed_protection() -> ScriptedJournal {
+    let mut journal = journal();
+    journal.0.push(protection_changed(
+        16,
+        INSTRUMENT,
+        UNATTRIBUTED_PROTECTIVE_ORDER,
+        "01J8Z3M1Q0000000000000000P",
+    ));
+    journal.0.push(protection_changed(
+        17,
+        UNHELD_INSTRUMENT,
+        UNRELATED_PROTECTIVE_ORDER,
+        "01J8Z3M1Q0000000000000000Q",
+    ));
+    prove_the_fixture(&journal);
+    journal
+}
+
 /// The fixture proves itself before any test runs it: every row parses through the journal's own
 /// `Draft::parse`, and the whole sequence folds through the executor's public `fold` — the two
 /// crates DEC-449 names — so the contract is never pinned on records they would refuse.
@@ -403,7 +554,7 @@ fn prove_the_fixture(journal: &ScriptedJournal) {
         workspace: mandate_executor::WorkspaceId("ws_01J8Z2".to_owned()),
     });
     for stored in &journal.0 {
-        let draft = Draft::parse(&stored.body).unwrap_or_else(|refusal| {
+        let draft = Draft::parse(&draft_body(stored)).unwrap_or_else(|refusal| {
             panic!(
                 "the fixture's {} row is one the journal accepts: {refusal:?}",
                 stored.event_type
@@ -615,6 +766,131 @@ fn the_plan_is_the_risk_crates_own_plan_for_the_journals_folded_state() {
     assert_eq!(plan.sells, mapped.sells);
     assert_eq!(plan.purpose, mapped.purpose);
     assert_eq!(plan.confirmation, mapped.confirmation);
+}
+
+/// Review blocker 1: production reads sealed stored rows, not draft bodies. A real
+/// `MemoryJournal::append` adds `seq`, `prev_hash`, and `recorded_at`; planning must validate the
+/// original draft strictly and fold the stored row without feeding those assigned keys to
+/// `Draft::parse`.
+#[test]
+fn the_plan_folds_rows_sealed_by_the_real_memory_journal() {
+    let exit = RiskExitPath::new(the_agent(), fixture_mandate());
+    let journal = sealed_journal();
+    let request = kill_switch(vec![PROTECTIVE_INTENT.to_owned()]);
+    let plan = exit
+        .plan(&request, &journal, STREAM, Some(clock(REGULAR_CLOCK)))
+        .expect("the adapter plans over real sealed stored rows");
+    assert_eq!(
+        plan.sells.iter().map(|leg| leg.qty).collect::<Vec<_>>(),
+        vec![Qty::parse("10").expect("a qty")]
+    );
+}
+
+/// Removing the journal-assigned members does not weaken either boundary: each assigned value must
+/// match its stored column, and the remaining writer draft is still closed to unknown keys.
+#[test]
+fn sealed_row_normalization_keeps_assigned_and_draft_validation_strict() {
+    let request = kill_switch(vec![PROTECTIVE_INTENT.to_owned()]);
+    let refuses = |rows: Vec<StoredEvent>| {
+        matches!(
+            RiskExitPath::new(the_agent(), fixture_mandate()).plan(
+                &request,
+                &ScriptedJournal(rows),
+                STREAM,
+                Some(clock(REGULAR_CLOCK))
+            ),
+            Err(mandate_shell::Cause::Spec(_))
+        )
+    };
+
+    let journal = sealed_journal();
+    let mut mismatched = journal.journal.rows(&journal.stream).to_vec();
+    let first = mismatched.first_mut().expect("the first stored row");
+    let Value::Object(mut body) =
+        mandate_canon::parse(&first.body).expect("the sealed body parses")
+    else {
+        panic!("the sealed body is an object")
+    };
+    body.insert(
+        Key::new("recorded_at").expect("the assigned key"),
+        text("2026-09-21T14:00:02.000000000Z"),
+    );
+    first.body = mandate_canon::to_canonical(&Value::Object(body));
+    assert!(
+        refuses(mismatched),
+        "assigned fields must match row columns"
+    );
+
+    let journal = sealed_journal();
+    let mut unknown = journal.journal.rows(&journal.stream).to_vec();
+    let first = unknown.first_mut().expect("the first stored row");
+    let Value::Object(mut body) =
+        mandate_canon::parse(&first.body).expect("the sealed body parses")
+    else {
+        panic!("the sealed body is an object")
+    };
+    body.insert(
+        Key::new("unexpected").expect("a canonical unknown key"),
+        Value::Null,
+    );
+    first.body = mandate_canon::to_canonical(&Value::Object(body));
+    assert!(
+        refuses(unknown),
+        "strict draft validation still refuses unknown writer keys"
+    );
+}
+
+/// Review blocker 2, inclusion: with two attributed holders, a broker-created protective leg
+/// names neither holder and folds with `agent = None`. The deciding agent closes this instrument,
+/// so §5.4/§5.5 requires its exact client order id to be cancelled.
+#[test]
+fn an_agent_flatten_cancels_unattributed_protection_in_an_instrument_it_closes() {
+    let exit = RiskExitPath::new(the_agent(), fixture_mandate());
+    let plan = exit
+        .plan(
+            &kill_switch(Vec::new()),
+            &journal_with_unattributed_protection(),
+            STREAM,
+            Some(clock(REGULAR_CLOCK)),
+        )
+        .expect("the adapter plans with ownerless protection");
+    assert!(
+        plan.cancel_client_order_ids
+            .contains(&UNATTRIBUTED_PROTECTIVE_ORDER.to_owned()),
+        "the flatten cancels ownerless protection in the instrument it closes: {:?}",
+        plan.cancel_client_order_ids
+    );
+}
+
+/// Review blocker 2, scope: admitting ownerless orders must not become cancel-all. The plan
+/// includes the ownerless leg in the closed instrument, but excludes another instrument's
+/// ownerless leg and the other agent's attributed protective order in the same instrument.
+#[test]
+fn unattributed_cancels_stay_inside_the_closed_instrument_and_never_take_another_agents_order() {
+    let exit = RiskExitPath::new(the_agent(), fixture_mandate());
+    let held = InstrumentId::new(INSTRUMENT).expect("the held instrument");
+    let plan = exit
+        .plan(
+            &owner_exit(Some(held)),
+            &journal_with_unattributed_protection(),
+            STREAM,
+            Some(clock(REGULAR_CLOCK)),
+        )
+        .expect("the adapter plans the instrument-scoped owner exit");
+    assert!(
+        plan.cancel_client_order_ids
+            .contains(&UNATTRIBUTED_PROTECTIVE_ORDER.to_owned())
+    );
+    assert!(
+        !plan
+            .cancel_client_order_ids
+            .contains(&UNRELATED_PROTECTIVE_ORDER.to_owned())
+    );
+    assert!(
+        !plan
+            .cancel_client_order_ids
+            .contains(&format!("md-{OTHER_PROTECTIVE_INTENT}"))
+    );
 }
 
 /// §5.5's structural pins, in the regular session: the plan sells exactly the deciding agent's

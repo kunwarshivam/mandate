@@ -26,7 +26,7 @@
 //! | [`AlpacaConnector`] | `mandate_alpaca::TradingClient` over a `TradingTransport` (stream K) |
 //! | [`ExecutorReconciler`] | `mandate_executor::reconcile` on the connector's snapshot (E7-3) |
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use mandate_accounting::{InstrumentId, Side};
@@ -187,13 +187,14 @@ impl ExitPath for RiskExitPath {
                 order
                     .agent
                     .as_ref()
-                    .is_some_and(|agent| agent.0.as_str() == self.agent.0.as_str())
+                    .is_some_and(|owner| owner.0.as_str() == self.agent.0.as_str())
             })
             .collect();
         let session = session_of(clock, &mine, &classes)?;
         let positions = sub_ledger_of(&mine, &classes, request.instrument.as_ref())?;
+        let flatten_orders = flatten_orders_of(state.orders().values(), &self.agent, &positions);
         let (open_orders, order_ids) =
-            working_orders_of(&mine, clock, request.instrument.as_ref())?;
+            working_orders_of(&flatten_orders, clock, request.instrument.as_ref())?;
         let input = FlattenInput {
             agent: mandate_risk::AgentId(1),
             open_orders: &open_orders,
@@ -268,6 +269,37 @@ impl ExitPath for RiskExitPath {
     }
 }
 
+fn flatten_orders_of<'a>(
+    orders: impl Iterator<Item = &'a ExecutorOrder>,
+    agent: &AgentId,
+    positions: &[mandate_risk::AgentPosition],
+) -> Vec<&'a ExecutorOrder> {
+    let closing: BTreeSet<&str> = positions
+        .iter()
+        .map(|position| position.instrument.as_str())
+        .collect();
+    orders
+        .filter(|order| {
+            let attributed_to_agent = order
+                .agent
+                .as_ref()
+                .is_some_and(|owner| owner.0.as_str() == agent.0.as_str());
+            let permitted_unattributed_purpose = match order.purpose {
+                mandate_executor::Purpose::Protective | mandate_executor::Purpose::RiskExit => true,
+                mandate_executor::Purpose::Open
+                | mandate_executor::Purpose::Increase
+                | mandate_executor::Purpose::OwnerExit
+                | mandate_executor::Purpose::DiscretionaryExit
+                | mandate_executor::Purpose::Flatten => false,
+            };
+            attributed_to_agent
+                || (order.agent.is_none()
+                    && permitted_unattributed_purpose
+                    && closing.contains(order.instrument.as_str()))
+        })
+        .collect()
+}
+
 /// The account scope a stream id names, in the `acct:{workspace}:{account}` form every journal
 /// account stream takes.
 fn scope_of(stream: &str) -> Result<mandate_executor::AccountScope, Cause> {
@@ -293,7 +325,32 @@ fn fold_of(
 ) -> Result<mandate_executor::ExecutorState, Cause> {
     let mut state = mandate_executor::ExecutorState::new(scope.clone());
     for row in stored {
-        let draft = mandate_journal::Draft::parse(&row.body).map_err(|_| {
+        let sealed = mandate_canon::parse(&row.body).map_err(|_| {
+            Cause::Spec(mandate_spec::SpecError::InvalidInput {
+                what: "a stored journal body that is not canonical JSON",
+            })
+        })?;
+        let mandate_canon::Value::Object(mut body) = sealed else {
+            return Err(Cause::Spec(mandate_spec::SpecError::InvalidInput {
+                what: "a stored journal body that is not an object",
+            }));
+        };
+        let assigned_match = body.remove("seq").and_then(|value| value.as_int()) == Some(row.seq)
+            && body
+                .remove("prev_hash")
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .is_some_and(|value| value == row.prev_hash.to_hex())
+            && body
+                .remove("recorded_at")
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .is_some_and(|value| value == row.recorded_at);
+        if !assigned_match {
+            return Err(Cause::Spec(mandate_spec::SpecError::InvalidInput {
+                what: "a stored journal body whose assigned fields do not match its row",
+            }));
+        }
+        let draft_bytes = mandate_canon::to_canonical(&mandate_canon::Value::Object(body));
+        let draft = mandate_journal::Draft::parse(&draft_bytes).map_err(|_| {
             Cause::Spec(mandate_spec::SpecError::InvalidInput {
                 what: "a journal record the draft validation refuses",
             })
@@ -857,7 +914,7 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use super::{ExecutorOrder, working_order_of};
+    use super::{ExecutorOrder, flatten_orders_of, working_order_of, working_orders_of};
     use mandate_backtest::{BacktestError, Signal};
     use mandate_canon::DecStr;
     use mandate_marketdata::actions::{RecordedActions, write_actions};
@@ -891,6 +948,77 @@ mod tests {
             opening.open_qty,
             mandate_num::Qty::parse("4").map_err(|e| e.to_string())?
         );
+        Ok(())
+    }
+
+    /// Review blocker 2: the deciding agent's attributed orders travel beside ownerless
+    /// protective legs and ownerless watchdog exits only when they are in an instrument the
+    /// flatten closes. Another agent's attributed order is never admitted.
+    #[test]
+    fn flatten_candidates_include_scoped_ownerless_protection_and_watchdogs_only()
+    -> Result<(), String> {
+        let own = the_order(mandate_executor::Purpose::Protective)?;
+        let mut ownerless_protective = the_order(mandate_executor::Purpose::Protective)?;
+        ownerless_protective.client_order_id =
+            mandate_executor::ClientOrderId::parse("md-broker-protective")
+                .map_err(|e| e.to_string())?;
+        ownerless_protective.agent = None;
+        let mut ownerless_watchdog = the_order(mandate_executor::Purpose::RiskExit)?;
+        ownerless_watchdog.client_order_id =
+            mandate_executor::ClientOrderId::parse("md-w-01J8Z3M1Q0000000000000000W")
+                .map_err(|e| e.to_string())?;
+        ownerless_watchdog.agent = None;
+        let mut other_agent = the_order(mandate_executor::Purpose::Protective)?;
+        other_agent.client_order_id =
+            mandate_executor::ClientOrderId::parse("md-other-agent-protective")
+                .map_err(|e| e.to_string())?;
+        other_agent.agent = Some(mandate_executor::AgentId("agent-b".to_owned()));
+        let mut unrelated_ownerless = the_order(mandate_executor::Purpose::Protective)?;
+        unrelated_ownerless.client_order_id =
+            mandate_executor::ClientOrderId::parse("md-unrelated-ownerless")
+                .map_err(|e| e.to_string())?;
+        unrelated_ownerless.agent = None;
+        unrelated_ownerless.instrument =
+            InstrumentId::new("cccccccc-cccc-cccc-cccc-cccccccccccc").map_err(|e| e.to_string())?;
+        let mut ownerless_opening = the_order(mandate_executor::Purpose::Open)?;
+        ownerless_opening.client_order_id =
+            mandate_executor::ClientOrderId::parse("md-ownerless-opening")
+                .map_err(|e| e.to_string())?;
+        ownerless_opening.agent = None;
+        let orders = [
+            own,
+            ownerless_protective,
+            ownerless_watchdog,
+            other_agent,
+            unrelated_ownerless,
+            ownerless_opening,
+        ];
+        let scope =
+            InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415").map_err(|e| e.to_string())?;
+        let positions = vec![mandate_risk::AgentPosition {
+            agent: mandate_risk::AgentId(1),
+            instrument: mandate_risk::AssetId::new(scope.as_str()).map_err(|e| e.to_string())?,
+            asset_class: mandate_risk::AssetClass::UsEquity,
+            qty: Qty::parse("10").map_err(|e| e.to_string())?,
+        }];
+        let selected = flatten_orders_of(
+            orders.iter(),
+            &mandate_runtime::AgentId("agent-a".to_owned()),
+            &positions,
+        );
+        let (_, ids) = working_orders_of(
+            &selected,
+            mandate_runtime::RiskClock::from_secs(1_779_113_601),
+            Some(&scope),
+        )
+        .map_err(|e| e.to_string())?;
+        let selected: Vec<&str> = ids.values().map(String::as_str).collect();
+        assert!(selected.contains(&"md-resting"));
+        assert!(selected.contains(&"md-broker-protective"));
+        assert!(selected.contains(&"md-w-01J8Z3M1Q0000000000000000W"));
+        assert!(!selected.contains(&"md-other-agent-protective"));
+        assert!(!selected.contains(&"md-unrelated-ownerless"));
+        assert!(!selected.contains(&"md-ownerless-opening"));
         Ok(())
     }
 
