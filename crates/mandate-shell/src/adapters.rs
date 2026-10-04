@@ -2,11 +2,12 @@
 //!
 //! The implementation lands one slice at a time (DEC-77 stage 3, DEC-166). **Live** in slice 1:
 //! [`StoredBars`], [`MovingAverage`] and [`AlpacaConnector`], whose upstreams are fully implemented
-//! and whose every input the shell holds. **Still refusing**, each with [`Cause::Unimplemented`]:
-//! every other adapter, because its upstream is a stub or no production source exists for one of
-//! its inputs, and the shell never invents one (DEC-166 item 2). The first of them, [`RiskExitPath`],
-//! is also the first stage [`crate::run`] reaches, so a run over [`production`] still refuses at its
-//! first probe and places no order.
+//! and whose every input the shell holds, and since DEC-449's flip also [`RiskExitPath`], which
+//! probes and plans over the journal, stream, clock, and agent the run's bridge hands it.
+//! **Still refusing**, each with [`Cause::Unimplemented`]: every other adapter, because its
+//! upstream is a stub or no production source exists for one of its inputs, and the shell never
+//! invents one (DEC-166 item 2) — so a run over [`production`] refuses at the protection probe,
+//! the first stage after the exit, and places no order.
 //!
 //! What each will bind, per the task brief's step table:
 //!
@@ -28,19 +29,23 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use mandate_accounting::{InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
 use mandate_backtest::{Signal, Strategy, StrategyConfig};
-use mandate_executor::{BrokerConnector, BrokerOutcome, BrokerRequest, ConnectorError};
+use mandate_executor::{
+    BrokerConnector, BrokerOutcome, BrokerRequest, ConnectorError, Order as ExecutorOrder,
+};
 use mandate_journal::{AppendOutcome, StoredEvent};
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
 use mandate_marketdata::model::{Kind, Records, TimeUnit, Timeframe};
-use mandate_num::{Bps, Fraction, Price, Usd};
+use mandate_num::{Bps, Fraction, Price, Qty, SignedQty, Usd};
 use mandate_risk::{Decision, FlattenInitiator, FlattenInput, agent_flatten};
 use mandate_runtime::{
     AgentId, Autonomy, FlattenLeg, FlattenPlan, FlattenRequest, Initiator, IntentHandoff,
     MandateView, Proposal, Purpose, RiskClock, SignalInputs,
 };
+use mandate_time::UtcNanos;
 
 use crate::error::Cause;
 use crate::stages::{
@@ -98,9 +103,12 @@ impl RiskExitPath {
         })
     }
 
-    /// Each pinned instrument's asset class, keyed by the id the journal's records carry, with
-    /// every id proven readable as the risk crate's own `AssetId` — the probe refuses a mandate
-    /// whose universe the flatten could never read.
+    /// Each pinned instrument's asset class, keyed by the id the journal's records carry. The
+    /// journal's `instrument_id` must carry the mandate's `asset_id` — the strict
+    /// `8-4-4-4-12` uuid, never the vendor's symbol — and every id is proven readable as the
+    /// risk crate's own `AssetId`: the probe refuses a mandate whose universe the flatten could
+    /// never read, and a plan over an instrument the map does not carry is a refusal, never a
+    /// guess at its class.
     fn classes(
         document: &mandate_spec::document::Mandate,
     ) -> Result<BTreeMap<String, mandate_risk::AssetClass>, Cause> {
@@ -120,8 +128,26 @@ impl RiskExitPath {
 impl ExitPath for RiskExitPath {
     fn probe(&self) -> Result<(), Cause> {
         let document = self.document()?;
-        let _classes = Self::classes(&document)?;
-        let positions = Vec::new();
+        Self::classes(&document)?;
+        let positions = document
+            .universe
+            .pinned_instruments
+            .iter()
+            .map(|pinned| {
+                Ok(mandate_risk::AgentPosition {
+                    agent: mandate_risk::AgentId(1),
+                    instrument: mandate_risk::AssetId::new(pinned.asset_id.as_str()).map_err(
+                        |_| {
+                            Cause::Spec(mandate_spec::SpecError::InvalidInput {
+                                what: "a universe instrument the risk crate cannot read",
+                            })
+                        },
+                    )?,
+                    asset_class: pinned.asset_class,
+                    qty: Qty::parse("1")?,
+                })
+            })
+            .collect::<Result<Vec<_>, Cause>>()?;
         let open_orders = BTreeMap::new();
         let input = FlattenInput {
             agent: mandate_risk::AgentId(1),
@@ -165,8 +191,9 @@ impl ExitPath for RiskExitPath {
             })
             .collect();
         let session = session_of(clock, &mine, &classes)?;
-        let positions = sub_ledger_of(&mine, &classes)?;
-        let (open_orders, order_ids) = working_orders_of(&mine, clock)?;
+        let positions = sub_ledger_of(&mine, &classes, request.instrument.as_ref())?;
+        let (open_orders, order_ids) =
+            working_orders_of(&mine, clock, request.instrument.as_ref())?;
         let input = FlattenInput {
             agent: mandate_risk::AgentId(1),
             open_orders: &open_orders,
@@ -185,27 +212,26 @@ impl ExitPath for RiskExitPath {
                 .map(|confirmed| confirmed.floor),
         };
         let planned = agent_flatten(&input)?;
-        let leg =
-            |instrument: &mandate_risk::AssetId,
-             qty: mandate_num::Qty,
-             deferred: bool|
-             -> Result<FlattenLeg, Cause> {
-                Ok(FlattenLeg {
-                    instrument: mandate_accounting::InstrumentId::new(instrument.as_str())
-                        .map_err(|_| {
-                            Cause::Spec(mandate_spec::SpecError::InvalidInput {
-                                what: "an instrument the accounting crate cannot read",
-                            })
-                        })?,
-                    asset_class: classes.get(instrument.as_str()).copied().ok_or(
-                        Cause::Absent {
-                            what: "an instrument the mandate's universe does not carry",
-                        },
-                    )?,
-                    qty,
-                    deferred_to_regular_session: deferred,
-                })
-            };
+        let leg = |instrument: &mandate_risk::AssetId,
+                   qty: Qty,
+                   deferred: bool|
+         -> Result<FlattenLeg, Cause> {
+            Ok(FlattenLeg {
+                instrument: InstrumentId::new(instrument.as_str()).map_err(|_| {
+                    Cause::Spec(mandate_spec::SpecError::InvalidInput {
+                        what: "an instrument the accounting crate cannot read",
+                    })
+                })?,
+                asset_class: classes
+                    .get(instrument.as_str())
+                    .copied()
+                    .ok_or(Cause::Absent {
+                        what: "an instrument the mandate's universe does not carry",
+                    })?,
+                qty,
+                deferred_to_regular_session: deferred,
+            })
+        };
         let mut sells = Vec::new();
         for sell in &planned.sells {
             sells.push(leg(&sell.instrument, sell.qty, false)?);
@@ -300,10 +326,14 @@ fn fold_of(
 /// The session the clock derives, over the committed US-equities calendar — never a label a
 /// caller supplies (trading-domain spec §4.3): an equity instrument makes the calendar's
 /// answer load-bearing, and an all-crypto set of orders takes the continuous session, which
-/// never defers a sell. An instant the calendar cannot name is a refusal: no session, no plan.
+/// never defers a sell. A closed market inside the calendar's range is the overnight session,
+/// so an equity sell waits for the open rather than the run halting — risk reduction is never
+/// denied (AGENTS.md rule 13), and the risk crate's own derivation reads the same instant the
+/// same way. Only an instant the calendar cannot cover at all is a refusal: no session, no
+/// plan, and the bridge poisons rather than guess.
 fn session_of(
     clock: RiskClock,
-    mine: &[&mandate_executor::Order],
+    mine: &[&ExecutorOrder],
     classes: &BTreeMap<String, mandate_risk::AssetClass>,
 ) -> Result<mandate_risk::Session, Cause> {
     let any_equity = mine.iter().any(|order| {
@@ -315,7 +345,7 @@ fn session_of(
     let calendar = mandate_time::ExchangeCalendar::us_equities().map_err(|_| Cause::Absent {
         what: "the committed US equities calendar",
     })?;
-    let now = mandate_time::UtcNanos::from_parts(clock.secs(), 0).map_err(|_| Cause::Absent {
+    let now = UtcNanos::from_parts(clock.secs(), 0).map_err(|_| Cause::Absent {
         what: "a clock the calendar reads",
     })?;
     let (today, _) = mandate_time::new_york_date_and_hour(now).map_err(|_| Cause::Absent {
@@ -337,6 +367,9 @@ fn session_of(
             });
         }
     }
+    if calendar.is_trading_day(today).is_ok() {
+        return Ok(mandate_risk::Session::Overnight);
+    }
     Err(Cause::Absent {
         what: "a session the committed calendar names",
     })
@@ -344,29 +377,33 @@ fn session_of(
 
 /// The deciding agent's sub-ledger, attributed from the folded orders (DEC-449 item 1): each of
 /// the agent's orders contributes its signed filled quantity per instrument, and the account's
-/// other agents' fills count toward nothing. A net short is refused — v1 never holds one — and
-/// so is an instrument the mandate's universe does not carry, whose class the plan cannot know.
+/// other agents' fills count toward nothing. An owner exit names the one instrument it closes
+/// (mandate spec §6.1, trading-domain spec §5.5, DEC-257): the scope filters to it, so an exit
+/// of one instrument never sells another's sub-ledger. A net short is refused — v1 never holds
+/// one — and so is an instrument the mandate's universe does not carry, whose class the plan
+/// cannot know.
 fn sub_ledger_of(
-    mine: &[&mandate_executor::Order],
+    mine: &[&ExecutorOrder],
     classes: &BTreeMap<String, mandate_risk::AssetClass>,
+    scope: Option<&InstrumentId>,
 ) -> Result<Vec<mandate_risk::AgentPosition>, Cause> {
-    let mut net: BTreeMap<&mandate_accounting::InstrumentId, mandate_num::SignedQty> =
-        BTreeMap::new();
+    let mut net: BTreeMap<&InstrumentId, SignedQty> = BTreeMap::new();
     for order in mine {
-        let filled = mandate_num::SignedQty::from(order.filled_qty);
-        let signed = if order.side == mandate_accounting::Side::Buy {
+        if scope.is_some_and(|instrument| order.instrument != *instrument) {
+            continue;
+        }
+        let filled = SignedQty::from(order.filled_qty);
+        let signed = if order.side == Side::Buy {
             filled
         } else {
             filled.negated()
         };
-        let entry = net
-            .entry(&order.instrument)
-            .or_insert(mandate_num::SignedQty::ZERO);
+        let entry = net.entry(&order.instrument).or_insert(SignedQty::ZERO);
         *entry = entry.checked_add(signed)?;
     }
     let mut positions = Vec::new();
     for (instrument, qty) in net {
-        if qty == mandate_num::SignedQty::ZERO {
+        if qty == SignedQty::ZERO {
             continue;
         }
         if qty.is_negative() {
@@ -393,13 +430,6 @@ fn sub_ledger_of(
     Ok(positions)
 }
 
-/// The agent's working orders in the risk crate's shape, keyed by the numeric ids of the
-/// adapter's own internal mapping, with the reverse map the plan's cancels resolve through. An
-/// order is working while its state is not terminal and part of its quantity rests unfilled —
-/// the executor's own rule (a filled quantity at or past the order's is done, whatever state
-/// the last journal record left it in). `max_cost` and `submitted_on` are unread by the
-/// flatten; the fold's order carries no price, so the cost is zero and the date is the plan's
-/// own.
 /// The risk crate's working orders keyed by the adapter's internal numeric ids, beside the
 /// reverse map the plan's cancels resolve through — the numeric space is the adapter's own and
 /// invisible to the runtime, which keys orders by strings end to end (DEC-449 item 3).
@@ -411,25 +441,31 @@ type WorkingOrders = (
 /// The agent's working orders in the risk crate's shape: an order is working while its state is
 /// not terminal and part of its quantity rests unfilled — the executor's own rule that a filled
 /// quantity at or past the order's is done, whatever state the last journal record left it in.
-/// `max_cost` and `submitted_on` are unread by the flatten; the fold's order carries no price,
-/// so the cost is zero and the date is the plan's own.
+/// An owner exit names the one instrument it closes, so the scope filters the cancels to its
+/// orders in it alone. `max_cost` and `submitted_on` are unread by the flatten; the fold's
+/// order carries no price, so the cost is zero and the date is the plan's own, derived only
+/// when a working order exists to carry it.
 fn working_orders_of(
-    mine: &[&mandate_executor::Order],
+    mine: &[&ExecutorOrder],
     clock: RiskClock,
+    scope: Option<&InstrumentId>,
 ) -> Result<WorkingOrders, Cause> {
-    let now = mandate_time::UtcNanos::from_parts(clock.secs(), 0).map_err(|_| Cause::Absent {
-        what: "a clock the calendar reads",
-    })?;
-    let (today, _) = mandate_time::new_york_date_and_hour(now).map_err(|_| Cause::Absent {
-        what: "a New York date",
-    })?;
     let mut open_orders = BTreeMap::new();
     let mut order_ids = BTreeMap::new();
     for (index, order) in mine
         .iter()
         .filter(|order| !order.state.is_terminal() && order.filled_qty < order.qty)
+        .filter(|order| !scope.is_some_and(|instrument| order.instrument != *instrument))
         .enumerate()
     {
+        let (today, _) = mandate_time::new_york_date_and_hour(
+            UtcNanos::from_parts(clock.secs(), 0).map_err(|_| Cause::Absent {
+                what: "a clock the calendar reads",
+            })?,
+        )
+        .map_err(|_| Cause::Absent {
+            what: "a New York date",
+        })?;
         let numeric =
             mandate_risk::ClientOrderId(u64::try_from(index).map_err(|_| Cause::Absent {
                 what: "a working-order id",

@@ -51,10 +51,19 @@ const PROTECTIVE_INTENT: &str = "01J8Z3M1P0000000000000000Y";
 const PROTECTIVE_ORDER: &str = "md-01J8Z3M1P0000000000000000Y";
 /// The intent by which agent-b opened its five shares of the same instrument.
 const OTHER_INTENT: &str = "01J8Z3M1P0000000000000000Z";
+/// The intent behind agent-b's resting protective sell of one: unfilled, so a plan that
+/// cancelled every agent's working orders would name it and fail the cancel pin.
+const OTHER_PROTECTIVE_INTENT: &str = "01J8Z3M1P0000000000000000V";
 /// A Monday mid-morning in New York: the regular session, so an equity sell plans now.
 const REGULAR_CLOCK: &str = "2026-09-21T14:00:01.000000000Z";
 /// The same Monday, before the open: an equity sell waits for the regular session.
 const PRE_MARKET_CLOCK: &str = "2026-09-21T12:00:01.000000000Z";
+/// The Saturday before: the market is closed inside the calendar's range, which is the
+/// overnight session — the sell waits for Monday's open rather than the run halting (rule 13:
+/// risk reduction is never denied).
+const SATURDAY_CLOCK: &str = "2026-09-19T14:00:01.000000000Z";
+/// An instrument neither agent holds, for the owner exit's scope.
+const UNHELD_INSTRUMENT: &str = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 
 fn clock(at: &str) -> RiskClock {
     RiskClock::from_secs(UtcNanos::parse(at).expect("a timestamp").secs())
@@ -247,37 +256,47 @@ fn journal() -> ScriptedJournal {
             ("account_ref", text("01J8Z2ACCT00000000000000A1")),
         ]),
     )];
-    let opening: [(&str, &str, &str, &str, &str); 3] = [
+    let opening: [(&str, &str, &str, &str, &str, &str, &str); 4] = [
         (
             OPEN_INTENT,
             "agent-a",
+            "buy",
             "10",
+            "open",
             "150",
             "01J8Z3M1Q0000000000000000B",
         ),
         (
             PROTECTIVE_INTENT,
             "agent-a",
+            "sell",
             "4",
+            "protective",
             "149",
             "01J8Z3M1Q0000000000000000C",
         ),
         (
             OTHER_INTENT,
             "agent-b",
+            "buy",
             "5",
+            "open",
             "150",
             "01J8Z3M1Q0000000000000000D",
         ),
+        (
+            OTHER_PROTECTIVE_INTENT,
+            "agent-b",
+            "sell",
+            "1",
+            "protective",
+            "151",
+            "01J8Z3M1Q0000000000000000R",
+        ),
     ];
-    for (index, (intent, agent, qty, price, event_id)) in opening.iter().enumerate() {
+    for (index, (intent, agent, side, qty, purpose, price, event_id)) in opening.iter().enumerate()
+    {
         let seq: u64 = 2 + u64::try_from(index).expect("an index") * 3;
-        let purpose = if qty == &"10" || qty == &"5" {
-            "open"
-        } else {
-            "protective"
-        };
-        let side = if qty == &"4" { "sell" } else { "buy" };
         rows.push(row(
             seq,
             event_id,
@@ -298,7 +317,7 @@ fn journal() -> ScriptedJournal {
                 ("risk_clock", risk_clock.clone()),
             ]),
         ));
-        let companion_id = format!("01J8Z3M1Q0000000000000000{}", ['E', 'F', 'G'][index]);
+        let companion_id = format!("01J8Z3M1Q0000000000000000{}", ['E', 'F', 'G', 'S'][index]);
         rows.push(row(
             seq + 1,
             &companion_id,
@@ -322,7 +341,7 @@ fn journal() -> ScriptedJournal {
         ));
         rows.push(row(
             seq + 2,
-            &format!("01J8Z3M1Q0000000000000000{}", ['H', 'J', 'K'][index]),
+            &format!("01J8Z3M1Q0000000000000000{}", ['H', 'J', 'K', 'T'][index]),
             "OrderSubmitted",
             2,
             Some(&companion_id),
@@ -342,13 +361,13 @@ fn journal() -> ScriptedJournal {
     }
     for (seq, event_id, order, side, qty) in [
         (
-            11_u64,
+            14_u64,
             "01J8Z3M1Q0000000000000000M",
             OPEN_INTENT,
             "buy",
             "10",
         ),
-        (12, "01J8Z3M1Q0000000000000000N", OTHER_INTENT, "buy", "5"),
+        (15, "01J8Z3M1Q0000000000000000N", OTHER_INTENT, "buy", "5"),
     ] {
         rows.push(row(
             seq,
@@ -384,23 +403,27 @@ fn prove_the_fixture(journal: &ScriptedJournal) {
         workspace: mandate_executor::WorkspaceId("ws_01J8Z2".to_owned()),
     });
     for stored in &journal.0 {
-        Draft::parse(&stored.body).unwrap_or_else(|refusal| {
+        let draft = Draft::parse(&stored.body).unwrap_or_else(|refusal| {
             panic!(
                 "the fixture's {} row is one the journal accepts: {refusal:?}",
                 stored.event_type
             )
         });
-        let body = mandate_canon::parse(&stored.body).expect("the fixture's canonical body");
+        let normalized =
+            mandate_canon::parse(draft.canonical_bytes()).expect("the fixture's canonical form");
         let event = FoldedEvent {
             stream: stored.stream_id.clone(),
             seq: mandate_executor::Seq(stored.seq),
             event_id: mandate_executor::EventId(stored.event_id.clone()),
             event_type: stored.event_type.clone(),
-            causation_id: body
+            causation_id: normalized
                 .get("causation_id")
                 .and_then(Value::as_str)
                 .map(|id| mandate_executor::EventId(id.to_owned())),
-            payload: body.get("payload").cloned().expect("the fixture's payload"),
+            payload: normalized
+                .get("payload")
+                .cloned()
+                .expect("the fixture's payload"),
         };
         fold(&mut state, &event).unwrap_or_else(|refusal| {
             panic!(
@@ -418,6 +441,17 @@ fn kill_switch(working_orders: Vec<String>) -> FlattenRequest {
         instrument: None,
         confirmation: None,
         working_orders,
+    }
+}
+
+/// An owner's exit of one instrument: the scope the plan filters to, nothing confirmed, the
+/// fold's outstanding intents.
+fn owner_exit(instrument: Option<InstrumentId>) -> FlattenRequest {
+    FlattenRequest {
+        initiator: Initiator::Owner,
+        instrument,
+        confirmation: None,
+        working_orders: Vec::new(),
     }
 }
 
@@ -656,6 +690,83 @@ fn a_plan_with_no_clock_advanced_is_refused() {
         Err(_) => {}
         Ok(plan) => panic!("a plan with no clock advanced is refused, never defaulted: {plan:?}"),
     }
+}
+
+/// An owner's exit names the one instrument it closes (mandate spec §6.1, trading-domain spec
+/// §5.5, DEC-257): the plan sells exactly the agent's sub-ledger of that instrument and cancels
+/// only its orders in it. An exit of the held instrument sells the same ten and cancels the
+/// same protective order a kill switch would; an exit of an instrument the agent does not hold
+/// sells nothing and cancels nothing — never another instrument's sub-ledger or protection.
+#[test]
+fn an_owner_exit_sells_only_the_named_instruments_sub_ledger() {
+    let exit = RiskExitPath::new(the_agent(), fixture_mandate());
+    let journal = journal();
+    let held = InstrumentId::new(INSTRUMENT).expect("an instrument id");
+    let unheld = InstrumentId::new(UNHELD_INSTRUMENT).expect("an instrument id");
+
+    let of_the_held = exit
+        .plan(
+            &owner_exit(Some(held)),
+            &journal,
+            STREAM,
+            Some(clock(REGULAR_CLOCK)),
+        )
+        .expect("the adapter plans an owner exit of the held instrument");
+    assert_eq!(
+        of_the_held
+            .sells
+            .iter()
+            .map(|leg| leg.qty)
+            .collect::<Vec<_>>(),
+        vec![Qty::parse("10").expect("a qty")]
+    );
+    assert_eq!(
+        of_the_held.cancel_client_order_ids,
+        vec![PROTECTIVE_ORDER.to_owned()]
+    );
+
+    let of_an_unheld = exit
+        .plan(
+            &owner_exit(Some(unheld)),
+            &journal,
+            STREAM,
+            Some(clock(REGULAR_CLOCK)),
+        )
+        .expect("the adapter plans an owner exit of an instrument the agent does not hold");
+    assert!(
+        of_an_unheld.sells.is_empty(),
+        "an exit of an unheld instrument sells nothing: {:?}",
+        of_an_unheld.sells
+    );
+    assert!(
+        of_an_unheld.cancel_client_order_ids.is_empty(),
+        "an exit of an unheld instrument cancels nothing: {:?}",
+        of_an_unheld.cancel_client_order_ids
+    );
+}
+
+/// The market closed inside the calendar's range is the overnight session, not a refusal: the
+/// equity sell waits for Monday's open, so a weekend kill switch still plans — risk reduction
+/// is never denied (AGENTS.md rule 13), and only an instant the calendar cannot cover at all
+/// refuses.
+#[test]
+fn on_a_saturday_the_equity_sell_waits_for_the_open() {
+    let exit = RiskExitPath::new(the_agent(), fixture_mandate());
+    let journal = journal();
+    let request = kill_switch(vec![PROTECTIVE_INTENT.to_owned()]);
+    let plan = exit
+        .plan(&request, &journal, STREAM, Some(clock(SATURDAY_CLOCK)))
+        .expect("the adapter plans over a closed market inside the calendar's range");
+    assert_eq!(
+        plan.sells,
+        vec![FlattenLeg {
+            instrument: InstrumentId::new(INSTRUMENT).expect("an instrument id"),
+            asset_class: mandate_risk::AssetClass::UsEquity,
+            qty: Qty::parse("10").expect("a qty"),
+            deferred_to_regular_session: true,
+        }],
+        "an equity sell on a closed market defers to the open"
+    );
 }
 
 /// The plan reads the journal it is handed at the call, so two plans over the same journal,

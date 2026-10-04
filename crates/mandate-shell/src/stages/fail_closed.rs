@@ -805,7 +805,6 @@ fn a_stubbed_stage_answers_its_own_crates_refusal() {
 /// implemented (DEC-449's flip), so a probe that cannot answer over a readable, parsing mandate
 /// fails here; the protection probe still refuses, so the tracer never arms without a protective
 /// sequence either.
-/// a protective sequence either.
 #[test]
 fn the_production_exit_probes_over_the_shells_fixture() {
     let flatten = crate::adapters::RiskExitPath::new(
