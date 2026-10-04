@@ -380,8 +380,22 @@ protective legs are checked against position + entry quantity.
 - A plain risk-increasing order in an instrument with resting protective orders is denied
   (`add_blocked_by_protective_order`).
 - **Passive exits** (a sell limit above the bid) are placed as the take-profit leg of a new OCO
-  that keeps the existing stop: cancel the OCO, confirm, submit the new OCO. Protection is never
-  removed for a passive exit.
+  that keeps the existing stop: cancel the OCO, confirm, submit the new OCO. The rest of the
+  position keeps its stop at the recorded prices, so a passive exit never removes protection by
+  itself ([DEC-422](../project/decisions/DEC-422.md)).
+  - **Beside other exits.** The new OCO's stop and every other exit's sell must fit within the
+    position together, and one fit decides it at every check
+    ([DEC-425](../project/decisions/DEC-425.md)): whether the placement holds the other exits back,
+    whether it is cancelled for them, and whether an exit the gate allows leaves it resting all
+    read the same measure. The other exits are those still selling and those received with no order
+    yet. Exits the gate holds are left out of the fit at every one of those checks — when the gate
+    allows an exit, at every step an exit waits, the placement's own step included, and when a
+    cancel is decided — because they cannot move; a held exit counts again once released. Where
+    they do not fit, the new OCO is cancelled for them, as any protection is cancelled before a
+    marketable exit.
+  - **The gap is bounded.** That cancel falls inside an unprotected interval that is journaled and
+    bounded by `max_unprotected_s`, like any other. Once the other exits end, or the bound ends
+    them, protection is re-placed for what is left.
 - **Marketable exit sequence:** cancel all protective orders in the instrument → confirm → re-run
   the gate on fresh state → submit the exit, priced marketable per §5.6 → after a terminal state,
   re-place protection for any remaining quantity. **Orders submitted while protection is canceled
