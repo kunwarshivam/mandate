@@ -1564,9 +1564,8 @@ fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), 
 mod companion_tests {
     use mandate_canon::Value;
 
-    use super::{fold, order_request_recorded};
+    use super::order_request_recorded;
     use crate::error::ExecutorError;
-    use crate::ids::IntentId;
     use crate::payload::{object, text};
     use crate::state::{ExecutorState, PendingRequest};
     use crate::types::{
@@ -1591,11 +1590,14 @@ mod companion_tests {
         });
         state.risk_clock = Some(RiskClock::from_secs(1));
         order_request_recorded(&mut state, &folded(payload)?)?;
-        Ok(state
+        let held = state
             .pending_requests
             .get(&EventId("e-2".to_owned()))
-            .cloned()
-            .expect("the companion is held against its own event id"))
+            .cloned();
+        match held {
+            Some(pending) => Ok(pending),
+            None => Err(refused("the companion is held against its own event id")),
+        }
     }
 
     fn base() -> Vec<(&'static str, Value)> {
