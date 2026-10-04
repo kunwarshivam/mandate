@@ -30,11 +30,12 @@
 //!
 //! # State of this crate (DEC-77 stage 3, sliced by DEC-166)
 //!
-//! The adapters in [`adapters`] become real one slice at a time. The stored bars, the signal and
-//! the connector are live. Every other adapter still answers [`Cause::Unimplemented`], because its
-//! upstream is a stub or one of its inputs has no production source yet. The tracer therefore
-//! refuses at its first probe and never reaches a broker. The effect runner, the mappings, the
-//! envelope and the host controls are the harness the fail-closed suite tests (DEC-157 item 1).
+//! The adapters in [`adapters`] become real one slice at a time. The flatten and protection probes,
+//! stored bars, signal, and connector are live. Every other adapter still answers
+//! [`Cause::Unimplemented`], because its upstream is a stub or one of its inputs has no production
+//! source yet. The tracer therefore refuses at mandate validation and never reaches a broker. The
+//! effect runner, the mappings, the envelope and the host controls are the harness the fail-closed
+//! suite tests (DEC-157 item 1).
 
 pub mod adapters;
 pub mod cli;
