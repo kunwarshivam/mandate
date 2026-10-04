@@ -182,7 +182,7 @@ static STREAM_OPENED_V1: Ty = Ty::Record(&[
     ("account_ref", Ty::Ident),
 ]);
 
-static INTENT_RECEIVED_V1: Ty = Ty::Record(&[
+pub(crate) static INTENT_RECEIVED_V1: Ty = Ty::Record(&[
     ("intent_id", Ty::Ulid),
     ("agent_id", Ty::Ident),
     ("instrument_id", Ty::Str),
@@ -195,7 +195,7 @@ static INTENT_RECEIVED_V1: Ty = Ty::Record(&[
 ]);
 
 /// Check IDs from the trading domain spec §9.1, as listed in journal spec §9.
-const GATE_CHECK_IDS: &[&str] = &[
+pub(crate) const GATE_CHECK_IDS: &[&str] = &[
     "account_status",
     "agent_mode",
     "eligibility",
@@ -212,7 +212,7 @@ const GATE_CHECK_IDS: &[&str] = &[
     "day_trade_budget",
 ];
 
-static GATE_DECIDED_V1: Ty = Ty::Record(&[
+pub(crate) static GATE_DECIDED_V1: Ty = Ty::Record(&[
     ("intent_id", Ty::Ulid),
     ("verdict", Ty::Str),
     ("reason_code", Ty::Nullable(&Ty::Str)),
@@ -247,7 +247,7 @@ static GATE_DECIDED_V1: Ty = Ty::Record(&[
     ),
 ]);
 
-static ORDER_SUBMITTED_V1: Ty = Ty::Record(&[
+pub(crate) static ORDER_SUBMITTED_V1: Ty = Ty::Record(&[
     ("client_order_id", Ty::Str),
     ("attempt", Ty::Int),
     ("instrument_id", Ty::Str),
