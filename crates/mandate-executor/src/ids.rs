@@ -127,7 +127,8 @@ impl ClientOrderId {
             .strip_prefix(PREFIX)
             .and_then(|body| body.strip_prefix(KILL))
             .is_some_and(|rest| {
-                !rest.starts_with('-')
+                !rest.is_empty()
+                    && !rest.starts_with('-')
                     && !rest.ends_with('-')
                     && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
             })
@@ -295,5 +296,46 @@ mod tests {
             ClientOrderId::seeded_for_tests("md-01JABC").as_str(),
             "md-01JABC"
         );
+    }
+}
+
+#[cfg(test)]
+mod kill_sell_tests {
+    use super::{ClientOrderId, IntentId};
+    use crate::error::ExecutorError;
+    use crate::types::EventId;
+
+    /// The kill switch's own id grammar, both ways: a `k-` id with a record and an ordinal reads
+    /// back as the switch's, and every other id of ours — an agent intent's, a watchdog's, a
+    /// replacement's, a protective parent's, an empty `k-`, one with outer hyphens or an
+    /// underscore — does not. Each arm is a fold decision (the plan ends on the sell's own
+    /// `OrderSubmitted`), so a mutant either way drops or keeps the wrong plan.
+    #[test]
+    fn only_a_kill_switchs_own_sell_reads_back_as_its_own() -> Result<(), ExecutorError> {
+        let record = "e2h11o3";
+        for ordinal in [0_u32, 1, 12] {
+            // The ordinal is always numeric, so the derivation's ids are exactly these.
+            let id =
+                ClientOrderId::for_intent(&IntentId(EventId(format!("k-{record}-{ordinal}"))))?;
+            assert_eq!(id.as_str(), format!("md-k-{record}-{ordinal}"));
+            assert!(id.kill_sell(), "{} names the switch's sell", id.as_str());
+        }
+        let watchdog = ClientOrderId::for_intent(&IntentId(EventId("w-01JABC".to_owned())))?;
+        let replacement = ClientOrderId::for_replacement(&EventId("01JORIGIN".to_owned()))?;
+        for refused in [
+            "md-01JABC",
+            "md-k-",
+            watchdog.as_str(),
+            replacement.as_str(),
+            "md-k-",
+            "md-k-e1-",
+            "md-k--e1",
+        ] {
+            assert!(
+                !ClientOrderId::parse(refused)?.kill_sell(),
+                "{refused:?} is not the switch's own"
+            );
+        }
+        Ok(())
     }
 }

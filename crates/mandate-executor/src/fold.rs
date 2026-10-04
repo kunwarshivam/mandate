@@ -3424,3 +3424,197 @@ mod interval_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod kill_plan_tests {
+    use mandate_accounting::InstrumentId;
+    use mandate_canon::Value;
+    use mandate_num::Qty;
+
+    use crate::error::ExecutorError;
+    use crate::fold::{fold, held_by};
+    use crate::payload::{clock, object, text};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Executor, Ids, executor_config, fees};
+    use crate::types::{AccountRef, AccountWide, AgentId, EventId, FoldedEvent, Seq};
+
+    fn event(kind: &str, payload: Value) -> Result<FoldedEvent, ExecutorError> {
+        let Value::Object(entries) = payload else {
+            return Err(ExecutorError::NotInterpreted {
+                what: "a kill plan test payload".to_owned(),
+                story: "E7-4",
+            });
+        };
+        let mut entries = entries;
+        let key =
+            mandate_canon::Key::new("risk_clock").map_err(|_| ExecutorError::NotInterpreted {
+                what: "key".to_owned(),
+                story: "E7-4",
+            })?;
+        entries.insert(key, clock(crate::types::RiskClock::from_secs(10))?);
+        Ok(FoldedEvent {
+            stream: "acct:ws1:acct-1".to_owned(),
+            seq: Seq(2),
+            event_id: EventId("e1h1o2".to_owned()),
+            event_type: kind.to_owned(),
+            causation_id: None,
+            payload: Value::Object(entries),
+        })
+    }
+
+    fn ports() -> Result<Ports<'static>, ExecutorError> {
+        let fees = fees()?;
+        let config = executor_config();
+        Ok(Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: Box::leak(Box::new(config)),
+            fees: Box::leak(Box::new(fees)),
+        })
+    }
+
+    /// The lots are the agent's own: another agent's filled order on the same instrument counts
+    /// toward nobody else's sub-ledger, and a sell nets against the buys (§5.5 sells exactly the
+    /// sub-ledger quantity). The `||`→`&&` and `&&`→`||` mutants on the filter each count the
+    /// other agent's lot or drop the holder's own.
+    #[test]
+    fn held_by_counts_only_the_agents_own_lots() -> Result<(), ExecutorError> {
+        let ports = ports()?;
+        let mut executor = Executor::opened(&ports)?;
+        let stamp = || clock(crate::types::RiskClock::from_secs(0));
+        for (id, agent, side, fill_qty) in [
+            ("md-a-1", "agent-a", "buy", "4"),
+            ("md-b-1", "agent-b", "buy", "3"),
+            ("md-a-2", "agent-a", "sell", "1"),
+        ] {
+            executor.commit_one(
+                "OrderSubmitted",
+                object(vec![
+                    ("client_order_id", text(id)),
+                    ("agent", text(agent)),
+                    ("instrument", text("AAPL")),
+                    ("side", text(side)),
+                    ("qty", text("10")),
+                    ("limit", text("150")),
+                    ("risk_clock", stamp()?),
+                ])?,
+            )?;
+            executor.commit_one(
+                "FillApplied",
+                object(vec![
+                    ("fill_id", text(format!("f-{id}"))),
+                    ("client_order_id", text(id)),
+                    ("instrument", text("AAPL")),
+                    ("side", text(side)),
+                    ("qty_gross", text(fill_qty)),
+                    ("price", text("150")),
+                    ("risk_clock", stamp()?),
+                ])?,
+            )?;
+        }
+        let aapl = InstrumentId::new("AAPL")?;
+        let agent_a = AgentId("agent-a".to_owned());
+        let agent_b = AgentId("agent-b".to_owned());
+        assert_eq!(held_by(&executor.state, &agent_a, &aapl)?, Qty::parse("3")?);
+        assert_eq!(held_by(&executor.state, &agent_b, &aapl)?, Qty::parse("3")?);
+        assert_eq!(
+            held_by(&executor.state, &AgentId("agent-c".to_owned()), &aapl)?,
+            Qty::ZERO
+        );
+        Ok(())
+    }
+
+    /// The switch's record folds into the plan it names, per scope: an agent plan carries the
+    /// agent and the sell's shape; an account plan carries the account-wide scope and `close`;
+    /// the confirmed bid rides beside an owner plan. The `workspace` arm's deletion, a flipped
+    /// `close` read, and a dropped confirmed-bid read each fold a plan the switch would not send.
+    #[test]
+    fn kill_switch_activated_folds_each_scope_s_plan() -> Result<(), ExecutorError> {
+        let ports = ports()?;
+        let mut executor = Executor::opened(&ports)?;
+        let sells = |pairs: &[(&str, Value)]| -> Result<Value, ExecutorError> {
+            Ok(Value::Array(vec![object(pairs.to_vec())?]))
+        };
+        let agent_plan = |executor: &mut Executor| -> Result<(), ExecutorError> {
+            let sells_payload = sells(&[
+                ("instrument", text("AAPL")),
+                ("qty", text("5")),
+                ("purpose", text("risk_exit")),
+                ("deferred", Value::Bool(false)),
+                ("close", Value::Bool(false)),
+                ("agent", text("agent-a")),
+            ])?;
+            let event = event(
+                "KillSwitchActivated",
+                object(vec![
+                    ("scope", text("agent")),
+                    ("subject", text("agent-a")),
+                    ("initiator", text("risk_limit")),
+                    ("canceled", text("")),
+                    ("deferred", Value::Array(vec![])),
+                    ("sells", sells_payload),
+                ])?,
+            );
+            fold(&mut executor.state, &event?)
+        };
+        agent_plan(&mut executor)?;
+        let plan = executor
+            .state
+            .flattens
+            .get(&InstrumentId::new("AAPL")?)
+            .ok_or_else(|| ExecutorError::UnknownOrder {
+                client_order_id: "the agent plan".to_owned(),
+            })?;
+        assert_eq!(plan.qty, Qty::parse("5")?);
+        assert_eq!(plan.agent.as_ref().map(|a| a.0.as_str()), Some("agent-a"));
+        assert!(!plan.close && !plan.deferred);
+        assert!(plan.wide.is_none() && plan.confirmed.is_none());
+
+        let mut executor = Executor::opened(&ports)?;
+        let sells_payload = sells(&[
+            ("instrument", text("AAPL")),
+            ("qty", text("10")),
+            ("purpose", text("owner_exit")),
+            ("deferred", Value::Bool(true)),
+            ("close", Value::Bool(true)),
+            ("wide", text("workspace")),
+            ("bid", text("155")),
+            ("bid_size", text("100")),
+            ("floor", text("150.35")),
+        ])?;
+        let payload = object(vec![
+            ("scope", text("account")),
+            ("subject", text("acct-1")),
+            ("initiator", text("owner")),
+            ("canceled", text("")),
+            ("deferred", Value::Array(vec![])),
+            ("sells", sells_payload),
+        ])?;
+        let event = event("KillSwitchActivated", payload)?;
+        fold(&mut executor.state, &event)?;
+        let plan = executor
+            .state
+            .flattens
+            .get(&InstrumentId::new("AAPL")?)
+            .ok_or_else(|| ExecutorError::UnknownOrder {
+                client_order_id: "the account plan".to_owned(),
+            })?;
+        assert!(plan.close && plan.deferred);
+        assert_eq!(
+            plan.wide,
+            Some(AccountWide::Workspace(
+                executor.state.scope.workspace.clone()
+            ))
+        );
+        let confirmed = plan
+            .confirmed
+            .as_ref()
+            .ok_or_else(|| ExecutorError::UnknownOrder {
+                client_order_id: "the confirmed bid".to_owned(),
+            })?;
+        assert_eq!(confirmed.floor.to_string(), "150.35");
+        let _ = (AccountRef("".to_owned()), EventId("".to_owned()));
+        Ok(())
+    }
+}
