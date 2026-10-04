@@ -818,7 +818,10 @@ fn the_production_exit_probes_over_the_shells_fixture() {
         "the flatten probe answers over the shell's mandate fixture: {flatten:?}"
     );
     let protection = crate::adapters::ExecutorProtection.probe();
-    assert!(protection.is_ok(), "the protection probe answers: {protection:?}");
+    assert!(
+        protection.is_ok(),
+        "the protection probe answers: {protection:?}"
+    );
 }
 
 /// Every `.rs` file under `src/`, with its text.
