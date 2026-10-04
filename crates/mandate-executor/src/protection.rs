@@ -9265,6 +9265,10 @@ mod sequence_tests {
             qty.saturating_add(working).saturating_add(waiting) > self.position
         }
 
+        /// The oracle's read of one draft. An `unprotected_end` that names the protection it
+        /// awaits stays open until the broker acknowledges it (DEC-348 item 2), as the fold keeps
+        /// it; the bound's `interval_limit` records its end and alerts the owner (§5.4), so the
+        /// shares it leaves uncovered are accounted for from that instant.
         fn saw(&mut self, draft: &EventDraft) -> Result<(), String> {
             if draft.event_type == "OrderRequestRecorded" {
                 self.companion = Some(draft.payload.clone());
@@ -9284,18 +9288,15 @@ mod sequence_tests {
                 match field("action") {
                     Some("unprotected_start" | "passive_start") => {
                         self.open = true;
-                        if field("intent_id").is_some()
+                        let sequenced = field("intent_id").is_some()
                             && field("entry").is_some()
-                            && (field("agent_id").is_some() || field("agent").is_some())
-                            && let Some(opened) = field("intent_id")
-                        {
+                            && (field("agent_id").is_some() || field("agent").is_some());
+                        if sequenced && let Some(opened) = field("intent_id") {
                             self.sequenced.insert(opened.to_owned());
                             self.sequence = Some(opened.to_owned());
                         }
                     }
                     Some("unprotected_end") => {
-                        // An end that names the protection it awaits stays open until the broker
-                        // acknowledges it (DEC-348 item 2); the fold keeps the interval.
                         if draft.payload.get("awaiting").is_none() {
                             self.open = false;
                         }
@@ -9303,8 +9304,6 @@ mod sequence_tests {
                             self.sequenced.remove(&ended);
                         }
                     }
-                    // The bound's end journals its record and alerts the owner (§5.4): the
-                    // shares it leaves uncovered are accounted for from that instant.
                     Some("interval_limit" | "expiry_unreplaceable") => self.alerted = true,
                     _ => {}
                 }

@@ -314,7 +314,6 @@ mod kill_sell_tests {
     fn only_a_kill_switchs_own_sell_reads_back_as_its_own() -> Result<(), ExecutorError> {
         let record = "e2h11o3";
         for ordinal in [0_u32, 1, 12] {
-            // The ordinal is always numeric, so the derivation's ids are exactly these.
             let id =
                 ClientOrderId::for_intent(&IntentId(EventId(format!("k-{record}-{ordinal}"))))?;
             assert_eq!(id.as_str(), format!("md-k-{record}-{ordinal}"));
