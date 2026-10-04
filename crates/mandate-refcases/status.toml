@@ -262,18 +262,17 @@
 'MC-V67' = { status = "passing", story = "E10-1" }
 'MC-V68' = { status = "passing", story = "E10-1" }
 # MC-V69 to MC-V71 are V-047's refusing rule and its two passes; the code is merged (#536, #580).
-# MC-V72 to MC-V77 are DEC-444's risk-reducing exception: `PreviousVersion` carries the digest the
-# journal recorded beside the document, `ValidationContext` carries the agent's current version, and
-# the harness reads both, so the exception lands in `mandate-spec` (DEC-444 item 3).
+# MC-V72 to MC-V77 stay pending until `PreviousVersion` carries the digest and the harness reads
+# `current_mandate_version` (DEC-444 item 3), when the risk-reducing exception lands in `mandate-spec`.
 'MC-V69' = { status = "passing", story = "E10-1" }
 'MC-V70' = { status = "passing", story = "E10-1" }
 'MC-V71' = { status = "passing", story = "E10-1" }
-'MC-V72' = { status = "passing", story = "E10-1" }
-'MC-V73' = { status = "passing", story = "E10-1" }
-'MC-V74' = { status = "passing", story = "E10-1" }
-'MC-V75' = { status = "passing", story = "E10-1" }
-'MC-V76' = { status = "passing", story = "E10-1" }
-'MC-V77' = { status = "passing", story = "E10-1" }
+'MC-V72' = { status = "pending", story = "E10-1" }
+'MC-V73' = { status = "pending", story = "E10-1" }
+'MC-V74' = { status = "pending", story = "E10-1" }
+'MC-V75' = { status = "pending", story = "E10-1" }
+'MC-V76' = { status = "pending", story = "E10-1" }
+'MC-V77' = { status = "pending", story = "E10-1" }
 'MC-T01' = { status = "passing", story = "E6-4" }
 'MC-T02' = { status = "passing", story = "E6-4" }
 'MC-T03' = { status = "passing", story = "E6-4" }
