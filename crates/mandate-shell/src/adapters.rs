@@ -26,7 +26,7 @@
 //! | [`AlpacaConnector`] | `mandate_alpaca::TradingClient` over a `TradingTransport` (stream K) |
 //! | [`ExecutorReconciler`] | `mandate_executor::reconcile` on the connector's snapshot (E7-3) |
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use mandate_accounting::{InstrumentId, Side};
@@ -103,32 +103,25 @@ impl RiskExitPath {
         })
     }
 
-    /// Each pinned instrument's asset class, keyed by the id the journal's records carry. The
-    /// journal's `instrument_id` must carry the mandate's `asset_id` — the strict
-    /// `8-4-4-4-12` uuid, never the vendor's symbol — and every id is proven readable as the
-    /// risk crate's own `AssetId`: the probe refuses a mandate whose universe the flatten could
-    /// never read, and a plan over an instrument the map does not carry is a refusal, never a
-    /// guess at its class.
+    /// Each pinned instrument's asset class, keyed by the mandate's own `asset_id` — already
+    /// the strict `8-4-4-4-12` uuid the document's parse enforces, never the vendor's symbol —
+    /// which is the id the journal's records must carry. A plan over an instrument the map
+    /// does not carry is a refusal, never a guess at its class.
     fn classes(
         document: &mandate_spec::document::Mandate,
-    ) -> Result<BTreeMap<String, mandate_risk::AssetClass>, Cause> {
-        let mut classes = BTreeMap::new();
-        for pinned in &document.universe.pinned_instruments {
-            mandate_risk::AssetId::new(pinned.asset_id.as_str()).map_err(|_| {
-                Cause::Spec(mandate_spec::SpecError::InvalidInput {
-                    what: "a universe instrument the risk crate cannot read",
-                })
-            })?;
-            classes.insert(pinned.asset_id.as_str().to_owned(), pinned.asset_class);
-        }
-        Ok(classes)
+    ) -> BTreeMap<String, mandate_risk::AssetClass> {
+        document
+            .universe
+            .pinned_instruments
+            .iter()
+            .map(|pinned| (pinned.asset_id.as_str().to_owned(), pinned.asset_class))
+            .collect()
     }
 }
 
 impl ExitPath for RiskExitPath {
     fn probe(&self) -> Result<(), Cause> {
         let document = self.document()?;
-        Self::classes(&document)?;
         let positions = document
             .universe
             .pinned_instruments
@@ -177,10 +170,10 @@ impl ExitPath for RiskExitPath {
             });
         };
         let document = self.document()?;
-        let classes = Self::classes(&document)?;
+        let classes = Self::classes(&document);
         let stored = journal.read(stream)?;
         let state = fold_of(&scope_of(stream)?, &stored)?;
-        let mine: Vec<&mandate_executor::Order> = state
+        let mine: Vec<&ExecutorOrder> = state
             .orders()
             .values()
             .filter(|order| {
@@ -194,6 +187,10 @@ impl ExitPath for RiskExitPath {
         let positions = sub_ledger_of(&mine, &classes, request.instrument.as_ref())?;
         let (open_orders, order_ids) =
             working_orders_of(&mine, clock, request.instrument.as_ref())?;
+        let closed: BTreeSet<&str> = positions
+            .iter()
+            .map(|position| position.instrument.as_str())
+            .collect();
         let input = FlattenInput {
             agent: mandate_risk::AgentId(1),
             open_orders: &open_orders,
@@ -251,21 +248,48 @@ impl ExitPath for RiskExitPath {
                 }));
             }
         };
-        Ok(FlattenPlan {
-            cancel_client_order_ids: planned
-                .cancel_client_order_ids
-                .iter()
-                .map(|id| {
-                    order_ids.get(id).cloned().ok_or(Cause::Absent {
-                        what: "a working order the plan named but the fold does not hold",
-                    })
+        let mut cancel_client_order_ids = planned
+            .cancel_client_order_ids
+            .iter()
+            .map(|id| {
+                order_ids.get(id).cloned().ok_or(Cause::Absent {
+                    what: "a working order the plan named but the fold does not hold",
                 })
-                .collect::<Result<Vec<String>, Cause>>()?,
+            })
+            .collect::<Result<Vec<String>, Cause>>()?;
+        cancel_client_order_ids.extend(unattributed_legs_of(&state, &closed));
+        cancel_client_order_ids.sort();
+        Ok(FlattenPlan {
+            cancel_client_order_ids,
             sells,
             purpose,
             confirmation: request.confirmation.clone(),
         })
     }
+}
+
+/// §5.5's Close column (§5.4's leg rule, DEC-160 item 3d; §2.3's ownerless watchdog exit): an
+/// agent-scoped flatten cancels, in every instrument it closes, the resting legs no holder
+/// explains — the broker-created protective legs that could not be attributed and the
+/// ownerless watchdog exit — each by its own `client_order_id`, exactly as the executor's own
+/// sequence path does. They belong to no agent, so the risk crate's own filter cannot carry
+/// them: the adapter unions them into the cancels itself. A resting leg in an instrument the
+/// plan does not close is another holder's protection, untouched.
+fn unattributed_legs_of(
+    state: &mandate_executor::ExecutorState,
+    closed: &BTreeSet<&str>,
+) -> Vec<String> {
+    state
+        .orders()
+        .values()
+        .filter(|order| match &order.agent {
+            None => true,
+            Some(agent) => agent.0.as_str() == "*",
+        })
+        .filter(|order| !order.state.is_terminal() && order.filled_qty < order.qty)
+        .filter(|order| closed.contains(order.instrument.as_str()))
+        .map(|order| order.client_order_id.as_str().to_owned())
+        .collect()
 }
 
 /// The account scope a stream id names, in the `acct:{workspace}:{account}` form every journal
@@ -367,12 +391,27 @@ fn session_of(
             });
         }
     }
-    if calendar.is_trading_day(today).is_ok() {
-        return Ok(mandate_risk::Session::Overnight);
+    Ok(mandate_risk::Session::Overnight)
+}
+
+/// Whether the order is in the flatten's scope: an owner exit names the one instrument it
+/// closes, so only its orders are in; a kill switch closes the whole agent, so every order is.
+fn in_scope(order: &ExecutorOrder, scope: Option<&InstrumentId>) -> bool {
+    match scope {
+        Some(instrument) => order.instrument == *instrument,
+        None => true,
     }
-    Err(Cause::Absent {
-        what: "a session the committed calendar names",
-    })
+}
+
+/// The New York date the clock reads, for the working orders' submission dates.
+fn new_york_today(clock: RiskClock) -> Result<mandate_time::Date, Cause> {
+    let now = UtcNanos::from_parts(clock.secs(), 0).map_err(|_| Cause::Absent {
+        what: "a clock the calendar reads",
+    })?;
+    let (today, _) = mandate_time::new_york_date_and_hour(now).map_err(|_| Cause::Absent {
+        what: "a New York date",
+    })?;
+    Ok(today)
 }
 
 /// The deciding agent's sub-ledger, attributed from the folded orders (DEC-449 item 1): each of
@@ -389,7 +428,7 @@ fn sub_ledger_of(
 ) -> Result<Vec<mandate_risk::AgentPosition>, Cause> {
     let mut net: BTreeMap<&InstrumentId, SignedQty> = BTreeMap::new();
     for order in mine {
-        if scope.is_some_and(|instrument| order.instrument != *instrument) {
+        if !in_scope(order, scope) {
             continue;
         }
         let filled = SignedQty::from(order.filled_qty);
@@ -450,22 +489,19 @@ fn working_orders_of(
     clock: RiskClock,
     scope: Option<&InstrumentId>,
 ) -> Result<WorkingOrders, Cause> {
+    let working: Vec<&ExecutorOrder> = mine
+        .iter()
+        .copied()
+        .filter(|order| !order.state.is_terminal() && order.filled_qty < order.qty)
+        .filter(|order| in_scope(order, scope))
+        .collect();
+    if working.is_empty() {
+        return Ok((BTreeMap::new(), BTreeMap::new()));
+    }
+    let today = new_york_today(clock)?;
     let mut open_orders = BTreeMap::new();
     let mut order_ids = BTreeMap::new();
-    for (index, order) in mine
-        .iter()
-        .filter(|order| !order.state.is_terminal() && order.filled_qty < order.qty)
-        .filter(|order| !scope.is_some_and(|instrument| order.instrument != *instrument))
-        .enumerate()
-    {
-        let (today, _) = mandate_time::new_york_date_and_hour(
-            UtcNanos::from_parts(clock.secs(), 0).map_err(|_| Cause::Absent {
-                what: "a clock the calendar reads",
-            })?,
-        )
-        .map_err(|_| Cause::Absent {
-            what: "a New York date",
-        })?;
+    for (index, order) in working.iter().enumerate() {
         let numeric =
             mandate_risk::ClientOrderId(u64::try_from(index).map_err(|_| Cause::Absent {
                 what: "a working-order id",

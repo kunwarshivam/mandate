@@ -54,6 +54,10 @@ const OTHER_INTENT: &str = "01J8Z3M1P0000000000000000Z";
 /// The intent behind agent-b's resting protective sell of one: unfilled, so a plan that
 /// cancelled every agent's working orders would name it and fail the cancel pin.
 const OTHER_PROTECTIVE_INTENT: &str = "01J8Z3M1P0000000000000000V";
+/// The broker-created protective leg no holder explains — two agents hold the instrument, so
+/// the fold's single-holder rule attributes it to nobody (§5.4, DEC-160 item 3d) — and §5.5's
+/// Close column makes an agent-scoped flatten cancel it in the instrument it closes.
+const BROKER_LEG: &str = "md-broker-leg";
 /// A Monday mid-morning in New York: the regular session, so an equity sell plans now.
 const REGULAR_CLOCK: &str = "2026-09-21T14:00:01.000000000Z";
 /// The same Monday, before the open: an equity sell waits for the regular session.
@@ -389,6 +393,33 @@ fn journal() -> ScriptedJournal {
             ]),
         ));
     }
+    rows.push(row(
+        16,
+        "01J8Z3M1Q0000000000000000W",
+        "ProtectionChanged",
+        1,
+        None,
+        Vec::new(),
+        payload(vec![
+            ("instrument_id", text(INSTRUMENT)),
+            ("action", text("placed")),
+            ("orders", Value::Array(vec![text(BROKER_LEG)])),
+            ("awaiting", Value::Array(Vec::new())),
+            ("qty", decimal("2")),
+            ("stop", decimal("139")),
+            ("take_profit", decimal("159")),
+            ("intent_id", Value::Null),
+            ("bracket", Value::Null),
+            ("entry", Value::Null),
+            ("agent_id", Value::Null),
+            ("replacing", Value::Null),
+            ("created_on", text("2026-09-21")),
+            ("sent", Value::Null),
+            ("uncovered", Value::Null),
+            ("acknowledged", Value::Null),
+            ("risk_clock", risk_clock.clone()),
+        ]),
+    ));
     let journal = ScriptedJournal(rows);
     prove_the_fixture(&journal);
     journal
@@ -646,8 +677,8 @@ fn the_plan_sells_the_agents_sub_ledger_not_the_accounts_position() {
     );
     assert_eq!(
         plan.cancel_client_order_ids,
-        vec![PROTECTIVE_ORDER.to_owned()],
-        "cancels name the md- client order the journal's submission carries, not the intent"
+        vec![PROTECTIVE_ORDER.to_owned(), BROKER_LEG.to_owned()],
+        "cancels name the agent's own md- order and the unattributed leg of the closed instrument"
     );
 }
 
@@ -722,7 +753,7 @@ fn an_owner_exit_sells_only_the_named_instruments_sub_ledger() {
     );
     assert_eq!(
         of_the_held.cancel_client_order_ids,
-        vec![PROTECTIVE_ORDER.to_owned()]
+        vec![PROTECTIVE_ORDER.to_owned(), BROKER_LEG.to_owned()]
     );
 
     let of_an_unheld = exit
