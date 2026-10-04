@@ -1717,7 +1717,6 @@ fn trading_domain_rc_14_add_via_bracket() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_14_kill_switch() {
     drive(case("RC-14", Some("kill_switch")));
 }
@@ -1729,7 +1728,6 @@ fn trading_domain_rc_04_split_cancels_the_oco_and_re_derives_protection() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_06_protective_orders_kept_through_dividend() {
     drive(case(
         "RC-06",
@@ -1743,7 +1741,6 @@ fn trading_domain_rc_07_unposted_crypto_fees_reconcile() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_20_crypto_stop_limit_add_and_exit_sequences() {
     drive(case("RC-20", None));
 }

@@ -15,6 +15,10 @@ pub const PREFIX: &str = "md-";
 /// The prefix of the triggered-stop watchdog's own intent id, `w-<event>` (§2.3, DEC-160 (11)).
 pub(crate) const WATCHDOG: &str = "w-";
 
+/// The prefix of the kill switch's own sell id, `k-<record>-<ordinal>` (§2.3's pattern for an
+/// order the executor originates, DEC-160 (11)): the `KillSwitchActivated` that planned it.
+pub(crate) const KILL: &str = "k-";
+
 /// The longest `client_order_id` Alpaca accepts.
 const MAX_LEN: usize = 128;
 
@@ -36,24 +40,26 @@ impl ClientOrderId {
     /// the same id, and an id that depended on the attempt could not. An intent id is a ULID, so
     /// its body is alphanumeric; anything else is refused rather than escaped.
     ///
-    /// The triggered-stop watchdog's exit is the executor's own intent, `w-<event>` from its
-    /// journaled record (trading-domain spec §2.3, DEC-160 (11)), so `md-w-<event>`. An event id
-    /// is a ULID in production, and the `md-w-` prefix keeps it apart from every intent's id
-    /// whatever its event id's hyphens (DEC-260 (10)); one that would read back as a protective
-    /// order's is refused, as [`Self::for_replacement`] refuses.
+    /// The executor's own orders are intents too: the triggered-stop watchdog's exit is
+    /// `w-<event>` from its journaled record (trading-domain spec §2.3, DEC-160 (11)), and the
+    /// kill switch's own sell is `k-<record>-<ordinal>` from its `KillSwitchActivated`, so
+    /// `md-w-<event>` and `md-k-<record>-<ordinal>`. An event id is a ULID in production, and the
+    /// `md-w-` and `md-k-` prefixes keep both apart from every agent intent's id whatever its
+    /// event id's hyphens (DEC-260 (10)); one that would read back as a protective order's is
+    /// refused, as [`Self::for_replacement`] refuses.
     pub fn for_intent(intent: &IntentId) -> Result<Self, ExecutorError> {
         let raw = intent.0.0.as_str();
-        let derived = match raw.strip_prefix(WATCHDOG) {
-            Some(record) => {
+        let executor_originated = match (raw.strip_prefix(WATCHDOG), raw.strip_prefix(KILL)) {
+            (Some(record), _) | (None, Some(record)) => {
                 !record.starts_with('-')
                     && !record.ends_with('-')
                     && record
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b == b'-')
             }
-            None => raw.bytes().all(|b| b.is_ascii_alphanumeric()),
+            (None, None) => raw.bytes().all(|b| b.is_ascii_alphanumeric()),
         };
-        if raw.is_empty() || raw == WATCHDOG || !derived {
+        if raw.is_empty() || raw == WATCHDOG || raw == KILL || !executor_originated {
             return Err(malformed(raw));
         }
         let id = Self::parse(&format!("{PREFIX}{raw}"))?;
@@ -112,6 +118,21 @@ impl ClientOrderId {
             Leg::Stop => "sl",
         };
         Self::parse(&format!("{}-{suffix}", self.0))
+    }
+
+    /// Whether this id names a kill switch's own sell, `md-k-<record>-<ordinal>` (§2.3): the
+    /// record the fold reads to end the plan the sell was planned by.
+    pub fn kill_sell(&self) -> bool {
+        self.0
+            .strip_prefix(PREFIX)
+            .and_then(|body| body.strip_prefix(KILL))
+            .is_some_and(|rest| {
+                !rest.starts_with('-')
+                    && !rest.ends_with('-')
+                    && rest
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            })
     }
 
     /// The entry a protective order's id names — everything before its last `-p` — when that

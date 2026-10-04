@@ -915,7 +915,6 @@ fn a_replacement_is_a_new_order_under_its_own_id() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kill_switch_cancel_is_unconfirmed_until_the_broker_confirms_it() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -965,7 +964,6 @@ fn a_kill_switch_cancel_is_unconfirmed_until_the_broker_confirms_it() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kill_switch_leaves_another_agents_working_order_alone() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

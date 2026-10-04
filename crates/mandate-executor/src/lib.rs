@@ -83,6 +83,7 @@ mod fold;
 mod gate;
 mod ids;
 mod intent;
+pub(crate) mod kill;
 mod orders;
 mod payload;
 mod ports;

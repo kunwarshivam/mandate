@@ -3327,7 +3327,6 @@ fn net_of_taker_fee(bought: &str) -> String {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_crypto_position_carries_one_stop_limit_for_the_whole_position() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -3392,7 +3391,6 @@ fn a_crypto_position_carries_one_stop_limit_for_the_whole_position() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_crypto_add_is_a_limit_ioc_inside_the_sequence() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -3504,7 +3502,6 @@ fn a_crypto_add_is_a_limit_ioc_inside_the_sequence() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
     const BOUGHT: &str = "0.123456789";
     let ids = TestIds;
@@ -3564,7 +3561,6 @@ fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -3833,7 +3829,6 @@ fn the_ladder_never_prices_below_the_floor() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_kill_switch_cancels_only_that_agents_orders() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3893,7 +3888,6 @@ fn an_agent_kill_switch_cancels_only_that_agents_orders() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3931,7 +3925,6 @@ fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_kill_switch_uses_cancel_all_and_close_position() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3960,7 +3953,6 @@ fn an_account_kill_switch_uses_cancel_all_and_close_position() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_cancel_all_covers_unknown_orders() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -4010,7 +4002,6 @@ fn an_account_cancel_all_covers_unknown_orders() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kill_switch_applies_the_mode_before_it_cancels() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4052,7 +4043,6 @@ fn a_kill_switch_applies_the_mode_before_it_cancels() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_automated_flatten_defers_equity_sells_to_the_session() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4093,7 +4083,6 @@ fn an_automated_flatten_defers_equity_sells_to_the_session() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_automated_flatten_sells_crypto_at_once() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -4172,7 +4161,6 @@ fn an_automated_flatten_sells_crypto_at_once() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_owner_exit_outside_the_session_prices_from_the_confirmed_bid() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4219,7 +4207,6 @@ fn an_owner_exit_outside_the_session_prices_from_the_confirmed_bid() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unconfirmed_owner_exit_waits_for_the_session() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4628,7 +4615,6 @@ fn the_reducing_sell_waits_for_the_cancel_confirmation() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kill_switch_jumps_a_full_queue() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4662,7 +4648,6 @@ fn a_kill_switch_jumps_a_full_queue() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_journaled_order_is_the_handling_order() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

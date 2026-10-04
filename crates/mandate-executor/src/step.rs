@@ -3,13 +3,15 @@
 use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::intent::{received, release_held, resume};
+use crate::kill;
 use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
 };
 use crate::payload::optional_text;
 use crate::ports::Ports;
 use crate::protection::{
-    bound, breach, cancel_openings, ladder_steps, new_day, overdue_openings, settle, watchdog,
+    action_prepared, bound, breach, cancel_openings, ladder_steps, new_day, overdue_openings,
+    settle, watchdog,
 };
 use crate::reconcile::run;
 use crate::state::{EVERY_AGENT, ExecutorState, UnresolvedAppend};
@@ -129,6 +131,7 @@ fn started(
     state.started = true;
     state.started_at = Some(state.account_head());
     let mut batch = Batch::new(state, ports)?;
+    kill::resume(&mut batch)?;
     let unresolved: Vec<_> =
         batch
             .view
@@ -178,7 +181,11 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             batch.request_reconciliation();
             Ok(())
         }
-        Input::Command(Command::KillSwitch { .. }) => later_slice(),
+        Input::Command(Command::KillSwitch {
+            scope,
+            initiator,
+            confirmation,
+        }) => kill::switch(batch, scope, initiator, confirmation),
     }
 }
 
@@ -192,10 +199,10 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
         BrokerOutcome::CancelAccepted { client_order_id } => cancelled(batch, &client_order_id),
         BrokerOutcome::Rejected(refused) => reject(batch, &refused),
         BrokerOutcome::Account(snapshot) => account(batch, &snapshot),
+        BrokerOutcome::AccountWideAccepted => kill::account_wide_accepted(batch),
         BrokerOutcome::OpenOrders(_)
         | BrokerOutcome::Positions(_)
-        | BrokerOutcome::Activities { .. }
-        | BrokerOutcome::AccountWideAccepted => later_slice(),
+        | BrokerOutcome::Activities { .. } => later_slice(),
     }
 }
 
@@ -214,6 +221,10 @@ fn copied(batch: &mut Batch<'_, '_>, event: &FoldedEvent) -> Result<(), Executor
     if event.stream == batch.view.account_stream() && event.event_type == "TradingDayStarted" {
         return new_day(batch);
     }
+    if event.stream == batch.view.account_stream() && event.event_type == "CorporateActionPrepared"
+    {
+        return action_prepared(batch, &event.payload);
+    }
     let strict = event.stream == batch.view.account_stream()
         && event.event_type == "AgentModeApplied"
         && optional_text(&event.payload, "to").is_some_and(|to| to != "normal");
@@ -224,8 +235,8 @@ fn copied(batch: &mut Batch<'_, '_>, event: &FoldedEvent) -> Result<(), Executor
     cancel_openings(batch, agent.as_ref(), None)
 }
 
-/// Reconciliation's broker reads and the kill switch (trading-domain spec §5.5, §11): the later
-/// slices of this stack.
+/// Reconciliation's broker reads and the applied corporate action (trading-domain spec §5.5, §11,
+/// §8.5): the later slices of this stack.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }

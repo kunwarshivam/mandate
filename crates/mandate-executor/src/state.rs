@@ -9,9 +9,9 @@ use mandate_time::Date;
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
-    AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, IntentBody,
-    MarketObservation, Mode, OcoLegs, Order, OrderState, Protection, ProtectionPrices, Purpose,
-    RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
+    AccountScope, AccountState, AccountWide, ActivityCursor, AgentId, BracketLegs, EventId, FillId,
+    IntentBody, MarketObservation, Mode, OcoLegs, Order, OrderState, Protection, ProtectionPrices,
+    Purpose, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
 
 pub use crate::fold::fold;
@@ -122,6 +122,49 @@ pub struct ExecutorState {
     /// exact request the fold rebuilds a resubmission from (§5.7).
     pub(crate) pending_requests: BTreeMap<EventId, PendingRequest>,
     pub(crate) now: Option<RiskClock>,
+    /// Each instrument's planned kill-switch sell or close, folded from `KillSwitchActivated`
+    /// (trading-domain spec §5.5): what the switch still has to send once its cancels are
+    /// confirmed and, for an automated equity sell or an unconfirmed owner's, the regular session
+    /// is open. The sell's own `OrderSubmitted` and the close-step record are what end a plan, so
+    /// a replay ends it too.
+    pub(crate) flattens: BTreeMap<InstrumentId, PendingFlatten>,
+    /// The account-wide scopes whose `cancel-all` the broker has answered: process-local, like
+    /// the quotes, so a restart asks the idempotent endpoint again rather than closing on a
+    /// memory.
+    pub(crate) wide_confirmed: BTreeSet<String>,
+}
+
+/// The owner's confirmed bid for one planned sell (§5.5): the displayed bid and its size, and the
+/// floor `OwnerExitRequested` carried, which the sell never prices below. Journaled beside the
+/// plan it prices, so a restart prices the same sell the same way; the step-up evidence itself
+/// stays on the control stream's `OwnerAcknowledged`, never here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfirmedBid {
+    pub(crate) bid: Price,
+    pub(crate) bid_size: Qty,
+    pub(crate) floor: Price,
+}
+
+/// One kill switch's planned sell or close (§5.5), folded from `KillSwitchActivated`: what the
+/// switch still has to send, and what may hold it. `close` marks an account- or workspace-scoped
+/// switch, whose close goes through the broker's close-position endpoint under its
+/// [`AccountWideScope`] and never through a sell order of our own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingFlatten {
+    /// The `KillSwitchActivated` that planned it, from which the sell's `client_order_id` is
+    /// derived, so a restart derives the same id and a duplicate is refused, never taken.
+    pub(crate) record: String,
+    /// The plan's place in its switch's sells, which keeps two plans of one switch on two ids:
+    /// the id is `md-k-<record>-<ordinal>`, derived, never a counter.
+    pub(crate) ordinal: u32,
+    pub(crate) qty: Qty,
+    pub(crate) purpose: Purpose,
+    pub(crate) agent: Option<AgentId>,
+    pub(crate) deferred: bool,
+    pub(crate) close: bool,
+    pub(crate) wide: Option<AccountWide>,
+    /// The confirmed bid an owner switch sells on, when the command carried one.
+    pub(crate) confirmed: Option<ConfirmedBid>,
 }
 
 /// What one `OrderRequestRecorded` carries (§9.5): the executor-only members of the order that
@@ -286,6 +329,8 @@ impl ExecutorState {
             uncompensated: BTreeMap::new(),
             pending_requests: BTreeMap::new(),
             now: None,
+            flattens: BTreeMap::new(),
+            wide_confirmed: BTreeSet::new(),
         }
     }
 

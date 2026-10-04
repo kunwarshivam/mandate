@@ -1536,7 +1536,6 @@ proptest! {
     /// `AGENTS.md` rule 13, made unrepresentable: no agent-scoped effect names the account-wide
     /// endpoints. The script only ever fires an agent-scoped switch.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_agent_scoped_effect_can_name_the_account_wide_endpoints(script in scripted()) {
         let run = play(&script);
         prop_assume!(script.contains(&Step::KillSwitch));
@@ -1559,7 +1558,6 @@ proptest! {
 
     /// §5.5: the final mode is journaled before any cancel and any sell of the same switch.
     #[test]
-    #[ignore = "pending E7-4"]
     fn the_mode_draft_precedes_every_cancel_and_every_sell(script in scripted()) {
         let run = play(&script);
         prop_assume!(script.contains(&Step::KillSwitch));
@@ -1691,7 +1689,6 @@ proptest! {
 
     /// §5.4, E7-4: no interval exceeds `max_unprotected_s` without an alert.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_interval_exceeds_the_limit_without_an_alert(script in scripted_protected()) {
         let run = play(&script);
         let accountant = ProtectionAccountant::of(&run.drafts);
@@ -1852,7 +1849,6 @@ proptest! {
 
     /// `AGENTS.md` rule 13: no risk-reducing submission is ever denied by a pacing control.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_risk_reducing_submission_is_ever_denied_by_a_pacing_control(script in scripted()) {
         let run = play(&script);
         let pacing = [
@@ -1894,7 +1890,6 @@ proptest! {
 
     /// `AGENTS.md` rule 13: the only holds on an exit are the four the rule names.
     #[test]
-    #[ignore = "pending E7-4"]
     fn the_only_holds_on_an_exit_are_the_four_the_rule_names(script in scripted()) {
         let run = play(&script);
         let allowed = ["agent_paused", "agent_stopped", "unknown_order_in_flight", "broker"];
@@ -2502,7 +2497,7 @@ proptest! {
         /// The catalogue events a merged slice interprets. Every other event this crate owns
         /// answers its story's stub until the slice that implements it moves it here, in the same
         /// change, with live tests pinning what it does (DEC-137, #184 review finding 4).
-        const INTERPRETED: [&str; 24] = [
+        const INTERPRETED: [&str; 26] = [
             "StreamOpened",
             "IntentReceived",
             "GateDecided",
@@ -2527,6 +2522,8 @@ proptest! {
             "ProtectionChanged",
             "ConductBreachDetected",
             "TradingDayStarted",
+            "KillSwitchActivated",
+            "CorporateActionPrepared",
         ];
         let stubbed = event_type != "NobodyEverWroteThis"
             && !OTHER_STREAMS.contains(&event_type)

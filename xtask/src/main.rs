@@ -1961,28 +1961,34 @@ const STUB_MARKERS: [&str; 5] = [
 /// The stub check runs first, so a row whose test stops at a stub is reported for deletion rather
 /// than applied (#194 review, round 1, finding 4).
 ///
-/// The `properties` row is E7-4's too. Since slice 2 places brackets, its minimal failure is a
-/// script that ends while the protected lead's partly filled entry is still inside its interval,
-/// which no implementation can close before the script stops; it waits on a tests correction
-/// (DEC-346 item 7). Slice 2 deleted the other two `properties` rows, whose minimal failure is now
-/// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
-/// 4).
+/// The `every_unprotected_interval` row is E7-4's. Since slice 2 places brackets, its minimal
+/// failure is a script that ends while the protected lead's partly filled entry is still inside
+/// its interval, which no implementation can close before the script stops; it waits on a tests
+/// correction (DEC-346 item 7). The other three `properties` rows are E7-4's too, held by oracle
+/// gaps the same shape, each to be released by a tests correction: `no_resting_order` fails on an
+/// opening submitted inside the lead's interval, which only a gate hold the held-exit flows
+/// contradict can prevent; `no_order_is_submitted` fails on a risk exit submitted after its
+/// rule-5 wait on the lead's partly filled entry ran out against the broker's silence, which is
+/// the release DEC-160 (18) pins in `protection::sequence_tests` and its oracle counts as an
+/// unconfirmed cancel; and `protective_sell_quantity` fails when a broker `Fill` step fills the
+/// lead's own re-placed OCO, which the protection accountant cannot see (it reads `placed` and
+/// `cancelled` records only), so a correct executor still trips it.
 const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction",
-    ),
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "no_resting_order_is_submitted_inside_an_unprotected_interval",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "protective_sell_quantity_never_exceeds_the_position",
     ),
 ];
 

@@ -2,10 +2,10 @@
 //! status updates, fills, and silence.
 
 use mandate_accounting::{
-    Account, AccountType, AssetClass, Execution, FeeKind, Input as AccountingInput, Record,
+    Account, AccountType, AssetClass, Execution, FeeKind, Input as AccountingInput, Record, Side,
 };
 use mandate_canon::Value;
-use mandate_num::{Qty, Usd};
+use mandate_num::{Qty, Rounding, Usd};
 use mandate_time::{NewYorkTime, new_york_instant};
 
 use crate::batch::Batch;
@@ -420,6 +420,7 @@ pub(crate) fn fill(
     };
     batch.journal(kind, None, pairs)?;
     simulated_fee(batch, fill, &id, prior)?;
+    crypto_asset_fee(batch, fill)?;
     if terminal {
         batch.request_reconciliation();
         return Ok(());
@@ -550,6 +551,32 @@ fn simulated_fee(
         pairs.push((fee_name(fee.kind), text(fee.usd.to_string())));
     }
     batch.journal("FeesCharged", None, pairs)?;
+    Ok(())
+}
+
+/// A crypto buy's own fee, withheld in the asset (§6.3, RC-07): the taker rate, the larger one,
+/// because the fill record the broker pushes names no liquidity and the larger fee is the
+/// conservative side — a stop-limit sized from the position after it never outlasts the position
+/// once the fee posts. The accrual is a quantity of the asset, journaled `FeesCharged` with the
+/// `crypto_asset` family the fold reads into the position and the unposted balance.
+fn crypto_asset_fee(batch: &mut Batch<'_, '_>, fill: &BrokerFill) -> Result<(), ExecutorError> {
+    if fill.side != Side::Buy
+        || batch.ports.instruments.asset_class(&fill.instrument) != Some(AssetClass::Crypto)
+    {
+        return Ok(());
+    }
+    let rate = batch.ports.fees.crypto.taker;
+    let accrued = fill.qty.times_bps(rate, Rounding::HalfEven)?;
+    batch.journal(
+        "FeesCharged",
+        None,
+        vec![
+            ("family", text("crypto_asset")),
+            ("accrued", text(accrued.to_string())),
+            ("charged", text("0")),
+            ("instrument", text(fill.instrument.as_str())),
+        ],
+    )?;
     Ok(())
 }
 

@@ -528,10 +528,31 @@ mod tests {
     use mandate_accounting::InstrumentId;
 
     use super::{
-        AlpacaPaperHttp, Credentials, DATA_HOST, DataTransport, HttpRequest, Method, QuoteRequest,
-        TradingTransport, TransportError, data_url, is_dot_segment, position_path, sent_as_built,
-        sent_as_built_on,
+        AlpacaPaperHttp, Credentials, DATA_HOST, DataTransport, ENDPOINTS, HttpRequest, Method,
+        QuoteRequest, TradingTransport, TransportError, data_url, is_dot_segment, position_path,
+        sent_as_built, sent_as_built_on,
     };
+
+    /// The account-wide constructor is the exact dual of [`HttpRequest::new`] over the whole
+    /// endpoint table: it builds precisely the two endpoints the table marks account-wide and
+    /// refuses every other, so no ordinary path can be reached through it and no account-wide
+    /// path can be reached around it (#195 round 2, the coordinator's merge note). The loop runs
+    /// through the `#[cfg(test)]` constructor, which builds a request and never a scope.
+    #[test]
+    fn the_account_wide_constructor_is_the_exact_dual_of_new_over_every_endpoint() {
+        for endpoint in ENDPOINTS {
+            let path = endpoint
+                .path
+                .replace("{id}", "abc")
+                .replace("{symbol}", "AAPL");
+            assert_eq!(
+                HttpRequest::account_wide_for_tests(endpoint.method, &path).is_ok(),
+                endpoint.account_wide,
+                "{} {path}: the account-wide constructor is the exact dual of `new`",
+                endpoint.method.as_str()
+            );
+        }
+    }
 
     /// A request as [`HttpRequest::close_position`] builds one: straight from an instrument id,
     /// which the allowlist never sees, so only the transport's own check stands between a hostile

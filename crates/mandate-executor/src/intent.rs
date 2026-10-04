@@ -2,6 +2,7 @@
 //! confirmed absence — resubmitted under the same id or abandoned.
 
 use mandate_accounting::{AssetClass, InstrumentId};
+use mandate_num::{Fraction, Qty, ShareIncrement};
 use mandate_canon::Value;
 
 use crate::batch::Batch;
@@ -131,7 +132,9 @@ pub(crate) fn gate_and_submit(
     if too_old(batch, intent) {
         return abandon(batch, intent, "intent_too_old");
     }
-    crypto_add(batch, intent)?;
+    if crypto_add(batch, intent)? {
+        return Ok(());
+    }
     begin_and_submit(batch, intent, true)
 }
 
@@ -296,6 +299,12 @@ pub(crate) fn order_tif(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Tim
     }
 }
 
+/// Whether this intent is a crypto add, whose submission is a limit `ioc` (§5.1, §5.4, RC-20).
+fn crypto_add_tif(batch: &Batch<'_, '_>, instrument: &InstrumentId, purpose: Purpose) -> bool {
+    batch.ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto)
+        && purpose == Purpose::Increase
+}
+
 /// The first submission of an intent: journaled as `OrderSubmitted` naming the id the request
 /// carries, and only then described (journal spec §5.2, `AGENTS.md` rule 5). An exit with nothing
 /// to price from goes at its own limit, journaled and alerted (DEC-160 (12)); a discretionary one
@@ -319,7 +328,7 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     {
         return Ok(());
     }
-    let bracket = bracket_of(batch, &instrument, purpose, protection)?;
+    let bracket = bracket_of(batch, &instrument, qty, purpose, protection)?;
     let lone = !batch.view.exiting.contains_key(&instrument)
         && !rests(&batch.view, &instrument)
         && alone(batch, &instrument, purpose, limit);
@@ -336,6 +345,9 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     };
     let tif = match bracket {
         Some(_) => TimeInForce::Gtc,
+        // A crypto add is a limit `ioc` (§5.1's capability matrix, §5.4), the one time in force
+        // that cannot rest beside the stop-limit its sequence re-places.
+        None if crypto_add_tif(batch, &instrument, purpose) => TimeInForce::Ioc,
         None => order_tif(batch, &instrument),
     };
     let extended_hours =
@@ -373,11 +385,18 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
 pub(crate) fn bracket_of(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
+    qty: Qty,
     purpose: Purpose,
     protection: Option<ProtectionPrices>,
 ) -> Result<Option<BracketLegs>, ExecutorError> {
     let crypto = batch.ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto);
-    let Some(prices) = protection.filter(|_| purpose.adds_risk() && !crypto) else {
+    // A fractional quantity is never a bracket: a fractional leg is not allowed in an OCO or a
+    // bracket (§5.2), so the entry goes plain and its whole-share part is protected once it has
+    // filled ([`crate::protection::unbracketed_protection`]), the fraction disclosed.
+    let fractional = batch.ports.instruments.increment(instrument)
+        == Some(ShareIncrement::Fractional)
+        && qty != qty.portion(Fraction::ONE, ShareIncrement::Whole)?;
+    let Some(prices) = protection.filter(|_| purpose.adds_risk() && !crypto && !fractional) else {
         return Ok(None);
     };
     match prices.take_profit {
@@ -996,18 +1015,22 @@ mod bracket_call_tests {
                 let case = format!("{purpose:?} crypto {crypto}");
                 let bracket = purpose.adds_risk() && !crypto;
                 assert_eq!(
-                    bracket_of(&batch, &aapl, purpose, Some(both)),
+                    bracket_of(&batch, &aapl, Qty::parse("5")?, purpose, Some(both)),
                     Ok(bracket.then(|| legs.clone())),
                     "{case}"
                 );
-                assert_eq!(bracket_of(&batch, &aapl, purpose, None), Ok(None), "{case}");
+                assert_eq!(
+                    bracket_of(&batch, &aapl, Qty::parse("5")?, purpose, None),
+                    Ok(None),
+                    "{case}"
+                );
                 let expected = if bracket {
                     Err(ExecutorError::Unimplemented { story: "E7-4" })
                 } else {
                     Ok(None)
                 };
                 assert_eq!(
-                    bracket_of(&batch, &aapl, purpose, Some(stop_only)),
+                    bracket_of(&batch, &aapl, Qty::parse("5")?, purpose, Some(stop_only)),
                     expected,
                     "{case}"
                 );

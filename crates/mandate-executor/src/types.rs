@@ -182,6 +182,14 @@ impl AccountWideScope {
     pub fn scope(&self) -> &AccountWide {
         &self.scope
     }
+
+    /// The one constructor, `pub(crate)`: the account and workspace kill-switch paths are its
+    /// only callers (trading-domain spec §5.5, task brief interpretation 18), so no path outside
+    /// this crate, and no agent-scoped path inside it, can name the account-wide endpoints. Its
+    /// field is private and [`AccountWide`] has no agent variant, so the type rule holds.
+    pub(crate) fn for_scope(scope: AccountWide) -> Self {
+        Self { scope }
+    }
 }
 
 /// The owner's confirmation of a displayed bid, which is what lets an equity sell price outside the

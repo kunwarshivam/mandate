@@ -16,13 +16,13 @@ use crate::payload::{
 };
 use crate::protection::climbs;
 use crate::state::{
-    Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
-    ObservedAccount, OrderDetail, PendingRequest, Replacement,
+    Adoption, ConfirmedBid, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder,
+    LoneLadder, ObservedAccount, OrderDetail, PendingFlatten, PendingRequest, Replacement,
 };
 use crate::types::{
-    AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
-    Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose, RiskClock,
-    Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
+    AccountState, AccountWide, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent,
+    IntentBody, Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices,
+    Purpose, RiskClock, Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -140,6 +140,8 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         }
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
+        "KillSwitchActivated" => kill_activated(state, payload, &event.event_id),
+        "CorporateActionPrepared" => Ok(()),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
         "TradingDayStarted" => {
             let date = Date::parse(required_text(payload, "date")?)?;
@@ -489,6 +491,15 @@ fn rung_submitted(
     at: RiskClock,
     companion: Option<&PendingRequest>,
 ) -> Result<(), ExecutorError> {
+
+    if optional_text(payload, "client_order_id").is_some_and(|raw| {
+        ClientOrderId::parse(raw)
+            .map(|id| id.kill_sell())
+            .unwrap_or(false)
+    }) && let Some(instrument) = instrument(payload).ok()
+    {
+        state.flattens.remove(&instrument);
+    }
     let intent = companion
         .and_then(|pending| pending.intent.clone())
         .or_else(|| {
@@ -980,6 +991,98 @@ fn net_unattributed(
 
 /// One restriction on one agent (or on every agent, as `*`). A mode is the strictest of an
 /// agent's active restrictions, and `normal` lifts the restriction it names (mandate spec §5.9).
+/// One agent's sub-ledger quantity in one instrument (§5.5): the lots its own orders' fills
+/// built there, sells netted against buys, never below zero. A kill switch sells exactly this and
+/// nothing of anyone else's.
+pub(crate) fn held_by(
+    state: &ExecutorState,
+    agent: &AgentId,
+    instrument: &InstrumentId,
+) -> Result<Qty, ExecutorError> {
+    let mut lots = SignedQty::ZERO;
+    for order in state.orders.values() {
+        if &order.instrument != instrument || order.agent.as_ref() != Some(agent) {
+            continue;
+        }
+        let filled = SignedQty::from(order.filled_qty);
+        let signed = match order.side {
+            Side::Buy => filled,
+            Side::Sell => filled.negated(),
+        };
+        lots = lots.checked_add(signed)?;
+    }
+    Ok(if lots.is_negative() {
+        Qty::ZERO
+    } else {
+        lots.abs()
+    })
+}
+
+/// A kill switch's record (trading-domain spec §5.5), folded into the plans it still has to send:
+/// each planned sell or close waits for its own cancels and, where journaled deferred, for the
+/// regular session. The close-step record of the same type ends the plan it names, so a replay
+/// ends it too.
+fn kill_activated(
+    state: &mut ExecutorState,
+    payload: &Value,
+    record: &EventId,
+) -> Result<(), ExecutorError> {
+    if optional_text(payload, "step") == Some("close") {
+        state.flattens.remove(&instrument(payload)?);
+        return Ok(());
+    }
+    let Value::Array(sells) = payload.get("sells").unwrap_or(&Value::Null) else {
+        return Err(refused("sells"));
+    };
+    for (position, sell) in sells.iter().enumerate() {
+        let Value::Object(entry) = sell else {
+            return Err(refused("sells"));
+        };
+        let field = |name: &str| {
+            entry
+                .get(name)
+                .and_then(Value::as_str)
+                .ok_or_else(|| refused(name))
+        };
+        let wide = match entry.get("wide").and_then(Value::as_str) {
+            Some("account") => Some(AccountWide::Account(state.scope.account.clone())),
+            Some("workspace") => Some(AccountWide::Workspace(state.scope.workspace.clone())),
+            _ => None,
+        };
+        let as_value = Value::Object(entry.clone());
+        let confirmed = match (
+            optional_price(&as_value, "bid")?,
+            optional_qty(&as_value, "bid_size")?,
+            optional_price(&as_value, "floor")?,
+        ) {
+            (Some(bid), Some(bid_size), Some(floor)) => Some(ConfirmedBid {
+                bid,
+                bid_size,
+                floor,
+            }),
+            _ => None,
+        };
+        let plan = PendingFlatten {
+            record: record.0.clone(),
+            ordinal: u32::try_from(position).unwrap_or(u32::MAX),
+            qty: Qty::parse(field("qty")?)?,
+            purpose: purpose_of(field("purpose")?)?,
+            agent: entry
+                .get("agent")
+                .and_then(Value::as_str)
+                .map(|agent| AgentId(agent.to_owned())),
+            deferred: entry.get("deferred") == Some(&Value::Bool(true)),
+            close: entry.get("close") == Some(&Value::Bool(true)),
+            wide,
+            confirmed,
+        };
+        state
+            .flattens
+            .insert(InstrumentId::new(field("instrument")?)?, plan);
+    }
+    Ok(())
+}
+
 fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
     let agent = AgentId(required_text(payload, "agent")?.to_owned());
     let mode = mode_of(required_text(payload, "to")?)?;
