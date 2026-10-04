@@ -47,16 +47,37 @@ use crate::stages::{
     ModelRef, Protection, Reconciled, Reconciler, SignalModel, Sink, Sizing, Stages,
 };
 
-/// `mandate_risk::agent_flatten`, probed once against a synthetic request before anything starts.
-pub struct RiskExitPath;
+/// `mandate_risk::agent_flatten`, probed once against a synthetic request before anything starts
+/// and, mid-run, planned over a fold of the journal taken at request time (DEC-449): the agent's
+/// positions and working orders from the account-stream fold, the broker's positions from the
+/// `BrokerPositionObserved` records, asset classes from the mandate's universe, and the session
+/// from the clock. The journal's read capability arrives with each `plan` call from the run's
+/// bridge — the adapter holds no journal of its own, so no plan can be taken over a fold the run
+/// has written past — and the mandate's path is held for the probe's synthetic request and the
+/// universe's asset classes.
+pub struct RiskExitPath {
+    mandate: PathBuf,
+}
+
+impl RiskExitPath {
+    /// The adapter over one mandate document, as `Sources` carries it (DEC-449).
+    pub fn new(mandate: PathBuf) -> RiskExitPath {
+        RiskExitPath { mandate }
+    }
+}
 
 impl ExitPath for RiskExitPath {
     fn probe(&self) -> Result<(), Cause> {
+        let _ = &self.mandate;
         Err(Cause::Unimplemented { story: "E7-7" })
     }
 
-    fn plan(&self, request: &FlattenRequest) -> Result<FlattenPlan, Cause> {
-        let _ = request;
+    fn plan(
+        &self,
+        request: &FlattenRequest,
+        journal: &dyn JournalWriter,
+    ) -> Result<FlattenPlan, Cause> {
+        let _ = (request, journal);
         Err(Cause::Unimplemented { story: "E7-7" })
     }
 }
@@ -384,7 +405,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
 /// [`production`]'s.
 pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
     Stages {
-        exit: Box::new(RiskExitPath),
+        exit: Box::new(RiskExitPath::new(sources.mandate.clone())),
         protection: Box::new(ExecutorProtection),
         mandate: Box::new(SpecMandate {
             path: sources.mandate,

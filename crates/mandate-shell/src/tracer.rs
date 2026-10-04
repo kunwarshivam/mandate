@@ -25,7 +25,7 @@ use crate::envelope::{
 };
 use crate::error::{Cause, ShellError, refused};
 use crate::map;
-use crate::stages::{Classifier, ExitPath, Gate, Sizing, Stage, Stages};
+use crate::stages::{Classifier, ExitPath, Gate, JournalWriter, Sizing, Stage, Stages};
 
 /// What a run is for, besides its stages. Nothing here is secret: every id is opaque (TI-8).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,6 +211,7 @@ impl<'s> Session<'s> {
             classifier: &*self.stages.classifier,
             gate: &*self.stages.gate,
             exit: &*self.stages.exit,
+            journal: &*self.stages.journal,
             findings: RefCell::new(Findings::default()),
         };
         let ids = Ids {
@@ -487,6 +488,7 @@ struct Bridge<'a> {
     classifier: &'a dyn Classifier,
     gate: &'a dyn Gate,
     exit: &'a dyn ExitPath,
+    journal: &'a dyn JournalWriter,
     findings: RefCell<Findings>,
 }
 
@@ -556,7 +558,7 @@ impl GateDryRun for Bridge<'_> {
 /// already rests at the broker; nothing is invented and nothing empty is sent (TI-4, PB-8).
 impl FlattenPlanner for Bridge<'_> {
     fn plan(&self, request: &FlattenRequest) -> FlattenPlan {
-        match self.exit.plan(request) {
+        match self.exit.plan(request, self.journal) {
             Ok(plan) => plan,
             Err(cause) => {
                 self.findings.borrow_mut().poison = Some(ShellError::Refused {

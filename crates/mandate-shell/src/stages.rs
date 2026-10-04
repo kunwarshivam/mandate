@@ -180,8 +180,15 @@ pub struct Reconciled {
 pub trait ExitPath {
     /// Whether an agent-scoped flatten can be planned at all. Asked once, before anything else.
     fn probe(&self) -> Result<(), Cause>;
-    /// The agent-scoped plan for one request.
-    fn plan(&self, request: &FlattenRequest) -> Result<FlattenPlan, Cause>;
+    /// The agent-scoped plan for one request, over the journal as it stands at the call: the
+    /// caller — the run's bridge, which owns the stages — hands the journal's read capability with
+    /// each call, so the plan can never be taken over a fold the run has already written past
+    /// (DEC-449). A scratch run's memory journal is readable through the same hand.
+    fn plan(
+        &self,
+        request: &FlattenRequest,
+        journal: &dyn JournalWriter,
+    ) -> Result<FlattenPlan, Cause>;
 }
 
 /// Step 17's protection half: whether the executor's protective sequence can answer (E7-4).

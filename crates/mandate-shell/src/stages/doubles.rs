@@ -265,7 +265,12 @@ impl ExitPath for PermissiveExit {
         Ok(())
     }
 
-    fn plan(&self, request: &FlattenRequest) -> Result<FlattenPlan, Cause> {
+    fn plan(
+        &self,
+        request: &FlattenRequest,
+        journal: &dyn JournalWriter,
+    ) -> Result<FlattenPlan, Cause> {
+        let _ = journal;
         Ok(FlattenPlan {
             cancel_client_order_ids: request.working_orders.clone(),
             sells: Vec::new(),
@@ -284,8 +289,12 @@ impl ExitPath for PlanlessExit {
         Ok(())
     }
 
-    fn plan(&self, request: &FlattenRequest) -> Result<FlattenPlan, Cause> {
-        let _ = request;
+    fn plan(
+        &self,
+        request: &FlattenRequest,
+        journal: &dyn JournalWriter,
+    ) -> Result<FlattenPlan, Cause> {
+        let _ = (request, journal);
         Err(Cause::Gate(mandate_risk::GateError::Unimplemented(
             "agent_flatten",
             "E6-3",
@@ -889,8 +898,12 @@ impl ExitPath for Stubbed {
         self.refuse()
     }
 
-    fn plan(&self, request: &FlattenRequest) -> Result<FlattenPlan, Cause> {
-        let _ = request;
+    fn plan(
+        &self,
+        request: &FlattenRequest,
+        journal: &dyn JournalWriter,
+    ) -> Result<FlattenPlan, Cause> {
+        let _ = (request, journal);
         self.refuse()
     }
 }
