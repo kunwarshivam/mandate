@@ -2,12 +2,13 @@
 //!
 //! The implementation lands one slice at a time (DEC-77 stage 3, DEC-166). **Live** in slice 1:
 //! [`StoredBars`], [`MovingAverage`] and [`AlpacaConnector`], whose upstreams are fully implemented
-//! and whose every input the shell holds, and since DEC-449's flip also [`RiskExitPath`], which
-//! probes and plans over the journal, stream, clock, and agent the run's bridge hands it.
-//! **Still refusing**, each with [`Cause::Unimplemented`]: every other adapter, because its
-//! upstream is a stub or no production source exists for one of its inputs, and the shell never
-//! invents one (DEC-166 item 2) — so a run over [`production`] refuses at the protection probe,
-//! the first stage after the exit, and places no order.
+//! and whose every input the shell holds; since DEC-449's flip also [`RiskExitPath`], which probes
+//! and plans over the journal, stream, clock, and agent the run's bridge hands it; and
+//! [`ExecutorProtection`], through the executor's public protection probe. **Still refusing**, each
+//! with [`Cause::Unimplemented`]: every other adapter, because its upstream is a stub or no
+//! production source exists for one of its inputs, and the shell never invents one (DEC-166 item
+//! 2) — so a run over [`production`] refuses at mandate validation, the first stage after the exit
+//! probes and reconciliation, and places no order.
 //!
 //! What each will bind, per the task brief's step table:
 //!
@@ -33,19 +34,22 @@ use mandate_accounting::{InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
 use mandate_backtest::{Signal, Strategy, StrategyConfig};
 use mandate_executor::{
-    BrokerConnector, BrokerOutcome, BrokerRequest, ConnectorError, Order as ExecutorOrder,
+    AccountRef, AccountScope, AgentId as ExecutorAgentId, BrokerConnector, BrokerOutcome,
+    BrokerRequest, ConnectorError, EventId, ExecutorConfig, ExecutorState, IdGen,
+    InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView, Order as ExecutorOrder,
+    Ports, Seq, WorkspaceId, WriterEpoch, is_protected, paper_only_fee_config,
 };
 use mandate_journal::{AppendOutcome, StoredEvent};
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
 use mandate_marketdata::model::{Kind, Records, TimeUnit, Timeframe};
-use mandate_num::{Bps, Fraction, Price, Qty, SignedQty, Usd};
+use mandate_num::{Bps, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
 use mandate_risk::{Decision, FlattenInitiator, FlattenInput, agent_flatten};
 use mandate_runtime::{
     AgentId, Autonomy, FlattenLeg, FlattenPlan, FlattenRequest, Initiator, IntentHandoff,
     MandateView, Proposal, Purpose, RiskClock, SignalInputs,
 };
-use mandate_time::UtcNanos;
+use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 use crate::error::Cause;
 use crate::stages::{
@@ -572,13 +576,86 @@ fn working_order_of(
     })
 }
 
-/// The executor's protective sequence, probed through `mandate_executor::handle`, since
-/// `mod protection` is private (task brief, Decisions needed 4).
+/// The executor's public protection probe over a flat synthetic state. A flat instrument needs no
+/// resting order, but the call still proves the executor can answer the protection question before
+/// the tracer arms anything; the executor's own tests pin held positions and every coverage shape.
 pub struct ExecutorProtection;
+
+struct ProtectionProbePorts;
+
+impl IdGen for ProtectionProbePorts {
+    fn event_id(&self, _epoch: WriterEpoch, _head: Seq, _ordinal: u32) -> EventId {
+        EventId("protection-probe".to_owned())
+    }
+}
+
+impl ExecutorMandateView for ProtectionProbePorts {
+    fn version(&self, _agent: &ExecutorAgentId) -> Option<MandateVersion> {
+        None
+    }
+
+    fn crypto_stop_limit_offset(&self, _agent: &ExecutorAgentId) -> Option<Fraction> {
+        None
+    }
+
+    fn covers(&self, _agent: &ExecutorAgentId, _instrument: &InstrumentId) -> bool {
+        false
+    }
+}
+
+impl InstrumentSnapshot for ProtectionProbePorts {
+    fn asset_class(&self, _instrument: &InstrumentId) -> Option<mandate_accounting::AssetClass> {
+        None
+    }
+
+    fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
+        None
+    }
+
+    fn exit_tier(&self, _instrument: &InstrumentId) -> Option<mandate_executor::ExitTier> {
+        None
+    }
+}
+
+fn protection_probe_date(raw: &str) -> Result<Date, Cause> {
+    Date::parse(raw).map_err(|_| Cause::Absent {
+        what: "the protection probe's fee calendar",
+    })
+}
 
 impl Protection for ExecutorProtection {
     fn probe(&self) -> Result<(), Cause> {
-        Err(Cause::Unimplemented { story: "E7-7" })
+        let first = protection_probe_date("2026-01-01")?;
+        let last = protection_probe_date("2026-12-31")?;
+        let calendar = TradingCalendar::new(first, last, [], []).map_err(|_| Cause::Absent {
+            what: "the protection probe's fee calendar",
+        })?;
+        let fees = paper_only_fee_config("paper", calendar, "2026-01-01")?;
+        let config = ExecutorConfig::PROPOSED;
+        let ports = Ports {
+            ids: &ProtectionProbePorts,
+            mandates: &ProtectionProbePorts,
+            instruments: &ProtectionProbePorts,
+            config: &config,
+            fees: &fees,
+        };
+        let state = ExecutorState::new(AccountScope {
+            account: AccountRef("protection-probe".to_owned()),
+            workspace: WorkspaceId("protection-probe".to_owned()),
+        });
+        let instrument =
+            InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415").map_err(|_| {
+                Cause::Absent {
+                    what: "the protection probe's instrument",
+                }
+            })?;
+        if is_protected(&state, &instrument, &ports)? {
+            Ok(())
+        } else {
+            Err(Cause::Absent {
+                what: "the executor's protective path",
+            })
+        }
     }
 }
 
