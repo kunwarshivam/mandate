@@ -71,7 +71,9 @@ reading that loosens the spec toward the code still goes to the founder.
     power, or opening-session rules.** Risk exits, protective orders, and automated kill switches
     are exempt from all of them. Owner exits are paced only by participation caps. Discretionary
     exits (signal or goal driven) are paced by conduct controls and, for equities, wait for the
-    regular session, but are never denied. Exits and protective orders
+    regular session, but are never denied, except when the exits already allowed sell the whole
+    position, so nothing is left for it to sell; then it is refused `sell_exceeds_available` as
+    DEC-410 item 3 says. Exits and protective orders
     may be held only by agent mode `paused` or `stopped`, by an `Unknown` order in the same
     instrument, or by the broker. Owner exits may sell equities outside the regular session once the
     owner confirms the displayed bid. The kill switch is always available, touches only its scope

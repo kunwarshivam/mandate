@@ -114,7 +114,7 @@ This repository is the monorepo for all of Mandate. Today it holds:
 | `assets/` | Brand assets |
 
 The workspace and control-plane services and the installer join this repository when their
-milestones start. People with write access start with [COLLABORATION.md](COLLABORATION.md).
+milestones start. People with write access start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Engine
 
