@@ -3,15 +3,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
-use mandate_num::{Qty, Rounding, SignedQty, Usd};
+use mandate_num::{Price, Qty, Rounding, SignedQty, Usd};
 use mandate_time::Date;
 
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
-    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody,
-    MarketObservation, Mode, Order, OrderState, Protection, ProtectionPrices, RiskClock, Seq,
-    SubmitOrder, UnprotectedInterval, WriterEpoch,
+    AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, IntentBody,
+    MarketObservation, Mode, OcoLegs, Order, OrderState, Protection, ProtectionPrices, Purpose,
+    RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
 
 pub use crate::fold::fold;
@@ -117,7 +117,26 @@ pub struct ExecutorState {
     pub(crate) details: BTreeMap<ClientOrderId, OrderDetail>,
     pub(crate) restrictions: BTreeMap<(AgentId, String), Mode>,
     pub(crate) uncompensated: BTreeMap<EventId, Adoption>,
+    /// The companions an `OrderSubmitted` names: each `OrderRequestRecorded` folded, keyed by its
+    /// event id, consumed by the submission that names it as its `causation_id` (rule 45). The
+    /// exact request the fold rebuilds a resubmission from (§5.7).
+    pub(crate) pending_requests: BTreeMap<EventId, PendingRequest>,
     pub(crate) now: Option<RiskClock>,
+}
+
+/// What one `OrderRequestRecorded` carries (§9.5): the executor-only members of the order that
+/// follows it, from which the fold rebuilds the exact request and the order's owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingRequest {
+    pub(crate) agent: AgentId,
+    pub(crate) intent: Option<IntentId>,
+    pub(crate) purpose: Purpose,
+    pub(crate) extended_hours: bool,
+    pub(crate) stop_price: Option<Price>,
+    pub(crate) bracket: Option<BracketLegs>,
+    pub(crate) oco: Option<OcoLegs>,
+    pub(crate) rung: Option<u32>,
+    pub(crate) at_floor: bool,
 }
 
 /// What the fold knows about one order beyond [`Order`]: the exact request, so a resubmission
@@ -265,6 +284,7 @@ impl ExecutorState {
             details: BTreeMap::new(),
             restrictions: BTreeMap::new(),
             uncompensated: BTreeMap::new(),
+            pending_requests: BTreeMap::new(),
             now: None,
         }
     }
@@ -493,6 +513,24 @@ impl ExecutorState {
     /// The origin a copied fact cites, as folded from its `causation_id` (journal spec §2).
     pub fn copied_origin(&self, event: &EventId) -> Result<Option<&EventId>, ExecutorError> {
         Ok(self.copied.get(event))
+    }
+
+    /// The exact request an order's `OrderSubmitted` named, rebuilt at replay from its
+    /// `OrderRequestRecorded` companion (§9.5, rule 45) — what a resubmission after a confirmed
+    /// absence sends again under the same id (§5.7).
+    pub fn request_of(&self, client_order_id: &ClientOrderId) -> Option<&SubmitOrder> {
+        self.details
+            .get(client_order_id)
+            .and_then(|detail| detail.request.as_ref())
+    }
+
+    /// The protective prices an intent was handed in with, restored at replay from its `intended`
+    /// `ProtectionChanged` (`AGENTS.md` rule 13: protection never lost to a restart).
+    pub fn intent_protection(&self, intent: &IntentId) -> Option<ProtectionPrices> {
+        match self.bodies.get(intent) {
+            Some(IntentBody::Order { protection, .. }) => *protection,
+            _ => None,
+        }
     }
 
     /// The account stream this state is the single writer of, named by its opaque ids alone

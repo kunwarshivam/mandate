@@ -1028,7 +1028,7 @@ fn may_hold_protection(script: &[Step], drafts: &[EventDraft], at: usize) -> boo
     script.contains(&Step::KillSwitch)
         || drafts.iter().take(at).any(|d| {
             if d.event_type == "OrderSubmitted"
-                && field(d, "instrument") == Some(CPHC)
+                && (field(d, "instrument_id") == Some(CPHC) || field(d, "instrument") == Some(CPHC))
                 && let Some(id) = field(d, "client_order_id")
             {
                 in_cphc.insert(id);
@@ -1714,9 +1714,8 @@ proptest! {
         for effect in &run.effects {
             match effect {
                 Effect::Journal(draft) if draft.event_type == "OrderSubmitted" => {
-                    if let (Some(id), Some(name)) =
-                        (field(draft, "client_order_id"), field(draft, "instrument"))
-                    {
+                    let name = field(draft, "instrument_id").or(field(draft, "instrument"));
+                    if let (Some(id), Some(name)) = (field(draft, "client_order_id"), name) {
                         instrument_of.insert(id.to_owned(), name.to_owned());
                     }
                 }

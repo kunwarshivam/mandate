@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;
-use mandate_num::{Qty, SignedQty, Usd};
+use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_time::Date;
 
 use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of};
@@ -17,7 +17,7 @@ use crate::payload::{
 use crate::protection::climbs;
 use crate::state::{
     Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
-    ObservedAccount, OrderDetail, Replacement,
+    ObservedAccount, OrderDetail, PendingRequest, Replacement,
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
@@ -104,9 +104,11 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     let interpreted = match kind {
         "IntentReceived" => intent_received(state, payload, at),
         "GateDecided" => gate_decided(state, payload, at),
+        "OrderRequestRecorded" => order_request_recorded(state, event),
         "OrderSubmitted" => {
-            rung_submitted(state, payload, at)?;
-            order_submitted(state, event)
+            let companion = take_companion(state, event);
+            rung_submitted(state, payload, at, companion.as_ref())?;
+            order_submitted(state, event, companion)
         }
         "OrderStateChanged" => {
             adoption(state, event)?;
@@ -213,6 +215,7 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         "IntentReceived"
         | "GateDecided"
         | "OrderSubmitted"
+        | "OrderRequestRecorded"
         | "OrderStateChanged"
         | "OrderAbandoned"
         | "FillApplied"
@@ -267,9 +270,14 @@ fn refused(field: &str) -> ExecutorError {
     }
 }
 
-/// `StreamOpened` fixes the stream's `environment` for good (ADR-0001 ES-23).
+/// `StreamOpened` fixes the stream's `environment` for good (ADR-0001 ES-23). The member is the
+/// older payload shape's; §9's registered schema carries the environment in the envelope instead,
+/// so a payload without it opens the stream and leaves the environment to the envelope's own
+/// field, and a mismatch is still refused the moment any record names one.
 fn stream_opened(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
-    let found = required_text(payload, "environment")?;
+    let Some(found) = optional_text(payload, "environment") else {
+        return Ok(());
+    };
     if let Some(opened) = &state.environment {
         return Err(ExecutorError::EnvironmentMismatch {
             opened: opened.clone(),
@@ -298,8 +306,32 @@ fn risk_clock(state: &ExecutorState, event: &FoldedEvent) -> Result<RiskClock, E
     Ok(at)
 }
 
+/// The instrument a payload names, either spelling the account stream has written: the closed
+/// form's `instrument_id` (§9.5) beside the legacy `instrument` the golden journal carries
+/// (DEC-446 item 7: the fold's legacy reads stay).
 fn instrument(payload: &Value) -> Result<InstrumentId, ExecutorError> {
-    Ok(InstrumentId::new(required_text(payload, "instrument")?)?)
+    let name = optional_text(payload, "instrument_id")
+        .or_else(|| optional_text(payload, "instrument"))
+        .ok_or_else(|| refused("instrument_id"))?;
+    Ok(InstrumentId::new(name)?)
+}
+
+/// The agent a payload names, either spelling: the closed form's `agent_id` beside the legacy
+/// `agent` (DEC-446 item 7).
+fn agent_of(payload: &Value) -> Result<AgentId, ExecutorError> {
+    let name = optional_text(payload, "agent_id")
+        .or_else(|| optional_text(payload, "agent"))
+        .ok_or_else(|| refused("agent_id"))?;
+    Ok(AgentId(name.to_owned()))
+}
+
+/// The limit price a payload names, either spelling: the closed form's `limit_price` beside the
+/// legacy `limit` (DEC-446 item 7).
+fn limit_of(payload: &Value) -> Result<Option<Price>, ExecutorError> {
+    optional_price(payload, "limit_price")?
+        .or(optional_price(payload, "limit")?)
+        .map(Ok)
+        .transpose()
 }
 
 fn intent_id(payload: &Value) -> Result<IntentId, ExecutorError> {
@@ -325,7 +357,7 @@ fn intent_received(
         instrument: instrument(payload)?,
         side: side_of(required_text(payload, "side")?)?,
         qty: qty(payload, "qty")?,
-        limit: optional_price(payload, "limit")?.ok_or_else(|| refused("limit"))?,
+        limit: limit_of(payload)?.ok_or_else(|| refused("limit_price"))?,
         purpose: purpose_of(required_text(payload, "purpose")?)?,
         protection: prices_of(payload)?,
     };
@@ -333,7 +365,7 @@ fn intent_received(
         id.clone(),
         IntentRecord {
             intent_id: id.clone(),
-            agent: AgentId(required_text(payload, "agent")?.to_owned()),
+            agent: agent_of(payload)?,
             received_at: at,
             outcome: IntentOutcome::Received,
             allowed_at: None,
@@ -448,35 +480,58 @@ fn request_of(
 }
 
 /// §5.6: the sequence's exit, or a later rung of it, was submitted, and the ladder's clock
-/// restarts from it.
+/// restarts from it. A submission's rung comes from its `OrderRequestRecorded` companion at
+/// version 2 — `rung` non-null says a ladder rung, and a lone ladder's first rung writes rung 0
+/// (DEC-446 item 2) — and from the legacy members beside it on an older record.
 fn rung_submitted(
     state: &mut ExecutorState,
     payload: &Value,
     at: RiskClock,
+    companion: Option<&PendingRequest>,
 ) -> Result<(), ExecutorError> {
-    let Some(intent) = optional_text(payload, "intent_id") else {
+    let intent = companion
+        .and_then(|pending| pending.intent.clone())
+        .or_else(|| {
+            optional_text(payload, "intent_id").map(|raw| IntentId(EventId(raw.to_owned())))
+        });
+    let Some(intent) = intent else {
         return Ok(());
     };
-    let instrument = InstrumentId::new(required_text(payload, "instrument")?)?;
+    let instrument = instrument(payload)?;
+    let (rung, floored, laddered) = match companion {
+        Some(pending) => (
+            pending.rung.unwrap_or(0),
+            pending.at_floor && pending.rung.is_some(),
+            pending.rung.is_some(),
+        ),
+        None => (
+            optional_int(payload, "rung")
+                .and_then(|rung| u32::try_from(rung).ok())
+                .unwrap_or(0),
+            flag(payload, "at_floor"),
+            flag(payload, "laddered"),
+        ),
+    };
     let ladder = Ladder {
-        rung: optional_int(payload, "rung")
-            .and_then(|rung| u32::try_from(rung).ok())
-            .unwrap_or(0),
+        rung,
         since: Some(at),
-        floored: flag(payload, "at_floor"),
+        floored,
         stepping: false,
         parked: false,
     };
     if let Some(sequence) = state
         .exiting
         .get_mut(&instrument)
-        .filter(|sequence| sequence.intent.0.0 == intent && !sequence.passive)
+        .filter(|sequence| sequence.intent == intent && !sequence.passive)
     {
         sequence.ladder = ladder;
-    } else if flag(payload, "laddered") {
+    } else if laddered {
         let lone = LoneLadder {
-            intent: IntentId(EventId(intent.to_owned())),
-            agent: AgentId(required_text(payload, "agent")?.to_owned()),
+            intent: intent.clone(),
+            agent: match companion {
+                Some(pending) => pending.agent.clone(),
+                None => agent_of(payload)?,
+            },
             ladder,
         };
         state
@@ -536,11 +591,93 @@ fn rung_ended(state: &mut ExecutorState, payload: &Value) -> Result<(), Executor
     Ok(())
 }
 
-fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
+/// The companion a submission names, taken from the pending map (rule 45): its
+/// `OrderRequestRecorded` folded immediately before it in the same batch. A submission naming
+/// nothing pending keeps the legacy rebuild, which is what a version-1 record replays through.
+fn take_companion(state: &mut ExecutorState, event: &FoldedEvent) -> Option<PendingRequest> {
+    event
+        .causation_id
+        .as_ref()
+        .and_then(|named| state.pending_requests.remove(named))
+}
+
+/// Folds one `OrderRequestRecorded` (§9.5): the executor-only members of the order that follows
+/// it, held against the event id the submission names as its `causation_id`.
+fn order_request_recorded(
+    state: &mut ExecutorState,
+    event: &FoldedEvent,
+) -> Result<(), ExecutorError> {
+    let payload = &event.payload;
+    let legs = |name: &str| -> Result<Option<(Price, Price)>, ExecutorError> {
+        match (
+            optional_text(payload, "order_class"),
+            optional_price(payload, "take_profit")?,
+            optional_price(payload, "stop")?,
+        ) {
+            (Some(kind), Some(take_profit), Some(stop)) if kind == name => {
+                Ok(Some((take_profit, stop)))
+            }
+            (Some(kind), _, _) if kind == name => Err(refused("order_class")),
+            _ => Ok(None),
+        }
+    };
+    let pending = PendingRequest {
+        agent: agent_of(payload)?,
+        intent: optional_text(payload, "intent_id").map(|raw| IntentId(EventId(raw.to_owned()))),
+        purpose: purpose_of(required_text(payload, "purpose")?)?,
+        extended_hours: flag(payload, "extended_hours"),
+        stop_price: optional_price(payload, "stop_price")?,
+        bracket: legs("bracket")?.map(|(take_profit, stop)| BracketLegs { take_profit, stop }),
+        oco: legs("oco")?.map(|(take_profit, stop)| OcoLegs {
+            take_profit,
+            stop,
+            qty: Qty::ZERO,
+        }),
+        rung: optional_int(payload, "rung").and_then(|rung| u32::try_from(rung).ok()),
+        at_floor: flag(payload, "at_floor"),
+    };
+    state
+        .pending_requests
+        .insert(event.event_id.clone(), pending);
+    Ok(())
+}
+
+fn order_submitted(
+    state: &mut ExecutorState,
+    event: &FoldedEvent,
+    companion: Option<PendingRequest>,
+) -> Result<(), ExecutorError> {
     let payload = &event.payload;
     let id = client_order_id(payload)?;
-    let intent = optional_text(payload, "intent_id").map(|raw| IntentId(EventId(raw.to_owned())));
-    let request = request_of(payload, id.clone())?;
+    let intent = companion
+        .as_ref()
+        .and_then(|pending| pending.intent.clone())
+        .or_else(|| {
+            optional_text(payload, "intent_id").map(|raw| IntentId(EventId(raw.to_owned())))
+        });
+    let request = match &companion {
+        Some(pending) => SubmitOrder {
+            client_order_id: id.clone(),
+            instrument: instrument(payload)?,
+            side: side_of(required_text(payload, "side")?)?,
+            qty: qty(payload, "qty")?,
+            order_type: order_type_of(required_text(payload, "type")?)?,
+            tif: tif_of(required_text(payload, "tif")?)?,
+            limit_price: optional_price(payload, "limit_price")?,
+            stop_price: pending.stop_price,
+            bracket: pending.bracket.clone(),
+            oco: match pending.oco.clone() {
+                Some(pending_legs) => Some(OcoLegs {
+                    qty: qty(payload, "qty")?,
+                    ..pending_legs
+                }),
+                None => None,
+            },
+            extended_hours: pending.extended_hours,
+            purpose: pending.purpose,
+        },
+        None => request_of(payload, id.clone())?,
+    };
     let attempt = optional_int(payload, "attempt")
         .and_then(|attempt| u32::try_from(attempt).ok())
         .unwrap_or(1);
@@ -550,7 +687,10 @@ fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
             .map_or(Ok(Usd::ZERO), |limit| request.qty.notional(limit))?,
         Side::Sell => Usd::ZERO,
     };
-    let agent = Some(AgentId(required_text(payload, "agent")?.to_owned()));
+    let agent = Some(match &companion {
+        Some(pending) => pending.agent.clone(),
+        None => agent_of(payload)?,
+    });
     let created_on = None;
     let order = state.orders.entry(id.clone()).or_insert_with(|| Order {
         client_order_id: id.clone(),
@@ -962,6 +1102,20 @@ fn protection_changed(
     let instrument = instrument(payload)?;
     let action = required_text(payload, "action")?;
     match action {
+        "intended" => {
+            let intent = intent_id(payload)?;
+            let prices = prices_of(payload)?;
+            let body =
+                state
+                    .bodies
+                    .get_mut(&intent)
+                    .ok_or_else(|| ExecutorError::UnknownOrder {
+                        client_order_id: intent.0.0.clone(),
+                    })?;
+            if let IntentBody::Order { protection, .. } = body {
+                *protection = prices;
+            }
+        }
         "placed" => {
             if let Some(entry) = optional_text(payload, "bracket") {
                 let entry = ClientOrderId::parse(entry)?;
@@ -1023,7 +1177,7 @@ fn protection_changed(
             if flag(payload, "replacing")
                 && let (Some(entry), Some(agent)) = (
                     optional_text(payload, "entry"),
-                    optional_text(payload, "agent"),
+                    optional_text(payload, "agent_id").or(optional_text(payload, "agent")),
                 )
             {
                 state.replacing.insert(
@@ -1038,7 +1192,7 @@ fn protection_changed(
             if let (Some(intent), Some(entry), Some(agent)) = (
                 optional_text(payload, "intent_id"),
                 optional_text(payload, "entry"),
-                optional_text(payload, "agent"),
+                optional_text(payload, "agent_id").or(optional_text(payload, "agent")),
             ) {
                 let prices = prices_of(payload)?;
                 let intent = IntentId(EventId(intent.to_owned()));
@@ -1283,17 +1437,30 @@ fn created_on(payload: &Value) -> Result<Option<Date>, ExecutorError> {
         .transpose()
 }
 
-/// The protective orders a `ProtectionChanged` names, space- or comma-separated.
+/// The protective orders a `ProtectionChanged` names, either form: the closed schema's list
+/// beside the space- or comma-joined text the legacy records carry (DEC-446 item 7).
 fn protective_orders(payload: &Value) -> Result<Vec<ClientOrderId>, ExecutorError> {
-    ids(required_text(payload, "orders")?)
+    match payload.get("orders") {
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| ClientOrderId::parse(item.as_str().ok_or_else(|| refused("orders"))?))
+            .collect(),
+        _ => ids(required_text(payload, "orders")?),
+    }
 }
 
-/// The protective orders a record names under `key`, none where it names none.
+/// The orders a record names under `key`, either form, none where it names none.
 fn protective_orders_named(
     payload: &Value,
     key: &str,
 ) -> Result<Vec<ClientOrderId>, ExecutorError> {
-    optional_text(payload, key).map_or(Ok(Vec::new()), ids)
+    match payload.get(key) {
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| ClientOrderId::parse(item.as_str().ok_or_else(|| refused(key))?))
+            .collect(),
+        _ => optional_text(payload, key).map_or(Ok(Vec::new()), ids),
+    }
 }
 
 fn ids(raw: &str) -> Result<Vec<ClientOrderId>, ExecutorError> {

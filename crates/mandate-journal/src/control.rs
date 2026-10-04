@@ -386,14 +386,23 @@ fn protection_changed_rules(p: Payload<'_>) -> Result<(), Invalid> {
         ("replacing", &["passive_start", "unprotected_start"][..]),
         (
             "bracket",
-            &["placed", "passive_start", "unprotected_start", "unprotected_end"][..],
+            &[
+                "placed",
+                "passive_start",
+                "unprotected_start",
+                "unprotected_end",
+            ][..],
         ),
         ("created_on", &["placed"][..]),
         ("sent", &["rung_short"][..]),
         ("uncovered", &["interval_limit", "unprotected_end"][..]),
         ("acknowledged", &["unprotected_end"][..]),
     ] {
-        ensure(!has(member) || named(actions), schema, &format!("payload.{member}"))?;
+        ensure(
+            !has(member) || named(actions),
+            schema,
+            &format!("payload.{member}"),
+        )?;
     }
     Ok(())
 }

@@ -34,33 +34,64 @@ pub(crate) fn received(
     }
     let IntentBody::Order {
         instrument,
-        side,
-        qty,
-        limit,
-        purpose,
         protection,
+        ..
     } = &handoff.body
     else {
         return flatten_plan();
     };
-    let mut pairs = vec![
-        ("intent_id", text(handoff.intent_id.0.0.clone())),
-        ("agent", text(handoff.agent.0.clone())),
-        ("kind", text("order")),
-        ("instrument", text(instrument.as_str())),
-        ("side", text(side_name(*side))),
-        ("qty", text(qty.to_string())),
-        ("limit", text(limit.to_string())),
-        ("purpose", text(purpose_name(*purpose))),
-    ];
+    batch.journal(
+        "IntentReceived",
+        None,
+        intent_received_fields(
+            &handoff.intent_id,
+            &handoff.agent,
+            &handoff.body,
+            handoff.tif,
+        )?,
+    )?;
     if let Some(prices) = protection {
-        pairs.push(("stop", text(prices.stop.to_string())));
-        if let Some(take_profit) = prices.take_profit {
-            pairs.push(("take_profit", text(take_profit.to_string())));
-        }
+        batch.journal(
+            "ProtectionChanged",
+            None,
+            intended_fields(instrument, &handoff.intent_id, *prices)?,
+        )?;
     }
-    batch.journal("IntentReceived", None, pairs)?;
     gate_and_submit(batch, &handoff.intent_id)
+}
+
+/// The `intended` `ProtectionChanged` (§9.5, DEC-446 item 5): the receipt-time protective prices
+/// an opening was handed in with, journaled beside its `IntentReceived` in the same batch, so
+/// replay restores the protection (`AGENTS.md` rule 13). Every member present (§4.2); the prices
+/// leave `IntentReceived`, never a member there at either version.
+fn intended_fields(
+    instrument: &InstrumentId,
+    intent: &IntentId,
+    prices: ProtectionPrices,
+) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
+    Ok(vec![
+        ("instrument_id", text(instrument.as_str())),
+        ("action", text("intended")),
+        ("orders", Value::Array(Vec::new())),
+        ("awaiting", Value::Array(Vec::new())),
+        ("qty", Value::Null),
+        ("stop", text(prices.stop.to_string())),
+        (
+            "take_profit",
+            prices
+                .take_profit
+                .map_or(Value::Null, |price| text(price.to_string())),
+        ),
+        ("intent_id", text(intent.0.0.clone())),
+        ("bracket", Value::Null),
+        ("entry", Value::Null),
+        ("agent_id", Value::Null),
+        ("replacing", Value::Null),
+        ("created_on", Value::Null),
+        ("sent", Value::Null),
+        ("uncovered", Value::Null),
+        ("acknowledged", Value::Null),
+    ])
 }
 
 /// A flatten plan handed over as an intent: the agent-scoped flatten's sells are the protective
@@ -326,8 +357,8 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     if !lone {
         return send(batch, request, Some(intent), &agent, 1);
     }
-    let laddered = vec![("laddered", Value::Bool(true))];
-    journal_rung(batch, &request, Some(intent), &agent, 1, laddered)?;
+    let first = vec![("rung", int(0)?), ("at_floor", Value::Bool(false))];
+    journal_rung(batch, &request, Some(intent), &agent, 1, first)?;
     batch.broker(BrokerRequest::Submit(request));
     Ok(())
 }
@@ -385,6 +416,12 @@ pub(crate) fn journal_submission(
 }
 
 /// [`journal_submission`] with `extra` fields: a ladder rung's `rung` and `at_floor` (§5.6).
+///
+/// One batch writes two events (§9.5, DEC-446 item 3): the `OrderRequestRecorded` companion
+/// carrying the executor-only members the fold rebuilds the exact request and the order's owner
+/// from, immediately followed by the version-2 `OrderSubmitted` that names it as its
+/// `causation_id` — the request the broker sees, its eight members with `limit_price` null when
+/// the order has none, and the batch's `risk_clock`. A crash cannot leave one without the other.
 pub(crate) fn journal_rung(
     batch: &mut Batch<'_, '_>,
     request: &SubmitOrder,
@@ -393,39 +430,62 @@ pub(crate) fn journal_rung(
     attempt: u32,
     extra: Vec<(&'static str, Value)>,
 ) -> Result<(), ExecutorError> {
-    let mut pairs = vec![
-        ("client_order_id", text(request.client_order_id.as_str())),
-        ("agent", text(agent.0.clone())),
-        ("instrument", text(request.instrument.as_str())),
-        ("side", text(side_name(request.side))),
-        ("qty", text(request.qty.to_string())),
-        ("order_type", text(order_type_name(request.order_type))),
-        ("tif", text(tif_name(request.tif))),
+    let rung = extra
+        .iter()
+        .find(|(name, _)| *name == "rung")
+        .and_then(|(_, value)| value.as_int());
+    let at_floor = rung.is_some()
+        && extra
+            .iter()
+            .any(|(name, value)| *name == "at_floor" && *value == Value::Bool(true));
+    let (order_class, take_profit, stop) = match (&request.bracket, &request.oco) {
+        (Some(legs), _) => (Some("bracket"), Some(legs.take_profit), Some(legs.stop)),
+        (_, Some(legs)) => (Some("oco"), Some(legs.take_profit), Some(legs.stop)),
+        _ => (None, None, None),
+    };
+    let rung_value = match rung {
+        Some(rung) => int(rung)?,
+        None => Value::Null,
+    };
+    let companion = vec![
+        ("agent_id", text(agent.0.clone())),
+        (
+            "intent_id",
+            intent.map_or(Value::Null, |intent| text(intent.0.0.clone())),
+        ),
         ("purpose", text(purpose_name(request.purpose))),
-        ("attempt", int(u64::from(attempt))?),
         ("extended_hours", Value::Bool(request.extended_hours)),
+        (
+            "stop_price",
+            request
+                .stop_price
+                .map_or(Value::Null, |price| text(price.to_string())),
+        ),
+        ("order_class", order_class.map_or(Value::Null, text)),
+        (
+            "take_profit",
+            take_profit.map_or(Value::Null, |price| text(price.to_string())),
+        ),
+        (
+            "stop",
+            stop.map_or(Value::Null, |price| text(price.to_string())),
+        ),
+        ("rung", rung_value),
+        ("at_floor", Value::Bool(at_floor)),
     ];
-    if let Some(intent) = intent {
-        pairs.push(("intent_id", text(intent.0.0.clone())));
-    }
-    if let Some(limit) = request.limit_price {
-        pairs.push(("limit", text(limit.to_string())));
-    }
-    if let Some(stop) = request.stop_price {
-        pairs.push(("stop_price", text(stop.to_string())));
-    }
-    if let Some(bracket) = &request.bracket {
-        pairs.push(("order_class", text("bracket")));
-        pairs.push(("take_profit", text(bracket.take_profit.to_string())));
-        pairs.push(("stop", text(bracket.stop.to_string())));
-    }
-    if let Some(oco) = &request.oco {
-        pairs.push(("order_class", text("oco")));
-        pairs.push(("take_profit", text(oco.take_profit.to_string())));
-        pairs.push(("stop", text(oco.stop.to_string())));
-    }
-    pairs.extend(extra);
-    batch.journal("OrderSubmitted", None, pairs)?;
+    let companion_id = batch.next_id();
+    batch.journal("OrderRequestRecorded", None, companion)?;
+    let mut submission = vec![
+        ("client_order_id", text(request.client_order_id.as_str())),
+        ("attempt", int(u64::from(attempt))?),
+        ("instrument_id", text(request.instrument.as_str())),
+        ("side", text(side_name(request.side))),
+        ("type", text(order_type_name(request.order_type))),
+        ("tif", text(tif_name(request.tif))),
+        ("qty", text(request.qty.to_string())),
+    ];
+    submission.extend(order_submitted_optional_fields(request)?);
+    batch.journal("OrderSubmitted", Some(companion_id), submission)?;
     Ok(())
 }
 
@@ -736,6 +796,7 @@ mod bracket_call_tests {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(intent.to_owned())),
             agent: AgentId("agent-a".to_owned()),
+            tif: TimeInForce::Day,
             body: IntentBody::Order {
                 instrument: InstrumentId::new("AAPL")?,
                 side: Side::Buy,
