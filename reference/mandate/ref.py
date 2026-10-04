@@ -1325,11 +1325,23 @@ def builder(m, inp):
     band_usd = D(beh["sizing"]["rebalance_band"]) * cap
     # The agent's own non-protective sells already resting in the instrument are a trim in progress: the
     # trim is what they leave of the excess and of the position, and the minimum is judged on that
-    # (DEC-399 item 7). When they cover the excess, no trim is due.
+    # (DEC-399 item 7). When they cover the excess, no trim is due. They come off the excess before it
+    # is rounded up on the instrument's quantity grid (DEC-445 item 2), and a remainder beside them
+    # that is off the grid and is not the whole position is truncated onto it: the largest quantity on
+    # the grid at or below what they leave unsold. Zero, or below the minimum, is withheld by the
+    # guards below (DEC-423 item 2).
     on_sale = D(inp["open_sell_qty"]) if r["scale_action"] == "trim_to_target" else D(0)
     sell = D(0)
     if r["scale_action"] == "trim_to_target" and factor < 1 and mv - factor * cap >= band_usd:
-        sell = max(D(0), min(qty - on_sale, ceil_inc((mv - factor * cap) / bid, inc) - on_sale))
+        owed = max(D(0), mv - factor * cap - on_sale * bid)
+        rounded = ceil_inc(owed / bid, inc)
+        unsold = max(D(0), qty - on_sale)
+        if rounded <= unsold:
+            sell = rounded
+        elif unsold == qty:
+            sell = qty
+        else:
+            sell = trunc(unsold, inc)
     if sell > 0:
         guards = []
         if inp.get("scale_active_s", 0) < r["breach_confirm_s"]:
