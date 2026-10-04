@@ -129,9 +129,7 @@ impl ClientOrderId {
             .is_some_and(|rest| {
                 !rest.starts_with('-')
                     && !rest.ends_with('-')
-                    && rest
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                    && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
             })
     }
 

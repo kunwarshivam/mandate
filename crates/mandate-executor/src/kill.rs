@@ -164,7 +164,9 @@ pub(crate) fn switch(
                     .chain(unattributed_legs(&batch.view, &instrument))
                 {
                     if ask_cancel(batch, &id)? {
-                        batch.broker(BrokerRequest::Cancel { client_order_id: id });
+                        batch.broker(BrokerRequest::Cancel {
+                            client_order_id: id,
+                        });
                         touched.insert(instrument.clone());
                     }
                 }
@@ -270,7 +272,10 @@ fn sell_waits_for_session(
 /// it: journaled first (§5.5's journal each step), then requested through the only path that may
 /// name the endpoint. The close-step record is what the fold reads to end the plan, so a replay
 /// ends it too.
-fn close_due_for(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
+fn close_due_for(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+) -> Result<(), ExecutorError> {
     let Some(plan) = batch.view.flattens.get(instrument).cloned() else {
         return Ok(());
     };
@@ -283,10 +288,13 @@ fn close_due_for(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result
     {
         return Ok(());
     }
-    let wide = plan.wide.clone().ok_or_else(|| ExecutorError::NotInterpreted {
-        what: "an account-wide close with no scope".to_owned(),
-        story: "E7-4",
-    })?;
+    let wide = plan
+        .wide
+        .clone()
+        .ok_or_else(|| ExecutorError::NotInterpreted {
+            what: "an account-wide close with no scope".to_owned(),
+            story: "E7-4",
+        })?;
     if !batch.view.wide_confirmed.contains(wide_name(&wide)) {
         return Ok(());
     }
@@ -338,7 +346,9 @@ fn release_plan(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<
     let shape = match (plan.purpose, &confirmed) {
         (Purpose::OwnerExit, Some(confirmation)) if !crypto => {
             let limit = match batch.ports.instruments.exit_tier(instrument) {
-                Some(tier) => confirmation.bid.collar_bound(tier.exit_offset, Adverse::Down)?,
+                Some(tier) => confirmation
+                    .bid
+                    .collar_bound(tier.exit_offset, Adverse::Down)?,
                 None => confirmation.bid,
             };
             Shape::Limit {
@@ -399,10 +409,7 @@ fn release_plan(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<
 /// The shape one sell takes: a market order, or a limit at the price it was priced at.
 enum Shape {
     Market,
-    Limit {
-        limit: Price,
-        extended_hours: bool,
-    },
+    Limit { limit: Price, extended_hours: bool },
 }
 
 impl Shape {
@@ -421,7 +428,13 @@ impl Shape {
     }
 
     fn extended_hours(&self) -> bool {
-        matches!(self, Self::Limit { extended_hours: true, .. })
+        matches!(
+            self,
+            Self::Limit {
+                extended_hours: true,
+                ..
+            }
+        )
     }
 }
 
@@ -436,7 +449,10 @@ fn kill_order_id(record: &str, ordinal: u32) -> Result<ClientOrderId, ExecutorEr
 /// The unprotected interval a switch's cancel of protection opens, journaled when the cancel is
 /// asked (§5.4, DEC-348 item 1; R-23). It names no intent and no entry: a kill switch is no exit
 /// sequence, and the fold must not read one into it.
-fn open_interval(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
+fn open_interval(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+) -> Result<(), ExecutorError> {
     if rests(&batch.view, instrument) && !interval_open(&batch.view, instrument) {
         changed(batch, instrument, "unprotected_start", Vec::new())?;
     }
@@ -619,8 +635,6 @@ fn unattributed_legs(view: &ExecutorState, instrument: &InstrumentId) -> Vec<Cli
 /// nothing is submitted while an unconfirmed cancel is outstanding).
 fn waiting_on_cancels(view: &ExecutorState, instrument: &InstrumentId) -> bool {
     view.orders.values().any(|order| {
-        &order.instrument == instrument
-            && !order.state.is_terminal()
-            && order.cancel_unconfirmed
+        &order.instrument == instrument && !order.state.is_terminal() && order.cancel_unconfirmed
     })
 }

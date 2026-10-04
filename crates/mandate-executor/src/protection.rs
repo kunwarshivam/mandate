@@ -576,10 +576,7 @@ fn next_rung(
 /// What §5.6 prices `instrument` from, oldest to newest by when each was observed: the last sane
 /// quote with a trade, the last sane bid, and the latest quote. A trade printed in another session
 /// prices nothing (§8.2: a last trade counts only in-session).
-pub(crate) fn observed(
-    batch: &Batch<'_, '_>,
-    instrument: &InstrumentId,
-) -> Vec<MarketObservation> {
+pub(crate) fn observed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Vec<MarketObservation> {
     let mut seen: Vec<MarketObservation> = [
         &batch.view.trades,
         &batch.view.sane_bids,
@@ -917,10 +914,12 @@ pub(crate) fn crypto_add(
             what: "a crypto add beside protection the fold does not carry".to_owned(),
             story: "E7-4",
         })?;
-    let prices = protection.prices.ok_or_else(|| ExecutorError::NotInterpreted {
-        what: "a crypto add beside protection with no recorded stop".to_owned(),
-        story: "E7-4",
-    })?;
+    let prices = protection
+        .prices
+        .ok_or_else(|| ExecutorError::NotInterpreted {
+            what: "a crypto add beside protection with no recorded stop".to_owned(),
+            story: "E7-4",
+        })?;
     let entry = protection
         .resting
         .first()
@@ -937,7 +936,9 @@ pub(crate) fn crypto_add(
     )?;
     for id in protection.resting {
         if ask_cancel(batch, &id)? {
-            batch.broker(BrokerRequest::Cancel { client_order_id: id });
+            batch.broker(BrokerRequest::Cancel {
+                client_order_id: id,
+            });
         }
     }
     Ok(true)
@@ -1151,18 +1152,15 @@ fn sequence_waits_to_gate(
     instrument: &InstrumentId,
     sequence: &ExitSequence,
 ) -> bool {
-    // Only a crypto add waits here: its sequence cancelled the protection and the add is gated
-    // once the cancel is confirmed (§5.4, RC-20). An exit's sequence runs its own release paths.
-    match view.bodies.get(&sequence.intent) {
-        Some(IntentBody::Order { purpose, .. }) if purpose.adds_risk() => {}
-        _ => return false,
+    if !adds_risk_sequence(view, &sequence.intent) {
+        return false;
     }
-    let Ok(exit) = ClientOrderId::for_intent(&sequence.intent)
-        .and_then(|id| id.rung(sequence.ladder.rung))
+    let Ok(exit) =
+        ClientOrderId::for_intent(&sequence.intent).and_then(|id| id.rung(sequence.ladder.rung))
     else {
         return false;
     };
-    view.orders.get(&exit).is_none()
+    !view.orders.contains_key(&exit)
         && !view.held.contains(&sequence.intent)
         && view
             .intents
@@ -1832,16 +1830,27 @@ fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty,
             _ => None,
         })
         .try_fold(live, Qty::checked_add)?
-        .checked_add(
-            // A kill switch's planned sell or close, which no intent carries (§5.5): protection
-            // placed beside it would cover shares the switch is already selling, and Σ protective
-            // sell quantity would outlast the position once both filled (rule 12).
-            view.flattens
-                .get(instrument)
-                .map(|plan| plan.qty)
-                .unwrap_or(Qty::ZERO),
-        )
+        .checked_add(kill_plan_qty(view, instrument))
         .map_err(ExecutorError::from)
+}
+
+/// A kill switch's planned sell or close quantity, which no intent carries (§5.5): protection
+/// placed beside it would cover shares the switch is already selling, and Σ protective sell
+/// quantity would outlast the position once both filled (rule 12).
+fn kill_plan_qty(view: &ExecutorState, instrument: &InstrumentId) -> Qty {
+    view.flattens
+        .get(instrument)
+        .map(|plan| plan.qty)
+        .unwrap_or(Qty::ZERO)
+}
+
+/// Whether this sequence's exit is an add (adds risk): only a crypto add waits at its sequence's
+/// confirmed cancel, gated afresh (§5.4, RC-20). An exit's sequence runs its own release paths.
+fn adds_risk_sequence(view: &ExecutorState, intent: &IntentId) -> bool {
+    matches!(
+        view.bodies.get(intent),
+        Some(IntentBody::Order { purpose, .. }) if purpose.adds_risk()
+    )
 }
 
 /// The long position in `instrument` as the broker holds it (DEC-421, #515): the folded position
@@ -2081,7 +2090,9 @@ pub(crate) fn action_prepared(
             )?;
             for id in resting {
                 if ask_cancel(batch, &id)? {
-                    batch.broker(BrokerRequest::Cancel { client_order_id: id });
+                    batch.broker(BrokerRequest::Cancel {
+                        client_order_id: id,
+                    });
                 }
             }
             Ok(())
@@ -2109,9 +2120,17 @@ fn unbracketed_protection(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError
         .values()
         .filter(|order| order.purpose.adds_risk() && order.state.is_terminal())
         .filter(|order| {
-            batch.view.details.get(&order.client_order_id).is_some_and(|detail| {
-                !detail.bracket_placed && detail.request.as_ref().is_some_and(|sent| sent.bracket.is_none())
-            })
+            batch
+                .view
+                .details
+                .get(&order.client_order_id)
+                .is_some_and(|detail| {
+                    !detail.bracket_placed
+                        && detail
+                            .request
+                            .as_ref()
+                            .is_some_and(|sent| sent.bracket.is_none())
+                })
         })
         .filter_map(|order| {
             let detail = batch.view.details.get(&order.client_order_id)?;
@@ -2223,16 +2242,10 @@ fn unbracketed_protection(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError
 /// The whole-share part of a protective quantity (§5.4): a fractional leg is not allowed in an
 /// OCO or a bracket (§5.2), so only the whole shares are protected. A whole-share instrument's
 /// quantity is itself.
-fn whole(
-    batch: &Batch<'_, '_>,
-    instrument: &InstrumentId,
-    qty: Qty,
-) -> Result<Qty, ExecutorError> {
+fn whole(batch: &Batch<'_, '_>, instrument: &InstrumentId, qty: Qty) -> Result<Qty, ExecutorError> {
     match batch.ports.instruments.increment(instrument) {
         Some(ShareIncrement::Whole) | None => Ok(qty),
-        Some(ShareIncrement::Fractional) => {
-            Ok(qty.portion(Fraction::ONE, ShareIncrement::Whole)?)
-        }
+        Some(ShareIncrement::Fractional) => Ok(qty.portion(Fraction::ONE, ShareIncrement::Whole)?),
     }
 }
 
@@ -5158,9 +5171,6 @@ mod sequence_tests {
             ..ports
         };
         let mut executor = protected(&coins)?;
-        // §5.4's crypto add sequence (DEC-36, RC-20): the add beside its resting stop-limit
-        // cancels that protection first, the interval starting when the cancel is asked, and is
-        // gated and sent only once the confirmation arrives.
         let sequenced = executor.run(
             order(EXIT, "AAPL", Side::Buy, "150", Purpose::Increase)?,
             &coins,

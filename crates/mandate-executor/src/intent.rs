@@ -2,8 +2,8 @@
 //! confirmed absence — resubmitted under the same id or abandoned.
 
 use mandate_accounting::{AssetClass, InstrumentId};
-use mandate_num::{Fraction, Qty, ShareIncrement};
 use mandate_canon::Value;
+use mandate_num::{Fraction, Qty, ShareIncrement};
 
 use crate::batch::Batch;
 use crate::codec::{order_type_name, purpose_name, side_name, tif_name};
@@ -299,10 +299,26 @@ pub(crate) fn order_tif(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Tim
     }
 }
 
-/// Whether this intent is a crypto add, whose submission is a limit `ioc` (§5.1, §5.4, RC-20).
+/// Whether this intent is a crypto add, whose submission is a limit `ioc` (§5.1's capability
+/// matrix, §5.4), the one time in force that cannot rest beside the stop-limit its sequence
+/// re-places (RC-20).
 fn crypto_add_tif(batch: &Batch<'_, '_>, instrument: &InstrumentId, purpose: Purpose) -> bool {
     batch.ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto)
         && purpose == Purpose::Increase
+}
+
+/// Whether the quantity would go into an OCO or a bracket as a fractional leg, which §5.2 does
+/// not allow: the entry goes plain and its whole-share part is protected once it has filled
+/// ([`crate::protection::unbracketed_protection`]), the fraction disclosed.
+fn fractional_qty(
+    batch: &Batch<'_, '_>,
+    instrument: &InstrumentId,
+    qty: Qty,
+) -> Result<bool, ExecutorError> {
+    Ok(
+        batch.ports.instruments.increment(instrument) == Some(ShareIncrement::Fractional)
+            && qty != qty.portion(Fraction::ONE, ShareIncrement::Whole)?,
+    )
 }
 
 /// The first submission of an intent: journaled as `OrderSubmitted` naming the id the request
@@ -345,8 +361,6 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     };
     let tif = match bracket {
         Some(_) => TimeInForce::Gtc,
-        // A crypto add is a limit `ioc` (§5.1's capability matrix, §5.4), the one time in force
-        // that cannot rest beside the stop-limit its sequence re-places.
         None if crypto_add_tif(batch, &instrument, purpose) => TimeInForce::Ioc,
         None => order_tif(batch, &instrument),
     };
@@ -390,12 +404,7 @@ pub(crate) fn bracket_of(
     protection: Option<ProtectionPrices>,
 ) -> Result<Option<BracketLegs>, ExecutorError> {
     let crypto = batch.ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto);
-    // A fractional quantity is never a bracket: a fractional leg is not allowed in an OCO or a
-    // bracket (§5.2), so the entry goes plain and its whole-share part is protected once it has
-    // filled ([`crate::protection::unbracketed_protection`]), the fraction disclosed.
-    let fractional = batch.ports.instruments.increment(instrument)
-        == Some(ShareIncrement::Fractional)
-        && qty != qty.portion(Fraction::ONE, ShareIncrement::Whole)?;
+    let fractional = fractional_qty(batch, instrument, qty)?;
     let Some(prices) = protection.filter(|_| purpose.adds_risk() && !crypto && !fractional) else {
         return Ok(None);
     };

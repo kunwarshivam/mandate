@@ -21,8 +21,8 @@ use crate::state::{
 };
 use crate::types::{
     AccountState, AccountWide, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent,
-    IntentBody, Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices,
-    Purpose, RiskClock, Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
+    IntentBody, Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose,
+    RiskClock, Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -491,7 +491,6 @@ fn rung_submitted(
     at: RiskClock,
     companion: Option<&PendingRequest>,
 ) -> Result<(), ExecutorError> {
-
     if optional_text(payload, "client_order_id").is_some_and(|raw| {
         ClientOrderId::parse(raw)
             .map(|id| id.kill_sell())
