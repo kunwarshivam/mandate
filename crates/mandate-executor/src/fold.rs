@@ -1562,9 +1562,11 @@ fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), 
 
 #[cfg(test)]
 mod companion_tests {
+    use mandate_accounting::InstrumentId;
     use mandate_canon::Value;
 
-    use super::order_request_recorded;
+    use super::{fold, order_request_recorded};
+    const STREAM: &str = "acct:ws1:acct-1";
     use crate::error::ExecutorError;
     use crate::payload::{object, text};
     use crate::state::{ExecutorState, PendingRequest};
@@ -1574,7 +1576,7 @@ mod companion_tests {
 
     fn folded(payload: Vec<(&'static str, Value)>) -> Result<FoldedEvent, ExecutorError> {
         Ok(FoldedEvent {
-            stream: "acct:ws1:acct-1".to_owned(),
+            stream: STREAM.to_owned(),
             seq: Seq(2),
             event_id: EventId("e-2".to_owned()),
             event_type: "OrderRequestRecorded".to_owned(),
@@ -1658,6 +1660,70 @@ mod companion_tests {
         ExecutorError::NonCanonicalPayload {
             field: field.to_owned(),
         }
+    }
+
+    /// §9.5: an interval's bound names the orders its end awaits, either form the fold reads —
+    /// the closed schema's list beside the legacy joined text — and the names land in the state's
+    /// awaiting set, so the interval cannot end unwatched (§5.4, DEC-348 item 2).
+    #[test]
+    fn an_interval_awaits_the_orders_its_record_names_in_either_form() -> Result<(), ExecutorError>
+    {
+        let fold_awaiting = |awaiting: Value| -> Result<Vec<String>, ExecutorError> {
+            let mut state = ExecutorState::new(AccountScope {
+                account: AccountRef("acct-1".to_owned()),
+                workspace: WorkspaceId("ws1".to_owned()),
+            });
+            fold(
+                &mut state,
+                &FoldedEvent {
+                    stream: STREAM.to_owned(),
+                    seq: Seq(1),
+                    event_id: EventId("e-1".to_owned()),
+                    event_type: "StreamOpened".to_owned(),
+                    causation_id: None,
+                    payload: object(vec![("environment", text("paper"))])?,
+                },
+            )?;
+            let event = FoldedEvent {
+                stream: STREAM.to_owned(),
+                seq: Seq(2),
+                event_id: EventId("e-2".to_owned()),
+                event_type: "ProtectionChanged".to_owned(),
+                causation_id: None,
+                payload: object(vec![
+                    ("instrument_id", text("AAPL")),
+                    ("action", text("interval_limit")),
+                    ("orders", Value::Array(Vec::new())),
+                    ("awaiting", awaiting),
+                    ("qty", Value::Null),
+                    ("stop", Value::Null),
+                    ("take_profit", Value::Null),
+                    ("intent_id", Value::Null),
+                    ("bracket", Value::Null),
+                    ("entry", Value::Null),
+                    ("agent_id", Value::Null),
+                    ("replacing", Value::Null),
+                    ("created_on", Value::Null),
+                    ("sent", Value::Null),
+                    ("uncovered", Value::Bool(true)),
+                    ("acknowledged", Value::Null),
+                    ("risk_clock", text("2026-09-21T14:00:00.000000000Z")),
+                ])?,
+            };
+            fold(&mut state, &event)?;
+            Ok(state
+                .awaiting
+                .get(&InstrumentId::new("AAPL")?)
+                .into_iter()
+                .flatten()
+                .map(|id| id.as_str().to_owned())
+                .collect())
+        };
+        let listed = fold_awaiting(Value::Array(vec![text("md-1-p1"), text("md-1-p2")]))?;
+        assert_eq!(listed, vec!["md-1-p1".to_owned(), "md-1-p2".to_owned()]);
+        let joined = fold_awaiting(text("md-1-p1 md-1-p2"))?;
+        assert_eq!(joined, vec!["md-1-p1".to_owned(), "md-1-p2".to_owned()]);
+        Ok(())
     }
 }
 
