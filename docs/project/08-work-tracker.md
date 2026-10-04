@@ -356,30 +356,63 @@ Lessons from this wave:
 - The merge workflow reads the approval line from the PR body only; a line in a comment is ignored,
   and a draft PR is skipped even when labelled.
 
+## The 2026-10-03/04 night wave
+
+Merged by the coordinator (founder asleep; every merge has green CI and a cross-model review):
+
+| Story | PRs |
+|---|---|
+| Community standards | [#588](https://github.com/kunwarshivam/mandate/pull/588) (CONTRIBUTING as the front door, COLLABORATION restored as the manual, CoC, SECURITY, issue templates, repo description) |
+| DEC-360 option (c), spec half | [#590](https://github.com/kunwarshivam/mandate/pull/590) (journal spec v0.13 §9.5, the vectors, the reference implementation, DEC-446/447/448) |
+| DEC-360 option (c), code half | [#592](https://github.com/kunwarshivam/mandate/pull/592) (the five schemas registered with rules 39–45, the companion-then-submission writers, the fold's reads, the acceptance replay; the review's blocking `at_floor`/`rung` fix with a pin proven against the seeded bug); [#589](https://github.com/kunwarshivam/mandate/pull/589) closed as the umbrella, split per ES-22 |
+| E10-1, the six cases | [#591](https://github.com/kunwarshivam/mandate/pull/591) (implementation: `PreviousVersion`'s journal-recorded digest, the context's current version, the exemption at validation and application, the stale-predecessor refusal named and pinned after review round 2) and [#593](https://github.com/kunwarshivam/mandate/pull/593) (the status flip; MC-V72–77 passing) |
+
+Backlog rows the reviews left (each a small change, none blocking):
+
+- A pair-checking `PreviousVersion` constructor that refuses a document whose hash is not the
+  digest it is paired with, so "never assembled per request" is a type, not a convention (#591
+  review round 2, minor 3).
+- The Python control-stream fact vector gains the `AgentVersionActive` digest member, so the two
+  models stop differing on the fact's shape (#591 review round 2, minor 5).
+- A property test for the exemption over generated matched pairs, the expected class computed from
+  the edited documents (#591 review round 2, minor 6).
+- Rule 44's report order against §9.5's table — the Python oracle matches the Rust, so a spec-text
+  amendment or a reorder is its own change (#589 review, minor 3).
+
+Lessons from this wave:
+
+- One checkout, one work stream. A background gate and a branch switch on the same tree killed a
+  mutation run and sent one review agent to the wrong diff; the re-run cost an hour. Background
+  gates own the tree until they finish, and reviewers read branches by ref, never the working
+  tree.
+- The free Zen pool (fledge-alpha, space-bunny, longcat) reviews well when the paid endpoints are
+  down: two of tonight's three verdicts came from it, and the space-bunny pass caught a major the
+  first reviewer missed. The remote server cannot reach Zen's external endpoint — its sessions
+  hang — so Zen reviews run from the local machine.
+- A three-dot diff against a stale merge-base fails the spec guard even when the content is already
+  on `main`. Rebuild the branch on `main`'s tip (checkout the changed paths onto a fresh branch)
+  rather than fighting the guard.
+
 ## Next, in order
 
-As of 2026-10-03, after #580. Open PRs and claims on GitHub are the live record.
+As of 2026-10-04, after #593. Open PRs and claims on GitHub are the live record.
 
-1. **The status and record PRs owed on `main`.** The V-047 status PRs: MC-V69 to MC-V71 moved to
-   passing (the code is merged: tests [#536](https://github.com/kunwarshivam/mandate/pull/536),
-   implementation [#580](https://github.com/kunwarshivam/mandate/pull/580); DEC-428, DEC-444);
-   MC-V72 to MC-V77 move with the harness's `current_mandate_version` and `PreviousVersion`'s
-   digest. The docs PR that records the
-   founder's DEC-410 item 3 ruling (rule 13's wording), and
-   [#514](https://github.com/kunwarshivam/mandate/pull/514) (DEC-422) through its review.
-2. **DEC-360 option (c)** (the founder's ruling): `risk_clock` on every account-stream schema,
-   protective prices to `ProtectionChanged`, and a companion record for submission's executor-only
-   members; this unblocks wiring the executor's intent writers.
-3. **The tracer (E7-7).** Flip the `mandate-shell` adapters one at a time, starting with the
-   risk-exit probe, until one order runs end to end on Alpaca paper; this is also the path that
-   wires the research agent into the runtime.
-4. **Tripwires (E6-13).** The MC-W01 to MC-W57 implementation in the DEC-77 sequence.
-5. **M7's remainder:** the CLI's `clap` wiring of the inbox and owner commands, email, one chat
+1. **The tracer (E7-7).** DEC-360's code is in, so every upstream crate the remaining adapters bind
+   exists. The risk-exit probe's tests are drafted on a local branch (`agent/l-flatten-probe-tests`)
+   but **held on a design question for the founder**: the probe is settled (a synthetic request, the
+   brief's ruling), but mid-run `plan()` needs the folded state at request time — the journal's fold
+   for the agent's positions and orders, the broker's positions from reconciliation, and the
+   mandate's universe for asset classes — because a construction-time fold is stale and a kill
+   switch must see the current one. The founder's call: fold the journal inside the adapter, or
+   extend the runtime's `FlattenRequest` to carry the state it already holds (the coordinator's
+   ruling covered the probe, not this).
+2. **Tripwires (E6-13).** The MC-W01 to MC-W57 implementation in the DEC-77 sequence.
+3. **M7's remainder:** the CLI's `clap` wiring of the inbox and owner commands, email, one chat
    channel, and the pending MC-E cases.
-6. **Journal (M4):** E5-5 (the personal-data vault) and E5-7 to E5-9 (the cold store's operational
+4. **Journal (M4):** E5-5 (the personal-data vault) and E5-7 to E5-9 (the cold store's operational
    half, its CLI wiring, the examination bundle), all safety-critical; DEC-265 item 1 waits on the
    founder.
-7. **ADR-0003's remaining code stories** (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5), each under
+5. **ADR-0003's remaining code stories** (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5), each under
    the DEC-77 sequence with its own claim issue.
 
 Streams that touch different crates run in parallel; reviews and merges run one at a time.
