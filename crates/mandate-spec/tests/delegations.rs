@@ -100,6 +100,7 @@ fn context(
         connection_loss_carry_usd: Usd::ZERO,
         eligibility_failures: BTreeSet::new(),
         previous_version,
+        current_mandate_version: None,
     }
 }
 
@@ -116,6 +117,7 @@ fn codes_after(previous: &Value, known: bool, document: &Value) -> BTreeSet<Viol
         environment: Environment::Paper,
         connection_id: ConnectionId::parse("conn_alpaca_paper_01").expect("a connection id"),
         mandate: known.then(|| parse(previous)),
+        mandate_version: None,
     };
     validate(
         &parse(document),

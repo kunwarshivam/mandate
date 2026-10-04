@@ -209,6 +209,7 @@ fn fact_json(fact: Option<&JournaledFact>) -> Json {
             environment,
             allocation_usd,
             pinned,
+            version: _,
         }) => json!({"kind": "AgentVersionActive", "agent": agent.as_str(),
             "connection_id": connection_id.as_str(),
             "environment": format!("{environment:?}").to_lowercase(),

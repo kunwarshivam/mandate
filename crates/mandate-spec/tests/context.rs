@@ -147,6 +147,7 @@ fn active(who: &str, connection: &str, allocation: &str, pinned: &[&str]) -> Jou
         environment: Environment::Paper,
         allocation_usd: usd(allocation),
         pinned: assets(pinned),
+        version: MandateVersion::named(Digest::of(who.as_bytes())),
     }
 }
 
@@ -358,19 +359,27 @@ fn the_previous_version_is_the_drafts_agents_last_active_version() {
         environment: Environment::Live,
         allocation_usd: usd("10000"),
         pinned: BTreeSet::new(),
+        version: MandateVersion::named(Digest::of(b"a's later version")),
     };
     let facts = [
         active("a", OURS, "10000", &[]),
         later,
         active("b", OURS, "3000", &[]),
     ];
+    let folded = fold(&facts);
     assert_eq!(
-        fold(&facts).previous_version,
+        folded.previous_version,
         Some(PreviousVersion {
             environment: Environment::Live,
             connection_id: conn(THEIRS),
             mandate: None,
+            mandate_version: Some(MandateVersion::named(Digest::of(b"a's later version"))),
         })
+    );
+    assert_eq!(
+        folded.current_mandate_version,
+        Some(MandateVersion::named(Digest::of(b"a's later version"))),
+        "the latest applied version's digest is the agent's current version, not the earlier one's"
     );
     assert_eq!(
         fold(&[active("b", OURS, "3000", &[])]).previous_version,
@@ -815,6 +824,7 @@ fn to_fact(step: &Step) -> JournaledFact {
             environment: Environment::Paper,
             allocation_usd: cents(i64::from(c)),
             pinned: assets(&[instrument(pin)]),
+            version: MandateVersion::named(Digest::of(name(who).as_bytes())),
         },
         Step::Admit {
             who,

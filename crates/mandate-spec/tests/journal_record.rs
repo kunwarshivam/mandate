@@ -216,7 +216,7 @@ fn the_mandate_records_map_their_version_provenance_and_confirmation() -> Result
 /// document's (§9.2): the record names only the agent and the version.
 #[test]
 fn a_deployment_is_read_from_its_stored_document() -> Result<(), SpecError> {
-    let (value, _, _, named) = document()?;
+    let (value, _, version, named) = document()?;
     let stored = value.clone();
     let documents = move |wanted: &Digest| {
         (Digest::of(&to_canonical(&stored)) == *wanted).then(|| stored.clone())
@@ -234,6 +234,7 @@ fn a_deployment_is_read_from_its_stored_document() -> Result<(), SpecError> {
             environment: Environment::Paper,
             allocation_usd: Usd::parse("10000")?,
             pinned: BTreeSet::from([AssetId::parse(ASSET_A)?, AssetId::parse(ASSET_B)?]),
+            version,
         })
     );
     assert_eq!(

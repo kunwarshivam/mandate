@@ -159,6 +159,7 @@ pub(crate) fn context() -> Result<ValidationContext, String> {
         connection_loss_carry_usd: Usd::ZERO,
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
+        current_mandate_version: None,
     })
 }
 
@@ -821,6 +822,7 @@ fn each_context_rule_fires_on_its_side_of_the_boundary() -> Checked {
                     connection_id: ConnectionId::parse("conn_alpaca_paper_01")
                         .map_err(|e| e.to_string())?,
                     mandate: None,
+                    mandate_version: None,
                 });
                 Ok(())
             })?,
@@ -834,6 +836,7 @@ fn each_context_rule_fires_on_its_side_of_the_boundary() -> Checked {
                     environment: Environment::Paper,
                     connection_id: ConnectionId::parse("conn_other").map_err(|e| e.to_string())?,
                     mandate: None,
+                    mandate_version: None,
                 });
                 Ok(())
             })?,
@@ -848,6 +851,7 @@ fn each_context_rule_fires_on_its_side_of_the_boundary() -> Checked {
                     connection_id: ConnectionId::parse("conn_alpaca_paper_01")
                         .map_err(|e| e.to_string())?,
                     mandate: None,
+                    mandate_version: None,
                 });
                 Ok(())
             })?,
@@ -1958,6 +1962,7 @@ const BREAKERS: [Breaker; 26] = [
                     environment: Environment::Paper,
                     connection_id,
                     mandate: None,
+                    mandate_version: None,
                 });
     }),
     (Violation::V032, &[], |c| {

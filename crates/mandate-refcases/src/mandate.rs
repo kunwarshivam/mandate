@@ -580,6 +580,7 @@ const CONTEXT_KEYS: &[&str] = &[
     "approver_users",
     "independent_approval_required",
     "previous_version",
+    "current_mandate_version",
     "eligibility_failures",
 ];
 
@@ -632,19 +633,27 @@ fn semantic_context(fixture: &Json, stated: &Json) -> Result<ValidationContext, 
                 let previous = at_of(stated, key)?;
                 let identity_only =
                     unknown_members(previous, &["environment", "connection_id"]).is_ok();
+                let document = if identity_only {
+                    None
+                } else {
+                    Some(crate::to_canon(previous)?)
+                };
+                let mandate_version = document.as_ref().map(|value| {
+                    MandateVersion::named(Digest::of(&mandate_canon::to_canonical(value)))
+                });
                 context.previous_version = Some(PreviousVersion {
                     environment: environment(str_at(previous, "environment")?)?,
                     connection_id: ConnectionId::parse(str_at(previous, "connection_id")?)
                         .map_err(|e| format!("`previous_version.connection_id`: {}", e.code()))?,
-                    mandate: if identity_only {
-                        None
-                    } else {
-                        Some(
-                            Mandate::parse(&crate::to_canon(previous)?)
-                                .map_err(|e| format!("`previous_version`: {}", e.code()))?,
-                        )
-                    },
+                    mandate: document
+                        .as_ref()
+                        .and_then(|value| Mandate::parse(value).ok()),
+                    mandate_version,
                 });
+            }
+            "current_mandate_version" => {
+                context.current_mandate_version =
+                    Some(MandateVersion::named(digest(str_at(stated, key)?)?));
             }
             other => return Err(format!("`context.{other}` is not interpreted")),
         }
@@ -1577,7 +1586,8 @@ fn goal_case(fixture: &Json, case: &Json) -> Result<(), String> {
 /// registry, and the workspace and approver user counts. Every field is owner-entered and confirmed,
 /// which is what an absent [`ProvenanceMap`] entry means (§2.1), and the remaining fields are the "not
 /// stated" of the cases — no group map, nothing claimed elsewhere, no disclosure, no previous version,
-/// and no `independent_approval_required` (an absent policy key is `false` under §4.3, DEC-428).
+/// no agent current version, and no `independent_approval_required` (an absent policy key is `false`
+/// under §4.3, DEC-428).
 fn context_defaults(fixture: &Json) -> Result<ValidationContext, String> {
     let defaults = at_of(fixture, "validation_context_defaults")?;
     Ok(ValidationContext {
@@ -1603,6 +1613,7 @@ fn context_defaults(fixture: &Json) -> Result<ValidationContext, String> {
         connection_loss_carry_usd: Usd::ZERO,
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
+        current_mandate_version: None,
     })
 }
 
@@ -1684,6 +1695,8 @@ fn spec<T>(result: Result<T, SpecError>, what: &str) -> Result<T, String> {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+
+    use mandate_spec::MandateVersion;
 
     use super::policy_case;
     use crate::{Json, read_fixture};
@@ -1823,6 +1836,46 @@ mod tests {
         if edited < 22 * 2 {
             return Err(format!("only {edited} edits were tried"));
         }
+        Ok(())
+    }
+
+    /// MC-V77's previous document, which the schema refuses (#591 review round 2, minor 4): the
+    /// harness carries no mandate for it — `None`, not a case error — and still computes its
+    /// digest over the document's canonical form. The oracle is the case's own
+    /// `current_mandate_version`, which `check_cases.py` derives as the document's own hash, so
+    /// the two agree exactly when the harness hashed what the case wrote.
+    #[test]
+    fn a_schema_refused_previous_document_carries_no_mandate_but_its_own_hash() -> Result<(), String>
+    {
+        let fixture = fixture()?;
+        let case = fixture
+            .pointer("/cases")
+            .and_then(Json::as_array)
+            .and_then(|cases| {
+                cases
+                    .iter()
+                    .find(|case| case.get("id").and_then(Json::as_str) == Some("MC-V77"))
+            })
+            .ok_or("the fixture holds MC-V77")?;
+        let stated = case.get("context").ok_or("MC-V77 states a context")?;
+        let context = super::semantic_context(&fixture, stated)?;
+        let previous = context
+            .previous_version
+            .ok_or("MC-V77 carries a previous version")?;
+        assert!(
+            previous.mandate.is_none(),
+            "the schema-refused document is not a mandate"
+        );
+        let stated_current = stated
+            .get("current_mandate_version")
+            .and_then(Json::as_str)
+            .ok_or("MC-V77 states the agent's current version")?;
+        let expected = MandateVersion::named(super::digest(stated_current)?);
+        assert_eq!(
+            previous.mandate_version,
+            Some(expected),
+            "the harness hashed the document the case says is current"
+        );
         Ok(())
     }
 }
