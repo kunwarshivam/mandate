@@ -15,7 +15,7 @@
 //! | Adapter | Binds |
 //! |---|---|
 //! | [`RiskExitPath`] | `mandate_risk::agent_flatten` (E6-3) |
-//! | [`ExecutorProtection`] | `mandate_executor::handle` on a synthetic protective input (E7-4) |
+//! | [`ExecutorProtection`] | `mandate_executor::is_protected` (E7-4) |
 //! | [`SpecMandate`] | `mandate_spec::validate`, then `ValidatedMandate::new` (stream F) |
 //! | [`StoredBars`] | `mandate_marketdata::dataset::read_manifest` and `dataset::read` (E2-1, E2-2) |
 //! | [`MovingAverage`] | `mandate_backtest::Strategy::MovingAverageCrossover` (E4-2) |
@@ -28,7 +28,7 @@
 //! | [`ExecutorReconciler`] | `mandate_executor::reconcile` on the connector's snapshot (E7-3) |
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
@@ -79,6 +79,24 @@ pub struct RiskExitPath {
 /// bound (trading-domain spec §5.6). The owner-bid path narrows the tier in a follow-up.
 const EQUITY_EXIT_OFFSET: &str = "0.05";
 
+fn mandate_document(path: &Path) -> Result<mandate_spec::document::Mandate, Cause> {
+    let bytes = std::fs::read(path).map_err(|_| {
+        Cause::Spec(mandate_spec::SpecError::InvalidInput {
+            what: "a mandate document that cannot be read",
+        })
+    })?;
+    let value = mandate_canon::parse(&bytes).map_err(|_| {
+        Cause::Spec(mandate_spec::SpecError::InvalidInput {
+            what: "a mandate document that is not canonical JSON",
+        })
+    })?;
+    mandate_spec::document::Mandate::parse(&value).map_err(|_| {
+        Cause::Spec(mandate_spec::SpecError::InvalidInput {
+            what: "a mandate document that does not parse",
+        })
+    })
+}
+
 impl RiskExitPath {
     /// The adapter for one agent over one mandate document, the two `Sources` members the fold
     /// reads (DEC-449).
@@ -90,21 +108,7 @@ impl RiskExitPath {
     /// asset classes both come from it, so a document that cannot be read is a refusal, not a
     /// pass (DEC-449 item 5).
     fn document(&self) -> Result<mandate_spec::document::Mandate, Cause> {
-        let bytes = std::fs::read(&self.mandate).map_err(|_| {
-            Cause::Spec(mandate_spec::SpecError::InvalidInput {
-                what: "a mandate document that cannot be read",
-            })
-        })?;
-        let value = mandate_canon::parse(&bytes).map_err(|_| {
-            Cause::Spec(mandate_spec::SpecError::InvalidInput {
-                what: "a mandate document that is not canonical JSON",
-            })
-        })?;
-        mandate_spec::document::Mandate::parse(&value).map_err(|_| {
-            Cause::Spec(mandate_spec::SpecError::InvalidInput {
-                what: "a mandate document that does not parse",
-            })
-        })
+        mandate_document(&self.mandate)
     }
 
     /// Each pinned instrument's asset class, keyed by the mandate's own `asset_id` — already
@@ -635,11 +639,7 @@ fn protection_probe_date(raw: &str) -> Result<Date, Cause> {
 
 impl Protection for ExecutorProtection {
     fn probe(&self) -> Result<(), Cause> {
-        let document = RiskExitPath {
-            agent: AgentId(String::new()),
-            mandate: self.mandate.clone(),
-        }
-        .document()?;
+        let document = mandate_document(&self.mandate)?;
         let pinned = document
             .universe
             .pinned_instruments
