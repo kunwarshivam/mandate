@@ -78,7 +78,9 @@ pub struct FlattenRequest {
     /// orders in it (mandate spec §6.1, trading-domain spec §5.5; DEC-257).
     pub instrument: Option<InstrumentId>,
     pub confirmation: Option<OwnerConfirmation>,
-    /// The client order ids of every intent the fold still holds outstanding.
+    /// The intent event ids of every intent the fold still holds outstanding, which is what
+    /// `RuntimeState::working_orders` supplies; the plan's cancels name client order ids, a
+    /// mapping the exit adapter derives from the journal (DEC-449 item 3).
     pub working_orders: Vec<String>,
 }
 

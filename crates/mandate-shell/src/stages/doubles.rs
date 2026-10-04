@@ -257,6 +257,11 @@ pub fn passed_checks() -> Vec<CheckOutcome> {
     .collect()
 }
 
+/// The permissive exit: probes and plans succeed so the fail-closed suite can drive the paths
+/// around a working exit. Its plan is fixture-shaped, not a mapping example — it echoes the
+/// request's `working_orders` as cancels, which under DEC-449 item 3 is exactly the copy a
+/// production adapter must never make (the cancels are the fold's working orders for the
+/// agent, as `md-` client order ids, never the request's intent ids).
 pub struct PermissiveExit(pub World);
 
 impl ExitPath for PermissiveExit {
@@ -265,7 +270,14 @@ impl ExitPath for PermissiveExit {
         Ok(())
     }
 
-    fn plan(&self, request: &FlattenRequest) -> Result<FlattenPlan, Cause> {
+    fn plan(
+        &self,
+        request: &FlattenRequest,
+        journal: &dyn JournalWriter,
+        stream: &str,
+        clock: Option<mandate_runtime::RiskClock>,
+    ) -> Result<FlattenPlan, Cause> {
+        let _ = (journal, stream, clock);
         Ok(FlattenPlan {
             cancel_client_order_ids: request.working_orders.clone(),
             sells: Vec::new(),
@@ -284,8 +296,14 @@ impl ExitPath for PlanlessExit {
         Ok(())
     }
 
-    fn plan(&self, request: &FlattenRequest) -> Result<FlattenPlan, Cause> {
-        let _ = request;
+    fn plan(
+        &self,
+        request: &FlattenRequest,
+        journal: &dyn JournalWriter,
+        stream: &str,
+        clock: Option<mandate_runtime::RiskClock>,
+    ) -> Result<FlattenPlan, Cause> {
+        let _ = (request, journal, stream, clock);
         Err(Cause::Gate(mandate_risk::GateError::Unimplemented(
             "agent_flatten",
             "E6-3",
@@ -889,8 +907,14 @@ impl ExitPath for Stubbed {
         self.refuse()
     }
 
-    fn plan(&self, request: &FlattenRequest) -> Result<FlattenPlan, Cause> {
-        let _ = request;
+    fn plan(
+        &self,
+        request: &FlattenRequest,
+        journal: &dyn JournalWriter,
+        stream: &str,
+        clock: Option<mandate_runtime::RiskClock>,
+    ) -> Result<FlattenPlan, Cause> {
+        let _ = (request, journal, stream, clock);
         self.refuse()
     }
 }

@@ -14,7 +14,8 @@ use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_num::Price;
 use mandate_risk::Decision;
 use mandate_runtime::{
-    Autonomy, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal, SignalInputs,
+    Autonomy, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal, RiskClock,
+    SignalInputs,
 };
 
 use crate::error::Cause;
@@ -180,8 +181,20 @@ pub struct Reconciled {
 pub trait ExitPath {
     /// Whether an agent-scoped flatten can be planned at all. Asked once, before anything else.
     fn probe(&self) -> Result<(), Cause>;
-    /// The agent-scoped plan for one request.
-    fn plan(&self, request: &FlattenRequest) -> Result<FlattenPlan, Cause>;
+    /// The agent-scoped plan for one request, over the journal as it stands at the call: the
+    /// caller — the run's bridge, which owns the stages — hands the journal's read capability,
+    /// the account stream's id, and the step's risk clock with each call, so the plan can never
+    /// be taken over a fold the run has already written past or a session the clock has already
+    /// left (DEC-449). A scratch run's memory journal is readable through the same hand. The
+    /// clock is `None` before any has advanced, and a plan without one is refused — the session
+    /// cannot be derived, and no default invents it.
+    fn plan(
+        &self,
+        request: &FlattenRequest,
+        journal: &dyn JournalWriter,
+        stream: &str,
+        clock: Option<RiskClock>,
+    ) -> Result<FlattenPlan, Cause>;
 }
 
 /// Step 17's protection half: whether the executor's protective sequence can answer (E7-4).
