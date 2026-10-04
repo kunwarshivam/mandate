@@ -580,6 +580,7 @@ const CONTEXT_KEYS: &[&str] = &[
     "approver_users",
     "independent_approval_required",
     "previous_version",
+    "current_mandate_version",
     "eligibility_failures",
 ];
 
@@ -632,19 +633,27 @@ fn semantic_context(fixture: &Json, stated: &Json) -> Result<ValidationContext, 
                 let previous = at_of(stated, key)?;
                 let identity_only =
                     unknown_members(previous, &["environment", "connection_id"]).is_ok();
+                let document = if identity_only {
+                    None
+                } else {
+                    Some(crate::to_canon(previous)?)
+                };
+                let mandate_version = document.as_ref().map(|value| {
+                    MandateVersion::named(Digest::of(&mandate_canon::to_canonical(value)))
+                });
                 context.previous_version = Some(PreviousVersion {
                     environment: environment(str_at(previous, "environment")?)?,
                     connection_id: ConnectionId::parse(str_at(previous, "connection_id")?)
                         .map_err(|e| format!("`previous_version.connection_id`: {}", e.code()))?,
-                    mandate: if identity_only {
-                        None
-                    } else {
-                        Some(
-                            Mandate::parse(&crate::to_canon(previous)?)
-                                .map_err(|e| format!("`previous_version`: {}", e.code()))?,
-                        )
-                    },
+                    mandate: document
+                        .as_ref()
+                        .and_then(|value| Mandate::parse(value).ok()),
+                    mandate_version,
                 });
+            }
+            "current_mandate_version" => {
+                context.current_mandate_version =
+                    Some(MandateVersion::named(digest(str_at(stated, key)?)?));
             }
             other => return Err(format!("`context.{other}` is not interpreted")),
         }
@@ -1577,7 +1586,8 @@ fn goal_case(fixture: &Json, case: &Json) -> Result<(), String> {
 /// registry, and the workspace and approver user counts. Every field is owner-entered and confirmed,
 /// which is what an absent [`ProvenanceMap`] entry means (§2.1), and the remaining fields are the "not
 /// stated" of the cases — no group map, nothing claimed elsewhere, no disclosure, no previous version,
-/// and no `independent_approval_required` (an absent policy key is `false` under §4.3, DEC-428).
+/// no agent current version, and no `independent_approval_required` (an absent policy key is `false`
+/// under §4.3, DEC-428).
 fn context_defaults(fixture: &Json) -> Result<ValidationContext, String> {
     let defaults = at_of(fixture, "validation_context_defaults")?;
     Ok(ValidationContext {
@@ -1603,6 +1613,7 @@ fn context_defaults(fixture: &Json) -> Result<ValidationContext, String> {
         connection_loss_carry_usd: Usd::ZERO,
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
+        current_mandate_version: None,
     })
 }
 

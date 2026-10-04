@@ -22,7 +22,7 @@ use mandate_spec::document::{ConnectionId, ModelId, Pointer, ProvenanceMap, Sour
 use mandate_spec::validate::{
     PreviousVersion, RegisteredModel, ValidationReport, recheck_at_application, validate,
 };
-use mandate_spec::{Mandate, SpecError, ValidationContext, Violation};
+use mandate_spec::{Mandate, MandateVersion, SpecError, ValidationContext, Violation};
 use mandate_time::Date;
 use proptest::prelude::*;
 use proptest::test_runner::TestRunner;
@@ -78,6 +78,7 @@ fn context(workspace_users: u32, independent_approval_required: bool) -> Validat
         connection_loss_carry_usd: Usd::ZERO,
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
+        current_mandate_version: None,
     }
 }
 
@@ -302,16 +303,31 @@ fn an_absent_membership_is_no_second_user_under_the_policy() {
     );
 }
 
-/// The draft's context in a lone workspace under the policy, with a previous version behind it whose
-/// document is `previous`, or only its identity when `previous` is `None`.
-fn after(previous: Option<Mandate>) -> ValidationContext {
+/// The draft's context in a lone workspace under the policy, with a previous version behind it
+/// whose document is `previous` (or only its identity when `None`), the journal-recorded digest of
+/// that version, and the agent's current version (DEC-444 item 3: the digest and the document are
+/// read from the same agent's journal record, so the pair is never assembled per request).
+fn after(
+    previous: Option<Mandate>,
+    mandate_version: Option<MandateVersion>,
+    current: Option<MandateVersion>,
+) -> ValidationContext {
     let mut ctx = context(1, true);
     ctx.previous_version = Some(PreviousVersion {
         environment: Environment::Paper,
         connection_id: conn(OURS),
         mandate: previous,
+        mandate_version,
     });
+    ctx.current_mandate_version = current;
     ctx
+}
+
+/// A previous document and its own digest, matched as the agent's current version: the journal's
+/// pair, read together (DEC-444 item 3). A caller that read no record passes `None`s instead.
+fn matched_to_current(previous: &Mandate) -> ValidationContext {
+    let version = previous.version().expect("the previous document hashes");
+    after(Some(previous.clone()), Some(version), Some(version))
 }
 
 /// The base with each `(pointer, value)` written in turn, parsed.
@@ -323,16 +339,21 @@ fn edited(changes: &[(&str, &str)]) -> Mandate {
     Mandate::parse(&with_all(&changes)).expect("the edited document parses")
 }
 
-/// DEC-444 item 3: the exception reads the agent's current version, the document whose canonical hash
-/// is its current `mandate_version`, and a document validation cannot match to that hash is refused.
-/// `PreviousVersion` carries no digest, so no previous document can be matched yet, and even a version
-/// §9.2 rates risk-reducing against the document given (the previous version allowed $20,000 and the
-/// draft $10,000) is refused, at validation and at application. The exception passes once
-/// `PreviousVersion` can be matched by hash; that test lands with the digest.
+/// DEC-444 item 3: the exception reads the agent's current version, the document whose canonical
+/// hash is its current `mandate_version`, and a version validation cannot match to that hash is
+/// refused. This is the no-record case: the caller read no journal record, so
+/// [`PreviousVersion`] carries no digest and even a version §9.2 rates risk-reducing against the
+/// document given (the previous version allowed $20,000 and the draft $10,000) is refused, at
+/// validation and at application. A digest that matches no current version is the same refusal,
+/// pinned beside the exception's pass.
 #[test]
 fn v047_refuses_a_reducing_version_it_cannot_match_to_the_current_version() {
     let mandate = draft();
-    let ctx = after(Some(edited(&[("/capital/allocation_usd", "20000")])));
+    let ctx = after(
+        Some(edited(&[("/capital/allocation_usd", "20000")])),
+        None,
+        None,
+    );
     assert!(
         report(&mandate, &ctx).violations.contains(&Violation::V047),
         "a reducing version against a document no digest ties to the agent's version is refused"
@@ -344,16 +365,54 @@ fn v047_refuses_a_reducing_version_it_cannot_match_to_the_current_version() {
     );
 }
 
+/// DEC-444 items 1 and 3: the exception itself. A version §9.2 rates risk-reducing against the
+/// agent's current version — the previous document's journal-recorded digest matching the current
+/// version's — passes V-047 at validation and at application (MC-V72's shape). The same reducing
+/// version with a digest that matches no current version is refused, and so is one with no current
+/// version at all, the first-deployment case (MC-V76's shape and item 3's list).
+#[test]
+fn v047_exempts_a_reducing_version_matched_to_the_current_version() {
+    let mandate = draft();
+    let previous = edited(&[("/capital/allocation_usd", "20000")]);
+    let version = previous.version().expect("the previous document hashes");
+    let matched = matched_to_current(&previous);
+    assert!(
+        report(&mandate, &matched).is_valid(),
+        "a reducing version against the agent's current document passes V-047"
+    );
+    assert_eq!(
+        rechecked(&mandate, &matched),
+        BTreeSet::new(),
+        "and passes at application too"
+    );
+    let elsewhere = MandateVersion::named(Digest::of(b"another agent's version"));
+    let mismatched = after(Some(previous.clone()), Some(elsewhere), Some(version));
+    assert!(
+        report(&mandate, &mismatched)
+            .violations
+            .contains(&Violation::V047),
+        "the same reducing version against a digest that is not the agent's current version is refused"
+    );
+    let unmatched = after(Some(previous), Some(version), None);
+    assert!(
+        report(&mandate, &unmatched)
+            .violations
+            .contains(&Violation::V047),
+        "and so is one the platform holds no current version for"
+    );
+}
+
 /// DEC-444: every other version stays refused in a lone workspace under the policy, at validation and
-/// at application. A neutral version, unchanged or renamed. One that lowers a maximum and raises
-/// another, which §9.2 rates risk-increasing because any path is. A risk-increasing one. And a
-/// reducing one whose previous document validation does not have, only its identity (rule 3; the
-/// reviewer's must-catch plant from #536 round 1, `previous_version.is_none()`, is this file's
-/// first-version case).
+/// at application — each with its previous document matched to the agent's current version, so the
+/// refusal is the classification's and not a missing digest. A neutral version, unchanged or
+/// renamed. One that lowers a maximum and raises another, which §9.2 rates risk-increasing because
+/// any path is. A risk-increasing one. And a reducing one whose previous document validation does
+/// not have, only its identity (rule 3; the reviewer's must-catch plant from #536 round 1,
+/// `previous_version.is_none()`, is this file's first-version case).
 #[test]
 fn v047_refuses_every_other_version_in_a_lone_workspace() {
     let mandate = draft();
-    let shapes = [
+    let shapes: [(&str, Option<Mandate>); 5] = [
         ("neutral, unchanged", Some(draft())),
         (
             "neutral, renamed",
@@ -373,7 +432,10 @@ fn v047_refuses_every_other_version_in_a_lone_workspace() {
         ("reducing, its previous document withheld", None),
     ];
     for (label, previous) in shapes {
-        let ctx = after(previous);
+        let ctx = match &previous {
+            Some(document) => matched_to_current(document),
+            None => after(None, None, None),
+        };
         assert!(
             report(&mandate, &ctx).violations.contains(&Violation::V047),
             "{label}: refused at validation in a lone workspace under the policy"
@@ -433,6 +495,7 @@ fn another_allocation_applied_before_application_refuses_the_version() {
         environment: Environment::Paper,
         allocation_usd: usd(allocation),
         pinned: BTreeSet::new(),
+        version: MandateVersion::named(Digest::of(b"b")),
     };
     facts.push(elsewhere("15000"));
     assert_eq!(

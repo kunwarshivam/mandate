@@ -18,8 +18,8 @@ use crate::condition::{
     Condition, ConditionField, ConditionValue, FieldKind, MAX_CONDITION_DEPTH, Operator,
 };
 use crate::document::{
-    ConnectionId, Goal, LadderAction, Lifts, Mandate, ModelId, Pointer, ProvenanceMap, ScaleAction,
-    SignalModel, Source, pointer,
+    ConnectionId, Goal, LadderAction, Lifts, Mandate, MandateVersion, ModelId, Pointer,
+    ProvenanceMap, ScaleAction, SignalModel, Source, pointer,
 };
 use crate::policy::{PolicyLevel, PolicyViolation, check, platform_base};
 use crate::{DecGrammar, SchemaDec, SpecError};
@@ -206,6 +206,10 @@ pub struct ValidationContext {
     /// blocks (W-001); the gate enforces at runtime.
     pub eligibility_failures: BTreeSet<AssetId>,
     pub previous_version: Option<PreviousVersion>,
+    /// The agent's current version, as the journal's latest applied version folds it: the document
+    /// whose canonical hash (§9.1) this is (DEC-444 item 3). `None` when the platform holds no
+    /// current version — a first deployment — and V-047 then refuses every version.
+    pub current_mandate_version: Option<MandateVersion>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -231,6 +235,11 @@ pub struct PreviousVersion {
     /// caller holds only the version's identity: V-042 then cannot tell a carried delegation from a
     /// new one, so it refuses every delegation the new version holds, failing closed (DEC-420).
     pub mandate: Option<Mandate>,
+    /// The version's digest as the journal recorded it beside the document, so the pair is never
+    /// assembled per request (DEC-444 item 3): V-047 matches it against
+    /// [`ValidationContext::current_mandate_version`] and never re-hashes the document itself.
+    /// `None` when the caller read no journal record, and V-047 then refuses.
+    pub mandate_version: Option<MandateVersion>,
 }
 
 /// The four dollar figures §4.2 puts on the confirmation screen.
@@ -343,21 +352,52 @@ pub fn recheck_at_application(
     );
     flag(
         &mut violations,
-        lone_under_independent_approval(context),
+        lone_under_independent_approval(mandate, context)?,
         Violation::V047,
     );
     Ok(violations)
 }
 
 /// V-047's condition: the policy requires independent approval and the workspace has no second
-/// active user. A count the caller did not know arrives as 0 or 1 (DEC-428 item 2), so it is here.
-///
-/// DEC-444 exempts a version §9.2 classifies as risk-reducing against the agent's current version,
-/// the document whose hash is the agent's current `mandate_version`. [`PreviousVersion`] carries no
-/// digest, so no document can be matched to that version here, and every version is refused: the
-/// refusing side DEC-444 item 3 names until the type can match one.
-fn lone_under_independent_approval(context: &ValidationContext) -> bool {
-    context.independent_approval_required && context.workspace_users < 2
+/// active user, unless DEC-444's exemption applies — a version §9.2 classifies as risk-reducing
+/// against the agent's current version. A count the caller did not know arrives as 0 or 1
+/// (DEC-428 item 2), so it is here.
+fn lone_under_independent_approval(
+    mandate: &Mandate,
+    context: &ValidationContext,
+) -> Result<bool, SpecError> {
+    if !(context.independent_approval_required && context.workspace_users < 2) {
+        return Ok(false);
+    }
+    Ok(!exempted_reducing_version(mandate, context)?)
+}
+
+/// DEC-444 items 1 and 3: the exemption needs the agent's current version — the journal's
+/// [`ValidationContext::current_mandate_version`] matched against the previous version's
+/// journal-recorded digest, the pair never assembled per request — and §9.2's plain `classify`
+/// calling the new version risk-reducing against that document. Everything else is refused: no
+/// previous version (a deployment), identity only, a document the schema refuses, a digest that
+/// matches no current version, no current version, a neutral version, and a version with any
+/// risk-increasing path (MC-V72 to MC-V77).
+fn exempted_reducing_version(
+    mandate: &Mandate,
+    context: &ValidationContext,
+) -> Result<bool, SpecError> {
+    let Some(previous) = context.previous_version.as_ref() else {
+        return Ok(false);
+    };
+    let (Some(previous_document), Some(previous_digest)) =
+        (&previous.mandate, previous.mandate_version)
+    else {
+        return Ok(false);
+    };
+    let Some(current) = context.current_mandate_version else {
+        return Ok(false);
+    };
+    if previous_digest.digest() != current.digest() {
+        return Ok(false);
+    }
+    Ok(classify(previous_document, mandate)?.class == ChangeClass::RiskReducing)
 }
 
 /// The places of the size fraction the order builder multiplies its targets by (§8.3 step 2), which
@@ -465,7 +505,11 @@ fn account_rules(
         Violation::V001,
     );
     flag(out, committed > ctx.account_equity_usd, Violation::V002);
-    flag(out, lone_under_independent_approval(ctx), Violation::V047);
+    flag(
+        out,
+        lone_under_independent_approval(m, ctx)?,
+        Violation::V047,
+    );
     let universe = &m.universe;
     flag(
         out,

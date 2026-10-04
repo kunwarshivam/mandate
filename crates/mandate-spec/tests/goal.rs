@@ -51,6 +51,7 @@ fn context() -> ValidationContext {
         connection_loss_carry_usd: Usd::ZERO,
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
+        current_mandate_version: None,
     }
 }
 

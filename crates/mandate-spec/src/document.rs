@@ -52,8 +52,9 @@ impl MandateVersion {
 
     /// The version a journal record names (journal spec §9.2): a digest is a version only once the
     /// record has been mapped against the document stored under it, or names the document a
-    /// confirmation or a provenance list is about.
-    pub(crate) fn named(digest: Digest) -> Self {
+    /// confirmation or a provenance list is about. The reference-case harness reads the same
+    /// journal-record shape, so this is how it names one too.
+    pub fn named(digest: Digest) -> Self {
         Self(digest)
     }
 }

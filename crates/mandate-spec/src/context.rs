@@ -81,6 +81,9 @@ pub enum JournaledFact {
         environment: Environment,
         allocation_usd: Usd,
         pinned: BTreeSet<AssetId>,
+        /// The version's own digest, as the journal record named it beside the stored document:
+        /// what V-047 matches the agent's current version by (DEC-444 item 3).
+        version: MandateVersion,
     },
     /// `UniverseChanged`: an instrument admitted to, or removed from, an agent's working universe. An
     /// agent with no `AgentVersionActive` has no known connection, so its admitted instruments count as
@@ -226,6 +229,7 @@ impl JournaledFact {
                         .iter()
                         .map(|i| i.asset_id.clone())
                         .collect(),
+                    version: MandateVersion::named(version),
                 }
             }
             "AgentStopped" => Self::AgentStopped {
@@ -280,6 +284,7 @@ impl JournaledFact {
                         .iter()
                         .map(|i| i.asset_id.clone())
                         .collect(),
+                    version: MandateVersion::named(record.digest("new_version")?),
                 }
             }
             "AccountSnapshotRecorded" => Self::AccountSnapshot {
@@ -509,11 +514,23 @@ impl ValidationContext {
 /// An agent as the fold last saw it.
 #[derive(Debug, Default)]
 struct AgentState {
-    /// The version in force: its connection, environment, allocation, and pinned instruments.
-    version: Option<(ConnectionId, Environment, Usd, BTreeSet<AssetId>)>,
+    /// The version in force: its connection, environment, allocation, pinned instruments, and the
+    /// version's own digest as the journal recorded it (DEC-444 item 3: the digest and the document
+    /// are read from the same agent's record, never assembled per request).
+    version: Option<VersionInForce>,
     retired: bool,
     flat_since_retired: bool,
     working: BTreeSet<AssetId>,
+}
+
+/// The version in force, as one journal record read it.
+#[derive(Debug, Clone)]
+struct VersionInForce {
+    connection_id: ConnectionId,
+    environment: Environment,
+    allocation_usd: Usd,
+    pinned: BTreeSet<AssetId>,
+    version: MandateVersion,
 }
 
 #[derive(Debug, Default)]
@@ -556,14 +573,16 @@ impl Fold {
                 environment,
                 allocation_usd,
                 pinned,
+                version,
             } => {
                 let state = self.agents.entry(agent.clone()).or_default();
-                state.version = Some((
-                    connection_id.clone(),
-                    *environment,
-                    *allocation_usd,
-                    pinned.clone(),
-                ));
+                state.version = Some(VersionInForce {
+                    connection_id: connection_id.clone(),
+                    environment: *environment,
+                    allocation_usd: *allocation_usd,
+                    pinned: pinned.clone(),
+                    version: *version,
+                });
                 state.retired = false;
                 state.flat_since_retired = false;
             }
@@ -589,7 +608,7 @@ impl Fold {
                 let named = state
                     .version
                     .as_ref()
-                    .is_some_and(|(version_connection, ..)| version_connection == connection_id);
+                    .is_some_and(|in_force| in_force.connection_id == *connection_id);
                 if named {
                     state.retired = true;
                     state.flat_since_retired = false;
@@ -654,18 +673,19 @@ impl Fold {
             if *id == args.agent {
                 continue;
             }
-            let Some((connection_id, _, allocation, pinned)) = &state.version else {
+            let Some(in_force) = &state.version else {
                 claimed_by_other_agents.extend(state.working.iter().cloned());
                 continue;
             };
-            if connection_id != ours {
+            if in_force.connection_id != *ours {
                 continue;
             }
             if !state.retired {
-                other_allocations_usd = other_allocations_usd.checked_add(*allocation)?;
+                other_allocations_usd =
+                    other_allocations_usd.checked_add(in_force.allocation_usd)?;
             }
             if !state.flat_since_retired {
-                claimed_by_other_agents.extend(pinned.iter().cloned());
+                claimed_by_other_agents.extend(in_force.pinned.iter().cloned());
                 claimed_by_other_agents.extend(state.working.iter().cloned());
             }
         }
@@ -678,15 +698,17 @@ impl Fold {
                 connection_loss_carry_usd = connection_loss_carry_usd.checked_add(*loss)?;
             }
         }
-        let previous_version = self
+        let folded = self
             .agents
             .get(&args.agent)
-            .and_then(|state| state.version.as_ref())
-            .map(|(connection_id, environment, _, _)| PreviousVersion {
-                environment: *environment,
-                connection_id: connection_id.clone(),
-                mandate: None,
-            });
+            .and_then(|state| state.version.as_ref());
+        let previous_version = folded.map(|in_force| PreviousVersion {
+            environment: in_force.environment,
+            connection_id: in_force.connection_id.clone(),
+            mandate: None,
+            mandate_version: Some(in_force.version),
+        });
+        let current_mandate_version = folded.map(|in_force| in_force.version);
         let membership = args.membership.unwrap_or(Membership {
             workspace_users: 0,
             approver_users: 0,
@@ -712,6 +734,7 @@ impl Fold {
             connection_loss_carry_usd,
             eligibility_failures: args.eligibility_failures,
             previous_version,
+            current_mandate_version,
         })
     }
 }
@@ -821,9 +844,11 @@ mod tests {
 
     use super::{AgentId, ContextArgs, JournaledFact};
     use crate::Mandate;
+    use crate::MandateVersion;
     use crate::document::{ConnectionId, Pointer, Provenance, Source};
     use crate::validate::tests::mandate;
     use crate::validate::{ValidationContext, Violation, validate};
+    use mandate_canon::Digest;
 
     #[test]
     fn an_agent_id_is_the_text_it_was_given() {
@@ -1102,6 +1127,7 @@ mod tests {
                 environment: Environment::Paper,
                 allocation_usd: Usd::parse("3000").map_err(|e| e.to_string())?,
                 pinned: BTreeSet::from([pinned.clone()]),
+                version: MandateVersion::named(Digest::of(b"b")),
             },
             JournaledFact::AgentStopped {
                 agent: b.clone(),
@@ -1149,6 +1175,7 @@ mod record_tests {
     use mandate_time::Date;
 
     use super::{AgentId, ContextArgs, JournaledFact};
+    use crate::MandateVersion;
     use crate::SpecError;
     use crate::document::{ConnectionId, Pointer, Provenance, Source};
     use crate::validate::ValidationContext;
@@ -1482,6 +1509,7 @@ mod record_tests {
                     .iter()
                     .map(|i| i.asset_id.clone())
                     .collect(),
+                version: MandateVersion::named(digest(new)?),
             });
             for (result, fact) in [("applied", applied), ("rejected", None)] {
                 for label in ["risk_increasing", "risk_reducing", "neutral"] {

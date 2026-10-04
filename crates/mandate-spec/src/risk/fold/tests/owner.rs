@@ -9,10 +9,12 @@ use mandate_domain::Environment;
 use mandate_time::Date;
 
 use super::*;
+use crate::MandateVersion;
 use crate::context::{AgentId, ContextArgs, JournaledFact};
 use crate::document::{ConnectionId, OnComplete};
 use crate::risk::{ApplyResult, Rejection};
 use crate::validate::{ValidationContext, Violation, validate};
+use mandate_canon::Digest;
 
 fn acknowledge(offset_s: i64, restriction: Latch) -> Result<Step, String> {
     Ok(Step {
@@ -531,6 +533,7 @@ fn a_release_retires_with_its_loss_carry_and_a_redeploy_opens_at_it() -> Result<
             environment: Environment::Paper,
             allocation_usd: usd("10000")?,
             pinned: BTreeSet::new(),
+            version: MandateVersion::named(Digest::of(b"released")),
         },
         JournaledFact::AgentStopped {
             agent: AgentId::new("released"),
