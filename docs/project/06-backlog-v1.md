@@ -425,7 +425,7 @@ the spec invariants (DP-n) its tests cover.
   orders will draw on? Product wording, so the founder's (§6.4's approval card already carries delegation shapes).
   ~~**Founder question** (#443 round 2): should a mandate be refused at validation
   when `independent_approval_required` is on and the workspace has one user?~~ Decided yes (the founder, 2026-10-02):
-  spec V-047 and MC-V69 to MC-V71 ([DEC-411](decisions/DEC-411.md)); the code is owed on E10-1's row.
+  spec V-047 and MC-V69 to MC-V71 ([DEC-411](decisions/DEC-411.md)); the code is merged (#536, #580) and MC-V69 to MC-V71 pass.
   **Founder question** (DEC-411 item 6): a workspace that loses its second user, or turns
   `independent_approval_required` on with one user, after a version is confirmed keeps its agents running with nothing
   they latched liftable, and no new version validates there but a risk-reducing one (DEC-444, below; §4.3's conforming
@@ -1088,13 +1088,13 @@ story buys a service, and none uses a real identity-provider account in tests (s
   against the [mandate spec](../specs/mandate.md) (schema, V-rules, policy hierarchy; reference
   cases MC-S, MC-V, and MC-P pass); proposed envelope values are marked as proposed and no envelope
   field activates unconfirmed ([DEC-97](04-decision-log.md#decisions)).
-  Owed ([DEC-411](decisions/DEC-411.md), stream H, DEC-77 tests then code): `mandate-spec`'s `ValidationContext` gains
-  the effective `independent_approval_required`, V-047 refuses it in a workspace of fewer than two users, and the
-  harness reads the cases' new context member, so MC-V69 to MC-V71 pass. V-047 also refuses again when a version is
-  applied, as V-002 does, and a case covers a second user deactivated between confirmation and application (#528
-  round 2, major 1; the reference models V-047 at validation only, DEC-411 item 5). In progress (claim #124, stream
-  H4; [DEC-428](decisions/DEC-428.md)): the tests PR, then the implementation, then the status PR; the apply-time case
-  is a Rust test through `from_journal` (DEC-428 item 4), and `validate::recheck_at_application` rechecks V-002 and V-047.
+  Merged (claim #124, stream H4; [DEC-428](decisions/DEC-428.md), tests #536 then implementation #580):
+  `mandate-spec`'s `ValidationContext` carries the effective `independent_approval_required`, V-047 refuses it in a
+  workspace of fewer than two users at validation, and the harness reads the cases' context member, so MC-V69 to
+  MC-V71 pass. V-047 also refuses again when a version is applied, as V-002 does (`validate::recheck_at_application`
+  rechecks V-002 and V-047), and a Rust test through `from_journal` covers a second user deactivated between
+  confirmation and application (DEC-428 item 4; #528 round 2, major 1; the reference models V-047 at validation only,
+  DEC-411 item 5).
   Owed when `Membership` gets a producer (#536 round 1, minor 4): a test pins that pending invitations and deactivated
   accounts do not count as users (spec V-047, DEC-411 item 2). `mandate-spec` receives a count, so it cannot pin it.
   The founder's DEC-444 (2026-10-03) lets a version §9.2 rates risk-reducing through V-047; the spec, `ref.py` and

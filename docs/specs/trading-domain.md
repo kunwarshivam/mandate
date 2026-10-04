@@ -108,7 +108,9 @@
    controls, eligibility, day-trade budgets, buying power, or opening-session rules.** Risk exits,
    protective orders, and automated kill switches are exempt from all of them; owner exits are paced
    only by participation caps; discretionary exits (signal or goal driven) are paced by conduct
-   controls but never denied (§9.6). Exits and protective
+   controls but never denied (§9.6), except when the exits already allowed sell the whole position,
+   so nothing is left for it to sell; then it is refused `sell_exceeds_available` as DEC-410 item 3
+   says. Exits and protective
    orders may be held only by agent mode `paused` or `stopped` (state integrity), by an `Unknown`
    order in the same instrument, or by the broker. **The kill switch is always available** and
    does not depend on model state (§5.5).
@@ -344,7 +346,7 @@ queued by the broker for the next eligible session.
      With nothing left, it is denied `sell_exceeds_available`, but only once it is otherwise
      releasable now: one held `session_closed`, `session_unknown` or `exit_unpriced` keeps its
      hold and is decided again when it is released. The denial is terminal: the intent is not
-     retried, and a later proposal is judged afresh (DEC-410 item 3, Proposed).
+     retried, and a later proposal is judged afresh (DEC-410 item 3).
    - **Protective placements** are not gated here; §5.4 sizes them.
 5. **One side at a time:** an agent's non-protective orders in an instrument are all on the same
    side (`working_order_limit`). Before a risk-reducing sell, the executor cancels the agent's own
@@ -380,8 +382,22 @@ protective legs are checked against position + entry quantity.
 - A plain risk-increasing order in an instrument with resting protective orders is denied
   (`add_blocked_by_protective_order`).
 - **Passive exits** (a sell limit above the bid) are placed as the take-profit leg of a new OCO
-  that keeps the existing stop: cancel the OCO, confirm, submit the new OCO. Protection is never
-  removed for a passive exit.
+  that keeps the existing stop: cancel the OCO, confirm, submit the new OCO. The rest of the
+  position keeps its stop at the recorded prices, so a passive exit never removes protection by
+  itself ([DEC-422](../project/decisions/DEC-422.md)).
+  - **Beside other exits.** The new OCO's stop and every other exit's sell must fit within the
+    position together, and one fit decides it at every check
+    ([DEC-425](../project/decisions/DEC-425.md)): whether the placement holds the other exits back,
+    whether it is cancelled for them, and whether an exit the gate allows leaves it resting all
+    read the same measure. The other exits are those still selling and those received with no order
+    yet. Exits the gate holds are left out of the fit at every one of those checks — when the gate
+    allows an exit, at every step an exit waits, the placement's own step included, and when a
+    cancel is decided — because they cannot move; a held exit counts again once released. Where
+    they do not fit, the new OCO is cancelled for them, as any protection is cancelled before a
+    marketable exit.
+  - **The gap is bounded.** That cancel falls inside an unprotected interval that is journaled and
+    bounded by `max_unprotected_s`, like any other. Once the other exits end, or the bound ends
+    them, protection is re-placed for what is left.
 - **Marketable exit sequence:** cancel all protective orders in the instrument → confirm → re-run
   the gate on fresh state → submit the exit, priced marketable per §5.6 → after a terminal state,
   re-place protection for any remaining quantity. **Orders submitted while protection is canceled
