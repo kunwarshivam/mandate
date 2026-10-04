@@ -38,7 +38,7 @@ use mandate_num::{Bps, Price, Usd};
 use mandate_risk::Decision;
 use mandate_runtime::{
     AgentId, Autonomy, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal,
-    SignalInputs,
+    RiskClock, SignalInputs,
 };
 
 use crate::error::Cause;
@@ -49,12 +49,12 @@ use crate::stages::{
 
 /// `mandate_risk::agent_flatten`, probed once against a synthetic request before anything starts
 /// and, mid-run, planned over a fold of the journal taken at request time (DEC-449): the agent's
-/// positions and working orders from the account-stream fold, the broker's positions from the
-/// `BrokerPositionObserved` records, asset classes from the mandate's universe, and the session
-/// from the clock. The journal's read capability arrives with each `plan` call from the run's
-/// bridge — the adapter holds no journal of its own, so no plan can be taken over a fold the run
-/// has written past — and the mandate's path is held for the probe's synthetic request and the
-/// universe's asset classes.
+/// positions and working orders from the account-stream fold, asset classes from the mandate's
+/// universe, and the session derived from the step's risk clock. The journal's read capability,
+/// the account stream's id, and the clock arrive with each `plan` call from the run's bridge —
+/// the adapter holds no journal and no clock of its own, so no plan can be taken over a fold the
+/// run has written past or a session the clock has left — and the mandate's path is held for the
+/// probe's synthetic request and the universe's asset classes.
 pub struct RiskExitPath {
     mandate: PathBuf,
 }
@@ -76,8 +76,10 @@ impl ExitPath for RiskExitPath {
         &self,
         request: &FlattenRequest,
         journal: &dyn JournalWriter,
+        stream: &str,
+        clock: Option<RiskClock>,
     ) -> Result<FlattenPlan, Cause> {
-        let _ = (request, journal);
+        let _ = (request, journal, stream, clock);
         Err(Cause::Unimplemented { story: "E7-7" })
     }
 }

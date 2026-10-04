@@ -212,6 +212,8 @@ impl<'s> Session<'s> {
             gate: &*self.stages.gate,
             exit: &*self.stages.exit,
             journal: &*self.stages.journal,
+            stream: &self.account_stream,
+            clock: self.state.risk_clock(),
             findings: RefCell::new(Findings::default()),
         };
         let ids = Ids {
@@ -489,6 +491,8 @@ struct Bridge<'a> {
     gate: &'a dyn Gate,
     exit: &'a dyn ExitPath,
     journal: &'a dyn JournalWriter,
+    stream: &'a str,
+    clock: Option<RiskClock>,
     findings: RefCell<Findings>,
 }
 
@@ -558,7 +562,10 @@ impl GateDryRun for Bridge<'_> {
 /// already rests at the broker; nothing is invented and nothing empty is sent (TI-4, PB-8).
 impl FlattenPlanner for Bridge<'_> {
     fn plan(&self, request: &FlattenRequest) -> FlattenPlan {
-        match self.exit.plan(request, self.journal) {
+        match self
+            .exit
+            .plan(request, self.journal, self.stream, self.clock)
+        {
             Ok(plan) => plan,
             Err(cause) => {
                 self.findings.borrow_mut().poison = Some(ShellError::Refused {
