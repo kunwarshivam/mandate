@@ -691,6 +691,164 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
     Ok(())
 }
 
+/// The writer/fold round-trip for an OCO submission (§9.5, rule 45): `journal_rung` journals the
+/// companion carrying the OCO's class and legs beside the executor-only members, then the
+/// causation-naming version-2 submission; the fold rebuilds the exact request from the pair — the
+/// OCO's quantity from the submission's — and the order's owner and intent from the companion.
+#[cfg(test)]
+mod oco_round_trip_tests {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_canon::Value;
+    use mandate_num::{Price, Qty};
+
+    use super::journal_rung;
+    use crate::batch::Batch;
+    use crate::error::ExecutorError;
+    use crate::fold::fold;
+    use crate::ids::{ClientOrderId, IntentId};
+    use crate::payload::text;
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Executor, Ids, executor_config, fees};
+    use crate::state::ExecutorState;
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, EventId, FoldedEvent, OcoLegs, Purpose, Seq,
+        SubmitOrder, TimeInForce, WorkspaceId,
+    };
+
+    fn refused(what: &str) -> ExecutorError {
+        crate::error::ExecutorError::UnknownOrder {
+            client_order_id: what.to_owned(),
+        }
+    }
+
+    #[test]
+    fn an_oco_submission_journals_its_companion_and_rebuilds_the_request()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let executor = Executor::opened(&ports)?;
+        let mut batch = Batch::new(&executor.state, &ports)?;
+        let intent = IntentId(EventId("01JABCDEFGHJKMNPQRSTVWXYZ1".to_owned()));
+        let agent = AgentId("agent-a".to_owned());
+        let request = SubmitOrder {
+            client_order_id: ClientOrderId::for_intent(&intent)?,
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Sell,
+            qty: Qty::parse("4")?,
+            order_type: crate::types::OrderType::Limit,
+            tif: TimeInForce::Gtc,
+            limit_price: Some(Price::parse("149")?),
+            stop_price: None,
+            bracket: None,
+            oco: Some(OcoLegs {
+                take_profit: Price::parse("170")?,
+                stop: Price::parse("140")?,
+                qty: Qty::parse("4")?,
+            }),
+            extended_hours: false,
+            purpose: Purpose::RiskExit,
+        };
+        journal_rung(&mut batch, &request, Some(&intent), &agent, 1, Vec::new())?;
+        let drafts: Vec<_> = batch
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                crate::types::Effect::Journal(draft) => Some(draft.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            drafts.len(),
+            2,
+            "one batch, two events: the companion then the order"
+        );
+        let companion_draft = drafts.first().ok_or_else(|| refused("the companion"))?;
+        let submission = drafts.get(1).ok_or_else(|| refused("the submission"))?;
+        assert_eq!(companion_draft.event_type, "OrderRequestRecorded");
+        assert_eq!(submission.event_type, "OrderSubmitted");
+        assert_eq!(
+            submission.causation_id.as_ref(),
+            Some(&companion_draft.event_id),
+            "the submission names its companion as its causation_id"
+        );
+        let companion = &companion_draft.payload;
+        assert_eq!(companion.get("order_class"), Some(&text("oco")));
+        assert_eq!(companion.get("take_profit"), Some(&text("170")));
+        assert_eq!(companion.get("stop"), Some(&text("140")));
+        assert_eq!(companion.get("agent_id"), Some(&text("agent-a")));
+        assert_eq!(
+            companion.get("intent_id"),
+            Some(&text("01JABCDEFGHJKMNPQRSTVWXYZ1"))
+        );
+        assert_eq!(companion.get("purpose"), Some(&text("risk_exit")));
+        assert_eq!(companion.get("rung"), Some(&Value::Null));
+        assert_eq!(companion.get("at_floor"), Some(&Value::Bool(false)));
+
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let opened = FoldedEvent {
+            stream: state.account_stream(),
+            seq: Seq(1),
+            event_id: EventId("01JABCDEFGHJKMNPQRSTVWXYZ0".to_owned()),
+            event_type: "StreamOpened".to_owned(),
+            causation_id: None,
+            payload: crate::payload::object(vec![("environment", text("paper"))])?,
+        };
+        fold(&mut state, &opened)?;
+        let stream = state.account_stream();
+        for (index, draft) in drafts.iter().enumerate() {
+            fold(
+                &mut state,
+                &FoldedEvent {
+                    stream: stream.clone(),
+                    seq: Seq(u64::try_from(index).unwrap_or(0) + 2),
+                    event_id: draft.event_id.clone(),
+                    event_type: draft.event_type.clone(),
+                    causation_id: draft.causation_id.clone(),
+                    payload: draft.payload.clone(),
+                },
+            )?;
+        }
+        let rebuilt = state
+            .request_of(&request.client_order_id)
+            .ok_or_else(|| crate::error::ExecutorError::UnknownOrder {
+                client_order_id: request.client_order_id.as_str().to_owned(),
+            })?
+            .clone();
+        assert_eq!(
+            rebuilt.oco.as_ref().map(|legs| legs.qty),
+            Some(Qty::parse("4")?),
+            "the OCO's quantity is the submission's"
+        );
+        assert_eq!(
+            rebuilt.oco.as_ref().map(|legs| legs.stop.to_string()),
+            Some("140".to_owned())
+        );
+        assert_eq!(rebuilt.purpose, Purpose::RiskExit);
+        assert!(!rebuilt.extended_hours);
+        assert_eq!(rebuilt.stop_price, None);
+        let order = state.order(&request.client_order_id).ok_or_else(|| {
+            crate::error::ExecutorError::UnknownOrder {
+                client_order_id: request.client_order_id.as_str().to_owned(),
+            }
+        })?;
+        assert_eq!(
+            order.agent.as_ref().map(|agent| agent.0.clone()),
+            Some("agent-a".to_owned())
+        );
+        assert_eq!(order.intent_id, Some(intent));
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod bracket_call_tests {
     use mandate_accounting::{AssetClass, InstrumentId, Side};
