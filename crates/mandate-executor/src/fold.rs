@@ -1561,6 +1561,105 @@ fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), 
 }
 
 #[cfg(test)]
+mod companion_tests {
+    use mandate_canon::Value;
+
+    use super::{fold, order_request_recorded};
+    use crate::error::ExecutorError;
+    use crate::ids::IntentId;
+    use crate::payload::{object, text};
+    use crate::state::{ExecutorState, PendingRequest};
+    use crate::types::{
+        AccountRef, AccountScope, EventId, FoldedEvent, RiskClock, Seq, WorkspaceId,
+    };
+
+    fn folded(payload: Vec<(&'static str, Value)>) -> Result<FoldedEvent, ExecutorError> {
+        Ok(FoldedEvent {
+            stream: "acct:ws1:acct-1".to_owned(),
+            seq: Seq(2),
+            event_id: EventId("e-2".to_owned()),
+            event_type: "OrderRequestRecorded".to_owned(),
+            causation_id: None,
+            payload: object(payload)?,
+        })
+    }
+
+    fn companion(payload: Vec<(&'static str, Value)>) -> Result<PendingRequest, ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.risk_clock = Some(RiskClock::from_secs(1));
+        order_request_recorded(&mut state, &folded(payload)?)?;
+        Ok(state
+            .pending_requests
+            .get(&EventId("e-2".to_owned()))
+            .cloned()
+            .expect("the companion is held against its own event id"))
+    }
+
+    fn base() -> Vec<(&'static str, Value)> {
+        vec![
+            ("agent_id", text("agent-a")),
+            ("intent_id", text("01JABCDEFGHJKMNPQRSTVWXYZ1")),
+            ("purpose", text("open")),
+            ("extended_hours", Value::Bool(false)),
+            ("stop_price", Value::Null),
+            ("order_class", text("bracket")),
+            ("take_profit", text("159")),
+            ("stop", text("139")),
+            ("rung", Value::Null),
+            ("at_floor", Value::Null),
+            ("risk_clock", text("2026-09-21T14:00:00.000000000Z")),
+        ]
+    }
+
+    /// §9.5: a well-formed companion carries its legs, and one whose class names a price it does
+    /// not carry is refused at `order_class`, never folded legless (DEC-85); a class the legs do
+    /// not name takes no legs from them.
+    #[test]
+    fn a_companion_without_its_class_legs_is_refused_never_legless() -> Result<(), ExecutorError> {
+        let whole = companion(base())?;
+        let legs = whole.bracket.as_ref().ok_or_else(|| refused("bracket"))?;
+        assert_eq!(legs.stop.to_string(), "139");
+        assert_eq!(legs.take_profit.to_string(), "159");
+        assert!(whole.oco.is_none(), "the bracket is not an oco");
+        for missing in ["take_profit", "stop"] {
+            let mut payload = base();
+            for (name, value) in payload.iter_mut() {
+                if *name == missing {
+                    *value = Value::Null;
+                }
+            }
+            let answer = companion(payload);
+            assert_eq!(
+                answer.as_ref().err().map(ExecutorError::code),
+                Some("non_canonical_payload"),
+                "a bracket without its {missing} is refused: {answer:?}"
+            );
+        }
+        let mut other_class = base();
+        for (name, value) in other_class.iter_mut() {
+            if *name == "order_class" {
+                *value = text("oco");
+            }
+        }
+        let other = companion(other_class)?;
+        assert!(
+            other.bracket.is_none() && other.oco.is_some(),
+            "the oco's legs build for the oco"
+        );
+        Ok(())
+    }
+
+    fn refused(field: &str) -> ExecutorError {
+        ExecutorError::NonCanonicalPayload {
+            field: field.to_owned(),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use mandate_accounting::{InstrumentId, Side};
     use mandate_num::Qty;
