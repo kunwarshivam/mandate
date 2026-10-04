@@ -1166,22 +1166,44 @@ proptest! {
         }
     }
 
-    /// E7-2: no two intents ever share a client order id, across restarts and across agents.
+    /// E7-2: no two intents ever share a client order id, across restarts and across agents. The
+    /// intent a submission carries rides its `OrderRequestRecorded` companion (§9.5, rule 45), so
+    /// the loop reads the merged view, the way the fold does.
     #[test]
     #[ignore = "pending E7-2"]
     fn distinct_intents_never_share_a_client_order_id(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
         let mut owner: BTreeMap<String, String> = BTreeMap::new();
+        let mut companion: Option<Value> = None;
         let mut seen = 0usize;
         for draft in &run.drafts {
+            if draft.event_type == "OrderRequestRecorded" {
+                companion = Some(draft.payload.clone());
+                continue;
+            }
             if draft.event_type != "OrderSubmitted" {
                 continue;
             }
-            let Some(id) = field(draft, "client_order_id") else {
+            let merged = match &companion {
+                Some(merge) => {
+                    let mut merged = draft.payload.clone();
+                    if let (Value::Object(merged), Value::Object(companion)) =
+                        (&mut merged, merge)
+                    {
+                        for (key, value) in companion {
+                            merged.entry(key.clone()).or_insert_with(|| value.clone());
+                        }
+                    }
+                    merged
+                }
+                None => draft.payload.clone(),
+            };
+            let field_of = |name: &str| merged.get(name).and_then(Value::as_str);
+            let Some(id) = field_of("client_order_id") else {
                 continue;
             };
-            let Some(intent) = field(draft, "intent_id") else {
+            let Some(intent) = field_of("intent_id") else {
                 prop_assert!(
                     book.protective.contains(id),
                     "{} was submitted with no intent and is not a protective order the journal \
