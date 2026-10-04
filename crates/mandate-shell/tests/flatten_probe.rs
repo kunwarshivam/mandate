@@ -58,6 +58,10 @@ const OTHER_PROTECTIVE_INTENT: &str = "01J8Z3M1P0000000000000000V";
 /// the fold's single-holder rule attributes it to nobody (§5.4, DEC-160 item 3d) — and §5.5's
 /// Close column makes an agent-scoped flatten cancel it in the instrument it closes.
 const BROKER_LEG: &str = "md-broker-leg";
+/// The second broker-created leg, filled to its whole quantity but never transitioned — a fill
+/// record does not itself change an order's state — so the union's working rule must exclude it
+/// by its filled quantity alone: a plan that cancelled it names an order that is done.
+const BROKER_LEG_FILLED: &str = "md-broker-leg-filled";
 /// A Monday mid-morning in New York: the regular session, so an equity sell plans now.
 const REGULAR_CLOCK: &str = "2026-09-21T14:00:01.000000000Z";
 /// The same Monday, before the open: an equity sell waits for the regular session.
@@ -403,7 +407,7 @@ fn journal() -> ScriptedJournal {
         payload(vec![
             ("instrument_id", text(INSTRUMENT)),
             ("action", text("placed")),
-            ("orders", Value::Array(vec![text(BROKER_LEG)])),
+            ("orders", Value::Array(vec![text(BROKER_LEG), text(BROKER_LEG_FILLED)])),
             ("awaiting", Value::Array(Vec::new())),
             ("qty", decimal("2")),
             ("stop", decimal("139")),
@@ -418,6 +422,25 @@ fn journal() -> ScriptedJournal {
             ("uncovered", Value::Null),
             ("acknowledged", Value::Null),
             ("risk_clock", risk_clock.clone()),
+        ]),
+    ));
+    rows.push(row(
+        17,
+        "01J8Z3M1Q0000000000000000P",
+        "FillApplied",
+        1,
+        None,
+        fill_refs(),
+        payload(vec![
+            ("fill_id", text("exec-broker-leg")),
+            ("client_order_id", text(BROKER_LEG_FILLED)),
+            ("instrument_id", text(INSTRUMENT)),
+            ("side", text("sell")),
+            ("qty_gross", decimal("2")),
+            ("price", decimal("149")),
+            ("trade_date", text("2026-09-21")),
+            ("risk_clock", risk_clock.clone()),
+            ("fees", Value::Array(Vec::new())),
         ]),
     ));
     let journal = ScriptedJournal(rows);
