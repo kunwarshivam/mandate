@@ -1,11 +1,11 @@
 ---
 name: Story claim
-about: Claim one backlog story for one stream (see COLLABORATION.md before claiming)
+about: Claim one backlog story for one stream (see CONTRIBUTING.md before claiming)
 labels: ["claim"]
 title: "<story ID>: <title>"
 ---
 
-<!-- One issue per story, labeled claim, titled `<story ID>: <title>` (COLLABORATION.md §1). A story with an open claim is taken; check open claims first. -->
+<!-- One issue per story, labeled claim, titled `<story ID>: <title>` (CONTRIBUTING.md §1). A story with an open claim is taken; check open claims first. -->
 
 **Story:** E?-? — <title> ([backlog row](docs/project/06-backlog-v1.md))
 
