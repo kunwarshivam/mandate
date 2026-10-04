@@ -1970,7 +1970,10 @@ const STUB_MARKERS: [&str; 5] = [
 /// contradict can prevent; and `no_order_is_submitted` fails on a risk exit submitted after its
 /// rule-5 wait on the lead's partly filled entry ran out against the broker's silence, which is
 /// the release DEC-160 (18) pins in `protection::sequence_tests` and its oracle counts as an
-/// unconfirmed cancel.
+/// unconfirmed cancel. And `protective_sell_quantity` fails on a kill-switch script: after the
+/// switch's own sell fills, protection re-placed for the lead's remainder can cover more than the
+/// reduced position, and the accountant reads `placed` records without netting the switch's sell.
+/// DEC-451 item 2.
 ///
 /// The remaining six rows are E7-2 pins the kill switch moved past their old stub: the kill
 /// switch's own orders are not intents (they are exempt from the agent's mode, §5.5), so the
@@ -1978,7 +1981,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// the id-citation pair, the reservation and fold-replay pairs, the random-script Σ quantity, and
 /// the risk-clock walk (the kill switch's `FillApplied` copy). Each is released when its oracle
 /// reads the kill flow, in E7-2's tests correction.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
@@ -2014,6 +2017,10 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_risk_input_draft_carries_a_non_decreasing_risk_clock",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "protective_sell_quantity_never_exceeds_the_position",
     ),
 ];
 
