@@ -800,11 +800,14 @@ fn a_stubbed_stage_answers_its_own_crates_refusal() {
     assert_eq!(world.tally.borrow().calls, [Stage::Validate]);
 }
 
-/// Rule 13 on the production side (review round 1, minor 1): until their stories land, both
-/// production exit probes answer `Unimplemented`, so the tracer never arms without an exit path.
-/// A probe answering `Ok(())` before its adapter is real fails here.
+/// Rule 13 on the production side: the exit path must answer before anything arms, and the
+/// protection probe must refuse at its stub until its story lands. The flatten probe is
+/// implemented (DEC-449's flip), so a probe that cannot answer over a readable, parsing mandate
+/// fails here; the protection probe still refuses, so the tracer never arms without a protective
+/// sequence either.
+/// a protective sequence either.
 #[test]
-fn the_production_exit_probes_answer_unimplemented() {
+fn the_production_exit_probes_over_the_shells_fixture() {
     let flatten = crate::adapters::RiskExitPath::new(
         mandate_runtime::AgentId("agent-a".to_owned()),
         std::path::PathBuf::from(concat!(
@@ -814,8 +817,8 @@ fn the_production_exit_probes_answer_unimplemented() {
     )
     .probe();
     assert!(
-        matches!(flatten, Err(Cause::Unimplemented { .. })),
-        "{flatten:?}"
+        flatten.is_ok(),
+        "the flatten probe answers over the shell's mandate fixture: {flatten:?}"
     );
     let protection = crate::adapters::ExecutorProtection.probe();
     assert!(

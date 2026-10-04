@@ -353,9 +353,11 @@ impl RuntimeState {
         }
     }
 
-    /// The client order ids a flatten plan is asked to cancel: every intent the fold still holds
+    /// The intent event ids a flatten plan is asked about: every intent the fold still holds
     /// live, whether or not the executor has taken it, because an order the executor took and is
     /// working is exactly the one a kill switch must name (trading spec §5.5, DEC-131 item 22).
+    /// The plan's cancels name client order ids, a mapping the exit adapter derives from the
+    /// journal (DEC-449 item 3).
     pub(crate) fn working_orders(&self) -> Vec<String> {
         self.outstanding.keys().map(|id| id.0.clone()).collect()
     }
@@ -415,8 +417,10 @@ impl RuntimeState {
             .filter(|(_, exit)| matches!(exit.handoff, Handoff::Pending))
     }
 
-    /// The client order ids of the intents still live in one instrument: all an owner's exit of
-    /// that instrument may cancel (mandate spec §6.1, trading-domain spec §5.5).
+    /// The intent event ids of the intents still live in one instrument: all an owner's exit of
+    /// that instrument may cancel (mandate spec §6.1, trading-domain spec §5.5). The plan's
+    /// cancels name client order ids, a mapping the exit adapter derives from the journal
+    /// (DEC-449 item 3).
     pub(crate) fn working_orders_in(&self, instrument: &InstrumentId) -> Vec<String> {
         self.outstanding
             .keys()

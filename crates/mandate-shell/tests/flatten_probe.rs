@@ -2,11 +2,10 @@
 //! `RiskExitPath` must do once it binds `mandate_risk::agent_flatten` over the journal, the
 //! stream, and the clock the bridge hands it, for the agent it is constructed for (DEC-449).
 //!
-//! Every test here is pending on the flip: the adapter still refuses with its own
-//! `Cause::Unimplemented` report, and each test fails by that refusal propagating (DEC-110,
-//! DEC-137). The implementation PR deletes the markers and changes nothing else here. The
-//! fail-closed suite keeps its own pin of today's refusal
-//! (`the_production_exit_probes_answer_unimplemented`).
+//! The adapter implements the flip these tests pinned while it was a stub (DEC-77 stage 2):
+//! every test that was pending now runs against the real fold, and the fail-closed suite pins
+//! the probe over the shell's fixture
+//! (`the_production_exit_probes_over_the_shells_fixture`).
 //!
 //! The journal is a scripted double returning §9.5-shaped records, and the builder proves the
 //! fixture before any test runs it: every row parses through `mandate_journal::Draft::parse`
@@ -528,7 +527,6 @@ fn positions_of(agent: mandate_risk::AgentId) -> Vec<AgentPosition> {
 /// synthetic kill-switch request built from the mandate fixture. It is asked once, before
 /// anything is armed, so a run that cannot plan its exit never opens a position (task brief,
 /// step 17).
-#[ignore = "pending E7-7"]
 #[test]
 fn the_probe_answers_ok_over_the_mandate_fixtures_synthetic_request() {
     RiskExitPath::new(the_agent(), fixture_mandate())
@@ -539,7 +537,6 @@ fn the_probe_answers_ok_over_the_mandate_fixtures_synthetic_request() {
 /// The probe reads the mandate it is handed: one it cannot read is a spec refusal naming the
 /// document, never the stub's own refusal, so an adapter that ignores the mandate cannot pass
 /// by refusing everything alike.
-#[ignore = "pending E7-7"]
 #[test]
 fn the_probe_refuses_over_a_mandate_it_cannot_read() {
     let unreadable = RiskExitPath::new(
@@ -561,7 +558,6 @@ fn the_probe_refuses_over_a_mandate_it_cannot_read() {
 /// the cancels are pinned by the client-order round trip in the structural test below: the risk
 /// crate's numeric working-order ids are the adapter's internal mapping, invisible to the
 /// runtime.
-#[ignore = "pending E7-7"]
 #[test]
 fn the_plan_is_the_risk_crates_own_plan_for_the_journals_folded_state() {
     let exit = RiskExitPath::new(the_agent(), fixture_mandate());
@@ -593,7 +589,6 @@ fn the_plan_is_the_risk_crates_own_plan_for_the_journals_folded_state() {
 /// order id the journal's submission carries, though the request named the intent. The mapping
 /// from intent to order is journal-derived; a copy of the request's strings would name an
 /// order the broker never saw and fail here.
-#[ignore = "pending E7-7"]
 #[test]
 fn the_plan_sells_the_agents_sub_ledger_not_the_accounts_position() {
     let exit = RiskExitPath::new(the_agent(), fixture_mandate());
@@ -625,7 +620,6 @@ fn the_plan_sells_the_agents_sub_ledger_not_the_accounts_position() {
 /// The session comes from the clock the bridge hands: before the open, an equity sell waits for
 /// the regular session instead of planning to sell now, so a wrong session guess fails the
 /// regular-session test above and an ignored clock fails this one.
-#[ignore = "pending E7-7"]
 #[test]
 fn before_the_open_the_equity_sell_waits_for_the_regular_session() {
     let exit = RiskExitPath::new(the_agent(), fixture_mandate());
@@ -650,7 +644,6 @@ fn before_the_open_the_equity_sell_waits_for_the_regular_session() {
 /// refused with a real refusal that names the clock — never the stub's own — and no default
 /// invents a session (the fail-closed suite's own discipline, which caught this shape's first
 /// draft).
-#[ignore = "pending E7-7"]
 #[test]
 fn a_plan_with_no_clock_advanced_is_refused() {
     let exit = RiskExitPath::new(the_agent(), fixture_mandate());
@@ -668,7 +661,6 @@ fn a_plan_with_no_clock_advanced_is_refused() {
 /// The plan reads the journal it is handed at the call, so two plans over the same journal,
 /// stream, and clock are equal: a replay shares the plan the first run made (task brief,
 /// "Durability").
-#[ignore = "pending E7-7"]
 #[test]
 fn two_plans_over_the_same_journal_and_request_are_equal() {
     let exit = RiskExitPath::new(the_agent(), fixture_mandate());
