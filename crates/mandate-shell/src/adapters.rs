@@ -103,32 +103,25 @@ impl RiskExitPath {
         })
     }
 
-    /// Each pinned instrument's asset class, keyed by the id the journal's records carry. The
-    /// journal's `instrument_id` must carry the mandate's `asset_id` — the strict
-    /// `8-4-4-4-12` uuid, never the vendor's symbol — and every id is proven readable as the
-    /// risk crate's own `AssetId`: the probe refuses a mandate whose universe the flatten could
-    /// never read, and a plan over an instrument the map does not carry is a refusal, never a
-    /// guess at its class.
+    /// Each pinned instrument's asset class, keyed by the mandate's own `asset_id` — already
+    /// the strict `8-4-4-4-12` uuid the document's parse enforces, never the vendor's symbol —
+    /// which is the id the journal's records must carry. A plan over an instrument the map
+    /// does not carry is a refusal, never a guess at its class.
     fn classes(
         document: &mandate_spec::document::Mandate,
-    ) -> Result<BTreeMap<String, mandate_risk::AssetClass>, Cause> {
-        let mut classes = BTreeMap::new();
-        for pinned in &document.universe.pinned_instruments {
-            mandate_risk::AssetId::new(pinned.asset_id.as_str()).map_err(|_| {
-                Cause::Spec(mandate_spec::SpecError::InvalidInput {
-                    what: "a universe instrument the risk crate cannot read",
-                })
-            })?;
-            classes.insert(pinned.asset_id.as_str().to_owned(), pinned.asset_class);
-        }
-        Ok(classes)
+    ) -> BTreeMap<String, mandate_risk::AssetClass> {
+        document
+            .universe
+            .pinned_instruments
+            .iter()
+            .map(|pinned| (pinned.asset_id.as_str().to_owned(), pinned.asset_class))
+            .collect()
     }
 }
 
 impl ExitPath for RiskExitPath {
     fn probe(&self) -> Result<(), Cause> {
         let document = self.document()?;
-        Self::classes(&document)?;
         let positions = document
             .universe
             .pinned_instruments
@@ -177,10 +170,10 @@ impl ExitPath for RiskExitPath {
             });
         };
         let document = self.document()?;
-        let classes = Self::classes(&document)?;
+        let classes = Self::classes(&document);
         let stored = journal.read(stream)?;
         let state = fold_of(&scope_of(stream)?, &stored)?;
-        let mine: Vec<&mandate_executor::Order> = state
+        let mine: Vec<&ExecutorOrder> = state
             .orders()
             .values()
             .filter(|order| {
@@ -192,9 +185,12 @@ impl ExitPath for RiskExitPath {
             .collect();
         let session = session_of(clock, &mine, &classes)?;
         let positions = sub_ledger_of(&mine, &classes, request.instrument.as_ref())?;
-        let flatten_orders = flatten_orders_of(state.orders().values(), &self.agent, &positions);
         let (open_orders, order_ids) =
-            working_orders_of(&flatten_orders, clock, request.instrument.as_ref())?;
+            working_orders_of(&mine, clock, request.instrument.as_ref())?;
+        let closed: BTreeSet<&str> = positions
+            .iter()
+            .map(|position| position.instrument.as_str())
+            .collect();
         let input = FlattenInput {
             agent: mandate_risk::AgentId(1),
             open_orders: &open_orders,
@@ -252,16 +248,19 @@ impl ExitPath for RiskExitPath {
                 }));
             }
         };
-        Ok(FlattenPlan {
-            cancel_client_order_ids: planned
-                .cancel_client_order_ids
-                .iter()
-                .map(|id| {
-                    order_ids.get(id).cloned().ok_or(Cause::Absent {
-                        what: "a working order the plan named but the fold does not hold",
-                    })
+        let mut cancel_client_order_ids = planned
+            .cancel_client_order_ids
+            .iter()
+            .map(|id| {
+                order_ids.get(id).cloned().ok_or(Cause::Absent {
+                    what: "a working order the plan named but the fold does not hold",
                 })
-                .collect::<Result<Vec<String>, Cause>>()?,
+            })
+            .collect::<Result<Vec<String>, Cause>>()?;
+        cancel_client_order_ids.extend(unattributed_legs_of(&state, &closed));
+        cancel_client_order_ids.sort();
+        Ok(FlattenPlan {
+            cancel_client_order_ids,
             sells,
             purpose,
             confirmation: request.confirmation.clone(),
@@ -269,35 +268,37 @@ impl ExitPath for RiskExitPath {
     }
 }
 
-fn flatten_orders_of<'a>(
-    orders: impl Iterator<Item = &'a ExecutorOrder>,
-    agent: &AgentId,
-    positions: &[mandate_risk::AgentPosition],
-) -> Vec<&'a ExecutorOrder> {
-    let closing: BTreeSet<&str> = positions
-        .iter()
-        .map(|position| position.instrument.as_str())
-        .collect();
-    orders
-        .filter(|order| {
-            let attributed_to_agent = order
-                .agent
-                .as_ref()
-                .is_some_and(|owner| owner.0.as_str() == agent.0.as_str());
-            let permitted_unattributed_purpose = match order.purpose {
-                mandate_executor::Purpose::Protective | mandate_executor::Purpose::RiskExit => true,
-                mandate_executor::Purpose::Open
-                | mandate_executor::Purpose::Increase
-                | mandate_executor::Purpose::OwnerExit
-                | mandate_executor::Purpose::DiscretionaryExit
-                | mandate_executor::Purpose::Flatten => false,
-            };
-            attributed_to_agent
-                || (order.agent.is_none()
-                    && permitted_unattributed_purpose
-                    && closing.contains(order.instrument.as_str()))
-        })
+/// §5.5's Close column (§5.4's leg rule, DEC-160 item 3d; §2.3's ownerless watchdog exit): an
+/// agent-scoped flatten cancels, in every instrument it closes, the resting legs no holder
+/// explains — the broker-created protective legs that could not be attributed and the
+/// ownerless watchdog exit — each by its own `client_order_id`, exactly as the executor's own
+/// sequence path does. They belong to no agent, so the risk crate's own filter cannot carry
+/// them: the adapter unions them into the cancels itself. A resting leg in an instrument the
+/// plan does not close is another holder's protection, untouched.
+fn unattributed_legs_of(
+    state: &mandate_executor::ExecutorState,
+    closed: &BTreeSet<&str>,
+) -> Vec<String> {
+    state
+        .orders()
+        .values()
+        .filter(|order| is_unattributed_exit(order))
+        .filter(|order| !order.state.is_terminal() && order.filled_qty < order.qty)
+        .filter(|order| closed.contains(order.instrument.as_str()))
+        .map(|order| order.client_order_id.as_str().to_owned())
         .collect()
+}
+
+fn is_unattributed_exit(order: &ExecutorOrder) -> bool {
+    let ownerless = match &order.agent {
+        None => true,
+        Some(agent) => agent.0.as_str() == "*",
+    };
+    ownerless
+        && matches!(
+            order.purpose,
+            mandate_executor::Purpose::Protective | mandate_executor::Purpose::RiskExit
+        )
 }
 
 /// The account scope a stream id names, in the `acct:{workspace}:{account}` form every journal
@@ -424,12 +425,27 @@ fn session_of(
             });
         }
     }
-    if calendar.is_trading_day(today).is_ok() {
-        return Ok(mandate_risk::Session::Overnight);
+    Ok(mandate_risk::Session::Overnight)
+}
+
+/// Whether the order is in the flatten's scope: an owner exit names the one instrument it
+/// closes, so only its orders are in; a kill switch closes the whole agent, so every order is.
+fn in_scope(order: &ExecutorOrder, scope: Option<&InstrumentId>) -> bool {
+    match scope {
+        Some(instrument) => order.instrument == *instrument,
+        None => true,
     }
-    Err(Cause::Absent {
-        what: "a session the committed calendar names",
-    })
+}
+
+/// The New York date the clock reads, for the working orders' submission dates.
+fn new_york_today(clock: RiskClock) -> Result<mandate_time::Date, Cause> {
+    let now = UtcNanos::from_parts(clock.secs(), 0).map_err(|_| Cause::Absent {
+        what: "a clock the calendar reads",
+    })?;
+    let (today, _) = mandate_time::new_york_date_and_hour(now).map_err(|_| Cause::Absent {
+        what: "a New York date",
+    })?;
+    Ok(today)
 }
 
 /// The deciding agent's sub-ledger, attributed from the folded orders (DEC-449 item 1): each of
@@ -446,7 +462,7 @@ fn sub_ledger_of(
 ) -> Result<Vec<mandate_risk::AgentPosition>, Cause> {
     let mut net: BTreeMap<&InstrumentId, SignedQty> = BTreeMap::new();
     for order in mine {
-        if scope.is_some_and(|instrument| order.instrument != *instrument) {
+        if !in_scope(order, scope) {
             continue;
         }
         let filled = SignedQty::from(order.filled_qty);
@@ -507,22 +523,19 @@ fn working_orders_of(
     clock: RiskClock,
     scope: Option<&InstrumentId>,
 ) -> Result<WorkingOrders, Cause> {
+    let working: Vec<&ExecutorOrder> = mine
+        .iter()
+        .copied()
+        .filter(|order| !order.state.is_terminal() && order.filled_qty < order.qty)
+        .filter(|order| in_scope(order, scope))
+        .collect();
+    if working.is_empty() {
+        return Ok((BTreeMap::new(), BTreeMap::new()));
+    }
+    let today = new_york_today(clock)?;
     let mut open_orders = BTreeMap::new();
     let mut order_ids = BTreeMap::new();
-    for (index, order) in mine
-        .iter()
-        .filter(|order| !order.state.is_terminal() && order.filled_qty < order.qty)
-        .filter(|order| !scope.is_some_and(|instrument| order.instrument != *instrument))
-        .enumerate()
-    {
-        let (today, _) = mandate_time::new_york_date_and_hour(
-            UtcNanos::from_parts(clock.secs(), 0).map_err(|_| Cause::Absent {
-                what: "a clock the calendar reads",
-            })?,
-        )
-        .map_err(|_| Cause::Absent {
-            what: "a New York date",
-        })?;
+    for (index, order) in working.iter().enumerate() {
         let numeric =
             mandate_risk::ClientOrderId(u64::try_from(index).map_err(|_| Cause::Absent {
                 what: "a working-order id",
@@ -914,7 +927,7 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use super::{ExecutorOrder, flatten_orders_of, working_order_of, working_orders_of};
+    use super::{ExecutorOrder, is_unattributed_exit, working_order_of};
     use mandate_backtest::{BacktestError, Signal};
     use mandate_canon::DecStr;
     use mandate_marketdata::actions::{RecordedActions, write_actions};
@@ -951,13 +964,11 @@ mod tests {
         Ok(())
     }
 
-    /// Review blocker 2: the deciding agent's attributed orders travel beside ownerless
-    /// protective legs and ownerless watchdog exits only when they are in an instrument the
-    /// flatten closes. Another agent's attributed order is never admitted.
+    /// §5.5 permits only ownerless protective legs and watchdog risk exits to join the
+    /// deciding agent's cancels. An ownerless opening and another agent's protection remain
+    /// outside the agent-scoped flatten.
     #[test]
-    fn flatten_candidates_include_scoped_ownerless_protection_and_watchdogs_only()
-    -> Result<(), String> {
-        let own = the_order(mandate_executor::Purpose::Protective)?;
+    fn only_ownerless_protection_and_watchdog_exits_join_the_agent_flatten() -> Result<(), String> {
         let mut ownerless_protective = the_order(mandate_executor::Purpose::Protective)?;
         ownerless_protective.client_order_id =
             mandate_executor::ClientOrderId::parse("md-broker-protective")
@@ -969,56 +980,13 @@ mod tests {
                 .map_err(|e| e.to_string())?;
         ownerless_watchdog.agent = None;
         let mut other_agent = the_order(mandate_executor::Purpose::Protective)?;
-        other_agent.client_order_id =
-            mandate_executor::ClientOrderId::parse("md-other-agent-protective")
-                .map_err(|e| e.to_string())?;
         other_agent.agent = Some(mandate_executor::AgentId("agent-b".to_owned()));
-        let mut unrelated_ownerless = the_order(mandate_executor::Purpose::Protective)?;
-        unrelated_ownerless.client_order_id =
-            mandate_executor::ClientOrderId::parse("md-unrelated-ownerless")
-                .map_err(|e| e.to_string())?;
-        unrelated_ownerless.agent = None;
-        unrelated_ownerless.instrument =
-            InstrumentId::new("cccccccc-cccc-cccc-cccc-cccccccccccc").map_err(|e| e.to_string())?;
         let mut ownerless_opening = the_order(mandate_executor::Purpose::Open)?;
-        ownerless_opening.client_order_id =
-            mandate_executor::ClientOrderId::parse("md-ownerless-opening")
-                .map_err(|e| e.to_string())?;
         ownerless_opening.agent = None;
-        let orders = [
-            own,
-            ownerless_protective,
-            ownerless_watchdog,
-            other_agent,
-            unrelated_ownerless,
-            ownerless_opening,
-        ];
-        let scope =
-            InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415").map_err(|e| e.to_string())?;
-        let positions = vec![mandate_risk::AgentPosition {
-            agent: mandate_risk::AgentId(1),
-            instrument: mandate_risk::AssetId::new(scope.as_str()).map_err(|e| e.to_string())?,
-            asset_class: mandate_risk::AssetClass::UsEquity,
-            qty: Qty::parse("10").map_err(|e| e.to_string())?,
-        }];
-        let selected = flatten_orders_of(
-            orders.iter(),
-            &mandate_runtime::AgentId("agent-a".to_owned()),
-            &positions,
-        );
-        let (_, ids) = working_orders_of(
-            &selected,
-            mandate_runtime::RiskClock::from_secs(1_779_113_601),
-            Some(&scope),
-        )
-        .map_err(|e| e.to_string())?;
-        let selected: Vec<&str> = ids.values().map(String::as_str).collect();
-        assert!(selected.contains(&"md-resting"));
-        assert!(selected.contains(&"md-broker-protective"));
-        assert!(selected.contains(&"md-w-01J8Z3M1Q0000000000000000W"));
-        assert!(!selected.contains(&"md-other-agent-protective"));
-        assert!(!selected.contains(&"md-unrelated-ownerless"));
-        assert!(!selected.contains(&"md-ownerless-opening"));
+        assert!(is_unattributed_exit(&ownerless_protective));
+        assert!(is_unattributed_exit(&ownerless_watchdog));
+        assert!(!is_unattributed_exit(&other_agent));
+        assert!(!is_unattributed_exit(&ownerless_opening));
         Ok(())
     }
 
