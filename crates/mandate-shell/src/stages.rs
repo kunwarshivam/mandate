@@ -9,14 +9,16 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use mandate_backtest::Signal;
+use mandate_canon::Digest;
 use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_num::Price;
 use mandate_risk::Decision;
 use mandate_runtime::{
-    Autonomy, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal, RiskClock,
+    Classified, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal, RiskClock,
     SignalInputs,
 };
+use mandate_time::UtcNanos;
 
 use crate::error::Cause;
 
@@ -163,18 +165,11 @@ pub struct Admitted {
 pub struct ModelRef {
     pub id: String,
     pub version: String,
+    pub content_hash: Digest,
     /// How long an output stays fresh, in whole seconds (`max_output_age_s`).
     pub max_output_age_s: i64,
     /// The model's `params`, key to value, exactly as the envelope states them.
     pub params: BTreeMap<String, String>,
-}
-
-/// What the startup reconciliation found: whether the journal and the broker agree, and the
-/// account-stream drafts that record it (trading-domain spec §11).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Reconciled {
-    pub clean: bool,
-    pub drafts: Vec<mandate_executor::EventDraft>,
 }
 
 /// Step 17's flatten half, and the planner behind the runtime's infallible `FlattenPlanner`.
@@ -208,9 +203,9 @@ pub trait MandateSource {
 }
 
 /// Step 2: the closing prices of every stored daily bar of the pinned instrument, by its ticker,
-/// oldest first.
+/// oldest first, trusted through the last equity session completed by `now`.
 pub trait Bars {
-    fn closes(&self, symbol: &str) -> Result<Vec<Price>, Cause>;
+    fn closes(&self, symbol: &str, now: UtcNanos) -> Result<Vec<Price>, Cause>;
 }
 
 /// Step 3: the signal of the envelope's `model` at the close of the last period in `closes`.
@@ -225,7 +220,7 @@ pub trait Sizing {
 
 /// Step 5's autonomy classification.
 pub trait Classifier {
-    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Autonomy, Cause>;
+    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause>;
 }
 
 /// Step 6: `mandate_risk::evaluate` on the proposal, as a dry run.
@@ -257,6 +252,8 @@ pub trait Sink {
 
 /// Steps 10 to 12 and 14: one `mandate_executor::handle` call, and the fold of what it journaled.
 pub trait Executor {
+    /// Starts one process-local fold from an empty state while retaining its trusted context.
+    fn reset(&mut self) -> Result<(), Cause>;
     fn step(
         &mut self,
         input: mandate_executor::Input,
@@ -273,7 +270,18 @@ pub trait Connector {
 
 /// Step 16: the startup reconciliation.
 pub trait Reconciler {
-    fn reconcile(&mut self) -> Result<Reconciled, Cause>;
+    /// Reads one typed broker snapshot through the run's connector.
+    fn snapshot(
+        &mut self,
+        connector: &mut dyn Connector,
+        requests: &[BrokerRequest],
+    ) -> Result<mandate_executor::BrokerSnapshot, Cause>;
+
+    /// Reconciles that gathered snapshot after its account report has committed and folded.
+    fn reconcile(
+        &mut self,
+        snapshot: &mandate_executor::BrokerSnapshot,
+    ) -> Result<mandate_executor::Reconciliation, Cause>;
 }
 
 /// Every stage the tracer reaches, one implementation each.

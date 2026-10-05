@@ -51,15 +51,16 @@
 //! [`Input::Intent`], and the adapter that implements stream I's sink on this executor's behalf
 //! lives in the shell, at layer 7, the one place that may depend on both (DEC-131, ES-02).
 //!
-//! # The gate is partial: no caller outside tests may drive [`handle`] yet
+//! # The binding gate
 //!
-//! Stream G's §9.1 evaluation is not wired. Until the gate port lands — whose production adapter
-//! calls `mandate-risk` and fails closed on every check G has not yet implemented — the executor
-//! runs only its own account-stream checks, and every verdict is a [`PartialGateDecision`]
-//! journaled with `evaluation: account_stream_only`. **No caller outside this crate's tests may
-//! drive [`handle`] until then**, and no paper run may treat an allow from it as the §9.1
-//! evaluation. Stream I's injected `GateDryRun` is the advisory call and can only narrow; the gate
-//! port will be the binding one, and it too can only narrow what this crate already refuses.
+//! [`handle`] requires a [`BindingGateSource`] that supplies the trusted mandate, configuration,
+//! account, instrument, market, and universe snapshots outside this crate's fold. The source
+//! cannot return a verdict: the executor derives `mandate-risk`'s proposal and calls
+//! `mandate_risk::evaluate` directly. Missing or invalid snapshots fail closed for a risk-adding
+//! order. A risk reduction retains the executor's local account-stream decision when an external
+//! snapshot is unavailable, preserving `AGENTS.md` rule 13. A completed binding run records its
+//! full evidence; a local denial records only its reached checks under the `account_stream_only`
+//! data profile.
 //!
 //! # Determinism
 //!
@@ -97,7 +98,10 @@ pub use error::{ExecutorError, JsonError};
 pub use fees::{FeeSchedule, fee_config, paper_only_fee_config};
 pub use gate::PartialGateDecision;
 pub use ids::{ClientOrderId, IntentId, PREFIX};
-pub use ports::{BrokerConnector, ConnectorError, IdGen, InstrumentSnapshot, MandateView, Ports};
+pub use ports::{
+    BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource,
+    BrokerConnector, ConnectorError, IdGen, InstrumentSnapshot, MandateView, Ports,
+};
 pub use protection::{LadderPrice, LadderReference, is_protected};
 pub use reconcile::reconcile;
 pub use state::{

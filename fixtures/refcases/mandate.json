@@ -23683,8 +23683,10 @@
        "clock": "2026-09-22T14:00:00.000000000Z"
       },
       {
-       "instrument": "7b4a1c2e-5555-4a2b-9c3d-000000000005",
+       "instrument_id": "7b4a1c2e-5555-4a2b-9c3d-000000000005",
        "side": "buy",
+       "order_type": "limit",
+       "tif": "day",
        "qty": "10",
        "limit_price": "155",
        "purpose": "open",
@@ -24408,8 +24410,10 @@
        "clock": "2026-09-22T14:00:00.000000000Z"
       },
       {
-       "instrument": "7b4a1c2e-5555-4a2b-9c3d-000000000005",
+       "instrument_id": "7b4a1c2e-5555-4a2b-9c3d-000000000005",
        "side": "buy",
+       "order_type": "limit",
+       "tif": "day",
        "qty": "10",
        "limit_price": "155",
        "purpose": "open",
@@ -26547,8 +26551,10 @@
        "clock": "2026-09-22T14:00:00.000000000Z"
       },
       {
-       "instrument": "7b4a1c2e-5555-4a2b-9c3d-000000000005",
+       "instrument_id": "7b4a1c2e-5555-4a2b-9c3d-000000000005",
        "side": "buy",
+       "order_type": "limit",
+       "tif": "day",
        "qty": "10",
        "limit_price": "155",
        "purpose": "open",
@@ -26978,8 +26984,10 @@
        "clock": "2026-09-22T14:00:00.000000000Z"
       },
       {
-       "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+       "instrument_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
        "side": "buy",
+       "order_type": "limit",
+       "tif": "gtc",
        "qty": "0.01",
        "limit_price": "50000",
        "purpose": "open",
@@ -27366,8 +27374,10 @@
        "clock": "2026-09-22T06:00:00.000000000Z"
       },
       {
-       "instrument": "7b4a1c2e-5555-4a2b-9c3d-000000000005",
+       "instrument_id": "7b4a1c2e-5555-4a2b-9c3d-000000000005",
        "side": "buy",
+       "order_type": "limit",
+       "tif": "day",
        "qty": "10",
        "limit_price": "155",
        "purpose": "open",

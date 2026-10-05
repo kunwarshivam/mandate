@@ -8,10 +8,10 @@
 //!
 //! **The mandate arrives as a narrow view.** [`BuilderMandate`] is the §8 fields only, typed, not
 //! the whole [`Mandate`](mandate_spec::Mandate), whose decimals are schema text at scales no exact
-//! type holds (DEC-128 item 3). `mandate-spec` supplies the conversion from a
-//! [`ValidatedMandate`](mandate_spec::ValidatedMandate) without changing a signature here
-//! (DEC-130 item 5); until it does, a caller builds the view and a value too wide for its type is
-//! refused at that boundary rather than approximated inside the chain (item 8).
+//! type holds (DEC-128 item 3). [`BuilderMandate::try_from`] projects a
+//! [`ValidatedMandate`](mandate_spec::ValidatedMandate) at this crate boundary, the lowest layer
+//! that owns the target type; a value too wide for that type is refused rather than approximated
+//! inside the chain (DEC-130 items 5 and 8; E7-7).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -21,7 +21,8 @@ use mandate_num::{
     Conviction, CostBasis, FeeRate, MarkPrice, Price, Qty, SignedQty, SizeFraction, Unit, Usd,
     UsdExact,
 };
-use mandate_spec::document::{ModelId, SizingMethod};
+use mandate_spec::ValidatedMandate;
+use mandate_spec::document::{Autonomy, Goal, ModelId, SizingMethod};
 use mandate_time::{Date, UtcNanos};
 
 use crate::BuilderError;
@@ -270,6 +271,77 @@ pub struct BuilderMandate {
     pub sizing: Sizing,
     pub limits: Limits,
     pub goal: GoalKind,
+}
+
+impl TryFrom<&ValidatedMandate> for BuilderMandate {
+    type Error = BuilderError;
+
+    /// Projects the validated document's §8 fields into the exact numeric types used by
+    /// `conviction_linear`. A schema decimal that does not fit is refused, never rounded.
+    fn try_from(validated: &ValidatedMandate) -> Result<Self, Self::Error> {
+        let document = validated.mandate();
+        let fraction = |value: &mandate_spec::SchemaDec| SizeFraction::parse(value.as_str());
+        let usd = |value: &mandate_spec::SchemaDec| Usd::parse(value.as_str());
+        let models = document
+            .behavior
+            .signal_models
+            .iter()
+            .map(|model| {
+                Ok(SignalModel {
+                    id: model.id.clone(),
+                    version: ModelVersion::parse(&model.version)?,
+                    content_hash: model.content_hash,
+                    weight: fraction(&model.weight)?,
+                    max_output_age_s: model.max_output_age_s,
+                })
+            })
+            .collect::<Result<Vec<_>, BuilderError>>()?;
+        let sizing = &document.behavior.sizing;
+        let risk = &document.risk;
+        let goal = match &document.goal {
+            Goal::Continuous { .. } => GoalKind::Continuous,
+            Goal::ProfitStop { .. } => GoalKind::ProfitStop,
+            Goal::Accumulate {
+                instrument,
+                target_qty,
+                max_avg_price,
+                max_spend_usd,
+                ..
+            } => GoalKind::Accumulate(AccumulateGoal {
+                instrument: instrument.clone(),
+                target_qty: Qty::parse(target_qty.as_str())?,
+                max_avg_price: max_avg_price
+                    .as_ref()
+                    .map(|price| Price::parse(price.as_str()))
+                    .transpose()?,
+                max_spend_usd: usd(max_spend_usd)?,
+            }),
+        };
+        Ok(Self {
+            models,
+            sizing: Sizing {
+                method: sizing.method,
+                entry_threshold: fraction(&sizing.entry_threshold)?,
+                exit_threshold: fraction(&sizing.exit_threshold)?,
+                rebalance_band: fraction(&sizing.rebalance_band)?,
+            },
+            limits: Limits {
+                max_position_usd: usd(&risk.max_position_usd)?,
+                max_position_fraction: fraction(&risk.max_position_fraction)?,
+                max_order_usd: usd(&risk.max_order_usd)?,
+                max_gross_exposure_usd: usd(&risk.max_gross_exposure_usd)?,
+            },
+            goal,
+        })
+    }
+}
+
+/// Borrows the validated document's §6 policy for [`crate::classify`].
+///
+/// The classifier already consumes `mandate-spec`'s [`Autonomy`] type, so this projection borrows
+/// that exact value instead of copying it into another policy vocabulary.
+pub fn autonomy_policy(validated: &ValidatedMandate) -> &Autonomy {
+    &validated.mandate().autonomy
 }
 
 /// The account facts §8.3 sizes against.

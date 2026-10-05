@@ -108,11 +108,17 @@ pub fn verify_events(
         if row.prev_hash != prev_hash {
             return Err(fail(EventCheck::PrevHashMismatch));
         }
-        for reference in body
+        let artifact_refs = body
             .get("artifact_refs")
             .and_then(Value::as_array)
-            .unwrap_or_default()
-        {
+            .into_iter()
+            .flatten();
+        let config_refs = body
+            .get("config_refs")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flat_map(|refs| refs.values());
+        for reference in artifact_refs.chain(config_refs) {
             let read = reference
                 .as_str()
                 .and_then(ArtifactRef::parse)

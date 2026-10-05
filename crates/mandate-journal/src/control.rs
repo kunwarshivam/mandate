@@ -58,15 +58,22 @@ const RISK_STATE: [&str; 2] = ["MandateVersionApplied", "UniverseChanged"];
 /// The agent stream's research-agent thesis records journal spec §9.4 closes, with rules 34 to 38.
 const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 
-/// The account stream's executor records journal spec §9.5 closes, with rules 39 to 45 (DEC-446).
-/// `ProtectionChanged` closes at `schema_version` 1; the other three close at 2 and stay at 1.
-const EXECUTOR: [&str; 5] = [
+/// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460).
+/// `OrderStateChanged`, `OrderRequestRecorded`, and `ProtectionChanged` close at version 1;
+/// `IntentReceived`, `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1.
+const EXECUTOR: [&str; 9] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
     "OrderRequestRecorded",
+    "OrderStateChanged",
     "ProtectionChanged",
+    "BrokerPositionObserved",
+    "AgentModeApplied",
+    "CompensatingEvent",
 ];
+
+const ACCOUNT_STATE: &str = "AccountStateObserved";
 
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
 /// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
@@ -80,6 +87,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
         StreamType::Account => {
             event_type == REFUSAL
                 || event_type == SNAPSHOT
+                || event_type == ACCOUNT_STATE
                 || RISK_STATE.contains(&event_type)
                 || EXECUTOR.contains(&event_type)
         }
@@ -586,7 +594,11 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("GateDecided", 2) => Some(&GATE_DECIDED_V2),
         ("OrderSubmitted", 2) => Some(&ORDER_SUBMITTED_V2),
         (COMPANION, 1) => Some(&ORDER_REQUEST_RECORDED),
+        ("OrderStateChanged", 1) => Some(&ORDER_STATE_CHANGED),
         ("ProtectionChanged", 1) => Some(&PROTECTION_CHANGED),
+        ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
+        ("AgentModeApplied", 1) => Some(&AGENT_MODE_APPLIED),
+        ("CompensatingEvent", 1) => Some(&COMPENSATING_EVENT),
         ("StreamOpened", 1) => Some(&STREAM_OPENED),
         ("ConnectionEstablished", 1) => Some(&CONNECTION_ESTABLISHED),
         ("ConnectionRevoked", 1) => Some(&CONNECTION_REVOKED),
@@ -598,6 +610,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("AgentStopped", 1) => Some(&AGENT_STOPPED),
         ("OwnerCommandRefused", 1) => Some(&OWNER_COMMAND_REFUSED),
         (SNAPSHOT, 1) => Some(&ACCOUNT_SNAPSHOT_RECORDED),
+        (ACCOUNT_STATE, 1) => Some(&ACCOUNT_STATE_OBSERVED),
         ("MandateVersionApplied", 1) => Some(&MANDATE_VERSION_APPLIED),
         ("UniverseChanged", 1) => Some(&UNIVERSE_CHANGED),
         ("ThesisProposed" | "ThesisRevised", 1) => Some(&THESIS_RECORD),
@@ -757,6 +770,22 @@ static ACCOUNT_SNAPSHOT_RECORDED: Ty = Ty::Record(&[
     ("risk_clock", Ty::RiskClock),
 ]);
 
+/// DEC-458's complete broker-account report, with no broker identity or personal data.
+static ACCOUNT_STATE_OBSERVED: Ty = Ty::Record(&[
+    ("status", Ty::Str),
+    ("crypto_status", Ty::Str),
+    ("trading_blocked", Ty::Bool),
+    ("account_blocked", Ty::Bool),
+    ("trade_suspended_by_user", Ty::Bool),
+    ("multiplier", Ty::Int),
+    ("equity", Ty::Decimal),
+    ("cash", Ty::Decimal),
+    ("buying_power", Ty::Decimal),
+    ("non_marginable_buying_power", Ty::Decimal),
+    ("accrued_fees", Ty::Decimal),
+    ("risk_clock", Ty::RiskClock),
+]);
+
 /// §9.5's `IntentReceived` at `schema_version` 2: version 1's nine members with `risk_clock` last
 /// and nothing else moved (DEC-446 item 1). The protective prices are never members, at either
 /// version: they move to the `intended` `ProtectionChanged` (DEC-446 item 5).
@@ -850,6 +879,72 @@ static ORDER_REQUEST_RECORDED: Ty = Ty::Record(&[
     ("stop", Ty::Nullable(&Ty::Decimal)),
     ("rung", Ty::Nullable(&Ty::Int)),
     ("at_floor", Ty::Nullable(&Ty::Bool)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+const ORDER_STATES: &[&str] = &[
+    "intent",
+    "submitting",
+    "accepted",
+    "partially_filled",
+    "pending_cancel",
+    "pending_replace",
+    "unknown",
+    "filled",
+    "canceled",
+    "rejected",
+    "expired",
+    "replaced",
+    "abandoned",
+];
+
+/// DEC-459's `OrderStateChanged` at `schema_version` 1. Every evidence member is present on every
+/// record; absent evidence is `null` and inactive flags are false.
+static ORDER_STATE_CHANGED: Ty = Ty::Record(&[
+    ("client_order_id", Ty::Str),
+    ("state", Ty::OneOf(ORDER_STATES)),
+    ("attempted", Ty::Nullable(&Ty::OneOf(ORDER_STATES))),
+    ("broker_status", Ty::Nullable(&Ty::Str)),
+    ("filled_qty", Ty::Nullable(&Ty::Decimal)),
+    ("reject_code", Ty::Nullable(&Ty::Str)),
+    ("replaces", Ty::Nullable(&Ty::Str)),
+    ("replaced_by", Ty::Nullable(&Ty::Str)),
+    ("replaced_by_broker_order_id", Ty::Nullable(&Ty::Str)),
+    ("lookup", Ty::Nullable(&Ty::OneOf(&["absent"]))),
+    ("ignored", Ty::Bool),
+    ("cancel_requested", Ty::Bool),
+    ("cancel_confirmed", Ty::Bool),
+    ("cancel_overdue", Ty::Bool),
+    ("adopted", Ty::Bool),
+    ("ladder_step", Ty::Bool),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+static BROKER_POSITION_OBSERVED: Ty = Ty::Record(&[
+    ("instrument", Ty::Str),
+    ("broker_qty", Ty::Decimal),
+    ("model_qty", Ty::Decimal),
+    ("mismatch", Ty::Bool),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+static AGENT_MODE_APPLIED: Ty = Ty::Record(&[
+    ("agent", Ty::Str),
+    (
+        "to",
+        Ty::OneOf(&["normal", "exits_only", "paused", "stopped"]),
+    ),
+    ("restriction", Ty::Str),
+    ("originated", Ty::Bool),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+static COMPENSATING_EVENT: Ty = Ty::Record(&[
+    ("subject", Ty::Str),
+    ("difference", Ty::OneOf(&["order_state"])),
+    ("from", Ty::OneOf(ORDER_STATES)),
+    ("to", Ty::OneOf(ORDER_STATES)),
+    ("corrected_event_ids", Ty::List(&Ty::Ulid)),
     ("risk_clock", Ty::RiskClock),
 ]);
 

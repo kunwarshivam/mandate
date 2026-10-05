@@ -349,6 +349,7 @@ impl RuntimeState {
     pub(crate) fn signal_inputs(&self, now: RiskClock) -> SignalInputs {
         SignalInputs {
             outputs: self.outputs.clone(),
+            output_events: self.output_events.clone(),
             now,
         }
     }
@@ -591,14 +592,14 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
             let output = payload::model_output_of(&event.payload)?;
             state
                 .output_events
-                .entry(output.model.clone())
+                .entry(output.model_id.clone())
                 .or_default()
-                .insert(output.instrument.clone(), event.event_id.clone());
+                .insert(output.instrument_id.clone(), event.event_id.clone());
             state
                 .outputs
-                .entry(output.model.clone())
+                .entry(output.model_id.clone())
                 .or_default()
-                .insert(output.instrument.clone(), output);
+                .insert(output.instrument_id.clone(), output);
         }
         "MarkUpdated" => {
             let instrument = payload::str_of(&event.payload, "instrument")
@@ -643,6 +644,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         }
         "StreamOpened"
         | "GateDecided"
+        | "OrderRequestRecorded"
         | "OrderAbandoned"
         | "ObservationRecorded"
         | "ModelInvocationRecorded"

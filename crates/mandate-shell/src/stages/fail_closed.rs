@@ -79,10 +79,26 @@ fn assert_fails_closed(stage: Stage) -> Result<(), String> {
     }
     for downstream in [Stage::Sink, Stage::Executor, Stage::Connector] {
         if downstream.position() > stage.position() {
-            assert!(
-                !tally.calls.contains(&downstream),
-                "{stage}: {downstream} was reached after the refusal"
-            );
+            match downstream {
+                Stage::Executor => assert_eq!(
+                    tally.executor_intents, 0,
+                    "{stage}: the executor received an intent after the refusal"
+                ),
+                Stage::Sink | Stage::Connector => assert!(
+                    !tally.calls.contains(&downstream),
+                    "{stage}: {downstream} was reached after the refusal"
+                ),
+                Stage::FlattenProbe
+                | Stage::ProtectionProbe
+                | Stage::Validate
+                | Stage::MarketData
+                | Stage::Signal
+                | Stage::Reconcile
+                | Stage::Size
+                | Stage::Classify
+                | Stage::GateDryRun
+                | Stage::Journal => unreachable!("the downstream list is closed"),
+            }
         }
     }
     Ok(())
@@ -169,6 +185,21 @@ fn all_doubles_place_exactly_one_order() -> Result<(), String> {
     shadow_book_matches(&ledger, &tally.submitted)?;
     every_draft_is_paper(&ledger)?;
     let account = account_stream();
+    let startup_facts: Vec<String> = ledger
+        .types(&account)
+        .into_iter()
+        .filter(|event_type| {
+            matches!(
+                event_type.as_str(),
+                "AccountStateObserved" | "ReconciliationRun"
+            )
+        })
+        .collect();
+    assert_eq!(
+        startup_facts,
+        ["AccountStateObserved", "ReconciliationRun"],
+        "the account report commits before reconciliation releases startup"
+    );
     let held = ledger.len(&account);
     assert!(held > 0);
     assert_eq!(
@@ -196,12 +227,12 @@ fn shadow_book_matches(
                 .map(str::to_owned)
         };
         assert_eq!(
-            field("instrument").as_deref(),
+            field("instrument_id").as_deref(),
             Some(order.instrument.as_str())
         );
         assert_eq!(field("qty"), Some(order.qty.to_string()));
         let limit = order.limit_price.map(|price| price.to_string());
-        assert_eq!(field("limit"), limit);
+        assert_eq!(field("limit_price"), limit);
         let intent_id = intent
             .get("event_id")
             .and_then(Value::as_str)
@@ -251,11 +282,17 @@ fn all_stubs_at_once_refuse_at_the_first_probe_and_place_nothing() -> Result<(),
 /// today at the first probe, and once the adapters are real at the protection probe or validation.
 #[test]
 fn the_production_stages_refuse_without_their_inputs() -> Result<(), String> {
+    let recorded_at = setup()?.now;
     let mut stages = over(Sources {
         mandate: PathBuf::from("no-such-mandate.json"),
         dataset: PathBuf::from("no-such-dataset"),
         journal: None,
+        recorded_at,
         agent: AgentId("tracer-aapl".to_owned()),
+        workspace: "tracer".to_owned(),
+        account_ref: "tracer-paper".to_owned(),
+        executor: None,
+        run: None,
         transport: Box::new(Disconnected),
     });
     let error = refusal(run_with(&mut stages)?)?;
@@ -365,6 +402,7 @@ fn an_intent_whose_draft_was_never_appended_never_reaches_the_sink() -> Result<(
             limit: mandate_num::Price::parse("255.2").map_err(|e| e.to_string())?,
             purpose: Purpose::Open,
         },
+        execution: None,
     });
     let error = match session.perform(vec![unrecorded]) {
         Err(error) => error,
@@ -437,6 +475,87 @@ fn an_ambiguous_append_is_never_read_as_committed() -> Result<(), String> {
     );
     assert_eq!(world.ledger.borrow().count("OrderSubmitted"), 1);
     assert_eq!(world.tally.borrow().submissions, 0);
+    Ok(())
+}
+
+#[test]
+fn the_ledger_double_refuses_a_draft_without_its_schema_version() -> Result<(), String> {
+    let world = World::default();
+    let mut journal = LedgerJournal(world);
+    let stream = account_stream();
+    let epoch = journal
+        .take_ownership(&stream)
+        .map_err(|error| error.to_string())?;
+    let draft = br#"{"event_id":"01K6VY6M800000000000000000","event_type":"Unversioned"}"#.to_vec();
+    assert_eq!(
+        journal.append(&stream, 0, epoch, &[draft]),
+        AppendOutcome::Unavailable
+    );
+    Ok(())
+}
+
+#[test]
+fn an_ambiguous_account_report_never_runs_reconciliation_or_opens() -> Result<(), String> {
+    let world = World::default();
+    let mut stages = world.stages();
+    stages.journal = Box::new(AmbiguousOn {
+        inner: LedgerJournal(world.clone()),
+        event_type: "AccountStateObserved",
+    });
+    let error = refusal(run_with(&mut stages)?)?;
+    assert!(matches!(
+        &error,
+        ShellError::Refused {
+            stage: Stage::Journal,
+            cause: Cause::Append {
+                outcome: "Ambiguous"
+            },
+        }
+    ));
+    let ledger = world.ledger.borrow();
+    assert_eq!(ledger.count("AccountStateObserved"), 1);
+    assert_eq!(ledger.count("ReconciliationRun"), 0);
+    let tally = world.tally.borrow();
+    assert_eq!(tally.hands, 0);
+    assert_eq!(tally.submissions, 0);
+    Ok(())
+}
+
+#[test]
+fn an_ambiguous_reconciliation_keeps_the_committed_account_and_never_opens() -> Result<(), String> {
+    let world = World::default();
+    let mut stages = world.stages();
+    stages.journal = Box::new(AmbiguousOn {
+        inner: LedgerJournal(world.clone()),
+        event_type: "ReconciliationRun",
+    });
+    let error = refusal(run_with(&mut stages)?)?;
+    assert!(matches!(
+        &error,
+        ShellError::Refused {
+            stage: Stage::Journal,
+            cause: Cause::Append {
+                outcome: "Ambiguous"
+            },
+        }
+    ));
+    let ledger = world.ledger.borrow();
+    assert_eq!(
+        ledger
+            .types(&account_stream())
+            .into_iter()
+            .filter(|event_type| {
+                matches!(
+                    event_type.as_str(),
+                    "AccountStateObserved" | "ReconciliationRun"
+                )
+            })
+            .collect::<Vec<_>>(),
+        ["AccountStateObserved", "ReconciliationRun"]
+    );
+    let tally = world.tally.borrow();
+    assert_eq!(tally.hands, 0);
+    assert_eq!(tally.submissions, 0);
     Ok(())
 }
 
@@ -581,7 +700,27 @@ fn a_restart_sends_nothing_and_a_repeat_run_is_refused() -> Result<(), String> {
     assert_eq!(tally.submissions, 1);
     assert_eq!(tally.hands, 1);
     assert_eq!(ledger.count("IntentProposed"), 1);
+    assert_eq!(ledger.count("AccountStateObserved"), 2);
     assert_eq!(ledger.count("ReconciliationRun"), 2);
+    assert_eq!(
+        ledger
+            .types(&account_stream())
+            .into_iter()
+            .filter(|event_type| {
+                matches!(
+                    event_type.as_str(),
+                    "AccountStateObserved" | "ReconciliationRun"
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            "AccountStateObserved",
+            "ReconciliationRun",
+            "AccountStateObserved",
+            "ReconciliationRun"
+        ],
+        "each restart records its account before its reconciliation run"
+    );
     Ok(())
 }
 
@@ -625,10 +764,8 @@ fn a_new_cycle_is_a_new_intent_with_a_new_id() -> Result<(), String> {
     Ok(())
 }
 
-/// TI-9, PB-6: ASK sends nothing. The decision is journaled and the tracer, which has no
-/// escalation, stops. The stage classifier names no `DecidedBy` label until E7-7 wires the
-/// builder's, and a request that cannot show the rule that triggered it is not asked (mandate spec
-/// §6.4, DEC-278 item 2), so the runtime records the `ask` on `DecisionMade` and requests nothing.
+/// TI-9, PB-6: ASK sends nothing. The decision and its approval request are journaled, then the
+/// tracer stops because this harness supplies no approval response.
 #[test]
 fn ask_journals_the_decision_and_sends_nothing() -> Result<(), String> {
     let world = World::default();
@@ -642,7 +779,7 @@ fn ask_journals_the_decision_and_sends_nothing() -> Result<(), String> {
     assert!(error.to_string().contains("classified ask"), "{error}");
     let ledger = world.ledger.borrow();
     assert_eq!(ledger.count("DecisionMade"), 1);
-    assert_eq!(ledger.count("ApprovalRequested"), 0);
+    assert_eq!(ledger.count("ApprovalRequested"), 1);
     assert_eq!(ledger.count("IntentProposed"), 0);
     assert_eq!(world.tally.borrow().submissions, 0);
     Ok(())

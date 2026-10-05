@@ -106,24 +106,20 @@ fn named<'a>(section: &'a Json, lists: &[&str], name: &str) -> Result<&'a Json, 
 }
 
 /// Every artifact the chain references, keyed by its digest, from its canonical bytes.
-fn artifact_store(section: &Json) -> Result<BTreeMap<Digest, Vec<u8>>, String> {
-    list_at(section, "artifacts")?
-        .iter()
-        .map(|a| {
-            let canonical = str_at(a, "canonical")?;
-            Ok((
-                Digest::of(canonical.as_bytes()),
-                canonical.as_bytes().to_vec(),
-            ))
-        })
-        .collect()
+fn artifact_store(fx: &Json) -> Result<BTreeMap<Digest, Vec<u8>>, String> {
+    let section = at(fx, SECTION)?;
+    super::verified_artifact_store(
+        list_at(fx, "artifacts")?
+            .iter()
+            .chain(list_at(section, "artifacts")?),
+    )
 }
 
 fn artifacts(fx: &Json, _: &str) -> Result<(), String> {
     let section = at(fx, SECTION)?;
     let listed = list_at(section, "artifacts")?;
     ensure(!listed.is_empty(), || "`artifacts` is empty".to_owned())?;
-    for artifact in listed {
+    for artifact in list_at(fx, "artifacts")?.iter().chain(listed) {
         let name = str_at(artifact, "name")?;
         let canonical = str_at(artifact, "canonical")?;
         let written = String::from_utf8(to_canonical(&to_canon(at(artifact, "object")?)?))
@@ -194,7 +190,7 @@ fn chain_append(fx: &Json, _: &str) -> Result<(), String> {
     };
     expect_eq(
         "per-event verification of the appended chain",
-        verify_events(rows, TrustedStart::GENESIS, &artifact_store(section)?),
+        verify_events(rows, TrustedStart::GENESIS, &artifact_store(fx)?),
         Ok(expected),
     )?;
     expect_eq(
@@ -388,7 +384,7 @@ fn range(fx: &Json, name: &str) -> Result<(), String> {
         prev_hash,
     };
     let range: Vec<StoredEvent> = rows.into_iter().filter(|r| r.seq >= from_seq).collect();
-    let checked = verify_events(&range, start, &artifact_store(section)?);
+    let checked = verify_events(&range, start, &artifact_store(fx)?);
     ensure(checked.is_ok(), || {
         format!("the tampered range fails a per-event check: {checked:?}")
     })?;
@@ -505,10 +501,16 @@ mod tests {
     fn the_artifacts_are_their_canonical_bytes_and_their_references() {
         let fx = fixture();
         assert_eq!(artifacts(&fx, ""), Ok(()));
-        let store = artifact_store(get(&fx, "/agent_stream")).unwrap_or_default();
+        let store = artifact_store(&fx).unwrap_or_default();
         let refs: Vec<String> = store
             .keys()
             .map(|d| format!("sha256:{}", d.to_hex()))
+            .collect();
+        let root_refs: Vec<String> = get(&fx, "/artifacts")
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|a| get(a, "/ref").as_str().map(str::to_owned))
             .collect();
         let mut listed: Vec<String> = get(&fx, "/agent_stream/artifacts")
             .as_array()
@@ -516,11 +518,20 @@ mod tests {
             .flatten()
             .filter_map(|a| get(a, "/ref").as_str().map(str::to_owned))
             .collect();
+        listed.extend(root_refs);
         let first = listed.first().cloned().unwrap_or_default();
         listed.sort();
         assert_eq!(refs, listed);
         assert!(!store.is_empty());
         assert!(store.iter().all(|(d, bytes)| Digest::of(bytes) == *d));
+
+        let mut wrong_root_bytes = fx.clone();
+        set(&mut wrong_root_bytes, "/artifacts/3/canonical", json!("{}"));
+        let wrong_root_error = artifact_store(&wrong_root_bytes).err().unwrap_or_default();
+        assert!(
+            wrong_root_error.starts_with("mandate_version: ref: expected"),
+            "{wrong_root_error}"
+        );
 
         let zeros = format!("sha256:{}", "0".repeat(64));
         let mut edited = fx.clone();
@@ -657,6 +668,10 @@ mod tests {
             rows.windows(2)
                 .all(|w| matches!(w, [a, b] if b.prev_hash == a.hash))
         );
+        let mut missing_configs = fx.clone();
+        set(&mut missing_configs, "/artifacts", json!([]));
+        let missing_error = range(&missing_configs, "from_1").err().unwrap_or_default();
+        assert!(missing_error.contains("ArtifactMissing"), "{missing_error}");
         for name in ["from_1", "from_3"] {
             let failed = range(&fx, name).err().unwrap_or_default();
             assert!(

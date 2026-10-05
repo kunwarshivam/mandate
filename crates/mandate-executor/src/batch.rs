@@ -5,12 +5,12 @@
 //! journal will see — and the list is one sequence rather than a set of guesses (task brief
 //! interpretation 20).
 
-use mandate_canon::Value;
+use mandate_canon::{Digest, Key, Object, Value};
 
 use crate::error::ExecutorError;
 use crate::fold::fold;
 use crate::payload::{object, risk_clock_stamp};
-use crate::ports::Ports;
+use crate::ports::{BindingGateSource, Ports};
 use crate::state::ExecutorState;
 use crate::types::{
     ActivityCursor, BrokerRequest, Effect, EventDraft, EventId, FoldedEvent, NotificationRef,
@@ -21,6 +21,7 @@ pub(crate) struct Batch<'p, 'a> {
     pub(crate) ports: &'p Ports<'a>,
     pub(crate) view: ExecutorState,
     pub(crate) effects: Vec<Effect>,
+    binding_gate: Option<&'p dyn BindingGateSource>,
     epoch: WriterEpoch,
     head: Seq,
     drafted: u32,
@@ -36,8 +37,17 @@ impl<'p, 'a> Batch<'p, 'a> {
             head: state.account_head(),
             view: state.clone(),
             effects: Vec::new(),
+            binding_gate: default_binding_gate(),
             drafted: 0,
         })
+    }
+
+    pub(crate) fn bind(&mut self, source: &'p dyn BindingGateSource) {
+        self.binding_gate = Some(source);
+    }
+
+    pub(crate) fn binding_gate(&self) -> Option<&dyn BindingGateSource> {
+        self.binding_gate
     }
 
     /// The risk-clock second this batch acts at.
@@ -65,6 +75,16 @@ impl<'p, 'a> Batch<'p, 'a> {
         &mut self,
         event_type: &str,
         causation_id: Option<EventId>,
+        pairs: Vec<(&str, Value)>,
+    ) -> Result<EventId, ExecutorError> {
+        self.journal_with_refs(event_type, causation_id, Object::new(), pairs)
+    }
+
+    pub(crate) fn journal_with_refs(
+        &mut self,
+        event_type: &str,
+        causation_id: Option<EventId>,
+        config_refs: Object,
         mut pairs: Vec<(&str, Value)>,
     ) -> Result<EventId, ExecutorError> {
         pairs.push(("risk_clock", risk_clock_stamp(self.at())?));
@@ -91,6 +111,8 @@ impl<'p, 'a> Batch<'p, 'a> {
         self.effects.push(Effect::Journal(EventDraft {
             event_id: event_id.clone(),
             event_type: event_type.to_owned(),
+            schema_version: schema_version(event_type),
+            config_refs,
             causation_id,
             payload,
         }));
@@ -122,5 +144,72 @@ impl<'p, 'a> Batch<'p, 'a> {
         self.broker(BrokerRequest::ListPositions);
         self.broker(BrokerRequest::GetAccount);
         self.broker(BrokerRequest::ListActivities { since });
+    }
+}
+
+pub(crate) fn config_refs(refs: &[(&'static str, Option<&str>)]) -> Result<Object, ExecutorError> {
+    let mut object = Object::new();
+    for (name, raw) in refs {
+        let raw = raw.ok_or(ExecutorError::BindingGateInputMissing)?;
+        let digest = raw.strip_prefix("sha256:").and_then(Digest::from_hex);
+        if digest.is_none() {
+            return Err(ExecutorError::BindingGateInputMissing);
+        }
+        let key = Key::new(name).map_err(|_| ExecutorError::NonCanonicalPayload {
+            field: (*name).to_owned(),
+        })?;
+        object.insert(key, Value::Str(raw.to_owned()));
+    }
+    Ok(object)
+}
+
+fn schema_version(event_type: &str) -> u64 {
+    match event_type {
+        "IntentReceived" | "GateDecided" | "OrderSubmitted" => 2,
+        _ => 1,
+    }
+}
+
+#[cfg(test)]
+fn default_binding_gate() -> Option<&'static dyn BindingGateSource> {
+    Some(&crate::ports::ALLOWING_BINDING_GATE)
+}
+
+#[cfg(not(test))]
+fn default_binding_gate() -> Option<&'static dyn BindingGateSource> {
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{config_refs, schema_version};
+
+    #[test]
+    fn the_executor_owns_each_account_draft_schema_version() {
+        for event_type in ["IntentReceived", "GateDecided", "OrderSubmitted"] {
+            assert_eq!(schema_version(event_type), 2, "{event_type}");
+        }
+        for event_type in [
+            "OrderRequestRecorded",
+            "ProtectionChanged",
+            "ReconciliationRun",
+            "OwnerCommandRefused",
+        ] {
+            assert_eq!(schema_version(event_type), 1, "{event_type}");
+        }
+    }
+
+    #[test]
+    fn config_references_are_digest_refs_or_the_draft_is_refused() -> Result<(), String> {
+        let digest = format!("sha256:{}", "1".repeat(64));
+        let bare = "1".repeat(64);
+        assert!(config_refs(&[("mandate_version", Some(&digest))]).is_ok());
+        for raw in [None, Some(""), Some(bare.as_str()), Some("sha256:not-hex")] {
+            let error = config_refs(&[("mandate_version", raw)])
+                .err()
+                .ok_or("an invalid config reference was accepted")?;
+            assert_eq!(error, crate::error::ExecutorError::BindingGateInputMissing);
+        }
+        Ok(())
     }
 }

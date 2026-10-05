@@ -17,7 +17,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::orders::{legal, transition};
+use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
 use crate::ports::Ports;
 use crate::session::{
@@ -149,7 +149,7 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             IntentHandoff {
                 intent_id,
                 agent,
-                tif,
+                tif: Some(tif),
                 body: IntentBody::Order {
                     instrument,
                     side: Side::Sell,
@@ -499,10 +499,11 @@ pub(crate) fn ladder_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
             )
         });
         if live {
-            let asked = vec![
-                ("cancel_requested", Value::Bool(true)),
-                ("ladder_step", Value::Bool(true)),
-            ];
+            let asked = StateEvidence {
+                cancel_requested: true,
+                ladder_step: true,
+                ..StateEvidence::default()
+            };
             transition(batch, &id, OrderState::PendingCancel, asked)?;
             batch.broker(BrokerRequest::Cancel {
                 client_order_id: id,
@@ -704,7 +705,15 @@ pub(crate) fn overdue(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(
         OrderState::Submitting => OrderState::Unknown,
         kept => kept,
     };
-    transition(batch, id, to, vec![("cancel_overdue", Value::Bool(true))])?;
+    transition(
+        batch,
+        id,
+        to,
+        StateEvidence {
+            cancel_overdue: true,
+            ..StateEvidence::default()
+        },
+    )?;
     batch.broker(BrokerRequest::GetOrderByClientId(id.clone()));
     Ok(())
 }
@@ -907,7 +916,10 @@ fn ask_cancel(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<bool, Exe
         .get(id)
         .is_some_and(|order| !order.cancel_unconfirmed && !order.state.is_terminal());
     if live {
-        let requested = vec![("cancel_requested", Value::Bool(true))];
+        let requested = StateEvidence {
+            cancel_requested: true,
+            ..StateEvidence::default()
+        };
         transition(batch, id, OrderState::PendingCancel, requested)?;
     }
     Ok(live)
@@ -1640,7 +1652,10 @@ fn cancel_resting(
         if outstanding {
             continue;
         }
-        let requested = vec![("cancel_requested", Value::Bool(true))];
+        let requested = StateEvidence {
+            cancel_requested: true,
+            ..StateEvidence::default()
+        };
         transition(batch, &id, OrderState::PendingCancel, requested)?;
         batch.broker(BrokerRequest::Cancel {
             client_order_id: id,
@@ -2993,7 +3008,7 @@ mod sequence_tests {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(intent.to_owned())),
             agent: AgentId(agent.to_owned()),
-            tif: TimeInForce::Day,
+            tif: Some(TimeInForce::Day),
             body: IntentBody::Order {
                 instrument: aapl()?,
                 side: Side::Sell,
@@ -3856,6 +3871,30 @@ mod sequence_tests {
         assert!(cancels(&early).is_empty() && submissions(&early).is_empty());
         let stepped = executor.run(Input::Tick(RiskClock::from_secs(10)), &ports)?;
         assert_eq!(cancels(&stepped), vec![rung_id(0).as_str()]);
+        let state_change = stepped.iter().find_map(|effect| match effect {
+            Effect::Journal(draft)
+                if draft.event_type == "OrderStateChanged"
+                    && draft.payload.get("client_order_id").and_then(Value::as_str)
+                        == Some(rung_id(0).as_str()) =>
+            {
+                Some(draft)
+            }
+            _ => None,
+        });
+        assert!(state_change.is_some(), "the rung cancel's state change");
+        let Some(state_change) = state_change else {
+            return Ok(());
+        };
+        assert_eq!(
+            state_change.payload.get("cancel_requested"),
+            Some(&Value::Bool(true)),
+            "the transition records that this pending cancel was requested"
+        );
+        assert_eq!(
+            state_change.payload.get("ladder_step"),
+            Some(&Value::Bool(true)),
+            "the transition records why this cancel was requested"
+        );
         assert!(
             submissions(&stepped).is_empty(),
             "the next rung waits for the confirmation"
@@ -4800,7 +4839,7 @@ mod sequence_tests {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(intent.to_owned())),
             agent: AgentId("agent-a".to_owned()),
-            tif: TimeInForce::Day,
+            tif: Some(TimeInForce::Day),
             body: IntentBody::Order {
                 instrument: InstrumentId::new(name)?,
                 side,
@@ -13095,7 +13134,7 @@ mod bracket_tests {
             Input::Intent(IntentHandoff {
                 intent_id: IntentId(EventId(ENTRY.to_owned())),
                 agent: AgentId("agent-a".to_owned()),
-                tif: TimeInForce::Day,
+                tif: Some(TimeInForce::Day),
                 body: IntentBody::Order {
                     instrument: aapl()?,
                     side: Side::Buy,
@@ -13654,7 +13693,9 @@ mod remainder_pins {
                     side: Side::Sell,
                     qty: Qty::parse(qty)?,
                     purpose,
-                    bracketed: false,
+                    protection: None,
+                    limit: mandate_num::Price::parse("150")?,
+                    tif: crate::types::TimeInForce::Day,
                 },
                 ports,
             )
