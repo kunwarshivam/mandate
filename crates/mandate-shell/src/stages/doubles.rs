@@ -16,13 +16,14 @@ use std::rc::Rc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_backtest::Signal;
-use mandate_canon::{Digest, Key, Object, Value};
+use mandate_canon::{Digest, Int, Key, Object, Value};
 use mandate_executor::{
-    BrokerOrder, BrokerOutcome, BrokerRequest, BrokerUnknown, ClientOrderId, ConnectorError,
-    IntentId, OrderType, SubmitOrder, TimeInForce,
+    ActivityCursor, BrokerAccount, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerSnapshot,
+    BrokerUnknown, ClientOrderId, ConnectorError, IntentId, OrderType, ReconcileReason, Seq,
+    SubmitOrder, TimeInForce,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
-use mandate_num::{Price, Qty};
+use mandate_num::{Price, Qty, Usd};
 use mandate_risk::{Check, CheckOutcome, Computed, Decision, Purpose as GatePurpose, Verdict};
 use mandate_runtime::{
     AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment, FlattenPlan,
@@ -63,6 +64,8 @@ pub struct Tally {
     pub queries: u32,
     /// Broker answers the executor double was handed.
     pub executor_broker_inputs: u32,
+    /// Order intents handed to the executor after startup.
+    pub executor_intents: u32,
     /// The stream of every committed event the executor double was asked to fold.
     pub executor_folds: Vec<String>,
     next_id: u64,
@@ -123,6 +126,15 @@ impl Ledger {
             Some(rows) => rows.len(),
             None => 0,
         }
+    }
+
+    pub fn types(&self, stream: &str) -> Vec<String> {
+        self.streams
+            .get(stream)
+            .into_iter()
+            .flatten()
+            .map(|row| row.event_type.clone())
+            .collect()
     }
 
     fn has(&self, event_type: &str, field: &str, value: &str) -> bool {
@@ -239,6 +251,41 @@ fn object(members: &[(&str, &str)]) -> Result<Value, Cause> {
         let key = Key::new(name).map_err(|_| Cause::Absent { what: "a key" })?;
         map.insert(key, Value::Str((*value).to_owned()));
     }
+    Ok(Value::Object(map))
+}
+
+fn account_payload(account: &BrokerAccount) -> Result<Value, Cause> {
+    let mut map = Object::new();
+    let mut insert = |name: &'static str, value: Value| -> Result<(), Cause> {
+        let key = Key::new(name).map_err(|_| Cause::Absent { what: "a key" })?;
+        map.insert(key, value);
+        Ok(())
+    };
+    insert("status", Value::Str(account.status.clone()))?;
+    insert("crypto_status", Value::Str(account.crypto_status.clone()))?;
+    insert("trading_blocked", Value::Bool(account.trading_blocked))?;
+    insert("account_blocked", Value::Bool(account.account_blocked))?;
+    insert(
+        "trade_suspended_by_user",
+        Value::Bool(account.trade_suspended_by_user),
+    )?;
+    insert(
+        "multiplier",
+        Value::Int(
+            Int::new(u64::from(account.multiplier)).ok_or(Cause::Absent {
+                what: "the account multiplier",
+            })?,
+        ),
+    )?;
+    insert("equity", Value::Str(account.equity.to_string()))?;
+    insert("cash", Value::Str(account.cash.to_string()))?;
+    insert("buying_power", Value::Str(account.buying_power.to_string()))?;
+    insert(
+        "non_marginable_buying_power",
+        Value::Str(account.non_marginable_buying_power.to_string()),
+    )?;
+    insert("accrued_fees", Value::Str(account.accrued_fees.to_string()))?;
+    insert("risk_clock", Value::Str(NOW.to_owned()))?;
     Ok(Value::Object(map))
 }
 
@@ -387,13 +434,41 @@ pub struct FixedReconciler {
 }
 
 impl Reconciler for FixedReconciler {
-    fn reconcile(
+    fn snapshot(
         &mut self,
         connector: &mut dyn Connector,
         requests: &[BrokerRequest],
-    ) -> Result<mandate_executor::Reconciliation, Cause> {
+    ) -> Result<BrokerSnapshot, Cause> {
         let _ = (connector, requests);
         self.world.called(Stage::Reconcile);
+        Ok(BrokerSnapshot {
+            open_orders: Vec::new(),
+            positions: Vec::new(),
+            account: BrokerAccount {
+                status: "ACTIVE".to_owned(),
+                crypto_status: "ACTIVE".to_owned(),
+                trading_blocked: false,
+                account_blocked: false,
+                trade_suspended_by_user: false,
+                multiplier: 2,
+                equity: Usd::ZERO,
+                cash: Usd::ZERO,
+                buying_power: Usd::ZERO,
+                non_marginable_buying_power: Usd::ZERO,
+                accrued_fees: Usd::ZERO,
+            },
+            fills: Vec::new(),
+            cursor: ActivityCursor(String::new()),
+            reason: ReconcileReason::Startup,
+            taken_at_head: Seq(0),
+        })
+    }
+
+    fn reconcile(
+        &mut self,
+        snapshot: &BrokerSnapshot,
+    ) -> Result<mandate_executor::Reconciliation, Cause> {
+        let _ = snapshot;
         let result = if self.clean { "clean" } else { "mismatch" };
         let event_id = self.world.tally.borrow_mut().next_account_id();
         Ok(mandate_executor::Reconciliation {
@@ -791,6 +866,9 @@ impl Executor for PaperExecutor {
             self.world.called(Stage::Executor);
         }
         if let mandate_executor::Input::Intent(handoff) = &input {
+            let mut tally = self.world.tally.borrow_mut();
+            tally.executor_intents = tally.executor_intents.saturating_add(1);
+            drop(tally);
             return self.intent(handoff);
         }
         if let mandate_executor::Input::Broker(answer) = &input {
@@ -799,6 +877,22 @@ impl Executor for PaperExecutor {
                 tally.executor_broker_inputs = tally.executor_broker_inputs.saturating_add(1);
             }
             return self.answered(answer);
+        }
+        if let mandate_executor::Input::BrokerUpdate(mandate_executor::BrokerUpdate::Account(
+            account,
+        )) = &input
+        {
+            let event_id = self.world.tally.borrow_mut().next_account_id();
+            return Ok(vec![mandate_executor::Effect::Journal(
+                mandate_executor::EventDraft {
+                    event_id: mandate_executor::EventId(event_id),
+                    event_type: "AccountStateObserved".to_owned(),
+                    schema_version: 1,
+                    config_refs: Object::new(),
+                    causation_id: None,
+                    payload: account_payload(account)?,
+                },
+            )]);
         }
         Ok(Vec::new())
     }
@@ -1000,12 +1094,20 @@ impl SignalModel for Stubbed {
 }
 
 impl Reconciler for Stubbed {
-    fn reconcile(
+    fn snapshot(
         &mut self,
         connector: &mut dyn Connector,
         requests: &[BrokerRequest],
-    ) -> Result<mandate_executor::Reconciliation, Cause> {
+    ) -> Result<BrokerSnapshot, Cause> {
         let _ = (connector, requests);
+        self.refuse()
+    }
+
+    fn reconcile(
+        &mut self,
+        snapshot: &BrokerSnapshot,
+    ) -> Result<mandate_executor::Reconciliation, Cause> {
+        let _ = snapshot;
         self.refuse()
     }
 }

@@ -233,8 +233,9 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
-    /// Recovery, then the startup reconciliation. The runtime holds every opening until a clean
-    /// `ReconciliationRun` has been folded (DEC-131 item 13), and a mismatch keeps it held.
+    /// Recovery, then the startup account report and reconciliation. The account report commits
+    /// first; the runtime holds every opening until it and a clean `ReconciliationRun` have both
+    /// folded (DEC-458), and a mismatch keeps it held.
     pub(crate) fn start(&mut self) -> Result<(), ShellError> {
         let agent_epoch = self.epoch(&self.agent_stream.clone());
         self.feed(Input::Started(WriterEpoch(agent_epoch)))?;
@@ -247,10 +248,23 @@ impl<'s> Session<'s> {
             ))
             .map_err(refused(Stage::Executor))?;
         let reconciliation_requests = self.prepare_reconciliation(executor_effects)?;
+        let snapshot = self
+            .stages
+            .reconciler
+            .snapshot(&mut *self.stages.connector, &reconciliation_requests)
+            .map_err(refused(Stage::Reconcile))?;
+        let account_effects = self
+            .stages
+            .executor
+            .step(mandate_executor::Input::BrokerUpdate(
+                mandate_executor::BrokerUpdate::Account(snapshot.account.clone()),
+            ))
+            .map_err(refused(Stage::Executor))?;
+        self.perform_executor(account_effects)?;
         let reconciled = self
             .stages
             .reconciler
-            .reconcile(&mut *self.stages.connector, &reconciliation_requests)
+            .reconcile(&snapshot)
             .map_err(refused(Stage::Reconcile))?;
         self.perform_executor(reconciled.effects)?;
         match reconciled.verdict {

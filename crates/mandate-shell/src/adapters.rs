@@ -1837,7 +1837,7 @@ impl ExecutorReconciler {
         })
     }
 
-    fn snapshot(
+    fn gather_snapshot(
         &self,
         connector: &mut dyn Connector,
         requests: &[BrokerRequest],
@@ -1933,15 +1933,21 @@ fn unexpected_snapshot(outcome: BrokerOutcome, what: &'static str) -> Cause {
 }
 
 impl Reconciler for ExecutorReconciler {
-    fn reconcile(
+    fn snapshot(
         &mut self,
         connector: &mut dyn Connector,
         requests: &[BrokerRequest],
+    ) -> Result<mandate_executor::BrokerSnapshot, Cause> {
+        self.gather_snapshot(connector, requests)
+    }
+
+    fn reconcile(
+        &mut self,
+        snapshot: &mandate_executor::BrokerSnapshot,
     ) -> Result<mandate_executor::Reconciliation, Cause> {
         let context = self.context()?;
-        let snapshot = self.snapshot(connector, requests)?;
         let ports = context.ports();
-        let reconciliation = mandate_executor::reconcile(&self.state.borrow(), &snapshot, &ports)?;
+        let reconciliation = mandate_executor::reconcile(&self.state.borrow(), snapshot, &ports)?;
         Ok(reconciliation)
     }
 }
@@ -2354,9 +2360,10 @@ mod tests {
                 | mandate_executor::Effect::Notify(_) => None,
             })
             .collect();
-        let result = reconciler
-            .reconcile(&mut connector, &requests)
+        let snapshot = reconciler
+            .snapshot(&mut connector, &requests)
             .map_err(|e| e.to_string())?;
+        let result = reconciler.reconcile(&snapshot).map_err(|e| e.to_string())?;
         assert_eq!(result.expected_head, mandate_executor::Seq(1));
         assert!(result.effects.iter().any(|effect| matches!(
             effect,
@@ -2386,7 +2393,7 @@ mod tests {
         let (_, mut reconciler) =
             CoreExecutor::pair(account_scope(), Some(test_executor_context()?));
         assert!(matches!(
-            reconciler.reconcile(&mut connector, &[]),
+            reconciler.snapshot(&mut connector, &[]),
             Err(crate::Cause::Absent {
                 what: "the executor's complete reconciliation request"
             })

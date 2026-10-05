@@ -267,11 +267,17 @@ pub trait Connector {
 
 /// Step 16: the startup reconciliation.
 pub trait Reconciler {
-    /// Reads the broker through the run's connector and reconciles it with replayed executor state.
-    fn reconcile(
+    /// Reads one typed broker snapshot through the run's connector.
+    fn snapshot(
         &mut self,
         connector: &mut dyn Connector,
         requests: &[BrokerRequest],
+    ) -> Result<mandate_executor::BrokerSnapshot, Cause>;
+
+    /// Reconciles that gathered snapshot after its account report has committed and folded.
+    fn reconcile(
+        &mut self,
+        snapshot: &mandate_executor::BrokerSnapshot,
     ) -> Result<mandate_executor::Reconciliation, Cause>;
 }
 

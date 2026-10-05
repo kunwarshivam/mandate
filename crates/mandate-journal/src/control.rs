@@ -68,6 +68,8 @@ const EXECUTOR: [&str; 5] = [
     "ProtectionChanged",
 ];
 
+const ACCOUNT_STATE: &str = "AccountStateObserved";
+
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
 /// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
 const COMPANION: &str = "OrderRequestRecorded";
@@ -80,6 +82,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
         StreamType::Account => {
             event_type == REFUSAL
                 || event_type == SNAPSHOT
+                || event_type == ACCOUNT_STATE
                 || RISK_STATE.contains(&event_type)
                 || EXECUTOR.contains(&event_type)
         }
@@ -598,6 +601,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("AgentStopped", 1) => Some(&AGENT_STOPPED),
         ("OwnerCommandRefused", 1) => Some(&OWNER_COMMAND_REFUSED),
         (SNAPSHOT, 1) => Some(&ACCOUNT_SNAPSHOT_RECORDED),
+        (ACCOUNT_STATE, 1) => Some(&ACCOUNT_STATE_OBSERVED),
         ("MandateVersionApplied", 1) => Some(&MANDATE_VERSION_APPLIED),
         ("UniverseChanged", 1) => Some(&UNIVERSE_CHANGED),
         ("ThesisProposed" | "ThesisRevised", 1) => Some(&THESIS_RECORD),
@@ -754,6 +758,22 @@ static ACCOUNT_SNAPSHOT_RECORDED: Ty = Ty::Record(&[
     ("model_cash", Ty::Nullable(&Ty::Decimal)),
     ("cash_band", Ty::Nullable(&Ty::Decimal)),
     ("cash_in_band", Ty::Nullable(&Ty::Bool)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// DEC-458's complete broker-account report, with no broker identity or personal data.
+static ACCOUNT_STATE_OBSERVED: Ty = Ty::Record(&[
+    ("status", Ty::Str),
+    ("crypto_status", Ty::Str),
+    ("trading_blocked", Ty::Bool),
+    ("account_blocked", Ty::Bool),
+    ("trade_suspended_by_user", Ty::Bool),
+    ("multiplier", Ty::Int),
+    ("equity", Ty::Decimal),
+    ("cash", Ty::Decimal),
+    ("buying_power", Ty::Decimal),
+    ("non_marginable_buying_power", Ty::Decimal),
+    ("accrued_fees", Ty::Decimal),
     ("risk_clock", Ty::RiskClock),
 ]);
 

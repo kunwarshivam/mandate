@@ -178,6 +178,7 @@ const EXECUTOR_ON_ACCOUNT: [(&str, &str); 5] = [
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {
     CLOSED_BY_SECTION_9_2.contains(&(event_type, kind))
         || (event_type, kind) == SNAPSHOT_ON_ACCOUNT
+        || (event_type, kind) == ("AccountStateObserved", ACCT)
         || RISK_STATE_ON_ACCOUNT.contains(&(event_type, kind))
         || THESIS_ON_AGENT.contains(&(event_type, kind))
         || EXECUTOR_ON_ACCOUNT.contains(&(event_type, kind))
@@ -260,6 +261,67 @@ fn stream_types_and_required_config_refs_match_the_spec() {
 fn with_payload(event_type: &str, refs: &[&str], payload: &str) -> Vec<u8> {
     let d = draft(event_type, ACCT, refs);
     edit(&d, "payload", Some(payload))
+}
+
+fn account_state_observed() -> Vec<u8> {
+    with_payload(
+        "AccountStateObserved",
+        &[],
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"ACTIVE","trading_blocked":false,
+            "account_blocked":false,"trade_suspended_by_user":false,"multiplier":2,
+            "equity":"1000","cash":"800","buying_power":"2000",
+            "non_marginable_buying_power":"800","accrued_fees":"0",
+            "risk_clock":"{T}"}}"#
+        ),
+    )
+}
+
+#[test]
+fn account_state_observed_is_closed_complete_and_contains_no_sensitive_identity() {
+    let complete = account_state_observed();
+    assert_eq!(Draft::parse(&complete).map(|_| ()), Ok(()));
+    for field in [
+        "status",
+        "crypto_status",
+        "trading_blocked",
+        "account_blocked",
+        "trade_suspended_by_user",
+        "multiplier",
+        "equity",
+        "cash",
+        "buying_power",
+        "non_marginable_buying_power",
+        "accrued_fees",
+        "risk_clock",
+    ] {
+        let missing = edit(&complete, &format!("payload.{field}"), None);
+        let refusal = Draft::parse(&missing).expect_err("every account field is required");
+        assert_eq!(
+            (refusal.reason, refusal.path),
+            (InvalidReason::Schema, format!("payload.{field}")),
+            "{field}"
+        );
+    }
+    for field in [
+        "extra",
+        "account_number",
+        "account_id",
+        "credentials",
+        "personal_data",
+    ] {
+        let extra = edit(
+            &complete,
+            &format!("payload.{field}"),
+            Some("\"sensitive\""),
+        );
+        let refusal = Draft::parse(&extra).expect_err("the payload is closed");
+        assert_eq!(
+            (refusal.reason, refusal.path),
+            (InvalidReason::Schema, format!("payload.{field}")),
+            "{field}"
+        );
+    }
 }
 
 #[test]

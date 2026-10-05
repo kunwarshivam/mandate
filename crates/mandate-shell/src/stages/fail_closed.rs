@@ -79,10 +79,26 @@ fn assert_fails_closed(stage: Stage) -> Result<(), String> {
     }
     for downstream in [Stage::Sink, Stage::Executor, Stage::Connector] {
         if downstream.position() > stage.position() {
-            assert!(
-                !tally.calls.contains(&downstream),
-                "{stage}: {downstream} was reached after the refusal"
-            );
+            match downstream {
+                Stage::Executor => assert_eq!(
+                    tally.executor_intents, 0,
+                    "{stage}: the executor received an intent after the refusal"
+                ),
+                Stage::Sink | Stage::Connector => assert!(
+                    !tally.calls.contains(&downstream),
+                    "{stage}: {downstream} was reached after the refusal"
+                ),
+                Stage::FlattenProbe
+                | Stage::ProtectionProbe
+                | Stage::Validate
+                | Stage::MarketData
+                | Stage::Signal
+                | Stage::Reconcile
+                | Stage::Size
+                | Stage::Classify
+                | Stage::GateDryRun
+                | Stage::Journal => unreachable!("the downstream list is closed"),
+            }
         }
     }
     Ok(())
@@ -169,6 +185,21 @@ fn all_doubles_place_exactly_one_order() -> Result<(), String> {
     shadow_book_matches(&ledger, &tally.submitted)?;
     every_draft_is_paper(&ledger)?;
     let account = account_stream();
+    let startup_facts: Vec<String> = ledger
+        .types(&account)
+        .into_iter()
+        .filter(|event_type| {
+            matches!(
+                event_type.as_str(),
+                "AccountStateObserved" | "ReconciliationRun"
+            )
+        })
+        .collect();
+    assert_eq!(
+        startup_facts,
+        ["AccountStateObserved", "ReconciliationRun"],
+        "the account report commits before reconciliation releases startup"
+    );
     let held = ledger.len(&account);
     assert!(held > 0);
     assert_eq!(
@@ -447,6 +478,71 @@ fn an_ambiguous_append_is_never_read_as_committed() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn an_ambiguous_account_report_never_runs_reconciliation_or_opens() -> Result<(), String> {
+    let world = World::default();
+    let mut stages = world.stages();
+    stages.journal = Box::new(AmbiguousOn {
+        inner: LedgerJournal(world.clone()),
+        event_type: "AccountStateObserved",
+    });
+    let error = refusal(run_with(&mut stages)?)?;
+    assert!(matches!(
+        &error,
+        ShellError::Refused {
+            stage: Stage::Journal,
+            cause: Cause::Append {
+                outcome: "Ambiguous"
+            },
+        }
+    ));
+    let ledger = world.ledger.borrow();
+    assert_eq!(ledger.count("AccountStateObserved"), 1);
+    assert_eq!(ledger.count("ReconciliationRun"), 0);
+    let tally = world.tally.borrow();
+    assert_eq!(tally.hands, 0);
+    assert_eq!(tally.submissions, 0);
+    Ok(())
+}
+
+#[test]
+fn an_ambiguous_reconciliation_keeps_the_committed_account_and_never_opens() -> Result<(), String> {
+    let world = World::default();
+    let mut stages = world.stages();
+    stages.journal = Box::new(AmbiguousOn {
+        inner: LedgerJournal(world.clone()),
+        event_type: "ReconciliationRun",
+    });
+    let error = refusal(run_with(&mut stages)?)?;
+    assert!(matches!(
+        &error,
+        ShellError::Refused {
+            stage: Stage::Journal,
+            cause: Cause::Append {
+                outcome: "Ambiguous"
+            },
+        }
+    ));
+    let ledger = world.ledger.borrow();
+    assert_eq!(
+        ledger
+            .types(&account_stream())
+            .into_iter()
+            .filter(|event_type| {
+                matches!(
+                    event_type.as_str(),
+                    "AccountStateObserved" | "ReconciliationRun"
+                )
+            })
+            .collect::<Vec<_>>(),
+        ["AccountStateObserved", "ReconciliationRun"]
+    );
+    let tally = world.tally.borrow();
+    assert_eq!(tally.hands, 0);
+    assert_eq!(tally.submissions, 0);
+    Ok(())
+}
+
 /// The ledger journal, answering `Ambiguous` for any append carrying `event_type` after the
 /// ledger has committed it: the one answer a writer cannot read either way.
 struct AmbiguousOn {
@@ -588,7 +684,27 @@ fn a_restart_sends_nothing_and_a_repeat_run_is_refused() -> Result<(), String> {
     assert_eq!(tally.submissions, 1);
     assert_eq!(tally.hands, 1);
     assert_eq!(ledger.count("IntentProposed"), 1);
+    assert_eq!(ledger.count("AccountStateObserved"), 2);
     assert_eq!(ledger.count("ReconciliationRun"), 2);
+    assert_eq!(
+        ledger
+            .types(&account_stream())
+            .into_iter()
+            .filter(|event_type| {
+                matches!(
+                    event_type.as_str(),
+                    "AccountStateObserved" | "ReconciliationRun"
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            "AccountStateObserved",
+            "ReconciliationRun",
+            "AccountStateObserved",
+            "ReconciliationRun"
+        ],
+        "each restart records its account before its reconciliation run"
+    );
     Ok(())
 }
 

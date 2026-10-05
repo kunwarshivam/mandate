@@ -1630,6 +1630,35 @@ pub(crate) mod tests {
         Ok(())
     }
 
+    #[test]
+    fn a_pushed_blocked_account_records_observation_before_restriction() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        let blocked = BrokerAccount {
+            trading_blocked: true,
+            ..account("100000")?
+        };
+        let effects = executor.run(Input::BrokerUpdate(BrokerUpdate::Account(blocked)), &ports)?;
+        assert_eq!(
+            drafted(&effects),
+            [
+                "AccountStateObserved",
+                "AccountRestrictionChanged",
+                "AgentModeApplied"
+            ],
+            "the complete account fact precedes its restriction and fail-closed mode effect"
+        );
+        Ok(())
+    }
+
     /// Journal spec §9: an acknowledgment names its owner. One with no `user` is refused by the
     /// fold and lifts nothing, whatever its step-up evidence (#205 review, round 1, finding 6).
     #[test]
