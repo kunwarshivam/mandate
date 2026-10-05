@@ -13,8 +13,8 @@
 #
 # Planned crates and layers, created only when a story needs them:
 #   0  mandate-num, mandate-time, mandate-canon
-#   1  mandate-domain, mandate-approval (the pure approval core, DEC-155 item 1: layer 0 only, so
-#      it compares values and never reaches a limit)
+#   1  mandate-domain, mandate-approval, mandate-liquidity (pure cores over layer-0 values;
+#      mandate-approval compares values and never reaches a limit under DEC-155 item 1)
 #   2  mandate-journal, mandate-accounting
 #   3  mandate-spec
 #   4  mandate-risk
@@ -66,6 +66,12 @@ layer = 1
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+[crates.mandate-liquidity]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = []
 
 [crates.mandate-journal]
 layer = 2
@@ -123,7 +129,7 @@ allowed_external = ["thiserror"]
 
 [crates.mandate-marketdata]
 layer = 6
-safety_critical = true
+safety_critical = false
 pure = false
 
 [crates.mandate-journal-pg]

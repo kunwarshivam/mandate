@@ -1,16 +1,27 @@
-//! The liquidity figures the gate's liquidity floor and participation caps read (trading-domain spec
-//! §3.2 item 5 and §9.6), each computed by one stated rule from bars the caller has already judged
-//! fit to decide on (DEC-468 item 4, DEC-469).
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::float_arithmetic,
+    clippy::float_cmp,
+    clippy::as_conversions
+)]
+//! The pure liquidity figures the gate's liquidity floor and participation caps read
+//! (trading-domain spec §3.2 item 5 and §9.6), each computed by one stated rule from typed bars
+//! the caller has already judged fit to decide on (DEC-468 item 4, DEC-469).
 //!
-//! Every figure errs toward the tighter limit: the median is the lower of the two middle values, the
-//! average is truncated to whole shares, and the trailing volume counts only bars that are complete
-//! at the clock. A figure that cannot be computed by its rule is an error, never a default
-//! (`AGENTS.md` rule 3).
+//! Every figure errs toward the tighter limit: the median is the lower of the two middle values,
+//! the average is truncated to whole shares, and the trailing volume counts only bars that are
+//! complete at the clock. A figure that cannot be computed by its rule is an error, never a
+//! default (`AGENTS.md` rule 3).
+
+use std::error::Error;
+use std::fmt;
 
 use mandate_num::{Fraction, NumError, Price, Qty, ShareIncrement, Usd};
 use mandate_time::{TimeError, UtcNanos};
-
-use crate::model::Bar;
 
 /// The sessions the daily figures span (spec §3.2 item 5, §9.6).
 pub const SESSIONS: usize = 20;
@@ -23,6 +34,13 @@ const ONE_PER_SESSION: &str = "0.05";
 pub const TRAILING_WINDOW_S: i64 = 300;
 /// One bar's span: the trailing volume is read from one-minute bars.
 pub const BAR_S: i64 = 60;
+
+/// One trusted daily bar's inputs to the liquidity rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DailyBar {
+    pub close: Price,
+    pub volume: Qty,
+}
 
 /// The daily figures, from the last [`SESSIONS`] sessions.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,20 +61,14 @@ pub struct MinuteVolume {
 }
 
 /// Why a liquidity figure could not be computed.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LiquidityError {
-    #[error("fewer than 20 sessions were given")]
     FewerSessions,
-    #[error("a minute bar ends after the clock, so it cannot have been seen complete")]
     AheadOfClock,
-    #[error("the minute bars do not start in strictly increasing order")]
     Unordered,
-    #[error("no complete minute bar lies in the trailing window")]
     EmptyWindow,
-    #[error(transparent)]
-    Num(#[from] NumError),
-    #[error(transparent)]
-    Time(#[from] TimeError),
+    Num(NumError),
+    Time(TimeError),
 }
 
 impl LiquidityError {
@@ -67,9 +79,50 @@ impl LiquidityError {
             Self::AheadOfClock => "ahead_of_clock",
             Self::Unordered => "unordered",
             Self::EmptyWindow => "empty_window",
-            Self::Num(e) => e.code(),
-            Self::Time(e) => e.code(),
+            Self::Num(error) => error.code(),
+            Self::Time(error) => error.code(),
         }
+    }
+}
+
+impl fmt::Display for LiquidityError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::FewerSessions => formatter.write_str("fewer than 20 sessions were given"),
+            Self::AheadOfClock => formatter.write_str(
+                "a minute bar ends after the clock, so it cannot have been seen complete",
+            ),
+            Self::Unordered => {
+                formatter.write_str("the minute bars do not start in strictly increasing order")
+            }
+            Self::EmptyWindow => {
+                formatter.write_str("no complete minute bar lies in the trailing window")
+            }
+            Self::Num(error) => fmt::Display::fmt(error, formatter),
+            Self::Time(error) => fmt::Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl Error for LiquidityError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Num(error) => Some(error),
+            Self::Time(error) => Some(error),
+            Self::FewerSessions | Self::AheadOfClock | Self::Unordered | Self::EmptyWindow => None,
+        }
+    }
+}
+
+impl From<NumError> for LiquidityError {
+    fn from(error: NumError) -> Self {
+        Self::Num(error)
+    }
+}
+
+impl From<TimeError> for LiquidityError {
+    fn from(error: TimeError) -> Self {
+        Self::Time(error)
     }
 }
 
@@ -79,8 +132,8 @@ impl LiquidityError {
 ///
 /// # Errors
 /// [`LiquidityError::FewerSessions`] for fewer than [`SESSIONS`] bars, and the number's own error
-/// for a close or volume `mandate-num` cannot hold.
-pub fn daily_liquidity(bars: &[Bar]) -> Result<DailyLiquidity, LiquidityError> {
+/// when an intermediate value cannot be represented.
+pub fn daily_liquidity(bars: &[DailyBar]) -> Result<DailyLiquidity, LiquidityError> {
     let first = bars
         .len()
         .checked_sub(SESSIONS)
@@ -89,7 +142,7 @@ pub fn daily_liquidity(bars: &[Bar]) -> Result<DailyLiquidity, LiquidityError> {
     let last = window.last().ok_or(LiquidityError::FewerSessions)?;
     let mut dollar_volumes = window
         .iter()
-        .map(|bar| volume(bar)?.notional(close(bar)?))
+        .map(|bar| bar.volume.notional(bar.close))
         .collect::<Result<Vec<Usd>, NumError>>()?;
     dollar_volumes.sort_unstable();
     let median_dollar_volume_20d = dollar_volumes
@@ -98,20 +151,12 @@ pub fn daily_liquidity(bars: &[Bar]) -> Result<DailyLiquidity, LiquidityError> {
         .ok_or(LiquidityError::FewerSessions)?;
     let total = window
         .iter()
-        .try_fold(Qty::ZERO, |sum, bar| sum.checked_add(volume(bar)?))?;
+        .try_fold(Qty::ZERO, |sum, bar| sum.checked_add(bar.volume))?;
     Ok(DailyLiquidity {
-        prior_close: close(last)?,
+        prior_close: last.close,
         median_dollar_volume_20d,
         adv_20d: total.portion(Fraction::parse(ONE_PER_SESSION)?, ShareIncrement::Whole)?,
     })
-}
-
-fn close(bar: &Bar) -> Result<Price, NumError> {
-    Price::parse(bar.close.as_str())
-}
-
-fn volume(bar: &Bar) -> Result<Qty, NumError> {
-    Qty::parse(bar.volume.as_str())
 }
 
 /// The volume of the one-minute `bars` that start no earlier than [`TRAILING_WINDOW_S`] before
@@ -154,28 +199,20 @@ fn shifted(at: UtcNanos, secs: i64) -> Result<UtcNanos, TimeError> {
 
 #[cfg(test)]
 mod tests {
-    use mandate_canon::DecStr;
     use mandate_num::{Price, Qty, Usd};
     use mandate_time::UtcNanos;
 
     use super::{
-        DailyLiquidity, LiquidityError, MinuteVolume, SESSIONS, daily_liquidity, trailing_volume,
+        DailyBar, DailyLiquidity, LiquidityError, MinuteVolume, SESSIONS, daily_liquidity,
+        trailing_volume,
     };
-    use crate::model::Bar;
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
-    fn bar(day: u32, close: &str, volume: &str) -> Result<Bar> {
-        let decimal = |text: &str| DecStr::parse(text).map_err(|e| format!("{text}: {e:?}"));
-        Ok(Bar {
-            start: UtcNanos::from_parts(i64::from(day) * 86_400, 0)?,
-            open: decimal(close)?,
-            high: decimal(close)?,
-            low: decimal(close)?,
-            close: decimal(close)?,
-            volume: decimal(volume)?,
-            vwap: decimal(close)?,
-            trade_count: 1,
+    fn bar(close: &str, volume: &str) -> Result<DailyBar> {
+        Ok(DailyBar {
+            close: Price::parse(close)?,
+            volume: Qty::parse(volume)?,
         })
     }
 
@@ -197,19 +234,18 @@ mod tests {
     /// outside the window.
     #[test]
     fn the_daily_figures_read_the_last_twenty_sessions_by_their_stated_rules() -> Result<()> {
-        let mut bars = vec![bar(1, "999", "999999")?];
-        for day in 0..9 {
-            bars.push(bar(2 + day, "10", "900")?);
+        let mut bars = vec![bar("999", "999999")?];
+        for _ in 0..9 {
+            bars.push(bar("10", "900")?);
         }
-        bars.push(bar(11, "10", "1000")?);
-        bars.push(bar(12, "10", "1100")?);
-        for day in 0..9 {
-            bars.push(bar(13 + day, "10", "1201")?);
+        bars.push(bar("10", "1000")?);
+        bars.push(bar("10", "1100")?);
+        for _ in 0..9 {
+            bars.push(bar("10", "1201")?);
         }
         bars.swap(5, 15);
         assert_eq!(bars.len(), SESSIONS + 1);
-        let last_close = bars.last().map(|b| b.close.as_str().to_owned());
-        assert_eq!(last_close.as_deref(), Some("10"));
+        assert_eq!(bars.last().map(|bar| bar.close), Some(Price::parse("10")?));
         assert_eq!(
             daily_liquidity(&bars)?,
             DailyLiquidity {
@@ -226,10 +262,10 @@ mod tests {
     #[test]
     fn the_prior_close_is_the_last_close_and_the_median_weighs_price() -> Result<()> {
         let mut bars = Vec::new();
-        for day in 0..19 {
-            bars.push(bar(day, "2", "100")?);
+        for _ in 0..19 {
+            bars.push(bar("2", "100")?);
         }
-        bars.push(bar(19, "3.5", "100")?);
+        bars.push(bar("3.5", "100")?);
         let figures = daily_liquidity(&bars)?;
         assert_eq!(figures.prior_close, Price::parse("3.5")?);
         assert_eq!(figures.median_dollar_volume_20d, Usd::parse("200")?);
@@ -240,7 +276,7 @@ mod tests {
     #[test]
     fn fewer_than_twenty_sessions_compute_nothing() -> Result<()> {
         let bars = (0..19)
-            .map(|day| bar(day, "10", "100"))
+            .map(|_| bar("10", "100"))
             .collect::<Result<Vec<_>>>()?;
         assert_eq!(daily_liquidity(&bars), Err(LiquidityError::FewerSessions));
         assert_eq!(daily_liquidity(&[]), Err(LiquidityError::FewerSessions));
@@ -249,12 +285,10 @@ mod tests {
 
     /// Ten bars from 16:50 to 16:59 with volumes 1 to 10 (hand-summed windows below).
     fn ten_minutes() -> Result<Vec<MinuteVolume>> {
-        (0..10)
+        (0_u32..10)
             .map(|index| {
-                minute(
-                    &format!("2026-09-28T16:5{index}:00Z"),
-                    &(index + 1).to_string(),
-                )
+                let volume = index.checked_add(1).ok_or("minute index overflow")?;
+                minute(&format!("2026-09-28T16:5{index}:00Z"), &volume.to_string())
             })
             .collect()
     }

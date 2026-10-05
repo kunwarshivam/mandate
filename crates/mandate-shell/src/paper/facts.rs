@@ -1,7 +1,7 @@
 //! The one snapshot the contexts are assembled from: what the broker answered to the preflight's
-//! GETs, and the liquidity figures `mandate-marketdata` computes from the stored daily bars and the
-//! broker's minute bars (DEC-468 item 4, DEC-469). Nothing here computes a figure; it reads, maps,
-//! and names the refusal.
+//! GETs, and the liquidity figures `mandate-liquidity` computes from typed stored daily bars and
+//! broker minute bars (DEC-468 item 4, DEC-469). Nothing here computes a figure; it reads, parses,
+//! maps, and names the refusal.
 
 use std::path::Path;
 use std::time::Duration;
@@ -11,8 +11,8 @@ use mandate_alpaca::{
     TradingClient, TradingTransport,
 };
 use mandate_executor::{BrokerAccount, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest};
-use mandate_marketdata::liquidity::{
-    DailyLiquidity, LiquidityError, MinuteVolume, TRAILING_WINDOW_S, daily_liquidity,
+use mandate_liquidity::{
+    DailyBar, DailyLiquidity, LiquidityError, MinuteVolume, TRAILING_WINDOW_S, daily_liquidity,
     trailing_volume,
 };
 use mandate_num::{Price, Qty, Usd};
@@ -35,7 +35,7 @@ pub struct BrokerFacts {
     pub minute_bars: MinuteBars,
 }
 
-/// The liquidity figures the gate reads, each computed by `mandate-marketdata`'s stated rule.
+/// The liquidity figures the gate reads, each computed by `mandate-liquidity`'s stated rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiquidityFacts {
     /// The close of the last completed session.
@@ -130,10 +130,11 @@ where
     })
 }
 
-/// The liquidity figures at `now`, from two inputs `mandate-marketdata` computes on:
+/// The liquidity figures at `now`, from two inputs `mandate-shell` parses and maps:
 ///
 /// - `daily` must pass the same trust check the signal's bars do, ending on the last completed
-///   session; [`daily_liquidity`] reads its last 20 sessions.
+///   session; its stored close and volume fields are parsed into [`DailyBar`] values, and
+///   [`daily_liquidity`] reads the last 20.
 /// - `minute_bars` must be AAPL's, as the preflight read them; [`trailing_volume`] sums those that
 ///   start inside the five minutes before `now` and refuses one that ends after it.
 ///
@@ -150,11 +151,21 @@ pub fn liquidity_facts(
     if minute_bars.instrument.as_str() != SYMBOL {
         return Err(absent("AAPL's minute bars"));
     }
+    let daily: Vec<DailyBar> = trusted_daily_bars(daily, SYMBOL, now)?
+        .iter()
+        .map(|bar| -> Result<DailyBar, LiquidityError> {
+            Ok(DailyBar {
+                close: Price::parse(bar.close.as_str())?,
+                volume: Qty::parse(bar.volume.as_str())?,
+            })
+        })
+        .collect::<Result<_, _>>()
+        .map_err(refusal)?;
     let DailyLiquidity {
         prior_close,
         median_dollar_volume_20d,
         adv_20d,
-    } = daily_liquidity(&trusted_daily_bars(daily, SYMBOL, now)?).map_err(refusal)?;
+    } = daily_liquidity(&daily).map_err(refusal)?;
     let minutes: Vec<MinuteVolume> = minute_bars
         .bars
         .iter()

@@ -160,6 +160,7 @@ seeded bug before it is trusted ([AGENTS.md](../../../AGENTS.md) "Independent or
 | `mandate-marketdata` | 6 | `dataset::read_manifest`, `dataset::partition::read` — stored daily bars |
 | `mandate-builder` | 5 | Sizing and autonomy classification, behind the shell's `OrderPlan` adapter |
 | `mandate-risk` | 4 | `evaluate` behind the shell's `GateDryRun` adapter; the **binding** call stays inside `mandate-executor` |
+| `mandate-liquidity` | 1 | Pure daily and trailing liquidity arithmetic over typed bar inputs |
 | `mandate-spec`, `mandate-domain` | 3, 1 | `validate`, `ValidatedMandate` |
 | `mandate-journal` | 2 | `Draft::parse`, `verify_events`, `Environment` |
 | `mandate-num`, `mandate-time` | 0 | Parsing and display of the fixture's numbers and times. **No arithmetic on money or quantity happens in `mandate-shell`** |
@@ -470,9 +471,9 @@ cargo run -p mandate-shell --bin mandate-tracer -- \
   reviewed artifacts, which read no credential. Then the paper credentials and the one transport,
   and a GET-only preflight of the account, positions, open orders, asset record, latest IEX quote,
   and the last five minutes' complete 1-minute IEX bars. Then the liquidity facts, which
-  `mandate-marketdata` computes from `--dataset` (daily bars) and those minute bars. Only then are
-  the trusted contexts assembled from that one snapshot, and the run journals the intent before its
-  one `POST`. Any missing, stale, or ambiguous fact refuses.
+  `mandate-liquidity` computes after the shell parses and maps the stored daily bars and maps those
+  minute bars. Only then are the trusted contexts assembled from that one snapshot, and the run
+  journals the intent before its one `POST`. Any missing, stale, or ambiguous fact refuses.
 - **A clean paper account only.** Any position or open order on the account refuses the run
   (DEC-468 item 1), so a restart after the submission sends nothing.
 - **The run's freshness bounds.** The quote and the asset record must be at most

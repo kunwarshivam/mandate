@@ -314,7 +314,7 @@ crates.
   fixtures are generated and checked against `reference/mandate/ref.py` by
   `tests/fixtures/tracer/generate.py`. The paper assembly is split by step under `src/paper/`
   (`artifacts`, `facts`, `judge`, `gate`, `context`) and computes no money or quantity: the
-  liquidity figures are `mandate-marketdata`'s, the bracket prices and 1× buying power the
+  liquidity figures are `mandate-liquidity`'s, the bracket prices and 1× buying power the
   executor's, the classification facts the builder's `buy_action`, and the fee reservation
   `mandate-accounting`'s (DEC-469 item 3). `src/paper/tests.rs` covers the artifact members and
   values, each single-fact refusal and its boundary, the session and close window, the mapping of
@@ -944,6 +944,17 @@ proves each pending test fails on them (DEC-110).
   `reference/mandate/check_cases.py`, `reference/mandate/mutants.py`.
 - **Run:** `cargo xtask refcases`, `cargo xtask ci reference`.
 
+## Liquidity figures
+
+- **Spec:** trading-domain spec §3.2 item 5 and §9.6; DEC-468 item 4; DEC-469 item 3.
+- **Code:** `crates/mandate-liquidity/src/lib.rs` (pure typed inputs and the prior close,
+  lower-median 20-session dollar volume, truncated 20-session average volume, and trailing
+  five-minute volume of complete bars). `crates/mandate-shell/src/paper/facts.rs` validates the
+  stored dataset, parses its close and volume fields, maps broker minute bars, and orchestrates.
+- **Tests:** the in-module hand cases in `crates/mandate-liquidity/src/lib.rs`, plus the mapping and
+  refusal cases in `crates/mandate-shell/src/paper/facts/tests.rs`.
+- **Run:** `cargo nextest run -p mandate-liquidity -p mandate-shell`.
+
 ## Historical market data download
 
 - **Spec:** backlog E2-1; ADR-0001 ES-19, ES-23; DEC-88, DEC-89, DEC-90;
@@ -956,11 +967,8 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-marketdata/src/http.rs` (the market-data host only, credentials),
   `crates/mandate-marketdata/src/dataset.rs` and
   `crates/mandate-marketdata/src/dataset/partition.rs` (Parquet partitions, manifest,
-  compare-before-write), `crates/mandate-marketdata/src/download.rs` (one dataset over a day range),
-  `crates/mandate-marketdata/src/liquidity.rs` (the gate's liquidity figures: the prior close, the
-  lower-median 20-session dollar volume, the truncated 20-session average volume, and the trailing
-  five-minute volume of complete bars, with in-module hand cases; DEC-469 item 3; not covered by
-  CI's mutation gate, since the crate is not safety-critical).
+  compare-before-write), and `crates/mandate-marketdata/src/download.rs` (one dataset over a day
+  range).
   `mandate-cli`: `crates/mandate-cli/src/download.rs` (`mandate download`),
   `config/research-basket.toml`.
 - **Tests:** `crates/mandate-marketdata/tests/` against recorded responses in

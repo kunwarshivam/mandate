@@ -7,9 +7,9 @@
 //! 2. [`preflight`] reads the broker with GETs only, through `mandate-alpaca`'s own clients: the
 //!    account, the positions, the open orders, the asset record, the latest IEX quote, and the
 //!    complete IEX minute bars of the last five minutes. [`liquidity_facts`] has
-//!    `mandate-marketdata` compute the prior close, the 20-session median dollar volume, and the
-//!    20-session average daily volume from the stored daily bars, and the trailing five-minute
-//!    volume from those minute bars.
+//!    `mandate-liquidity` compute the prior close, the 20-session median dollar volume, and the
+//!    20-session average daily volume from typed stored daily bars, and the trailing five-minute
+//!    volume from typed minute bars.
 //! 3. [`load_contexts`] judges that [`PaperFacts`] snapshot at the run clock and assembles the two
 //!    trusted contexts from it and from nothing else. An account holding any position or open order
 //!    is refused: this one first-order migration maps no existing broker state (DEC-468 item 1).

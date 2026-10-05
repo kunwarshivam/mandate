@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{MinuteBar, MinuteBars};
 use mandate_canon::DecStr;
+use mandate_liquidity::LiquidityError;
 use mandate_marketdata::dataset::Store;
-use mandate_marketdata::liquidity::LiquidityError;
 use mandate_marketdata::model::{
     AssetClass as DataAssetClass, Bar, DatasetId, Feed as DataFeed, Kind, Records, Symbol,
     TimeUnit, Timeframe,
@@ -119,11 +119,11 @@ fn scratch_root(name: &str) -> Result<PathBuf, String> {
     Ok(root)
 }
 
-/// The shell passes the stored daily bars and the broker's minute bars through untouched, and the
-/// figures are `mandate-marketdata`'s: the last close; the lower median 245.20 × 1,000,000 of the
+/// The shell parses and maps the stored daily bars and maps the broker's typed minute bars; the
+/// figures are `mandate-liquidity`'s: the last close; the lower median 245.20 × 1,000,000 of the
 /// last twenty; 20,000,001 ÷ 20 truncated; and 105 + 106 + 107 + 108 + 109.
 #[test]
-fn the_liquidity_facts_are_marketdatas_figures_over_the_snapshots_bars() -> Result<(), String> {
+fn the_liquidity_facts_are_the_pure_crates_figures_over_the_snapshots_bars() -> Result<(), String> {
     let root = scratch_root("liquidity")?;
     let daily_dir = daily(&root.join("daily"), "2026-08-24", &sessions())?;
     let facts =
@@ -206,7 +206,7 @@ fn each_unusable_input_refuses_with_its_own_reason() -> Result<(), String> {
     fs::remove_dir_all(&root).map_err(text)
 }
 
-/// Every `mandate-marketdata` refusal maps to one cause, none of them a default figure.
+/// Every `mandate-liquidity` refusal maps to one cause, none of them a default figure.
 #[test]
 fn every_liquidity_error_maps_to_its_cause() {
     let cases = [

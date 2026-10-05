@@ -42,6 +42,6 @@
 /crates/mandate-research/   @kunwarshivam
 /crates/mandate-builder/   @kunwarshivam
 /crates/mandate-executor/   @kunwarshivam
-/crates/mandate-marketdata/ @kunwarshivam
+/crates/mandate-liquidity/  @kunwarshivam
 /crates/mandate-alpaca/     @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
