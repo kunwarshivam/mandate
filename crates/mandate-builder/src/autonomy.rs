@@ -537,6 +537,7 @@ mod tests {
             },
             review_by: None,
             delegations: Vec::new(),
+            tripwires: Vec::new(),
         })
     }
 

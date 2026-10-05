@@ -77,6 +77,9 @@ pub enum Violation {
     V042,
     /// A delegation's caps do not fit inside the envelope, or stand in for a second approver.
     V043,
+    /// Tripwire ids are sorted and unique, and every threshold fits its metric and allocation
+    /// (§6.7, DEC-352).
+    V044,
     /// The workspace's policy requires independent approval and the workspace has fewer than two
     /// active users, so nothing the policy reserves for a second user could ever happen (DEC-411).
     /// Checked at validation and again when a version is applied ([`recheck_at_application`]).
@@ -122,6 +125,7 @@ impl Violation {
             Self::V041 => "V-041",
             Self::V042 => "V-042",
             Self::V043 => "V-043",
+            Self::V044 => "V-044",
             Self::V047 => "V-047",
         }
     }
@@ -302,6 +306,7 @@ pub fn validate(
     document_rules(mandate, &document, &mut violations);
     condition_rules(mandate, &mut violations);
     delegation_rules(mandate, context, &mut violations)?;
+    tripwire_rules(mandate)?;
     provenance_rules(mandate, &document, context, &mut violations);
     universe_rules(mandate, &mut violations);
     let rules = &mandate.autonomy.rules;
@@ -336,6 +341,16 @@ pub fn validate(
         warnings,
         worst_case,
     })
+}
+
+/// V-044's tests-PR boundary. A non-empty list is never treated as valid before E6-13 implements
+/// its sorted-id, count-threshold, cent, and allocation checks.
+fn tripwire_rules(mandate: &Mandate) -> Result<(), SpecError> {
+    if mandate.autonomy.tripwires.is_empty() {
+        Ok(())
+    } else {
+        Err(SpecError::Unimplemented)
+    }
 }
 
 /// The rules §4.1 checks again when a version is applied, against the facts at application: V-002,

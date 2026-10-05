@@ -532,6 +532,79 @@ pub struct Autonomy {
     /// and expiring; none when the member is absent. V-041 to V-043 bound them, and the order path
     /// lifts none until E8-8, which is the stricter side (DEC-420 item 7).
     pub delegations: Vec<Delegation>,
+    /// Owner-set conditions over recorded fills (§6.7, DEC-350). None when absent. Until E6-13's
+    /// implementation PR, the parser refuses a document that states this member, so unchecked
+    /// tripwires cannot reach a runtime.
+    pub tripwires: Vec<Tripwire>,
+}
+
+/// One owner-set tripwire (§6.7): its metric fires at or above the threshold and applies its action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tripwire {
+    pub id: TripwireId,
+    pub metric: TripwireMetric,
+    pub threshold: SchemaDec,
+    pub action: TripwireAction,
+}
+
+/// A tripwire's closed metric vocabulary (DEC-350).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TripwireMetric {
+    ConsecutiveLosingExits,
+    RealizedLossUsd,
+    NewInstruments,
+}
+
+impl TripwireMetric {
+    pub const ALL: [Self; 3] = [
+        Self::ConsecutiveLosingExits,
+        Self::RealizedLossUsd,
+        Self::NewInstruments,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ConsecutiveLosingExits => "consecutive_losing_exits",
+            Self::RealizedLossUsd => "realized_loss_usd",
+            Self::NewInstruments => "new_instruments",
+        }
+    }
+}
+
+/// A tripwire action in increasing severity (DEC-350, DEC-352).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TripwireAction {
+    EndDelegations,
+    ExitsOnly,
+}
+
+impl TripwireAction {
+    pub const ALL: [Self; 2] = [Self::EndDelegations, Self::ExitsOnly];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::EndDelegations => "end_delegations",
+            Self::ExitsOnly => "exits_only",
+        }
+    }
+}
+
+/// A tripwire id: the schema's rule-id grammar, unique and sorted under V-044.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TripwireId(String);
+
+impl TripwireId {
+    pub fn parse(text: &str) -> Result<Self, ParseError> {
+        RuleId::parse(text)
+            .map(|id| Self(id.as_str().to_owned()))
+            .map_err(|_| ParseError::OffPattern {
+                path: Pointer::new("/autonomy/tripwires/id"),
+            })
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// One delegation (§6.5): a bounded, expiring permission that lifts one kind of `ask` to `auto`.
