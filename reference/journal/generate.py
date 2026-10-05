@@ -475,7 +475,9 @@ AGENT = "agent_a"
 STREAM = f"agent:{WORKSPACE}:{AGENT}"
 INSTRUMENT = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
 HELD_INSTRUMENT = "5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f"
-MANDATE = {"mandate_version": "sha256:" + "5" * 64}
+MANDATE = {
+    "mandate_version": artifact_ref({"kind": "mandate_version", "version": "fixture-v1"})
+}
 ACTOR = {"kind": "agent", "id": AGENT, "version": "0.1.0", "build": "sha256:" + "c" * 64}
 INTENT_ID = "01J8Z3M1P0000000000000000X"
 CHAIN = (
@@ -2090,7 +2092,7 @@ def check_chain(section: dict, v3: dict) -> list[str]:
         prev = entry["hash"]
         if body["stream_id"] != STREAM or body["event_type"] != entry["event_type"]:
             problems.append(found("chain.stream", f"seq {i}: stream or type differs"))
-    stored = {a["ref"]: a for a in section["artifacts"]}
+    stored = {a["ref"]: a for a in v3["artifacts"] + section["artifacts"]}
     for a in section["artifacts"]:
         if (
             canon(a["object"]) != a["canonical"]
@@ -2101,6 +2103,14 @@ def check_chain(section: dict, v3: dict) -> list[str]:
         for ref in entry["body"]["artifact_refs"]:
             if ref not in stored:
                 problems.append(found("artifacts.missing", f"seq {entry['seq']}: artifact {ref} missing"))
+        for ref in entry["body"]["config_refs"].values():
+            if ref not in stored:
+                problems.append(
+                    found(
+                        "config_artifacts.missing",
+                        f"seq {entry['seq']}: config artifact {ref} missing",
+                    )
+                )
     if chain[0]["event_type"] != "StreamOpened":
         problems.append(found("chain.opened", "seq 1 is not StreamOpened"))
     named = {name: chain[seq - 1]["body"] for name, seq in SEQ.items() if seq <= len(chain)}
