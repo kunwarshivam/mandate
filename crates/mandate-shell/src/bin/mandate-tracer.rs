@@ -2,8 +2,9 @@
 //! ([task brief](../../../../docs/project/tasks/E7-7-tracer-bullet.md), backlog E7-7).
 //!
 //! ```text
-//! mandate-tracer --mandate <path> --dataset <dir> --confirm-paper
-//! mandate-tracer --mandate <path> --dataset <dir> --journal <dsn> --confirm-paper --place-one-order
+//! mandate-tracer --mandate <path> --dataset <dir> --config-dir <dir> --confirm-paper
+//! mandate-tracer --mandate <path> --dataset <dir> --config-dir <dir> --journal <dsn>
+//!   --confirm-paper --place-one-order
 //! ```
 //!
 //! A refusal exits non-zero and prints its stable reason code and message on one line of stderr.
@@ -13,9 +14,11 @@
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use mandate_alpaca::{AlpacaPaperHttp, Credentials};
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
-use mandate_shell::adapters::{Disconnected, Sources, over};
-use mandate_shell::{Report, Setup, ShellError, cli, host, run};
+use mandate_shell::adapters::{Sources, production};
+use mandate_shell::paper::load_contexts;
+use mandate_shell::{Report, Setup, ShellError, Stage, cli, host, run};
 use mandate_time::UtcNanos;
 
 fn main() -> ExitCode {
@@ -48,9 +51,21 @@ fn tracer() -> Result<Report, ShellError> {
         )
     }))?;
     let recorded_at = now()?;
+    let agent = AgentId(cli::AGENT.to_owned());
+    let contexts =
+        load_contexts(&args.mandate, &args.config_dir, recorded_at, &agent).map_err(|cause| {
+            ShellError::Refused {
+                stage: Stage::Validate,
+                cause,
+            }
+        })?;
+    let credentials = Credentials::from_env()
+        .map_err(|_| ShellError::Usage("Alpaca paper credentials are unavailable".to_owned()))?;
+    let transport = AlpacaPaperHttp::new(credentials)
+        .map_err(|_| ShellError::Usage("the Alpaca paper client is unavailable".to_owned()))?;
     let setup = Setup {
         deployment: Deployment {
-            agent: AgentId(cli::AGENT.to_owned()),
+            agent: agent.clone(),
             connection: ConnectionId(cli::CONNECTION.to_owned()),
             workspace: WorkspaceId(cli::WORKSPACE.to_owned()),
         },
@@ -59,17 +74,17 @@ fn tracer() -> Result<Report, ShellError> {
         place_one_order: args.place_one_order,
         new_cycle: args.new_cycle,
     };
-    let mut stages = over(Sources {
+    let mut stages = production(Sources {
         mandate: args.mandate,
         dataset: args.dataset,
         journal: args.journal,
         recorded_at,
-        agent: AgentId(cli::AGENT.to_owned()),
+        agent,
         workspace: cli::WORKSPACE.to_owned(),
         account_ref: cli::ACCOUNT_REF.to_owned(),
-        executor: None,
-        run: None,
-        transport: Box::new(Disconnected),
+        executor: Some(contexts.executor),
+        run: Some(contexts.run),
+        transport,
     });
     run(&mut stages, &setup)
 }

@@ -462,7 +462,8 @@ from a build that ships (see "How the mapping is made unrepresentable" item 5).
 
 ```
 cargo run -p mandate-shell --bin mandate-tracer -- \
-  --mandate <path> --dataset <dir> --journal <dsn> --confirm-paper [--place-one-order]
+  --mandate <path> --dataset <dir> --config-dir <dir> --journal <dsn> \
+  --confirm-paper [--place-one-order]
 ```
 
 - **Nothing is sent without `--place-one-order`.** The default runs every stage, journals the
@@ -704,8 +705,10 @@ The manual paper run, for the founder or a cloud routine with the paper keys in 
 ```
 cargo run -p mandate-shell --bin mandate-tracer -- \
   --mandate fixtures/tracer/mandate.json --dataset data/alpaca/bars/1d \
-  --journal "$MANDATE_JOURNAL_DSN" --confirm-paper                      # plans, sends nothing
-cargo run -p mandate-shell --bin mandate-tracer -- ... --confirm-paper --place-one-order
+  --config-dir fixtures/tracer/config \
+  --confirm-paper                                                       # plans, sends nothing
+cargo run -p mandate-shell --bin mandate-tracer -- ... \
+  --journal "$MANDATE_JOURNAL_DSN" --confirm-paper --place-one-order
 mandate journal verify --stream <agent-stream> --trusted-start <file>   # the record, after
 ```
 

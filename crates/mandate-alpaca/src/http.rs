@@ -255,6 +255,7 @@ pub trait TradingTransport {
 ///
 /// `Debug` prints neither value: the derive is deliberately absent and the manual implementation
 /// names the fields without their contents (`AGENTS.md` rule 7, ES-09).
+#[derive(Clone)]
 pub struct Credentials {
     key_id: SecretString,
     secret: SecretString,
@@ -427,7 +428,7 @@ fn safe(text: &str, extra: &[u8]) -> bool {
 
 /// HTTPS to [`PAPER_HOST`] with the paper credentials: HTTPS only, no redirects, bounded
 /// timeouts, and TLS on the `ring` provider.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AlpacaPaperHttp {
     client: reqwest::Client,
     credentials: Credentials,

@@ -22,6 +22,8 @@ pub const ACCOUNT_REF: &str = "tracer-paper";
 pub struct Args {
     pub mandate: PathBuf,
     pub dataset: PathBuf,
+    /// Effective-dated E7-7 artifacts, including the pinned model artifact.
+    pub config_dir: PathBuf,
     /// The journal's DSN. Only a run that places its order keeps a journal: a planning run uses a
     /// scratch one, so a later start cannot re-hand what it proposed (DEC-157 item 6).
     pub journal: Option<String>,
@@ -40,6 +42,7 @@ where
 {
     let mut mandate = None;
     let mut dataset = None;
+    let mut config_dir = None;
     let mut journal = None;
     let mut confirm_paper = false;
     let mut place_one_order = false;
@@ -49,6 +52,7 @@ where
         match arg.as_str() {
             "--mandate" => mandate = Some(PathBuf::from(value_of(&arg, args.next())?)),
             "--dataset" => dataset = Some(PathBuf::from(value_of(&arg, args.next())?)),
+            "--config-dir" => config_dir = Some(PathBuf::from(value_of(&arg, args.next())?)),
             "--journal" => journal = Some(value_of(&arg, args.next())?),
             "--confirm-paper" => confirm_paper = true,
             "--place-one-order" => place_one_order = true,
@@ -72,6 +76,7 @@ where
     Ok(Args {
         mandate: mandate.ok_or_else(|| usage("--mandate is required".to_owned()))?,
         dataset: dataset.ok_or_else(|| usage("--dataset is required".to_owned()))?,
+        config_dir: config_dir.ok_or_else(|| usage("--config-dir is required".to_owned()))?,
         journal,
         place_one_order,
         new_cycle,

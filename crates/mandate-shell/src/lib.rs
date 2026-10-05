@@ -43,6 +43,7 @@ pub mod envelope;
 mod error;
 pub mod host;
 pub mod map;
+pub mod paper;
 pub mod stages;
 pub mod tracer;
 

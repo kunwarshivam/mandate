@@ -6,6 +6,8 @@ use std::process::{Command, Output};
 
 use mandate_shell::Stage;
 
+const CONFIG: &str = "crates/mandate-shell/tests/fixtures/tracer/config";
+
 fn tracer(args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_mandate-tracer"));
     command.args(args);
@@ -37,6 +39,8 @@ fn a_planning_run_without_its_inputs_refuses_before_anything_is_sent() {
             "no-such-mandate.json",
             "--dataset",
             "no-such-dataset",
+            "--config-dir",
+            CONFIG,
             "--confirm-paper",
         ],
         &[],
@@ -62,6 +66,8 @@ fn a_configured_host_is_refused_before_anything_runs() {
             "m.json",
             "--dataset",
             "bars",
+            "--config-dir",
+            CONFIG,
             "--confirm-paper",
         ],
         &[("ALPACA_BASE_URL", "https://api.alpaca.markets")],
