@@ -59,8 +59,9 @@
    plain-English thesis into a backtest or a basket sized to the account, and sends each rebalance
    of a followed strategy as a ticket to review. Its broker connections are read-only today, and
    it describes order placement as coming soon, with the owner confirming every order [VL2] [VL4]
-   [VL5]. It documents no delegation inside limits, which is where Mandate's difference sits. Its
-   free research stack sets what owners will expect to pay for the front half of the journey.
+   [VL5]. It does not document orders placed for the owner within limits the owner set, which is
+   where Mandate's difference sits. Its free tier [VL6] is likely to set what owners expect to pay
+   for the research half of the journey (inference).
 
 ## Segment map
 
@@ -518,10 +519,11 @@ may also be a source of strategies for the bring-your-own-strategy mode.
   launch" [VL3] [VL7].
 - Alpha Hub: "Following sends you each rebalance to review before anything trades" [VL2]; "every
   rebalance reaches you as an alert with a one-tap trade ticket", and "creators can publish theirs
-  to the Alpha Hub with a verified track record attached" [VL3]. Its strategies include
-  Volaren-authored ones such as Congress Tracker, which "buys the fifteen companies members of
-  Congress bought most on balance" each month [VL9]. "Returns shown are model backtests and
-  paper-traded records, not client returns" [VL8].
+  to the Alpha Hub with a verified track record attached" [VL3]. The terms say "you can run
+  Volaren's strategies, follow any of them, and build your own" [VL6]. One listed strategy,
+  Congress Tracker, "buys the fifteen companies members of Congress bought most on balance" each
+  month [VL9]. "Returns shown are model backtests and paper-traded records, not client returns"
+  [VL8].
 - Strategy records: the Congress Tracker page shows a "Live record ... never backfilled", "forward
   only" because "Volaren's valuations can't be backtested honestly"; a "Current book ...
   simulated"; and a "Verify" block with a "Rules fingerprint" that identifies "the exact rules and
@@ -551,13 +553,13 @@ Pages disagree in two places. The pricing page lists trading from Volaren in eve
 [VL5], while the brokerages page and the terms describe read-only connections [VL4] [VL6]. The
 "Who we are" page says users pay "if you choose to follow a premium strategy" [VL3], while the
 terms of 2026-10-02 say "Every public strategy on the platform, premium strategies included, is
-available at no charge" [VL6]. Prefer the terms and the brokerages page; they are newer or more
-specific.
+available at no charge" [VL6]. Prefer the terms, which are dated, and the brokerages page, which
+is specific to brokers; the pricing and "Who we are" pages carry no date.
 
 **What it does not document**
 
-- What its "agents watching the market" do, or whether any can act without a confirmation. The
-  agents page renders only after sign-in.
+- What its "agents watching the market" do, or whether any can act without a confirmation. Its
+  agents page shows only a cookie notice to a visitor who is not signed in [VL11].
 - When order placement ships, through which provider, with which order types, and whether a ticket
   expires or is checked against the account again before it is sent.
 - Limits that hold outside a strategy or ticket (capital, loss, concentration), or a kill switch.
@@ -568,16 +570,18 @@ specific.
 
 **Overlap with Mandate.** The front half of the journey is shared: a plain-English idea becomes a
 backtest and a position sized to the account, and the owner reviews it before anything trades.
-Volaren's research depth (company models, macro, a risk view, eight asset classes) is far broader
-than anything Mandate plans, and it is free; Mandate should not compete as a research terminal.
-The authority models differ: Volaren documents a person placing or confirming every trade, and no
-delegation, envelope, or gate, while Mandate's proposition is an agent that acts within limits the
-owner set (AUTO), asks above them (ASK), and is refused outside them (DENY). If its "agents
+Volaren's research surface (company models, macro, a risk view, eight asset classes) [VL2] [VL7]
+covers far more than Mandate's research agent is planned to, and has a free tier [VL6]; Mandate
+should not compete as a research terminal (inference). The authority models differ: Volaren
+documents a person placing or confirming every trade [VL4] [VL5], and does not document orders
+placed for the owner within owner-set limits or a gate independent of the strategy, while
+Mandate's proposition is an agent that acts within limits the owner set (AUTO), asks above them
+(ASK), and is refused outside them (DENY). If its "agents
 watching the market" start to act, Volaren will need the layer Mandate builds (inference). Its
 rules fingerprint and never-backfilled forward record are the closest public analogue found to
 Mandate's forward-paper evidence (DEC-99) and journal, though they cover a strategy's rules and
-simulated book, not one owner's decisions. Its Alpha Hub sends platform-authored strategies as
-tickets under an information-platform posture, the same adviser question
+simulated book, not one owner's decisions. Its Alpha Hub sends strategies, Volaren's own among
+them [VL6], as tickets under an information-platform posture, the same adviser question
 [Strategy options](10-strategy-options.md#option-0-baseline-platform-originated-theses-dec-97)
 raises for platform-originated theses; any reading is for counsel. Its copy
 publishes return figures and says "room to beat the market opened back up" [VL2] [VL9]; Mandate's
@@ -702,7 +706,7 @@ not shipped product, so no row supports a comparative claim until the demo in
 23. That Volaren needs a registration it lacks, or any other regulatory conclusion about it. Its
     terms say it is not a registered adviser or broker-dealer [VL6]; readings are for counsel.
 24. That Volaren charges for strategies. Its terms of 2026-10-02 say every public strategy is free
-    [VL6], although an older page mentions premium strategies [VL3].
+    [VL6], although its undated "Who we are" page mentions paying for premium strategies [VL3].
 
 ## Unknowns to verify by product trial
 
@@ -814,6 +818,7 @@ Accessed means the page carried no date and was read on 2026-09-26 or 2026-09-27
 | VL8 | [Volaren Alpha Hub](https://www.volaren.ai/strategies) | accessed 2026-10-05 |
 | VL9 | [Volaren: Congress Tracker strategy](https://www.volaren.ai/strategies/revisions/congress-tracker) | record through 2026-10-02 |
 | VL10 | [Martin Pestana on LinkedIn: joining YC Fall 2026](https://www.linkedin.com/posts/martin-pestana_activity-7505737757198233602-lC4U) | 2026-09-15 |
+| VL11 | [Volaren: Agents](https://www.volaren.ai/agents) (signed out) | accessed 2026-10-05 |
 | QC1 | [QuantConnect: Mia](https://www.quantconnect.com/docs/v2/ai-assistance/predefined-agents/mia) | accessed |
 | QC2 | [QuantConnect: risk management key concepts](https://www.quantconnect.com/docs/v2/writing-algorithms/algorithm-framework/risk-management/key-concepts) | accessed |
 | QC3 | [QuantConnect: live brokerages](https://www.quantconnect.com/docs/v2/cloud-platform/live-trading/brokerages) | accessed |
