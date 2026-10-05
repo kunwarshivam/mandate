@@ -345,6 +345,7 @@ impl MandateSource for FixtureMandate {
             model: ModelRef {
                 id: "quant.ma_crossover".to_owned(),
                 version: "1.0.0".to_owned(),
+                content_hash: Digest::of(b"quant.ma_crossover:1.0.0"),
                 max_output_age_s: 86_400,
                 params: BTreeMap::from([
                     ("fast_periods".to_owned(), "5".to_owned()),

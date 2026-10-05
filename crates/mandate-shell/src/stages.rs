@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use mandate_backtest::Signal;
+use mandate_canon::Digest;
 use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_num::Price;
@@ -163,6 +164,7 @@ pub struct Admitted {
 pub struct ModelRef {
     pub id: String,
     pub version: String,
+    pub content_hash: Digest,
     /// How long an output stays fresh, in whole seconds (`max_output_age_s`).
     pub max_output_age_s: i64,
     /// The model's `params`, key to value, exactly as the envelope states them.

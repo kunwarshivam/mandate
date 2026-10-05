@@ -62,6 +62,12 @@ fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tracer")
 }
 
+fn model_artifact() -> (Digest, Vec<u8>) {
+    let bytes = fs::read(fixtures().join("model-artifact.json"))
+        .unwrap_or_else(|error| panic!("the deterministic model artifact is readable: {error}"));
+    (Digest::of(&bytes), bytes)
+}
+
 fn agent_stream() -> String {
     format!("agent:{WORKSPACE}:{AGENT}")
 }
@@ -145,10 +151,7 @@ fn run_context(with_builder: bool) -> RunContext {
             },
             model_content_hashes: BTreeMap::from([(
                 ("quant.ma_crossover".to_owned(), "1.0.0".to_owned()),
-                Digest::from_hex(
-                    "5555555555555555555555555555555555555555555555555555555555555555",
-                )
-                .unwrap(),
+                model_artifact().0,
             )]),
             execution: OrderExecution {
                 asset_class: DomainAssetClass::UsEquity,
@@ -659,7 +662,10 @@ fn the_fixture_sizes_to_exactly_one_share() {
     )
     .unwrap();
     let inputs = SignalInputs {
-        outputs: BTreeMap::from([(output.model.clone(), BTreeMap::from([(instrument, output)]))]),
+        outputs: BTreeMap::from([(
+            output.model_id.clone(),
+            BTreeMap::from([(instrument, output)]),
+        )]),
         now,
     };
     let plan = BuilderPlan {
@@ -705,7 +711,10 @@ fn sizing_refuses_a_model_output_without_its_trusted_content_hash() {
     )
     .unwrap();
     let inputs = SignalInputs {
-        outputs: BTreeMap::from([(output.model.clone(), BTreeMap::from([(instrument, output)]))]),
+        outputs: BTreeMap::from([(
+            output.model_id.clone(),
+            BTreeMap::from([(instrument, output)]),
+        )]),
         now,
     };
     let mut context = run_context(true);
@@ -773,13 +782,10 @@ fn happy() {
         .find_map(|(method, _, body)| (*method == Method::Post).then(|| body.clone().unwrap()));
     assert!(posted.unwrap().contains(&client_order_id));
 
+    let (model_digest, model_bytes) = model_artifact();
+    let artifacts = BTreeMap::from([(model_digest, model_bytes)]);
     for rows in [&agent, &account] {
-        verify_events(
-            rows,
-            TrustedStart::GENESIS,
-            &BTreeMap::<Digest, Vec<u8>>::new(),
-        )
-        .unwrap();
+        verify_events(rows, TrustedStart::GENESIS, &artifacts).unwrap();
         for row in rows.iter() {
             assert_eq!(row.environment, "paper");
         }

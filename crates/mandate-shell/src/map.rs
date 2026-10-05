@@ -5,10 +5,12 @@
 
 use mandate_accounting::InstrumentId;
 use mandate_backtest::Signal;
-use mandate_canon::{Key, Object, Value};
 use mandate_executor::{BrokerOutcome, ConnectorError};
+use mandate_num::{Conviction, Unit};
 use mandate_risk::{CheckOutcome, Decision, Verdict};
-use mandate_runtime::{Autonomy, DryRunVerdict, ModelOutput, Proposal, Purpose, RiskClock};
+use mandate_runtime::{
+    Autonomy, DryRunVerdict, ModelDirection, ModelOutput, Proposal, Purpose, RiskClock,
+};
 
 use crate::error::{Cause, ShellError};
 use crate::stages::{ModelRef, Stage};
@@ -149,27 +151,28 @@ pub fn model_output(
                     what: "the output's expiry is past the risk clock's range",
                 })?;
             Ok(ModelOutput {
-                model: model.id.clone(),
-                version: model.version.clone(),
-                instrument: instrument.clone(),
+                model_id: model.id.clone(),
+                model_version: model.version.clone(),
+                content_hash: model.content_hash,
+                instrument_id: instrument.clone(),
                 as_of: now,
                 expires_at: RiskClock::from_secs(expires),
-                content: long_content()?,
+                direction: ModelDirection::Long,
+                conviction: Conviction::parse("1")?,
+                confidence: Unit::ONE,
+                horizon_s: u64::try_from(model.max_output_age_s).map_err(|_| Cause::Absent {
+                    what: "the output's horizon is negative",
+                })?,
+                thesis_ref: None,
+                evidence: Vec::new(),
+                invalidation: None,
+                thesis_id: None,
+                lineage_id: None,
+                ignored: None,
             })
         }
         Signal::Flat | Signal::Undecided => Err(Cause::NotLong(signal)),
     }
-}
-
-fn long_content() -> Result<Value, Cause> {
-    let mut content = Object::new();
-    for (name, value) in [("confidence", "1"), ("conviction", "1")] {
-        let key = Key::new(name).map_err(|_| Cause::Absent {
-            what: "a model output field could not be named",
-        })?;
-        content.insert(key, Value::Str(value.to_owned()));
-    }
-    Ok(Value::Object(content))
 }
 
 /// The name an autonomy is journaled and reported under.
@@ -187,13 +190,16 @@ mod tests {
 
     use mandate_backtest::{BacktestError, Signal};
     use mandate_builder::BuilderError;
+    use mandate_canon::Digest;
     use mandate_executor::{BrokerOutcome, BrokerUnknown, ConnectorError, ExecutorError};
     use mandate_num::{Price, Qty};
     use mandate_risk::{
         Check, CheckOutcome, Computed, Decision, GateError, Purpose as GatePurpose, ReasonCode,
         Verdict,
     };
-    use mandate_runtime::{Autonomy, DryRunVerdict, Proposal, Purpose, RiskClock, SinkError};
+    use mandate_runtime::{
+        Autonomy, DryRunVerdict, ModelDirection, Proposal, Purpose, RiskClock, SinkError,
+    };
     use mandate_spec::SpecError;
     use proptest::prelude::*;
 
@@ -424,6 +430,7 @@ mod tests {
         ModelRef {
             id: "quant.ma_crossover".to_owned(),
             version: "1.0.0".to_owned(),
+            content_hash: Digest::of(b"quant.ma_crossover:1.0.0"),
             max_output_age_s: 86_400,
             params: BTreeMap::new(),
         }
@@ -443,24 +450,19 @@ mod tests {
         }
         let output =
             model_output(Signal::Long, &model(), &instrument, now).map_err(|e| e.to_string())?;
-        assert_eq!(output.model, "quant.ma_crossover");
-        assert_eq!(output.version, "1.0.0");
+        assert_eq!(output.model_id, "quant.ma_crossover");
+        assert_eq!(output.model_version, "1.0.0");
+        assert_eq!(output.content_hash, model().content_hash);
         assert_eq!(output.as_of, now);
         assert_eq!(output.expires_at, RiskClock::from_secs(1_790_086_400));
-        assert_eq!(
-            output
-                .content
-                .get("conviction")
-                .and_then(mandate_canon::Value::as_str),
-            Some("1")
-        );
-        assert_eq!(
-            output
-                .content
-                .get("confidence")
-                .and_then(mandate_canon::Value::as_str),
-            Some("1")
-        );
+        assert_eq!(output.direction, ModelDirection::Long);
+        assert_eq!(output.conviction.to_string(), "1");
+        assert_eq!(output.confidence.to_string(), "1");
+        assert_eq!(output.horizon_s, 86_400);
+        assert!(output.thesis_ref.is_none());
+        assert!(output.evidence.is_empty());
+        assert!(output.invalidation.is_none());
+        assert!(output.ignored.is_none());
         let overflow = model_output(
             Signal::Long,
             &model(),

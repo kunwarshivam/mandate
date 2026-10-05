@@ -63,7 +63,8 @@ pub use types::{
     AgentId, ApprovalSettings, Autonomy, Classified, Command, ConnectionId, Deployment,
     DryRunVerdict, Effect, EventDraft, EventId, FlattenLeg, FlattenPlan, FlattenRequest,
     FoldedEvent, Handoff, Initiator, Input, IntentBody, IntentHandoff, KillScope, LocalHold,
-    MandateView, Mode, ModelOutput, NotificationRef, Observation, OrderExecution, Outstanding,
-    OwnerConfirmation, Proposal, ProtectionPrices, Purpose, RiskClock, Seq, SignalInputs,
-    TimeInForce, TimerId, TimerRequest, WorkspaceId, WriterEpoch,
+    MandateView, Mode, ModelDirection, ModelOutput, ModelOutputIgnored, NotificationRef,
+    Observation, OrderExecution, Outstanding, OwnerConfirmation, Proposal, ProtectionPrices,
+    Purpose, RiskClock, Seq, SignalInputs, TimeInForce, TimerId, TimerRequest, WorkspaceId,
+    WriterEpoch,
 };

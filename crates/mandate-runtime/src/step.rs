@@ -729,14 +729,7 @@ fn observed(observation: &Observation) -> Result<Value, RuntimeError> {
 }
 
 fn modelled(output: &ModelOutput) -> Result<Value, RuntimeError> {
-    payload::object(vec![
-        ("model", payload::text(&output.model)),
-        ("version", payload::text(&output.version)),
-        ("instrument", payload::text(output.instrument.as_str())),
-        ("as_of", payload::seconds_text(output.as_of)),
-        ("expires_at", payload::seconds_text(output.expires_at)),
-        ("content", output.content.clone()),
-    ])
+    payload::model_output(output)
 }
 
 /// One step's effect list under construction. Ids are derived from the epoch, the head the batch is
@@ -801,5 +794,65 @@ impl<'a> Batch<'a> {
     /// (`AGENTS.md` rules 5 and 6).
     pub(crate) fn notify_approval(&mut self, notification: mandate_approval::Notification) {
         self.effects.push(Effect::NotifyApproval(notification));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_accounting::InstrumentId;
+    use mandate_canon::{Digest, Value};
+    use mandate_num::{Conviction, Unit};
+
+    use super::modelled;
+    use crate::payload::model_output_of;
+    use crate::{EventId, ModelDirection, ModelOutput, ModelOutputIgnored, RiskClock};
+
+    #[test]
+    fn model_output_uses_the_closed_journal_shape_and_replays_exactly() -> Result<(), String> {
+        let output = ModelOutput {
+            model_id: "quant.ma_crossover".to_owned(),
+            model_version: "1.0.0".to_owned(),
+            content_hash: Digest::from_hex(
+                "5555555555555555555555555555555555555555555555555555555555555555",
+            )
+            .ok_or("content hash")?,
+            instrument_id: InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+                .map_err(|error| error.to_string())?,
+            as_of: RiskClock::from_secs(1_790_356_800),
+            expires_at: RiskClock::from_secs(1_790_443_200),
+            direction: ModelDirection::Long,
+            conviction: Conviction::parse("1").map_err(|error| error.to_string())?,
+            confidence: Unit::ONE,
+            horizon_s: 86_400,
+            thesis_ref: None,
+            evidence: vec![EventId("01J8Z3M0A000000000000000G2".to_owned())],
+            invalidation: None,
+            thesis_id: None,
+            lineage_id: None,
+            ignored: Some(ModelOutputIgnored::NotPinned),
+        };
+        let payload = modelled(&output).map_err(|error| error.to_string())?;
+        assert_eq!(
+            payload.get("model_id").and_then(Value::as_str),
+            Some("quant.ma_crossover")
+        );
+        assert_eq!(
+            payload.get("direction").and_then(Value::as_str),
+            Some("long")
+        );
+        assert_eq!(
+            payload.get("horizon_s").and_then(Value::as_int),
+            Some(86_400)
+        );
+        assert_eq!(
+            payload.get("ignored").and_then(Value::as_str),
+            Some("not_pinned")
+        );
+        assert_eq!(payload.get("content"), None);
+        assert_eq!(
+            model_output_of(&payload).map_err(|error| error.to_string())?,
+            output
+        );
+        Ok(())
     }
 }

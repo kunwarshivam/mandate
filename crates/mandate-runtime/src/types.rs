@@ -4,9 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_approval::{ActorKind, Notification};
-use mandate_canon::Value;
+use mandate_canon::{Digest, Value};
 use mandate_journal::Environment;
-use mandate_num::{Price, Qty};
+use mandate_num::{Conviction, Price, Qty, Unit};
 
 /// The scheduler's whole-second risk clock (mandate spec §5.2). The only time the core knows:
 /// `event_time` and `recorded_at` are never read for timing, and nothing reads a wall clock.
@@ -232,12 +232,39 @@ pub struct Observation {
 /// against the risk-clock second, never against a wall clock.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelOutput {
-    pub model: String,
-    pub version: String,
-    pub instrument: InstrumentId,
+    pub model_id: String,
+    pub model_version: String,
+    pub content_hash: Digest,
+    pub instrument_id: InstrumentId,
     pub as_of: RiskClock,
     pub expires_at: RiskClock,
-    pub content: Value,
+    pub direction: ModelDirection,
+    pub conviction: Conviction,
+    pub confidence: Unit,
+    pub horizon_s: u64,
+    pub thesis_ref: Option<Digest>,
+    pub evidence: Vec<EventId>,
+    pub invalidation: Option<String>,
+    pub thesis_id: Option<String>,
+    pub lineage_id: Option<String>,
+    pub ignored: Option<ModelOutputIgnored>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelDirection {
+    Long,
+    Other(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelOutputIgnored {
+    NotPinned,
+    ModelWithdrawn,
+    OutputLimits,
+    NotInUniverse,
+    DirectionNotAllowed,
+    HorizonMismatch,
+    RevisionWithoutPredecessor,
 }
 
 /// Everything that can reach the core.

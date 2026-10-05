@@ -203,6 +203,7 @@ impl<'s> Session<'s> {
             );
         }
         let event_id = Ids { space }.derive(self.epoch(stream), 0, 0);
+        let config_refs = Object::new();
         let bytes = draft_bytes(
             &Envelope {
                 stream,
@@ -214,6 +215,7 @@ impl<'s> Session<'s> {
                 event_id: &event_id,
                 event_type: "StreamOpened",
                 causation_id: None,
+                config_refs: &config_refs,
                 payload: &Value::Object(object),
             },
         )?;
@@ -431,6 +433,13 @@ impl<'s> Session<'s> {
 
     fn append_agent(&mut self, draft: &EventDraft) -> Result<(), ShellError> {
         let stream = self.agent_stream.clone();
+        let mut config_refs = Object::new();
+        config_refs.insert(
+            Key::new("mandate_version").map_err(|_| ShellError::Envelope {
+                field: "mandate_version",
+            })?,
+            Value::Str(self.view.version.clone()),
+        );
         let bytes = draft_bytes(
             &Envelope {
                 stream: &stream,
@@ -442,6 +451,7 @@ impl<'s> Session<'s> {
                 event_id: &draft.event_id.0,
                 event_type: &draft.event_type,
                 causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
+                config_refs: &config_refs,
                 payload: &draft.payload,
             },
         )?;
@@ -450,6 +460,13 @@ impl<'s> Session<'s> {
 
     fn append_account(&mut self, draft: &mandate_executor::EventDraft) -> Result<(), ShellError> {
         let stream = self.account_stream.clone();
+        let mut config_refs = Object::new();
+        config_refs.insert(
+            Key::new("mandate_version").map_err(|_| ShellError::Envelope {
+                field: "mandate_version",
+            })?,
+            Value::Str(self.view.version.clone()),
+        );
         let bytes = draft_bytes(
             &Envelope {
                 stream: &stream,
@@ -461,6 +478,7 @@ impl<'s> Session<'s> {
                 event_id: &draft.event_id.0,
                 event_type: &draft.event_type,
                 causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
+                config_refs: &config_refs,
                 payload: &draft.payload,
             },
         )?;

@@ -54,7 +54,7 @@ use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
 use mandate_marketdata::model::{Kind, Records, TimeUnit, Timeframe};
-use mandate_num::{Bps, Conviction, Fraction, Price, Qty, ShareIncrement, SignedQty, Unit, Usd};
+use mandate_num::{Bps, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
 use mandate_risk::{
     AccountSnapshot as GateAccountSnapshot, AgentSnapshot as GateAgentSnapshot, ConductState,
     Decision, FlattenInitiator, FlattenInput, GateConfig, GateInput, GatePass,
@@ -64,8 +64,8 @@ use mandate_risk::{
 };
 use mandate_runtime::{
     AgentId, ApprovalSettings, Autonomy, FlattenLeg, FlattenPlan, FlattenRequest, Initiator,
-    IntentBody, IntentHandoff, MandateView, OrderExecution, Proposal, Purpose, RiskClock,
-    SignalInputs, TimeInForce,
+    IntentBody, IntentHandoff, MandateView, ModelDirection, OrderExecution, Proposal, Purpose,
+    RiskClock, SignalInputs, TimeInForce,
 };
 use mandate_spec::document::ParamValue;
 use mandate_spec::policy::PolicyLevel;
@@ -970,6 +970,7 @@ impl MandateSource for SpecMandate {
             model: ModelRef {
                 id: model.id.as_str().to_owned(),
                 version: model.version.clone(),
+                content_hash: model.content_hash,
                 max_output_age_s: i64::from(model.max_output_age_s),
                 params,
             },
@@ -1125,7 +1126,7 @@ fn builder_output(
     mandate: &BuilderMandate,
     context: &BuilderContext,
 ) -> Result<BuilderModelOutput, Cause> {
-    if output.model != outer_model || output.instrument != *outer_instrument {
+    if output.model_id != outer_model || output.instrument_id != *outer_instrument {
         return Err(Cause::Absent {
             what: "a consistently keyed model output",
         });
@@ -1133,36 +1134,37 @@ fn builder_output(
     let pinned = mandate
         .models
         .iter()
-        .find(|model| model.id.as_str() == output.model && model.version.as_str() == output.version)
+        .find(|model| {
+            model.id.as_str() == output.model_id && model.version.as_str() == output.model_version
+        })
         .ok_or(Cause::Absent {
             what: "a model output pinned by the validated mandate",
         })?;
     let content_hash = context
         .model_content_hashes
-        .get(&(output.model.clone(), output.version.clone()))
+        .get(&(output.model_id.clone(), output.model_version.clone()))
         .copied()
         .ok_or(Cause::Absent {
             what: "the model output's trusted content hash",
         })?;
-    let conviction = output
-        .content
-        .get("conviction")
-        .and_then(Value::as_str)
-        .ok_or(Cause::Absent {
-            what: "the model output's conviction",
-        })?;
-    let confidence = output
-        .content
-        .get("confidence")
-        .and_then(Value::as_str)
-        .ok_or(Cause::Absent {
-            what: "the model output's confidence",
-        })?;
+    if content_hash != output.content_hash {
+        return Err(Cause::Absent {
+            what: "the model output's matching trusted content hash",
+        });
+    }
+    let direction = match &output.direction {
+        ModelDirection::Long => Direction::Long,
+        ModelDirection::Other(_) => {
+            return Err(Cause::Absent {
+                what: "a supported model output direction",
+            });
+        }
+    };
     Ok(BuilderModelOutput {
         model_id: pinned.id.clone(),
         model_version: pinned.version.clone(),
         content_hash,
-        instrument: mandate_domain::AssetId::parse(output.instrument.as_str())
+        instrument: mandate_domain::AssetId::parse(output.instrument_id.as_str())
             .map_err(mandate_builder::BuilderError::from)?,
         as_of: UtcNanos::from_parts(output.as_of.secs(), 0).map_err(|_| Cause::Absent {
             what: "the model output's timestamp",
@@ -1172,9 +1174,9 @@ fn builder_output(
                 what: "the model output's expiry",
             }
         })?,
-        direction: Direction::Long,
-        conviction: Conviction::parse(conviction)?,
-        confidence: Unit::parse(confidence)?,
+        direction,
+        conviction: output.conviction,
+        confidence: output.confidence,
     })
 }
 
@@ -1987,7 +1989,7 @@ mod tests {
         proposed_order, working_order_of,
     };
     use mandate_backtest::{BacktestError, Signal};
-    use mandate_canon::{DecStr, Value};
+    use mandate_canon::{DecStr, Digest, Value};
     use mandate_journal::AppendOutcome;
     use mandate_marketdata::actions::{RecordedActions, write_actions};
     use mandate_marketdata::dataset::{Store, partition_name};
@@ -2133,6 +2135,7 @@ mod tests {
             ("account_ref", Value::Str("tracer-paper".to_owned())),
             ("broker", Value::Str("alpaca".to_owned())),
         ])?;
+        let config_refs = mandate_canon::Object::new();
         let draft = draft_bytes(
             &Envelope {
                 stream,
@@ -2144,6 +2147,7 @@ mod tests {
                 event_id: "10000100000000000000000000",
                 event_type: "StreamOpened",
                 causation_id: None,
+                config_refs: &config_refs,
                 payload: &payload,
             },
         )
@@ -2919,6 +2923,7 @@ mod tests {
         ModelRef {
             id: id.to_owned(),
             version: "1.0.0".to_owned(),
+            content_hash: Digest::of(format!("{id}:1.0.0").as_bytes()),
             max_output_age_s: 86_400,
             params: params
                 .iter()

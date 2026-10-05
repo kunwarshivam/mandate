@@ -9,9 +9,9 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
-use mandate_canon::{Int, Key, Value};
+use mandate_canon::{Digest, Int, Key, Value};
 use mandate_journal::Environment;
-use mandate_num::{Price, Qty};
+use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_time::UtcNanos;
 
 use super::*;
@@ -20,7 +20,7 @@ use crate::state::{RuntimeState, fold};
 use crate::step::handle;
 use crate::types::{
     ApprovalSettings, Classified, ConnectionId, Deployment, Effect, EventDraft, FlattenPlan,
-    FoldedEvent, Input, MandateView, ModelOutput, Seq, SignalInputs, WriterEpoch,
+    FoldedEvent, Input, MandateView, ModelDirection, ModelOutput, Seq, SignalInputs, WriterEpoch,
 };
 
 type Checked = Result<(), String>;
@@ -30,6 +30,27 @@ const ACCOUNT_STREAM: &str = "acct:w:x";
 const CONTROL_STREAM: &str = "ctl:w";
 const OWNER: &str = "owner";
 const AT: i64 = 1_000;
+
+fn model_output(model: &str, as_of: i64, expires_at: i64) -> Result<ModelOutput, String> {
+    Ok(ModelOutput {
+        model_id: model.to_owned(),
+        model_version: "1".to_owned(),
+        content_hash: Digest::of(format!("{model}:1").as_bytes()),
+        instrument_id: instrument("AAPL")?,
+        as_of: RiskClock::from_secs(as_of),
+        expires_at: RiskClock::from_secs(expires_at),
+        direction: ModelDirection::Long,
+        conviction: Conviction::parse("1").map_err(failed)?,
+        confidence: Unit::ONE,
+        horizon_s: u64::try_from(expires_at.saturating_sub(as_of)).map_err(failed)?,
+        thesis_ref: None,
+        evidence: Vec::new(),
+        invalidation: None,
+        thesis_id: None,
+        lineage_id: None,
+        ignored: None,
+    })
+}
 
 fn failed(what: impl std::fmt::Display) -> String {
     what.to_string()
@@ -282,14 +303,7 @@ impl Rig {
     /// A fresh model output and a tick at `at`, which is one evaluation.
     fn evaluate(&mut self, at: i64, model: &str, ports: &Ports<'_>) -> Result<Vec<Effect>, String> {
         self.step(
-            Input::ModelOutput(ModelOutput {
-                model: model.to_owned(),
-                version: "1".to_owned(),
-                instrument: instrument("AAPL")?,
-                as_of: RiskClock::from_secs(at),
-                expires_at: RiskClock::from_secs(at.saturating_add(300)),
-                content: text("long"),
-            }),
+            Input::ModelOutput(model_output(model, at, at.saturating_add(300))?),
             ports,
         )?;
         self.step(Input::Tick(RiskClock::from_secs(at)), ports)
@@ -653,14 +667,11 @@ fn a_request_cites_the_unexpired_outputs_behind_it() -> Checked {
     };
     let (mut rig, _) = Rig::started(&ports)?;
     let early = rig.step(
-        Input::ModelOutput(ModelOutput {
-            model: "m0".to_owned(),
-            version: "1".to_owned(),
-            instrument: instrument("AAPL")?,
-            as_of: RiskClock::from_secs(AT.saturating_sub(600)),
-            expires_at: RiskClock::from_secs(AT.saturating_sub(1)),
-            content: text("long"),
-        }),
+        Input::ModelOutput(model_output(
+            "m0",
+            AT.saturating_sub(600),
+            AT.saturating_sub(1),
+        )?),
         &ports,
     )?;
     let expired = the(&early, "ModelOutputRecorded")?.event_id.clone();

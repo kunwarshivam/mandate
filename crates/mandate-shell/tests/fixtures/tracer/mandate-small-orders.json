@@ -37,7 +37,7 @@
     "signal_models": [
       {
         "admits_instruments": false,
-        "content_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "content_hash": "sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc",
         "id": "quant.ma_crossover",
         "max_output_age_s": 86400,
         "params": [

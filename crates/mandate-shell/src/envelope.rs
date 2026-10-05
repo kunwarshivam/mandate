@@ -5,6 +5,8 @@
 //! constant: there is no input from which a draft could be built with any environment but `paper`
 //! (TI-7, `AGENTS.md` rule 8).
 
+use std::collections::BTreeSet;
+
 use mandate_canon::{Int, Key, Object, Value, to_canonical};
 use mandate_journal::Environment;
 use mandate_time::UtcNanos;
@@ -54,6 +56,7 @@ pub struct DraftFields<'a> {
     pub event_id: &'a str,
     pub event_type: &'a str,
     pub causation_id: Option<&'a str>,
+    pub config_refs: &'a Object,
     pub payload: &'a Value,
 }
 
@@ -77,12 +80,17 @@ pub fn draft_bytes(
         Some(id) => text(id),
         None => Value::Null,
     };
+    let mut references = BTreeSet::new();
+    collect_digest_refs(draft.payload, &mut references);
     let fields = object(vec![
         ("actor", actor),
-        ("artifact_refs", Value::Array(Vec::new())),
+        (
+            "artifact_refs",
+            Value::Array(references.into_iter().map(Value::Str).collect()),
+        ),
         ("causation_id", causation),
         ("clock_source", text("scheduler")),
-        ("config_refs", Value::Object(Object::new())),
+        ("config_refs", Value::Object(draft.config_refs.clone())),
         ("correlation_id", Value::Null),
         ("environment", text(ENVIRONMENT.as_str())),
         ("envelope_version", int(1)?),
@@ -95,6 +103,31 @@ pub fn draft_bytes(
         ("stream_id", text(envelope.stream)),
     ])?;
     Ok(to_canonical(&fields))
+}
+
+fn collect_digest_refs(value: &Value, references: &mut BTreeSet<String>) {
+    match value {
+        Value::Str(text) => {
+            if text
+                .strip_prefix("sha256:")
+                .and_then(mandate_canon::Digest::from_hex)
+                .is_some()
+            {
+                references.insert(text.clone());
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_digest_refs(value, references);
+            }
+        }
+        Value::Object(values) => {
+            for value in values.values() {
+                collect_digest_refs(value, references);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Int(_) => {}
+    }
 }
 
 /// The build the actor names: a content reference over the crate's name and version. It is not a
@@ -217,6 +250,7 @@ mod tests {
     fn every_draft_says_paper_and_names_its_stream_writer_and_causation() -> Result<(), String> {
         let at = UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|e| e.to_string())?;
         let payload = Value::Object(mandate_canon::Object::new());
+        let config_refs = mandate_canon::Object::new();
         let bytes = draft_bytes(
             &Envelope {
                 stream: "acct:ws1:acc1",
@@ -228,6 +262,7 @@ mod tests {
                 event_id: "10000100000000000001000000",
                 event_type: "OrderSubmitted",
                 causation_id: Some("00000100000000000003000001"),
+                config_refs: &config_refs,
                 payload: &payload,
             },
         )
@@ -271,6 +306,7 @@ mod tests {
     fn an_agent_draft_is_written_by_the_agent_with_no_causation() -> Result<(), String> {
         let at = UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|e| e.to_string())?;
         let payload = Value::Null;
+        let config_refs = mandate_canon::Object::new();
         let bytes = draft_bytes(
             &Envelope {
                 stream: "agent:ws1:ag1",
@@ -282,6 +318,7 @@ mod tests {
                 event_id: "00000100000000000000000000",
                 event_type: "AgentModeChanged",
                 causation_id: None,
+                config_refs: &config_refs,
                 payload: &payload,
             },
         )
@@ -293,6 +330,54 @@ mod tests {
             .and_then(|actor| actor.get("kind"))
             .and_then(Value::as_str);
         assert_eq!(kind, Some("agent"));
+        Ok(())
+    }
+
+    #[test]
+    fn artifact_refs_are_the_sorted_digest_references_in_the_payload() -> Result<(), String> {
+        let at = UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|e| e.to_string())?;
+        let mut payload = mandate_canon::Object::new();
+        payload.insert(
+            mandate_canon::Key::new("content_hash").map_err(|_| "content_hash")?,
+            Value::Str(format!("sha256:{}", "5".repeat(64))),
+        );
+        payload.insert(
+            mandate_canon::Key::new("thesis_ref").map_err(|_| "thesis_ref")?,
+            Value::Str(format!("sha256:{}", "2".repeat(64))),
+        );
+        let config_refs = mandate_canon::Object::new();
+        let bytes = draft_bytes(
+            &Envelope {
+                stream: "agent:ws1:agent-a",
+                writer: Writer::Agent,
+                actor_id: "agent-a",
+                event_time: at,
+            },
+            &DraftFields {
+                event_id: "00000100000000000000000000",
+                event_type: "ModelOutputRecorded",
+                causation_id: None,
+                config_refs: &config_refs,
+                payload: &Value::Object(payload),
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let envelope = envelope_of(&bytes)?;
+        let listed: Vec<&str> = envelope
+            .get("artifact_refs")
+            .and_then(Value::as_array)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        let expected = [
+            format!("sha256:{}", "2".repeat(64)),
+            format!("sha256:{}", "5".repeat(64)),
+        ];
+        assert_eq!(
+            listed,
+            expected.iter().map(String::as_str).collect::<Vec<_>>()
+        );
         Ok(())
     }
 }
