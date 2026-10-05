@@ -4,14 +4,12 @@ import Link from "next/link";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
 import { BODY, PIXEL, RAISED } from "./letter";
-import { KEY, PixelIcon } from "./pixel-icons";
 import { TitleBar, WINDOW_BUTTON } from "./retro";
 import { Wallpaper } from "./wallpaper";
 
 /**
  * The sign-in pages as the logon dialog of the landing page's desktop: the same wallpaper, one window
- * in the middle with the key beside what it asks, in the landing page's faces and bevels. Its close
- * box goes back to the home page.
+ * in the middle, in the landing page's faces and bevels. Its close box goes back to the home page.
  */
 export function Logon({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -27,10 +25,7 @@ export function Logon({ title, children }: { title: string; children: ReactNode 
             </Link>
           }
         />
-        <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 px-4 pt-5 pb-4 sm:gap-x-5 sm:px-6 sm:pt-6 sm:pb-6">
-          <PixelIcon sprite={KEY} className="size-10 sm:size-12" />
-          <div className="min-w-0">{children}</div>
-        </div>
+        <div className="min-w-0 px-5 pt-5 pb-6 sm:px-7 sm:pt-6 sm:pb-7">{children}</div>
       </section>
     </main>
   );
