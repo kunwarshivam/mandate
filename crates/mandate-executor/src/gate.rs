@@ -496,9 +496,7 @@ fn binding_checks_value(checks: &[CheckOutcome]) -> Result<Value, ExecutorError>
                 CheckOutcome::Failed(check, _) => (*check, "fail"),
                 CheckOutcome::NotReached(check) => (*check, "not_reached"),
             };
-            binding_check_ids(check)
-                .iter()
-                .map(move |id| (id, result))
+            binding_check_ids(check).iter().map(move |id| (id, result))
         })
         .map(|(id, result)| {
             object(vec![
