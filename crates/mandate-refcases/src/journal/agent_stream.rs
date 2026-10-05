@@ -108,29 +108,11 @@ fn named<'a>(section: &'a Json, lists: &[&str], name: &str) -> Result<&'a Json, 
 /// Every artifact the chain references, keyed by its digest, from its canonical bytes.
 fn artifact_store(fx: &Json) -> Result<BTreeMap<Digest, Vec<u8>>, String> {
     let section = at(fx, SECTION)?;
-    let mut store = BTreeMap::new();
-    for artifact in list_at(fx, "artifacts")?
-        .iter()
-        .chain(list_at(section, "artifacts")?)
-    {
-        let name = str_at(artifact, "name")?;
-        let canonical = str_at(artifact, "canonical")?;
-        let reference = str_at(artifact, "ref")?;
-        let calculated = Digest::of(canonical.as_bytes());
-        let calculated_reference = format!("sha256:{}", calculated.to_hex());
-        expect_eq(
-            &format!("{name}: ref"),
-            reference,
-            calculated_reference.as_str(),
-        )?;
-        let bytes = canonical.as_bytes().to_vec();
-        if let Some(previous) = store.insert(calculated, bytes.clone()) {
-            ensure(previous == bytes, || {
-                format!("{name}: duplicate digest has different canonical bytes")
-            })?;
-        }
-    }
-    Ok(store)
+    super::verified_artifact_store(
+        list_at(fx, "artifacts")?
+            .iter()
+            .chain(list_at(section, "artifacts")?),
+    )
 }
 
 fn artifacts(fx: &Json, _: &str) -> Result<(), String> {

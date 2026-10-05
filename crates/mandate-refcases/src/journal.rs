@@ -167,6 +167,35 @@ fn timestamp(text: &str) -> Result<UtcNanos, String> {
     UtcNanos::parse(text).map_err(|e| format!("`{text}`: {e}"))
 }
 
+fn verified_artifact_store<'a>(
+    artifacts: impl IntoIterator<Item = &'a Json>,
+) -> Result<BTreeMap<Digest, Vec<u8>>, String> {
+    let mut store = BTreeMap::new();
+    for artifact in artifacts {
+        let name = str_at(artifact, "name")?;
+        let canonical = str_at(artifact, "canonical")?;
+        let reference = str_at(artifact, "ref")?;
+        let calculated = Digest::of(canonical.as_bytes());
+        let calculated_reference = format!("sha256:{}", calculated.to_hex());
+        expect_eq(
+            &format!("{name}: ref"),
+            reference,
+            calculated_reference.as_str(),
+        )?;
+        let bytes = canonical.as_bytes().to_vec();
+        if let Some(previous) = store.insert(calculated, bytes.clone()) {
+            ensure(previous == bytes, || {
+                format!("{name}: duplicate digest has different canonical bytes")
+            })?;
+        }
+    }
+    Ok(store)
+}
+
+fn root_artifact_store(fx: &Json) -> Result<BTreeMap<Digest, Vec<u8>>, String> {
+    verified_artifact_store(list_at(fx, "artifacts")?)
+}
+
 /// A draft as a writer would send it: the body without the journal-assigned fields, serialized by
 /// `serde_json` (not canonical), so the journal's own parsing and normalization are exercised.
 fn draft_json(body: &Json) -> Result<Vec<u8>, String> {
@@ -274,11 +303,8 @@ fn chain_append(fx: &Json, _: &str) -> Result<(), String> {
         next_seq: u64_at(last, "seq")?.saturating_add(1),
         last_hash: digest(str_at(last, "hash")?)?,
     };
-    let verified = verify_events(
-        journal.rows(&stream),
-        TrustedStart::GENESIS,
-        &BTreeMap::new(),
-    );
+    let artifacts = root_artifact_store(fx)?;
+    let verified = verify_events(journal.rows(&stream), TrustedStart::GENESIS, &artifacts);
     expect_eq("verification of the appended chain", verified, Ok(expected))
 }
 
@@ -483,7 +509,8 @@ fn tamper(fx: &Json, name: &str) -> Result<(), String> {
     )?;
     let mut rows = rows_from_chain(fx)?;
     apply(&mut rows)?;
-    let per_event = verify_events(&rows, TrustedStart::GENESIS, &BTreeMap::new());
+    let artifacts = root_artifact_store(fx)?;
+    let per_event = verify_events(&rows, TrustedStart::GENESIS, &artifacts);
 
     let expect = at(case, "expect")?;
     match expect.get("range_check").and_then(Json::as_str) {
@@ -765,12 +792,75 @@ fn append(fx: &Json, name: &str) -> Result<(), String> {
             5,
         )?;
     }
-    let verified = verify_events(
-        journal.rows(&stream),
-        TrustedStart::GENESIS,
-        &BTreeMap::new(),
-    );
+    let rows = journal.rows(&stream);
+    let artifacts = root_artifact_store(fx)?;
+    let verified = verify_events(rows, TrustedStart::GENESIS, &artifacts);
     ensure(verified.is_ok(), || {
         format!("journal fails verification after the append: {verified:?}")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use mandate_canon::Digest;
+    use mandate_journal::{TrustedStart, verify_events};
+
+    use super::{nth, root_artifact_store, rows_from_chain};
+    use crate::{Json, ensure, expect_eq, read_fixture, str_at};
+
+    fn fixture() -> Result<Json, String> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
+        read_fixture(&dir, "journal.json").map(Arc::unwrap_or_clone)
+    }
+
+    #[test]
+    fn root_artifacts_are_independently_rehashed_before_verification() -> Result<(), String> {
+        let fixture = fixture()?;
+        let store = root_artifact_store(&fixture)?;
+        expect_eq("root artifact count", store.len(), 6)?;
+        ensure(
+            store
+                .iter()
+                .all(|(digest, bytes)| Digest::of(bytes) == *digest),
+            || "a loaded artifact is not keyed by its own digest".to_owned(),
+        )?;
+
+        let mut wrong = fixture;
+        let reference = wrong
+            .pointer_mut("/artifacts/0/ref")
+            .ok_or("the fixture has no first artifact ref")?;
+        *reference = Json::String(format!("sha256:{}", "0".repeat(64)));
+        let error = root_artifact_store(&wrong)
+            .err()
+            .ok_or("wrong declared digest was accepted")?;
+        ensure(error.starts_with("fee_config: ref:"), || error)
+    }
+
+    #[test]
+    fn missing_root_artifact_bytes_fail_strict_event_verification() -> Result<(), String> {
+        let fixture = fixture()?;
+        let mut store = root_artifact_store(&fixture)?;
+        let mandate_reference = str_at(
+            nth(&fixture, "chain", "1")?,
+            "body.config_refs.mandate_version",
+        )?;
+        let mandate_digest = mandate_reference
+            .strip_prefix("sha256:")
+            .and_then(Digest::from_hex)
+            .ok_or("the mandate version is not a digest reference")?;
+        ensure(store.remove(&mandate_digest).is_some(), || {
+            "the mandate version artifact was not loaded".to_owned()
+        })?;
+        let failure = verify_events(&rows_from_chain(&fixture)?, TrustedStart::GENESIS, &store)
+            .err()
+            .map(|failure| (failure.seq, failure.check.code()));
+        expect_eq(
+            "missing artifact failure",
+            failure,
+            Some((2, "artifact_missing")),
+        )
+    }
 }
