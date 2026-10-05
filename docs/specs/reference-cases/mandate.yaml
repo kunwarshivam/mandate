@@ -12125,8 +12125,8 @@ cases:
       effective_at: '2026-09-22T14:00:30.000000000Z'
       quorum: {required: 1, independent: false}
     - {type: ApprovalRevalidated, approval: ap1, result: act, reason: null, clock: '2026-09-22T14:00:00.000000000Z'}
-    - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, qty: '10', limit_price: '155', purpose: open,
-      mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
+    - {instrument_id: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, order_type: limit, tif: day, qty: '10', limit_price: '155',
+      purpose: open, mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
 - id: MC-E02
   kind: escalation
   op: lifecycle
@@ -12538,8 +12538,8 @@ cases:
       effective_at: '2026-09-22T14:00:30.000000000Z'
       quorum: {required: 1, independent: false}
     - {type: ApprovalRevalidated, approval: ap1, result: act, reason: null, clock: '2026-09-22T14:00:00.000000000Z'}
-    - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, qty: '10', limit_price: '155', purpose: open,
-      mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
+    - {instrument_id: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, order_type: limit, tif: day, qty: '10', limit_price: '155',
+      purpose: open, mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
   - drafts: []
 - id: MC-E07
   kind: escalation
@@ -13797,8 +13797,8 @@ cases:
       effective_at: '2026-09-22T14:00:30.000000000Z'
       quorum: {required: 1, independent: false}
     - {type: ApprovalRevalidated, approval: ap1, result: act, reason: null, clock: '2026-09-22T14:00:00.000000000Z'}
-    - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, qty: '10', limit_price: '155', purpose: open,
-      mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
+    - {instrument_id: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, order_type: limit, tif: day, qty: '10', limit_price: '155',
+      purpose: open, mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
 - id: MC-E22
   kind: escalation
   op: lifecycle
@@ -14021,8 +14021,8 @@ cases:
       effective_at: '2026-09-22T14:00:30.000000000Z'
       quorum: {required: 1, independent: false}
     - {type: ApprovalRevalidated, approval: ap1, result: act, reason: null, clock: '2026-09-22T14:00:00.000000000Z'}
-    - {instrument: 7b4a1c2e-1111-4a2b-9c3d-000000000001, side: buy, qty: '0.01', limit_price: '50000', purpose: open,
-      mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
+    - {instrument_id: 7b4a1c2e-1111-4a2b-9c3d-000000000001, side: buy, order_type: limit, tif: gtc, qty: '0.01',
+      limit_price: '50000', purpose: open, mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T14:00:00.000000000Z'}
 - id: MC-E25
   kind: escalation
   op: ask_permit
@@ -14175,8 +14175,8 @@ cases:
       effective_at: '2026-09-22T06:00:30.000000000Z'
       quorum: {required: 1, independent: false}
     - {type: ApprovalRevalidated, approval: ap1, result: act, reason: null, clock: '2026-09-22T06:00:00.000000000Z'}
-    - {instrument: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, qty: '10', limit_price: '155', purpose: open,
-      mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T06:00:00.000000000Z'}
+    - {instrument_id: 7b4a1c2e-5555-4a2b-9c3d-000000000005, side: buy, order_type: limit, tif: day, qty: '10', limit_price: '155',
+      purpose: open, mandate_version: 'sha256:v1', type: IntentProposed, approval: ap1, clock: '2026-09-22T06:00:00.000000000Z'}
 - id: MC-E30
   kind: escalation
   op: deliver_now
