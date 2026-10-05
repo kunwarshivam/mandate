@@ -5,18 +5,21 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_canon::{Value, parse};
+use mandate_canon::{Digest, Value, parse, to_canonical};
+use mandate_time::UtcNanos;
 
 use crate::schema::{Ty, is_ident};
 use crate::{Draft, Invalid, InvalidReason, StoredEvent, StreamId, StreamType, TrustedStart};
 
 /// The event types §9.1 closes on the agent stream.
-const CLOSED: [&str; 8] = [
+const CLOSED: [&str; 10] = [
     "StreamOpened",
     "ObservationRecorded",
     "ModelOutputRecorded",
     "DecisionMade",
     "IntentProposed",
+    "ApprovalRequested",
+    "ApprovalDelivered",
     "AgentModeChanged",
     "KillSwitchActivated",
     "OwnerExitRequested",
@@ -50,6 +53,7 @@ pub(crate) fn payload(
             action_rules(view)?;
             ensure(caused, InvalidReason::Schema, "causation_id")?;
         }
+        "ApprovalRequested" => approval_requested_rules(view)?,
         "AgentModeChanged" => ensure(
             strictness(view.text("to")) >= strictness(view.text("lifecycle")),
             InvalidReason::Schema,
@@ -468,6 +472,76 @@ fn owner_exit_rules(p: Payload<'_>) -> Result<(), Invalid> {
     )
 }
 
+fn approval_requested_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    let content = p.0.get("content").unwrap_or(&Value::Null);
+    let action = content.get("action").unwrap_or(&Value::Null);
+    let trigger = content.get("trigger").unwrap_or(&Value::Null);
+    let evidence = content.get("evidence").unwrap_or(&Value::Null);
+    let score = evidence.get("combined_score").unwrap_or(&Value::Null);
+    let approvers = content.get("approvers").unwrap_or(&Value::Null);
+    for (top, nested) in [
+        ("instrument", action.get("instrument")),
+        ("asset_class", action.get("asset_class")),
+        ("side", action.get("side")),
+        ("qty", action.get("qty")),
+        ("limit", action.get("limit")),
+        ("purpose", action.get("purpose")),
+        ("mandate_version", trigger.get("mandate_version")),
+        ("decided_by", trigger.get("decided_by")),
+        ("combined_score", score.get("value")),
+        ("reference_mark", content.get("reference_mark")),
+        ("approvers_required", approvers.get("required")),
+        ("independent_required", approvers.get("independent")),
+    ] {
+        ensure(
+            p.0.get(top) == nested,
+            InvalidReason::Schema,
+            &format!("payload.{top}"),
+        )?;
+    }
+    let content_deadline = content
+        .get("deadline")
+        .and_then(Value::as_str)
+        .and_then(|stamp| UtcNanos::parse(stamp).ok())
+        .and_then(|stamp| u64::try_from(stamp.secs()).ok());
+    ensure(
+        p.0.get("deadline").and_then(Value::as_int) == content_deadline,
+        InvalidReason::Schema,
+        "payload.deadline",
+    )?;
+    ensure(
+        score.get("label").and_then(Value::as_str)
+            == Some("combined model score, not a probability of profit"),
+        InvalidReason::Schema,
+        "payload.content.evidence.combined_score.label",
+    )?;
+    ensure(
+        content.get("default").and_then(Value::as_str)
+            == Some("If you do nothing, this action is skipped"),
+        InvalidReason::Schema,
+        "payload.content.default",
+    )?;
+    let choices = content
+        .get("choices")
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    ensure(
+        choices
+            == [
+                Value::Str("approve".to_owned()),
+                Value::Str("skip".to_owned()),
+            ],
+        InvalidReason::Schema,
+        "payload.content.choices",
+    )?;
+    let expected = format!("sha256:{}", Digest::of(&to_canonical(content)));
+    ensure(
+        p.text("content_hash") == expected,
+        InvalidReason::Schema,
+        "payload.content_hash",
+    )
+}
+
 /// One of `decided_by`'s labels (mandate spec §6.2): a fixed label, or `rule:` or `delegation:`
 /// followed by an `id`.
 fn is_label(label: &str) -> bool {
@@ -498,6 +572,8 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         "ModelOutputRecorded" => Some(&MODEL_OUTPUT_RECORDED),
         "DecisionMade" => Some(&DECISION_MADE),
         "IntentProposed" => Some(&INTENT_PROPOSED),
+        "ApprovalRequested" => Some(&APPROVAL_REQUESTED),
+        "ApprovalDelivered" => Some(&APPROVAL_DELIVERED),
         "AgentModeChanged" => Some(&AGENT_MODE_CHANGED),
         "KillSwitchActivated" => Some(&KILL_SWITCH_ACTIVATED),
         "OwnerExitRequested" => Some(&OWNER_EXIT_REQUESTED),
@@ -614,6 +690,107 @@ static INTENT_PROPOSED: Ty = Ty::Record(&[
             "owner_exit",
         ]),
     ),
+]);
+
+static REFERENCE_MARK: Ty = Ty::Record(&[("price", Ty::Decimal), ("seq", Ty::Int)]);
+
+static APPROVAL_REQUESTED: Ty = Ty::Record(&[
+    ("instrument", Ty::Str),
+    ("asset_class", Ty::OneOf(&["us_equity", "crypto"])),
+    ("side", Ty::OneOf(&["buy"])),
+    ("qty", Ty::Decimal),
+    ("limit", Ty::Decimal),
+    ("purpose", Ty::OneOf(&["open", "increase"])),
+    ("mandate_version", Ty::DigestRef),
+    ("decided_by", Ty::Str),
+    ("combined_score", Ty::Decimal),
+    ("reference_mark", Ty::Nullable(&REFERENCE_MARK)),
+    ("approvers_required", Ty::Int),
+    ("independent_required", Ty::Bool),
+    ("deadline", Ty::Int),
+    ("timeout_s", Ty::Int),
+    ("on_timeout", Ty::OneOf(&["skip"])),
+    (
+        "content",
+        Ty::Record(&[
+            (
+                "action",
+                Ty::Record(&[
+                    ("instrument", Ty::Str),
+                    ("asset_class", Ty::OneOf(&["us_equity", "crypto"])),
+                    ("side", Ty::OneOf(&["buy"])),
+                    ("qty", Ty::Decimal),
+                    ("limit", Ty::Decimal),
+                    ("order_usd", Ty::Decimal),
+                    ("purpose", Ty::OneOf(&["open", "increase"])),
+                ]),
+            ),
+            (
+                "trigger",
+                Ty::Record(&[("mandate_version", Ty::DigestRef), ("decided_by", Ty::Str)]),
+            ),
+            (
+                "evidence",
+                Ty::Record(&[
+                    (
+                        "combined_score",
+                        Ty::Record(&[("label", Ty::Str), ("value", Ty::Decimal)]),
+                    ),
+                    (
+                        "outputs",
+                        Ty::List(&Ty::Record(&[
+                            ("event_id", Ty::Ulid),
+                            ("artifact", Ty::Nullable(&Ty::DigestRef)),
+                            (
+                                "label",
+                                Ty::OneOf(&[
+                                    "Output of software you selected",
+                                    "platform-authored",
+                                ]),
+                            ),
+                        ])),
+                    ),
+                ]),
+            ),
+            (
+                "risk_impact",
+                Ty::List(&Ty::Record(&[
+                    (
+                        "field",
+                        Ty::OneOf(&[
+                            "order_usd",
+                            "position_usd_after",
+                            "gross_usd_after",
+                            "bought_today_usd",
+                            "drawdown",
+                            "daily_pnl_fraction",
+                        ]),
+                    ),
+                    ("value", Ty::Decimal),
+                    ("cap", Ty::Nullable(&Ty::Decimal)),
+                ])),
+            ),
+            ("reference_mark", Ty::Nullable(&REFERENCE_MARK)),
+            ("deadline", Ty::RiskClock),
+            ("default", Ty::Str),
+            ("choices", Ty::List(&Ty::OneOf(&["approve", "skip"]))),
+            (
+                "approvers",
+                Ty::Record(&[("required", Ty::Int), ("independent", Ty::Bool)]),
+            ),
+        ]),
+    ),
+    ("content_hash", Ty::DigestRef),
+]);
+
+static APPROVAL_DELIVERED: Ty = Ty::Record(&[
+    ("approval", Ty::Ulid),
+    ("channel", Ty::OneOf(&["cli_inbox"])),
+    (
+        "status",
+        Ty::OneOf(&["delivered", "suppressed_quiet_hours", "failed"]),
+    ),
+    ("message_id", Ty::Nullable(&Ty::Str)),
 ]);
 
 static AGENT_MODE_CHANGED: Ty = Ty::Record(&[

@@ -9,8 +9,8 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
-use mandate_canon::{Digest, Int, Key, Value};
-use mandate_journal::Environment;
+use mandate_canon::{Digest, Int, Key, Value, to_canonical};
+use mandate_journal::{Draft, Environment};
 use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_time::UtcNanos;
 
@@ -169,7 +169,7 @@ fn proposal(name: &str, purpose: Purpose, class: AssetClass) -> Result<Proposal,
 
 fn view() -> Result<MandateView, String> {
     Ok(MandateView {
-        version: "v1".to_owned(),
+        version: format!("sha256:{}", "1".repeat(64)),
         working_universe: [
             instrument("AAPL")?,
             instrument("MSFT")?,
@@ -357,6 +357,52 @@ fn handed(effects: &[Effect]) -> Vec<&IntentHandoff> {
 
 fn member<'d>(draft: &'d EventDraft, key: &str) -> Option<&'d str> {
     draft.payload.get(key).and_then(Value::as_str)
+}
+
+fn journal_accepts(draft: &EventDraft, mandate_version: &str) -> Result<(), String> {
+    fn digest_refs(value: &Value, refs: &mut BTreeSet<String>) {
+        match value {
+            Value::Str(text)
+                if text
+                    .strip_prefix("sha256:")
+                    .is_some_and(|hex| hex.len() == 64) =>
+            {
+                refs.insert(text.clone());
+            }
+            Value::Array(items) => items.iter().for_each(|item| digest_refs(item, refs)),
+            Value::Object(members) => members
+                .values()
+                .for_each(|member| digest_refs(member, refs)),
+            Value::Null | Value::Bool(_) | Value::Int(_) | Value::Str(_) => {}
+        }
+    }
+    let mut refs = BTreeSet::new();
+    digest_refs(&draft.payload, &mut refs);
+    let artifacts = refs
+        .into_iter()
+        .map(|reference| format!("\"{reference}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let causation = draft
+        .causation_id
+        .as_ref()
+        .map_or_else(|| "null".to_owned(), |id| format!("\"{}\"", id.0));
+    let body = format!(
+        r#"{{"envelope_version":1,"environment":"paper","event_id":"{}",
+        "stream_id":"{AGENT_STREAM}","event_type":"{}","schema_version":1,
+        "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
+        "causation_id":{causation},"correlation_id":null,
+        "actor":{{"kind":"agent","id":"a","version":"0.1.0","build":"sha256:{}"}},
+        "config_refs":{{"mandate_version":"{mandate_version}"}},
+        "payload":{},"artifact_refs":[{artifacts}],"pii_refs":[]}}"#,
+        draft.event_id.0,
+        draft.event_type,
+        "3".repeat(64),
+        String::from_utf8_lossy(&to_canonical(&draft.payload))
+    );
+    Draft::parse(body.as_bytes())
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn evidence(assertion: &str, at: i64) -> Result<Value, String> {
@@ -608,6 +654,33 @@ fn an_ask_for_an_exit_is_proposed_and_an_ask_for_an_opening_asks() -> Checked {
         matches!(notices.as_slice(), [Effect::NotifyApproval(_)]),
         "an ask notifies once, through the opaque approval notice and no other (rule 6, EI-9): {notices:?}"
     );
+    Ok(())
+}
+
+#[test]
+fn approval_writers_emit_payloads_the_closed_journal_schemas_accept() -> Checked {
+    let (view, flatten) = (
+        view()?,
+        Recording {
+            asked: RefCell::new(Vec::new()),
+        },
+    );
+    let opening = Plan::of(
+        vec![proposal("AAPL", Purpose::Open, AssetClass::UsEquity)?],
+        Autonomy::Ask,
+    );
+    let ports = Ports {
+        ids: &Ids,
+        gate: &Allow,
+        plan: &opening,
+        flatten: &flatten,
+        view: &view,
+    };
+    let (mut rig, _) = Rig::started(&ports)?;
+    let ran = rig.evaluate(AT, "m1", &ports)?;
+    for event_type in ["ApprovalRequested", "ApprovalDelivered"] {
+        journal_accepts(the(&ran, event_type)?, &view.version)?;
+    }
     Ok(())
 }
 

@@ -563,9 +563,9 @@ pub(crate) mod tests {
     use crate::types::{
         AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BrokerAccount,
         BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate,
-        DifferenceKind, Effect, EventId, ExecutorConfig, ExitTier, FoldedEvent, Input, IntentBody,
-        IntentHandoff, MandateVersion, Mode, Order, OrderState, Purpose, ReconcileReason, Seq,
-        TimeInForce, WorkspaceId, WriterEpoch,
+        DifferenceKind, Effect, EventDraft, EventId, ExecutorConfig, ExitTier, FoldedEvent, Input,
+        IntentBody, IntentHandoff, MandateVersion, Mode, Order, OrderState, Purpose,
+        ReconcileReason, Seq, TimeInForce, WorkspaceId, WriterEpoch,
     };
 
     /// Ids derived from the epoch, the head and the ordinal, as a production id generator does,
@@ -576,6 +576,43 @@ pub(crate) mod tests {
         fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
             EventId(format!("e{}h{}o{ordinal}", epoch.0, head.0))
         }
+    }
+
+    struct SchemaIds;
+
+    impl IdGen for SchemaIds {
+        fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
+            let suffix = epoch
+                .0
+                .saturating_add(head.0)
+                .saturating_add(u64::from(ordinal));
+            EventId(format!("01J8Z3M4{suffix:018}"))
+        }
+    }
+
+    fn journal_accepts(draft: &EventDraft) -> Result<(), ExecutorError> {
+        let causation = draft
+            .causation_id
+            .as_ref()
+            .map_or_else(|| "null".to_owned(), |id| format!("\"{}\"", id.0));
+        let body = format!(
+            r#"{{"envelope_version":1,"environment":"paper","event_id":"{}",
+            "stream_id":"acct:ws1:acct-1","event_type":"{}","schema_version":{},
+            "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
+            "causation_id":{causation},"correlation_id":null,
+            "actor":{{"kind":"system","id":"executor","version":"0.1.0","build":"sha256:{}"}},
+            "config_refs":{{}},"payload":{},"artifact_refs":[],"pii_refs":[]}}"#,
+            draft.event_id.0,
+            draft.event_type,
+            draft.schema_version,
+            "3".repeat(64),
+            String::from_utf8_lossy(&to_canonical(&draft.payload))
+        );
+        Draft::parse(body.as_bytes()).map(|_| ()).map_err(|error| {
+            ExecutorError::NonCanonicalPayload {
+                field: error.to_string(),
+            }
+        })
     }
 
     /// A mandate covering everything, and whole-share equities.
@@ -1244,6 +1281,73 @@ pub(crate) mod tests {
             observed.and_then(|draft| draft.payload.get("mismatch")),
             Some(&Value::Bool(true))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn reconciliation_writers_emit_payloads_the_closed_journal_schemas_accept()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        executor.commit_one(
+            "FillApplied",
+            object(vec![
+                ("fill_id", Value::Str("f-0".to_owned())),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("side", Value::Str("buy".to_owned())),
+                ("qty_gross", Value::Str("10".to_owned())),
+                ("price", Value::Str("150".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
+        let mut taken = executor.snapshot(ReconcileReason::Scheduled)?;
+        taken.positions = vec![BrokerPosition {
+            instrument: aapl()?,
+            qty: SignedQty::parse("7")?,
+            avg_entry_price: Price::parse("150")?,
+        }];
+        let mismatch = executor.run(Input::BrokerSnapshot(taken), &ports)?;
+        for event_type in ["BrokerPositionObserved", "AgentModeApplied"] {
+            let draft = mismatch
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::Journal(draft) if draft.event_type == event_type => Some(draft),
+                    _ => None,
+                })
+                .ok_or_else(|| missing(event_type))?;
+            journal_accepts(draft)?;
+        }
+
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(1));
+        state.started = true;
+        let live = ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ2")?;
+        state
+            .orders
+            .insert(live.clone(), order(&live, OrderState::Accepted)?);
+        let adopted = reconcile(&state, &snapshot(ReconcileReason::Scheduled)?, &ports)?;
+        let compensation = adopted
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "CompensatingEvent" => Some(draft),
+                _ => None,
+            })
+            .ok_or_else(|| missing("CompensatingEvent"))?;
+        journal_accepts(compensation)?;
         Ok(())
     }
 

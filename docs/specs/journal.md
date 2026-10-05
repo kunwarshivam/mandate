@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.14 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.15 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, and `account_stream` section of §9.5; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -12,6 +12,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.15 ([DEC-460](../project/decisions/DEC-460.md)):** §9.6 closes
+  `ApprovalRequested`, including its nested canonical content, `ApprovalDelivered`,
+  `BrokerPositionObserved`, `AgentModeApplied`, and `CompensatingEvent` at schema version 1.
 - **v0.14 ([DEC-459](../project/decisions/DEC-459.md)):** `OrderStateChanged` version 1 is a
   closed record whose nullable evidence and boolean lifecycle markers are always present. This
   closes new appends without changing the executor fold's tolerance of historical sparse records.
@@ -445,14 +448,14 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `SettlementPosted`, `DividendPaid`, `CashInLieuPosted` | set | date, instrument, amount |
 | `CorporateActionPrepared`, `CorporateActionApplied` | ins | instrument, action, ratio or amount, ex-date |
 | `ProtectionChanged` | — | instrument, action, orders, unprotected-interval start or end; closed in §9.5 |
-| `BrokerPositionObserved` | — | observed values |
+| `BrokerPositionObserved` | — | Closed at schema version 1: instrument, broker and model quantities, mismatch flag, and risk clock (§9.6) |
 | `ReconciliationRun` | — | result (`clean`, `adopted`, `mismatch`), nullable activity checkpoint, snapshot head, difference count, risk clock (DEC-453) |
-| `CompensatingEvent`, `AccountSnapshotRecorded` | — | corrected event IDs; daily snapshot |
+| `CompensatingEvent`, `AccountSnapshotRecorded` | — | Closed `CompensatingEvent` version 1: order subject, order-state difference, from/to states, corrected event IDs, and risk clock (§9.6); daily snapshot |
 | `AccountStateObserved` | — | Closed at schema version 1: `status`, `crypto_status`, `trading_blocked`, `account_blocked`, `trade_suspended_by_user`, `multiplier`, `equity`, `cash`, `buying_power`, `non_marginable_buying_power`, `accrued_fees`, and `risk_clock` ([DEC-458](../project/decisions/DEC-458.md)); no broker account identifier or personal data |
 | `RejectObserved`, `AccountRestrictionChanged` | — | reject code and message, restriction; for `AccountRestrictionChanged`, its `cause` (`broker_reject`, `broker_notice`, `connection_unavailable`; [trading spec §7.3](trading-domain.md#73-account-restrictions), [DEC-441](../project/decisions/DEC-441.md) item 23) |
 | `ExternalActivityIngested`, `RelatedAccountsCoordination` | — | unattributed activity; canceled opening orders across the group |
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
-| `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | gating facts, copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
+| `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | Closed `AgentModeApplied` version 1: agent (including `*`), mode, restriction, originated flag, and risk clock (§9.6); other gating facts copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
 | `OwnerAcknowledged` | — | copied from the control stream (with `causation_id`); a risk input |
 | `OwnerCommandRefused` | — | An acknowledgment the executor refused, for its step-up or, under `independent_approval_required`, because it is not independent ([mandate spec §6.1](mandate.md#61-purposes), [§6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`, `not_independent`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
 | `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N, and for a tripwire (limit `tripwire:<id>`, reason `tripwire_condition`, [mandate spec §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)) its metric, threshold, and the value reached; reset evidence; released positions; stale-mark and removed-instrument changes with the reason; goal completion |
@@ -469,8 +472,8 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ThesisProposed`, `ThesisRevised` | man, mod | The research agent's output and its admission decision ([mandate spec §8.4, §8.5](mandate.md#84-the-research-agent-dec-97-adr-0002)): research agent id, version, and content hash; thesis id, lineage id, revision, and for `ThesisRevised` the `predecessor_thesis_id` and what the revision changed; instrument, asset class, direction, horizon, evidence and cited sources, corroboration kind, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); `admitted` and the refusal reason from the ordered §8.5 checks; closed in §9.4 |
 | `DecisionMade` | man | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification and its source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling), `delegation_id` when a delegation lifted it ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003)), and `requested_by` (`agent`, `owner`, or `client`) with the client's id when a connected client asked (mandate §6.2 step 5a, DEC-185); `ask_suppressed` (`budget`, `skipped_today`, `recent_timeout`) when an `ask` was classified but not asked ([mandate spec §6.4](mandate.md#64-approvals)) |
 | `IntentProposed` | man | intent fields (its `event_id` is the intent ID); after a grant, `causation_id` is the `ApprovalRevalidated` |
-| `ApprovalRequested` | man | approval (its `event_id`), instrument, asset class, side, quantity, limit price, purpose, mandate version, `decided_by`, `approvers_required`, `independent_required`, `reference_mark` (`{price, seq}` or null), deadline, `timeout_s`, `on_timeout: skip`, the content object inline (large parts by artifact reference), `content_hash` |
-| `ApprovalDelivered` | man | approval, channel, delivery status (`delivered`, `suppressed_quiet_hours`, `failed`), message ID |
+| `ApprovalRequested` | man | Closed at schema version 1: approval (its `event_id`), instrument, asset class, side, quantity, limit price, purpose, mandate version, `decided_by`, score, approver requirements, nullable reference mark, deadline, timeout/default, recursively closed content, and its canonical hash (§9.6) |
+| `ApprovalDelivered` | man | Closed at schema version 1: approval, `cli_inbox` channel, delivery status (`delivered`, `suppressed_quiet_hours`, `failed`), and nullable message ID (§9.6) |
 | `ApprovalResponded` | man | approval, verdict (`approved`, `skipped`; a legacy `denied` reads as `skipped`), responder (opaque) and role, result (`admitted`, `counted`, `refused`; a legacy `recorded` or `refused` reads as terminal), reason, effective time, step-up evidence (assertion ID, authentication time, method), separation-of-duties result, and for a grant that reaches check 7 the approver count and independence it applied (the stricter of the bound values and the policy overlay, [mandate spec §6.4](mandate.md#64-approvals)); `causation_id` is the `ApprovalResponseSubmitted`, copied at most once; the delegation shape chosen, if any, with the new mandate version and delegation id (mandate §6.4, §6.5) |
 | `ApprovalRevalidated` | man | approval, result (`act`, `skip`), reason, and every value compared: bound and current mandate version, mode, instrument restriction, `decided_by` then and now, dry-run verdict and reason, `m_req`, `m_now`, `band_bp` |
 | `ApprovalTimedOut`, `ApprovalCanceled` | man | approval, `on_timeout: skip`; approval, cancel reason (`version_applied`, `mode_tightened`, `owner_pause`, `owner_stop`, `kill_switch`; a legacy `rebound` is a cancellation for either of the first two) |
@@ -1308,6 +1311,90 @@ unprotected intervals, and the receipt-time protective prices of `intended` (DEC
 **No mapping to `JournaledFact`.** None of these records is a `ValidationContext` input: §9.2's
 mapping covers the context's reads alone (DEC-446 item 7), and the executor's own fold reads
 these directly.
+
+### 9.6 Approval and reconciliation records ([DEC-460](../project/decisions/DEC-460.md))
+
+These version-1 records are closed recursively: every listed member is present, `null` is used
+only where the type is nullable, and any extra member is refused.
+
+**`ApprovalRequested`** on the agent stream:
+
+| Member | Type |
+|---|---|
+| `instrument` | `text` |
+| `asset_class` | `us_equity` \| `crypto` |
+| `side` | `buy` |
+| `qty`, `limit` | `decimal` |
+| `purpose` | `open` \| `increase` |
+| `mandate_version` | `ref` |
+| `decided_by` | `text` |
+| `combined_score` | `decimal` |
+| `reference_mark` | `{price: decimal, seq: integer}?` |
+| `approvers_required` | `integer` |
+| `independent_required` | `boolean` |
+| `deadline` | `integer` risk-clock seconds |
+| `timeout_s` | `integer` |
+| `on_timeout` | `skip` |
+| `content` | The closed object below |
+| `content_hash` | `ref` |
+
+`content` has exactly:
+
+- `action`: `{instrument: text, asset_class: us_equity | crypto, side: buy, qty: decimal,
+  limit: decimal, order_usd: decimal, purpose: open | increase}`;
+- `trigger`: `{mandate_version: ref, decided_by: text}`;
+- `evidence`: `{combined_score: {label: text, value: decimal}, outputs:
+  [{event_id: ulid, artifact: ref?, label: Output of software you selected | platform-authored}]}`;
+- `risk_impact`: `[{field: order_usd | position_usd_after | gross_usd_after | bought_today_usd |
+  drawdown | daily_pnl_fraction, value: decimal, cap: decimal?}]`;
+- `reference_mark: {price: decimal, seq: integer}?`, `deadline: risk_clock`,
+  `default: text`, `choices: [approve | skip]`, and
+  `approvers: {required: integer, independent: boolean}`.
+
+The score label is exactly `combined model score, not a probability of profit`; `default` is
+exactly `If you do nothing, this action is skipped`; and `choices` is exactly
+`["approve", "skip"]`. Every top-level action, trigger, score, reference-mark, deadline, and
+approver member equals its nested counterpart; the top-level integer deadline and nested
+whole-second timestamp name the same instant. `content_hash` equals the `sha256:` reference of the
+canonical `content` bytes.
+
+**`ApprovalDelivered`** on the agent stream:
+
+| Member | Type |
+|---|---|
+| `approval` | `ulid` |
+| `channel` | `cli_inbox` |
+| `status` | `delivered` \| `suppressed_quiet_hours` \| `failed` |
+| `message_id` | `text?` |
+
+**`BrokerPositionObserved`** on the account stream:
+
+| Member | Type |
+|---|---|
+| `instrument` | `text` |
+| `broker_qty`, `model_qty` | `decimal` |
+| `mismatch` | `boolean` |
+| `risk_clock` | `risk_clock` |
+
+**`AgentModeApplied`** on the account stream:
+
+| Member | Type |
+|---|---|
+| `agent` | `text` (an agent id or the executor's `*` all-agent sentinel) |
+| `to` | `normal` \| `exits_only` \| `paused` \| `stopped` |
+| `restriction` | `text` |
+| `originated` | `boolean` |
+| `risk_clock` | `risk_clock` |
+
+**`CompensatingEvent`** on the account stream:
+
+| Member | Type |
+|---|---|
+| `subject` | `text` |
+| `difference` | `order_state` |
+| `from`, `to` | `intent` \| `submitting` \| `accepted` \| `partially_filled` \| `pending_cancel` \| `pending_replace` \| `unknown` \| `filled` \| `canceled` \| `rejected` \| `expired` \| `replaced` \| `abandoned` |
+| `corrected_event_ids` | `[ulid]` |
+| `risk_clock` | `risk_clock` |
 
 ## 10. Anchoring
 

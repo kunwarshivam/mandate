@@ -58,16 +58,19 @@ const RISK_STATE: [&str; 2] = ["MandateVersionApplied", "UniverseChanged"];
 /// The agent stream's research-agent thesis records journal spec §9.4 closes, with rules 34 to 38.
 const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 
-/// The account stream's closed executor records (DEC-446, DEC-447, DEC-459).
+/// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460).
 /// `OrderStateChanged`, `OrderRequestRecorded`, and `ProtectionChanged` close at version 1;
 /// `IntentReceived`, `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1.
-const EXECUTOR: [&str; 6] = [
+const EXECUTOR: [&str; 9] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
     "OrderRequestRecorded",
     "OrderStateChanged",
     "ProtectionChanged",
+    "BrokerPositionObserved",
+    "AgentModeApplied",
+    "CompensatingEvent",
 ];
 
 const ACCOUNT_STATE: &str = "AccountStateObserved";
@@ -593,6 +596,9 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         (COMPANION, 1) => Some(&ORDER_REQUEST_RECORDED),
         ("OrderStateChanged", 1) => Some(&ORDER_STATE_CHANGED),
         ("ProtectionChanged", 1) => Some(&PROTECTION_CHANGED),
+        ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
+        ("AgentModeApplied", 1) => Some(&AGENT_MODE_APPLIED),
+        ("CompensatingEvent", 1) => Some(&COMPENSATING_EVENT),
         ("StreamOpened", 1) => Some(&STREAM_OPENED),
         ("ConnectionEstablished", 1) => Some(&CONNECTION_ESTABLISHED),
         ("ConnectionRevoked", 1) => Some(&CONNECTION_REVOKED),
@@ -911,6 +917,34 @@ static ORDER_STATE_CHANGED: Ty = Ty::Record(&[
     ("cancel_overdue", Ty::Bool),
     ("adopted", Ty::Bool),
     ("ladder_step", Ty::Bool),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+static BROKER_POSITION_OBSERVED: Ty = Ty::Record(&[
+    ("instrument", Ty::Str),
+    ("broker_qty", Ty::Decimal),
+    ("model_qty", Ty::Decimal),
+    ("mismatch", Ty::Bool),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+static AGENT_MODE_APPLIED: Ty = Ty::Record(&[
+    ("agent", Ty::Str),
+    (
+        "to",
+        Ty::OneOf(&["normal", "exits_only", "paused", "stopped"]),
+    ),
+    ("restriction", Ty::Str),
+    ("originated", Ty::Bool),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+static COMPENSATING_EVENT: Ty = Ty::Record(&[
+    ("subject", Ty::Str),
+    ("difference", Ty::OneOf(&["order_state"])),
+    ("from", Ty::OneOf(ORDER_STATES)),
+    ("to", Ty::OneOf(ORDER_STATES)),
+    ("corrected_event_ids", Ty::List(&Ty::Ulid)),
     ("risk_clock", Ty::RiskClock),
 ]);
 
