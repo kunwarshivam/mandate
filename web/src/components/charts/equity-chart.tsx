@@ -30,6 +30,12 @@ const RANGE_WORDS: Record<EquityRange, string> = {
 /** Short enough on a phone that the range picker clears the tab bar under what needs you (DEC-207). */
 const ACCOUNT_PHONE_HEIGHT = 180;
 
+/** In Home's rail the account is a compact figure beside the decisions, not the page's centrepiece (DEC-467). */
+const ACCOUNT_HEIGHT = 200;
+
+/** A week reads as a trend; a day of paper ticks is mostly noise (DEC-467). */
+export const ACCOUNT_RANGE: EquityRange = "1W";
+
 /** The change's soft pill: its tint by sign, and the type in the gain or loss colour. */
 const PILL: Record<Direction, string> = {
   gain: "bg-gain-soft text-gain",
@@ -167,7 +173,7 @@ function EquityHero({
           axis={(levels?.length ?? 0) > 0}
           onScrub={onScrub}
           pulse={pulse}
-          height={tone === "account" ? 340 : 300}
+          height={tone === "account" ? ACCOUNT_HEIGHT : 300}
           phoneHeight={tone === "account" ? ACCOUNT_PHONE_HEIGHT : undefined}
           className="-mx-1"
         />
@@ -205,7 +211,7 @@ export function AccountEquityChart() {
   const { ws } = useRuntime();
   const market = useMarket();
   const { stale, asOf, now } = useStale();
-  const [range, setRange] = useState<EquityRange>("1D");
+  const [range, setRange] = useState<EquityRange>(ACCOUNT_RANGE);
   const unmanaged = unmanagedEquity(ws);
   const all = useMemo(() => {
     const offset = Number(unmanaged);

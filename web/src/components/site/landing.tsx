@@ -7,10 +7,10 @@ import { cn } from "@/lib/utils";
 import { OWLHEAD_ASCII } from "./ascii";
 import { BetaForm } from "./beta-form";
 import { Contents } from "./contents";
+import { type AppId, Desktop } from "./desktop";
 import { BODY, BOLD, BUTTON, H2, LINK, MONO, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
+import { OpenApp } from "./open-app";
 import { ModeChart, Perch, TitleOwl } from "./owls";
-import { RecordTrace } from "./record-trace";
-import { Desktop } from "./desktop";
 import { Blink, Browser, UnderConstruction, Window } from "./retro";
 import { SiteFooter } from "./site-footer";
 
@@ -106,20 +106,6 @@ export const SECTIONS: Section[] = [
     ),
   },
   {
-    id: "record",
-    title: "The record",
-    body: (
-      <>
-        <p>
-          Before any order goes out, Owlhead writes down what the agent read, what it concluded, which checks passed and who approved it. Each line carries a hash of the line before it, so if anyone edits a line, the chain stops
-          matching from there on. You can export it for an auditor or your investors.
-        </p>
-        <p>Here is one decision from start to finish. Try editing a line.</p>
-        <RecordTrace />
-      </>
-    ),
-  },
-  {
     id: "who",
     title: "Who it's for",
     body: (
@@ -138,11 +124,17 @@ export const SECTIONS: Section[] = [
         ))}
       </dl>
       <p className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <a href="#beta" className={BUTTON}>
+        <OpenApp app="guestbook" className={BUTTON}>
           Sign the guestbook
-        </a>
+        </OpenApp>
         <span>and tell us which of these you are.</span>
       </p>
+      {/* The guestbook opens in its own window, which needs a script; without one, the form is here. */}
+      <noscript>
+        <Window title="guestbook.cgi" icon={<TitleOwl />} className="max-w-[30rem]">
+          <BetaForm id="beta-noscript" />
+        </Window>
+      </noscript>
       </>
     ),
   },
@@ -172,23 +164,14 @@ export const SECTIONS: Section[] = [
   },
 ];
 
-export const QUESTIONS: { q: string; a: string }[] = [
-  { q: "Can it take money out of my account?", a: "No. Owlhead only asks your broker for permission to trade. It can't withdraw or transfer money, and it can't change its own rules." },
-  {
-    q: "Is it trading real money?",
-    a: "Not yet. In the beta, agents trade on paper with simulated money. Live trading comes later, once it has legal sign-off, and only when you switch it on with your passkey.",
-  },
-  { q: "Which brokers does it work with?", a: "Alpaca first. Robinhood and Kraken Derivatives US are planned." },
-  { q: "How do I stop it?", a: "Press Stop. It halts every agent and cancels their open orders. Protective stops rest at your broker, so they hold even if Owlhead goes down." },
-  { q: "What does it cost?", a: "Nothing during the private beta. We'll tell you the price well before we charge anything." },
-  {
-    q: "Is this investment advice?",
-    a: "No. Owlhead is software that carries out rules you write. It doesn't know your finances and doesn't recommend what to buy or sell. Whether trading suits you is your decision, ideally with an adviser.",
-  },
-  { q: "Who gets in?", a: "We let people in a few at a time, roughly in the order they ask, with room for each kind of user so we hear from all of them." },
-];
+const CONTENTS = SECTIONS.map(({ id, title }) => ({ id, title }));
 
-const CONTENTS = [...SECTIONS.map(({ id, title }) => ({ id, title })), { id: "questions", title: "Questions" }, { id: "beta", title: "Ask for a place" }];
+/** The parts of the site that open in their own window on the desktop, as their icons do. */
+export const WINDOWS: { app: AppId; title: string }[] = [
+  { app: "record", title: "The record" },
+  { app: "questions", title: "Questions" },
+  { app: "guestbook", title: "Guestbook" },
+];
 
 function Section({ id, n, title, children }: { id: string; n: number; title: string; children: ReactNode }) {
   return (
@@ -210,7 +193,8 @@ function Section({ id, n, title, children }: { id: string; n: number; title: str
 /**
  * The landing page at owlhead.ai (DEC-212), for signed-out visitors: one homepage, set as the web
  * looked in the late 1990s and open in a browser window on a desktop of the time, that says what
- * Owlhead is, why and how, and asks for an email. It brings its own `<main>` and footer.
+ * Owlhead is, why and how. The record, the questions and the guestbook that asks for an email each
+ * open in their own window on the desktop. It brings its own `<main>` and footer.
  */
 export function Landing() {
   return (
@@ -234,9 +218,12 @@ export function Landing() {
               <span>Private beta, opening a few people at a time.</span>
             </p>
             <p className="flex flex-wrap items-center justify-center gap-2" data-slot="hero-actions">
-              <a href="#beta" className={BUTTON}>
+              <OpenApp app="guestbook" className={BUTTON}>
                 Sign the guestbook
-              </a>
+              </OpenApp>
+              <OpenApp app="record" className={BUTTON}>
+                See the record
+              </OpenApp>
               <Link href="/login" className={cn(PLAIN_BUTTON, "h-9")}>
                 Sign in
               </Link>
@@ -248,7 +235,7 @@ export function Landing() {
 
           <div className="grid gap-8 px-4 pb-10 sm:px-8 lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-12">
             <aside>
-              <Contents items={CONTENTS} />
+              <Contents items={CONTENTS} windows={WINDOWS} />
             </aside>
 
             <main id="main" tabIndex={-1} data-slot="landing" className="min-w-0 outline-none">
@@ -257,24 +244,6 @@ export function Landing() {
                   {s.body}
                 </Section>
               ))}
-
-              <Section id="questions" n={SECTIONS.length + 1} title="Questions">
-                <dl className="grid gap-5">
-                  {QUESTIONS.map(({ q, a }) => (
-                    <div key={q}>
-                      <dt className={B}>{q}</dt>
-                      <dd>{a}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </Section>
-
-              <Section id="beta" n={SECTIONS.length + 2} title="Ask for a place">
-                <p>Sign the guestbook to ask for a place. Leave your email and we&apos;ll write once, when your place opens.</p>
-                <Window title="guestbook.cgi" icon={<TitleOwl />} className="max-w-[30rem]">
-                  <BetaForm />
-                </Window>
-              </Section>
             </main>
           </div>
 

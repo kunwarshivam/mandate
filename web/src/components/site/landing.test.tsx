@@ -1,12 +1,15 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { contrastRatio } from "@/lib/color";
 import { tokenValue } from "@/lib/tokens";
-import { HEADLINE, Landing, QUESTIONS, SECTIONS, SUBHEAD } from "./landing";
-import { DISCARDED } from "./apps";
+import { HEADLINE, Landing, SECTIONS, SUBHEAD, WINDOWS } from "./landing";
+import { DISCARDED, QUESTIONS } from "./apps";
+import { OWLHEAD_ASCII } from "./ascii";
 import { GREETING, TIPS } from "./assistant";
+import { BODY, MONO, PIXEL } from "./letter";
 import { PLAYLIST } from "./music";
 import { TOUR, TOUR_VIDEO, tourVtt } from "./tour";
 import { EDITED, TRACE } from "./record-trace";
@@ -25,6 +28,26 @@ function readable(container: HTMLElement): string {
   return container.textContent ?? "";
 }
 
+const frame = () => new Promise((r) => requestAnimationFrame(r));
+
+async function press(el: HTMLElement) {
+  await act(async () => {
+    fireEvent.click(el);
+    await frame();
+  });
+}
+
+const win = (name: string) => screen.getByRole("region", { name });
+const zOf = (el: HTMLElement) => Number(el.style.zIndex);
+const icon = (name: string) => within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name });
+const home = () => document.querySelector<HTMLElement>("[data-slot=landing-page]")!;
+
+const RECORD = "The record - Example decision";
+const HELP = "Questions - Owlhead Help";
+const GUESTBOOK = "guestbook.cgi";
+
+const TITLE_OF: Record<string, string> = { record: RECORD, questions: HELP, guestbook: GUESTBOOK };
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -35,32 +58,78 @@ describe("the landing page's structure", () => {
     const h1s = screen.getAllByRole("heading", { level: 1 });
     expect(h1s).toHaveLength(1);
     expect(h1s[0]).toHaveAccessibleName(HEADLINE);
-    expect(h1s[0].querySelector("[aria-hidden]")?.textContent).toMatch(/_{4}/);
+    expect(h1s[0].querySelector("[aria-hidden]")?.textContent).toBe(OWLHEAD_ASCII);
     expect(container).toHaveTextContent(SUBHEAD);
+  });
+
+  it("sets the block letters upright, no wider than the slanted ones were, so they fit the hero", () => {
+    expect(OWLHEAD_ASCII).not.toMatch(/\/_\/ \//);
+    expect(OWLHEAD_ASCII).toMatch(/_{4}/);
+    expect(Math.max(...OWLHEAD_ASCII.split("\n").map((l) => l.length))).toBeLessThanOrEqual(49);
   });
 
   it("numbers every section and labels it by its heading", () => {
     renderLanding();
-    const titles = [...SECTIONS.map((s) => s.title), "Questions", "Ask for a place"];
-    titles.forEach((title, i) => {
+    SECTIONS.forEach(({ title }, i) => {
       const heading = screen.getByRole("heading", { level: 2, name: `${i + 1}. ${title}` });
       expect(heading.closest("section")).toHaveAttribute("aria-labelledby", heading.id);
     });
+    expect(screen.getAllByRole("heading", { level: 2 }).filter((h) => /^\d+\. /.test(h.textContent ?? ""))).toHaveLength(SECTIONS.length);
   });
 
   it("lists every section in the contents, and each link lands on its heading", () => {
     const { container } = renderLanding();
     const contents = screen.getByRole("navigation", { name: "Contents" });
     const links = within(contents).getAllByRole("link");
-    expect(links).toHaveLength(SECTIONS.length + 2);
+    expect(links).toHaveLength(SECTIONS.length);
     for (const a of links) expect(container.querySelector(a.getAttribute("href")!)?.tagName).toBe("H2");
   });
 
-  it("sends the browser's guide buttons to sections that exist", () => {
+  it("opens the record, the questions and the guestbook in their own windows from the contents", async () => {
+    renderLanding();
+    const contents = screen.getByRole("navigation", { name: "Contents" });
+    expect(within(contents).getAllByRole("button").map((b) => b.textContent)).toEqual(WINDOWS.map((w) => w.title));
+    for (const { app, title } of WINDOWS) {
+      await press(within(screen.getByRole("navigation", { name: "Contents" })).getByRole("button", { name: title }));
+      expect(win(TITLE_OF[app])).toHaveAttribute("data-front", "true");
+    }
+  });
+
+  it("sends the browser's guides to sections that exist, or opens the window that holds the rest", async () => {
     const { container } = renderLanding();
-    const guides = within(screen.getByRole("navigation", { name: "Guides" })).getAllByRole("link");
-    expect(guides.map((a) => a.textContent)).toEqual(["What's New?", "What's Cool?", "Handbook", "Questions"]);
-    for (const a of guides) expect(container.querySelector(a.getAttribute("href")!)).not.toBeNull();
+    const guides = () => screen.getByRole("navigation", { name: "Guides" });
+    expect(within(guides()).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["What's New?", "What's Cool?", "Handbook", "Questions"]);
+    const links = within(guides()).getAllByRole("link");
+    expect(links.map((a) => a.textContent)).toEqual(["What's New?", "Handbook"]);
+    for (const a of links) expect(container.querySelector(a.getAttribute("href")!)?.tagName).toBe("H2");
+    await press(within(guides()).getByRole("button", { name: "What's Cool?" }));
+    expect(win(RECORD)).toHaveAttribute("data-front", "true");
+    await press(within(guides()).getByRole("button", { name: "Questions" }));
+    expect(win(HELP)).toHaveAttribute("data-front", "true");
+  });
+
+  it("keeps the record, the questions and the guestbook out of the home page's document", () => {
+    renderLanding();
+    const page = home();
+    for (const id of ["record", "questions", "beta"]) expect(document.getElementById(id), id).toBeNull();
+    expect(page.querySelector("[data-slot=record-trace], [data-slot=beta-form], table, form")).toBeNull();
+    for (const { q } of QUESTIONS) expect(page).not.toHaveTextContent(q);
+    expect(page).not.toHaveTextContent("Try editing a line.");
+  });
+
+  it("links within the page only to ids that exist", () => {
+    const { container } = renderLanding();
+    const hashes = [...container.querySelectorAll("a[href^='#']")].map((a) => a.getAttribute("href")!);
+    expect(hashes.length).toBeGreaterThan(0);
+    for (const h of hashes) expect(document.getElementById(h.slice(1)), h).not.toBeNull();
+  });
+
+  it("server-renders the guestbook form inside the page for a visitor without scripts", () => {
+    const html = renderToString(<Landing />);
+    const fallback = html.match(/<noscript>(.*?)<\/noscript>/s)?.[1] ?? "";
+    expect(fallback).toContain('id="beta-noscript-email"');
+    expect(fallback).toContain("Sign the guestbook");
+    expect(html.indexOf("<noscript>")).toBeLessThan(html.indexOf('data-window="guestbook"'));
   });
 
   it("hides the browser's scenery: menus, toolbar and status bar are not in the accessibility tree", () => {
@@ -89,10 +158,13 @@ describe("the landing page's structure", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("answers every question as a term and its description", () => {
+  it("answers every question as a term and its description, in the Questions window", async () => {
     renderLanding();
+    await press(icon("Questions"));
+    const help = win(HELP);
+    expect(help).toHaveAttribute("data-front", "true");
     for (const { q } of QUESTIONS) {
-      const term = screen.getByText(q);
+      const term = within(help).getByText(q);
       expect(term.tagName).toBe("DT");
       expect(term.nextElementSibling?.tagName).toBe("DD");
     }
@@ -115,19 +187,38 @@ describe("the landing page's structure", () => {
 });
 
 describe("links", () => {
-  it("asks for a place from the top of the page, and signs in at /login", () => {
+  it("signs in at /login", () => {
     renderLanding();
-    expect(screen.getAllByRole("link", { name: "Ask for a place" })[0]).toHaveAttribute("href", "#beta");
     for (const link of screen.getAllByRole("link", { name: "Sign in" })) expect(link).toHaveAttribute("href", "/login");
   });
 
-  it("offers the guestbook as a button in the hero and again after who it's for", () => {
+  it("offers the guestbook as a button in the hero and again after who it's for, each opening its window", async () => {
     renderLanding();
-    const buttons = screen.getAllByRole("link", { name: "Sign the guestbook" });
+    const buttons = screen.getAllByRole("button", { name: "Sign the guestbook" });
     expect(buttons).toHaveLength(2);
-    for (const a of buttons) expect(a).toHaveAttribute("href", "#beta");
-    expect(buttons[0].closest("header")).not.toBeNull();
+    expect(buttons[0].closest("[data-slot=hero-actions]")).not.toBeNull();
     expect(buttons[1].closest("section")).toHaveAttribute("aria-labelledby", "who");
+    for (const b of buttons) {
+      expect(screen.queryByRole("region", { name: GUESTBOOK })).toBeNull();
+      await press(b);
+      expect(win(GUESTBOOK)).toHaveAttribute("data-front", "true");
+      expect(within(win(GUESTBOOK)).getByLabelText("Email address:")).toBeInTheDocument();
+      await press(screen.getByRole("button", { name: `Close ${GUESTBOOK}` }));
+    }
+  });
+
+  it("puts See the record beside Sign the guestbook in the hero, and it opens the record's window", async () => {
+    renderLanding();
+    const hero = document.querySelector<HTMLElement>("[data-slot=hero-actions]")!;
+    expect(within(hero).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sign the guestbook", "See the record"]);
+    const see = within(hero).getByRole("button", { name: "See the record" });
+    expect(see.className).toBe(within(hero).getByRole("button", { name: "Sign the guestbook" }).className);
+    expect(screen.queryByRole("region", { name: RECORD })).toBeNull();
+    await press(see);
+    const record = win(RECORD);
+    expect(record).toHaveAttribute("data-front", "true");
+    expect(zOf(record)).toBeGreaterThan(zOf(win("Owlhead Home Page")));
+    expect(within(record).getByRole("table")).toBeInTheDocument();
   });
 
   it("echoes the address of the link under the pointer in the status bar, as a browser of the time did", () => {
@@ -151,18 +242,6 @@ describe("links", () => {
     for (const h of away) expect(h).toMatch(/^https:\/\/www\.metmuseum\.org\/art\/collection\/search\/\d+$/);
   });
 });
-
-const frame = () => new Promise((r) => requestAnimationFrame(r));
-
-async function press(el: HTMLElement) {
-  await act(async () => {
-    fireEvent.click(el);
-    await frame();
-  });
-}
-
-const win = (name: string) => screen.getByRole("region", { name });
-const zOf = (el: HTMLElement) => Number(el.style.zIndex);
 
 describe("the desktop", () => {
   afterEach(() => localStorage.clear());
@@ -226,14 +305,39 @@ describe("the desktop", () => {
     expect(zOf(win("Owlhead Home Page"))).toBeGreaterThan(zOf(owl));
   });
 
-  it("sends the Guestbook icon to the guestbook, in the home page's window", async () => {
-    const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+  it("opens The record in its own window, with the tamper demo, and lists it on the taskbar", async () => {
+    renderLanding();
+    await press(icon("The record"));
+    const record = win(RECORD);
+    expect(record).toHaveAttribute("data-front", "true");
+    expect(record).toHaveTextContent("Here is one decision from start to finish. Try editing a line.");
+    expect(record.querySelector("[data-slot=record-trace]")).not.toBeNull();
+    expect(within(record).getByRole("button", { name: `Edit line ${EDITED.index + 1}` })).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Open windows" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["Owlhead", "The record"]);
+    expect(document.activeElement).toBe(record);
+  });
+
+  it("opens Questions in its own window, with every question", async () => {
+    renderLanding();
+    await press(icon("Questions"));
+    const help = win(HELP);
+    expect(help).toHaveAttribute("data-front", "true");
+    for (const { q, a } of QUESTIONS) {
+      expect(help).toHaveTextContent(q);
+      expect(help).toHaveTextContent(a);
+    }
+  });
+
+  it("opens the Guestbook in its own window, with the form, even with the home page minimized", async () => {
     renderLanding();
     await press(screen.getByRole("button", { name: "Minimize Owlhead Home Page" }));
-    await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Guestbook" }));
-    expect(win("Owlhead Home Page")).toBeVisible();
-    expect(scroll.mock.contexts.at(-1)).toBe(document.getElementById("beta"));
-    scroll.mockRestore();
+    await press(icon("Guestbook"));
+    const guestbook = win(GUESTBOOK);
+    expect(guestbook).toHaveAttribute("data-front", "true");
+    expect(guestbook.querySelector("[data-slot=beta-form]")).not.toBeNull();
+    expect(within(guestbook).getByLabelText("Email address:")).toHaveAttribute("type", "email");
+    expect(within(guestbook).getByRole("button", { name: "Sign the guestbook" })).toHaveAttribute("type", "submit");
+    expect(screen.queryByRole("region", { name: "Owlhead Home Page" })).toBeNull();
   });
 
   it("changes the wallpaper in Display, credits the painting, and keeps the choice out of browser storage", async () => {
@@ -350,18 +454,26 @@ describe("Winamp's playlist", () => {
 });
 
 describe("the guestbook", () => {
-  function fill(email: string) {
-    fireEvent.change(screen.getByLabelText("Email address:"), { target: { value: email } });
+  async function openGuestbook() {
+    renderLanding();
+    await press(icon("Guestbook"));
+    return win(GUESTBOOK);
   }
+
+  function fill(email: string) {
+    fireEvent.change(within(win(GUESTBOOK)).getByLabelText("Email address:"), { target: { value: email } });
+  }
+
+  const sign = () => within(win(GUESTBOOK)).getByRole("button", { name: "Sign the guestbook" });
 
   it("posts the email and the chosen use to /api/beta, then says you're on the list", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    renderLanding();
+    const guestbook = await openGuestbook();
     fill("ada@example.com");
-    fireEvent.click(screen.getByLabelText("Managing money for others"));
+    fireEvent.click(within(guestbook).getByLabelText("Managing money for others"));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Sign the guestbook" }));
+      fireEvent.click(sign());
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/beta", expect.objectContaining({ method: "POST" }));
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ email: "ada@example.com", role: "clients", website: "" });
@@ -371,29 +483,29 @@ describe("the guestbook", () => {
 
   it("asks you to check the email when the server says it's wrong", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "email" }), { status: 400 })));
-    renderLanding();
+    const guestbook = await openGuestbook();
     fill("ada@example");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Sign the guestbook" }));
+      fireEvent.click(sign());
     });
-    expect(screen.getByLabelText("Email address:")).toHaveAttribute("aria-invalid", "true");
+    expect(within(guestbook).getByLabelText("Email address:")).toHaveAttribute("aria-invalid", "true");
     expect(document.getElementById("beta-problem")).toHaveTextContent("That email doesn't look right.");
     expect(document.getElementById("beta-problem")).toHaveAttribute("data-slot", "beta-problem");
   });
 
   it("says to try again when the request can't be saved or sent", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
-    renderLanding();
+    await openGuestbook();
     fill("ada@example.com");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Sign the guestbook" }));
+      fireEvent.click(sign());
     });
     expect(document.getElementById("beta-problem")).toHaveTextContent("We couldn't save that just now.");
-    expect(screen.getByRole("button", { name: "Sign the guestbook" })).toBeEnabled();
+    expect(sign()).toBeEnabled();
   });
 
-  it("carries a field people never see, for bots to fill", () => {
-    renderLanding();
+  it("carries a field people never see, for bots to fill", async () => {
+    await openGuestbook();
     const trap = document.getElementById("beta-website")!;
     expect(trap).toHaveAttribute("tabindex", "-1");
     expect(trap.closest("[aria-hidden=true]")).not.toBeNull();
@@ -401,23 +513,29 @@ describe("the guestbook", () => {
 });
 
 describe("the record", () => {
-  it("shows one decision, every line with its hash, and a chain that matches", () => {
+  async function openRecord() {
     renderLanding();
-    const table = screen.getByRole("table");
+    await press(icon("The record"));
+    return win(RECORD);
+  }
+
+  it("shows one decision, every line with its hash, and a chain that matches", async () => {
+    const record = await openRecord();
+    const table = within(record).getByRole("table");
     expect(within(table).getAllByRole("row")).toHaveLength(TRACE.length + 1);
     for (const e of TRACE) expect(within(table).getByText(e.hash)).toBeInTheDocument();
-    expect(screen.getByText(/all 8 lines match/)).toBeInTheDocument();
+    expect(within(record).getByText(/all 8 lines match/)).toBeInTheDocument();
   });
 
-  it("breaks the chain from an edited line down, and mends it on undo", () => {
-    renderLanding();
-    fireEvent.click(screen.getByRole("button", { name: `Edit line ${EDITED.index + 1}` }));
-    expect(screen.getByText(EDITED.text)).toBeInTheDocument();
-    expect(screen.getByText(/fails at line 3\. Lines 3 to 8 no longer match/)).toBeInTheDocument();
-    expect(screen.getAllByText("no match")).toHaveLength(TRACE.length - EDITED.index - 1);
-    fireEvent.click(screen.getByRole("button", { name: "Undo the edit" }));
-    expect(screen.queryByText(EDITED.text)).toBeNull();
-    expect(screen.getByText(/all 8 lines match/)).toBeInTheDocument();
+  it("breaks the chain from an edited line down, and mends it on undo", async () => {
+    const record = await openRecord();
+    fireEvent.click(within(record).getByRole("button", { name: `Edit line ${EDITED.index + 1}` }));
+    expect(within(record).getByText(EDITED.text)).toBeInTheDocument();
+    expect(within(record).getByText(/fails at line 3\. Lines 3 to 8 no longer match/)).toBeInTheDocument();
+    expect(within(record).getAllByText("no match")).toHaveLength(TRACE.length - EDITED.index - 1);
+    fireEvent.click(within(record).getByRole("button", { name: "Undo the edit" }));
+    expect(within(record).queryByText(EDITED.text)).toBeNull();
+    expect(within(record).getByText(/all 8 lines match/)).toBeInTheDocument();
   });
 });
 
@@ -499,6 +617,25 @@ describe("the design system", () => {
       expect(el.getAttribute("class") ?? "").not.toMatch(BLEND);
       expect(el.getAttribute("style") ?? "").not.toMatch(BLEND);
     }
+  });
+
+  it("uses no font-sans: the product's Public Sans never joins the landing page's three faces", () => {
+    for (const file of SOURCES) expect(readFileSync(join(SITE_DIR, file), "utf8"), file).not.toMatch(/\bfont-sans\b/);
+    const { container } = renderLanding();
+    for (const el of container.querySelectorAll("*")) expect(el.getAttribute("class") ?? "").not.toMatch(/\bfont-sans\b/);
+  });
+
+  it("sets every word of the desktop and its windows in one of three faces: DotGothic16, VT323 or Pixelify Sans", () => {
+    const { container } = renderLanding();
+    const faces = [BODY, MONO, PIXEL].map((c) => `.${c}`).join(", ");
+    const unset = [...container.querySelectorAll<HTMLElement>("*")].filter((el) => [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim()) && !el.closest(faces));
+    expect(unset.map((el) => el.outerHTML.slice(0, 80))).toEqual([]);
+    for (const field of container.querySelectorAll("input[type=email]")) expect(field.closest(faces)).not.toBeNull();
+  });
+
+  it("sets typed text at 20px or more, so a phone never zooms into the field", () => {
+    renderLanding();
+    expect(screen.getByLabelText("Email address:").className).toMatch(new RegExp(`\\b${MONO}\\b.*text-\\[1\\.25rem\\]`));
   });
 
   it("uses only the app's weights: never bold", () => {

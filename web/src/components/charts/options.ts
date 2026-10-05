@@ -243,12 +243,12 @@ export function trendColor(trend: Direction, colourBlind = false): string {
   }
 }
 
-/** A hero line: smooth, 2 px, in the trend's colour, with nothing under it. */
+/** A hero line: smooth, 3 px so it holds its own on a compact chart, in the trend's colour, with nothing under it. */
 export function heroAreaOptions(trend: Direction, colourBlind = false): AreaSeriesPartialOptions {
   const line = trendColor(trend, colourBlind);
   return {
     lineColor: line,
-    lineWidth: 2,
+    lineWidth: 3,
     lineType: LineType.Curved,
     topColor: HERO_FILL,
     bottomColor: HERO_FILL,

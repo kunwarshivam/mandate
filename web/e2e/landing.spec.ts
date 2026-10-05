@@ -4,7 +4,8 @@ import { type Page, expect, test } from "@playwright/test";
  * The landing page (DEC-213) in a real browser, in light and dark (the two projects): no sideways
  * scroll from 320 px up, no gradients in any computed style, nothing blinking with motion reduced,
  * nothing shifting as the fonts load, a visible keyboard outline, contents links that land on their
- * section, the tamper demo, and the guestbook against a stubbed /api/beta.
+ * section, and the record's tamper demo and the guestbook, each in its own desktop window, the
+ * guestbook against a stubbed /api/beta.
  */
 
 const PATH = "/welcome";
@@ -14,6 +15,14 @@ async function open(page: Page, width: number, height = 900) {
   await page.setViewportSize({ width, height });
   await page.goto(PATH, { waitUntil: "load" });
   await page.locator("[data-slot=landing]").waitFor();
+}
+
+/** Opens one of the desktop's windows from the hero's buttons, as a visitor would, and returns it. */
+async function openWindow(page: Page, button: "See the record" | "Sign the guestbook", title: string) {
+  await page.locator("[data-slot=hero-actions]").getByRole("button", { name: button }).click();
+  const win = page.getByRole("region", { name: title });
+  await expect(win).toBeVisible();
+  return win;
 }
 
 for (const width of WIDTHS) {
@@ -100,16 +109,19 @@ test("the contents selects the section being read, and the status bar shows wher
   const contents = page.getByRole("navigation", { name: "Contents" });
   await page.locator("#safety").evaluate((el) => el.scrollIntoView());
   await expect(contents.locator("[aria-current=location]")).toHaveText("How it stays in check");
-  await contents.getByRole("link", { name: "The record" }).hover();
-  await expect(page.locator("[data-slot=status-text]")).toHaveText("http://www.owlhead.ai/#record");
+  await contents.getByRole("link", { name: "Who it's for" }).hover();
+  await expect(page.locator("[data-slot=status-text]")).toHaveText("http://www.owlhead.ai/#who");
   await page.mouse.move(0, 0);
   await expect(page.locator("[data-slot=status-text]")).toHaveText("Document: Done");
 });
 
-test("390 px: the record fits the phone without scrolling sideways", async ({ page }) => {
+test("390 px: the record's window fits the phone without scrolling sideways", async ({ page }) => {
   await open(page, 390);
   await page.evaluate(() => document.fonts.ready);
-  const fit = await page.locator("[data-slot=record-trace] table").evaluate((t) => t.scrollWidth <= t.parentElement!.clientWidth);
+  const record = await openWindow(page, "See the record", "The record - Example decision");
+  const table = record.locator("[data-slot=record-trace] table");
+  await expect(table).toBeVisible();
+  const fit = await table.evaluate((t) => t.parentElement!.clientWidth > 0 && t.scrollWidth <= t.parentElement!.clientWidth);
   expect(fit).toBe(true);
 });
 
@@ -122,11 +134,12 @@ test("one main landmark, and no site header over the page", async ({ page }) => 
 
 test("editing a line of the record breaks the chain from there, and undoing it mends it", async ({ page }) => {
   await open(page, 1440);
-  await expect(page.getByText("Chain check: all 8 lines match.")).toBeVisible();
-  await page.getByRole("button", { name: "Edit line 3" }).click();
-  await expect(page.getByText(/Chain check: fails at line 3/)).toBeVisible();
-  await page.getByRole("button", { name: "Undo the edit" }).click();
-  await expect(page.getByText("Chain check: all 8 lines match.")).toBeVisible();
+  const record = await openWindow(page, "See the record", "The record - Example decision");
+  await expect(record.getByText("Chain check: all 8 lines match.")).toBeVisible();
+  await record.getByRole("button", { name: "Edit line 3" }).click();
+  await expect(record.getByText(/Chain check: fails at line 3/)).toBeVisible();
+  await record.getByRole("button", { name: "Undo the edit" }).click();
+  await expect(record.getByText("Chain check: all 8 lines match.")).toBeVisible();
 });
 
 test("the guestbook sends the email and use, and says you're on the list", async ({ page }) => {
@@ -136,9 +149,10 @@ test("the guestbook sends the email and use, and says you're on the list", async
     await route.fulfill({ status: 201, contentType: "application/json", body: '{"ok":true}' });
   });
   await open(page, 390);
-  await page.getByLabel("Email address:").fill("ada@example.com");
-  await page.getByRole("radio", { name: "Running a trading desk" }).check();
-  await page.getByRole("button", { name: "Sign the guestbook" }).click();
-  await expect(page.locator("[data-slot=beta-done]")).toContainText("We'll write to ada@example.com");
+  const guestbook = await openWindow(page, "Sign the guestbook", "guestbook.cgi");
+  await guestbook.getByLabel("Email address:").fill("ada@example.com");
+  await guestbook.getByRole("radio", { name: "Running a trading desk" }).check();
+  await guestbook.getByRole("button", { name: "Sign the guestbook" }).click();
+  await expect(guestbook.locator("[data-slot=beta-done]")).toContainText("We'll write to ada@example.com");
   expect(sent).toEqual({ email: "ada@example.com", role: "desk", website: "" });
 });

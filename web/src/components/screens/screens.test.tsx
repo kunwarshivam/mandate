@@ -3,18 +3,20 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentRoute from "@/app/(app)/agents/[agentId]/page";
 import * as approvalRoute from "@/app/(app)/approvals/[approvalId]/page";
-import { BEVEL } from "@/components/kumo/bevel";
+import { DECISION_KEY } from "@/components/kumo/bevel";
 import { AppShell } from "@/components/shell/app-shell";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
 import { clock, price } from "@/lib/format";
 import { PURPOSE_LABEL } from "@/lib/labels";
+import { headroomLine } from "@/lib/limits";
+import { decisionHref } from "@/lib/screens";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { RECORD_AFTER_MS, dockStop, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
 import { AgentsListScreen } from "./agents-list";
 import { ApprovalRequestScreen } from "./approval-request";
-import { ApprovalsInboxScreen } from "./approvals-inbox";
+import { ApprovalsInboxScreen, askSentence } from "./approvals-inbox";
 import { DashboardScreen } from "./dashboard";
 
 const SCENARIO_IDS = SCENARIOS.map((s) => s.id);
@@ -67,15 +69,61 @@ describe("D1 dashboard", () => {
     expect(within(main()).getByRole("link", { name: "Describe your first agent" })).toHaveAttribute("href", "/agents/new");
   });
 
-  it("puts the performance placeholder beside every P&L", () => {
+  it("puts the performance placeholder beside every P&L, and says paper once for the list", () => {
     renderScreen("/", <DashboardScreen />);
-    const cards = within(main()).getAllByRole("article");
+    const agents = within(main()).getByRole("region", { name: "Agents" });
+    const cards = within(agents).getAllByRole("article");
     expect(cards).toHaveLength(3);
+    expect(agents.querySelectorAll("[data-slot=paper-note]")).toHaveLength(1);
+    expect(agents.querySelector("[data-slot=paper-note]")).toHaveTextContent("Paper P&L, simulated.");
     for (const card of cards) {
-      expect(card).toHaveTextContent("Paper P&L, simulated");
+      expect(card).not.toHaveTextContent(/simulated/i);
       expect(card.querySelector("[data-placeholder=performance]")).toHaveTextContent("[[DISCLOSURE-PERFORMANCE]]");
       expect(within(card).getByRole("button", { name: "Performance disclosure" })).toHaveAccessibleDescription("[[DISCLOSURE-PERFORMANCE]]");
     }
+  });
+
+  it("gives each agent row its headroom to the next level", () => {
+    renderScreen("/", <DashboardScreen />);
+    const ws = buildWorkspace("normal");
+    const cards = within(within(main()).getByRole("region", { name: "Agents" })).getAllByRole("article");
+    cards.forEach((card, i) => expect(card.querySelector("[data-slot=card-headroom]")).toHaveTextContent(headroomLine(ws.agents[i])));
+  });
+
+  it("leads the main column with the decisions, and keeps what needs you and the account in the rail, in that order", () => {
+    renderScreen("/", <DashboardScreen />);
+    const column = main().querySelector<HTMLElement>("[data-layout=main]")!;
+    const rail = main().querySelector<HTMLElement>("[data-layout=rail]")!;
+    expect(main().querySelectorAll("[data-layout=rail]")).toHaveLength(1);
+    expect(column.querySelector("h2")).toHaveTextContent("Decisions");
+    expect([...rail.querySelectorAll("h2")].map((h) => h.textContent?.replace(/\d+ items?$/, ""))).toEqual(["Needs you", "Account equity"]);
+    expect(rail.compareDocumentPosition(column) & Node.DOCUMENT_POSITION_FOLLOWING, "a phone reads what needs you before the decisions").toBeTruthy();
+    expect(rail.parentElement?.className).toContain("lg:grid-cols-[minmax(0,1fr)_20rem]");
+  });
+
+  it("draws the latest decisions as a timeline: the agent's owl, the action, the verdict in words, and the rule or what came next", () => {
+    renderScreen("/", <DashboardScreen />);
+    const ws = buildWorkspace("normal");
+    const region = within(main()).getByRole("region", { name: "Decisions" });
+    const entries = [...region.querySelectorAll<HTMLElement>("[data-slot=timeline-entry]")];
+    expect(entries).toHaveLength(Math.min(6, ws.decisions.length));
+    entries.forEach((entry, i) => {
+      const d = ws.decisions[i];
+      expect(entry).toHaveAttribute("data-verdict", d.verdict);
+      expect(entry.querySelector("svg[data-slot=owl]")).not.toBeNull();
+      expect(within(entry).getByRole("link")).toHaveAttribute("href", decisionHref(d.agent_id, d.event_id));
+      expect(entry.querySelector("[data-slot=verdict]")).toHaveTextContent(/^(Allowed|Not allowed|Held|Waiting)$/);
+      if (d.verdict === "allow") expect(entry.querySelector("[data-slot=gate-rule]")).toBeNull();
+      else expect(entry.querySelector("[data-slot=gate-rule]")).toHaveTextContent(/\w/);
+      expect(entry.innerHTML).not.toMatch(/\b(text|bg|ring|border)-(gain|loss|crimson)\b/);
+    });
+    expect(region.querySelector("[data-slot=decision-tally]")).toHaveTextContent(/^The latest 6 decisions: \d+ allowed(, \d+ (not allowed|held|waiting))+\.$/);
+    expect(within(region).getAllByRole("link", { name: "All decisions" })[0]).toHaveAttribute("href", "/audit/decisions");
+  });
+
+  it("keeps news off Home: it is read on each agent's page, beside its decisions", () => {
+    renderScreen("/", <DashboardScreen />);
+    expect(within(main()).queryByRole("region", { name: "News" })).toBeNull();
   });
 
   it("states a gain or loss in words as well as colour", () => {
@@ -119,7 +167,7 @@ describe("D2 agent detail", () => {
     renderScreen(`/agents/${AGENT_IDS.btc}`, <AgentDetailScreen agentId={AGENT_IDS.btc} />);
     const story = [...main().querySelectorAll("[data-layout=main]")];
     const headings = story.flatMap((col) => [...col.querySelectorAll("h2")].map((h) => h.textContent));
-    expect(headings).toEqual(expect.arrayContaining(["Equity against your mandate", "Key figures", "Positions", "Working orders", "Recent decisions", "Activity"]));
+    expect(headings).toEqual(expect.arrayContaining(["Equity against your mandate", "Key figures", "Positions", "Working orders", "Recent decisions", "Activity", "News"]));
     const activity = within(main()).getByRole("region", { name: "Activity" });
     expect(story.some((col) => col.contains(activity))).toBe(true);
     expect(activity.querySelectorAll("li").length).toBeLessThanOrEqual(5);
@@ -193,6 +241,26 @@ describe("D5 inbox and D6 request", () => {
   const request = (id: string, scenario: (typeof SCENARIO_IDS)[number] = "approvals") =>
     renderScreen(`/approvals/${id}`, <ApprovalRequestScreen approvalId={id} />, scenario);
 
+  it("lays the inbox on the page grid, with why requests come in the rail: each agent's asking rules and its window", () => {
+    renderScreen("/approvals", <ApprovalsInboxScreen />, "approvals");
+    const column = main().querySelector<HTMLElement>("[data-layout=main]")!;
+    const rail = main().querySelector<HTMLElement>("[data-layout=rail]")!;
+    expect(column.parentElement).toBe(rail.parentElement);
+    expect(rail.parentElement?.className).toContain("lg:grid-cols-[minmax(0,1fr)_20rem]");
+    expect(within(column).getByRole("region", { name: "Open, by deadline" })).toBeInTheDocument();
+    const why = within(rail).getByRole("region", { name: "What sends you a request" });
+    const ws = buildWorkspace("approvals");
+    const rows = [...why.querySelectorAll("li")];
+    expect(rows).toHaveLength(ws.agents.length);
+    rows.forEach((row, i) => {
+      const agent = ws.agents[i];
+      expect(within(row).getByRole("link", { name: agent.label })).toHaveAttribute("href", `/agents/${agent.agent_id}/mandate`);
+      expect(row).toHaveTextContent(askSentence(agent));
+      expect(row).toHaveTextContent(/A request waits .+, then is skipped\.$/);
+    });
+    expect(askSentence(ws.agents.find((a) => a.agent_id === AGENT_IDS.swing)!)).toMatch(/^Your rules? (“\w+”, )*“low_score”/);
+  });
+
   it("gives Approve and Skip the same variant and weight, with no focus or selection", () => {
     request(APPROVAL_IDS.btc);
     const choices = main().querySelector("[data-slot=approval-choices]") as HTMLElement;
@@ -211,12 +279,15 @@ describe("D5 inbox and D6 request", () => {
     }
   });
 
-  it("draws Approve and Skip in the landing page's bevel, both alike, flat, with Kumo's ring left only for focus (DEC-452)", () => {
+  it("draws Approve and Skip as one solid lit key in Public Sans, both alike, flat, with Kumo's ring left only for focus (DEC-467)", () => {
     request(APPROVAL_IDS.btc);
     const choices = main().querySelector("[data-slot=approval-choices]") as HTMLElement;
-    for (const b of within(choices).getAllByRole("button")) {
-      for (const c of BEVEL.split(" ")) expect(b).toHaveClass(c);
-      expect(b).not.toHaveClass("ring", "shadow-xs", "border-0", "rounded-lg");
+    const [approve, skip] = within(choices).getAllByRole("button");
+    expect(approve.className).toBe(skip.className);
+    for (const b of [approve, skip]) {
+      for (const c of DECISION_KEY.split(" ")) expect(b).toHaveClass(c);
+      expect(b).toHaveClass("bg-card", "text-foreground", "font-semibold");
+      expect(b).not.toHaveClass("pixel-face", "bg-muted", "border-t-card", "ring", "shadow-xs", "border-0");
       expect(b).toHaveClass("focus-visible:ring-2");
       expect(b.className).not.toMatch(/bg-\[|shadow-(?!none)/);
     }

@@ -1,11 +1,8 @@
 "use client";
 
-import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, CaretRight, CheckCircle, Tray, WarningCircle } from "@phosphor-icons/react";
-import { Deadline } from "@/components/approvals/deadline";
+import { CaretRight, Tray, WarningCircle } from "@phosphor-icons/react";
 import { AccountEquityChart } from "@/components/charts/equity-chart";
-import { GateDecisionRow } from "@/components/domain/gate-decision";
 import { ModeBadge } from "@/components/domain/mode";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { AgentOwl } from "@/components/domain/owl";
@@ -16,93 +13,17 @@ import { clock, price, quantity, zoneLabel } from "@/lib/format";
 import { headroomLine } from "@/lib/limits";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
-import { decisionHref } from "@/lib/screens";
-import { cn } from "@/lib/utils";
-import { AgentCard } from "./agent-card";
+import { AgentCard, PaperPnlNote } from "./agent-card";
 import { AssetsSection } from "./assets-section";
-import { NewsSection } from "./news-section";
-import { EmptyBoard, Section, SectionLink, WorkspaceGate } from "./common";
+import { DecisionTimeline, tally } from "./decision-timeline";
+import { EmptyBoard, PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
+import { SideRail } from "./side-rail";
 
-/** The rail beside the account chart shows this many requests; the rest are one link away. */
-const WAITING_SHOWN = 3;
+/** Home's timeline shows the latest decisions; the audit has them all. */
+const DECISIONS_SHOWN = 6;
 
-/** A phone's Home shows this much recent activity; the rest is one link away. */
-const ACTIVITY_SHOWN_ON_PHONE = 3;
-
-function AlertsSummary({ ws }: { ws: Workspace }) {
-  const lines = alertLines(ws).map((a) => a.text);
-  const Icon = lines.length === 0 ? CheckCircle : WarningCircle;
-  return (
-    <Link
-      href="/alerts"
-      data-slot="alerts-summary"
-      data-count={lines.length}
-      className={cn(
-        "press group -mx-3 grid min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1rem] items-start gap-x-3 rounded-xl px-3 py-3 outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-ring",
-        lines.length > 0 && "bg-background hover:bg-muted",
-      )}
-    >
-      <Icon aria-hidden weight={lines.length === 0 ? "regular" : "fill"} className={cn("mt-0.5 size-5", lines.length === 0 ? "text-muted-foreground" : "text-foreground")} />
-      <span className="grid gap-0.5">
-        <span className="font-medium">{lines.length === 0 ? "No alerts" : lines.length === 1 ? "1 alert" : `${lines.length} alerts`}</span>
-        <span className="text-sm text-muted-foreground">
-          {lines.length === 0 ? "Market data, broker, deployment and push relay are current, and no agent is restricted." : `${lines.join("; ")}.`}
-        </span>
-      </span>
-      <ArrowRight aria-hidden className="mt-1 size-4 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" />
-    </Link>
-  );
-}
-
-/**
- * Requests for your approval, soonest deadline first. Prominent by place and tint, calm in voice:
- * what the agent asks, and when it is skipped if you do nothing. No urgency colour, no countdown.
- */
-function Waiting({ ws, open, now }: { ws: Workspace; open: Approval[]; now: string }) {
-  const more = open.length - WAITING_SHOWN;
-  return (
-    <section aria-labelledby="waiting-title" data-slot="waiting" className="grid content-start gap-(--block-gap)">
-      <h2 id="waiting-title" className="flex items-center gap-2.5 text-h2">
-        {open.length === 0 ? "Nothing waiting" : "Waiting for you"}
-        {open.length > 0 ? (
-          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-sm bg-lapis px-2 font-mono text-label text-lapis-foreground tabular">
-            {open.length}
-            <span className="sr-only">{open.length === 1 ? " request" : " requests"}</span>
-          </span>
-        ) : null}
-      </h2>
-      {open.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Requests for your approval appear here, with their deadline.</p>
-      ) : (
-        <ul className="grid gap-2">
-          {open.slice(0, WAITING_SHOWN).map((a, i) => {
-            const agent = findAgent(ws, a.agent_id);
-            return (
-              <li key={a.approval_id} className="reveal grid gap-3 rounded-2xl bg-lapis-soft px-4 py-4" style={{ "--i": i + 1 } as CSSProperties}>
-                <p className="font-medium text-pretty">
-                  {agent?.label ?? "An agent"} asks to buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of{" "}
-                  <span className="font-mono tabular">{price(a.bound.limit)}</span>
-                </p>
-                <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
-                <Link
-                  href={`/approvals/${a.approval_id}`}
-                  className="press inline-flex h-11 w-fit items-center gap-2 rounded-lg bg-lapis pr-4 pl-5 text-sm font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-lapis-soft"
-                >
-                  Open request <ArrowRight aria-hidden className="size-4" />
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {more > 0 ? (
-        <SectionLink href="/approvals">
-          {more === 1 ? "1 more request" : `${more} more requests`}
-        </SectionLink>
-      ) : null}
-    </section>
-  );
-}
+/** A phone's Home shows this many decisions; the rest is one link away. */
+const DECISIONS_SHOWN_ON_PHONE = 3;
 
 function requestSentence(ws: Workspace, a: Approval) {
   return (
@@ -117,15 +38,16 @@ const NEEDS_ROW =
   "press group -mx-2 grid min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1rem] items-start gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset";
 
 /**
- * The phone's first question, answered first (DEC-207): the requests waiting for you, soonest
- * deadline first, each with the static time it is skipped at, then the open alerts. Each row opens
- * where it is read in full. With nothing, it says so plainly. The only place Home shows a request.
+ * Home's first question, answered first at every width (DEC-207, DEC-467): the requests waiting for
+ * you, soonest deadline first, each with the static time it is skipped at, then the open alerts. Each
+ * row opens where it is read in full. With nothing, it says so plainly. The only place Home shows a
+ * request; the dock carries the count.
  */
-function NeedsYou({ ws, open, className }: { ws: Workspace; open: Approval[]; className?: string }) {
+function NeedsYou({ ws, open }: { ws: Workspace; open: Approval[] }) {
   const lines = alertLines(ws);
   const count = open.length + lines.length;
   return (
-    <section aria-labelledby="needs-you-title" data-slot="needs-you" data-count={count} className={cn("grid content-start gap-2", className)}>
+    <section aria-labelledby="needs-you-title" data-slot="needs-you" data-count={count} className="grid content-start gap-2">
       <h2 id="needs-you-title" className="flex items-center gap-2.5 text-h2">
         Needs you
         {count > 0 ? (
@@ -156,7 +78,7 @@ function NeedsYou({ ws, open, className }: { ws: Workspace; open: Approval[]; cl
                     if you do nothing
                   </span>
                 </span>
-                <CaretRight aria-hidden className="mt-1 size-4 text-muted-foreground" />
+                <CaretRight aria-hidden className="mt-1 size-4 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" />
               </Link>
             </li>
           ))}
@@ -165,7 +87,7 @@ function NeedsYou({ ws, open, className }: { ws: Workspace; open: Approval[]; cl
               <Link href={l.href} className={NEEDS_ROW}>
                 <WarningCircle aria-hidden weight="fill" className="mt-0.5 size-5 text-foreground" />
                 <span className="font-medium text-pretty">{l.text}</span>
-                <CaretRight aria-hidden className="mt-1 size-4 text-muted-foreground" />
+                <CaretRight aria-hidden className="mt-1 size-4 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" />
               </Link>
             </li>
           ))}
@@ -202,6 +124,11 @@ function PhoneAgentRow({ agent }: { agent: Agent }) {
   );
 }
 
+/**
+ * Home answers three questions in the order an owner asks them (DEC-467): does anything need me, what
+ * did my agents do and was it allowed, and how is the account. The rail holds the first and the last;
+ * the decisions lead the main column. A phone reads them in the same order as the page's source.
+ */
 function Dashboard() {
   const { ws, now } = useRuntime();
   const canAudit = useCan("audit.view");
@@ -211,22 +138,51 @@ function Dashboard() {
     .filter((a) => a.status === "delivered")
     .sort((a, b) => Date.parse(a.deadline) - Date.parse(b.deadline));
   const marketStale = ws.health.market_data.state !== "ok";
+  const decisions = ws.decisions.slice(0, DECISIONS_SHOWN);
 
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
       <h1 className="sr-only">Dashboard</h1>
-      <div className="grid grid-cols-1 gap-(--section-gap) max-lg:gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-x-16">
-        <NeedsYou ws={ws} open={open} className="lg:hidden" />
-        <div data-slot="account-board" data-layout="main" className="reveal grid min-w-0 gap-5">
-          <AccountEquityChart />
-        </div>
-        <div data-layout="rail" className="grid content-start gap-6 max-lg:hidden lg:pt-1">
-          <Waiting ws={ws} open={open} now={now} />
-          <AlertsSummary ws={ws} />
+      <div className={PAGE_GRID}>
+        <SideRail className="max-lg:gap-8 lg:col-start-2 lg:row-start-1">
+          <NeedsYou ws={ws} open={open} />
+          <div data-slot="account-board" className="reveal grid min-w-0">
+            <AccountEquityChart />
+          </div>
+        </SideRail>
+
+        <div data-layout="main" className="grid min-w-0 content-start lg:col-start-1 lg:row-start-1">
+          <Section
+            title="Decisions"
+            action={
+              canAudit ? (
+                <SectionLink href="/audit/decisions" className="max-lg:hidden">
+                  All decisions
+                </SectionLink>
+              ) : undefined
+            }
+          >
+            {decisions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No decisions yet. Each action an agent wants appears here with what its mandate said.</p>
+            ) : (
+              <>
+                <p data-slot="decision-tally" className="-mt-1 text-sm text-muted-foreground max-lg:hidden">
+                  The latest {tally(decisions)}.
+                </p>
+                <DecisionTimeline ws={ws} decisions={decisions} shownOnPhone={DECISIONS_SHOWN_ON_PHONE} />
+              </>
+            )}
+            {canAudit && decisions.length > 0 ? (
+              <SectionLink href="/audit/decisions" className="w-fit lg:hidden">
+                See all decisions
+              </SectionLink>
+            ) : null}
+          </Section>
         </div>
       </div>
 
       <Section title="Agents" action={<SectionLink href="/agents">All agents</SectionLink>}>
+        <PaperPnlNote className="-mt-1 max-lg:hidden" />
         <ul className="grid max-lg:hidden">
           {ws.agents.map((agent, i) => (
             <li key={agent.agent_id} className="grid">
@@ -242,43 +198,6 @@ function Dashboard() {
       </Section>
 
       <AssetsSection ws={ws} className="max-lg:hidden" />
-
-      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-x-16">
-        <Section
-          title="Recent activity"
-          action={
-            canAudit ? (
-              <SectionLink href="/audit/decisions" className="max-lg:hidden">
-                All decisions
-              </SectionLink>
-            ) : undefined
-          }
-        >
-          {ws.decisions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No decisions yet.</p>
-          ) : (
-            <ol className="grid">
-              {ws.decisions.slice(0, 6).map((d, i) => (
-                <GateDecisionRow
-                  key={d.event_id}
-                  decision={d}
-                  agent={findAgent(ws, d.agent_id)}
-                  showAgent
-                  href={decisionHref(d.agent_id, d.event_id)}
-                  className={i >= ACTIVITY_SHOWN_ON_PHONE ? "max-lg:hidden" : "max-lg:[&:nth-child(3)]:border-b-0"}
-                />
-              ))}
-            </ol>
-          )}
-          {canAudit && ws.decisions.length > 0 ? (
-            <SectionLink href="/audit/decisions" className="w-fit lg:hidden">
-              See all activity
-            </SectionLink>
-          ) : null}
-        </Section>
-
-        <NewsSection ws={ws} now={now} className="max-lg:hidden" />
-      </div>
     </div>
   );
 }

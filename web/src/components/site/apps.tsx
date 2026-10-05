@@ -4,8 +4,10 @@ import { useState } from "react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { OWL_SCROLL } from "./art";
-import { MONO, PIXEL, PLAIN_BUTTON, SUNKEN } from "./letter";
+import { BetaForm } from "./beta-form";
+import { BODY, BOLD, MONO, PIXEL, PLAIN_BUTTON, SUNKEN } from "./letter";
 import { NOTE, PixelIcon } from "./pixel-icons";
+import { RecordTrace } from "./record-trace";
 import { ArtCredit } from "./wallpaper";
 
 function Menu({ items }: { items: string[] }) {
@@ -30,6 +32,8 @@ Click an icon to open it. Drag a window by its title bar. The three buttons at i
 Owlhead is a trading agent for your own brokerage account. It works inside rules you write, and it writes down every decision it makes. It is in private beta, trading on paper.
 
 The wallpapers are paintings and prints from The Metropolitan Museum of Art, which shares them as public domain. Pick one in Display.
+
+The record shows one decision the way Owlhead writes it down; try editing a line. Questions answers what people ask first, and the Guestbook asks for a place in the beta.
 
 Tour.mp4 is a minute on what Owlhead does. The Recycle Bin holds what Owlhead won't do.
 
@@ -63,6 +67,73 @@ export function PictureViewer() {
         </figcaption>
       </figure>
     </>
+  );
+}
+
+/** The page's reading text, in a sunken well that scrolls inside its window. */
+const PAGE = cn(SUNKEN, BODY, "min-h-0 flex-1 overflow-y-auto bg-card px-4 py-3 text-[1.0625rem] leading-[1.6] sm:px-5 sm:py-4");
+
+/** The record, open on one decision from start to finish, with the tamper demo. */
+export function RecordViewer() {
+  return (
+    <>
+      <Menu items={["File", "Edit", "View", "Help"]} />
+      <div className={PAGE}>
+        <div className="grid gap-4 text-pretty">
+          <p>
+            Before any order goes out, Owlhead writes down what the agent read, what it concluded, which checks passed and who approved it. Each line carries a hash of the line before it, so if anyone edits a line, the chain
+            stops matching from there on. You can export it for an auditor or your investors.
+          </p>
+          <p>Here is one decision from start to finish. Try editing a line.</p>
+          <RecordTrace />
+        </div>
+      </div>
+    </>
+  );
+}
+
+export const QUESTIONS: { q: string; a: string }[] = [
+  { q: "Can it take money out of my account?", a: "No. Owlhead only asks your broker for permission to trade. It can't withdraw or transfer money, and it can't change its own rules." },
+  {
+    q: "Is it trading real money?",
+    a: "Not yet. In the beta, agents trade on paper with simulated money. Live trading comes later, once it has legal sign-off, and only when you switch it on with your passkey.",
+  },
+  { q: "Which brokers does it work with?", a: "Alpaca first. Robinhood and Kraken Derivatives US are planned." },
+  { q: "How do I stop it?", a: "Press Stop. It halts every agent and cancels their open orders. Protective stops rest at your broker, so they hold even if Owlhead goes down." },
+  { q: "What does it cost?", a: "Nothing during the private beta. We'll tell you the price well before we charge anything." },
+  {
+    q: "Is this investment advice?",
+    a: "No. Owlhead is software that carries out rules you write. It doesn't know your finances and doesn't recommend what to buy or sell. Whether trading suits you is your decision, ideally with an adviser.",
+  },
+  { q: "Who gets in?", a: "We let people in a few at a time, roughly in the order they ask, with room for each kind of user so we hear from all of them." },
+];
+
+/** Help, open on the questions people ask first, each a term and its answer. */
+export function Help() {
+  return (
+    <>
+      <Menu items={["File", "Edit", "Bookmark", "Options", "Help"]} />
+      <div className={PAGE}>
+        <dl className="grid gap-5 text-pretty">
+          {QUESTIONS.map(({ q, a }) => (
+            <div key={q}>
+              <dt className={BOLD}>{q}</dt>
+              <dd>{a}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </>
+  );
+}
+
+/** The guestbook, where a visitor asks for a place in the private beta. */
+export function Guestbook() {
+  return (
+    <div className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto p-4 sm:p-5">
+      <p className="text-base leading-snug">Sign the guestbook to ask for a place. Leave your email and we&apos;ll write once, when your place opens.</p>
+      <BetaForm />
+    </div>
   );
 }
 

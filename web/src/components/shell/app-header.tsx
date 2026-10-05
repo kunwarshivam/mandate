@@ -4,9 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Breadcrumbs } from "@cloudflare/kumo/components/breadcrumbs";
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
-import { Bell, Briefcase, CaretUpDown, DotsThreeVertical, SignOut, Tray, UserCircle } from "@phosphor-icons/react";
+import { Bell, Briefcase, CaretUpDown, DotsThreeVertical, SignOut, UserCircle } from "@phosphor-icons/react";
 import { canOpen, homeFor } from "@/lib/access";
-import { approvalAt, useRuntime } from "@/lib/mock-runtime";
+import { useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
 import { type Crumb, crumbsFor } from "@/lib/screens";
 import { signOut, useSession } from "@/lib/session";
@@ -52,20 +52,6 @@ function EarlierCrumbs({ crumbs }: { crumbs: Crumb[] }) {
       </DropdownMenu>
       <Breadcrumbs.Separator />
     </div>
-  );
-}
-
-/** The approvals count carries a number and nothing else. */
-export function ApprovalsCount({ n, className }: { n: number; className?: string }) {
-  if (n === 0) return null;
-  return (
-    <span
-      data-slot="approvals-count"
-      className={`inline-flex h-5 min-w-5 items-center justify-center rounded-sm bg-lapis px-1.5 font-mono text-xs font-semibold text-lapis-foreground tabular ${className ?? ""}`}
-    >
-      {n}
-      <span className="sr-only"> open</span>
-    </span>
   );
 }
 
@@ -171,6 +157,7 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
 /**
  * The header always renders, whatever is loading: the paper badge and the way home never wait for
  * workspace data (brief §5). Stop is not here: it ends the dock and the phone's tab bar (DEC-452).
+ * Nor is Approvals: the dock and the tab bar carry it and its one count (DEC-467).
  * As the header narrows, lower-priority items give way first:
  * the trail folds its earlier crumbs into a menu and then hides, never truncating the current page,
  * the command bar narrows (it is centred where both sides fit, `e2e/command-bar.spec.ts`), the
@@ -181,9 +168,8 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
  */
 export function AppHeader() {
   const pathname = usePathname();
-  const { ws, now } = useRuntime();
+  const { ws } = useRuntime();
   const { role } = useRole();
-  const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
   // Deep pages keep their last three crumbs; the page's tabs and the dock carry the rest of the way back.
   const crumbs = crumbsFor(pathname, (id) => ws.agents.find((a) => a.agent_id === id)?.label)
     .filter((c) => canOpen(role, c.href))
@@ -226,15 +212,9 @@ export function AppHeader() {
           <ThemeMenu className={`${ICON_LINK} max-lg:hidden`} />
           <EnvironmentBadge environment={ws.environment} className="lg:max-[100rem]:[&>span+span]:sr-only" />
           {seesAgents ? (
-            <>
-              <Link href="/approvals" aria-label="Approvals" className={`${ICON_LINK} max-lg:hidden`}>
-                <Tray className="size-5" aria-hidden />
-                <ApprovalsCount n={open} className="absolute top-0.5 right-0" />
-              </Link>
-              <Link href="/alerts" aria-label="Alerts" className={`${ICON_LINK} max-xl:hidden`}>
-                <Bell className="size-5" aria-hidden />
-              </Link>
-            </>
+            <Link href="/alerts" aria-label="Alerts" className={`${ICON_LINK} max-xl:hidden`}>
+              <Bell className="size-5" aria-hidden />
+            </Link>
           ) : null}
           <div className="max-xl:hidden">
             <UserMenu />

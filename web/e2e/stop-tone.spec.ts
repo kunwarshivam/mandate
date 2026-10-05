@@ -141,7 +141,7 @@ test.describe("Stop is quiet on a calm screen", () => {
   test("requests waiting for approval alone leave it quiet", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await load(page, "approvals");
-    await expect(page.getByRole("banner").locator("[data-slot=approvals-count]")).toHaveText("3 open");
+    await expect(page.getByRole("navigation", { name: "Primary" }).locator("[data-slot=approvals-count]")).toHaveText("3 open");
     await expect(stopIn(page)).toHaveAttribute("data-tone", "quiet");
   });
 });

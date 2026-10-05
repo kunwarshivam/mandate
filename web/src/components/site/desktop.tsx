@@ -6,10 +6,11 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
-import { DISCARDED, Notepad, PictureViewer, RecycleBin } from "./apps";
+import { DISCARDED, Guestbook, Help, Notepad, PictureViewer, RecordViewer, RecycleBin } from "./apps";
 import { Assistant } from "./assistant";
 import { MONO, PIXEL, RAISED, SUNKEN } from "./letter";
 import { MediaPlayer } from "./media-player";
+import { OpenAppContext } from "./open-app";
 import { BIN, BIN_EMPTY, BOLT, BOOK, FILM, HELP, KEY, LEDGER, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
 import { TitleBar, WINDOW_BUTTON } from "./retro";
 import { ThemeSwitch } from "./theme-switch";
@@ -19,7 +20,7 @@ import type { AmpState } from "./winamp";
 /** Webamp is a megabyte of player, so it loads only when someone opens Winamp. */
 const Winamp = dynamic(() => import("./winamp"), { ssr: false });
 
-export type AppId = "home" | "readme" | "owl" | "display" | "tour" | "bin";
+export type AppId = "home" | "record" | "questions" | "guestbook" | "readme" | "owl" | "display" | "tour" | "bin";
 
 type Win = { open: boolean; min: boolean; max: boolean; x: number; y: number; z: number };
 
@@ -95,6 +96,27 @@ const APPS: Record<AppId, App> = {
     frame: "sm:inset-y-3 sm:mx-auto sm:w-[min(66rem,calc(100%-15rem))]",
     offset: { x: 0, y: 0 },
   },
+  record: {
+    title: "The record - Example decision",
+    task: "The record",
+    icon: <PixelIcon sprite={LEDGER} className="size-4" />,
+    frame: "sm:m-auto sm:h-fit sm:max-h-[calc(100%-2rem)] sm:w-[min(46rem,calc(100%-2rem))]",
+    offset: { x: -24, y: 12 },
+  },
+  questions: {
+    title: "Questions - Owlhead Help",
+    task: "Questions",
+    icon: <PixelIcon sprite={HELP} className="size-4" />,
+    frame: "sm:m-auto sm:h-[min(34rem,calc(100%-2rem))] sm:w-[34rem]",
+    offset: { x: -72, y: -12 },
+  },
+  guestbook: {
+    title: "guestbook.cgi",
+    task: "Guestbook",
+    icon: <PixelIcon sprite={BOOK} className="size-4" />,
+    frame: "sm:m-auto sm:h-fit sm:max-h-[calc(100%-2rem)] sm:w-[30rem]",
+    offset: { x: 36, y: 24 },
+  },
   readme: {
     title: "readme.txt - Notepad",
     task: "readme.txt",
@@ -133,15 +155,15 @@ const APPS: Record<AppId, App> = {
 };
 
 /** `right` icons sit down the desktop's right edge on a wide screen, as a Recycle Bin often did. */
-type Shortcut = { id: string; label: string; icon: ReactNode; right?: true } & ({ app: AppId; hash?: string } | { href: string } | { amp: true });
+type Shortcut = { id: string; label: string; icon: ReactNode; right?: true } & ({ app: AppId } | { href: string } | { amp: true });
 
 const sprite = (s: Sprite) => <PixelIcon sprite={s} />;
 
 const SHORTCUTS: Shortcut[] = [
   { id: "owlhead", label: "Owlhead", icon: <BrandOwl className="size-8" />, app: "home" },
-  { id: "guestbook", label: "Guestbook", icon: sprite(BOOK), app: "home", hash: "beta" },
-  { id: "record", label: "The record", icon: sprite(LEDGER), app: "home", hash: "record" },
-  { id: "questions", label: "Questions", icon: sprite(HELP), app: "home", hash: "questions" },
+  { id: "guestbook", label: "Guestbook", icon: sprite(BOOK), app: "guestbook" },
+  { id: "record", label: "The record", icon: sprite(LEDGER), app: "record" },
+  { id: "questions", label: "Questions", icon: sprite(HELP), app: "questions" },
   { id: "readme", label: "readme.txt", icon: sprite(NOTE), app: "readme" },
   { id: "owl", label: "owl.jpg", icon: sprite(PICTURE), app: "owl" },
   { id: "display", label: "Display", icon: sprite(MONITOR), app: "display" },
@@ -378,24 +400,17 @@ export function Desktop({ home }: { home: ReactNode }) {
     return () => clearTimeout(t);
   }, []);
 
-  const openApp = (id: AppId, hash?: string) => {
+  const openApp = (id: AppId) => {
     dispatch({ type: "open", id });
     setStart(false);
     setMenu(null);
-    requestAnimationFrame(() => {
-      const target = hash ? document.getElementById(hash) : null;
-      if (target) {
-        target.scrollIntoView({ block: "start" });
-        history.replaceState(null, "", `#${hash}`);
-      }
-      document.getElementById(`win-${id}`)?.focus({ preventScroll: true });
-    });
+    requestAnimationFrame(() => document.getElementById(`win-${id}`)?.focus({ preventScroll: true }));
   };
 
   const launch = (s: Shortcut) => {
     setSelected(s.id);
     setStart(false);
-    if ("app" in s) openApp(s.app, s.hash);
+    if ("app" in s) openApp(s.app);
     if ("amp" in s) {
       setAmpLoaded(true);
       setAmp("open");
@@ -405,6 +420,9 @@ export function Desktop({ home }: { home: ReactNode }) {
 
   const bodies: Record<AppId, ReactNode> = {
     home,
+    record: <RecordViewer />,
+    questions: <Help />,
+    guestbook: <Guestbook />,
     readme: <Notepad />,
     owl: <PictureViewer />,
     display: <DisplayProperties onDone={() => dispatch({ type: "close", id: "display" })} />,
@@ -442,7 +460,7 @@ export function Desktop({ home }: { home: ReactNode }) {
   const layers = (Object.keys(APPS) as AppId[]).toSorted((a, b) => state.wins[a].z - state.wins[b].z);
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden" data-slot="desktop">
+    <div className={cn("flex h-dvh flex-col overflow-hidden", PIXEL)} data-slot="desktop">
       <div
         className="relative isolate min-h-0 flex-1 overflow-hidden"
         onPointerDown={(e) => {
@@ -466,11 +484,13 @@ export function Desktop({ home }: { home: ReactNode }) {
           {icons(SHORTCUTS.filter((s) => s.right))}
         </ul>
 
-        {(Object.keys(APPS) as AppId[]).map((id) => (
-          <Window key={id} id={id} win={state.wins[id]} layer={layers.indexOf(id) + 1} front={front === id} dispatch={dispatch}>
-            {bodies[id]}
-          </Window>
-        ))}
+        <OpenAppContext value={openApp}>
+          {(Object.keys(APPS) as AppId[]).map((id) => (
+            <Window key={id} id={id} win={state.wins[id]} layer={layers.indexOf(id) + 1} front={front === id} dispatch={dispatch}>
+              {bodies[id]}
+            </Window>
+          ))}
+        </OpenAppContext>
 
         {menu && (
           <div role="menu" aria-label="Desktop" data-slot="desktop-menu" onKeyDown={arrowKeys} className={cn(RAISED, "absolute z-[60] w-48 bg-muted py-1 ring-1 ring-foreground/70")} style={{ left: menu.x, top: menu.y }}>

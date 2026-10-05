@@ -13,6 +13,7 @@ import * as audit from "@/app/(app)/audit/page";
 import * as closeAll from "@/app/(app)/connections/[connectionId]/close-all/page";
 import * as stopAll from "@/app/(app)/connections/[connectionId]/stop-all/page";
 import * as connections from "@/app/(app)/connections/page";
+import * as designNewAgent from "@/app/(app)/design/new-agent/page";
 import * as design from "@/app/(app)/design/page";
 import * as dashboard from "@/app/(app)/page";
 import * as positions from "@/app/(app)/positions/page";
@@ -59,7 +60,9 @@ export async function pageFor(path: string): Promise<ReactNode> {
       if (!second) return <settings.default />;
       return settingsScreen.default(params({ screen: second }));
     case "design":
-      return <design.default />;
+      if (!second) return <design.default />;
+      if (second === "new-agent" && rest.length === 0) return <designNewAgent.default />;
+      throw new Error(`no page for ${path}`);
     default:
       throw new Error(`no page for ${path}`);
   }
@@ -86,6 +89,7 @@ export function pathsFor(scenario: Scenario): string[] {
       SECTION_INDEX.audit.href,
       SECTION_INDEX.workspace.href,
       "/design",
+      "/design/new-agent",
       recordHref("stop_all", connection),
       recordHref("close_all", connection),
       ...ws.approvals.map((a) => `/approvals/${a.approval_id}`),

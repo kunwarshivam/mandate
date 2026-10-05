@@ -2,9 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import type { AppId } from "./desktop";
 import { BOLD, LINK, SUNKEN } from "./letter";
+import { OpenApp } from "./open-app";
 
 type Item = { id: string; title: string };
+
+type Opens = { app: AppId; title: string };
 
 /** How far down the page's window a heading must pass before its section counts as the one being read. */
 const READING_LINE = 0.3;
@@ -24,9 +28,10 @@ function reading(ids: string[], pane: HTMLElement): string | null {
 
 /**
  * The contents frame. The section being read is selected, the way a list box of the time drew its
- * selection: ink behind paper type.
+ * selection: ink behind paper type. Under the sections, the parts of the site that open in their own
+ * window on the desktop.
  */
-export function Contents({ items }: { items: Item[] }) {
+export function Contents({ items, windows }: { items: Item[]; windows: Opens[] }) {
   const [current, setCurrent] = useState<string | null>(null);
   const ref = useRef<HTMLElement>(null);
 
@@ -66,6 +71,16 @@ export function Contents({ items }: { items: Item[] }) {
           );
         })}
       </ol>
+      <h3 className={cn(BOLD, "pt-3 pb-1")}>On the desktop</h3>
+      <ul className="grid list-disc gap-0.5 ps-6 text-[1.0625rem]">
+        {windows.map((w) => (
+          <li key={w.app}>
+            <OpenApp app={w.app} className={cn(LINK, "cursor-pointer px-0.5 text-start")}>
+              {w.title}
+            </OpenApp>
+          </li>
+        ))}
+      </ul>
     </nav>
   );
 }

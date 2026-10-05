@@ -55,6 +55,7 @@ const PATHS = [
   `/approvals/${APPROVAL_IDS.swingXyz}`,
   ...RECORDS,
   "/design",
+  "/design/new-agent",
   ...STOP_RECORDS,
 ];
 
