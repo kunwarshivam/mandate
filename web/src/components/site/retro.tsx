@@ -1,8 +1,8 @@
 import type { ComponentProps, ReactNode } from "react";
-import { ArrowClockwise, ArrowLeft, ArrowRight, FolderOpen, HandPalm, House, Image as ImageIcon, Key, MagnifyingGlass, Printer } from "@phosphor-icons/react/ssr";
+import { Key } from "@phosphor-icons/react/ssr";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
-import type { AppId } from "./desktop";
+import { type Guide, LocationField, MenuBar, Toolbar } from "./browser-chrome";
 import { MONO, PIXEL, PLAIN_BUTTON, RAISED, SUNKEN } from "./letter";
 import styles from "./letter.module.css";
 import { OpenApp } from "./open-app";
@@ -50,25 +50,8 @@ export function Window({ title, icon, children, className }: { title: string; ic
   );
 }
 
-const MENU = ["File", "Edit", "View", "Go", "Bookmarks", "Options", "Directory", "Window", "Help"];
-
-const ICON = "size-5";
-
-/** The toolbar is scenery; Forward is greyed, as it was on any page you'd just opened. */
-const TOOLS: { label: string; icon: ReactNode; off?: boolean; wide?: boolean }[] = [
-  { label: "Back", icon: <ArrowLeft className={ICON} /> },
-  { label: "Forward", icon: <ArrowRight className={ICON} />, off: true },
-  { label: "Home", icon: <House className={ICON} /> },
-  { label: "Reload", icon: <ArrowClockwise className={ICON} /> },
-  { label: "Images", icon: <ImageIcon className={ICON} />, wide: true },
-  { label: "Open", icon: <FolderOpen className={ICON} />, wide: true },
-  { label: "Print", icon: <Printer className={ICON} />, wide: true },
-  { label: "Find", icon: <MagnifyingGlass className={ICON} />, wide: true },
-  { label: "Stop", icon: <HandPalm className={ICON} />, wide: true },
-];
-
 /** The row under the address, where a browser kept its guides. Here they open parts of the page, or its windows on the desktop. */
-export const DIRECTORY: ({ label: string; href: string } | { label: string; app: AppId })[] = [
+export const DIRECTORY: Guide[] = [
   { label: "What's New?", href: "#status" },
   { label: "What's Cool?", app: "record" },
   { label: "Handbook", href: "#how" },
@@ -78,34 +61,17 @@ export const DIRECTORY: ({ label: string; href: string } | { label: string; app:
 /**
  * The page open in a browser of 1996, inside its desktop window: menus, toolbar, the address, the
  * guide buttons, the page, which scrolls on its own, and a status bar that shows where a link goes.
- * Only the guide buttons work; the rest is hidden from assistive technology.
+ * What a browser could do for this page works; what it could not is greyed out, as it was then. The
+ * status bar alone is scenery, hidden from assistive technology.
  */
-export function Browser({ address, children }: { address: string; children: ReactNode }) {
+export function Browser({ address, bookmarks, children }: { address: string; bookmarks: { id: string; title: string }[]; children: ReactNode }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-slot="browser">
-      <div aria-hidden className={cn("flex shrink-0 gap-4 overflow-hidden px-2 py-0.5 text-[0.9375rem] whitespace-nowrap", PIXEL)}>
-        {MENU.map((m) => (
-          <span key={m}>
-            <span className="underline">{m[0]}</span>
-            {m.slice(1)}
-          </span>
-        ))}
-      </div>
+      <MenuBar bookmarks={bookmarks} directory={DIRECTORY} />
 
       <div className="shrink-0 border-t border-b border-t-card border-b-foreground/40 px-1.5 py-1.5">
         <div className="flex items-stretch justify-between gap-2">
-          <div className={cn("flex flex-wrap gap-1", PIXEL)}>
-            {TOOLS.map((t) => (
-              <span
-                key={t.label}
-                aria-hidden
-                className={cn(RAISED, "grid w-[4.25rem] justify-items-center gap-0.5 bg-muted px-1 py-1 text-[0.8125rem] leading-none", t.off && "text-foreground/35", t.wide && "hidden sm:grid")}
-              >
-                {t.icon}
-                {t.label}
-              </span>
-            ))}
-          </div>
+          <Toolbar />
           <span aria-hidden className={cn(SUNKEN, "grid w-14 shrink-0 place-items-center bg-foreground text-highlight")}>
             <BrandOwl className="size-8" />
           </span>
@@ -115,10 +81,7 @@ export function Browser({ address, children }: { address: string; children: Reac
           <span aria-hidden className={cn("shrink-0 text-[0.9375rem]", PIXEL)}>
             Location:
           </span>
-          <span className={cn(SUNKEN, "min-w-0 flex-1 truncate bg-card px-2 py-0.5 text-lg leading-tight", MONO)}>
-            <span className="sr-only">Address: </span>
-            {address}
-          </span>
+          <LocationField address={address} />
         </div>
 
         <nav aria-label="Guides" className="mt-1.5">

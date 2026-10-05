@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, createContext, useContext } from "react";
-import type { AppId } from "./desktop";
+import type { AppId } from "./windows";
 
 /** How the page inside the home window opens the desktop's other windows; the desktop provides it. */
 export const OpenAppContext = createContext<(id: AppId) => void>(() => {});

@@ -38,3 +38,9 @@ export const PLAIN_BUTTON = `${BEVEL} h-8 bg-muted px-3 text-[0.9375rem] text-fo
 
 /** Typed text in the terminal face, as the address is, at 20px so a phone never zooms into the field. */
 export const FIELD = `h-9 w-full max-w-[22rem] ${SUNKEN} bg-card px-2 ${styles.mono} text-[1.25rem] leading-none text-foreground placeholder:text-muted-foreground outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:outline-foreground`;
+
+/** A line in a menu of the time: ink on grey, lit in ink while pointed at or focused. */
+export const MENU_ITEM = `flex w-full cursor-pointer items-center gap-2.5 px-2 py-1 text-start text-[0.9375rem] outline-none hover:bg-foreground hover:text-card focus-visible:bg-foreground focus-visible:text-card ${styles.pixel}`;
+
+/** Greyed out as the period drew it: faint ink, etched by a light edge below and to the right. */
+export const ETCHED = "cursor-default text-foreground/40 [text-shadow:1px_1px_0_var(--card)] [&_svg]:drop-shadow-[1px_1px_0_var(--card)]";

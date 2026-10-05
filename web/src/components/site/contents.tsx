@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import type { AppId } from "./desktop";
+import type { AppId } from "./windows";
 import { BOLD, LINK, SUNKEN } from "./letter";
 import { OpenApp } from "./open-app";
 

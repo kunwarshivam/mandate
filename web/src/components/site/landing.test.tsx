@@ -132,14 +132,72 @@ describe("the landing page's structure", () => {
     expect(html.indexOf("<noscript>")).toBeLessThan(html.indexOf('data-window="guestbook"'));
   });
 
-  it("hides the browser's scenery: menus, toolbar and status bar are not in the accessibility tree", () => {
+  it("greys out the toolbar's buttons that can do nothing for this page, and Home and Reload work", async () => {
+    renderLanding();
+    const tools = screen.getByRole("toolbar", { name: "Browser" });
+    const buttons = within(tools).getAllByRole("button");
+    expect(buttons.map((b) => b.textContent)).toEqual(["Back", "Forward", "Home", "Reload", "Images", "Open", "Print", "Find", "Stop"]);
+    expect(buttons.filter((b) => !(b as HTMLButtonElement).disabled).map((b) => b.textContent)).toEqual(["Home", "Reload"]);
+    for (const b of buttons) expect(b, b.textContent ?? "").toHaveAttribute("tabindex", "-1");
+    const root = document.querySelector<HTMLElement>("[data-scroll-root]")!;
+    const scrollTo = vi.fn();
+    root.scrollTo = scrollTo;
+    await press(within(tools).getByRole("button", { name: "Home" }));
+    expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 0 }));
+  });
+
+  it("opens a real menu from each menu title that has lines, greys out the rest, and every line goes somewhere", async () => {
     const { container } = renderLanding();
-    const browser = container.querySelector("[data-slot=browser]")!;
-    for (const word of ["Bookmarks", "Reload", "Document: Done"]) {
-      const el = within(browser as HTMLElement).getByText((_, node) => node?.tagName === "SPAN" && node.textContent === word);
-      expect(el.closest("[aria-hidden=true]"), word).not.toBeNull();
+    const bar = screen.getByRole("menubar", { name: "Browser menus" });
+    const titles = within(bar).getAllByRole("menuitem").filter((m) => m.parentElement?.getAttribute("role") === "none" || m.parentElement === bar);
+    expect(titles.map((t) => t.textContent)).toEqual(["File", "Edit", "View", "Go", "Bookmarks", "Options", "Directory", "Window", "Help"]);
+    expect(titles.filter((t) => t.getAttribute("aria-disabled") === "true").map((t) => t.textContent)).toEqual(["File", "Edit", "Options"]);
+    for (const t of titles.filter((t) => t.getAttribute("aria-disabled") !== "true")) {
+      await press(t);
+      const menu = screen.getByRole("menu", { name: t.textContent! });
+      expect(t).toHaveAttribute("aria-expanded", "true");
+      for (const line of within(menu).getAllByRole("menuitem")) {
+        if (line.getAttribute("aria-disabled") === "true") continue;
+        const href = line.getAttribute("href");
+        if (href) expect(container.querySelector(href)?.tagName, `${t.textContent} › ${line.textContent}`).toBe("H2");
+        else expect(line.tagName, `${t.textContent} › ${line.textContent}`).toBe("BUTTON");
+      }
+      await press(t);
+      expect(screen.queryByRole("menu")).toBeNull();
     }
-    expect(within(browser as HTMLElement).getByText("http://www.owlhead.ai/").closest("[aria-hidden=true]")).toBeNull();
+  });
+
+  it("lists the page's sections under Bookmarks and opens a desktop window from the Window menu", async () => {
+    renderLanding();
+    const bar = screen.getByRole("menubar", { name: "Browser menus" });
+    await press(within(bar).getByRole("menuitem", { name: "Bookmarks" }));
+    expect(within(screen.getByRole("menu", { name: "Bookmarks" })).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(SECTIONS.map((s) => s.title));
+    await press(within(bar).getByRole("menuitem", { name: "Window" }));
+    await press(within(screen.getByRole("menu", { name: "Window" })).getByRole("menuitem", { name: "The record" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(win(RECORD)).toHaveAttribute("data-front", "true");
+  });
+
+  it("closes an open menu on Escape and gives the focus back to its title", async () => {
+    renderLanding();
+    const go = within(screen.getByRole("menubar", { name: "Browser menus" })).getByRole("menuitem", { name: "Go" });
+    await press(go);
+    const menu = screen.getByRole("menu", { name: "Go" });
+    expect(document.activeElement).toHaveTextContent("Home");
+    expect(within(menu).getByRole("menuitem", { name: "Back" })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(go);
+  });
+
+  it("shows the address in a read-only field, and keeps only the status bar as scenery", () => {
+    const { container } = renderLanding();
+    const address = screen.getByRole("textbox", { name: "Address" });
+    expect(address).toHaveValue("http://www.owlhead.ai/");
+    expect(address).toHaveAttribute("readonly");
+    const browser = container.querySelector<HTMLElement>("[data-slot=browser]")!;
+    const status = within(browser).getByText((_, node) => node?.tagName === "SPAN" && node.textContent === "Document: Done");
+    expect(status.closest("[aria-hidden=true]")).not.toBeNull();
   });
 
   it("switches dark mode from the taskbar's tray, pressed in while on, and saves the app's own theme choice", async () => {
