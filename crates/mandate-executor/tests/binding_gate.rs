@@ -9,7 +9,7 @@ use common::{
     stream_opened,
 };
 use mandate_executor::{
-    BindingGateInput, BindingGateSource, BrokerRequest, ExecutorError, Input, Ports,
+    BindingGateInput, BindingGateSource, BrokerRequest, ExecutorError, Ports,
 };
 use mandate_num::{Fraction, Price, Qty, Ratio, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits};
