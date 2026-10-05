@@ -5,8 +5,8 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
-    AGENT, FixedInstruments, FixedMandate, Shell, TestIds, config, handoff, opening, ports,
-    stream_opened,
+    ACCOUNT_STREAM, AGENT, FixedInstruments, FixedMandate, Shell, TestIds, config, event, handoff,
+    opening, ports, risk_exit, stream_opened, text, with_clock,
 };
 use mandate_executor::{
     BindingGateInput, BindingGateRequest, BindingGateSource, BrokerRequest, ExecutorError, Ports,
@@ -225,6 +225,52 @@ fn ready() -> (Shell, Ports<'static>) {
     (shell.restart_ready(&ports), ports)
 }
 
+fn ready_with_position() -> (Shell, Ports<'static>) {
+    let (mut shell, ports) = ready();
+    for (event_type, fields) in [
+        (
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text("md-held-1")),
+                ("agent", text(AGENT)),
+                ("instrument", text(AAPL)),
+                ("side", text("buy")),
+                ("qty", text("10")),
+                ("limit", text("150")),
+            ],
+        ),
+        (
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-held-1")),
+                ("client_order_id", text("md-held-1")),
+                ("instrument", text(AAPL)),
+                ("side", text("buy")),
+                ("qty_gross", text("10")),
+                ("price", text("150")),
+            ],
+        ),
+        (
+            "OrderStateChanged",
+            vec![
+                ("client_order_id", text("md-held-1")),
+                ("state", text("filled")),
+            ],
+        ),
+    ] {
+        let fact = event(
+            ACCOUNT_STREAM,
+            shell.head().0.saturating_add(1),
+            event_type,
+            with_clock(&fields, 10),
+        );
+        shell
+            .fold_one(&fact)
+            .unwrap_or_else(|error| panic!("{event_type} folds: {error}"));
+    }
+    (shell.restart_ready(&ports), ports)
+}
+
 fn submitted(ran: &common::Ran) -> bool {
     ran.requests
         .iter()
@@ -280,6 +326,21 @@ fn missing_binding_input_fails_closed_before_any_submission() {
         .expect_err("an opening without §9.1 inputs must fail closed");
     assert_eq!(error, ExecutorError::BindingGateInputMissing);
     assert_eq!(shell.connector.total_accepted(), 0);
+}
+
+#[test]
+fn missing_binding_input_does_not_block_risk_reduction() {
+    let (mut shell, ports) = ready_with_position();
+    let gate = GateFixture { input: None };
+    let ran = shell.run_with_binding(
+        handoff(INTENT, AGENT, risk_exit(AAPL, "10", "149")),
+        &ports,
+        &gate,
+    );
+    assert!(
+        submitted(&ran),
+        "rule 13 keeps a locally allowed risk exit routable when external snapshots are unavailable"
+    );
 }
 
 #[test]
