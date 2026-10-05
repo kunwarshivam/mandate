@@ -451,7 +451,7 @@ pub fn handoff(intent: &str, who: &str, body: mandate_executor::IntentBody) -> I
     Input::Intent(mandate_executor::IntentHandoff {
         intent_id: IntentId(EventId(intent.to_owned())),
         agent: agent(who),
-        tif: TimeInForce::Day,
+        tif: Some(TimeInForce::Day),
         body,
     })
 }

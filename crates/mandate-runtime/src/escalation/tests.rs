@@ -135,6 +135,7 @@ fn proposal(name: &str, purpose: Purpose, class: AssetClass) -> Result<Proposal,
         limit: Price::parse("100").map_err(failed)?,
         purpose,
         combined_score: text("0.5"),
+        execution: None,
     })
 }
 

@@ -363,6 +363,7 @@ mod tests {
             limit: Price::parse("255.2").map_err(|e| e.to_string())?,
             purpose: Purpose::Open,
             combined_score: mandate_canon::Value::Str("1".to_owned()),
+            execution: None,
         })
     }
 

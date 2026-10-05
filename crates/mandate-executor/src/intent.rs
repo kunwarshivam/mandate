@@ -40,15 +40,15 @@ pub(crate) fn received(
     else {
         return flatten_plan();
     };
+    let tif = handoff
+        .tif
+        .ok_or_else(|| ExecutorError::NonCanonicalPayload {
+            field: "tif".to_owned(),
+        })?;
     batch.journal(
         "IntentReceived",
         None,
-        intent_received_fields(
-            &handoff.intent_id,
-            &handoff.agent,
-            &handoff.body,
-            handoff.tif,
-        )?,
+        intent_received_fields(&handoff.intent_id, &handoff.agent, &handoff.body, tif)?,
     )?;
     if let Some(prices) = protection {
         batch.journal(
@@ -1047,7 +1047,7 @@ mod bracket_call_tests {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(intent.to_owned())),
             agent: AgentId("agent-a".to_owned()),
-            tif: TimeInForce::Day,
+            tif: Some(TimeInForce::Day),
             body: IntentBody::Order {
                 instrument: InstrumentId::new("AAPL")?,
                 side: Side::Buy,

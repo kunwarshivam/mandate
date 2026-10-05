@@ -134,8 +134,9 @@ impl PgJournal {
 
     /// Builds a lazily connecting application pool from a deployment DSN.
     ///
-    /// The constructor parses the DSN but performs no I/O. Migrations remain an explicit owner-role
-    /// deployment step, and the DSN must authenticate as [`APP_ROLE`].
+    /// The constructor parses the DSN but performs no I/O. It must run inside the Tokio runtime
+    /// that will drive the journal. Migrations remain an explicit owner-role deployment step, and
+    /// the DSN must authenticate as [`APP_ROLE`].
     pub fn from_dsn(dsn: &str) -> Result<Self, PgError> {
         let pool = PgPoolOptions::new().connect_lazy(dsn)?;
         Ok(Self::new(pool))
@@ -657,8 +658,11 @@ mod tests {
     use super::{PgError, PgJournal};
 
     #[test]
-    fn a_postgres_dsn_builds_a_lazy_journal_without_connecting() {
+    fn a_postgres_dsn_builds_a_lazy_journal_without_connecting() -> Result<(), String> {
+        let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+        let _entered = runtime.enter();
         assert!(PgJournal::from_dsn("postgres://journal.invalid/mandate").is_ok());
+        Ok(())
     }
 
     #[test]

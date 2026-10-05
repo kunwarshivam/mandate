@@ -672,7 +672,7 @@ pub(crate) mod tests {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(id.to_owned())),
             agent: AgentId(agent.to_owned()),
-            tif: TimeInForce::Day,
+            tif: Some(TimeInForce::Day),
             body: IntentBody::Order {
                 instrument: aapl()?,
                 side,

@@ -257,9 +257,9 @@ pub struct ProtectionPrices {
 pub struct IntentHandoff {
     pub intent_id: IntentId,
     pub agent: AgentId,
-    /// The TIF the proposal carries, which the account stream's `IntentReceived` copies exactly —
-    /// as proposed, never the submission's (journal spec §9.1, DEC-389 item 3).
-    pub tif: TimeInForce,
+    /// The TIF an order proposal carries, which `IntentReceived` copies exactly — as proposed,
+    /// never the submission's (journal spec §9.1, DEC-389 item 3). A flatten has no proposal TIF.
+    pub tif: Option<TimeInForce>,
     pub body: IntentBody,
 }
 
