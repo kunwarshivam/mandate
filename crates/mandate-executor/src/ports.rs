@@ -90,6 +90,19 @@ pub trait BindingGateSource {
     fn input(&self, agent: &AgentId, instrument: &InstrumentId) -> Option<BindingGateInput>;
 }
 
+#[cfg(test)]
+pub(crate) struct MissingBindingGate;
+
+#[cfg(test)]
+impl BindingGateSource for MissingBindingGate {
+    fn input(&self, _agent: &AgentId, _instrument: &InstrumentId) -> Option<BindingGateInput> {
+        None
+    }
+}
+
+#[cfg(test)]
+pub(crate) static MISSING_BINDING_GATE: MissingBindingGate = MissingBindingGate;
+
 /// The pure ports a step reads. Each is a function of its arguments, so `handle` stays
 /// deterministic and a test injects fixed implementations.
 pub struct Ports<'a> {

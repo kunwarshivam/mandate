@@ -551,7 +551,9 @@ pub(crate) mod tests {
     use crate::error::ExecutorError;
     use crate::ids::{ClientOrderId, IntentId};
     use crate::payload::object;
-    use crate::ports::{IdGen, InstrumentSnapshot, MandateView, Ports};
+    use crate::ports::{
+        IdGen, InstrumentSnapshot, MISSING_BINDING_GATE, MandateView, Ports,
+    };
     use crate::state::{ExecutorState, ObservedAccount, fold};
     use crate::step::handle;
     use crate::types::{
@@ -736,7 +738,7 @@ pub(crate) mod tests {
             ports: &Ports<'_>,
             keep: usize,
         ) -> Result<Vec<Effect>, ExecutorError> {
-            let effects = handle(&mut self.state, input, ports)?;
+            let effects = handle(&mut self.state, input, ports, &MISSING_BINDING_GATE)?;
             let mut kept = 0;
             for effect in &effects {
                 if let Effect::Journal(draft) = effect {
@@ -1912,7 +1914,13 @@ pub(crate) mod tests {
             payload: object(vec![("date", Value::Str("2026-09-22".to_owned()))])?,
         };
         assert_eq!(
-            handle(&mut executor.state, Input::Journal(fact), &ports).map(|_| ()),
+            handle(
+                &mut executor.state,
+                Input::Journal(fact),
+                &ports,
+                &MISSING_BINDING_GATE,
+            )
+            .map(|_| ()),
             Err(ExecutorError::Unimplemented { story: "E7-4" })
         );
         assert_eq!(executor.state, before, "a refused step changes nothing");
