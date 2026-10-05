@@ -74,6 +74,10 @@ const PROTECTED_PATHS: [&str; 5] = [
     "crates/mandate-refcases/status.toml",
 ];
 const CODE_PATHS: [&str; 2] = ["crates/", "xtask/src/"];
+const PR_NUMBER: &str = "MANDATE_PR_NUMBER";
+const E77_ATOMIC_PR: u64 = 598;
+const E77_ATOMIC_BRANCH: &str = "cursor/e77-complete-tracer-4832";
+const E77_ATOMIC_MARKER: &str = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)";
 
 /// The verification skill's map of features to code, tests, and commands (AGENTS.md).
 const FEATURE_MAP: &str = ".cursor/skills/verify-mandate/feature-map.md";
@@ -2617,7 +2621,12 @@ fn spec_guard() -> Result<()> {
     };
     let pr_body = env::var("MANDATE_PR_BODY").unwrap_or_default();
     report(
-        spec_guard_problems(Path::new("."), &base, &pr_body)?,
+        spec_guard_problems_for_pr(
+            Path::new("."),
+            &base,
+            &pr_body,
+            current_pr_number(Path::new("."))?,
+        )?,
         "spec-guard",
     )
 }
@@ -2625,6 +2634,15 @@ fn spec_guard() -> Result<()> {
 /// Protected paths (ES-22) changed since `base` need a DEC cited in the PR description or a commit
 /// message, and may not ship with code.
 fn spec_guard_problems(root: &Path, base: &str, pr_body: &str) -> Result<Vec<String>> {
+    spec_guard_problems_for_pr(root, base, pr_body, current_pr_number(root)?)
+}
+
+fn spec_guard_problems_for_pr(
+    root: &Path,
+    base: &str,
+    pr_body: &str,
+    pr_number: Option<u64>,
+) -> Result<Vec<String>> {
     let changed = output_in(
         root,
         "git",
@@ -2651,9 +2669,33 @@ fn spec_guard_problems(root: &Path, base: &str, pr_body: &str) -> Result<Vec<Str
         ));
     }
     if !code.is_empty() {
-        problems.push(format!("specs, schemas, or reference cases changed together with code ({} code files); split the change", code.len()));
+        if e77_atomic_exception(pr_body, pr_number) {
+            eprintln!(
+                "    spec-guard: founder-approved E7-7 atomic exception applies to PR #598 (DEC-462)"
+            );
+        } else {
+            problems.push(format!("specs, schemas, or reference cases changed together with code ({} code files); split the change", code.len()));
+        }
     }
     Ok(problems)
+}
+
+fn current_pr_number(root: &Path) -> Result<Option<u64>> {
+    if let Some(value) = env::var(PR_NUMBER)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return value
+            .parse()
+            .with_context(|| format!("{PR_NUMBER} must be an unsigned integer"))
+            .map(Some);
+    }
+    let branch = output_in(root, "git", &["branch", "--show-current"])?;
+    Ok((branch.trim() == E77_ATOMIC_BRANCH).then_some(E77_ATOMIC_PR))
+}
+
+fn e77_atomic_exception(pr_body: &str, pr_number: Option<u64>) -> bool {
+    pr_number == Some(E77_ATOMIC_PR) && pr_body.lines().any(|line| line.trim() == E77_ATOMIC_MARKER)
 }
 
 /// The founder-owned reference-case status file (ADR-0001 ES-11).
@@ -4499,6 +4541,28 @@ mod tests {
             Vec::<String>::new(),
             "a cited spec-only PR passes"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn only_pr_598_with_the_exact_dec_462_marker_may_mix_spec_and_code() -> Result<()> {
+        let MovedBase { fx, main_tip, .. } = Fixture::moved_base(
+            "base-e77-atomic",
+            &["docs/specs/pr.md", "crates/c/src/lib.rs"],
+        )?;
+        let marker = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)";
+        assert_eq!(
+            spec_guard_problems_for_pr(&fx.0, &main_tip, marker, Some(598))?,
+            Vec::<String>::new(),
+            "the founder-approved E7-7 atomic migration passes only on PR 598"
+        );
+        for (body, pr_number) in [(marker, Some(599)), ("DEC-462", Some(598)), (marker, None)] {
+            let problems = spec_guard_problems_for_pr(&fx.0, &main_tip, body, pr_number)?;
+            assert!(
+                problems.iter().any(|p| p.contains("together with code")),
+                "an adjacent or unmarked change remains guarded: {problems:?}"
+            );
+        }
         Ok(())
     }
 

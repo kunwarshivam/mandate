@@ -38,6 +38,7 @@ jobs:
       contents: read
     env:
       MANDATE_PR_BODY: ${{ github.event.pull_request.body }}
+      MANDATE_PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
