@@ -218,7 +218,7 @@ describe("D5 inbox and D6 request", () => {
       for (const c of BEVEL.split(" ")) expect(b).toHaveClass(c);
       expect(b).not.toHaveClass("ring", "shadow-xs", "border-0", "rounded-lg");
       expect(b).toHaveClass("focus-visible:ring-2");
-      expect(b.className).not.toMatch(/gradient|shadow-(?!none)/);
+      expect(b.className).not.toMatch(/bg-\[|shadow-(?!none)/);
     }
     const stop = within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name: "Stop" });
     expect(stop.className + stop.innerHTML).not.toMatch(/pixel-face|border-t-card/);

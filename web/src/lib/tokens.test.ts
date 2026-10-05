@@ -214,10 +214,12 @@ describe("figures with a plain zero", () => {
       expect(pkg.dependencies[font], font).toBeDefined();
       expect(landing, font).toContain(`import "${font}`);
     }
-    expect(readFileSync(resolve(process.cwd(), "src/app/layout.tsx"), "utf8")).not.toMatch(/dotgothic|vt323|pixelify/i);
-    const frame = readFileSync(resolve(process.cwd(), "src/components/shell/app-frame.tsx"), "utf8");
-    expect(frame, "DEC-452: the bevelled buttons' face").toContain('import "@fontsource-variable/pixelify-sans";');
-    expect(frame).not.toMatch(/dotgothic|vt323/i);
+    const root = readFileSync(resolve(process.cwd(), "src/app/layout.tsx"), "utf8");
+    expect(root, "DEC-452: the bevelled buttons' face, loaded beside Public Sans and before globals.css").toMatch(
+      /import "@fontsource-variable\/pixelify-sans";\nimport "\.\/globals\.css";/,
+    );
+    expect(root).not.toMatch(/dotgothic|vt323/i);
+    expect(readFileSync(resolve(process.cwd(), "src/components/shell/app-frame.tsx"), "utf8")).not.toMatch(/fontsource/);
     expect(css).toMatch(/@utility pixel-face \{\s*font-family: "Pixelify Sans Variable", /);
   });
 

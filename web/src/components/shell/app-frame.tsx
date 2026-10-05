@@ -1,4 +1,3 @@
-import "@fontsource-variable/pixelify-sans";
 import type { ReactNode } from "react";
 import { ViewTransition } from "react";
 import { ScenarioSwitcher } from "@/components/dev/scenario-switcher";

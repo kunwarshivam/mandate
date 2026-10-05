@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "@fontsource-variable/public-sans";
+import "@fontsource-variable/pixelify-sans";
 import "./globals.css";
 import { NIGHT, OFF_WHITE } from "@/lib/brand-palette";
 import { BRAND_OWL_SCRIPT } from "@/lib/brand-owl";
