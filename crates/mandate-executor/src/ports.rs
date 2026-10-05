@@ -72,8 +72,36 @@ pub trait InstrumentSnapshot {
 ///
 /// The proposed order and gate pass are deliberately absent: the executor derives both, then calls
 /// [`mandate_risk::evaluate`] directly. A caller can supply facts, never a verdict.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BindingGateConfigRefs {
+    pub fee_config: Option<String>,
+    pub trading_calendar: Option<String>,
+    pub instrument_snapshot: Option<String>,
+    pub rule_set: Option<String>,
+    pub mandate_version: Option<String>,
+}
+
+impl BindingGateConfigRefs {
+    pub fn complete(
+        fee_config: impl Into<String>,
+        trading_calendar: impl Into<String>,
+        instrument_snapshot: impl Into<String>,
+        rule_set: impl Into<String>,
+        mandate_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            fee_config: Some(fee_config.into()),
+            trading_calendar: Some(trading_calendar.into()),
+            instrument_snapshot: Some(instrument_snapshot.into()),
+            rule_set: Some(rule_set.into()),
+            mandate_version: Some(mandate_version.into()),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BindingGateInput {
+    pub config_refs: BindingGateConfigRefs,
     pub now: UtcNanos,
     pub config: GateConfig,
     pub mandate: ValidatedMandate,
@@ -134,6 +162,13 @@ impl BindingGateSource for AllowingBindingGate {
         positions.insert(asset.clone(), held);
         let gate_agent = GateAgentId(1);
         Some(BindingGateInput {
+            config_refs: BindingGateConfigRefs::complete(
+                format!("sha256:{}", "1".repeat(64)),
+                format!("sha256:{}", "2".repeat(64)),
+                format!("sha256:{}", "3".repeat(64)),
+                format!("sha256:{}", "4".repeat(64)),
+                format!("sha256:{}", "5".repeat(64)),
+            ),
             now: at,
             config: GateConfig {
                 price_floor: Usd::parse("0.01").ok()?,

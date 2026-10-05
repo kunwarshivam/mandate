@@ -1,7 +1,7 @@
 //! The core's vocabulary: what goes in, what comes out, and the order states in between.
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
-use mandate_canon::Value;
+use mandate_canon::{Object, Value};
 use mandate_num::{Fraction, Price, Qty, SignedQty, Usd};
 use mandate_time::Date;
 
@@ -816,6 +816,8 @@ pub struct EventDraft {
     pub event_type: String,
     /// The registered journal payload schema selected by the executor that owns this draft.
     pub schema_version: u64,
+    /// The trusted configuration artifacts used for this exact event.
+    pub config_refs: Object,
     pub causation_id: Option<EventId>,
     pub payload: Value,
 }

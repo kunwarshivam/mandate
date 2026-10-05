@@ -5,7 +5,7 @@
 //! journal will see — and the list is one sequence rather than a set of guesses (task brief
 //! interpretation 20).
 
-use mandate_canon::Value;
+use mandate_canon::{Digest, Key, Object, Value};
 
 use crate::error::ExecutorError;
 use crate::fold::fold;
@@ -75,6 +75,16 @@ impl<'p, 'a> Batch<'p, 'a> {
         &mut self,
         event_type: &str,
         causation_id: Option<EventId>,
+        pairs: Vec<(&str, Value)>,
+    ) -> Result<EventId, ExecutorError> {
+        self.journal_with_refs(event_type, causation_id, Object::new(), pairs)
+    }
+
+    pub(crate) fn journal_with_refs(
+        &mut self,
+        event_type: &str,
+        causation_id: Option<EventId>,
+        config_refs: Object,
         mut pairs: Vec<(&str, Value)>,
     ) -> Result<EventId, ExecutorError> {
         pairs.push(("risk_clock", risk_clock_stamp(self.at())?));
@@ -102,6 +112,7 @@ impl<'p, 'a> Batch<'p, 'a> {
             event_id: event_id.clone(),
             event_type: event_type.to_owned(),
             schema_version: schema_version(event_type),
+            config_refs,
             causation_id,
             payload,
         }));
@@ -136,6 +147,22 @@ impl<'p, 'a> Batch<'p, 'a> {
     }
 }
 
+pub(crate) fn config_refs(refs: &[(&'static str, Option<&str>)]) -> Result<Object, ExecutorError> {
+    let mut object = Object::new();
+    for (name, raw) in refs {
+        let raw = raw.ok_or(ExecutorError::BindingGateInputMissing)?;
+        let digest = raw.strip_prefix("sha256:").and_then(Digest::from_hex);
+        if digest.is_none() {
+            return Err(ExecutorError::BindingGateInputMissing);
+        }
+        let key = Key::new(name).map_err(|_| ExecutorError::NonCanonicalPayload {
+            field: (*name).to_owned(),
+        })?;
+        object.insert(key, Value::Str(raw.to_owned()));
+    }
+    Ok(object)
+}
+
 fn schema_version(event_type: &str) -> u64 {
     match event_type {
         "IntentReceived" | "GateDecided" | "OrderSubmitted" => 2,
@@ -155,7 +182,7 @@ fn default_binding_gate() -> Option<&'static dyn BindingGateSource> {
 
 #[cfg(test)]
 mod tests {
-    use super::schema_version;
+    use super::{config_refs, schema_version};
 
     #[test]
     fn the_executor_owns_each_account_draft_schema_version() {
@@ -169,6 +196,19 @@ mod tests {
             "OwnerCommandRefused",
         ] {
             assert_eq!(schema_version(event_type), 1, "{event_type}");
+        }
+    }
+
+    #[test]
+    fn config_references_are_digest_refs_or_the_draft_is_refused() {
+        let digest = format!("sha256:{}", "1".repeat(64));
+        let bare = "1".repeat(64);
+        assert!(config_refs(&[("mandate_version", Some(&digest))]).is_ok());
+        for raw in [None, Some(""), Some(bare.as_str()), Some("sha256:not-hex")] {
+            assert_eq!(
+                config_refs(&[("mandate_version", raw)]).unwrap_err(),
+                crate::error::ExecutorError::BindingGateInputMissing
+            );
         }
     }
 }

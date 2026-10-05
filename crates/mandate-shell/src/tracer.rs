@@ -485,13 +485,6 @@ impl<'s> Session<'s> {
         drafts: &[mandate_executor::EventDraft],
     ) -> Result<(), ShellError> {
         let stream = self.account_stream.clone();
-        let mut config_refs = Object::new();
-        config_refs.insert(
-            Key::new("mandate_version").map_err(|_| ShellError::Envelope {
-                field: "mandate_version",
-            })?,
-            Value::Str(self.view.version.clone()),
-        );
         let bytes = drafts
             .iter()
             .map(|draft| {
@@ -507,7 +500,7 @@ impl<'s> Session<'s> {
                         event_type: &draft.event_type,
                         schema_version: draft.schema_version,
                         causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
-                        config_refs: &config_refs,
+                        config_refs: &draft.config_refs,
                         payload: &draft.payload,
                     },
                 )
@@ -620,7 +613,7 @@ fn consecutive_executor_journals(
 mod tests {
     use std::collections::VecDeque;
 
-    use mandate_canon::Value;
+    use mandate_canon::{Object, Value};
     use mandate_executor::{Effect, EventDraft, EventId, NotificationRef};
 
     use super::consecutive_executor_journals;
@@ -630,6 +623,7 @@ mod tests {
             event_id: EventId(id.to_owned()),
             event_type: event_type.to_owned(),
             schema_version,
+            config_refs: Object::new(),
             causation_id: None,
             payload: Value::Null,
         }

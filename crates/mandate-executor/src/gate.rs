@@ -8,13 +8,14 @@
 //! `AGENTS.md` rule 13 requires.
 
 use mandate_accounting::{InstrumentId, Side};
-use mandate_canon::Value;
+use mandate_canon::{Object, Value};
 use mandate_num::{Price, Qty, SignedQty};
 use mandate_risk::{
     Check as BindingCheck, CheckOutcome, GateInput, GatePass, Origin, ProposedKind, ProposedOrder,
     TimeInForce as GateTimeInForce, Verdict,
 };
 
+use crate::batch::config_refs;
 use crate::error::ExecutorError;
 use crate::payload::{object, text};
 use crate::ports::{BindingGateInput, BindingGateRequest, BindingGateSource, Ports};
@@ -48,6 +49,7 @@ pub struct PartialGateDecision {
     crowded: bool,
     deferred: bool,
     binding: Option<BindingEvidence>,
+    config_refs: Object,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +87,10 @@ impl PartialGateDecision {
 
     pub(crate) fn is_binding(&self) -> bool {
         self.binding.is_some()
+    }
+
+    pub(crate) fn config_refs(&self) -> Object {
+        self.config_refs.clone()
     }
 
     /// Whether this is [`Self::crowded_out`]'s denial, which is journaled even on a held
@@ -315,6 +321,7 @@ pub(crate) fn account_stream_checks(
         crowded: false,
         deferred: false,
         binding: None,
+        config_refs: Object::new(),
     };
     if decision.verdict == GateVerdict::Allow && sell && discretionary && left < proposal.qty {
         if left == Qty::ZERO {
@@ -326,7 +333,8 @@ pub(crate) fn account_stream_checks(
     Ok(decision)
 }
 
-/// Runs the executor's non-substitutable binding gate after its account-stream checks have allowed.
+/// Resolves the trusted references every gate record requires, then runs the executor's
+/// non-substitutable binding gate after its account-stream checks have allowed.
 ///
 /// Missing or unreadable external snapshots refuse an opening. A reducing order keeps the local
 /// decision because §9.1 does not read those missing inputs for a limit denial and rule 13 forbids
@@ -338,10 +346,7 @@ pub(crate) fn binding_checks(
     ports: &Ports<'_>,
     source: Option<&dyn BindingGateSource>,
 ) -> Result<PartialGateDecision, ExecutorError> {
-    let partial = account_stream_checks(state, proposal, ports)?;
-    if partial.verdict != GateVerdict::Allow {
-        return Ok(partial);
-    }
+    let mut partial = account_stream_checks(state, proposal, ports)?;
     let Some(source) = source else {
         return if proposal.purpose.adds_risk() {
             Err(ExecutorError::BindingGateInputMissing)
@@ -375,7 +380,33 @@ pub(crate) fn binding_checks(
             Ok(partial)
         };
     }
-    evaluate_binding(partial, proposal, pass, snapshot)
+    let Some(mandate_version) = ports.mandates.version(proposal.agent) else {
+        return Err(ExecutorError::BindingGateInputMissing);
+    };
+    if snapshot.config_refs.mandate_version.as_deref() != Some(mandate_version.0.as_str()) {
+        return Err(ExecutorError::BindingGateInputMissing);
+    }
+    let refs = config_refs(&[
+        ("fee_config", snapshot.config_refs.fee_config.as_deref()),
+        (
+            "trading_calendar",
+            snapshot.config_refs.trading_calendar.as_deref(),
+        ),
+        (
+            "instrument_snapshot",
+            snapshot.config_refs.instrument_snapshot.as_deref(),
+        ),
+        ("rule_set", snapshot.config_refs.rule_set.as_deref()),
+        (
+            "mandate_version",
+            snapshot.config_refs.mandate_version.as_deref(),
+        ),
+    ])?;
+    if partial.verdict != GateVerdict::Allow {
+        partial.config_refs = refs;
+        return Ok(partial);
+    }
+    evaluate_binding(partial, proposal, pass, snapshot, refs)
 }
 
 fn evaluate_binding(
@@ -383,7 +414,9 @@ fn evaluate_binding(
     proposal: &Proposal<'_>,
     pass: GatePass,
     snapshot: BindingGateInput,
+    config_refs: Object,
 ) -> Result<PartialGateDecision, ExecutorError> {
+    partial.config_refs = config_refs;
     let proposed = ProposedOrder {
         instrument: snapshot.asset.clone(),
         side: proposal.side,

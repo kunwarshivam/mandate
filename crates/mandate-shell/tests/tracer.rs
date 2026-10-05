@@ -69,6 +69,61 @@ fn model_artifact() -> (Digest, Vec<u8>) {
     (Digest::of(&bytes), bytes)
 }
 
+fn executor_artifacts(
+    mandate: &str,
+) -> (
+    mandate_executor::BindingGateConfigRefs,
+    BTreeMap<Digest, Vec<u8>>,
+) {
+    let mandate_source = fs::read(fixtures().join(mandate)).unwrap();
+    let mandate_value = mandate_canon::parse(&mandate_source).unwrap();
+    let mandate_document = mandate_spec::Mandate::parse(&mandate_value).unwrap();
+    let mandate_bytes = mandate_document.canonical_bytes().unwrap();
+    let config = fixtures().join("config");
+    let named = [
+        (
+            "fee_config",
+            fs::read(config.join("fee-config.json")).unwrap(),
+        ),
+        (
+            "trading_calendar",
+            fs::read(config.join("trading-calendar.json")).unwrap(),
+        ),
+        (
+            "instrument_snapshot",
+            fs::read(config.join("instrument-snapshot.json")).unwrap(),
+        ),
+        ("rule_set", fs::read(config.join("rule-set.json")).unwrap()),
+        ("mandate_version", mandate_bytes),
+    ];
+    let refs = named
+        .iter()
+        .map(|(name, bytes)| ((*name).to_owned(), Digest::of(bytes)))
+        .collect::<BTreeMap<_, _>>();
+    let artifacts = named
+        .into_iter()
+        .map(|(_, bytes)| (Digest::of(&bytes), bytes))
+        .collect();
+    let reference = |name: &str| {
+        format!(
+            "sha256:{}",
+            refs.get(name)
+                .unwrap_or_else(|| panic!("{name} fixture digest"))
+                .to_hex()
+        )
+    };
+    (
+        mandate_executor::BindingGateConfigRefs::complete(
+            reference("fee_config"),
+            reference("trading_calendar"),
+            reference("instrument_snapshot"),
+            reference("rule_set"),
+            reference("mandate_version"),
+        ),
+        artifacts,
+    )
+}
+
 fn agent_stream() -> String {
     format!("agent:{WORKSPACE}:{AGENT}")
 }
@@ -181,16 +236,19 @@ fn run_context(with_builder: bool) -> RunContext {
 /// Trusted, effective-dated facts for the executor half of the full tracer fixture. The binding
 /// gate receives snapshots only; `mandate-executor` still constructs the proposal and calls
 /// `mandate-risk::evaluate` itself.
-struct TrustedExecutorFixture;
+struct TrustedExecutorFixture {
+    config_refs: mandate_executor::BindingGateConfigRefs,
+}
 
 impl mandate_executor::MandateView for TrustedExecutorFixture {
     fn version(
         &self,
         _agent: &mandate_executor::AgentId,
     ) -> Option<mandate_executor::MandateVersion> {
-        Some(mandate_executor::MandateVersion(
-            "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned(),
-        ))
+        self.config_refs
+            .mandate_version
+            .clone()
+            .map(mandate_executor::MandateVersion)
     }
 
     fn crypto_stop_limit_offset(&self, _agent: &mandate_executor::AgentId) -> Option<Fraction> {
@@ -241,6 +299,7 @@ impl mandate_executor::BindingGateSource for TrustedExecutorFixture {
         let positions = BTreeMap::new();
         let gate_agent = GateAgentId(1);
         Some(mandate_executor::BindingGateInput {
+            config_refs: self.config_refs.clone(),
             now,
             config: GateConfig {
                 price_floor: Usd::parse("0.01").ok()?,
@@ -364,12 +423,14 @@ impl mandate_executor::BindingGateSource for TrustedExecutorFixture {
     }
 }
 
-fn executor_context() -> ExecutorContext {
+fn executor_context(mandate: &str) -> ExecutorContext {
     let first = Date::parse("2026-01-01").unwrap();
     let last = Date::parse("2026-12-31").unwrap();
     let calendar = mandate_time::TradingCalendar::new(first, last, [], []).unwrap();
     let fees = mandate_executor::paper_only_fee_config("paper", calendar, "2026-01-01").unwrap();
-    let source = Rc::new(TrustedExecutorFixture);
+    let source = Rc::new(TrustedExecutorFixture {
+        config_refs: executor_artifacts(mandate).0,
+    });
     ExecutorContext::new(
         Rc::new(Ids {
             space: IdSpace::Account,
@@ -397,7 +458,10 @@ fn advisory_gate_context() -> AdvisoryGateContext {
         tif: mandate_executor::TimeInForce::Day,
         protection: None,
     };
-    let trusted = mandate_executor::BindingGateSource::input(&TrustedExecutorFixture, &request)
+    let fixture = TrustedExecutorFixture {
+        config_refs: executor_artifacts("mandate.json").0,
+    };
+    let trusted = mandate_executor::BindingGateSource::input(&fixture, &request)
         .expect("the trusted executor fixture supplies the same opening gate facts");
     AdvisoryGateContext {
         now: trusted.now,
@@ -618,7 +682,7 @@ fn stages(mandate: &str, dataset: PathBuf, transport: Scripted) -> Stages {
         agent: AgentId(AGENT.to_owned()),
         workspace: WORKSPACE.to_owned(),
         account_ref: ACCOUNT_REF.to_owned(),
-        executor: Some(executor_context()),
+        executor: Some(executor_context(mandate)),
         run: Some(run_context(true)),
         transport,
     })
@@ -951,13 +1015,26 @@ fn happy() {
     assert!(posted.unwrap().contains(&client_order_id));
 
     let (model_digest, model_bytes) = model_artifact();
-    let artifacts = BTreeMap::from([(model_digest, model_bytes)]);
+    let (config_refs, mut artifacts) = executor_artifacts("mandate.json");
+    artifacts.insert(model_digest, model_bytes);
     for rows in [&agent, &account] {
         verify_events(rows, TrustedStart::GENESIS, &artifacts).unwrap();
         for row in rows.iter() {
             assert_eq!(row.environment, "paper");
         }
     }
+    let fee_digest = config_refs
+        .fee_config
+        .as_deref()
+        .and_then(|reference| reference.strip_prefix("sha256:"))
+        .and_then(Digest::from_hex)
+        .unwrap();
+    let mut wrong = artifacts.clone();
+    wrong.insert(fee_digest, b"wrong fee config".to_vec());
+    assert!(
+        verify_events(&account, TrustedStart::GENESIS, &wrong).is_err(),
+        "verification rejects bytes that do not hash to the referenced fee configuration"
+    );
     let written = String::from_utf8(stream_bytes(&stages)).unwrap();
     for secret in [
         "pii:account_number",

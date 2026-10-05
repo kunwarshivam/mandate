@@ -214,8 +214,12 @@ impl mandate_executor::IdGen for Ids {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use mandate_canon::{Key, Value, parse};
-    use mandate_journal::{Draft, InvalidReason};
+    use mandate_journal::{
+        AppendOutcome, Draft, InvalidReason, MemoryJournal, StreamId, TrustedStart, verify_events,
+    };
     use mandate_time::UtcNanos;
 
     use super::{DraftFields, Envelope, IdSpace, Ids, Writer, draft_bytes, object, text};
@@ -417,6 +421,89 @@ mod tests {
         let refusal = Draft::parse(&bytes).expect_err("version 1 excludes risk_clock");
         assert_eq!(refusal.reason, InvalidReason::Schema);
         assert_eq!(refusal.path, "payload.risk_clock");
+        Ok(())
+    }
+
+    #[test]
+    fn verification_checks_the_content_behind_an_executor_config_reference() -> Result<(), String> {
+        let at = UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|e| e.to_string())?;
+        let stream_text = "acct:ws1:acc1";
+        let stream = StreamId::parse(stream_text).ok_or("stream")?;
+        let config_bytes = b"validated mandate fixture".to_vec();
+        let digest = mandate_canon::Digest::of(&config_bytes);
+        let reference = format!("sha256:{}", digest.to_hex());
+        let mut config_refs = mandate_canon::Object::new();
+        config_refs.insert(
+            Key::new("mandate_version").map_err(|e| e.to_string())?,
+            text(&reference),
+        );
+        let opened_payload = object(vec![
+            ("stream_type", text("account")),
+            ("workspace_id", text("ws1")),
+            ("broker", text("alpaca")),
+            ("account_ref", text("acc1")),
+        ])
+        .map_err(|e| e.to_string())?;
+        let intent_payload = object(vec![
+            ("intent_id", text("01JABCDEFGHJKMNPQRSTVWXYZ1")),
+            ("agent_id", text("agent-a")),
+            ("instrument_id", text("instrument-a")),
+            ("side", text("buy")),
+            ("type", text("limit")),
+            ("tif", text("day")),
+            ("qty", text("1")),
+            ("limit_price", text("100")),
+            ("purpose", text("open")),
+            ("risk_clock", text("2026-09-25T20:00:00.000000000Z")),
+        ])
+        .map_err(|e| e.to_string())?;
+        let envelope = Envelope {
+            stream: stream_text,
+            writer: Writer::Executor,
+            actor_id: "executor",
+            event_time: at,
+        };
+        let empty = mandate_canon::Object::new();
+        let opened = draft_bytes(
+            &envelope,
+            &DraftFields {
+                event_id: "10000100000000000000000000",
+                event_type: "StreamOpened",
+                schema_version: 1,
+                causation_id: None,
+                config_refs: &empty,
+                payload: &opened_payload,
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let intent = draft_bytes(
+            &envelope,
+            &DraftFields {
+                event_id: "10000100000000000001000000",
+                event_type: "IntentReceived",
+                schema_version: 2,
+                causation_id: None,
+                config_refs: &config_refs,
+                payload: &intent_payload,
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let mut journal = MemoryJournal::new();
+        let epoch = journal.take_ownership(&stream);
+        let drafts = [opened.as_slice(), intent.as_slice()];
+        let outcome = journal.append(&stream, 0, epoch, at, &drafts);
+        assert!(
+            matches!(outcome, AppendOutcome::Committed(_)),
+            "{outcome:?}"
+        );
+        let artifacts = BTreeMap::from([(digest, config_bytes)]);
+        verify_events(journal.rows(&stream), TrustedStart::GENESIS, &artifacts)
+            .map_err(|error| format!("{error:?}"))?;
+        let wrong = BTreeMap::from([(digest, b"wrong mandate".to_vec())]);
+        assert!(
+            verify_events(journal.rows(&stream), TrustedStart::GENESIS, &wrong).is_err(),
+            "verification accepts bytes whose digest does not match the config reference"
+        );
         Ok(())
     }
 

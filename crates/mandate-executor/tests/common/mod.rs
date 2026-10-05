@@ -22,12 +22,13 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Int, Key, Value};
 use mandate_executor::{
-    AccountRef, AccountScope, AgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
-    BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerReject,
-    BrokerRequest, BrokerSnapshot, BrokerUnknown, Effect, EventDraft, EventId, ExecutorConfig,
-    ExecutorError, ExecutorState, ExitTier, FillId, FoldedEvent, IdGen, Input, InstrumentSnapshot,
-    IntentId, MandateVersion, MandateView, MarketObservation, OrderState, Ports, ReconcileReason,
-    RiskClock, Seq, TimeInForce, TimerId, TimerRequest, WorkspaceId, WriterEpoch, fold, handle,
+    AccountRef, AccountScope, AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
+    BindingGateSource, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome, BrokerPosition,
+    BrokerReject, BrokerRequest, BrokerSnapshot, BrokerUnknown, Effect, EventDraft, EventId,
+    ExecutorConfig, ExecutorError, ExecutorState, ExitTier, FillId, FoldedEvent, IdGen, Input,
+    InstrumentSnapshot, IntentId, MandateVersion, MandateView, MarketObservation, OrderState,
+    Ports, ReconcileReason, RiskClock, Seq, TimeInForce, TimerId, TimerRequest, WorkspaceId,
+    WriterEpoch, fold, handle,
 };
 use mandate_num::{Fraction, Price, Qty, Ratio, ShareIncrement, SignedQty, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits};
@@ -50,7 +51,7 @@ pub const ACCOUNT: &str = "acct-1";
 pub const WORKSPACE: &str = "ws1";
 pub const AGENT: &str = "agent-a";
 pub const OTHER_AGENT: &str = "agent-b";
-pub const VERSION: &str = "v1";
+pub const VERSION: &str = "sha256:5555555555555555555555555555555555555555555555555555555555555555";
 pub const ENVIRONMENT: &str = "paper";
 
 pub struct MissingBindingGate;
@@ -83,6 +84,13 @@ impl BindingGateSource for AllowingBindingGate {
         let positions = BTreeMap::new();
         let gate_agent = GateAgentId(1);
         Some(BindingGateInput {
+            config_refs: BindingGateConfigRefs::complete(
+                format!("sha256:{}", "1".repeat(64)),
+                format!("sha256:{}", "2".repeat(64)),
+                format!("sha256:{}", "3".repeat(64)),
+                format!("sha256:{}", "4".repeat(64)),
+                VERSION,
+            ),
             now: at,
             config: GateConfig {
                 price_floor: Usd::parse("0.01").ok()?,

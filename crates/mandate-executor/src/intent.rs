@@ -5,7 +5,7 @@ use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
 use mandate_risk::GatePass;
 
-use crate::batch::Batch;
+use crate::batch::{Batch, config_refs};
 use crate::codec::{order_type_name, purpose_name, side_name, tif_name};
 use crate::error::ExecutorError;
 use crate::gate::{
@@ -46,9 +46,16 @@ pub(crate) fn received(
         .ok_or_else(|| ExecutorError::NonCanonicalPayload {
             field: "tif".to_owned(),
         })?;
-    batch.journal(
+    let mandate_version = batch
+        .ports
+        .mandates
+        .version(&handoff.agent)
+        .ok_or(ExecutorError::BindingGateInputMissing)?;
+    let refs = config_refs(&[("mandate_version", Some(mandate_version.0.as_str()))])?;
+    batch.journal_with_refs(
         "IntentReceived",
         None,
+        refs,
         intent_received_fields(&handoff.intent_id, &handoff.agent, &handoff.body, tif)?,
     )?;
     if let Some(prices) = protection {
@@ -285,7 +292,7 @@ fn journal_decision(
         pairs.push(("sized_qty", text(sized.to_string())));
     }
     pairs.append(&mut extra);
-    batch.journal("GateDecided", None, pairs)
+    batch.journal_with_refs("GateDecided", None, decision.config_refs(), pairs)
 }
 
 /// The coordinator's ruling D2: an exit still held past `max_intent_age_s` is journaled once more,

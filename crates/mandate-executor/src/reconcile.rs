@@ -582,7 +582,7 @@ pub(crate) mod tests {
 
     impl MandateView for Everything {
         fn version(&self, _agent: &AgentId) -> Option<MandateVersion> {
-            Some(MandateVersion("v1".to_owned()))
+            Some(MandateVersion(format!("sha256:{}", "5".repeat(64))))
         }
 
         fn crypto_stop_limit_offset(&self, _agent: &AgentId) -> Option<Fraction> {

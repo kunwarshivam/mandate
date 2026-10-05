@@ -5,11 +5,12 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
-    ACCOUNT_STREAM, AGENT, FixedInstruments, FixedMandate, Shell, TestIds, config, event, handoff,
-    opening, ports, risk_exit, stream_opened, text, with_clock,
+    ACCOUNT_STREAM, AGENT, FixedInstruments, FixedMandate, Shell, TestIds, VERSION, config, event,
+    handoff, opening, ports, risk_exit, stream_opened, text, with_clock,
 };
 use mandate_executor::{
-    BindingGateInput, BindingGateRequest, BindingGateSource, BrokerRequest, ExecutorError, Ports,
+    BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, BrokerRequest,
+    ExecutorError, Ports,
 };
 use mandate_num::{Fraction, Price, Qty, Ratio, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits};
@@ -90,6 +91,13 @@ fn input(state: AccountState, halted: bool) -> BindingGateInput {
         drawdown_ladder: Vec::new(),
     };
     BindingGateInput {
+        config_refs: BindingGateConfigRefs::complete(
+            format!("sha256:{}", "1".repeat(64)),
+            format!("sha256:{}", "2".repeat(64)),
+            format!("sha256:{}", "3".repeat(64)),
+            format!("sha256:{}", "4".repeat(64)),
+            VERSION,
+        ),
         now: at("2026-09-21T15:00:00Z"),
         config: GateConfig {
             price_floor: usd("5"),
@@ -292,6 +300,34 @@ fn full_binding_input_allows_and_replaces_the_partial_evaluation() {
         decided.payload.get("evaluation").is_none(),
         "a full §9.1 decision is never labelled account_stream_only"
     );
+    let received = ran
+        .draft("IntentReceived")
+        .unwrap_or_else(|| panic!("intent receipt"));
+    assert_eq!(received.config_refs.len(), 1);
+    assert_eq!(
+        received
+            .config_refs
+            .get("mandate_version")
+            .and_then(|value| value.as_str()),
+        Some(VERSION)
+    );
+    assert_eq!(decided.config_refs.len(), 5);
+    for name in [
+        "fee_config",
+        "trading_calendar",
+        "instrument_snapshot",
+        "rule_set",
+        "mandate_version",
+    ] {
+        assert!(
+            decided
+                .config_refs
+                .get(name)
+                .and_then(|value| value.as_str())
+                .is_some(),
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -328,6 +364,54 @@ fn missing_binding_input_fails_closed_before_any_submission() {
             &gate,
         )
         .expect_err("an opening without §9.1 inputs must fail closed");
+    assert_eq!(error, ExecutorError::BindingGateInputMissing);
+    assert_eq!(shell.connector.total_accepted(), 0);
+}
+
+#[test]
+fn each_missing_config_reference_fails_closed_before_any_submission() {
+    let cases: [(&str, fn(&mut BindingGateConfigRefs)); 5] = [
+        ("fee_config", |refs| refs.fee_config = None),
+        ("trading_calendar", |refs| refs.trading_calendar = None),
+        ("instrument_snapshot", |refs| {
+            refs.instrument_snapshot = None
+        }),
+        ("rule_set", |refs| refs.rule_set = None),
+        ("mandate_version", |refs| refs.mandate_version = None),
+    ];
+    for (name, remove) in cases {
+        let (mut shell, ports) = ready();
+        let mut trusted = input(AccountState::Active, false);
+        remove(&mut trusted.config_refs);
+        let gate = GateFixture {
+            input: Some(trusted),
+        };
+        let result = shell.step_with_binding(
+            handoff(INTENT, AGENT, opening(AAPL, "1", "150")),
+            &ports,
+            &gate,
+        );
+        let error = result.expect_err(&format!("{name} must fail closed"));
+        assert_eq!(error, ExecutorError::BindingGateInputMissing, "{name}");
+        assert_eq!(shell.connector.total_accepted(), 0, "{name}");
+    }
+}
+
+#[test]
+fn a_mandate_reference_that_differs_from_the_resolved_version_fails_closed() {
+    let (mut shell, ports) = ready();
+    let mut trusted = input(AccountState::Active, false);
+    trusted.config_refs.mandate_version = Some(format!("sha256:{}", "9".repeat(64)));
+    let gate = GateFixture {
+        input: Some(trusted),
+    };
+    let error = shell
+        .step_with_binding(
+            handoff(INTENT, AGENT, opening(AAPL, "1", "150")),
+            &ports,
+            &gate,
+        )
+        .expect_err("mismatched mandate evidence must fail closed");
     assert_eq!(error, ExecutorError::BindingGateInputMissing);
     assert_eq!(shell.connector.total_accepted(), 0);
 }
