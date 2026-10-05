@@ -3,9 +3,9 @@
 //! test"). No test here touches a network: the transport is scripted, and `AlpacaPaperHttp` is never
 //! constructed (ADR-0001 ES-19).
 //!
-//! The focused mandate and builder checks run as their adapters become live. Full-path scenarios
-//! stay pending until the binary can assemble every trusted run and executor input; each pending
-//! test still fails closed at that missing boundary (DEC-110, DEC-137).
+//! The full production path runs against recorded fixtures. The one pending outlier case remains a
+//! failing test until the market-data owner defines its price-trust threshold; the shell cannot
+//! invent price arithmetic (DEC-138 item 3, backlog E7-7 follow-up).
 //!
 //! The fail-closed suite is not here. It lives in `src/stages/fail_closed.rs`, because its
 //! permissive doubles must not be reachable from a build that ships (task brief item 5).
@@ -936,7 +936,6 @@ fn sizing_refuses_a_model_output_without_its_trusted_content_hash() {
 /// every draft paper, and no account number or credential anywhere in the record (TI-1, TI-7,
 /// TI-8).
 #[test]
-#[ignore = "pending E7-7"]
 fn happy() {
     let scratch = Scratch::new("happy");
     let closes = rising();
@@ -1057,7 +1056,6 @@ fn happy() {
 
 /// TI-10: the same fixtures, mandate, and clock journal byte-identical drafts.
 #[test]
-#[ignore = "pending E7-7"]
 fn happy_is_deterministic() {
     let closes = rising();
     let closes: Vec<&str> = closes.iter().map(String::as_str).collect();
@@ -1075,7 +1073,6 @@ fn happy_is_deterministic() {
 
 /// A planning run sends nothing and reports the order it would place.
 #[test]
-#[ignore = "pending E7-7"]
 fn a_planning_run_sends_nothing() {
     let scratch = Scratch::new("planning");
     let closes = rising();
@@ -1092,7 +1089,6 @@ fn a_planning_run_sends_nothing() {
 /// TI-9, PB-6: the mandate classifies the opening ASK, and the tracer has no escalation: the
 /// request is journaled and nothing is sent.
 #[test]
-#[ignore = "pending E7-7"]
 fn autonomy_ask() {
     let scratch = Scratch::new("ask");
     let closes = rising();
@@ -1157,7 +1153,6 @@ fn stale_stored_bars_are_refused() {
 /// A mandate whose order cap is below one share: the builder holds, so nothing is proposed and
 /// nothing is sent. A cap is a limit, which the shell never judges (PB-14).
 #[test]
-#[ignore = "pending E7-7"]
 fn oversized_proposal() {
     let scratch = Scratch::new("oversized");
     let closes = rising();
@@ -1194,7 +1189,6 @@ fn outlier_close() {
 /// TI-6, PB-3: a second run over the same journal sends nothing further; across both runs there is
 /// exactly one submission and one intent, and the broker's duplicate check is never needed.
 #[test]
-#[ignore = "pending E7-7"]
 fn duplicate_after_restart() {
     let scratch = Scratch::new("restart");
     let closes = rising();
@@ -1215,7 +1209,6 @@ fn duplicate_after_restart() {
 /// TI-12, PB-16: a fresh journal against a broker that already holds the position is a
 /// reconciliation mismatch, never a clean start.
 #[test]
-#[ignore = "pending E7-7"]
 fn fresh_journal_with_broker_position() {
     let scratch = Scratch::new("fresh-journal");
     let closes = rising();
@@ -1230,7 +1223,6 @@ fn fresh_journal_with_broker_position() {
 
 /// PB-11: the submission times out, the query finds nothing, and one absence never resubmits.
 #[test]
-#[ignore = "pending E7-7"]
 fn broker_unknown_then_absent() {
     let scratch = Scratch::new("unknown");
     let closes = rising();
@@ -1248,7 +1240,6 @@ fn broker_unknown_then_absent() {
 /// PB-12: after a mismatch the agent stays paused and alerted, and nothing in the tracer lifts it:
 /// its agent stream's last mode is `paused`.
 #[test]
-#[ignore = "pending E7-7"]
 fn reconcile_mismatch_pauses() {
     let scratch = Scratch::new("mismatch");
     let closes = rising();

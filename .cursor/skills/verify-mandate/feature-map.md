@@ -253,10 +253,11 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
 ## The tracer bullet: one order end to end on Alpaca paper
 
 Planned by [the E7-7 task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md) and DEC-138; the
-tests PR (DEC-157) has landed the crate with every production adapter a stub and the fail-closed
-suite live. The implementation lands in slices (DEC-166). Slice 1 makes the stored bars, the
-moving-average signal and the Alpaca connector live. Every other adapter still refuses until its
-upstream and its inputs exist.
+tests PR (DEC-157) landed the fail-closed crate, and the consolidated implementation in
+[PR #598](https://github.com/kunwarshivam/mandate/pull/598) wires the validated mandate,
+freshness-bounded stored bars, signal, builder, advisory and binding gates, runtime, memory/Postgres
+journal, executor, Alpaca paper connector, and startup/restart reconciliation through the real
+crates.
 
 - **Spec:** `docs/HLD.md` section 5 (the runtime's components in order, "Durability": the write-ahead
   intent and event-sourced state), 6.B (the decision cycle), 6.D (crash recovery);
@@ -272,10 +273,10 @@ upstream and its inputs exist.
   permitting arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
   deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
   `src/bin/mandate-tracer.rs` the binary; `src/adapters.rs` the production adapters: `StoredBars`,
-  `MovingAverage`, `AlpacaConnector` and `RiskExitPath` live — the risk exit plans over the journal,
-  stream, clock, and agent the run's bridge hands it (DEC-449, amended by DEC-451) — and the rest
-  refusing (DEC-166). It holds no trading logic — no sizing, no gating, no pricing, no state machine, and
-  no arithmetic on money or quantity — and binds `mandate-runtime` (`handle`, `fold`) for real today.
+  `MovingAverage`, `AlpacaConnector`, `RiskExitPath`, the validated mandate, builder, gate, journal,
+  executor, and reconciler. The risk exit plans over the journal, stream, clock, and agent the run's
+  bridge hands it (DEC-449, amended by DEC-451). It holds no trading logic—no sizing, gating,
+  pricing, state machine, or arithmetic on money or quantity—and binds the owning crates directly.
 - **Tests:** `src/stages/fail_closed.rs` over the permissive doubles of `src/stages/doubles.rs`: one
   case per `Stage`, each asserting at the furthest boundary its stage could reach (zero submissions;
   zero hands up to `Sink`; zero `IntentProposed` up to `Journal`; zero `OrderSubmitted` up to
@@ -289,13 +290,14 @@ upstream and its inputs exist.
   verdict (TI-3) and that an opening `Allow` with a `NotReached` check is refused (TI-11);
   `src/adapters.rs`'s cases for the stored-data trust rule, the crossover's envelope windows, and the
   purpose-flag and ownerless-exit mappings of the flatten adapter; `tests/flatten_probe.rs` the
-  flatten adapter's nine pins over a self-proving §9.5 journal (DEC-449, DEC-451). Then
-  `tests/tracer.rs`, pending on E7-7: the production path over recorded Alpaca paper responses and a
-  bar dataset written by `mandate-marketdata`'s own writer (`happy`, `happy_is_deterministic`,
-  `autonomy_ask`, `signal_flat`, `signal_undecided`, `oversized_proposal`, `outlier_close`,
+  flatten adapter's nine pins over a self-proving §9.5 journal (DEC-449, DEC-451).
+  `tests/tracer.rs` runs the production path over recorded Alpaca paper responses and a bar dataset
+  written by `mandate-marketdata`'s own writer (`happy`, `happy_is_deterministic`, `autonomy_ask`,
+  `signal_flat`, `signal_undecided`, `stale_stored_bars_are_refused`, `oversized_proposal`,
   `duplicate_after_restart`, `fresh_journal_with_broker_position`, `broker_unknown_then_absent`,
-  `reconcile_mismatch_pauses`, and the fixture's validation and one-share sizing), except the live
-  `the_connector_is_the_alpaca_client_over_the_given_transport`. The mandate
+  `reconcile_mismatch_pauses`, and the fixture's validation and one-share sizing). `outlier_close`
+  remains pending and failing until the market-data owner defines the price-trust threshold; the
+  shell cannot invent price arithmetic (DEC-138 item 3). The mandate
   fixtures are generated and checked against `reference/mandate/ref.py` by
   `tests/fixtures/tracer/generate.py`. `AlpacaPaperHttp` is never constructed in a test, so no test
   can reach a network (ES-19).
