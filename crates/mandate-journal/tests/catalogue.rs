@@ -118,6 +118,7 @@ const REGISTERED: &[&str] = &[
     "OrderSubmitted",
     "FillApplied",
     "MarkUpdated",
+    "ReconciliationRun",
     "MandateVersionApplied",
     "UniverseChanged",
 ];
@@ -295,6 +296,15 @@ fn registered_schemas_accept_their_payloads() {
             "fees":[{"kind":"cat","amount":"0.00010","asset":"USD","status":"accrued"}]}"#,
             ),
         ),
+        (
+            r#""checkpoint":null,"differences":0,"result":"clean","risk_clock":"2026-09-21T14:00:01.000000000Z","snapshot_head":1"#,
+            with_payload(
+                "ReconciliationRun",
+                &[],
+                r#"{"result":"clean","checkpoint":null,"snapshot_head":1,"differences":0,
+            "risk_clock":"2026-09-21T14:00:01.000000000Z"}"#,
+            ),
+        ),
     ];
     for (expected, bytes) in cases {
         let d = Draft::parse(&bytes).unwrap_or_else(|e| panic!("{e}"));
@@ -343,6 +353,17 @@ fn registered_schemas_accept_their_payloads() {
     assert_eq!(
         (e.reason, e.path.as_str()),
         (InvalidReason::Schema, "payload.attempt")
+    );
+    let bad_reconciliation = with_payload(
+        "ReconciliationRun",
+        &[],
+        r#"{"result":"unknown","checkpoint":"","snapshot_head":1,"differences":0,
+        "risk_clock":"2026-09-21T14:00:01.000000000Z"}"#,
+    );
+    let e = Draft::parse(&bad_reconciliation).unwrap_err();
+    assert_eq!(
+        (e.reason, e.path.as_str()),
+        (InvalidReason::NonCanonical, "payload.result")
     );
 }
 

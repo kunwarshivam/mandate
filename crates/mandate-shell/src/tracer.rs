@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mandate_accounting::InstrumentId;
-use mandate_canon::Value;
+use mandate_canon::{Key, Object, Value};
 use mandate_executor::BrokerRequest;
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_runtime::{
@@ -157,9 +157,67 @@ impl<'s> Session<'s> {
                 .journal
                 .read(&stream)
                 .map_err(refused(Stage::Journal))?;
-            session.replay(&stream, &rows)?;
+            if rows.is_empty() {
+                session.open_stream(&stream)?;
+            } else {
+                session.replay(&stream, &rows)?;
+            }
         }
         Ok(session)
+    }
+
+    /// Journal §2's stream lifecycle: the shell that owns a new stream writes its
+    /// `StreamOpened` at sequence 1 before either core receives `Started`. A replayed stream
+    /// already has this record and never passes through here.
+    fn open_stream(&mut self, stream: &str) -> Result<(), ShellError> {
+        let workspace = self.setup.deployment.workspace.0.clone();
+        let (writer, actor_id, space, members) = if stream == self.agent_stream {
+            (
+                Writer::Agent,
+                self.setup.deployment.agent.0.as_str(),
+                IdSpace::Agent,
+                vec![
+                    ("stream_type", "agent".to_owned()),
+                    ("workspace_id", workspace),
+                    ("agent_id", self.setup.deployment.agent.0.clone()),
+                ],
+            )
+        } else {
+            (
+                Writer::Executor,
+                "executor",
+                IdSpace::Account,
+                vec![
+                    ("stream_type", "account".to_owned()),
+                    ("workspace_id", workspace),
+                    ("broker", "alpaca".to_owned()),
+                    ("account_ref", self.setup.account_ref.clone()),
+                ],
+            )
+        };
+        let mut object = Object::new();
+        for (name, value) in members {
+            object.insert(
+                Key::new(name).map_err(|_| ShellError::Envelope { field: name })?,
+                Value::Str(value),
+            );
+        }
+        let event_id = Ids { space }.derive(self.epoch(stream), 0, 0);
+        let bytes = draft_bytes(
+            &Envelope {
+                stream,
+                writer,
+                actor_id,
+                event_time: self.setup.now,
+            },
+            &DraftFields {
+                event_id: &event_id,
+                event_type: "StreamOpened",
+                causation_id: None,
+                payload: &Value::Object(object),
+            },
+        )?;
+        self.append(stream, bytes)
     }
 
     fn replay(&mut self, stream: &str, rows: &[StoredEvent]) -> Result<(), ShellError> {
@@ -421,7 +479,8 @@ impl<'s> Session<'s> {
     fn append(&mut self, stream: &str, bytes: Vec<u8>) -> Result<(), ShellError> {
         let head = self.head(stream);
         let epoch = self.epoch(stream);
-        let rows = match self.stages.journal.append(stream, head, epoch, &[bytes]) {
+        let outcome = self.stages.journal.append(stream, head, epoch, &[bytes]);
+        let rows = match outcome {
             AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows) => rows,
             refusal @ (AppendOutcome::HeadMismatch { .. }
             | AppendOutcome::IdempotencyConflict { .. }

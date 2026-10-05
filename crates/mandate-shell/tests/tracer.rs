@@ -11,7 +11,7 @@
 //! permissive doubles must not be reachable from a build that ships (task brief item 5).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -26,15 +26,27 @@ use mandate_domain::{AssetClass as DomainAssetClass, AssetId, MarketSession, Pur
 use mandate_journal::{Environment, StoredEvent, TrustedStart, verify_events};
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
-use mandate_num::{CostBasis, FeeRate, MarkPrice, Price, Qty, Signed, SizeFraction, Unit, Usd};
+use mandate_num::{
+    CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, Ratio, ShareIncrement, Signed,
+    SizeFraction, Unit, Usd,
+};
+use mandate_risk::spec_types::{GoalState, RiskLimits};
+use mandate_risk::{
+    AccountSnapshot, AccountState as GateAccountState, AgentId as GateAgentId, AgentMode,
+    AgentSnapshot, AssetId as GateAssetId, ClientOrderId as GateOrderId, ConductState,
+    DayTradeLedger, DayTradeRegime, EtpClass, Exchange, GateConfig,
+    InstrumentSnapshot as GateInstrumentSnapshot, MarketSnapshot, QuoteCurrency, RiskSnapshot,
+    SaneQuote, ValidatedMandate as GateMandate, WorkingUniverse,
+};
 use mandate_runtime::{
     AgentId, ConnectionId, Deployment, OrderExecution, Proposal, ProtectionPrices, SignalInputs,
     TimeInForce, WorkspaceId,
 };
 use mandate_shell::adapters::{
-    AlpacaConnector, BuilderContext, BuilderPlan, DecisionContext, RunContext, Sources,
-    SpecMandate, production,
+    AlpacaConnector, BuilderContext, BuilderPlan, DecisionContext, ExecutorContext, RunContext,
+    Sources, SpecMandate, production,
 };
+use mandate_shell::envelope::{IdSpace, Ids};
 use mandate_shell::stages::{Classifier, MandateSource, Sizing, Stages};
 use mandate_shell::{Report, Setup, ShellError, run};
 use mandate_spec::ValidationContext;
@@ -160,6 +172,210 @@ fn run_context(with_builder: bool) -> RunContext {
         restricted_instruments: Default::default(),
         decision,
     }
+}
+
+/// Trusted, effective-dated facts for the executor half of the full tracer fixture. The binding
+/// gate receives snapshots only; `mandate-executor` still constructs the proposal and calls
+/// `mandate-risk::evaluate` itself.
+struct TrustedExecutorFixture;
+
+impl mandate_executor::MandateView for TrustedExecutorFixture {
+    fn version(
+        &self,
+        _agent: &mandate_executor::AgentId,
+    ) -> Option<mandate_executor::MandateVersion> {
+        Some(mandate_executor::MandateVersion(
+            "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned(),
+        ))
+    }
+
+    fn crypto_stop_limit_offset(&self, _agent: &mandate_executor::AgentId) -> Option<Fraction> {
+        None
+    }
+
+    fn covers(
+        &self,
+        agent: &mandate_executor::AgentId,
+        instrument: &mandate_accounting::InstrumentId,
+    ) -> bool {
+        agent.0 == AGENT && instrument.as_str() == "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
+    }
+}
+
+impl mandate_executor::InstrumentSnapshot for TrustedExecutorFixture {
+    fn asset_class(
+        &self,
+        instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<mandate_accounting::AssetClass> {
+        (instrument.as_str() == "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+            .then_some(mandate_accounting::AssetClass::UsEquity)
+    }
+
+    fn increment(&self, instrument: &mandate_accounting::InstrumentId) -> Option<ShareIncrement> {
+        (instrument.as_str() == "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+            .then_some(ShareIncrement::Whole)
+    }
+
+    fn exit_tier(
+        &self,
+        _instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<mandate_executor::ExitTier> {
+        None
+    }
+}
+
+impl mandate_executor::BindingGateSource for TrustedExecutorFixture {
+    fn input(
+        &self,
+        request: &mandate_executor::BindingGateRequest<'_>,
+    ) -> Option<mandate_executor::BindingGateInput> {
+        let asset = GateAssetId::new(request.instrument.as_str()).ok()?;
+        let now = UtcNanos::parse("2026-09-25T19:00:00.000000000Z").ok()?;
+        let quote_at = UtcNanos::parse("2026-09-25T18:59:59.000000000Z").ok()?;
+        let volume = Qty::parse("1000000").ok()?;
+        let equity = Usd::parse("1000000").ok()?;
+        let positions = BTreeMap::new();
+        let gate_agent = GateAgentId(1);
+        Some(mandate_executor::BindingGateInput {
+            now,
+            config: GateConfig {
+                price_floor: Usd::parse("0.01").ok()?,
+                liquidity_floor_usd: Usd::ZERO,
+                crypto_liquidity_floor_usd: Usd::ZERO,
+                collar_liquid_threshold_usd: Usd::ZERO,
+                collar_liquid_x: Fraction::parse("0.5").ok()?,
+                collar_other_x: Fraction::parse("0.5").ok()?,
+                collar_crypto_x: Fraction::parse("0.5").ok()?,
+                collar_passive_band: Fraction::parse("0.5").ok()?,
+                opposite_fill_interval_s: 0,
+                min_resting_time_s: 0,
+                order_to_fill_max: u32::MAX,
+                order_to_fill_min_orders: u32::MAX,
+                order_size_participation: Fraction::ONE,
+                daily_participation: Fraction::ONE,
+                close_window_minutes: 0,
+                legacy_pdt_equity_threshold: Usd::ZERO,
+                etp_classification_max_age_s: u32::MAX,
+            },
+            mandate: GateMandate::from_validated_parts(
+                RiskLimits {
+                    max_position_usd: equity,
+                    max_position_fraction: Fraction::ONE,
+                    max_order_usd: equity,
+                    max_gross_exposure_usd: equity,
+                    max_orders_per_day: u32::MAX,
+                    reentry_cooldown_s: 0,
+                    rebalance_band: Fraction::ONE,
+                    breach_confirm_s: 0,
+                    drawdown_ladder: Vec::new(),
+                },
+                GoalState::Running,
+                true,
+                true,
+            ),
+            risk: RiskSnapshot {
+                agent_equity: equity,
+                high_water_mark: equity,
+                day_start_equity: equity,
+                capital_base: equity,
+                inherited_loss: Usd::ZERO,
+                latched: BTreeSet::new(),
+                active_rungs: BTreeMap::new(),
+                size_factor: Ratio::parse("1").ok()?,
+                agent_mode: AgentMode::Normal,
+            },
+            account: AccountSnapshot {
+                account_type: mandate_accounting::AccountType::Margin,
+                state: GateAccountState::Active,
+                crypto_active: true,
+                regime: DayTradeRegime::IntradayMargin {
+                    maintenance_excess: equity,
+                },
+                equity,
+                prior_close_equity: equity,
+                model_buying_power: equity,
+                broker_buying_power: equity,
+                broker_non_marginable_buying_power: equity,
+                positions: positions.clone(),
+                market_values: BTreeMap::new(),
+                working_orders: BTreeMap::new(),
+                unknown_orders: BTreeSet::new(),
+                related_account_resting: BTreeMap::new(),
+            },
+            agent: AgentSnapshot {
+                agent: gate_agent,
+                mode: AgentMode::Normal,
+                instrument_restrictions: BTreeMap::new(),
+                positions,
+                market_values: BTreeMap::new(),
+                working_orders: BTreeSet::new(),
+                instrument_groups: BTreeMap::new(),
+                last_exit_fill_at: BTreeMap::new(),
+                orders_today: 0,
+                day_trades: DayTradeLedger::default(),
+            },
+            instrument: GateInstrumentSnapshot {
+                instrument: asset.clone(),
+                asset_class: mandate_risk::AssetClass::UsEquity,
+                exchange: Some(Exchange::Nasdaq),
+                status_active: true,
+                tradable: true,
+                fractionable: true,
+                ipo: false,
+                ptp_no_exception: false,
+                etp: EtpClass::Plain,
+                etp_classified_at: Some(now),
+                quote_currency: Some(QuoteCurrency::Usd),
+                prior_close: Some(request.limit),
+                median_dollar_volume_20d: Some(equity),
+                median_dollar_volume_30d: Some(equity),
+                min_order_size: Qty::parse("0.000000001").ok()?,
+                qty_increment: Qty::parse("0.000000001").ok()?,
+                halted: false,
+                status_feed_current: true,
+            },
+            market: MarketSnapshot {
+                quote: Some(SaneQuote {
+                    bid: request.limit,
+                    ask: request.limit,
+                    at: quote_at,
+                }),
+                last_trade: Some((request.limit, quote_at)),
+                trailing_5m_volume: Some(volume),
+                adv_20d: Some(volume),
+            },
+            conduct: ConductState::default(),
+            universe: WorkingUniverse::Known {
+                instruments: BTreeSet::from([asset.clone()]),
+                pinned: true,
+            },
+            asset,
+            gate_agent,
+            gate_client_order_id: GateOrderId(1),
+            owner_confirmed_bid: None,
+            fee_reservation: Usd::ZERO,
+            data_profile: "tracer-fixture".to_owned(),
+            feed: "iex-fixture".to_owned(),
+        })
+    }
+}
+
+fn executor_context() -> ExecutorContext {
+    let first = Date::parse("2026-01-01").unwrap();
+    let last = Date::parse("2026-12-31").unwrap();
+    let calendar = mandate_time::TradingCalendar::new(first, last, [], []).unwrap();
+    let fees = mandate_executor::paper_only_fee_config("paper", calendar, "2026-01-01").unwrap();
+    let source = Rc::new(TrustedExecutorFixture);
+    ExecutorContext::new(
+        Rc::new(Ids {
+            space: IdSpace::Account,
+        }),
+        source.clone(),
+        source.clone(),
+        source,
+        mandate_executor::ExecutorConfig::PROPOSED,
+        fees,
+    )
 }
 
 /// A scratch directory under the system's temporary directory, removed when dropped.
@@ -296,6 +512,9 @@ impl Scripted {
         if path.starts_with("/v2/orders?") {
             return ok(b"[]".to_vec());
         }
+        if path.starts_with("/v2/account/activities?") {
+            return ok(b"[]".to_vec());
+        }
         if path == "/v2/orders" && request.method() == Method::Post {
             if self.broker == Broker::TimeoutThenAbsent {
                 return Err(TransportError::Timeout);
@@ -354,7 +573,7 @@ fn stages(mandate: &str, dataset: PathBuf, transport: Scripted) -> Stages {
         agent: AgentId(AGENT.to_owned()),
         workspace: WORKSPACE.to_owned(),
         account_ref: ACCOUNT_REF.to_owned(),
-        executor: None,
+        executor: Some(executor_context()),
         run: Some(run_context(true)),
         transport,
     })
@@ -531,6 +750,16 @@ fn happy() {
 
     let agent = committed(&stages, &agent_stream());
     let account = committed(&stages, &account_stream());
+    assert_eq!(
+        agent.first().map(|row| row.event_type.as_str()),
+        Some("StreamOpened"),
+        "the agent stream opens before the runtime journals its startup mode"
+    );
+    assert_eq!(
+        account.first().map(|row| row.event_type.as_str()),
+        Some("StreamOpened"),
+        "the account stream opens before the executor journals reconciliation"
+    );
     let intents = of_type(&agent, "IntentProposed");
     assert_eq!(intents.len(), 1);
     let submitted = of_type(&account, "OrderSubmitted");

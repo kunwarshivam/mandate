@@ -104,12 +104,17 @@ pub(crate) fn run(
         ReconciliationVerdict::Adopted => "adopted",
         ReconciliationVerdict::Mismatch => "mismatch",
     };
+    let checkpoint = if snapshot.cursor.0.is_empty() {
+        Value::Null
+    } else {
+        text(snapshot.cursor.0.clone())
+    };
     batch.journal(
         "ReconciliationRun",
         None,
         vec![
             ("result", text(result)),
-            ("checkpoint", text(snapshot.cursor.0.clone())),
+            ("checkpoint", checkpoint),
             ("snapshot_head", int(snapshot.taken_at_head.0)?),
             (
                 "differences",
