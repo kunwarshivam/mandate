@@ -36,4 +36,5 @@ export const BUTTON = `${BEVEL} h-9 min-w-32 bg-highlight px-4 text-[0.9375rem] 
 
 export const PLAIN_BUTTON = `${BEVEL} h-8 bg-muted px-3 text-[0.9375rem] text-foreground`;
 
-export const FIELD = `h-9 w-full max-w-[22rem] ${SUNKEN} bg-card px-2 font-sans text-[0.9375rem] text-foreground placeholder:text-muted-foreground outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:outline-foreground`;
+/** Typed text in the terminal face, as the address is, at 20px so a phone never zooms into the field. */
+export const FIELD = `h-9 w-full max-w-[22rem] ${SUNKEN} bg-card px-2 ${styles.mono} text-[1.25rem] leading-none text-foreground placeholder:text-muted-foreground outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:outline-foreground`;

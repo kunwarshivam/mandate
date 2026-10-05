@@ -33,8 +33,11 @@ function problem(status: Status): string | null {
   }
 }
 
-/** The private beta's request form, set as a dialog: an email, an optional answer, and one button. */
-export function BetaForm({ className }: { className?: string }) {
+/**
+ * The private beta's request form, set as a dialog: an email, an optional answer, and one button. `id`
+ * prefixes its element ids, so a second copy (the page's no-script fallback) never repeats them.
+ */
+export function BetaForm({ id = "beta", className }: { id?: string; className?: string }) {
   const [status, setStatus] = useState<Status>("idle");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<BetaRole | null>(null);
@@ -72,11 +75,11 @@ export function BetaForm({ className }: { className?: string }) {
   return (
     <form onSubmit={submit} className={cn("relative grid gap-5 text-base", PIXEL, className)} data-slot="beta-form">
       <p className="grid gap-1.5">
-        <label htmlFor="beta-email">
+        <label htmlFor={`${id}-email`}>
           <span className="underline">E</span>mail address:
         </label>
         <input
-          id="beta-email"
+          id={`${id}-email`}
           type="email"
           name="email"
           required
@@ -86,7 +89,7 @@ export function BetaForm({ className }: { className?: string }) {
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           aria-invalid={status === "email" || undefined}
-          aria-describedby={message ? "beta-problem" : undefined}
+          aria-describedby={message ? `${id}-problem` : undefined}
           className={FIELD}
         />
       </p>
@@ -102,8 +105,8 @@ export function BetaForm({ className }: { className?: string }) {
       </fieldset>
 
       <div aria-hidden className="absolute -left-[9999px] h-px w-px overflow-hidden">
-        <label htmlFor="beta-website">Website</label>
-        <input id="beta-website" type="text" name="website" tabIndex={-1} autoComplete="off" value={website} onChange={(event) => setWebsite(event.target.value)} />
+        <label htmlFor={`${id}-website`}>Website</label>
+        <input id={`${id}-website`} type="text" name="website" tabIndex={-1} autoComplete="off" value={website} onChange={(event) => setWebsite(event.target.value)} />
       </div>
 
       <div className="grid gap-3">
@@ -113,7 +116,7 @@ export function BetaForm({ className }: { className?: string }) {
           </button>
         </p>
         <p
-          id="beta-problem"
+          id={`${id}-problem`}
           role="status"
           className={message ? "flex max-w-[22rem] items-start gap-2 border border-foreground bg-warning-soft px-3 py-2" : "sr-only"}
           data-slot={message ? "beta-problem" : undefined}
