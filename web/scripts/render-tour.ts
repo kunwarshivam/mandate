@@ -2,16 +2,16 @@
  * Renders Tour.mp4, the landing desktop's explainer, from the scenes in src/components/site/tour.ts.
  * Each frame is drawn in headless Chromium by `tour-scenes.js`, in the site's own faces and colours
  * and with the product's own owls (`owl-sprite.ts`, the perch's five agents in `perch.ts`), and
- * piped to ffmpeg. Under it, Scott Joplin's 1916 piano roll of the Maple Leaf Rag (public domain,
- * from Wikimedia Commons) and the synthesized effects of `tour-sound.ts`, levelled to -14 LUFS, the
- * loudness streaming players play at. Writes public/video/owlhead-tour.{mp4,jpg,vtt}.
+ * piped to ffmpeg. Under it, the tour's own chiptune (`tour-music.ts`) and its sound effects
+ * (`tour-sound.ts`), both synthesized on the scenes' cues and levelled to -14 LUFS, the loudness
+ * streaming players play at. Writes public/video/owlhead-tour.{mp4,jpg,vtt}.
  *
  *   node --experimental-strip-types scripts/render-tour.ts
  *   node --experimental-strip-types scripts/render-tour.ts --stills 3 12 20   (single frames, to check a scene)
  *   node --experimental-strip-types scripts/render-tour.ts --sound            (only the mix, with its levels)
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,18 +20,19 @@ import { type OwlMood, beakFor, bodyRects, eyeRects, owlShape } from "../src/com
 import { PERCH } from "../src/components/site/perch.ts";
 import { TOUR, TOUR_SECONDS, tourVtt } from "../src/components/site/tour.ts";
 import { CUES, FPS, RULES_TEXT, WIPE } from "./tour-cues.ts";
-import { RATE, tourSfx, wav } from "./tour-sound.ts";
+import { tourMusic } from "./tour-music.ts";
+import { tourSfx } from "./tour-sound.ts";
+import { RATE, wav } from "./tour-synth.ts";
 
 const WEB = join(import.meta.dirname, "..");
 const OUT = join(WEB, "public/video");
 const TMP = join(tmpdir(), "owlhead-tour");
-const MUSIC = "https://upload.wikimedia.org/wikipedia/commons/transcoded/d/db/Maple_leaf_rag_-_played_by_Scott_Joplin_1916_V2.ogg/Maple_leaf_rag_-_played_by_Scott_Joplin_1916_V2.ogg.mp3";
 /** Integrated loudness, in LUFS, and the true-peak ceiling, in dBTP. */
 const LOUDNESS = -14;
 const CEILING = -1.5;
-/** The stems before the mix is levelled: the effects sit a little under the rag, so they punctuate it. */
-const MUSIC_LUFS = -17;
-const SFX_LUFS = -18.5;
+/** The stems before the mix is levelled: the effects sit a little under the music, so they punctuate it. */
+const MUSIC_LUFS = -16;
+const SFX_LUFS = -18;
 /** The landing test's ceiling is 4 MB; this leaves room under it. */
 const MAX_BYTES = 3_800_000;
 
@@ -141,30 +142,26 @@ function measure(input: string[], filter: string): { lufs: number; peak: number 
 const gainTo = (from: number, to: number) => (10 ** ((to - from) / 20)).toFixed(4);
 
 /** The music and the effects, each set to its level, mixed, raised to `LOUDNESS` and limited under `CEILING`. */
-async function sound(): Promise<string> {
+function sound(): string {
   mkdirSync(TMP, { recursive: true });
-  const music = join(TMP, "music.mp3");
-  if (!existsSync(music)) {
-    const res = await fetch(MUSIC, { headers: { "User-Agent": "OwlheadTour/1.0 (landing page video)" } });
-    if (!res.ok) throw new Error(`music: ${res.status}`);
-    writeFileSync(music, Buffer.from(await res.arrayBuffer()));
-  }
+  const music = join(TMP, "music.wav");
+  writeFileSync(music, wav(tourMusic(TOUR, TOUR_SECONDS)));
   const sfx = join(TMP, "sfx.wav");
   writeFileSync(sfx, wav(tourSfx(TOUR, TOUR_SECONDS)));
 
   const inputs = ["-i", music, "-i", sfx];
-  const rag = (pad: string) => `[${pad}]atrim=0:${TOUR_SECONDS},asetpts=N/SR/TB,aresample=${RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=in:d=1,afade=t=out:st=${TOUR_SECONDS - 3}:d=3`;
   const fx = (pad: string) => `[${pad}]aformat=sample_fmts=fltp:channel_layouts=stereo`;
-  const stems = { music: measure(["-i", music], rag("0:a")), sfx: measure(["-i", sfx], fx("0:a")) };
-  const mix = `${rag("0:a")},volume=${gainTo(stems.music.lufs, MUSIC_LUFS)}[m];${fx("1:a")},volume=${gainTo(stems.sfx.lufs, SFX_LUFS)}[s];[m][s]amix=inputs=2:normalize=0:duration=first`;
-  const limit = (gain: string) => `${mix},volume=${gain},alimiter=limit=${(10 ** ((CEILING - 0.6) / 20)).toFixed(4)}:attack=2:release=80:level=0`;
+  const band = (pad: string) => `${fx(pad)},afade=t=out:st=${TOUR_SECONDS - 0.6}:d=0.6`;
+  const stems = { music: measure(["-i", music], band("0:a")), sfx: measure(["-i", sfx], fx("0:a")) };
+  const mix = `${band("0:a")},volume=${gainTo(stems.music.lufs, MUSIC_LUFS)}[m];${fx("1:a")},volume=${gainTo(stems.sfx.lufs, SFX_LUFS)}[s];[m][s]amix=inputs=2:normalize=0:duration=first`;
+  const limit = (gain: string) =>
+    `${mix},volume=${gain},aresample=${RATE * 4},alimiter=limit=${(10 ** ((CEILING - 0.8) / 20)).toFixed(4)}:attack=1:release=60:level=0,aresample=${RATE}`;
 
   let gain = gainTo(measure(inputs, mix).lufs, LOUDNESS);
-  const first = measure(inputs, limit(gain));
-  gain = (Number(gain) * Number(gainTo(first.lufs, LOUDNESS))).toFixed(4);
+  for (let pass = 0; pass < 2; pass++) gain = (Number(gain) * Number(gainTo(measure(inputs, limit(gain)).lufs, LOUDNESS))).toFixed(4);
 
   const out = join(TMP, "mix.wav");
-  ffmpeg(["-y", ...inputs, "-filter_complex", `${limit(gain)},aresample=${RATE}`, "-c:a", "pcm_f32le", out]);
+  ffmpeg(["-y", ...inputs, "-filter_complex", limit(gain), "-c:a", "pcm_f32le", out]);
   const level = measure(["-i", out], fx("0:a"));
   console.log(`music ${stems.music.lufs} LUFS, effects ${stems.sfx.lufs} LUFS; mix ${level.lufs} LUFS, true peak ${level.peak} dBTP`);
   return out;
@@ -207,7 +204,7 @@ async function frames(): Promise<string> {
 
 async function main() {
   mkdirSync(OUT, { recursive: true });
-  const audio = await sound();
+  const audio = sound();
   const master = await frames();
   const mp4 = join(OUT, "owlhead-tour.mp4");
   for (const crf of [24, 26, 28, 30, 32, 34]) {
@@ -225,5 +222,5 @@ async function main() {
 
 const at = process.argv.indexOf("--stills");
 if (at >= 0) await stills(process.argv.slice(at + 1).map(Number));
-else if (process.argv.includes("--sound")) await sound();
+else if (process.argv.includes("--sound")) sound();
 else await main();
