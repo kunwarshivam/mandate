@@ -272,11 +272,13 @@ crates.
   after its `OrderSubmitted` committed in the same run; `src/map.rs` the total mappings with no
   permitting arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
   deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
-  `src/bin/mandate-tracer.rs` the binary; `src/adapters.rs` the production adapters: `StoredBars`,
-  `MovingAverage`, `AlpacaConnector`, `RiskExitPath`, the validated mandate, builder, gate, journal,
-  executor, and reconciler. The risk exit plans over the journal, stream, clock, and agent the run's
-  bridge hands it (DEC-449, amended by DEC-451). It holds no trading logic—no sizing, gating,
-  pricing, state machine, or arithmetic on money or quantity—and binds the owning crates directly.
+  `src/bin/mandate-tracer.rs` the binary; `src/paper.rs` the DEC-466 one-run loader that verifies the
+  reviewed E7-7 AAPL artifacts, binds their hashes, and assembles the trusted run and executor
+  contexts; `src/adapters.rs` the production adapters: `StoredBars`, `MovingAverage`,
+  `AlpacaConnector`, `RiskExitPath`, the validated mandate, builder, gate, journal, executor, and
+  reconciler. The risk exit plans over the journal, stream, clock, and agent the run's bridge hands
+  it (DEC-449, amended by DEC-451). It holds no trading logic—no sizing, gating, pricing, state
+  machine, or arithmetic on money or quantity—and binds the owning crates directly.
 - **Tests:** `src/stages/fail_closed.rs` over the permissive doubles of `src/stages/doubles.rs`: one
   case per `Stage`, each asserting at the furthest boundary its stage could reach (zero submissions;
   zero hands up to `Sink`; zero `IntentProposed` up to `Journal`; zero `OrderSubmitted` up to
@@ -299,16 +301,17 @@ crates.
   remains pending and failing on E2-14 until its founder-gated price-trust rule lands; the shell
   cannot invent price arithmetic (DEC-138 item 3). The mandate
   fixtures are generated and checked against `reference/mandate/ref.py` by
-  `tests/fixtures/tracer/generate.py`. `AlpacaPaperHttp` is never constructed in a test, so no test
-  can reach a network (ES-19).
+  `tests/fixtures/tracer/generate.py`. `src/paper.rs` tests the fixed artifact assembly and platform
+  liquidity floor; the real HTTP runtime's I/O driver is tested with a local socket and no test
+  holds paper credentials or can reach Alpaca (ES-19).
 - **Reference cases:** none move, and `crates/mandate-refcases/status.toml` is untouched by every PR of
   this stream. The tracer cites `trading_domain::RC-04`, `RC-09`, `RC-09B`, `RC-11`, `RC-14`, `RC-16`,
   `RC-17`, the mandate gate and autonomy families, and the journal append vectors read-only.
 - **Run:** `cargo nextest run -p mandate-shell`; `cargo xtask ci pending` for the pending cases; the
   manual paper run is `cargo run -p mandate-shell --bin mandate-tracer -- --mandate <path> --dataset
-  <dir> --journal <dsn> --confirm-paper --place-one-order`, which needs both flags, refuses any attempt
-  to configure a host, and cannot reach one of its own because the crate's `allowed_external` names no
-  HTTP client.
+  <dir> --config-dir <dir> --journal <dsn> --confirm-paper --place-one-order`, which needs both flags,
+  accepts only the reviewed E7-7 paper artifacts, constructs the fixed Alpaca paper transport, and
+  refuses any attempt to configure a host.
 
 ## Idempotent executor and broker connector
 

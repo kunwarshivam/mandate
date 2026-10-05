@@ -6,9 +6,9 @@
 //! and plans over the journal, stream, clock, and agent the run's bridge hands it; and
 //! [`ExecutorProtection`], through the executor's public protection probe. The journal, sink,
 //! executor, reconciliation, mandate validation, sizing, classification, and advisory-gate
-//! boundaries are also live when their trusted inputs are injected. Production injects no run or
-//! executor context yet, so both boundaries fail closed rather than inventing effective-dated
-//! inputs (DEC-166 item 2).
+//! boundaries are also live when their trusted inputs are injected. The E7-7 shipping binary
+//! injects the reviewed one-run paper contexts assembled by [`crate::paper`] (DEC-466); callers
+//! that omit either context fail closed rather than inventing effective-dated inputs.
 //!
 //! What each will bind, per the task brief's step table:
 //!
@@ -2040,8 +2040,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
     })
 }
 
-/// The production stages over the given connector: the binary's [`Disconnected`] one, or
-/// [`production`]'s.
+/// The production stages over a caller-supplied connector.
 pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
     let run = sources.run.map(Rc::new);
     let (executor, reconciler) = CoreExecutor::pair(
