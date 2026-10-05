@@ -38,11 +38,11 @@ beforeEach(() => setPathname("/"));
 describe("Home on a phone", () => {
   const needsYou = () => main().querySelector<HTMLElement>("[data-slot=needs-you]")!;
 
-  it("opens with Needs you, then the account, the decisions and the agents, and no assets", () => {
+  it("opens with Needs you, then the account and the agents, and ends on the decisions, with no assets", () => {
     home();
     const heading = (h: Element) => h.textContent?.replace(/\d+ items?$/, "").trim();
-    expect(onPhone(main().querySelectorAll("h2")).map(heading)).toEqual(["Needs you", "Account equity", "Decisions", "Agents"]);
-    expect(onDesktop(main().querySelectorAll("h2")).map(heading)).toEqual(["Needs you", "Account equity", "Decisions", "Agents", "Assets"]);
+    expect(onPhone(main().querySelectorAll("h2")).map(heading)).toEqual(["Needs you", "Account equity", "Agents", "Decisions"]);
+    expect(onDesktop(main().querySelectorAll("h2")).map(heading)).toEqual(["Needs you", "Decisions", "Account equity", "Agents", "Assets"]);
     expect(shownOnDesktop(needsYou())).toBe(true);
   });
 
@@ -108,7 +108,7 @@ describe("Home on a phone", () => {
     const canvas = main().querySelector<HTMLElement>("[data-slot=account-equity] [data-slot=chart-canvas]")!;
     expect(canvas).toHaveClass("h-(--chart-phone)", "lg:h-(--chart-height)");
     expect(canvas.style.getPropertyValue("--chart-phone")).toBe("180px");
-    expect(canvas.style.getPropertyValue("--chart-height")).toBe("200px");
+    expect(canvas.style.getPropertyValue("--chart-height")).toBe("260px");
     const hero = main().querySelector<HTMLElement>("[data-slot=account-equity]")!;
     expect(shownOnPhone(hero.querySelector("[data-placeholder=performance]")!)).toBe(true);
     expect(shownOnPhone(hero.querySelector("[data-slot=range-picker]")!)).toBe(true);
@@ -149,15 +149,19 @@ describe("Home on a phone", () => {
     expect(onDesktop(main().querySelectorAll("[data-slot=phone-agent]"))).toEqual([]);
   });
 
-  it("shows the last three decisions, then See all decisions", () => {
+  it("ends on the last three decisions and All decisions, while desktop keeps four in the rail", () => {
     home();
-    const activity = within(main()).getByRole("region", { name: "Decisions" });
-    expect(onPhone(activity.querySelectorAll("ol > li"))).toHaveLength(3);
-    expect(onDesktop(activity.querySelectorAll("ol > li")).length).toBeGreaterThan(3);
-    const all = onPhone(activity.querySelectorAll("a")).filter((a) => a.textContent === "See all decisions");
-    expect(all).toHaveLength(1);
-    expect(all[0]).toHaveAttribute("href", "/audit/decisions");
-    expect(shownOnDesktop(all[0])).toBe(false);
+    const regions = [...main().querySelectorAll<HTMLElement>("section[aria-labelledby$=decisions-title]")];
+    expect(regions).toHaveLength(2);
+    const [phone] = onPhone(regions);
+    const [desktop] = onDesktop(regions);
+    expect(onPhone(regions)).toHaveLength(1);
+    expect(onDesktop(regions)).toHaveLength(1);
+    expect(phone.querySelectorAll("[data-slot=timeline-entry]")).toHaveLength(3);
+    expect(desktop.querySelectorAll("[data-slot=timeline-entry]")).toHaveLength(4);
+    expect(desktop.closest("[data-layout=rail]")).not.toBeNull();
+    expect(phone.closest("[data-layout=main]")).not.toBeNull();
+    for (const r of [phone, desktop]) expect(within(r).getByRole("link", { name: /All decisions/ })).toHaveAttribute("href", "/audit/decisions");
   });
 
   it("leaves assets off a phone's Home", () => {

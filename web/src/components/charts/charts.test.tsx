@@ -275,7 +275,7 @@ describe("the hero chart scrubs", () => {
     leave(chart);
     const h = hero(container);
     expect(h.value).toHaveTextContent(usd(WS.connection.account_equity));
-    expect(h.when).toHaveTextContent("past week");
+    expect(h.when).toHaveTextContent("today");
     expect(h.section).not.toHaveAttribute("data-scrubbing");
   });
 
@@ -359,8 +359,8 @@ describe("the hero chart scrubs", () => {
     expect(container.querySelector("[data-slot=chart-canvas]")).toHaveAttribute("data-draw-in");
     const picker = within(screen.getByRole("group", { name: "Account equity range" }));
     expect(picker.getAllByRole("button").map((b) => b.textContent)).toEqual(["1D", "1W", "1M", "3M", "1Y", "All"]);
-    expect(picker.getByRole("button", { name: ACCOUNT_RANGE }), "the account opens on a week, not a day of ticks").toHaveAttribute("aria-pressed", "true");
-    expect(hero(container).when).toHaveTextContent("past week");
+    expect(picker.getByRole("button", { name: ACCOUNT_RANGE }), "the account opens on today, what an owner checks first").toHaveAttribute("aria-pressed", "true");
+    expect(hero(container).when).toHaveTextContent("today");
     fireEvent.click(picker.getByRole("button", { name: "1Y" }));
     expect(hero(container).when).toHaveTextContent(/^since Sep 2\d$/);
     fireEvent.click(picker.getByRole("button", { name: "1D" }));
