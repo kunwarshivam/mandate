@@ -587,12 +587,12 @@ impl Sink for ConvertingSink {
                 qty: *qty,
                 limit: *limit,
                 purpose: executor_purpose(*purpose),
-                protection: execution.protection.map(|prices| {
-                    mandate_executor::ProtectionPrices {
+                protection: execution
+                    .protection
+                    .map(|prices| mandate_executor::ProtectionPrices {
                         stop: prices.stop,
                         take_profit: prices.take_profit,
-                    }
-                }),
+                    }),
             },
             IntentBody::Flatten(plan) => {
                 let _ = plan;
@@ -604,11 +604,11 @@ impl Sink for ConvertingSink {
         Ok(mandate_executor::IntentHandoff {
             intent_id: IntentId(mandate_executor::EventId(handoff.intent_id.0.clone())),
             agent: mandate_executor::AgentId(AGENT.to_owned()),
-            tif: match execution.tif {
+            tif: Some(match execution.tif {
                 RuntimeTimeInForce::Day => mandate_executor::TimeInForce::Day,
                 RuntimeTimeInForce::Gtc => mandate_executor::TimeInForce::Gtc,
                 RuntimeTimeInForce::Ioc => mandate_executor::TimeInForce::Ioc,
-            },
+            }),
             body,
         })
     }

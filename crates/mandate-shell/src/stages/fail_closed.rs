@@ -367,6 +367,7 @@ fn an_intent_whose_draft_was_never_appended_never_reaches_the_sink() -> Result<(
             limit: mandate_num::Price::parse("255.2").map_err(|e| e.to_string())?,
             purpose: Purpose::Open,
         },
+        execution: None,
     });
     let error = match session.perform(vec![unrecorded]) {
         Err(error) => error,

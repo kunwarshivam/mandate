@@ -149,7 +149,7 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             IntentHandoff {
                 intent_id,
                 agent,
-                tif,
+                tif: Some(tif),
                 body: IntentBody::Order {
                     instrument,
                     side: Side::Sell,
@@ -2993,7 +2993,7 @@ mod sequence_tests {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(intent.to_owned())),
             agent: AgentId(agent.to_owned()),
-            tif: TimeInForce::Day,
+            tif: Some(TimeInForce::Day),
             body: IntentBody::Order {
                 instrument: aapl()?,
                 side: Side::Sell,
@@ -4800,7 +4800,7 @@ mod sequence_tests {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(intent.to_owned())),
             agent: AgentId("agent-a".to_owned()),
-            tif: TimeInForce::Day,
+            tif: Some(TimeInForce::Day),
             body: IntentBody::Order {
                 instrument: InstrumentId::new(name)?,
                 side,
@@ -13095,7 +13095,7 @@ mod bracket_tests {
             Input::Intent(IntentHandoff {
                 intent_id: IntentId(EventId(ENTRY.to_owned())),
                 agent: AgentId("agent-a".to_owned()),
-                tif: TimeInForce::Day,
+                tif: Some(TimeInForce::Day),
                 body: IntentBody::Order {
                     instrument: aapl()?,
                     side: Side::Buy,

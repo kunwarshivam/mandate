@@ -1549,6 +1549,7 @@ dependencies = [
  "mandate-canon",
  "mandate-executor",
  "mandate-journal",
+ "mandate-journal-pg",
  "mandate-marketdata",
  "mandate-num",
  "mandate-risk",

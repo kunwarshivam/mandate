@@ -457,6 +457,7 @@ fn bound_proposal(bound: &BoundAction) -> Result<Proposal, RuntimeError> {
         limit: bound.limit,
         purpose: purpose_of(bound.purpose),
         combined_score: payload::text(&bound.combined_score.to_string()),
+        execution: None,
     })
 }
 

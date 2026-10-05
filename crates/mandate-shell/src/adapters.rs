@@ -966,14 +966,20 @@ impl StoreJournal {
     pub fn from_dsn(dsn: Option<String>, recorded_at: UtcNanos) -> Self {
         let backend = match dsn {
             None => StoreBackend::Memory(MemoryJournal::new()),
-            Some(dsn) => match PgJournal::from_dsn(&dsn) {
-                Ok(journal) => match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(runtime) => StoreBackend::Postgres { journal, runtime },
-                    Err(_) => StoreBackend::Unavailable,
-                },
+            Some(dsn) => match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => {
+                    let journal = {
+                        let _entered = runtime.enter();
+                        PgJournal::from_dsn(&dsn)
+                    };
+                    match journal {
+                        Ok(journal) => StoreBackend::Postgres { journal, runtime },
+                        Err(_) => StoreBackend::Unavailable,
+                    }
+                }
                 Err(_) => StoreBackend::Unavailable,
             },
         };
@@ -1126,7 +1132,7 @@ impl Sink for ExecutorSink {
                 handoff.intent_id.0.clone(),
             )),
             agent: ExecutorAgentId(self.agent.0.clone()),
-            tif: executor_tif(handoff.execution)?,
+            tif: executor_tif(handoff.execution),
             body,
         })
     }
@@ -1156,29 +1162,28 @@ fn validate_order_execution(
         });
     }
     match (execution.asset_class, execution.tif) {
-        (AssetClass::Crypto, TimeInForce::Day)
-        | (AssetClass::UsEquity, TimeInForce::Ioc) => Err(Cause::Absent {
-            what: "a time in force allowed by the mandate's asset class",
-        }),
+        (AssetClass::Crypto, TimeInForce::Day) | (AssetClass::UsEquity, TimeInForce::Ioc) => {
+            Err(Cause::Absent {
+                what: "a time in force allowed by the mandate's asset class",
+            })
+        }
         (AssetClass::UsEquity, TimeInForce::Day | TimeInForce::Gtc)
         | (AssetClass::Crypto, TimeInForce::Gtc | TimeInForce::Ioc) => Ok(()),
     }
 }
 
-fn executor_tif(
-    execution: Option<OrderExecution>,
-) -> Result<mandate_executor::TimeInForce, Cause> {
-    let Some(execution) = execution else {
-        return Ok(mandate_executor::TimeInForce::Day);
-    };
-    match (execution.asset_class, execution.tif) {
-        (AssetClass::UsEquity, TimeInForce::Day)
-        | (AssetClass::Crypto, TimeInForce::Day) => Ok(mandate_executor::TimeInForce::Day),
-        (AssetClass::UsEquity, TimeInForce::Gtc)
-        | (AssetClass::Crypto, TimeInForce::Gtc) => Ok(mandate_executor::TimeInForce::Gtc),
-        (AssetClass::UsEquity, TimeInForce::Ioc)
-        | (AssetClass::Crypto, TimeInForce::Ioc) => Ok(mandate_executor::TimeInForce::Ioc),
-    }
+fn executor_tif(execution: Option<OrderExecution>) -> Option<mandate_executor::TimeInForce> {
+    execution.map(|execution| match (execution.asset_class, execution.tif) {
+        (AssetClass::UsEquity, TimeInForce::Day) | (AssetClass::Crypto, TimeInForce::Day) => {
+            mandate_executor::TimeInForce::Day
+        }
+        (AssetClass::UsEquity, TimeInForce::Gtc) | (AssetClass::Crypto, TimeInForce::Gtc) => {
+            mandate_executor::TimeInForce::Gtc
+        }
+        (AssetClass::UsEquity, TimeInForce::Ioc) | (AssetClass::Crypto, TimeInForce::Ioc) => {
+            mandate_executor::TimeInForce::Ioc
+        }
+    })
 }
 
 fn executor_purpose(purpose: Purpose) -> mandate_executor::Purpose {
@@ -1311,10 +1316,7 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
         sizing: Box::new(BuilderPlan),
         classifier: Box::new(BuilderPlan),
         gate: Box::new(RiskGate),
-        journal: Box::new(StoreJournal::from_dsn(
-            sources.journal,
-            sources.recorded_at,
-        )),
+        journal: Box::new(StoreJournal::from_dsn(sources.journal, sources.recorded_at)),
         sink: Box::new(ExecutorSink {
             agent: sources.agent,
         }),
@@ -1409,9 +1411,7 @@ mod tests {
             UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|e| e.to_string())?;
         let mut journal =
             StoreJournal::from_dsn(Some("not a postgres dsn".to_owned()), recorded_at);
-        assert!(journal
-            .take_ownership("acct:tracer:tracer-paper")
-            .is_err());
+        assert!(journal.take_ownership("acct:tracer:tracer-paper").is_err());
         assert!(matches!(
             journal.append("acct:tracer:tracer-paper", 0, 0, &[]),
             AppendOutcome::Unavailable
@@ -1421,10 +1421,9 @@ mod tests {
 
     #[test]
     fn executor_sink_carries_the_mandate_order_policy_without_substitution() -> Result<(), String> {
-        let instrument = mandate_accounting::InstrumentId::new(
-            "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
-        )
-        .map_err(|e| e.to_string())?;
+        let instrument =
+            mandate_accounting::InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+                .map_err(|e| e.to_string())?;
         let stop = Price::parse("242.44").map_err(|e| e.to_string())?;
         let mut sink = ExecutorSink {
             agent: AgentId("tracer-aapl".to_owned()),
@@ -1451,7 +1450,7 @@ mod tests {
             })
             .map_err(|e| e.to_string())?;
         assert_eq!(converted.agent.0, "tracer-aapl");
-        assert_eq!(converted.tif, mandate_executor::TimeInForce::Gtc);
+        assert_eq!(converted.tif, Some(mandate_executor::TimeInForce::Gtc));
         let mandate_executor::IntentBody::Order {
             instrument: got_instrument,
             side,
@@ -1478,10 +1477,9 @@ mod tests {
     #[test]
     fn executor_sink_refuses_missing_policy_missing_protection_and_short_openings()
     -> Result<(), String> {
-        let instrument = mandate_accounting::InstrumentId::new(
-            "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
-        )
-        .map_err(|e| e.to_string())?;
+        let instrument =
+            mandate_accounting::InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+                .map_err(|e| e.to_string())?;
         let order = |side, execution| -> Result<IntentHandoff, String> {
             Ok(IntentHandoff {
                 intent_id: RuntimeEventId("10000100000000000000000000".to_owned()),
@@ -1498,27 +1496,30 @@ mod tests {
         let mut sink = ExecutorSink {
             agent: AgentId("tracer-aapl".to_owned()),
         };
-        assert!(sink
-            .hand(&order(mandate_accounting::Side::Buy, None)?)
-            .is_err());
+        assert!(
+            sink.hand(&order(mandate_accounting::Side::Buy, None)?)
+                .is_err()
+        );
         let required = Some(OrderExecution {
             asset_class: mandate_accounting::AssetClass::UsEquity,
             tif: RuntimeTimeInForce::Day,
             protection_required: true,
             protection: None,
         });
-        assert!(sink
-            .hand(&order(mandate_accounting::Side::Buy, required)?)
-            .is_err());
+        assert!(
+            sink.hand(&order(mandate_accounting::Side::Buy, required)?)
+                .is_err()
+        );
         let unprotected = Some(OrderExecution {
             asset_class: mandate_accounting::AssetClass::UsEquity,
             tif: RuntimeTimeInForce::Day,
             protection_required: false,
             protection: None,
         });
-        assert!(sink
-            .hand(&order(mandate_accounting::Side::Sell, unprotected)?)
-            .is_err());
+        assert!(
+            sink.hand(&order(mandate_accounting::Side::Sell, unprotected)?)
+                .is_err()
+        );
         Ok(())
     }
 

@@ -19,8 +19,9 @@ use mandate_runtime::{
     ActorKind, AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment,
     DryRunVerdict, Effect, EventDraft, EventId, FlattenLeg, FlattenPlan, FlattenPlanner,
     FlattenRequest, FoldedEvent, GateDryRun, IdGen, Initiator, IntentHandoff, MandateView,
-    ModelOutput, OrderPlan, Ports, Proposal, Purpose, RiskClock, RuntimeError, RuntimeState, Seq,
-    SignalInputs, TimerId, TimerRequest, WorkspaceId, WriterEpoch, fold, handle,
+    ModelOutput, OrderExecution, OrderPlan, Ports, Proposal, Purpose, RiskClock, RuntimeError,
+    RuntimeState, Seq, SignalInputs, TimeInForce, TimerId, TimerRequest, WorkspaceId, WriterEpoch,
+    fold, handle,
 };
 
 pub const AGENT_STREAM: &str = "agent:ws1:agent-a";
@@ -193,6 +194,12 @@ impl FixedPlan {
                 limit: price("155"),
                 purpose: Purpose::Open,
                 combined_score: text("0.5"),
+                execution: Some(OrderExecution {
+                    asset_class: AssetClass::UsEquity,
+                    tif: TimeInForce::Day,
+                    protection_required: false,
+                    protection: None,
+                }),
             }),
             autonomy,
             requires_fresh: true,
@@ -210,6 +217,12 @@ impl FixedPlan {
                 limit: price("149"),
                 purpose: Purpose::DiscretionaryExit,
                 combined_score: text("-0.5"),
+                execution: Some(OrderExecution {
+                    asset_class: AssetClass::UsEquity,
+                    tif: TimeInForce::Day,
+                    protection_required: false,
+                    protection: None,
+                }),
             }),
             autonomy,
             requires_fresh: true,
