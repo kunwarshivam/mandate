@@ -1764,6 +1764,13 @@ impl CoreExecutor {
 }
 
 impl Executor for CoreExecutor {
+    fn reset(&mut self) -> Result<(), Cause> {
+        let _ = self.context()?;
+        let scope = self.state.borrow().scope().clone();
+        *self.state.borrow_mut() = ExecutorState::new(scope);
+        Ok(())
+    }
+
     fn step(
         &mut self,
         input: mandate_executor::Input,
@@ -2276,6 +2283,26 @@ mod tests {
             core.state().head("acct:tracer:tracer-paper"),
             Some(mandate_executor::Seq(1))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn core_executor_reset_rebuilds_an_empty_fold_and_keeps_its_trusted_context()
+    -> Result<(), String> {
+        let (mut core, _) = CoreExecutor::pair(account_scope(), Some(test_executor_context()?));
+        let opened = stream_opened()?;
+        core.committed(&opened).map_err(|error| error.to_string())?;
+        assert!(
+            core.committed(&opened).is_err(),
+            "without a reset sequence one cannot be folded twice"
+        );
+        core.reset().map_err(|error| error.to_string())?;
+        core.committed(&opened).map_err(|error| error.to_string())?;
+        core.step(mandate_executor::Input::Started(
+            mandate_executor::WriterEpoch(7),
+        ))
+        .map_err(|error| error.to_string())?;
+        assert_eq!(core.state().environment(), Some("paper"));
         Ok(())
     }
 

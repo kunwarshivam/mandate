@@ -868,6 +868,12 @@ impl PaperExecutor {
 }
 
 impl Executor for PaperExecutor {
+    fn reset(&mut self) -> Result<(), Cause> {
+        self.seen.clear();
+        self.last_client_order_id = None;
+        Ok(())
+    }
+
     fn step(
         &mut self,
         input: mandate_executor::Input,
@@ -1175,6 +1181,10 @@ impl Sink for Stubbed {
 }
 
 impl Executor for Stubbed {
+    fn reset(&mut self) -> Result<(), Cause> {
+        Ok(())
+    }
+
     fn step(
         &mut self,
         input: mandate_executor::Input,

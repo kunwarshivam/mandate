@@ -145,6 +145,11 @@ impl<'s> Session<'s> {
             cycle_open: false,
             report: Report::default(),
         };
+        session
+            .stages
+            .executor
+            .reset()
+            .map_err(refused(Stage::Executor))?;
         for stream in [session.agent_stream.clone(), session.account_stream.clone()] {
             let epoch = session
                 .stages

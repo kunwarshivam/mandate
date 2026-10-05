@@ -251,6 +251,8 @@ pub trait Sink {
 
 /// Steps 10 to 12 and 14: one `mandate_executor::handle` call, and the fold of what it journaled.
 pub trait Executor {
+    /// Starts one process-local fold from an empty state while retaining its trusted context.
+    fn reset(&mut self) -> Result<(), Cause>;
     fn step(
         &mut self,
         input: mandate_executor::Input,
