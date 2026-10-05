@@ -585,12 +585,11 @@ fn each_mismatched_binding_identity_fails_closed_before_any_submission() {
 
 #[test]
 fn a_binding_gate_error_fails_an_opening_but_does_not_block_a_risk_exit() {
-    let outside_calendar = at("2027-01-02T15:00:00Z");
+    let outside_calendar = at("2100-01-02T15:00:00Z");
 
     let (mut opening_shell, opening_ports) = ready();
     let mut opening_input = input(AccountState::Active, false);
     opening_input.now = outside_calendar;
-    opening_input.universe = WorkingUniverse::Unavailable;
     let opening_gate = GateFixture {
         input: Some(opening_input),
     };
@@ -604,7 +603,7 @@ fn a_binding_gate_error_fails_an_opening_but_does_not_block_a_risk_exit() {
     assert_eq!(
         error,
         ExecutorError::BindingGateFailed {
-            code: "working_universe_unavailable"
+            code: "config_out_of_range"
         }
     );
     assert_eq!(opening_shell.connector.total_accepted(), 0);
