@@ -22,12 +22,12 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Int, Key, Value};
 use mandate_executor::{
-    AccountRef, AccountScope, AgentId, BindingGateInput, BindingGateRequest, BindingGateSource, BrokerAccount,
-    BrokerFill, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerReject, BrokerRequest,
-    BrokerSnapshot, BrokerUnknown, Effect, EventDraft, EventId, ExecutorConfig, ExecutorError,
-    ExecutorState, ExitTier, FillId, FoldedEvent, IdGen, Input, InstrumentSnapshot, IntentId,
-    MandateVersion, MandateView, MarketObservation, OrderState, Ports, ReconcileReason, RiskClock,
-    Seq, TimeInForce, TimerId, TimerRequest, WorkspaceId, WriterEpoch, fold, handle,
+    AccountRef, AccountScope, AgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
+    BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerReject,
+    BrokerRequest, BrokerSnapshot, BrokerUnknown, Effect, EventDraft, EventId, ExecutorConfig,
+    ExecutorError, ExecutorState, ExitTier, FillId, FoldedEvent, IdGen, Input, InstrumentSnapshot,
+    IntentId, MandateVersion, MandateView, MarketObservation, OrderState, Ports, ReconcileReason,
+    RiskClock, Seq, TimeInForce, TimerId, TimerRequest, WorkspaceId, WriterEpoch, fold, handle,
 };
 use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
 use mandate_time::Date;
@@ -49,10 +49,7 @@ pub const ENVIRONMENT: &str = "paper";
 pub struct MissingBindingGate;
 
 impl BindingGateSource for MissingBindingGate {
-    fn input(
-        &self,
-        _request: &BindingGateRequest<'_>,
-    ) -> Option<BindingGateInput> {
+    fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         None
     }
 }

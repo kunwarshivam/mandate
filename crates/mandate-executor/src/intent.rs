@@ -150,7 +150,12 @@ fn begin_and_submit(
     }
     match gate(batch, intent, always)? {
         ALLOW => submit(batch, intent)?,
-        HOLD if WAITS.contains(&decide(batch, intent, GatePass::BeforeSubmission)?.0.reason_code()) => {
+        HOLD if WAITS.contains(
+            &decide(batch, intent, GatePass::BeforeSubmission)?
+                .0
+                .reason_code(),
+        ) =>
+        {
             reprotect_unpriced(batch, intent)?;
         }
         _ => {}
@@ -240,7 +245,8 @@ fn gate(
             );
         }
     }
-    if verdict == ALLOW && decision.is_binding()
+    if verdict == ALLOW
+        && decision.is_binding()
         && let Some(IntentBody::Order { qty, limit, .. }) = batch.view.bodies.get_mut(intent)
     {
         if let Some(sized) = decision.sized() {

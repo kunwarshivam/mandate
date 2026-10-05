@@ -197,8 +197,14 @@ impl PartialGateDecision {
         });
         Ok(vec![
             ("data_profile", text(&evidence.data_profile)),
-            ("quotes_used", Value::Array(quotes.into_iter().collect::<Result<_, _>>()?)),
-            ("marks_used", Value::Array(marks.into_iter().collect::<Result<_, _>>()?)),
+            (
+                "quotes_used",
+                Value::Array(quotes.into_iter().collect::<Result<_, _>>()?),
+            ),
+            (
+                "marks_used",
+                Value::Array(marks.into_iter().collect::<Result<_, _>>()?),
+            ),
         ])
     }
 }
@@ -428,14 +434,35 @@ fn evaluate_binding(
         .map_or_else(String::new, |reason| reason.as_str().to_owned());
     let (verdict, held, deferred) = match decision.verdict {
         Verdict::Allow => (GateVerdict::Allow, false, false),
-        Verdict::Deny => (GateVerdict::Deny { reason_code: reason }, false, false),
-        Verdict::Hold => (GateVerdict::Deny { reason_code: reason }, true, false),
-        Verdict::Defer => (GateVerdict::Deny { reason_code: reason }, false, true),
+        Verdict::Deny => (
+            GateVerdict::Deny {
+                reason_code: reason,
+            },
+            false,
+            false,
+        ),
+        Verdict::Hold => (
+            GateVerdict::Deny {
+                reason_code: reason,
+            },
+            true,
+            false,
+        ),
+        Verdict::Defer => (
+            GateVerdict::Deny {
+                reason_code: reason,
+            },
+            false,
+            true,
+        ),
     };
     partial.verdict = verdict;
     partial.held = held;
     partial.deferred = deferred;
-    partial.sized = match (partial.sized, decision.pacing.as_ref().map(|pacing| pacing.qty)) {
+    partial.sized = match (
+        partial.sized,
+        decision.pacing.as_ref().map(|pacing| pacing.qty),
+    ) {
         (Some(local), Some(binding)) => Some(local.min(binding)),
         (local, binding) => local.or(binding),
     };

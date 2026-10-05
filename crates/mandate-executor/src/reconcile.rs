@@ -551,9 +551,7 @@ pub(crate) mod tests {
     use crate::error::ExecutorError;
     use crate::ids::{ClientOrderId, IntentId};
     use crate::payload::object;
-    use crate::ports::{
-        ALLOWING_BINDING_GATE, IdGen, InstrumentSnapshot, MandateView, Ports,
-    };
+    use crate::ports::{ALLOWING_BINDING_GATE, IdGen, InstrumentSnapshot, MandateView, Ports};
     use crate::state::{ExecutorState, ObservedAccount, fold};
     use crate::step::handle;
     use crate::types::{

@@ -4,13 +4,13 @@
 //! and calls `mandate-risk` itself, so neither this port nor stream I's advisory `GateDryRun` can
 //! inject an allow (`AGENTS.md` rule 1; journal spec §2).
 
-use std::future::Future;
 #[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 
-use mandate_accounting::{AssetClass, InstrumentId};
 #[cfg(test)]
 use mandate_accounting::AccountType;
+use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_num::{Fraction, ShareIncrement};
 #[cfg(test)]
 use mandate_num::{Price, Qty, Ratio, Usd};

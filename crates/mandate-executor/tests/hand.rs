@@ -12,11 +12,11 @@ mod common;
 
 use common::{
     ACCOUNT_STREAM, AGENT_STREAM, AppendOutcome, CLOCK_STREAM, CONTROL_STREAM, FixedInstruments,
-    FixedMandate, MISSING_BINDING_GATE, OTHER_AGENT, OTHER_AGENT_STREAM, Shell, TestIds, agent, broker_account,
-    broker_fill, broker_order, broker_position, broker_reject, clock, config, copied, derived_id,
-    discretionary_exit, event, handoff, instrument, int, object, opening, ports, price,
-    protected_opening, qty, quote, risk_exit, scope, snapshot, stale_quote, stream_opened, text,
-    usd, with_clock,
+    FixedMandate, MISSING_BINDING_GATE, OTHER_AGENT, OTHER_AGENT_STREAM, Shell, TestIds, agent,
+    broker_account, broker_fill, broker_order, broker_position, broker_reject, clock, config,
+    copied, derived_id, discretionary_exit, event, handoff, instrument, int, object, opening,
+    ports, price, protected_opening, qty, quote, risk_exit, scope, snapshot, stale_quote,
+    stream_opened, text, usd, with_clock,
 };
 use mandate_accounting::Side;
 use mandate_executor::{

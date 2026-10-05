@@ -43,10 +43,7 @@ impl GateFixture {
 }
 
 impl BindingGateSource for GateFixture {
-    fn input(
-        &self,
-        _request: &BindingGateRequest<'_>,
-    ) -> Option<BindingGateInput> {
+    fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         self.input.clone()
     }
 }
@@ -113,12 +110,7 @@ fn input(state: AccountState, halted: bool) -> BindingGateInput {
             legacy_pdt_equity_threshold: usd("25000"),
             etp_classification_max_age_s: 604_800,
         },
-        mandate: ValidatedMandate::from_validated_parts(
-            limits,
-            GoalState::Running,
-            false,
-            false,
-        ),
+        mandate: ValidatedMandate::from_validated_parts(limits, GoalState::Running, false, false),
         risk: RiskSnapshot {
             agent_equity: usd("10000"),
             high_water_mark: usd("10000"),
@@ -221,7 +213,9 @@ fn ready() -> (Shell, Ports<'static>) {
     let executor_config = Box::leak(Box::new(config()));
     let ports = bound_ports(ids, mandates, instruments, executor_config);
     let mut shell = Shell::new(1);
-    shell.fold_one(&stream_opened()).unwrap_or_else(|error| panic!("{error}"));
+    shell
+        .fold_one(&stream_opened())
+        .unwrap_or_else(|error| panic!("{error}"));
     (shell.restart_ready(&ports), ports)
 }
 
@@ -287,8 +281,13 @@ fn full_binding_input_allows_and_replaces_the_partial_evaluation() {
         &gate,
     );
     assert!(submitted(&ran));
-    let decided = ran.draft("GateDecided").unwrap_or_else(|| panic!("gate decision"));
-    assert_eq!(decided.payload.get("verdict").and_then(|v| v.as_str()), Some("allow"));
+    let decided = ran
+        .draft("GateDecided")
+        .unwrap_or_else(|| panic!("gate decision"));
+    assert_eq!(
+        decided.payload.get("verdict").and_then(|v| v.as_str()),
+        Some("allow")
+    );
     assert!(
         decided.payload.get("evaluation").is_none(),
         "a full §9.1 decision is never labelled account_stream_only"
@@ -305,8 +304,13 @@ fn binding_denial_sends_no_order_even_when_the_account_stream_checks_allow() {
         &gate,
     );
     assert!(!submitted(&ran));
-    let decided = ran.draft("GateDecided").unwrap_or_else(|| panic!("gate decision"));
-    assert_eq!(decided.payload.get("verdict").and_then(|v| v.as_str()), Some("deny"));
+    let decided = ran
+        .draft("GateDecided")
+        .unwrap_or_else(|| panic!("gate decision"));
+    assert_eq!(
+        decided.payload.get("verdict").and_then(|v| v.as_str()),
+        Some("deny")
+    );
     assert_eq!(
         decided.payload.get("reason_code").and_then(|v| v.as_str()),
         Some("instrument_halted")
