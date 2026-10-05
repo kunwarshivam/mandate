@@ -33,7 +33,7 @@ Owlhead is a trading agent for your own brokerage account. It works inside rules
 
 The wallpapers are paintings and prints from The Metropolitan Museum of Art, which shares them as public domain. Pick one in Display.
 
-The record shows one decision the way Owlhead writes it down; try editing a line. Questions answers what people ask first, and the Guestbook asks for a place in the beta.
+The record walks through why an agent made one trade, and shows what happens if anyone edits it afterwards. Questions answers what people ask first. Sign the Guestbook to ask for a place in the beta.
 
 Tour.mp4 is a minute on what Owlhead does. The Recycle Bin holds what Owlhead won't do.
 
@@ -80,12 +80,14 @@ export function RecordViewer() {
       <Menu items={["File", "Edit", "View", "Help"]} />
       <div className={PAGE}>
         <div className="grid gap-4 text-pretty">
+          <h2 className={cn(BOLD, "text-xl leading-snug")}>Why did it buy that?</h2>
           <p>
-            Before any order goes out, Owlhead writes down what the agent read, what it concluded, which checks passed and who approved it. Each line carries a hash of the line before it, so if anyone edits a line, the chain
-            stops matching from there on. You can export it for an auditor or your investors.
+            Most trading software shows you what it bought. Owlhead also writes down why, before the order goes out: what the agent read, its idea and what would prove it wrong, how it sized the order, which of your rules it
+            checked, and who said yes.
           </p>
-          <p>Here is one decision from start to finish. Try editing a line.</p>
+          <p>Here is one decision from start to finish.</p>
           <RecordTrace />
+          <p>When your investors or an auditor ask why a trade happened, you can export the record and send it to them.</p>
         </div>
       </div>
     </>
@@ -95,11 +97,15 @@ export function RecordViewer() {
 export const QUESTIONS: { q: string; a: string }[] = [
   { q: "Can it take money out of my account?", a: "No. Owlhead only asks your broker for permission to trade. It can't withdraw or transfer money, and it can't change its own rules." },
   {
-    q: "Is it trading real money?",
+    q: "Does it trade real money?",
     a: "Not yet. In the beta, agents trade on paper with simulated money. Live trading comes later, once it has legal sign-off, and only when you switch it on with your passkey.",
   },
-  { q: "Which brokers does it work with?", a: "Alpaca first. Robinhood and Kraken Derivatives US are planned." },
-  { q: "How do I stop it?", a: "Press Stop. It halts every agent and cancels their open orders. Protective stops rest at your broker, so they hold even if Owlhead goes down." },
+  { q: "Which brokers does it work with?", a: "Alpaca, on paper. Robinhood and Kraken Derivatives US are planned." },
+  {
+    q: "How do I stop it?",
+    a: "Press Stop, on any screen. You can pause one agent, or stop them all: each one cancels its orders, sells what it holds and ends. Anything you bought yourself stays where it is. Protective stops rest at your broker, so they hold even if Owlhead goes down.",
+  },
+  { q: "What if I miss a request?", a: "Nothing is sent. A request you don't answer by its deadline is skipped." },
   { q: "What does it cost?", a: "Nothing during the private beta. We'll tell you the price well before we charge anything." },
   {
     q: "Is this investment advice?",
