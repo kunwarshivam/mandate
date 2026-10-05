@@ -2880,22 +2880,22 @@ mod tests {
     }
 
     #[test]
-    fn mutation_shards_accept_only_one_based_indices_within_the_total() -> Result<()> {
+    fn mutation_shards_accept_only_zero_based_indices_below_the_total() -> Result<()> {
         assert_eq!(
-            MutantShard::parse("1/12")?,
+            MutantShard::parse("0/12")?,
             MutantShard {
-                index: 1,
+                index: 0,
                 total: 12
             }
         );
         assert_eq!(
-            MutantShard::parse("12/12")?,
+            MutantShard::parse("11/12")?,
             MutantShard {
-                index: 12,
+                index: 11,
                 total: 12
             }
         );
-        for invalid in ["0/12", "13/12", "1/0", "1", "1/2/3", "a/12"] {
+        for invalid in ["12/12", "13/12", "0/0", "1", "1/2/3", "a/12"] {
             assert!(
                 MutantShard::parse(invalid).is_err(),
                 "{invalid} must not select an incomplete or undefined shard"
@@ -2915,14 +2915,14 @@ mod tests {
         let sharded = mutants_args(
             "change.diff",
             Some(MutantShard {
-                index: 7,
+                index: 6,
                 total: 12,
             }),
         );
         assert_eq!(
             sharded
                 .windows(2)
-                .filter(|pair| pair[0] == "--shard" && pair[1] == "7/12")
+                .filter(|pair| pair[0] == "--shard" && pair[1] == "6/12")
                 .count(),
             1
         );
