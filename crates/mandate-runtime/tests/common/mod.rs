@@ -8,7 +8,7 @@
 
 pub mod escalation;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_approval::Notification;
@@ -17,11 +17,11 @@ use mandate_journal::Environment;
 use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_runtime::{
     ActorKind, AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment,
-    DryRunVerdict, Effect, EventDraft, EventId, FlattenLeg, FlattenPlan, FlattenPlanner,
-    FlattenRequest, FoldedEvent, GateDryRun, IdGen, Initiator, IntentHandoff, MandateView,
-    ModelDirection, ModelOutput, OrderExecution, OrderPlan, Ports, Proposal, Purpose, RiskClock,
-    RuntimeError, RuntimeState, Seq, SignalInputs, TimeInForce, TimerId, TimerRequest, WorkspaceId,
-    WriterEpoch, fold, handle,
+    DryRunVerdict, Effect, EventDraft, EventId, ExitOrigin, FlattenLeg, FlattenPlan,
+    FlattenPlanner, FlattenRequest, FoldedEvent, GateDryRun, IdGen, Initiator, IntentHandoff,
+    MandateView, ModelDirection, ModelOutput, OrderExecution, OrderPlan, Ports, Proposal, Purpose,
+    RiskClock, RuntimeError, RuntimeState, Seq, SignalInputs, TimeInForce, TimerId, TimerRequest,
+    WorkspaceId, WriterEpoch, fold, handle,
 };
 
 pub const AGENT_STREAM: &str = "agent:ws1:agent-a";
@@ -193,7 +193,13 @@ impl FixedPlan {
                 qty: qty("10"),
                 limit: price("155"),
                 purpose: Purpose::Open,
+                exit_origin: None,
+                exit_conviction: Some(text("1")),
+                buy_conviction: Some(text("1")),
                 combined_score: text("0.5"),
+                outputs_used: BTreeSet::from(["ma_cross".to_owned()]),
+                model_weights: BTreeMap::from([("ma_cross".to_owned(), text("1"))]),
+                clips_applied: Vec::new(),
                 execution: Some(OrderExecution {
                     asset_class: AssetClass::UsEquity,
                     tif: TimeInForce::Day,
@@ -216,7 +222,13 @@ impl FixedPlan {
                 qty: qty("10"),
                 limit: price("149"),
                 purpose: Purpose::DiscretionaryExit,
+                exit_origin: Some(ExitOrigin::Signal),
+                exit_conviction: Some(text("-1")),
+                buy_conviction: Some(text("-1")),
                 combined_score: text("-0.5"),
+                outputs_used: BTreeSet::from(["ma_cross".to_owned()]),
+                model_weights: BTreeMap::from([("ma_cross".to_owned(), text("1"))]),
+                clips_applied: Vec::new(),
                 execution: Some(OrderExecution {
                     asset_class: AssetClass::UsEquity,
                     tif: TimeInForce::Day,

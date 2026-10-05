@@ -705,12 +705,18 @@ fn every_opening_walks_back_to_one_timely_admitted_grant() {
                 .ok_or_else(|| TestCaseError::fail(format!("no request {approval}")))?;
             prop_assert!(record.requests.contains_key(&request.event_id));
             let action = request.payload.get("content").and_then(|c| c.get("action"));
-            for key in ["instrument", "side", "qty", "limit", "purpose"] {
+            for (intent_key, action_key) in [
+                ("instrument_id", "instrument"),
+                ("side", "side"),
+                ("qty", "qty"),
+                ("limit_price", "limit"),
+                ("purpose", "purpose"),
+            ] {
                 prop_assert_eq!(
-                    intent.payload.get(key),
-                    action.and_then(|a| a.get(key)),
+                    intent.payload.get(intent_key),
+                    action.and_then(|a| a.get(action_key)),
                     "the intent repeats the bound {}",
-                    key
+                    action_key
                 );
             }
             let granted = journal.iter().any(|r| {

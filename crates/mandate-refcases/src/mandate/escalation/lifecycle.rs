@@ -610,7 +610,13 @@ impl Shell {
                 "increase" => Purpose::Increase,
                 other => return Err(format!("`{other}` is not a purpose an ask binds")),
             },
+            exit_origin: None,
+            exit_conviction: None,
+            buy_conviction: None,
             combined_score: text(str_at(bound, "combined_score")?),
+            outputs_used: BTreeSet::new(),
+            model_weights: BTreeMap::new(),
+            clips_applied: Vec::new(),
             execution: None,
         };
         self.view.version = str_at(bound, "mandate_version")?.to_owned();

@@ -349,6 +349,7 @@ impl RuntimeState {
     pub(crate) fn signal_inputs(&self, now: RiskClock) -> SignalInputs {
         SignalInputs {
             outputs: self.outputs.clone(),
+            output_events: self.output_events.clone(),
             now,
         }
     }

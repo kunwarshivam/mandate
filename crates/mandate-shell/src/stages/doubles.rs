@@ -25,9 +25,9 @@ use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_num::{Price, Qty};
 use mandate_risk::{Check, CheckOutcome, Computed, Decision, Purpose as GatePurpose, Verdict};
 use mandate_runtime::{
-    AgentId, ApprovalSettings, Autonomy, ConnectionId, Deployment, FlattenPlan, FlattenRequest,
-    IntentBody, IntentHandoff, MandateView, OrderExecution, Proposal, Purpose, SignalInputs,
-    TimeInForce as RuntimeTimeInForce, WorkspaceId,
+    AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment, FlattenPlan,
+    FlattenRequest, IntentBody, IntentHandoff, MandateView, OrderExecution, Proposal, Purpose,
+    SignalInputs, TimeInForce as RuntimeTimeInForce, WorkspaceId,
 };
 use mandate_time::UtcNanos;
 
@@ -436,7 +436,18 @@ impl Sizing for OneShare {
             qty: Qty::parse(self.qty).map_err(|_| Cause::Absent { what: "a qty" })?,
             limit: Price::parse("255.2").map_err(|_| Cause::Absent { what: "a limit" })?,
             purpose: Purpose::Open,
+            exit_origin: None,
+            exit_conviction: Some(Value::Str("1".to_owned())),
+            buy_conviction: Some(Value::Str("1".to_owned())),
             combined_score: Value::Str("1".to_owned()),
+            outputs_used: inputs.outputs.keys().cloned().collect(),
+            model_weights: inputs
+                .outputs
+                .keys()
+                .cloned()
+                .map(|model| (model, Value::Str("1".to_owned())))
+                .collect(),
+            clips_applied: Vec::new(),
             execution: Some(OrderExecution {
                 asset_class: AssetClass::UsEquity,
                 tif: RuntimeTimeInForce::Day,
@@ -453,10 +464,13 @@ pub struct FixedClassifier {
 }
 
 impl Classifier for FixedClassifier {
-    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Autonomy, Cause> {
+    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let _ = (view, proposal);
         self.world.called(Stage::Classify);
-        Ok(self.autonomy)
+        Ok(Classified {
+            autonomy: self.autonomy,
+            decided_by: Some("default".to_owned()),
+        })
     }
 }
 
@@ -994,7 +1008,7 @@ impl Sizing for Stubbed {
 }
 
 impl Classifier for Stubbed {
-    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Autonomy, Cause> {
+    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let _ = (view, proposal);
         self.refuse()
     }

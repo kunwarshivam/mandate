@@ -359,12 +359,13 @@ pub(crate) fn order_of(payload: &Value) -> Result<crate::types::IntentBody, Runt
     let purpose = str_of(payload, "purpose")
         .and_then(purpose_from)
         .ok_or_else(|| non_canonical("purpose"))?;
-    let instrument = str_of(payload, "instrument").ok_or_else(|| non_canonical("instrument"))?;
+    let instrument =
+        str_of(payload, "instrument_id").ok_or_else(|| non_canonical("instrument_id"))?;
     let side = str_of(payload, "side")
         .and_then(side_from)
         .ok_or_else(|| non_canonical("side"))?;
     let qty = str_of(payload, "qty").ok_or_else(|| non_canonical("qty"))?;
-    let limit = str_of(payload, "limit").ok_or_else(|| non_canonical("limit"))?;
+    let limit = str_of(payload, "limit_price").ok_or_else(|| non_canonical("limit_price"))?;
     Ok(crate::types::IntentBody::Order {
         instrument: instrument_of(instrument)?,
         side,

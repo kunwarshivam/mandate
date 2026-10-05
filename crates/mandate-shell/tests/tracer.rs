@@ -23,7 +23,7 @@ use mandate_builder::{
 };
 use mandate_canon::{DecStr, Digest, Value};
 use mandate_domain::{AssetClass as DomainAssetClass, AssetId, MarketSession, Purpose};
-use mandate_journal::{Environment, StoredEvent, TrustedStart, verify_events};
+use mandate_journal::{AppendOutcome, Environment, StoredEvent, TrustedStart, verify_events};
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_num::{
@@ -34,21 +34,22 @@ use mandate_risk::spec_types::{GoalState, RiskLimits};
 use mandate_risk::{
     AccountSnapshot, AccountState as GateAccountState, AgentId as GateAgentId, AgentMode,
     AgentSnapshot, AssetId as GateAssetId, ClientOrderId as GateOrderId, ConductState,
-    DayTradeLedger, DayTradeRegime, EtpClass, Exchange, GateConfig,
-    InstrumentSnapshot as GateInstrumentSnapshot, MarketSnapshot, QuoteCurrency, RiskSnapshot,
-    SaneQuote, ValidatedMandate as GateMandate, WorkingUniverse,
+    DayTradeLedger, DayTradeRegime, EtpClass, Exchange, GateConfig, GatePass,
+    InstrumentSnapshot as GateInstrumentSnapshot, MarketSnapshot, Origin, ProposedKind,
+    QuoteCurrency, RiskSnapshot, SaneQuote, TimeInForce as GateTimeInForce,
+    ValidatedMandate as GateMandate, WorkingUniverse,
 };
 use mandate_runtime::{
     AgentId, ConnectionId, Deployment, OrderExecution, Proposal, ProtectionPrices, SignalInputs,
     TimeInForce, WorkspaceId,
 };
 use mandate_shell::adapters::{
-    AlpacaConnector, BuilderContext, BuilderPlan, DecisionContext, ExecutorContext, RunContext,
-    Sources, SpecMandate, production,
+    AdvisoryGateContext, AdvisoryOrderFacts, AlpacaConnector, BuilderContext, BuilderPlan,
+    DecisionContext, ExecutorContext, RunContext, Sources, SpecMandate, production,
 };
 use mandate_shell::envelope::{IdSpace, Ids};
-use mandate_shell::stages::{Classifier, MandateSource, Sizing, Stages};
-use mandate_shell::{Report, Setup, ShellError, run};
+use mandate_shell::stages::{Classifier, JournalWriter, MandateSource, Sizing, Stages};
+use mandate_shell::{Cause, Report, Setup, ShellError, run};
 use mandate_spec::ValidationContext;
 use mandate_spec::document::ProvenanceMap;
 use mandate_time::{Date, UtcNanos};
@@ -165,7 +166,7 @@ fn run_context(with_builder: bool) -> RunContext {
         };
         DecisionContext {
             builder: Some(builder),
-            gate: None,
+            gate: Some(advisory_gate_context()),
         }
     });
     RunContext {
@@ -381,6 +382,47 @@ fn executor_context() -> ExecutorContext {
     )
 }
 
+fn advisory_gate_context() -> AdvisoryGateContext {
+    let instrument =
+        mandate_accounting::InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415").unwrap();
+    let agent = mandate_executor::AgentId(AGENT.to_owned());
+    let limit = Price::parse("255.2").unwrap();
+    let request = mandate_executor::BindingGateRequest {
+        agent: &agent,
+        instrument: &instrument,
+        side: mandate_accounting::Side::Buy,
+        qty: Qty::parse("1").unwrap(),
+        limit,
+        purpose: mandate_executor::Purpose::Open,
+        tif: mandate_executor::TimeInForce::Day,
+        protection: None,
+    };
+    let trusted = mandate_executor::BindingGateSource::input(&TrustedExecutorFixture, &request)
+        .expect("the trusted executor fixture supplies the same opening gate facts");
+    AdvisoryGateContext {
+        now: trusted.now,
+        pass: GatePass::First,
+        config: trusted.config,
+        mandate: trusted.mandate,
+        risk: trusted.risk,
+        account: trusted.account,
+        agent: trusted.agent,
+        instrument: trusted.instrument,
+        market: trusted.market,
+        conduct: trusted.conduct,
+        universe: trusted.universe,
+        order: AdvisoryOrderFacts {
+            kind: ProposedKind::Plain,
+            tif: GateTimeInForce::Day,
+            extended_hours: false,
+            origin: Origin::OrderBuilder,
+            owner_confirmed_bid: None,
+            client_order_id: GateOrderId(1),
+            fee_reservation: Usd::ZERO,
+        },
+    }
+}
+
 /// A scratch directory under the system's temporary directory, removed when dropped.
 struct Scratch(PathBuf);
 
@@ -582,6 +624,78 @@ fn stages(mandate: &str, dataset: PathBuf, transport: Scripted) -> Stages {
     })
 }
 
+struct UnreachableJournal;
+
+impl JournalWriter for UnreachableJournal {
+    fn take_ownership(&mut self, _stream: &str) -> Result<u64, Cause> {
+        panic!("the temporary replacement journal is never used")
+    }
+
+    fn read(&self, _stream: &str) -> Result<Vec<StoredEvent>, Cause> {
+        panic!("the temporary replacement journal is never used")
+    }
+
+    fn append(
+        &mut self,
+        _stream: &str,
+        _expected_head: u64,
+        _writer_epoch: u64,
+        _drafts: &[Vec<u8>],
+    ) -> AppendOutcome {
+        panic!("the temporary replacement journal is never used")
+    }
+}
+
+struct RecordingJournal {
+    inner: Box<dyn JournalWriter>,
+    batches: Rc<RefCell<Vec<Vec<String>>>>,
+}
+
+impl JournalWriter for RecordingJournal {
+    fn take_ownership(&mut self, stream: &str) -> Result<u64, Cause> {
+        self.inner.take_ownership(stream)
+    }
+
+    fn read(&self, stream: &str) -> Result<Vec<StoredEvent>, Cause> {
+        self.inner.read(stream)
+    }
+
+    fn append(
+        &mut self,
+        stream: &str,
+        expected_head: u64,
+        writer_epoch: u64,
+        drafts: &[Vec<u8>],
+    ) -> AppendOutcome {
+        let types = drafts
+            .iter()
+            .map(|bytes| {
+                mandate_canon::parse(bytes)
+                    .ok()
+                    .and_then(|body| {
+                        body.get("event_type")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .unwrap_or_else(|| "<invalid>".to_owned())
+            })
+            .collect();
+        self.batches.borrow_mut().push(types);
+        self.inner
+            .append(stream, expected_head, writer_epoch, drafts)
+    }
+}
+
+fn record_batches(stages: &mut Stages) -> Rc<RefCell<Vec<Vec<String>>>> {
+    let batches = Rc::new(RefCell::new(Vec::new()));
+    let inner = std::mem::replace(&mut stages.journal, Box::new(UnreachableJournal));
+    stages.journal = Box::new(RecordingJournal {
+        inner,
+        batches: Rc::clone(&batches),
+    });
+    batches
+}
+
 fn committed(stages: &Stages, stream: &str) -> Vec<StoredEvent> {
     stages.journal.read(stream).unwrap()
 }
@@ -666,6 +780,7 @@ fn the_fixture_sizes_to_exactly_one_share() {
             output.model_id.clone(),
             BTreeMap::from([(instrument, output)]),
         )]),
+        output_events: BTreeMap::new(),
         now,
     };
     let plan = BuilderPlan {
@@ -689,7 +804,10 @@ fn the_fixture_sizes_to_exactly_one_share() {
     );
     assert_eq!(
         plan.classify(&admitted.view, &proposal).unwrap(),
-        mandate_runtime::Autonomy::Auto
+        mandate_runtime::Classified {
+            autonomy: mandate_runtime::Autonomy::Auto,
+            decided_by: Some("default".to_owned()),
+        }
     );
 }
 
@@ -715,6 +833,7 @@ fn sizing_refuses_a_model_output_without_its_trusted_content_hash() {
             output.model_id.clone(),
             BTreeMap::from([(instrument, output)]),
         )]),
+        output_events: BTreeMap::new(),
         now,
     };
     let mut context = run_context(true);
@@ -753,9 +872,18 @@ fn happy() {
     let transport = Scripted::new(Broker::Fresh);
     let seen = Rc::clone(&transport.seen);
     let mut stages = stages("mandate.json", dataset, transport);
+    let batches = record_batches(&mut stages);
     let report = run(&mut stages, &setup(true)).unwrap();
     assert_eq!(seen.borrow().posts(), 1);
     assert_eq!(report.submitted.len(), 1);
+    assert!(
+        batches
+            .borrow()
+            .iter()
+            .any(|batch| batch == &["DecisionMade".to_owned(), "IntentProposed".to_owned()]),
+        "the decision and its caused intent are one journal append batch: {:?}",
+        batches.borrow()
+    );
 
     let agent = committed(&stages, &agent_stream());
     let account = committed(&stages, &account_stream());

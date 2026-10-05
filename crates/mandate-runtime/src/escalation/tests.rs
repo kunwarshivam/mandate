@@ -19,8 +19,9 @@ use crate::ports::{FlattenPlanner, GateDryRun, IdGen, OrderPlan, Ports};
 use crate::state::{RuntimeState, fold};
 use crate::step::handle;
 use crate::types::{
-    ApprovalSettings, Classified, ConnectionId, Deployment, Effect, EventDraft, FlattenPlan,
-    FoldedEvent, Input, MandateView, ModelDirection, ModelOutput, Seq, SignalInputs, WriterEpoch,
+    ApprovalSettings, Classified, ConnectionId, Deployment, Effect, EventDraft, ExitOrigin,
+    FlattenPlan, FoldedEvent, Input, MandateView, ModelDirection, ModelOutput, Seq, SignalInputs,
+    WriterEpoch,
 };
 
 type Checked = Result<(), String>;
@@ -155,7 +156,13 @@ fn proposal(name: &str, purpose: Purpose, class: AssetClass) -> Result<Proposal,
         qty: Qty::parse("2").map_err(failed)?,
         limit: Price::parse("100").map_err(failed)?,
         purpose,
+        exit_origin: (purpose == Purpose::DiscretionaryExit).then_some(ExitOrigin::Signal),
+        exit_conviction: Some(text("0.5")),
+        buy_conviction: Some(text("0.5")),
         combined_score: text("0.5"),
+        outputs_used: BTreeSet::new(),
+        model_weights: Default::default(),
+        clips_applied: Vec::new(),
         execution: None,
     })
 }
@@ -1304,7 +1311,7 @@ fn an_owner_exit_names_only_its_instruments_orders() -> Checked {
     let aapl = the(&first, "IntentProposed")?.event_id.clone();
     let second = rig.evaluate(AT.saturating_add(1), "m1", &ports)?;
     assert_eq!(
-        member(the(&second, "IntentProposed")?, "instrument"),
+        member(the(&second, "IntentProposed")?, "instrument_id"),
         Some("MSFT")
     );
     rig.control(

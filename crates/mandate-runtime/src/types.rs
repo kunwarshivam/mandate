@@ -337,6 +337,25 @@ pub enum TimeInForce {
     Ioc,
 }
 
+/// Why the builder proposed a discretionary exit (journal spec §9.1 rule 8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitOrigin {
+    Signal,
+    GoalCompletion,
+    RemovedInstrument,
+}
+
+/// One exact order-builder bound recorded on a decision, in journal §9.1 table order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionClip {
+    MaxOrderUsd,
+    PositionCap,
+    GrossExposureCap,
+    TargetQty,
+    MaxSpendUsd,
+    MaxAvgPrice,
+}
+
 /// Protective prices computed before the shell boundary from the confirmed mandate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProtectionPrices {
@@ -411,7 +430,13 @@ pub struct Proposal {
     pub qty: Qty,
     pub limit: Price,
     pub purpose: Purpose,
+    pub exit_origin: Option<ExitOrigin>,
+    pub exit_conviction: Option<Value>,
+    pub buy_conviction: Option<Value>,
     pub combined_score: Value,
+    pub outputs_used: BTreeSet<String>,
+    pub model_weights: BTreeMap<String, Value>,
+    pub clips_applied: Vec<DecisionClip>,
     pub execution: Option<OrderExecution>,
 }
 
@@ -468,6 +493,7 @@ pub struct ApprovalSettings {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalInputs {
     pub outputs: BTreeMap<String, BTreeMap<InstrumentId, ModelOutput>>,
+    pub output_events: BTreeMap<String, BTreeMap<InstrumentId, EventId>>,
     pub now: RiskClock,
 }
 

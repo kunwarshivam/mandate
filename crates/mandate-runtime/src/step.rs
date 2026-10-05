@@ -10,10 +10,10 @@ use crate::payload;
 use crate::ports::{IdGen, Ports};
 use crate::state::{RuntimeState, UnresolvedAppend};
 use crate::types::{
-    Autonomy, Classified, Command, DryRunVerdict, Effect, EventDraft, EventId, FlattenRequest,
-    Initiator, Input, IntentBody, IntentHandoff, KillScope, Mode, ModelOutput, NotificationRef,
-    Observation, OwnerConfirmation, Proposal, Purpose, RiskClock, Seq, TimerId, TimerRequest,
-    WriterEpoch,
+    Autonomy, Classified, Command, DecisionClip, DryRunVerdict, Effect, EventDraft, EventId,
+    ExitOrigin, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope, Mode,
+    ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal, Purpose, RiskClock,
+    Seq, TimeInForce, TimerId, TimerRequest, WriterEpoch,
 };
 
 /// One step of the runtime (ADR-0001 ES-06).
@@ -526,11 +526,10 @@ fn decide(
     }
     let verdict = ports.gate.check(&proposal);
     let classified = ports.plan.classify(ports.view, &proposal);
-    let autonomy = classified.autonomy;
     let decision = batch.journal(
         "DecisionMade",
         None,
-        decided(&proposal, &verdict, autonomy)?,
+        decided(&proposal, &inputs, &verdict, &classified)?,
     )?;
     match &verdict {
         DryRunVerdict::Deny { .. } => {
@@ -602,10 +601,12 @@ fn remember(state: &mut RuntimeState, input: &Input, batch: &Batch<'_>) {
 
 pub(crate) fn proposed(proposal: &Proposal) -> Result<Value, RuntimeError> {
     payload::object(vec![
-        ("instrument", payload::text(proposal.instrument.as_str())),
+        ("instrument_id", payload::text(proposal.instrument.as_str())),
         ("side", payload::text(payload::side_name(proposal.side))),
+        ("type", payload::text("limit")),
+        ("tif", payload::text(tif_name(tif_of(proposal)))),
         ("qty", payload::text(&proposal.qty.to_string())),
-        ("limit", payload::text(&proposal.limit.to_string())),
+        ("limit_price", payload::text(&proposal.limit.to_string())),
         (
             "purpose",
             payload::text(payload::purpose_name(proposal.purpose)),
@@ -615,32 +616,133 @@ pub(crate) fn proposed(proposal: &Proposal) -> Result<Value, RuntimeError> {
 
 fn decided(
     proposal: &Proposal,
+    inputs: &crate::types::SignalInputs,
     verdict: &DryRunVerdict,
-    autonomy: Autonomy,
+    classified: &Classified,
 ) -> Result<Value, RuntimeError> {
     let (dry_run, reason_code) = match verdict {
-        DryRunVerdict::Allow => ("allow", String::new()),
-        DryRunVerdict::Deny { reason_code } => ("deny", reason_code.clone()),
+        DryRunVerdict::Allow => ("allow", Value::Null),
+        DryRunVerdict::Deny { reason_code } => ("deny", payload::text(reason_code)),
     };
-    let classification = match autonomy {
+    let classification = match classified.autonomy {
         Autonomy::Auto => "auto",
         Autonomy::Ask => "ask",
         Autonomy::Deny => "deny",
     };
+    let classified_value = match verdict {
+        DryRunVerdict::Allow => payload::text(classification),
+        DryRunVerdict::Deny { .. } => Value::Null,
+    };
+    let decided_by = match verdict {
+        DryRunVerdict::Allow => classified
+            .decided_by
+            .as_deref()
+            .map_or(Value::Null, payload::text),
+        DryRunVerdict::Deny { .. } => Value::Null,
+    };
+    let outputs_used = proposal
+        .outputs_used
+        .iter()
+        .map(|model| {
+            inputs
+                .output_events
+                .get(model)
+                .and_then(|by_instrument| by_instrument.get(&proposal.instrument))
+                .map(|event| payload::text(&event.0))
+                .ok_or_else(|| payload::non_canonical("outputs_used"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let model_weights = proposal
+        .model_weights
+        .iter()
+        .map(|(key, value)| {
+            payload::object(vec![("key", payload::text(key)), ("value", value.clone())])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     payload::object(vec![
-        ("instrument", payload::text(proposal.instrument.as_str())),
+        ("instrument_id", payload::text(proposal.instrument.as_str())),
         ("side", payload::text(payload::side_name(proposal.side))),
+        ("type", payload::text("limit")),
+        ("tif", payload::text(tif_name(tif_of(proposal)))),
         ("qty", payload::text(&proposal.qty.to_string())),
-        ("limit", payload::text(&proposal.limit.to_string())),
+        ("limit_price", payload::text(&proposal.limit.to_string())),
         (
             "purpose",
             payload::text(payload::purpose_name(proposal.purpose)),
         ),
-        ("dry_run", payload::text(dry_run)),
-        ("reason_code", payload::text(&reason_code)),
-        ("autonomy", payload::text(classification)),
+        (
+            "exit_origin",
+            proposal.exit_origin.map_or(Value::Null, |origin| {
+                payload::text(exit_origin_name(origin))
+            }),
+        ),
+        (
+            "exit_conviction",
+            proposal.exit_conviction.clone().unwrap_or(Value::Null),
+        ),
+        (
+            "buy_conviction",
+            proposal.buy_conviction.clone().unwrap_or(Value::Null),
+        ),
         ("combined_score", proposal.combined_score.clone()),
+        ("outputs_used", Value::Array(outputs_used)),
+        ("model_weights", Value::Array(model_weights)),
+        (
+            "clips_applied",
+            Value::Array(
+                proposal
+                    .clips_applied
+                    .iter()
+                    .map(|clip| payload::text(clip_name(*clip)))
+                    .collect(),
+            ),
+        ),
+        ("dry_run", payload::text(dry_run)),
+        ("reason_code", reason_code),
+        ("autonomy", classified_value),
+        ("ask_suppressed", Value::Null),
+        ("decided_by", decided_by),
+        ("delegation_id", Value::Null),
+        ("requested_by", payload::text("agent")),
+        ("client_id", Value::Null),
     ])
+}
+
+fn tif_of(proposal: &Proposal) -> TimeInForce {
+    proposal.execution.map_or_else(
+        || match proposal.asset_class {
+            mandate_accounting::AssetClass::UsEquity => TimeInForce::Day,
+            mandate_accounting::AssetClass::Crypto => TimeInForce::Gtc,
+        },
+        |execution| execution.tif,
+    )
+}
+
+fn tif_name(tif: TimeInForce) -> &'static str {
+    match tif {
+        TimeInForce::Day => "day",
+        TimeInForce::Gtc => "gtc",
+        TimeInForce::Ioc => "ioc",
+    }
+}
+
+fn exit_origin_name(origin: ExitOrigin) -> &'static str {
+    match origin {
+        ExitOrigin::Signal => "signal",
+        ExitOrigin::GoalCompletion => "goal_completion",
+        ExitOrigin::RemovedInstrument => "removed_instrument",
+    }
+}
+
+fn clip_name(clip: DecisionClip) -> &'static str {
+    match clip {
+        DecisionClip::MaxOrderUsd => "max_order_usd",
+        DecisionClip::PositionCap => "position_cap",
+        DecisionClip::GrossExposureCap => "gross_exposure_cap",
+        DecisionClip::TargetQty => "target_qty",
+        DecisionClip::MaxSpendUsd => "max_spend_usd",
+        DecisionClip::MaxAvgPrice => "max_avg_price",
+    }
 }
 
 /// The owner's instruction, without which the executor cannot price an exit outside the regular

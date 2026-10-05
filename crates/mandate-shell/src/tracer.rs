@@ -219,7 +219,7 @@ impl<'s> Session<'s> {
                 payload: &Value::Object(object),
             },
         )?;
-        self.append(stream, bytes)
+        self.append(stream, vec![bytes])
     }
 
     fn replay(&mut self, stream: &str, rows: &[StoredEvent]) -> Result<(), ShellError> {
@@ -339,9 +339,18 @@ impl<'s> Session<'s> {
     }
 
     pub(crate) fn perform(&mut self, effects: Vec<Effect>) -> Result<(), ShellError> {
-        for effect in effects {
+        let mut effects = VecDeque::from(effects);
+        while let Some(effect) = effects.pop_front() {
             match effect {
-                Effect::Journal(draft) => self.append_agent(&draft)?,
+                Effect::Journal(draft) => {
+                    let mut drafts = vec![draft];
+                    while matches!(effects.front(), Some(Effect::Journal(_))) {
+                        if let Some(Effect::Journal(next)) = effects.pop_front() {
+                            drafts.push(next);
+                        }
+                    }
+                    self.append_agent(&drafts)?;
+                }
                 Effect::Intent(handoff) => self.hand(&handoff)?,
                 Effect::Timer(_) => {}
                 Effect::Notify(notification) => self.report.alerts.push(notification.message_key),
@@ -431,7 +440,7 @@ impl<'s> Session<'s> {
             .map_err(refused(Stage::Connector))
     }
 
-    fn append_agent(&mut self, draft: &EventDraft) -> Result<(), ShellError> {
+    fn append_agent(&mut self, drafts: &[EventDraft]) -> Result<(), ShellError> {
         let stream = self.agent_stream.clone();
         let mut config_refs = Object::new();
         config_refs.insert(
@@ -440,21 +449,26 @@ impl<'s> Session<'s> {
             })?,
             Value::Str(self.view.version.clone()),
         );
-        let bytes = draft_bytes(
-            &Envelope {
-                stream: &stream,
-                writer: Writer::Agent,
-                actor_id: &self.setup.deployment.agent.0,
-                event_time: self.setup.now,
-            },
-            &DraftFields {
-                event_id: &draft.event_id.0,
-                event_type: &draft.event_type,
-                causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
-                config_refs: &config_refs,
-                payload: &draft.payload,
-            },
-        )?;
+        let bytes = drafts
+            .iter()
+            .map(|draft| {
+                draft_bytes(
+                    &Envelope {
+                        stream: &stream,
+                        writer: Writer::Agent,
+                        actor_id: &self.setup.deployment.agent.0,
+                        event_time: self.setup.now,
+                    },
+                    &DraftFields {
+                        event_id: &draft.event_id.0,
+                        event_type: &draft.event_type,
+                        causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
+                        config_refs: &config_refs,
+                        payload: &draft.payload,
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         self.append(&stream, bytes)
     }
 
@@ -482,7 +496,7 @@ impl<'s> Session<'s> {
                 payload: &draft.payload,
             },
         )?;
-        self.append(&stream, bytes)?;
+        self.append(&stream, vec![bytes])?;
         if draft.event_type == "OrderSubmitted"
             && let Some(id) = draft.payload.get("client_order_id").and_then(Value::as_str)
         {
@@ -491,13 +505,13 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
-    /// Appends one draft at the stream's head and folds what committed back into both cores. An
+    /// Appends one batch at the stream's head and folds what committed back into both cores. An
     /// `AlreadyCommitted` answer can name rows this session already folded; those are never folded
     /// twice, since a fold of a `seq` already held is out of order.
-    fn append(&mut self, stream: &str, bytes: Vec<u8>) -> Result<(), ShellError> {
+    fn append(&mut self, stream: &str, bytes: Vec<Vec<u8>>) -> Result<(), ShellError> {
         let head = self.head(stream);
         let epoch = self.epoch(stream);
-        let outcome = self.stages.journal.append(stream, head, epoch, &[bytes]);
+        let outcome = self.stages.journal.append(stream, head, epoch, &bytes);
         let rows = match outcome {
             AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows) => rows,
             refusal @ (AppendOutcome::HeadMismatch { .. }
@@ -628,16 +642,23 @@ impl OrderPlan for Bridge<'_> {
         proposal
     }
 
-    /// The stage classifier names no `DecidedBy` label, so its answer carries none.
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Classified {
         let answer = self.classifier.classify(view, proposal);
-        let autonomy = map::autonomy_of(&answer);
-        let cause = match answer {
-            Err(cause) => Some(cause),
-            Ok(Autonomy::Auto) => None,
-            Ok(other @ (Autonomy::Ask | Autonomy::Deny)) => Some(Cause::NotAuto {
-                autonomy: map::autonomy_name(other),
-            }),
+        let (classified, cause) = match answer {
+            Err(cause) => (
+                Classified {
+                    autonomy: Autonomy::Deny,
+                    decided_by: None,
+                },
+                Some(cause),
+            ),
+            Ok(classified) if classified.autonomy == Autonomy::Auto => (classified, None),
+            Ok(classified) => {
+                let cause = Cause::NotAuto {
+                    autonomy: map::autonomy_name(classified.autonomy),
+                };
+                (classified, Some(cause))
+            }
         };
         if let Some(cause) = cause {
             self.record(ShellError::Refused {
@@ -645,10 +666,7 @@ impl OrderPlan for Bridge<'_> {
                 cause,
             });
         }
-        Classified {
-            autonomy,
-            decided_by: None,
-        }
+        classified
     }
 }
 

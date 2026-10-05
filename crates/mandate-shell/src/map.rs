@@ -368,7 +368,13 @@ mod tests {
             qty: Qty::parse(qty).map_err(|e| e.to_string())?,
             limit: Price::parse("255.2").map_err(|e| e.to_string())?,
             purpose: Purpose::Open,
+            exit_origin: None,
+            exit_conviction: Some(mandate_canon::Value::Str("1".to_owned())),
+            buy_conviction: Some(mandate_canon::Value::Str("1".to_owned())),
             combined_score: mandate_canon::Value::Str("1".to_owned()),
+            outputs_used: Default::default(),
+            model_weights: Default::default(),
+            clips_applied: Vec::new(),
             execution: None,
         })
     }

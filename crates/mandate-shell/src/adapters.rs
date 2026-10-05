@@ -37,8 +37,8 @@ use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
 use mandate_backtest::{Signal, Strategy, StrategyConfig};
 use mandate_builder::{
     AccountSnapshot as BuilderAccountSnapshot, Action as BuilderAction, ActionContext,
-    BuilderMandate, Direction, Market as BuilderMarket, ModelOutput as BuilderModelOutput,
-    RiskContext as BuilderRiskContext,
+    BuilderMandate, Clip as BuilderClip, Direction, Market as BuilderMarket,
+    ModelOutput as BuilderModelOutput, RiskContext as BuilderRiskContext,
 };
 use mandate_canon::{Digest, Key, Object, Value};
 use mandate_domain::{AutonomyDecision, Purpose as BuilderPurpose};
@@ -54,7 +54,7 @@ use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
 use mandate_marketdata::model::{Kind, Records, TimeUnit, Timeframe};
-use mandate_num::{Bps, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
+use mandate_num::{Bps, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd, UsdExact};
 use mandate_risk::{
     AccountSnapshot as GateAccountSnapshot, AgentSnapshot as GateAgentSnapshot, ConductState,
     Decision, FlattenInitiator, FlattenInput, GateConfig, GateInput, GatePass,
@@ -63,9 +63,9 @@ use mandate_risk::{
     ValidatedMandate as GateMandate, WorkingUniverse, agent_flatten,
 };
 use mandate_runtime::{
-    AgentId, ApprovalSettings, Autonomy, FlattenLeg, FlattenPlan, FlattenRequest, Initiator,
-    IntentBody, IntentHandoff, MandateView, ModelDirection, OrderExecution, Proposal, Purpose,
-    RiskClock, SignalInputs, TimeInForce,
+    AgentId, ApprovalSettings, Autonomy, Classified, DecisionClip, ExitOrigin, FlattenLeg,
+    FlattenPlan, FlattenRequest, Initiator, IntentBody, IntentHandoff, MandateView, ModelDirection,
+    OrderExecution, Proposal, Purpose, RiskClock, SignalInputs, TimeInForce,
 };
 use mandate_spec::document::ParamValue;
 use mandate_spec::policy::PolicyLevel;
@@ -1213,8 +1213,43 @@ fn runtime_purpose(purpose: BuilderPurpose) -> Purpose {
 fn runtime_proposal(
     proposal: mandate_builder::Proposal,
     context: &BuilderContext,
+    mandate: &BuilderMandate,
     validated: &ValidatedMandate,
 ) -> Result<Option<Proposal>, Cause> {
+    let mut clips_applied = Vec::new();
+    if proposal.clipped_by.contains(&BuilderClip::Limits) {
+        let delta = proposal.sizes.delta.ok_or(Cause::Absent {
+            what: "the builder delta behind its limit clip",
+        })?;
+        let max_order = UsdExact::of(mandate.limits.max_order_usd);
+        let position_room = proposal
+            .sizes
+            .cap
+            .checked_sub(proposal.sizes.current_mv)?
+            .checked_sub(UsdExact::of(context.account.working_opening_cost))?;
+        let gross_room = UsdExact::of(mandate.limits.max_gross_exposure_usd)
+            .min(UsdExact::of(context.account.agent_equity))?
+            .checked_sub(UsdExact::of(context.account.gross_usd))?;
+        if max_order.is_below(delta)? {
+            clips_applied.push(DecisionClip::MaxOrderUsd);
+        }
+        if position_room.is_below(delta)? {
+            clips_applied.push(DecisionClip::PositionCap);
+        }
+        if gross_room.is_below(delta)? {
+            clips_applied.push(DecisionClip::GrossExposureCap);
+        }
+        if clips_applied.is_empty() {
+            return Err(Cause::Absent {
+                what: "the exact journal clip applied by the builder",
+            });
+        }
+    }
+    if proposal.clipped_by.contains(&BuilderClip::Goal) {
+        return Err(Cause::Absent {
+            what: "the exact journal goal clip applied by the builder",
+        });
+    }
     let (side, purpose, qty, limit) = match proposal.action {
         BuilderAction::Hold { .. } => return Ok(None),
         BuilderAction::Buy {
@@ -1245,6 +1280,24 @@ fn runtime_proposal(
             what: "the mandate-derived execution policy",
         });
     }
+    let outputs_used = proposal
+        .combined
+        .outputs_used
+        .iter()
+        .map(|model| model.as_str().to_owned())
+        .collect();
+    let model_weights = validated
+        .mandate()
+        .behavior
+        .signal_models
+        .iter()
+        .map(|model| {
+            (
+                model.id.as_str().to_owned(),
+                Value::Str(model.weight.to_string()),
+            )
+        })
+        .collect();
     Ok(Some(Proposal {
         instrument,
         asset_class: context.market.asset_class,
@@ -1252,7 +1305,13 @@ fn runtime_proposal(
         qty,
         limit,
         purpose,
+        exit_origin: (purpose == Purpose::DiscretionaryExit).then_some(ExitOrigin::Signal),
+        exit_conviction: Some(Value::Str(proposal.combined.exit_conviction.to_string())),
+        buy_conviction: Some(Value::Str(proposal.combined.buy_conviction.to_string())),
         combined_score: Value::Str(proposal.combined.score.to_string()),
+        outputs_used,
+        model_weights,
+        clips_applied,
         execution: Some(context.execution),
     }))
 }
@@ -1280,12 +1339,12 @@ impl Sizing for BuilderPlan {
             &outputs,
             now,
         )?;
-        runtime_proposal(proposal, builder, &validated)
+        runtime_proposal(proposal, builder, &mandate, &validated)
     }
 }
 
 impl Classifier for BuilderPlan {
-    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Autonomy, Cause> {
+    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let context = required_context(&self.context)?;
         let validated = validated_mandate(&self.mandate, context)?;
         if runtime_view(&validated, context)? != *view {
@@ -1306,10 +1365,14 @@ impl Classifier for BuilderPlan {
         }
         let classification =
             mandate_builder::classify(mandate_builder::autonomy_policy(&validated), action)?;
-        Ok(match classification.decision {
+        let autonomy = match classification.decision {
             AutonomyDecision::Auto => Autonomy::Auto,
             AutonomyDecision::Ask => Autonomy::Ask,
             AutonomyDecision::Deny => Autonomy::Deny,
+        };
+        Ok(Classified {
+            autonomy,
+            decided_by: Some(classification.by.label()),
         })
     }
 }
@@ -3096,7 +3159,13 @@ mod tests {
             qty: Qty::parse("3").map_err(|e| e.to_string())?,
             limit: Price::parse("12.34").map_err(|e| e.to_string())?,
             purpose: RuntimePurpose::Open,
+            exit_origin: None,
+            exit_conviction: Some(Value::Str("1".to_owned())),
+            buy_conviction: Some(Value::Str("1".to_owned())),
             combined_score: Value::Str("0.8".to_owned()),
+            outputs_used: BTreeSet::new(),
+            model_weights: BTreeMap::new(),
+            clips_applied: Vec::new(),
             execution: None,
         };
         let facts = AdvisoryOrderFacts {
@@ -3138,7 +3207,13 @@ mod tests {
             qty: Qty::parse("1").map_err(|e| e.to_string())?,
             limit: Price::parse("12.34").map_err(|e| e.to_string())?,
             purpose: RuntimePurpose::Open,
+            exit_origin: None,
+            exit_conviction: Some(Value::Str("1".to_owned())),
+            buy_conviction: Some(Value::Str("1".to_owned())),
             combined_score: Value::Str("1".to_owned()),
+            outputs_used: BTreeSet::new(),
+            model_weights: BTreeMap::new(),
+            clips_applied: Vec::new(),
             execution: None,
         };
         assert!(matches!(
@@ -3307,7 +3382,13 @@ mod tests {
             qty: Qty::ZERO,
             limit: Price::parse("12.34").map_err(|e| e.to_string())?,
             purpose: RuntimePurpose::Open,
+            exit_origin: None,
+            exit_conviction: Some(Value::Str("1".to_owned())),
+            buy_conviction: Some(Value::Str("1".to_owned())),
             combined_score: Value::Str("1".to_owned()),
+            outputs_used: BTreeSet::new(),
+            model_weights: BTreeMap::new(),
+            clips_applied: Vec::new(),
             execution: None,
         };
         assert!(matches!(

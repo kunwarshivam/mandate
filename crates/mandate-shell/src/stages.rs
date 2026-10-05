@@ -15,7 +15,7 @@ use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_num::Price;
 use mandate_risk::Decision;
 use mandate_runtime::{
-    Autonomy, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal, RiskClock,
+    Classified, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal, RiskClock,
     SignalInputs,
 };
 
@@ -219,7 +219,7 @@ pub trait Sizing {
 
 /// Step 5's autonomy classification.
 pub trait Classifier {
-    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Autonomy, Cause>;
+    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause>;
 }
 
 /// Step 6: `mandate_risk::evaluate` on the proposal, as a dry run.

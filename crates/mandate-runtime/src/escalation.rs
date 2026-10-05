@@ -456,7 +456,13 @@ fn bound_proposal(bound: &BoundAction) -> Result<Proposal, RuntimeError> {
         qty: bound.qty,
         limit: bound.limit,
         purpose: purpose_of(bound.purpose),
+        exit_origin: None,
+        exit_conviction: None,
+        buy_conviction: None,
         combined_score: payload::text(&bound.combined_score.to_string()),
+        outputs_used: Default::default(),
+        model_weights: Default::default(),
+        clips_applied: Vec::new(),
         execution: None,
     })
 }
