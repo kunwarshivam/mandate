@@ -1,10 +1,10 @@
 import { type Page, expect, test } from "@playwright/test";
 
 /**
- * The Stop control is quiet until something needs the owner (DEC-206): an ink outline on the
- * header, then the filled ink pill while a risk reason stands. Both tones share one box at every
- * width, keep a 44px hit area, hold their contrast in both themes, stay bordered under forced
- * colours, and change colour without any animation of their own.
+ * The Stop control is quiet until something needs the owner (DEC-206): an ink outline at the end of
+ * the dock or the phone tab bar (DEC-452), then the filled ink pill while a risk reason stands. Both
+ * tones share one box at every width, keep a 44px hit area, hold their contrast in both themes, stay
+ * bordered under forced colours, and change colour without any animation of their own.
  */
 
 const QUIET = ["normal", "approvals", "loading"] as const;
@@ -12,8 +12,8 @@ const LOUD = ["stale", "drawdown", "reconciliation", "unknown-order", "unreachab
 const WIDTHS = [320, 390, 1024, 1440];
 const DESKTOP = 1024;
 const MIN_TARGET = 44;
-/** From 64rem the visible pill matches the command bar, the header's other 40px control. */
-const DESKTOP_PILL = 40;
+/** From 64rem the visible pill is as tall as the dock's items, 3.125rem. */
+const DESKTOP_PILL = 50;
 /** WCAG 2.2: non-text contrast for the outline, and the Stop label's own bar (`STOP_CONTRAST`). */
 const MARK_CONTRAST = 3;
 const LABEL_CONTRAST = 7;
@@ -31,9 +31,9 @@ interface Found {
   tone: string | null;
   button: Box;
   pill: Box;
-  headerHeight: number;
-  headerBg: Rgba;
-  /** The solid card the header's glass is mixed from. */
+  frameHeight: number;
+  frameBg: Rgba;
+  /** The solid card the frame's glass is mixed from. */
   cardBg: Rgba;
   pillBg: Rgba;
   border: Rgba;
@@ -46,8 +46,9 @@ interface Found {
   animations: number;
 }
 
+/** The one Stop on screen: the dock's from 64rem, the tab bar's below it. */
 function stopIn(page: Page) {
-  return page.getByRole("banner").getByRole("button", { name: "Stop", exact: true });
+  return page.getByRole("button", { name: "Stop", exact: true });
 }
 
 async function load(page: Page, scenario: string, path = "/") {
@@ -71,14 +72,14 @@ async function inspect(page: Page): Promise<Found> {
       return { x: r.x, y: r.y, width: r.width, height: r.height };
     };
     const pill = el.querySelector("[data-slot=stop-pill]")!;
-    const header = el.closest("header")!;
+    const frame = el.closest("nav")!;
     const s = getComputedStyle(pill);
     return {
       tone: el.getAttribute("data-tone"),
       button: box(el),
       pill: box(pill),
-      headerHeight: header.getBoundingClientRect().height,
-      headerBg: toRgba(getComputedStyle(header).backgroundColor),
+      frameHeight: frame.getBoundingClientRect().height,
+      frameBg: toRgba(getComputedStyle(frame).backgroundColor),
       cardBg: (() => {
         const probe = document.createElement("div");
         probe.style.backgroundColor = "var(--card)";
@@ -119,7 +120,7 @@ function expectSameBox(a: Box, b: Box, what: string) {
 
 test.describe("Stop is quiet on a calm screen", () => {
   for (const scenario of QUIET) {
-    test(`${scenario}: an ink outline on the header, named Stop, with no description`, async ({ page }) => {
+    test(`${scenario}: an ink outline on the dock or the tab bar, named Stop, with no description`, async ({ page }) => {
       await load(page, scenario);
       const stop = stopIn(page);
       await expect(stop).toBeEnabled();
@@ -128,11 +129,11 @@ test.describe("Stop is quiet on a calm screen", () => {
       await expect(stop).not.toHaveAttribute("aria-describedby");
       await expect(stop).toHaveAccessibleDescription("");
       const f = await inspect(page);
-      expect(f.headerBg[3], "the header is glass").toBeLessThan(255);
-      expect(f.pillBg, "the quiet pill is the solid card the header's glass is mixed from").toEqual(f.cardBg);
+      expect(f.frameBg[3], "the dock and the tab bar are glass").toBeLessThan(255);
+      expect(f.pillBg, "the quiet pill is solid card").toEqual(f.cardBg);
       expect(f.border, "outline and label are the same ink").toEqual(f.text);
       expect(f.borderWidth, "a 2px outline").toBe(2);
-      expect(contrast(f.border, f.cardBg), "outline against the header's card").toBeGreaterThanOrEqual(MARK_CONTRAST);
+      expect(contrast(f.border, f.cardBg), "outline against the card").toBeGreaterThanOrEqual(MARK_CONTRAST);
       expect(contrast(f.text, f.pillBg), "label on the quiet pill").toBeGreaterThanOrEqual(LABEL_CONTRAST);
     });
   }
@@ -158,7 +159,7 @@ test.describe("Stop turns loud when something needs you", () => {
       const f = await inspect(page);
       expect(f.pillBg, "filled in the ink of its own outline").toEqual(f.border);
       expect(f.pillBg).not.toEqual(f.cardBg);
-      expect(contrast(f.pillBg, f.cardBg), "the fill against the header's card").toBeGreaterThanOrEqual(MARK_CONTRAST);
+      expect(contrast(f.pillBg, f.cardBg), "the fill against the card").toBeGreaterThanOrEqual(MARK_CONTRAST);
       expect(contrast(f.text, f.pillBg), "label on the loud pill").toBeGreaterThanOrEqual(LABEL_CONTRAST);
     });
   }
@@ -176,7 +177,7 @@ test.describe("both tones share one box (no layout shift)", () => {
       expect(loud.tone).toBe("loud");
       expectSameBox(quiet.button, loud.button, "hit area");
       expectSameBox(quiet.pill, loud.pill, "pill");
-      expect(loud.headerHeight).toBe(quiet.headerHeight);
+      expect(loud.frameHeight).toBe(quiet.frameHeight);
       for (const f of [quiet, loud]) {
         expect(f.button.x + f.button.width, "right edge on screen").toBeLessThanOrEqual(width);
         expect(f.button.x).toBeGreaterThanOrEqual(0);
@@ -186,15 +187,15 @@ test.describe("both tones share one box (no layout shift)", () => {
         else expect(f.pill.height, "desktop pill").toBeCloseTo(DESKTOP_PILL, 0);
       }
       if (width >= DESKTOP) {
-        const bar = await page.locator("[data-slot=command-bar]").boundingBox();
-        expect(bar!.height, "the command bar").toBeCloseTo(DESKTOP_PILL, 0);
-        expect(bar!.y + bar!.height / 2, "centred on the same line as Stop").toBeCloseTo(loud.pill.y + loud.pill.height / 2, 0);
+        const home = await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Home" }).boundingBox();
+        expect(home!.height, "the dock's items").toBeCloseTo(DESKTOP_PILL, 0);
+        expect(home!.y + home!.height / 2, "centred on the same line as Stop").toBeCloseTo(loud.pill.y + loud.pill.height / 2, 0);
       }
     });
   }
 
-  test("on desktop the 44px hit area reaches past the 40px pill", async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
+  test("on a phone the tab bar's full height presses Stop, past its 44px pill", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await load(page, "normal");
     const hits = await stopIn(page).evaluate((el) => {
       const pill = el.querySelector("[data-slot=stop-pill]")!.getBoundingClientRect();
@@ -224,7 +225,7 @@ test.describe("Stop never flickers or disables on a page change", () => {
               const result = { tones: [] as string[], disabled: 0 };
               const end = performance.now() + 1200;
               const tick = () => {
-                const el = document.querySelector("header [data-slot=stop-control]");
+                const el = document.querySelector("nav[aria-label=Primary] [data-slot=stop-control]");
                 result.tones.push(el?.getAttribute("data-tone") ?? "missing");
                 if (el?.hasAttribute("disabled") || el?.getAttribute("aria-disabled") === "true") result.disabled++;
                 if (performance.now() < end) requestAnimationFrame(tick);

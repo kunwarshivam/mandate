@@ -4,7 +4,7 @@ import { canOpen } from "@/lib/access";
 import { ROLES, can } from "@/lib/roles";
 import { GROUP_LABEL, SCREENS, SECTION_INDEX } from "@/lib/screens";
 import { AGENT_IDS } from "@/fixtures/workspace";
-import { renderWithRuntime } from "@/test/harness";
+import { dockStop, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { asPhone } from "@/test/viewport";
 import { AppShell } from "./app-shell";
@@ -27,10 +27,11 @@ describe("the desktop dock", () => {
     const names = (els: HTMLElement[]) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent);
     expect(within(dock()).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/", "/approvals", "/alerts", "/agents", "/positions", "/connections"]);
     expect(names(within(dock()).getAllByRole("link"))).toEqual(["Home", "Approvals", "Alerts", "Agents", "Positions", "Connections"]);
-    expect(names(within(dock()).getAllByRole("button"))).toEqual(["Audit", "More"]);
+    const menus = within(dock()).getAllByRole("button").filter((b) => b.getAttribute("data-slot") !== "stop-control");
+    expect(names(menus)).toEqual(["Audit", "More"]);
     expect(within(dock()).getByRole("link", { name: /^Approvals\s*\d+\s*open$/ })).toBeInTheDocument();
     expect(within(dock()).getByRole("link", { name: "Agents" })).toBeInTheDocument();
-    for (const b of within(dock()).getAllByRole("button")) {
+    for (const b of menus) {
       expect(b).toHaveAttribute("aria-haspopup", "menu");
       expect(b).not.toHaveAttribute("aria-label");
     }
@@ -107,7 +108,10 @@ describe("the desktop dock", () => {
 
   it("gives every item a visible focus ring", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    for (const item of [...within(dock()).getAllByRole("link"), ...within(dock()).getAllByRole("button")]) expect(item).toHaveClass("focus-visible:ring-3");
+    const stop = dockStop();
+    const items = [...within(dock()).getAllByRole("link"), ...within(dock()).getAllByRole("button")].filter((el) => el !== stop);
+    for (const item of items) expect(item).toHaveClass("focus-visible:ring-3");
+    expect(stop.querySelector("[data-slot=stop-pill]")).toHaveClass("group-focus-visible:ring-3");
   });
 
   it("sits fixed at the bottom from lg only, and phones keep the tab bar", () => {

@@ -2,6 +2,7 @@
 
 import { LinkButton } from "@cloudflare/kumo/components/button";
 import { useRuntime } from "@/lib/mock-runtime";
+import { BEVEL } from "@/components/kumo/bevel";
 import { AgentCard } from "./agent-card";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { EmptyBoard, WorkspaceGate } from "./common";
@@ -17,7 +18,7 @@ function Agents() {
         environment={ws.environment}
         description="Each agent trades on paper within its own confirmed mandate."
         actions={
-          <LinkButton href="/agents/new" variant="outline" size="lg" className="h-11 rounded-lg px-5">
+          <LinkButton href="/agents/new" variant="outline" size="lg" className={`h-11 px-5 ${BEVEL}`}>
             Describe an agent
           </LinkButton>
         }

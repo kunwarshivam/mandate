@@ -3,12 +3,13 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentRoute from "@/app/(app)/agents/[agentId]/page";
 import * as approvalRoute from "@/app/(app)/approvals/[approvalId]/page";
+import { BEVEL } from "@/components/kumo/bevel";
 import { AppShell } from "@/components/shell/app-shell";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
 import { clock, price } from "@/lib/format";
 import { PURPOSE_LABEL } from "@/lib/labels";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
-import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
+import { RECORD_AFTER_MS, dockStop, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
 import { AgentsListScreen } from "./agents-list";
@@ -45,7 +46,7 @@ describe("every screen in every scenario", () => {
     renderScreen(path, ui(), scenario);
     const [header] = screen.getAllByRole("banner");
     expect(within(header).getByText("PAPER")).toBeInTheDocument();
-    expect(isDisabled(within(header).getByRole("button", { name: "Stop" }))).toBe(false);
+    expect(isDisabled(dockStop())).toBe(false);
     expect(main()).not.toHaveTextContent(PERSUASIVE);
 
     if (scenario === "loading") {
@@ -208,6 +209,19 @@ describe("D5 inbox and D6 request", () => {
       expect(b).not.toHaveAttribute("aria-checked");
       expect(document.activeElement).not.toBe(b);
     }
+  });
+
+  it("draws Approve and Skip in the landing page's bevel, both alike, flat, with Kumo's ring left only for focus (DEC-452)", () => {
+    request(APPROVAL_IDS.btc);
+    const choices = main().querySelector("[data-slot=approval-choices]") as HTMLElement;
+    for (const b of within(choices).getAllByRole("button")) {
+      for (const c of BEVEL.split(" ")) expect(b).toHaveClass(c);
+      expect(b).not.toHaveClass("ring", "shadow-xs", "border-0", "rounded-lg");
+      expect(b).toHaveClass("focus-visible:ring-2");
+      expect(b.className).not.toMatch(/bg-\[|shadow-(?!none)/);
+    }
+    const stop = within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name: "Stop" });
+    expect(stop.className + stop.innerHTML).not.toMatch(/pixel-face|border-t-card/);
   });
 
   it("states the default, the trigger, the risk in dollars, and the score's meaning", () => {

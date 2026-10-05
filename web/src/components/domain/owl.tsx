@@ -38,9 +38,9 @@ export function owlSeed(id: string): number {
   return h >>> 0;
 }
 
-const FEATHERS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"] as const;
+export const FEATHERS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"] as const;
 const EARS = ["tufts", "wide", "round"] as const;
-const MARKING = ["none", "speckles", "bib"] as const;
+const MARKING = ["none", "speckles", "scallops"] as const;
 const BLINK_EVERY = [3.8, 4.6, 5.4, 6.2] as const;
 
 export interface OwlShape {
@@ -66,38 +66,52 @@ export function owlShape(id: string): OwlShape {
 /** One sprite pixel, in viewBox units. */
 const PX = 4;
 
-const EAR_ROWS: Record<OwlShape["ears"], [string, string]> = {
-  tufts: ["..b..........b..", "..bb........bb.."],
-  wide: [".bb..........bb.", ".bbb........bbb."],
-  round: ["................", "..bbb......bbb.."],
+/**
+ * The sprite's legend: o outline, b feathers, d wing (feathers in shade), l belly (feathers in
+ * light), w eye white, k beak, K the beak's shaded tip, f feet.
+ */
+type Ink = "o" | "b" | "d" | "l" | "w" | "k" | "K" | "f";
+
+/** The ears and the crown, rows 0 to 2. */
+const EAR_ROWS: Record<OwlShape["ears"], readonly [string, string, string]> = {
+  tufts: [".o............o.", ".obo........obo.", ".obboooooooobbo."],
+  wide: ["oo............oo", "obbo........obbo", "obbboooooooobbbo"],
+  round: ["................", "..oooooooooooo..", ".obbbbbbbbbbbbo."],
 };
 
-/** The head below the ears: b feathers, d wing shade, w eye white, k beak and feet. */
-const HEAD = [
-  "..bbbbbbbbbbbb..",
-  ".bbbbbbbbbbbbbb.",
-  ".bwwwwbbbbwwwwb.",
-  "bbwwwwbbbbwwwwbb",
-  "dbwwwwbbbbwwwwbd",
-  "dbwwwwbkkbwwwwbd",
-  "dbbbbbbkkbbbbbbd",
-  ".dbbbbbbbbbbbbd.",
-  ".bbbbbbbbbbbbbb.",
-  "..bbbbbbbbbbbb..",
-  "..bbbbbbbbbbbb..",
-  "...bbbbbbbbbb...",
-  "....kk....kk....",
+/** Rows 3 to 15: round eyes, the beak between them, folded wings, a pale belly, and the feet. */
+const BODY = [
+  "obbbbbbbbbbbbbbo",
+  "obbwwbbbbbbwwbbo",
+  "obwwwwbbbbwwwwbo",
+  "odwwwwbkkbwwwwdo",
+  "odbwwbbKKbbwwbdo",
+  "oddbbbbbbbbbbddo",
+  "oddbbllllllbbddo",
+  "oddbllllllllbddo",
+  ".oddbllllllbddo.",
+  "..oddbllllbddo..",
+  "...oooooooooo...",
+  "....ff....ff....",
   "................",
-];
+] as const;
 
-/** Markings over the chest: m a darker feather, e a pale one. */
+/** The whole sprite for a set of ears, 16 rows of 16. */
+export function owlRows(ears: OwlShape["ears"]): readonly string[] {
+  return [...EAR_ROWS[ears], ...BODY];
+}
+
+/**
+ * Feather marks on the belly, m. Scattered or even, never a curve: a curve under the beak reads as a
+ * mouth, and an owl's face says its mode and nothing else.
+ */
 const MARKING_ROWS: Record<OwlShape["marking"], Record<number, string>> = {
   none: {},
-  speckles: { 10: "....m......m....", 11: ".......mm......." },
-  bib: { 10: ".....eeeeee.....", 11: "......eeee......", 12: ".......ee......." },
+  speckles: { 10: "....m...m.......", 11: "..........m.....", 12: "......m........." },
+  scallops: { 10: "....m.m.m.m.....", 11: ".....m.m.m......" },
 };
 
-/** The two eyes' whites start at these columns, on rows 4 to 7. */
+/** The two eyes start at these columns, on rows 4 to 7. */
 const EYE_COLS = [2, 10] as const;
 const EYE_ROW = 4;
 
@@ -220,6 +234,7 @@ function Eyes({ mood, feathers, gaze }: { mood: OwlMood; feathers: string; gaze:
             {EYE_COLS.map((x) => (
               <g key={x} className="owl-blink">
                 {block(x + 1, EYE_ROW + 1 + dy, 2, 2, "var(--owl-pupil)", "pupil")}
+                {block(x + 1, EYE_ROW + 1 + dy, 1, 1, "var(--owl-eye)", "glint")}
               </g>
             ))}
           </motion.g>
@@ -259,10 +274,21 @@ function PixelZ({ x, y, p, className }: { x: number; y: number; p: number; class
   );
 }
 
+/** The beak is sun, except on a sun owl, where it is the pupil's colour so it still reads. */
+export function beakFor(feathers: string): string {
+  return feathers === "var(--series-2)" ? "var(--owl-pupil)" : "var(--highlight)";
+}
+
+/** Over the base colours: the wings and the beak's tip in shade, the belly in light. */
+const SHADE: Partial<Record<Ink, number>> = { d: 0.24, K: 0.28 };
+const LIGHT: Partial<Record<Ink, number>> = { l: 0.42 };
+
 export function Owl({
   seed,
   mood,
   still = false,
+  feathers: featherOverride,
+  beak: beakOverride,
   className,
   style,
 }: {
@@ -270,6 +296,9 @@ export function Owl({
   mood: OwlMood;
   /** Draw it without any motion, as in a static specimen. */
   still?: boolean;
+  /** A feather colour in place of the one the seed picks, for the brand owl. */
+  feathers?: string;
+  beak?: string;
   className?: string;
   style?: CSSProperties;
 }) {
@@ -278,9 +307,10 @@ export function Owl({
   const [gazeX, gazeY] = useGaze(ref, { reach: REACH, looking: !still && looks(mood) });
   const snapX = useTransform(gazeX, (v) => Math.round(v / PX) * PX);
   const snapY = useTransform(gazeY, (v) => Math.round(v / PX) * PX);
-  const beak = shape.feathers === "var(--series-2)" ? "var(--owl-pupil)" : "var(--highlight)";
-  const fills: Record<string, string> = { b: shape.feathers, d: shape.feathers, w: "var(--owl-eye)", k: beak };
-  const head = Object.fromEntries([...EAR_ROWS[shape.ears], ...HEAD].map((row, y) => [y, row]));
+  const feathers = featherOverride ?? shape.feathers;
+  const beak = beakOverride ?? beakFor(feathers);
+  const base: Record<Ink, string> = { o: "var(--owl-line)", b: feathers, d: feathers, l: feathers, w: "var(--owl-eye)", k: beak, K: beak, f: beak };
+  const head = Object.fromEntries(owlRows(shape.ears).map((row, y) => [y, row]));
 
   return (
     <svg
@@ -294,14 +324,10 @@ export function Owl({
       style={{ "--owl-blink": `${shape.blink.every}s`, "--owl-blink-offset": `-${shape.blink.offset}s`, ...style } as CSSProperties}
     >
       <g className="owl-body" shapeRendering="crispEdges">
-        <Pixels rows={head} top={0} fill={(c) => fills[c] ?? null} />
-        <Pixels rows={head} top={0} fill={(c) => (c === "d" ? "var(--owl-pupil)" : null)} opacity={() => 0.22} />
-        <Pixels
-          rows={MARKING_ROWS[shape.marking]}
-          top={0}
-          fill={(c) => (c === "m" ? "var(--owl-pupil)" : c === "e" ? "var(--owl-eye)" : null)}
-          opacity={(c) => (c === "m" ? 0.25 : 0.4)}
-        />
+        <Pixels rows={head} top={0} fill={(c) => base[c as Ink] ?? null} />
+        <Pixels rows={head} top={0} fill={(c) => (SHADE[c as Ink] ? "var(--owl-line)" : null)} opacity={(c) => SHADE[c as Ink]} />
+        <Pixels rows={head} top={0} fill={(c) => (LIGHT[c as Ink] ? "var(--owl-eye)" : null)} opacity={(c) => LIGHT[c as Ink]} />
+        <Pixels rows={MARKING_ROWS[shape.marking]} top={0} fill={(c) => (c === "m" ? "var(--owl-line)" : null)} opacity={() => 0.3} />
         <AnimatePresence initial={false} mode="popLayout">
           <motion.g
             key={mood}
@@ -310,7 +336,7 @@ export function Owl({
             transition={{ duration: still ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}
             style={{ originY: `${(EYE_ROW + 2) * PX}px` }}
           >
-            <Eyes mood={mood} feathers={shape.feathers} gaze={[snapX, snapY]} />
+            <Eyes mood={mood} feathers={feathers} gaze={[snapX, snapY]} />
           </motion.g>
         </AnimatePresence>
       </g>

@@ -1,3 +1,4 @@
+import { BrandOwl } from "@/components/brand/brand-owl";
 import { Owl, type OwlMood } from "@/components/domain/owl";
 import { cn } from "@/lib/utils";
 import { PIXEL, SUNKEN } from "./letter";
@@ -50,7 +51,7 @@ export function ModeChart({ className }: { className?: string }) {
   );
 }
 
-/** A 16 px owl for a window's title bar, one screen pixel to a sprite pixel. */
+/** A 16 px brand owl for a window's title bar, one screen pixel to a sprite pixel. */
 export function TitleOwl() {
-  return <Owl seed="owlhead" mood="awake" className="size-4" />;
+  return <BrandOwl className="size-4" />;
 }

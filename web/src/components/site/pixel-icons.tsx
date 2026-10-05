@@ -169,25 +169,6 @@ export const BOLT: Sprite = [
   "................",
 ];
 
-export const MINE: Sprite = [
-  "................",
-  ".......kk.......",
-  "..k....kk....k..",
-  "...k.kkkkkk.k...",
-  "....kkkkkkkk....",
-  "...kkwwkkkkkkk..",
-  "...kkwwkkkkkkk..",
-  ".kkkkkkkkkkkkkkk",
-  ".kkkkkkkkkkkkkkk",
-  "...kkkkkkkkkkk..",
-  "...kkkkkkkkkkk..",
-  "....kkkkkkkkk...",
-  "...k.kkkkkkk.k..",
-  "..k....kk....k..",
-  ".......kk.......",
-  "................",
-];
-
 const BASKET: Sprite = [
   "..kkkkkkkkkkkk..",
   "..kwgwgwgwgwgk..",

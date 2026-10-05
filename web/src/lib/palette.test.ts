@@ -265,7 +265,7 @@ describe.each(THEMES)("Azure and Sun, %s", (theme) => {
 
   it(`keeps the Stop control and the kill switch at ${STOP_CONTRAST}:1 or more`, () => {
     expect(contrastRatio(t["ink-foreground"].value, t.ink.value)).toBeGreaterThanOrEqual(STOP_CONTRAST);
-    expect(contrastRatio(t.ink.value, t.card.value), "the quiet Stop control on the header").toBeGreaterThanOrEqual(STOP_CONTRAST);
+    expect(contrastRatio(t.ink.value, t.card.value), "the quiet Stop control on the dock and the tab bar").toBeGreaterThanOrEqual(STOP_CONTRAST);
     expect(contrastRatio(t.ink.value, t.background.value), "the quiet Stop control, hovered").toBeGreaterThanOrEqual(STOP_CONTRAST);
     expect(contrastRatio(t["crimson-foreground"].value, t.crimson.value)).toBeGreaterThanOrEqual(STOP_CONTRAST);
   });

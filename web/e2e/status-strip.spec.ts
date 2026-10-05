@@ -37,9 +37,9 @@ for (const scenario of ["normal", "stale"]) {
       expect(style.mask).toBe("none");
       expect(style.background).toBe(style.behind === "rgba(0, 0, 0, 0)" ? style.card : style.behind);
 
-      const stop = page.getByRole("banner").getByRole("button", { name: "Stop", exact: true });
+      const stop = page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Stop", exact: true });
       const stopBox = (await stop.boundingBox())!;
-      expect(stopBox.y + stopBox.height).toBeLessThanOrEqual(box.y + 0.5);
+      expect(stopBox.y, "Stop sits on the tab bar, below the strip's cue").toBeGreaterThanOrEqual(box.y + box.height - 0.5);
 
       const before = Number((await more.textContent())!.slice(1));
       await more.click();

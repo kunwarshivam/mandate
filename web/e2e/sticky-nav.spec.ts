@@ -5,7 +5,7 @@ import { agentHref } from "../src/lib/screens";
 /**
  * The desktop dock stays put: however far a long page scrolls, it floats centred at the bottom of the
  * viewport with every item on screen, the current page's item among them, and the page's last line
- * ends above it. The header stays at the top with Stop wholly on screen. Below the 1024 px breakpoint
+ * ends above it, with Stop at its end wholly on screen. The header stays at the top. Below the 1024 px breakpoint
  * the tab bar and its More sheet carry the nav instead.
  */
 
@@ -53,14 +53,14 @@ test.describe("The desktop dock stays pinned while a long page scrolls", () => {
       expect(found.lastBottom, "the page's last line ends above the dock").toBeLessThanOrEqual(found.box.top);
 
       const items = dock.locator("a[href], button");
-      expect(await items.count()).toBe(8);
+      expect(await items.count(), "six links, the Audit and More menus, and Stop").toBe(9);
       for (const item of await items.all()) await expect(item).toBeInViewport({ ratio: 1 });
       await expect(dock.getByRole("link", { name: "Agents", exact: true }), "the current page's item").toHaveAttribute("aria-current", "page");
 
       const header = await page.locator("header").first().boundingBox();
       expect(header?.y, "the header stays at the top").toBe(0);
       expect(found.box.top, "the dock stays clear of the header").toBeGreaterThan(header!.y + header!.height);
-      await expect(page.getByRole("button", { name: "Stop", exact: true }), "Stop").toBeInViewport({ ratio: 1 });
+      await expect(dock.getByRole("button", { name: "Stop", exact: true }), "Stop").toBeInViewport({ ratio: 1 });
       await expect(page.locator("[data-sidebar]"), "no sidebar").toHaveCount(0);
     });
   }

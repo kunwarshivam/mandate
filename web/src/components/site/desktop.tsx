@@ -4,15 +4,13 @@ import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRe
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { OwlheadMark } from "@/components/brand/Logo";
-import { Owl } from "@/components/domain/owl";
+import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
 import { DISCARDED, Notepad, PictureViewer, RecycleBin } from "./apps";
 import { Assistant } from "./assistant";
 import { MONO, PIXEL, RAISED, SUNKEN } from "./letter";
 import { MediaPlayer } from "./media-player";
-import { Minesweeper } from "./minesweeper";
-import { BIN, BIN_EMPTY, BOLT, BOOK, FILM, HELP, KEY, LEDGER, MINE, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
+import { BIN, BIN_EMPTY, BOLT, BOOK, FILM, HELP, KEY, LEDGER, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
 import { TitleBar, WINDOW_BUTTON } from "./retro";
 import { ThemeSwitch } from "./theme-switch";
 import { DisplayProperties, Wallpaper } from "./wallpaper";
@@ -21,7 +19,7 @@ import type { AmpState } from "./winamp";
 /** Webamp is a megabyte of player, so it loads only when someone opens Winamp. */
 const Winamp = dynamic(() => import("./winamp"), { ssr: false });
 
-export type AppId = "home" | "readme" | "owl" | "display" | "tour" | "mines" | "bin";
+export type AppId = "home" | "readme" | "owl" | "display" | "tour" | "bin";
 
 type Win = { open: boolean; min: boolean; max: boolean; x: number; y: number; z: number };
 
@@ -93,7 +91,7 @@ const APPS: Record<AppId, App> = {
   home: {
     title: "Owlhead Home Page",
     task: "Owlhead",
-    icon: <OwlheadMark title="" className="size-4 shrink-0" />,
+    icon: <BrandOwl className="size-4" />,
     frame: "sm:inset-y-3 sm:mx-auto sm:w-[min(66rem,calc(100%-15rem))]",
     offset: { x: 0, y: 0 },
   },
@@ -125,13 +123,6 @@ const APPS: Record<AppId, App> = {
     frame: "sm:m-auto sm:h-fit sm:max-h-[calc(100%-2rem)] sm:w-[min(44rem,calc(100%-2rem))]",
     offset: { x: 24, y: -12 },
   },
-  mines: {
-    title: "Minesweeper",
-    task: "Minesweeper",
-    icon: <PixelIcon sprite={MINE} className="size-4" />,
-    frame: "sm:m-auto sm:h-fit sm:w-fit",
-    offset: { x: -72, y: 12 },
-  },
   bin: {
     title: "Recycle Bin",
     task: "Recycle Bin",
@@ -147,7 +138,7 @@ type Shortcut = { id: string; label: string; icon: ReactNode; right?: true } & (
 const sprite = (s: Sprite) => <PixelIcon sprite={s} />;
 
 const SHORTCUTS: Shortcut[] = [
-  { id: "owlhead", label: "Owlhead", icon: <Owl seed="owlhead" mood="awake" className="size-8" />, app: "home" },
+  { id: "owlhead", label: "Owlhead", icon: <BrandOwl className="size-8" />, app: "home" },
   { id: "guestbook", label: "Guestbook", icon: sprite(BOOK), app: "home", hash: "beta" },
   { id: "record", label: "The record", icon: sprite(LEDGER), app: "home", hash: "record" },
   { id: "questions", label: "Questions", icon: sprite(HELP), app: "home", hash: "questions" },
@@ -156,7 +147,6 @@ const SHORTCUTS: Shortcut[] = [
   { id: "display", label: "Display", icon: sprite(MONITOR), app: "display" },
   { id: "winamp", label: "Winamp", icon: sprite(BOLT), amp: true },
   { id: "tour", label: "Tour.mp4", icon: sprite(FILM), app: "tour", right: true },
-  { id: "mines", label: "Minesweeper", icon: sprite(MINE), app: "mines", right: true },
   { id: "bin", label: "Recycle Bin", icon: sprite(BIN), app: "bin", right: true },
   { id: "signin", label: "Sign in", icon: sprite(KEY), href: "/login" },
 ];
@@ -419,7 +409,6 @@ export function Desktop({ home }: { home: ReactNode }) {
     owl: <PictureViewer />,
     display: <DisplayProperties onDone={() => dispatch({ type: "close", id: "display" })} />,
     tour: <MediaPlayer />,
-    mines: <Minesweeper />,
     bin: <RecycleBin items={bin} onEmpty={() => setBin([])} />,
   };
 
@@ -525,7 +514,7 @@ export function Desktop({ home }: { home: ReactNode }) {
             onClick={() => setStart((v) => !v)}
             className={cn(start ? SUNKEN : RAISED, "flex h-8 shrink-0 cursor-pointer items-center gap-1.5 bg-muted px-2 text-[0.9375rem] outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground")}
           >
-            <OwlheadMark title="" className="size-5" />
+            <BrandOwl className="size-4" />
             Start
           </button>
           {start && (
@@ -536,7 +525,7 @@ export function Desktop({ home }: { home: ReactNode }) {
                 </span>
               </span>
               <ul className="grid min-w-56 py-1">
-                {[{ id: "home", label: "Owlhead Home Page", icon: <OwlheadMark title="" className="size-6" />, app: "home" as const }, ...SHORTCUTS.slice(1)].map((s) => (
+                {[{ id: "home", label: "Owlhead Home Page", icon: <BrandOwl className="size-6" />, app: "home" as const }, ...SHORTCUTS.slice(1)].map((s) => (
                   <li key={s.id} className={cn(s.id === "signin" && "mt-1 border-t border-t-foreground/40 pt-1")}>
                     <ShortcutItem s={s} onOpen={launch} role="menuitem" className={MENU_ITEM}>
                       <span className="grid size-6 place-items-center [&>svg]:size-6">{iconFor(s)}</span>

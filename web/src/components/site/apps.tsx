@@ -31,7 +31,7 @@ Owlhead is a trading agent for your own brokerage account. It works inside rules
 
 The wallpapers are paintings and prints from The Metropolitan Museum of Art, which shares them as public domain. Pick one in Display.
 
-Tour.mp4 is a minute on what Owlhead does. Minesweeper is the beginner's board, and the owl is the face. The Recycle Bin holds what Owlhead won't do.
+Tour.mp4 is a minute on what Owlhead does. The Recycle Bin holds what Owlhead won't do.
 
 The owl in the corner has tips. Right-click the desktop and pick Ask the owl to bring it back.
 

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { AgentMode } from "@/fixtures/types";
 import { AGENT_IDS, buildWorkspace } from "@/fixtures/workspace";
-import { AgentOwl, Owl, moodFor, owlShape } from "./owl";
+import { AgentOwl, FEATHERS, Owl, beakFor, moodFor, owlRows, owlShape } from "./owl";
 
 const MODES: AgentMode[] = ["normal", "exits_only", "paused", "stopped"];
 
@@ -53,6 +53,44 @@ describe("an agent's owl", () => {
       expect(offset).toBeGreaterThanOrEqual(0);
       expect(offset).toBeLessThan(every);
     }
+  });
+
+  it("draws every set of ears on one 16 by 16 grid, outlined, with both eyes where the lids and pupils land", () => {
+    for (const ears of ["tufts", "wide", "round"] as const) {
+      const rows = owlRows(ears);
+      expect(rows).toHaveLength(16);
+      for (const row of rows) expect(row, ears).toHaveLength(16);
+      for (const x of [2, 10]) {
+        for (let y = 4; y <= 7; y++) expect(rows[y].slice(x + 1, x + 3), `${ears} eye at ${x},${y}`).toBe("ww");
+      }
+      for (const row of rows) {
+        const ink = row.replace(/\./g, "");
+        if (ink.length > 0 && !/^f+$/.test(ink)) expect(row.trim().replace(/^\.+|\.+$/g, "")[0], `${ears} row "${row}" starts on its outline`).toBe("o");
+      }
+    }
+  });
+
+  it("puts belly marks on the belly alone, so they never draw a mouth on the face", () => {
+    const rows = owlRows("round");
+    for (const id of [...Object.values(AGENT_IDS), "owlhead", "assistant", "a", "b", "c", "d", "e", "f"]) {
+      const { container } = render(<Owl seed={id} mood="awake" still />);
+      const marks = [...container.querySelectorAll("rect[opacity='0.3']")];
+      for (const m of marks) {
+        const x = Number(m.getAttribute("x")) / 4;
+        const y = Number(m.getAttribute("y")) / 4;
+        expect(rows[y][x], `${id} mark at ${x},${y}`).toBe("l");
+      }
+    }
+  });
+
+  it("takes the brand owl's colour in place of its own, and gives a sun owl a dark beak", () => {
+    expect(beakFor("var(--series-2)")).toBe("var(--owl-pupil)");
+    for (const f of FEATHERS.filter((f) => f !== "var(--series-2)")) expect(beakFor(f)).toBe("var(--highlight)");
+    const { container } = render(<Owl seed="owlhead" mood="awake" feathers="var(--brand-owl)" beak="var(--brand-owl-beak)" still />);
+    const fills = new Set([...container.querySelectorAll("rect")].map((r) => r.getAttribute("fill")));
+    expect(fills).toContain("var(--brand-owl)");
+    expect(fills).toContain("var(--brand-owl-beak)");
+    for (const f of FEATHERS) expect(fills).not.toContain(f);
   });
 
   it("is decorative, painted only in palette tokens", () => {

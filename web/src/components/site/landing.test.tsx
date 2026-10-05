@@ -268,7 +268,6 @@ describe("the desktop", () => {
       "Display",
       "Winamp",
       "Tour.mp4",
-      "Minesweeper",
       "Recycle Bin",
       "Sign in",
       "Shut down…",
@@ -306,25 +305,6 @@ describe("the desktop's other things", () => {
     expect(readFileSync(join(pub, TOUR_VIDEO.src)).byteLength).toBeLessThan(4_000_000);
     expect(readFileSync(join(pub, TOUR_VIDEO.poster)).byteLength).toBeGreaterThan(1000);
     expect(readFileSync(join(pub, TOUR_VIDEO.captions), "utf8")).toBe(tourVtt());
-  });
-
-  it("plays Minesweeper: the first click opens safe ground, right-click flags, and the owl starts over", async () => {
-    renderLanding();
-    await press(within(right()).getByRole("button", { name: "Minesweeper" }));
-    const game = win("Minesweeper");
-    const field = within(game).getByRole("grid", { name: "Minefield" });
-    expect(field).toHaveAttribute("data-phase", "ready");
-    await press(within(field).getByRole("button", { name: "Row 5, column 5: hidden" }));
-    expect(["playing", "won"]).toContain(field.getAttribute("data-phase"));
-    expect(within(field).getByRole("button", { name: /^Row 5, column 5: (empty|\d)$/ })).toBeInTheDocument();
-    const hidden = within(field).getAllByRole("button", { name: /: hidden$/ })[0];
-    if (hidden) {
-      await act(async () => fireEvent.contextMenu(hidden));
-      expect(hidden.getAttribute("aria-label")).toMatch(/flagged$/);
-      expect(within(game).getByRole("img", { name: "Mines left: 9" })).toBeInTheDocument();
-    }
-    await press(within(game).getByRole("button", { name: "New game" }));
-    expect(field).toHaveAttribute("data-phase", "ready");
   });
 
   it("keeps what Owlhead won't do in the Recycle Bin: Restore says why, and Empty empties it", async () => {
