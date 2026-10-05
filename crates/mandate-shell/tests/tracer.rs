@@ -515,6 +515,10 @@ fn dec(text: &str) -> DecStr {
 /// Writes one daily bar per weekday, starting 2026-08-24, with these closes, through
 /// `mandate-marketdata`'s own writer, so the tracer reads the real format.
 fn bars(dir: &Path, closes: &[&str]) -> PathBuf {
+    bars_from(dir, "2026-08-24", closes)
+}
+
+fn bars_from(dir: &Path, first: &str, closes: &[&str]) -> PathBuf {
     let dataset = DatasetId::new(
         AssetClass::UsEquity,
         Feed::Iex,
@@ -523,7 +527,7 @@ fn bars(dir: &Path, closes: &[&str]) -> PathBuf {
     )
     .unwrap();
     let store = Store::new(dir);
-    let mut day = Date::parse("2026-08-24").unwrap();
+    let mut day = Date::parse(first).unwrap();
     for close in closes {
         while day.is_weekend() {
             day = day.next().unwrap();
@@ -1125,7 +1129,7 @@ fn signal_undecided() {
     let scratch = Scratch::new("undecided");
     let closes = rising();
     let closes: Vec<&str> = closes.iter().skip(15).map(String::as_str).collect();
-    let dataset = bars(&scratch.0, &closes);
+    let dataset = bars_from(&scratch.0, "2026-09-14", &closes);
     let transport = Scripted::new(Broker::Fresh);
     let seen = Rc::clone(&transport.seen);
     let mut stages = stages("mandate.json", dataset, transport);

@@ -2884,7 +2884,9 @@ mod tests {
                 &Records::Bars(vec![at("09", "999.99")?, at("04", "111.11")?]),
             )
             .map_err(|e| e.to_string())?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
+        let after_last_listed =
+            UtcNanos::parse("2026-09-28T20:00:00.000000000Z").map_err(|e| e.to_string())?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", after_last_listed))?;
         assert_eq!(what, "a listed day does not hold exactly one bar");
         Ok(())
     }
