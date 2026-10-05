@@ -100,7 +100,7 @@
         `<div class="stage" style="display:grid;place-content:center;justify-items:center;gap:20px;padding-bottom:150px;background:var(--ink);color:var(--ink-foreground)">` +
         owl(CAST.brand, 208, { t, gaze, style: `transform:translateY(${y - hop}px) scale(${1 + squash * 0.14},${1 - squash * 0.14});transform-origin:bottom` }) +
         `<div class="pix" style="font-size:76px;font-weight:600;line-height:1;height:78px">${word}</div>` +
-        `<div class="sunken" style="width:420px;height:30px;padding:3px;display:flex;gap:3px;background:var(--ink)">${Array.from({ length: bars }, () => '<i style="width:16px;background:var(--highlight)"></i>').join("")}</div>` +
+        `<div class="sunken" style="width:420px;height:30px;padding:3px;display:flex;gap:3px;background:var(--ink)">${Array.from({ length: bars }, () => `<i style="width:calc((100% - ${3 * (c.bars - 1)}px) / ${c.bars});background:var(--highlight)"></i>`).join("")}</div>` +
         `<div class="mono" style="font-size:30px;color:${ready ? "var(--highlight)" : "var(--series-5)"}">${ready ? "Ready." : `Starting Owlhead${dots(t)}`}</div></div>`;
       return cam(inner, camera(t, [[0, 1, 640, 360], [c.jingle, 1.04, 640, 330], [5, 1.08, 640, 330]]), shook);
     },
@@ -258,9 +258,9 @@
         '<div style="display:flex;gap:18px;position:absolute;right:30px;top:24px">' +
         crew
           .map((o, i) => {
-            const drop = halted ? out(span(t, c.press + i * 0.09, 0.2)) * 8 : 0;
+            const drop = halted ? out(span(t, c.press + i * 0.125, 0.2)) * 8 : 0;
             const x = 820 + i * 114;
-            return owl(o, 96, { t: t + i, mood: t >= c.press + i * 0.09 ? "stopped" : "awake", gaze: t >= c.cursor[0] ? look(x, 160, cx, cy) : [0, 1], style: `transform:translateY(${drop}px)` });
+            return owl(o, 96, { t: t + i, mood: t >= c.press + i * 0.125 ? "stopped" : "awake", gaze: t >= c.cursor[0] ? look(x, 160, cx, cy) : [0, 1], style: `transform:translateY(${drop}px)` });
           })
           .join("") +
         "</div>";

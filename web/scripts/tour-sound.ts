@@ -1,123 +1,13 @@
 /**
  * The tour's sound effects, synthesized: every click, keystroke, pop and chime lands on the cue the
  * scenes draw from (`tour-cues.ts`), panned to where it happens on screen. A seeded generator makes
- * the noise, so the track is the same on every render. `render-tour.ts` mixes it under the music.
+ * the noise, so the track is the same on every render. `render-tour.ts` mixes it with the music
+ * (`tour-music.ts`). Its notes are in the music's key, C major, except the record's errors, which
+ * are meant to clash.
  */
 import type { Scene } from "../src/components/site/tour.ts";
 import { CUES, RULES_TEXT, WIPE } from "./tour-cues.ts";
-
-export const RATE = 48_000;
-
-type Wave = "sine" | "square" | "triangle" | "saw";
-
-interface Voice {
-  dur: number;
-  gain: number;
-  /** -1 left to 1 right. */
-  pan?: number;
-  attack?: number;
-  /** How fast it dies away: higher is shorter. */
-  decay?: number;
-  /** A one-pole low-pass, in Hz, to soften a square's edge or darken a noise. */
-  lowpass?: number | [number, number];
-}
-
-interface Tone extends Voice {
-  freq: number;
-  /** The pitch it glides to by the end, exponentially. */
-  to?: number;
-  wave?: Wave;
-}
-
-/** mulberry32. */
-function generator(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const midi = (n: number) => 440 * 2 ** ((n - 69) / 12);
-
-function oscillate(wave: Wave, cycles: number): number {
-  const p = cycles - Math.floor(cycles);
-  switch (wave) {
-    case "sine":
-      return Math.sin(2 * Math.PI * p);
-    case "square":
-      return p < 0.5 ? 1 : -1;
-    case "triangle":
-      return 1 - 4 * Math.abs(p - 0.5);
-    case "saw":
-      return 2 * p - 1;
-    default: {
-      const unhandled: never = wave;
-      throw new Error(`unhandled wave ${String(unhandled)}`);
-    }
-  }
-}
-
-class Track {
-  readonly left: Float32Array;
-  readonly right: Float32Array;
-  private readonly random = generator(0x0071ead);
-
-  constructor(seconds: number) {
-    this.left = new Float32Array(Math.ceil(seconds * RATE));
-    this.right = new Float32Array(this.left.length);
-  }
-
-  rand(): number {
-    return this.random();
-  }
-
-  private voice(at: number, v: Voice, source: (t: number) => number) {
-    const start = Math.round(at * RATE);
-    const n = Math.round(v.dur * RATE);
-    const angle = ((clamp(v.pan ?? 0, -1, 1) + 1) * Math.PI) / 4;
-    const [l, r] = [Math.cos(angle) * v.gain, Math.sin(angle) * v.gain];
-    const attack = v.attack ?? 0.003;
-    const decay = v.decay ?? 6;
-    const [lpFrom, lpTo] = Array.isArray(v.lowpass) ? v.lowpass : [v.lowpass ?? 0, v.lowpass ?? 0];
-    let y = 0;
-    for (let i = 0; i < n && start + i < this.left.length; i++) {
-      if (start + i < 0) continue;
-      const t = i / RATE;
-      const k = i / n;
-      const env = Math.min(1, t / attack) * Math.exp(-decay * k) * (1 - k);
-      let x = source(t);
-      if (lpFrom > 0) {
-        const fc = lpFrom * (lpTo / lpFrom) ** k;
-        y += (1 - Math.exp((-2 * Math.PI * fc) / RATE)) * (x - y);
-        x = y;
-      }
-      this.left[start + i] += x * env * l;
-      this.right[start + i] += x * env * r;
-    }
-  }
-
-  tone(at: number, v: Tone) {
-    const wave = v.wave ?? "sine";
-    const ratio = (v.to ?? v.freq) / v.freq;
-    let cycles = 0;
-    let last = 0;
-    this.voice(at, v, (t) => {
-      cycles += v.freq * ratio ** (t / v.dur) * (t - last);
-      last = t;
-      return oscillate(wave, cycles);
-    });
-  }
-
-  noise(at: number, v: Voice) {
-    this.voice(at, v, () => this.random() * 2 - 1);
-  }
-}
-
-const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+import { Track, clamp, midi } from "./tour-synth.ts";
 
 /** Where an x on the 1280-pixel stage sits between the speakers. */
 const panAt = (x: number) => clamp(((x - 640) / 640) * 0.7, -0.7, 0.7);
@@ -220,7 +110,7 @@ class Foley {
   }
 
   jingle(at: number) {
-    [67, 72, 76, 79, 84].forEach((n, i) => this.track.tone(at + i * 0.09, { freq: midi(n), dur: 1.5, gain: 0.17, wave: "triangle", decay: 3.5 }));
+    [67, 72, 76, 79, 84].forEach((n, i) => this.track.tone(at + i * 0.125, { freq: midi(n), dur: 1.5, gain: 0.17, wave: "triangle", decay: 3.5 }));
     for (const n of [60, 64, 67]) this.track.tone(at + 0.4, { freq: midi(n), dur: 1.6, gain: 0.08, attack: 0.2, decay: 2 });
     this.track.tone(at, { freq: midi(48), dur: 1.4, gain: 0.22, decay: 3 });
   }
@@ -233,7 +123,7 @@ class Foley {
 
 /** The tour's sound effects as two channels at `RATE`. */
 export function tourSfx(tour: readonly Scene[], seconds: number): { left: Float32Array; right: Float32Array } {
-  const track = new Track(seconds);
+  const track = new Track(seconds, 0x0071ead);
   const f = new Foley(track);
   const at = (id: Scene["id"]) => {
     const scene = tour.find((s) => s.id === id);
@@ -249,9 +139,9 @@ export function tourSfx(tour: readonly Scene[], seconds: number): { left: Float3
     f.fall(s + c.drop, c.land - c.drop);
     f.thud(s + c.land);
     [..."Owlhead 98"].forEach((ch, i) => {
-      if (ch !== " ") f.tick(s + c.letters + i * c.letterGap + 0.06, midi(72 + PENTATONIC[i]), (i - 4.5) / 7, 0.09);
+      if (ch !== " ") f.tick(s + c.letters + i * c.letterGap, midi(72 + PENTATONIC[i]), (i - 4.5) / 7, 0.09);
     });
-    for (let b = 1; b <= c.bars; b++) f.tick(s + c.bar[0] + (b / c.bars) * (c.bar[1] - c.bar[0]), 900 + b * 30, -0.5 + b / c.bars, 0.045);
+    for (let b = 1; b <= c.bars; b++) f.tick(s + c.bar[0] + (b / c.bars) * (c.bar[1] - c.bar[0]), midi(84 + PENTATONIC[(b - 1) % 5]), -0.5 + b / c.bars, 0.05);
     f.jingle(s + c.jingle);
     f.boing(s + c.jingle);
   }
@@ -277,7 +167,7 @@ export function tourSfx(tour: readonly Scene[], seconds: number): { left: Float3
     for (let i = 0; i < 4; i++) {
       const when = s + c.row0 + i * c.rowGap;
       f.swish(when - 0.08, 0.2, panAt(700));
-      f.blip(when + 0.05, 69 + PENTATONIC[i * 2], panAt(700));
+      f.blip(when + 0.05, 72 + PENTATONIC[i * 2], panAt(700));
       f.boing(when, panAt(260), 0.12);
     }
   }
@@ -286,7 +176,7 @@ export function tourSfx(tour: readonly Scene[], seconds: number): { left: Float3
     const c = CUES.orders;
     const s = at("orders");
     for (let i = 0; i < 4; i++) {
-      f.blip(s + c.step0 + i * c.stepGap, 64 + PENTATONIC[i * 2], panAt(290));
+      f.blip(s + c.step0 + i * c.stepGap, 72 + PENTATONIC[i], panAt(290));
       if (i > 0 && i < 3) f.ding(s + c.step0 + i * c.stepGap + 0.12, 84 + i * 2, panAt(470));
     }
     f.swish(s + c.phone - 0.05, 0.42, panAt(925), 0.3);
@@ -294,7 +184,7 @@ export function tourSfx(tour: readonly Scene[], seconds: number): { left: Float3
     f.buzz(s + c.buzz, panAt(925));
     f.buzz(s + c.buzz + 0.3, panAt(925));
     f.click(s + c.press, panAt(896));
-    f.chime(s + c.approved, 76, panAt(925));
+    f.chime(s + c.approved, 72, panAt(925));
     f.pop(s + c.approved, panAt(925), 1.4);
   }
 
@@ -327,7 +217,7 @@ export function tourSfx(tour: readonly Scene[], seconds: number): { left: Float3
     f.click(s + c.press, panAt(288));
     f.thud(s + c.press, panAt(288), 1);
     f.powerdown(s + c.press + 0.05);
-    for (let i = 0; i < 3; i++) f.tick(s + c.press + i * 0.09, midi(60 - i * 3), panAt(870 + i * 114), 0.1);
+    for (let i = 0; i < 3; i++) f.tick(s + c.press + i * 0.125, midi(60 - i * 3), panAt(870 + i * 114), 0.1);
   }
 
   {
@@ -341,28 +231,4 @@ export function tourSfx(tour: readonly Scene[], seconds: number): { left: Float3
   }
 
   return { left: track.left, right: track.right };
-}
-
-/** Two channels as a 32-bit float WAV, so nothing clips before the mix is levelled. */
-export function wav({ left, right }: { left: Float32Array; right: Float32Array }): Buffer {
-  const bytes = left.length * 8;
-  const out = Buffer.alloc(44 + bytes);
-  out.write("RIFF", 0);
-  out.writeUInt32LE(36 + bytes, 4);
-  out.write("WAVE", 8);
-  out.write("fmt ", 12);
-  out.writeUInt32LE(16, 16);
-  out.writeUInt16LE(3, 20);
-  out.writeUInt16LE(2, 22);
-  out.writeUInt32LE(RATE, 24);
-  out.writeUInt32LE(RATE * 8, 28);
-  out.writeUInt16LE(8, 32);
-  out.writeUInt16LE(32, 34);
-  out.write("data", 36);
-  out.writeUInt32LE(bytes, 40);
-  for (let i = 0; i < left.length; i++) {
-    out.writeFloatLE(left[i], 44 + i * 8);
-    out.writeFloatLE(right[i], 48 + i * 8);
-  }
-  return out;
 }
