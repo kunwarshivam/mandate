@@ -104,8 +104,6 @@ pub struct Ports<'a> {
     /// §6.3), from which the executor computes paper's simulated regulatory fees with
     /// `mandate-accounting`'s own fee rules (§10, DEC-133).
     pub fees: &'a mandate_accounting::Config,
-    /// The non-account-stream half of the binding §9.1 input. `None` fails closed for openings.
-    pub binding_gate: Option<&'a dyn BindingGateSource>,
 }
 
 /// Why one broker round trip produced no broker fact.

@@ -211,19 +211,16 @@ fn bound_ports<'a>(
     mandates: &'a FixedMandate,
     instruments: &'a FixedInstruments,
     config: &'a mandate_executor::ExecutorConfig,
-    gate: Option<&'a dyn BindingGateSource>,
 ) -> Ports<'a> {
-    let mut ports = ports(ids, mandates, instruments, config);
-    ports.binding_gate = gate;
-    ports
+    ports(ids, mandates, instruments, config)
 }
 
-fn ready(gate: Option<&dyn BindingGateSource>) -> (Shell, Ports<'_>) {
+fn ready() -> (Shell, Ports<'static>) {
     let ids = Box::leak(Box::new(TestIds));
     let mandates = Box::leak(Box::new(FixedMandate::covering(&[AAPL])));
     let instruments = Box::leak(Box::new(FixedInstruments));
     let executor_config = Box::leak(Box::new(config()));
-    let ports = bound_ports(ids, mandates, instruments, executor_config, gate);
+    let ports = bound_ports(ids, mandates, instruments, executor_config);
     let mut shell = Shell::new(1);
     shell.fold_one(&stream_opened()).unwrap_or_else(|error| panic!("{error}"));
     (shell.restart_ready(&ports), ports)
@@ -238,8 +235,12 @@ fn submitted(ran: &common::Ran) -> bool {
 #[test]
 fn full_binding_input_allows_and_replaces_the_partial_evaluation() {
     let gate = GateFixture::allowing();
-    let (mut shell, ports) = ready(Some(&gate));
-    let ran = shell.run(handoff(INTENT, AGENT, opening(AAPL, "1", "150")), &ports);
+    let (mut shell, ports) = ready();
+    let ran = shell.run_with_binding(
+        handoff(INTENT, AGENT, opening(AAPL, "1", "150")),
+        &ports,
+        &gate,
+    );
     assert!(submitted(&ran));
     let decided = ran.draft("GateDecided").unwrap_or_else(|| panic!("gate decision"));
     assert_eq!(decided.payload.get("verdict").and_then(|v| v.as_str()), Some("allow"));
@@ -252,8 +253,12 @@ fn full_binding_input_allows_and_replaces_the_partial_evaluation() {
 #[test]
 fn binding_denial_sends_no_order_even_when_the_account_stream_checks_allow() {
     let gate = GateFixture::denying();
-    let (mut shell, ports) = ready(Some(&gate));
-    let ran = shell.run(handoff(INTENT, AGENT, opening(AAPL, "1", "150")), &ports);
+    let (mut shell, ports) = ready();
+    let ran = shell.run_with_binding(
+        handoff(INTENT, AGENT, opening(AAPL, "1", "150")),
+        &ports,
+        &gate,
+    );
     assert!(!submitted(&ran));
     let decided = ran.draft("GateDecided").unwrap_or_else(|| panic!("gate decision"));
     assert_eq!(decided.payload.get("verdict").and_then(|v| v.as_str()), Some("deny"));
@@ -265,9 +270,14 @@ fn binding_denial_sends_no_order_even_when_the_account_stream_checks_allow() {
 
 #[test]
 fn missing_binding_input_fails_closed_before_any_submission() {
-    let (mut shell, ports) = ready(None);
+    let (mut shell, ports) = ready();
+    let gate = GateFixture { input: None };
     let error = shell
-        .step(handoff(INTENT, AGENT, opening(AAPL, "1", "150")), &ports)
+        .step_with_binding(
+            handoff(INTENT, AGENT, opening(AAPL, "1", "150")),
+            &ports,
+            &gate,
+        )
         .expect_err("an opening without §9.1 inputs must fail closed");
     assert_eq!(error, ExecutorError::BindingGateInputMissing);
     assert_eq!(shell.connector.total_accepted(), 0);
@@ -276,8 +286,12 @@ fn missing_binding_input_fails_closed_before_any_submission() {
 #[test]
 fn replay_keeps_a_binding_denial_terminal() {
     let gate = GateFixture::denying();
-    let (mut shell, ports) = ready(Some(&gate));
-    let first = shell.run(handoff(INTENT, AGENT, opening(AAPL, "1", "150")), &ports);
+    let (mut shell, ports) = ready();
+    let first = shell.run_with_binding(
+        handoff(INTENT, AGENT, opening(AAPL, "1", "150")),
+        &ports,
+        &gate,
+    );
     assert!(!submitted(&first));
     let mut replayed = shell.restart_ready(&ports);
     let again = replayed.run(handoff(INTENT, AGENT, opening(AAPL, "1", "150")), &ports);
@@ -290,7 +304,11 @@ fn an_advisory_allow_has_no_api_that_can_override_the_binding_denial() {
     let advisory = mandate_executor::GateVerdict::Allow;
     assert_eq!(advisory, mandate_executor::GateVerdict::Allow);
     let gate = GateFixture::denying();
-    let (mut shell, ports) = ready(Some(&gate));
-    let ran = shell.run(handoff(INTENT, AGENT, opening(AAPL, "1", "150")), &ports);
+    let (mut shell, ports) = ready();
+    let ran = shell.run_with_binding(
+        handoff(INTENT, AGENT, opening(AAPL, "1", "150")),
+        &ports,
+        &gate,
+    );
     assert!(!submitted(&ran));
 }

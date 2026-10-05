@@ -10,7 +10,7 @@ use mandate_canon::Value;
 use crate::error::ExecutorError;
 use crate::fold::fold;
 use crate::payload::{object, risk_clock_stamp};
-use crate::ports::Ports;
+use crate::ports::{BindingGateSource, Ports};
 use crate::state::ExecutorState;
 use crate::types::{
     ActivityCursor, BrokerRequest, Effect, EventDraft, EventId, FoldedEvent, NotificationRef,
@@ -21,6 +21,7 @@ pub(crate) struct Batch<'p, 'a> {
     pub(crate) ports: &'p Ports<'a>,
     pub(crate) view: ExecutorState,
     pub(crate) effects: Vec<Effect>,
+    binding_gate: Option<&'p dyn BindingGateSource>,
     epoch: WriterEpoch,
     head: Seq,
     drafted: u32,
@@ -36,8 +37,17 @@ impl<'p, 'a> Batch<'p, 'a> {
             head: state.account_head(),
             view: state.clone(),
             effects: Vec::new(),
+            binding_gate: None,
             drafted: 0,
         })
+    }
+
+    pub(crate) fn bind(&mut self, source: &'p dyn BindingGateSource) {
+        self.binding_gate = Some(source);
+    }
+
+    pub(crate) fn binding_gate(&self) -> Option<&dyn BindingGateSource> {
+        self.binding_gate
     }
 
     /// The risk-clock second this batch acts at.

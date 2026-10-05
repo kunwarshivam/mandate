@@ -22,12 +22,12 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Int, Key, Value};
 use mandate_executor::{
-    AccountRef, AccountScope, AgentId, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome,
-    BrokerPosition, BrokerReject, BrokerRequest, BrokerSnapshot, BrokerUnknown, Effect, EventDraft,
-    EventId, ExecutorConfig, ExecutorError, ExecutorState, ExitTier, FillId, FoldedEvent, IdGen,
-    Input, InstrumentSnapshot, IntentId, MandateVersion, MandateView, MarketObservation,
-    OrderState, Ports, ReconcileReason, RiskClock, Seq, TimeInForce, TimerId, TimerRequest,
-    WorkspaceId, WriterEpoch, fold, handle,
+    AccountRef, AccountScope, AgentId, BindingGateInput, BindingGateSource, BrokerAccount,
+    BrokerFill, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerReject, BrokerRequest,
+    BrokerSnapshot, BrokerUnknown, Effect, EventDraft, EventId, ExecutorConfig, ExecutorError,
+    ExecutorState, ExitTier, FillId, FoldedEvent, IdGen, Input, InstrumentSnapshot, IntentId,
+    MandateVersion, MandateView, MarketObservation, OrderState, Ports, ReconcileReason, RiskClock,
+    Seq, TimeInForce, TimerId, TimerRequest, WorkspaceId, WriterEpoch, fold, handle,
 };
 use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
 use mandate_time::Date;
@@ -45,6 +45,20 @@ pub const AGENT: &str = "agent-a";
 pub const OTHER_AGENT: &str = "agent-b";
 pub const VERSION: &str = "v1";
 pub const ENVIRONMENT: &str = "paper";
+
+pub struct MissingBindingGate;
+
+impl BindingGateSource for MissingBindingGate {
+    fn input(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+    ) -> Option<BindingGateInput> {
+        None
+    }
+}
+
+pub static MISSING_BINDING_GATE: MissingBindingGate = MissingBindingGate;
 
 /// The broker account every fixture is for.
 pub fn scope() -> AccountScope {
@@ -324,7 +338,6 @@ pub fn ports<'a>(
         instruments,
         config,
         fees: fee_config(),
-        binding_gate: None,
     }
 }
 
@@ -809,7 +822,16 @@ impl Shell {
     /// timers. A submission is issued only after the append that records it has committed, which
     /// is the shell's half of write-before-acting (ES-06, journal spec §5.2).
     pub fn step(&mut self, input: Input, ports: &Ports<'_>) -> Result<Ran, ExecutorError> {
-        let effects = handle(&mut self.state, input, ports)?;
+        self.step_with_binding(input, ports, &MISSING_BINDING_GATE)
+    }
+
+    pub fn step_with_binding(
+        &mut self,
+        input: Input,
+        ports: &Ports<'_>,
+        binding_gate: &dyn BindingGateSource,
+    ) -> Result<Ran, ExecutorError> {
+        let effects = handle(&mut self.state, input, ports, binding_gate)?;
         self.play(effects, None)
     }
 
@@ -820,7 +842,7 @@ impl Shell {
         ports: &Ports<'_>,
         at: CrashPoint,
     ) -> Result<Ran, ExecutorError> {
-        let effects = handle(&mut self.state, input, ports)?;
+        let effects = handle(&mut self.state, input, ports, &MISSING_BINDING_GATE)?;
         self.play(effects, Some(at))
     }
 
@@ -893,6 +915,16 @@ impl Shell {
     /// the effect list. A pending test dies here, on the crate's `Unimplemented` error.
     pub fn run(&mut self, input: Input, ports: &Ports<'_>) -> Ran {
         self.step(input, ports)
+            .unwrap_or_else(|e| panic!("step refused with {}: {e}", e.code()))
+    }
+
+    pub fn run_with_binding(
+        &mut self,
+        input: Input,
+        ports: &Ports<'_>,
+        binding_gate: &dyn BindingGateSource,
+    ) -> Ran {
+        self.step_with_binding(input, ports, binding_gate)
             .unwrap_or_else(|e| panic!("step refused with {}: {e}", e.code()))
     }
 

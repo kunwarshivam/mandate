@@ -19,7 +19,7 @@ use mandate_risk::{
 
 use crate::error::ExecutorError;
 use crate::payload::{object, text};
-use crate::ports::{BindingGateInput, Ports};
+use crate::ports::{BindingGateInput, BindingGateSource, Ports};
 use crate::protection::{between_rungs, rests};
 use crate::state::ExecutorState;
 use crate::types::{
@@ -331,12 +331,13 @@ pub(crate) fn binding_checks(
     proposal: &Proposal<'_>,
     pass: GatePass,
     ports: &Ports<'_>,
+    source: Option<&dyn BindingGateSource>,
 ) -> Result<PartialGateDecision, ExecutorError> {
     let partial = account_stream_checks(state, proposal, ports)?;
     if partial.verdict != GateVerdict::Allow {
         return Ok(partial);
     }
-    let Some(source) = ports.binding_gate else {
+    let Some(source) = source else {
         return if proposal.purpose.adds_risk() {
             Err(ExecutorError::BindingGateInputMissing)
         } else {
@@ -671,7 +672,6 @@ mod attribution_tests {
             instruments: &Everything,
             config: &config,
             fees: &fees,
-            binding_gate: None,
         };
         let aapl = InstrumentId::new("AAPL")?;
         let agent = AgentId("agent-a".to_owned());
@@ -822,7 +822,6 @@ mod remainder_tests {
             instruments: &Everything,
             config: &config,
             fees: &fees,
-            binding_gate: None,
         };
         account_stream_checks(
             state,

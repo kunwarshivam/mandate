@@ -200,6 +200,7 @@ fn decide(
         },
         pass,
         batch.ports,
+        batch.binding_gate(),
     )?;
     let allowed = decision.verdict == GateVerdict::Allow;
     let closed = closed_hold(batch.ports, instrument, batch.at())
