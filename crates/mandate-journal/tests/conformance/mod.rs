@@ -589,6 +589,25 @@ pub fn fixture() -> Value {
     parse(&std::fs::read(path).unwrap()).unwrap()
 }
 
+fn fixture_artifacts(fx: &Value) -> BTreeMap<Digest, Vec<u8>> {
+    list(fx, "artifacts")
+        .iter()
+        .map(|artifact| {
+            let reference = text(artifact, "ref")
+                .strip_prefix("sha256:")
+                .and_then(Digest::from_hex)
+                .expect("a fixture artifact has a digest reference");
+            let bytes = text(artifact, "canonical").as_bytes().to_vec();
+            assert_eq!(
+                Digest::of(&bytes),
+                reference,
+                "fixture artifact bytes match their reference"
+            );
+            (reference, bytes)
+        })
+        .collect()
+}
+
 pub fn get<'a>(v: &'a Value, path: &str) -> &'a Value {
     path.split('.').fold(v, |v, key| {
         v.get(key).unwrap_or_else(|| panic!("no `{path}`"))
@@ -663,13 +682,14 @@ pub fn append_chain<B: Backend>(b: &mut B, fx: &Value) -> StreamId {
 
 pub fn chain_vectors_byte_for_byte<B: Backend>(b: &mut B) {
     let fx = fixture();
+    let artifacts = fixture_artifacts(&fx);
     let s = append_chain(b, &fx);
     let last = list(&fx, "chain").last().unwrap();
     let last_hash = Digest::from_hex(text(last, "hash")).unwrap();
     let rows = b.rows(&s);
     assert_eq!(rows.len(), list(&fx, "chain").len());
     assert_eq!(
-        verify_events(&rows, TrustedStart::GENESIS, &BTreeMap::new()),
+        verify_events(&rows, TrustedStart::GENESIS, &artifacts),
         Ok(Verified {
             next_seq: int(last, "seq") + 1,
             last_hash
@@ -806,6 +826,7 @@ const APPENDS: &[(&str, &[&str], Drafts)] = &[
 /// Every append case of the journal vectors, each on a fresh backend holding the vectors' chain.
 pub fn append_vectors<B: Backend>(fresh: impl Fn() -> Option<B>) {
     let fx = fixture();
+    let artifacts = fixture_artifacts(&fx);
     let cases = list(&fx, "append_cases.cases");
     assert_eq!(
         cases.len(),
@@ -887,7 +908,7 @@ pub fn append_vectors<B: Backend>(fresh: impl Fn() -> Option<B>) {
             assert_eq!(rows.len(), 5, "{name}: rows after a non-committing append");
         }
         assert!(
-            verify_events(&rows, TrustedStart::GENESIS, &BTreeMap::new()).is_ok(),
+            verify_events(&rows, TrustedStart::GENESIS, &artifacts).is_ok(),
             "{name}: the stream fails verification after the append"
         );
     }

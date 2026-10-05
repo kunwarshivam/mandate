@@ -48,6 +48,44 @@
 version: 3
 hash_algorithm: sha256
 genesis_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+
+artifacts:
+- name: fee_config
+  ref: sha256:0396236cc1e5f565e7415b1750a57f683f79b9fd62beea0e14e4ece4e1b150c8
+  object:
+    kind: fee_config
+    version: fixture-v1
+  canonical: '{"kind":"fee_config","version":"fixture-v1"}'
+- name: rule_set
+  ref: sha256:fc9108988bbe300c8efc73c12d7d7ecd36bc3df27c77e6ace30cec38fdffb3ea
+  object:
+    kind: rule_set
+    version: fixture-v1
+  canonical: '{"kind":"rule_set","version":"fixture-v1"}'
+- name: instrument_snapshot
+  ref: sha256:cf6270591242ede18b9cf090a04208a2736865e89b29f90f232f8ae522ce2a64
+  object:
+    kind: instrument_snapshot
+    version: fixture-v1
+  canonical: '{"kind":"instrument_snapshot","version":"fixture-v1"}'
+- name: mandate_version
+  ref: sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0
+  object:
+    kind: mandate_version
+    version: fixture-v1
+  canonical: '{"kind":"mandate_version","version":"fixture-v1"}'
+- name: settlement_calendar
+  ref: sha256:cb48911fbc23629d0b22ba9bfa795402c59633c00e2fa5ff847aeab539b5a59c
+  object:
+    kind: settlement_calendar
+    version: fixture-v1
+  canonical: '{"kind":"settlement_calendar","version":"fixture-v1"}'
+- name: trading_calendar
+  ref: sha256:483922b92fb181707c5fd21670b6f70f2f889b4a7ab7199bfaef19093a2b26bb
+  object:
+    kind: trading_calendar
+    version: fixture-v1
+  canonical: '{"kind":"trading_calendar","version":"fixture-v1"}'
 decimal_normalization:
   accept:
   - input: '150.00'
@@ -139,7 +177,7 @@ chain:
       version: 0.1.0
       build: sha256:3333333333333333333333333333333333333333333333333333333333333333
     config_refs:
-      mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+      mandate_version: sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0
     payload:
       intent_id: 01J8Z3M1P0000000000000000X
       agent_id: agent_a
@@ -153,8 +191,8 @@ chain:
     artifact_refs: []
     pii_refs: []
     prev_hash: 01ef3fc029357c2338b64726b8d1baba4710571c82271b0e80731c1a4640113f
-  canonical: '{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M1P0000000000000000X","clock_source":"local","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M2A0000000000000000B","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"IntentReceived","payload":{"agent_id":"agent_a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8Z3M1P0000000000000000X","limit_price":"150","purpose":"open","qty":"10","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"01ef3fc029357c2338b64726b8d1baba4710571c82271b0e80731c1a4640113f","recorded_at":"2026-09-21T14:00:00.000300000Z","schema_version":1,"seq":2,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
-  hash: acb1845de10ec0c9986d3877e9504883d5011e2ff16285b51c8eb05fdbe4f713
+  canonical: '{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M1P0000000000000000X","clock_source":"local","config_refs":{"mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0"},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M2A0000000000000000B","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"IntentReceived","payload":{"agent_id":"agent_a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8Z3M1P0000000000000000X","limit_price":"150","purpose":"open","qty":"10","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"01ef3fc029357c2338b64726b8d1baba4710571c82271b0e80731c1a4640113f","recorded_at":"2026-09-21T14:00:00.000300000Z","schema_version":1,"seq":2,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+  hash: 3a146f72b37761fa9b0f640a15a19362aa5c86c3247a308946ffbf943c248cf6
 - seq: 3
   event_type: GateDecided
   body:
@@ -176,11 +214,11 @@ chain:
       version: 0.1.0
       build: sha256:3333333333333333333333333333333333333333333333333333333333333333
     config_refs:
-      fee_config: sha256:1111111111111111111111111111111111111111111111111111111111111111
-      instrument_snapshot: sha256:4444444444444444444444444444444444444444444444444444444444444444
-      mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
-      rule_set: sha256:2222222222222222222222222222222222222222222222222222222222222222
-      trading_calendar: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      fee_config: sha256:0396236cc1e5f565e7415b1750a57f683f79b9fd62beea0e14e4ece4e1b150c8
+      instrument_snapshot: sha256:cf6270591242ede18b9cf090a04208a2736865e89b29f90f232f8ae522ce2a64
+      mandate_version: sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0
+      rule_set: sha256:fc9108988bbe300c8efc73c12d7d7ecd36bc3df27c77e6ace30cec38fdffb3ea
+      trading_calendar: sha256:483922b92fb181707c5fd21670b6f70f2f889b4a7ab7199bfaef19093a2b26bb
     payload:
       intent_id: 01J8Z3M1P0000000000000000X
       verdict: allow
@@ -273,9 +311,9 @@ chain:
         computed: {}
     artifact_refs: []
     pii_refs: []
-    prev_hash: acb1845de10ec0c9986d3877e9504883d5011e2ff16285b51c8eb05fdbe4f713
-  canonical: '{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M2A0000000000000000B","clock_source":"local","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","instrument_snapshot":"sha256:4444444444444444444444444444444444444444444444444444444444444444","mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555","rule_set":"sha256:2222222222222222222222222222222222222222222222222222222222222222","trading_calendar":"sha256:7777777777777777777777777777777777777777777777777777777777777777"},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M2R0000000000000000C","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"GateDecided","payload":{"checks":[{"computed":{},"id":"account_status","inputs":{"restriction":"none","status":"ACTIVE"},"result":"pass"},{"computed":{},"id":"agent_mode","inputs":{"mode":"normal"},"result":"pass"},{"computed":{},"id":"eligibility","inputs":{"exchange":"NASDAQ","median_dollar_volume_20d":"9000000000","prior_close":"149.5"},"result":"pass"},{"computed":{"position_value_after":"1500"},"id":"concentration","inputs":{"cap":"0.2"},"result":"pass"},{"computed":{},"id":"session","inputs":{"session":"regular"},"result":"pass"},{"computed":{},"id":"halt","inputs":{"halted":false,"status_feed":"current"},"result":"pass"},{"computed":{},"id":"order_constraints","inputs":{},"result":"pass"},{"computed":{},"id":"mark_freshness","inputs":{"age_ms":"100","threshold_ms":"5000"},"result":"pass"},{"computed":{"max_buy_limit":"151.5202"},"id":"collar","inputs":{"x":"0.01"},"result":"pass"},{"computed":{},"id":"conduct","inputs":{},"result":"pass"},{"computed":{"fee_reservation":"0.01","order_cost":"1500"},"id":"buying_power","inputs":{"buying_power":"10000"},"result":"pass"},{"computed":{"exposure_after":"1500"},"id":"gross_exposure","inputs":{"equity":"10000"},"result":"pass"},{"computed":{},"id":"day_trade_budget","inputs":{"regime":"intraday_margin"},"result":"not_applicable"}],"data_profile":"iex","intent_id":"01J8Z3M1P0000000000000000X","marks_used":[{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","kind":"risk","price":"149.98","source":"quote"}],"quotes_used":[{"as_of":"2026-09-21T13:59:59.900000000Z","ask":"150.02","bid":"149.98","feed":"iex","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"}],"reason_code":null,"verdict":"allow"},"pii_refs":[],"prev_hash":"acb1845de10ec0c9986d3877e9504883d5011e2ff16285b51c8eb05fdbe4f713","recorded_at":"2026-09-21T14:00:00.000850000Z","schema_version":1,"seq":3,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
-  hash: 313d989c7cd883675d6d976d6e8f529da0743b04c0481b1b4f59eb991ff85724
+    prev_hash: 3a146f72b37761fa9b0f640a15a19362aa5c86c3247a308946ffbf943c248cf6
+  canonical: '{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M2A0000000000000000B","clock_source":"local","config_refs":{"fee_config":"sha256:0396236cc1e5f565e7415b1750a57f683f79b9fd62beea0e14e4ece4e1b150c8","instrument_snapshot":"sha256:cf6270591242ede18b9cf090a04208a2736865e89b29f90f232f8ae522ce2a64","mandate_version":"sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0","rule_set":"sha256:fc9108988bbe300c8efc73c12d7d7ecd36bc3df27c77e6ace30cec38fdffb3ea","trading_calendar":"sha256:483922b92fb181707c5fd21670b6f70f2f889b4a7ab7199bfaef19093a2b26bb"},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M2R0000000000000000C","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"GateDecided","payload":{"checks":[{"computed":{},"id":"account_status","inputs":{"restriction":"none","status":"ACTIVE"},"result":"pass"},{"computed":{},"id":"agent_mode","inputs":{"mode":"normal"},"result":"pass"},{"computed":{},"id":"eligibility","inputs":{"exchange":"NASDAQ","median_dollar_volume_20d":"9000000000","prior_close":"149.5"},"result":"pass"},{"computed":{"position_value_after":"1500"},"id":"concentration","inputs":{"cap":"0.2"},"result":"pass"},{"computed":{},"id":"session","inputs":{"session":"regular"},"result":"pass"},{"computed":{},"id":"halt","inputs":{"halted":false,"status_feed":"current"},"result":"pass"},{"computed":{},"id":"order_constraints","inputs":{},"result":"pass"},{"computed":{},"id":"mark_freshness","inputs":{"age_ms":"100","threshold_ms":"5000"},"result":"pass"},{"computed":{"max_buy_limit":"151.5202"},"id":"collar","inputs":{"x":"0.01"},"result":"pass"},{"computed":{},"id":"conduct","inputs":{},"result":"pass"},{"computed":{"fee_reservation":"0.01","order_cost":"1500"},"id":"buying_power","inputs":{"buying_power":"10000"},"result":"pass"},{"computed":{"exposure_after":"1500"},"id":"gross_exposure","inputs":{"equity":"10000"},"result":"pass"},{"computed":{},"id":"day_trade_budget","inputs":{"regime":"intraday_margin"},"result":"not_applicable"}],"data_profile":"iex","intent_id":"01J8Z3M1P0000000000000000X","marks_used":[{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","kind":"risk","price":"149.98","source":"quote"}],"quotes_used":[{"as_of":"2026-09-21T13:59:59.900000000Z","ask":"150.02","bid":"149.98","feed":"iex","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"}],"reason_code":null,"verdict":"allow"},"pii_refs":[],"prev_hash":"3a146f72b37761fa9b0f640a15a19362aa5c86c3247a308946ffbf943c248cf6","recorded_at":"2026-09-21T14:00:00.000850000Z","schema_version":1,"seq":3,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+  hash: 1863657a9c99ac46fec62a69415901944264aba1823b0df6647786eb0c4a63f2
 - seq: 4
   event_type: OrderSubmitted
   body:
@@ -308,9 +346,9 @@ chain:
       limit_price: '150'
     artifact_refs: []
     pii_refs: []
-    prev_hash: 313d989c7cd883675d6d976d6e8f529da0743b04c0481b1b4f59eb991ff85724
-  canonical: '{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M2R0000000000000000C","clock_source":"local","config_refs":{},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M2S0000000000000000D","event_time":"2026-09-21T14:00:00.001000000Z","event_type":"OrderSubmitted","payload":{"attempt":1,"client_order_id":"01J8Z3M1P0000000000000000X-1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","qty":"10","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"313d989c7cd883675d6d976d6e8f529da0743b04c0481b1b4f59eb991ff85724","recorded_at":"2026-09-21T14:00:00.001200000Z","schema_version":1,"seq":4,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
-  hash: 09ed5093652d7bd8f0640469c64b96165f6e4961608ad6b4e9251dac6c82c5a9
+    prev_hash: 1863657a9c99ac46fec62a69415901944264aba1823b0df6647786eb0c4a63f2
+  canonical: '{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M2R0000000000000000C","clock_source":"local","config_refs":{},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M2S0000000000000000D","event_time":"2026-09-21T14:00:00.001000000Z","event_type":"OrderSubmitted","payload":{"attempt":1,"client_order_id":"01J8Z3M1P0000000000000000X-1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","qty":"10","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"1863657a9c99ac46fec62a69415901944264aba1823b0df6647786eb0c4a63f2","recorded_at":"2026-09-21T14:00:00.001200000Z","schema_version":1,"seq":4,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+  hash: 9f18e4ef7d293c6afc1c03dc0272f42a32f172682037a8501d232c0cedd918f8
 - seq: 5
   event_type: FillApplied
   body:
@@ -332,10 +370,10 @@ chain:
       version: v2
       build: null
     config_refs:
-      fee_config: sha256:1111111111111111111111111111111111111111111111111111111111111111
-      instrument_snapshot: sha256:4444444444444444444444444444444444444444444444444444444444444444
-      settlement_calendar: sha256:6666666666666666666666666666666666666666666666666666666666666666
-      trading_calendar: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      fee_config: sha256:0396236cc1e5f565e7415b1750a57f683f79b9fd62beea0e14e4ece4e1b150c8
+      instrument_snapshot: sha256:cf6270591242ede18b9cf090a04208a2736865e89b29f90f232f8ae522ce2a64
+      settlement_calendar: sha256:cb48911fbc23629d0b22ba9bfa795402c59633c00e2fa5ff847aeab539b5a59c
+      trading_calendar: sha256:483922b92fb181707c5fd21670b6f70f2f889b4a7ab7199bfaef19093a2b26bb
     payload:
       fill_id: exec-7f3a
       client_order_id: 01J8Z3M1P0000000000000000X-1
@@ -352,15 +390,15 @@ chain:
         status: accrued
     artifact_refs: []
     pii_refs: []
-    prev_hash: 09ed5093652d7bd8f0640469c64b96165f6e4961608ad6b4e9251dac6c82c5a9
-  canonical: '{"actor":{"build":null,"id":"alpaca","kind":"broker","version":"v2"},"artifact_refs":[],"causation_id":"01J8Z3M2S0000000000000000D","clock_source":"broker","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","instrument_snapshot":"sha256:4444444444444444444444444444444444444444444444444444444444444444","settlement_calendar":"sha256:6666666666666666666666666666666666666666666666666666666666666666","trading_calendar":"sha256:7777777777777777777777777777777777777777777777777777777777777777"},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M3T0000000000000000E","event_time":"2026-09-21T14:00:01.250000000Z","event_type":"FillApplied","payload":{"client_order_id":"01J8Z3M1P0000000000000000X-1","fees":[{"amount":"0.0001","asset":"USD","kind":"cat","status":"accrued"}],"fill_id":"exec-7f3a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","price":"150","qty_gross":"10","risk_clock":"2026-09-21T14:00:01.000000000Z","side":"buy","trade_date":"2026-09-21"},"pii_refs":[],"prev_hash":"09ed5093652d7bd8f0640469c64b96165f6e4961608ad6b4e9251dac6c82c5a9","recorded_at":"2026-09-21T14:00:01.251400000Z","schema_version":1,"seq":5,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
-  hash: c5c26f85f626affb5095a5c16496d4595b96a58b44f80cedb289b42f5c41b626
+    prev_hash: 9f18e4ef7d293c6afc1c03dc0272f42a32f172682037a8501d232c0cedd918f8
+  canonical: '{"actor":{"build":null,"id":"alpaca","kind":"broker","version":"v2"},"artifact_refs":[],"causation_id":"01J8Z3M2S0000000000000000D","clock_source":"broker","config_refs":{"fee_config":"sha256:0396236cc1e5f565e7415b1750a57f683f79b9fd62beea0e14e4ece4e1b150c8","instrument_snapshot":"sha256:cf6270591242ede18b9cf090a04208a2736865e89b29f90f232f8ae522ce2a64","settlement_calendar":"sha256:cb48911fbc23629d0b22ba9bfa795402c59633c00e2fa5ff847aeab539b5a59c","trading_calendar":"sha256:483922b92fb181707c5fd21670b6f70f2f889b4a7ab7199bfaef19093a2b26bb"},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M3T0000000000000000E","event_time":"2026-09-21T14:00:01.250000000Z","event_type":"FillApplied","payload":{"client_order_id":"01J8Z3M1P0000000000000000X-1","fees":[{"amount":"0.0001","asset":"USD","kind":"cat","status":"accrued"}],"fill_id":"exec-7f3a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","price":"150","qty_gross":"10","risk_clock":"2026-09-21T14:00:01.000000000Z","side":"buy","trade_date":"2026-09-21"},"pii_refs":[],"prev_hash":"9f18e4ef7d293c6afc1c03dc0272f42a32f172682037a8501d232c0cedd918f8","recorded_at":"2026-09-21T14:00:01.251400000Z","schema_version":1,"seq":5,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+  hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
 export_line_seq_1: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3K9Q0000000000000000A","event_time":"2026-09-21T13:00:00.000000000Z","event_type":"StreamOpened","payload":{"account_ref":"01J8Z2ACCT00000000000000A1","broker":"alpaca","stream_type":"account","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T13:00:00.000120000Z","schema_version":1,"seq":1,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"hash":"01ef3fc029357c2338b64726b8d1baba4710571c82271b0e80731c1a4640113f"}'
 merkle:
   leaves:
   - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
     seq: 5
-    hash: c5c26f85f626affb5095a5c16496d4595b96a58b44f80cedb289b42f5c41b626
+    hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
   - stream_id: agent:ws_01J8Z2:agent_a
     seq: 12
     hash: '8888888888888888888888888888888888888888888888888888888888888888'
@@ -368,11 +406,11 @@ merkle:
     seq: 7
     hash: '9999999999999999999999999999999999999999999999999999999999999999'
   leaf_hashes:
-  - 5224a008e93087832419ecabe8d478757f579b83f26cf7477a865a9ab40fc702
+  - 82090148281236f38f04734ef8120987c0cb45b798b4e6cd8002551f3bdd2405
   - 42042dcb7a4a07c5f4f2a854f3616ccdb6b978bb80c1840296abdb9e6e4db0a3
   - 0003c9675ac0c43101293f562cebe3019c5f7a808d0a819c6b7e5ab95c2fe125
-  root: 3f6f9a53ba70d2a9c1fa9b4f81f9e5319658c40d858dfc88fa18fb7c953802d9
-  tsa_imprint: a137fba7d53e36b88dca9b28f996237ed9d07ab9bda06ff2baaf12a2c7f0a8fc
+  root: 3709e7de749808a46884a6043f6ba8a6185f27ca00f5132a434f86d2746fb6a5
+  tsa_imprint: e026877b42b078a87d49219aa3db2dd967c44fd5c5604c310f531ea20e0561c0
   note: 'leaf = SHA-256(0x00 || canonical(leaf)); node = SHA-256(0x01 || left || right); 3 leaves: root = node(node(l0, l1), l2)'
 tamper_cases:
 - name: payload_modified
@@ -423,7 +461,7 @@ tamper_cases:
 append_cases:
   stream_state:
     head_seq: 5
-    head_hash: c5c26f85f626affb5095a5c16496d4595b96a58b44f80cedb289b42f5c41b626
+    head_hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
     writer_epoch: 1
   cases:
   - name: identical_retry_with_stale_head
@@ -471,7 +509,7 @@ append_cases:
     expect:
       outcome: HeadMismatch
       actual_seq: 5
-      actual_hash: c5c26f85f626affb5095a5c16496d4595b96a58b44f80cedb289b42f5c41b626
+      actual_hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
   - name: fenced_writer
     request:
       expected_head: 5
@@ -490,7 +528,7 @@ append_cases:
     expect:
       outcome: Committed
       seq: 6
-      prev_hash: c5c26f85f626affb5095a5c16496d4595b96a58b44f80cedb289b42f5c41b626
+      prev_hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
   - name: float_rejected
     request:
       expected_head: 5
