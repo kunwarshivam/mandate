@@ -14,8 +14,8 @@ import { Blink, Browser, UnderConstruction, Window } from "./retro";
 import { SiteFooter } from "./site-footer";
 
 export const HEADLINE = "Owlhead";
-export const SUBHEAD = "A trading agent for your own brokerage account. It works inside rules you write, and it writes down every decision it makes.";
-export const UPDATED = "30 September 2026";
+export const SUBHEAD = "A trading agent for your own brokerage account. It does the reading and the watching, trades only inside rules you write, and writes down why it placed every order.";
+export const UPDATED = "5 October 2026";
 
 type Section = { id: string; title: string; body: ReactNode };
 
@@ -28,7 +28,7 @@ export const SECTIONS: Section[] = [
     body: (
       <>
         <p>
-          Owlhead is a trading agent that runs in your own brokerage account. It reads filings, news and prices, comes up with its own trade ideas, places the orders, and looks after each position until it closes.
+          Owlhead is a trading agent that works in your own brokerage account. It reads filings, news and prices, comes up with its own trade ideas, places the orders, and looks after each position until it closes.
         </p>
         <p>It works inside rules you write in plain English, which we call your mandate. It can&apos;t change those rules, and it can&apos;t take money out of your account.</p>
       </>
@@ -47,7 +47,7 @@ export const SECTIONS: Section[] = [
           We want a third option. The agent does the reading and the watching. You decide how much it can spend, what it can buy and when it has to ask you. Every decision is written down before it acts, so you can always see
           why an order went out and who said yes.
         </p>
-        <p>Agents are going to handle more and more of people&apos;s money. We think the people whose money it is should stay in charge of them.</p>
+        <p>Agents are going to handle more and more of people&apos;s money. We think the people whose money it is should stay in charge of the agents.</p>
       </>
     ),
   },
@@ -64,10 +64,12 @@ export const SECTIONS: Section[] = [
           <strong className={B}>It looks for ideas.</strong> It writes each one down with its reason and what would prove it wrong.
         </li>
         <li>
-          <strong className={B}>It places orders.</strong> Every order is sized and checked against your rules before it&apos;s sent. If your rules say to ask, the order waits on your phone until you approve it.
+          <strong className={B}>It places orders.</strong> Every order is sized and checked against your rules before it&apos;s sent. If your rules say to ask, the order waits on your phone for you. If you don&apos;t
+          answer in time, it&apos;s skipped.
         </li>
         <li>
-          <strong className={B}>It looks after the position.</strong> Every trade has an exit plan from the start: a stop, a target and a time limit.
+          <strong className={B}>It looks after the position.</strong> Each idea comes with a time limit and the signs that would prove it wrong. Unless you turn protection off, each position also gets a stop that rests at your
+          broker.
         </li>
       </ol>
     ),
@@ -77,23 +79,23 @@ export const SECTIONS: Section[] = [
     title: "How it stays in check",
     body: (
       <>
-        <p>An agent that trades on its own should earn trust a step at a time. Every idea takes the same path to real money:</p>
+        <p>An agent that trades on its own should earn trust a step at a time. Every agent takes the same path to real money:</p>
         <ol className="grid list-decimal gap-3 ps-6">
           <li>
-            <strong className={B}>Backtest.</strong> It runs on past prices first. Orders that would break your limits are blocked there too.
+            <strong className={B}>Backtest.</strong> Your rules run on past prices first, to check that orders are sized right and that anything breaking your limits is blocked.
           </li>
           <li>
-            <strong className={B}>Paper.</strong> Then it trades with simulated money, and every trade is scored. An idea gets three tries, then it&apos;s retired.
+            <strong className={B}>Paper.</strong> Then it trades with simulated money, and each idea is scored when its time is up. An idea that keeps failing is retired.
           </li>
           <li>
-            <strong className={B}>Live.</strong> Real money only when you switch it on, with your passkey.
+            <strong className={B}>Live.</strong> Real money only after both, and only when you switch it on, with your passkey.
           </li>
         </ol>
         <p>And while it trades:</p>
         <ul className="grid list-disc gap-3 ps-6">
           <li>As losses reach levels you set, it trades smaller, then only sells, then closes out and pauses.</li>
           <li>Orders above a size you choose wait for your approval, or a second person&apos;s.</li>
-          <li>One Stop button halts every agent and cancels their open orders.</li>
+          <li>Stop is on every screen. Pause one agent, or stop them all: each one cancels its orders, sells what it holds and ends.</li>
           <li>If market data goes stale, or Owlhead&apos;s records and your broker&apos;s disagree, it stops adding risk and waits for you.</li>
         </ul>
         <ModeChart />
@@ -111,10 +113,10 @@ export const SECTIONS: Section[] = [
       <>
       <dl className="grid gap-4">
         {[
-          ["You trade your own account.", "The agent does the watching, and asks you only what you've told it to."],
+          ["You trade your own account.", "The agent does the watching, and asks you only when your rules say to."],
           ["You manage money for others.", "Require a second sign-off above a size you choose. When an investor asks why a trade happened, send them the record."],
-          ["You run a desk.", "Set firm limits that each team can tighten but never loosen. Run it in your own cloud, so strategy and keys stay with you."],
-          ["You've built your own agent.", "Connect it through Owlhead's MCP server. Its orders get the same checks, approvals and record, and it can't approve itself."],
+          ["You run a desk.", "Set firm limits that each team can tighten but never loosen, and run Owlhead in your own cloud, so strategy and keys stay with you. Both are coming during the beta."],
+          ["You've built your own agent.", "Connect it through Owlhead's MCP server, coming during the beta. Its orders get the same checks, approvals and record, and it can't approve itself."],
         ].map(([who, what]) => (
           <div key={who}>
             <dt className={B}>{who}</dt>
@@ -148,11 +150,12 @@ export const SECTIONS: Section[] = [
           <li>Writing your rules, and checking every order against them</li>
           <li>Paper trading on Alpaca, with simulated money</li>
           <li>Approvals on your phone, and the Stop button</li>
-          <li>The record</li>
+          <li>The record of every decision</li>
         </ul>
         <UnderConstruction />
         <p className={B}>Coming during the beta:</p>
         <ul className="grid list-disc gap-1.5 ps-6">
+          <li>Agents that bring their own trade ideas. We&apos;re scoring the ideas on our own paper account first</li>
           <li>Live trading, once it has legal sign-off</li>
           <li>More brokers, starting with Robinhood and Kraken Derivatives US</li>
           <li>Firm and team limits, and running Owlhead in your own cloud</li>
@@ -214,14 +217,14 @@ export function Landing() {
               <span className={cn(RAISED, "bg-highlight px-1.5 text-sm tracking-wide text-highlight-foreground uppercase", PIXEL)}>
                 <Blink>New</Blink>
               </span>
-              <span>Private beta, opening a few people at a time.</span>
+              <span>Private beta, opening a few people at a time. Sign the guestbook to ask for a place.</span>
             </p>
             <p className="flex flex-wrap items-center justify-center gap-2" data-slot="hero-actions">
               <OpenApp app="guestbook" className={BUTTON}>
                 Sign the guestbook
               </OpenApp>
               <OpenApp app="record" className={BUTTON}>
-                See the record
+                See why it traded
               </OpenApp>
               <Link href="/login" className={cn(PLAIN_BUTTON, "h-9")}>
                 Sign in

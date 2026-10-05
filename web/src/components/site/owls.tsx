@@ -2,15 +2,7 @@ import { BrandOwl } from "@/components/brand/brand-owl";
 import { Owl, type OwlMood } from "@/components/domain/owl";
 import { cn } from "@/lib/utils";
 import { PIXEL, SUNKEN } from "./letter";
-
-/** Sample agents for the landing page's owls; each ID draws its own face. */
-const PERCH: Array<{ seed: string; mood: OwlMood }> = [
-  { seed: "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", mood: "awake" },
-  { seed: "agt_01JB3K9P2H6SD4F8G1E3W7XYZB", mood: "awake" },
-  { seed: "agt_01JB3KH9ZT1W3E5R7Y2U4I6O8P", mood: "asleep" },
-  { seed: "agt_01JB3KAQ5R8TV2N4M6P9S1W3XD", mood: "awake" },
-  { seed: "agt_01JB3KD7XC2M9QW4E6R8T0Y1ZN", mood: "awake" },
-];
+import { PERCH } from "./perch";
 
 /** A row of agents on a branch, under the headline. Their open eyes follow the pointer. */
 export function Perch() {
@@ -30,7 +22,7 @@ const MODES: Array<{ mood: OwlMood; name: string; means: string }> = [
   { mood: "awake", name: "Trading", means: "Inside your rules" },
   { mood: "focused", name: "Only selling", means: "Closing, not opening" },
   { mood: "asleep", name: "Paused", means: "Waiting for you" },
-  { mood: "stopped", name: "Stopped", means: "Orders canceled" },
+  { mood: "stopped", name: "Stopped", means: "Ended for good" },
 ];
 
 /** Each agent is an owl, and its eyes show what it may do right now. */

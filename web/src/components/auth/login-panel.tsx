@@ -6,7 +6,8 @@ import { CircleNotch, EnvelopeSimple, Fingerprint, GoogleLogo } from "@phosphor-
 import { CALLBACK_PATH } from "@/lib/auth-routes";
 import { EMAIL_SENT, SIGN_IN_FAILED, SIGN_IN_PASSKEY_COPY, UNREACHABLE, isNetworkFailure, passkeyProblem, webAuthnSupported } from "@/lib/auth-errors";
 import { type BrowserClient, createClient } from "@/lib/supabase/client";
-import { LOGON_FIELD, LOGON_HEADING, LOGON_LINK, LOGON_NOTICE, LOGON_PRIMARY, LOGON_SECONDARY } from "./logon-styles";
+import { LOGON_FIELD, LOGON_LINK, LOGON_NOTICE, LOGON_PRIMARY, LOGON_SECONDARY } from "./logon-styles";
+import { LogonHeading } from "./logon-heading";
 
 export type LoginAuth = Pick<BrowserClient["auth"], "signInWithOAuth" | "signInWithPasskey" | "signInWithOtp">;
 
@@ -47,9 +48,9 @@ export function LoginPanel({ next, failed, enabled, emailEnabled, auth, navigate
   if (!enabled) {
     return (
       <section aria-labelledby="login-title" className="grid gap-5" data-slot="login">
-        <h1 id="login-title" className={LOGON_HEADING}>
+        <LogonHeading id="login-title">
           Sign in
-        </h1>
+        </LogonHeading>
         <p className={LOGON_NOTICE}>Sign-in is off in this build. It runs on fixture data and opens without an account.</p>
         <Link href="/" className={LOGON_PRIMARY}>
           Open Owlhead
@@ -108,9 +109,9 @@ export function LoginPanel({ next, failed, enabled, emailEnabled, auth, navigate
   return (
     <section aria-labelledby="login-title" aria-busy={busy} className="grid gap-5" data-slot="login">
       <div className="grid gap-2">
-        <h1 id="login-title" className={LOGON_HEADING}>
+        <LogonHeading id="login-title">
           Sign in
-        </h1>
+        </LogonHeading>
         <p className="text-pretty">New to Owlhead? Continue with Google to create your account. After that, a passkey signs you in.</p>
       </div>
 

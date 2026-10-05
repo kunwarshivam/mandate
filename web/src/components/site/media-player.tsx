@@ -18,7 +18,7 @@ export function MediaPlayer() {
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 px-0.5 text-[0.875rem]">
         <span>
-          Tour.mp4 · {Math.floor(TOUR_SECONDS / 60)}:{String(TOUR_SECONDS % 60).padStart(2, "0")} · music: Scott Joplin, Maple Leaf Rag, 1916
+          Tour.mp4 · {Math.floor(TOUR_SECONDS / 60)}:{String(TOUR_SECONDS % 60).padStart(2, "0")} · music: an original chiptune, made for the tour
         </span>
         <button type="button" aria-expanded={transcript} onClick={() => setTranscript((v) => !v)} className={PLAIN_BUTTON}>
           {transcript ? "Hide transcript" : "Transcript"}

@@ -19,9 +19,11 @@ test("/ shows the welcome page and keeps the address /", async ({ page, baseURL 
 test("a signed-out visitor can ask for a place in the private beta", async ({ page }) => {
   await page.route("**/api/beta", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }));
   await page.goto("/");
-  await page.getByLabel("Email address:").fill("someone@example.com");
-  await page.getByRole("button", { name: "Sign the guestbook" }).click();
-  await expect(page.locator("[data-slot=beta-done]")).toContainText("You're on the list.");
+  await page.locator("[data-slot=hero-actions]").getByRole("button", { name: "Sign the guestbook" }).click();
+  const guestbook = page.getByRole("region", { name: "guestbook.cgi" });
+  await guestbook.getByLabel("Email address:").fill("someone@example.com");
+  await guestbook.getByRole("button", { name: "Sign the guestbook" }).click();
+  await expect(guestbook.locator("[data-slot=beta-done]")).toContainText("You're on the list.");
 });
 
 test("the private beta's request address is open to a signed-out visitor", async ({ request }) => {
@@ -109,3 +111,26 @@ test("a failed callback comes back to sign in with one generic message", async (
   await expect(page.locator("[data-slot=login-message]")).toHaveText("That sign-in didn’t finish. Nothing changed; try again.");
   await expect(page.getByText(/not found/i)).toHaveCount(0);
 });
+
+for (const width of [390, 1440]) {
+  test(`${width} px: the logon window's heading, text, buttons, field and notices share one left edge`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await stubSupabase(page, { "/otp": { status: 200, body: {} } });
+    await page.goto("/login");
+    const panel = page.locator("[data-slot=login]");
+    const edges = async () =>
+      panel.evaluate((root) => {
+        const left = (el: Element | null) => (el ? Math.round(el.getBoundingClientRect().left) : null);
+        const parts = [root.querySelector("h1 svg"), root.querySelector("h1 + p"), ...root.querySelectorAll(":scope > div > button"), root.querySelector("[data-slot=login-email]"), root.querySelector("#login-email"), root.querySelector("[data-slot=login-email] [role=status]")];
+        return parts.filter(Boolean).map(left);
+      });
+    const before = await edges();
+    expect(before.length, "the key, the line under the heading, both buttons, the rule and the field").toBe(6);
+    expect(new Set(before).size, `left edges ${before.join(", ")}`).toBe(1);
+    await page.getByRole("textbox", { name: "Or get a sign-in link by email" }).fill("someone@example.com");
+    await page.getByRole("button", { name: "Email me a link" }).click();
+    await expect(panel.locator("[data-slot=login-email]").getByRole("status")).toBeVisible();
+    const after = await edges();
+    expect(new Set(after).size, `left edges once the link is sent: ${after.join(", ")}`).toBe(1);
+  });
+}

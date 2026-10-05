@@ -114,7 +114,7 @@ describe("the landing page's structure", () => {
     for (const id of ["record", "questions", "beta"]) expect(document.getElementById(id), id).toBeNull();
     expect(page.querySelector("[data-slot=record-trace], [data-slot=beta-form], table, form")).toBeNull();
     for (const { q } of QUESTIONS) expect(page).not.toHaveTextContent(q);
-    expect(page).not.toHaveTextContent("Try editing a line.");
+    expect(page).not.toHaveTextContent("Here is one decision from start to finish.");
   });
 
   it("links within the page only to ids that exist", () => {
@@ -138,6 +138,8 @@ describe("the landing page's structure", () => {
     const buttons = within(tools).getAllByRole("button");
     expect(buttons.map((b) => b.textContent)).toEqual(["Back", "Forward", "Home", "Reload", "Images", "Open", "Print", "Find", "Stop"]);
     expect(buttons.filter((b) => !(b as HTMLButtonElement).disabled).map((b) => b.textContent)).toEqual(["Home", "Reload"]);
+    expect(within(tools).getByRole("button", { name: "Stop loading" })).toBeDisabled();
+    expect(within(tools).queryByRole("button", { name: "Stop" })).toBeNull();
     for (const b of buttons) expect(b, b.textContent ?? "").toHaveAttribute("tabindex", "-1");
     const root = document.querySelector<HTMLElement>("[data-scroll-root]")!;
     const scrollTo = vi.fn();
@@ -265,11 +267,11 @@ describe("links", () => {
     }
   });
 
-  it("puts See the record beside Sign the guestbook in the hero, and it opens the record's window", async () => {
+  it("puts See why it traded beside Sign the guestbook in the hero, and it opens the record's window", async () => {
     renderLanding();
     const hero = document.querySelector<HTMLElement>("[data-slot=hero-actions]")!;
-    expect(within(hero).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sign the guestbook", "See the record"]);
-    const see = within(hero).getByRole("button", { name: "See the record" });
+    expect(within(hero).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sign the guestbook", "See why it traded"]);
+    const see = within(hero).getByRole("button", { name: "See why it traded" });
     expect(see.className).toBe(within(hero).getByRole("button", { name: "Sign the guestbook" }).className);
     expect(screen.queryByRole("region", { name: RECORD })).toBeNull();
     await press(see);
@@ -368,7 +370,8 @@ describe("the desktop", () => {
     await press(icon("The record"));
     const record = win(RECORD);
     expect(record).toHaveAttribute("data-front", "true");
-    expect(record).toHaveTextContent("Here is one decision from start to finish. Try editing a line.");
+    expect(within(record).getByRole("heading", { name: "Why did it buy that?" })).toBeInTheDocument();
+    expect(record).toHaveTextContent("Here is one decision from start to finish.");
     expect(record.querySelector("[data-slot=record-trace]")).not.toBeNull();
     expect(within(record).getByRole("button", { name: `Edit line ${EDITED.index + 1}` })).toBeInTheDocument();
     expect(within(screen.getByRole("list", { name: "Open windows" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["Owlhead", "The record"]);
@@ -577,11 +580,12 @@ describe("the record", () => {
     return win(RECORD);
   }
 
-  it("shows one decision, every line with its hash, and a chain that matches", async () => {
+  it("shows one decision step by step, with no seal column until a line is edited, and a chain that matches", async () => {
     const record = await openRecord();
     const table = within(record).getByRole("table");
     expect(within(table).getAllByRole("row")).toHaveLength(TRACE.length + 1);
-    for (const e of TRACE) expect(within(table).getByText(e.hash)).toBeInTheDocument();
+    for (const e of TRACE) expect(within(table).getByText(e.text)).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "Seal" })).toBeNull();
     expect(within(record).getByText(/all 8 lines match/)).toBeInTheDocument();
   });
 
@@ -590,9 +594,13 @@ describe("the record", () => {
     fireEvent.click(within(record).getByRole("button", { name: `Edit line ${EDITED.index + 1}` }));
     expect(within(record).getByText(EDITED.text)).toBeInTheDocument();
     expect(within(record).getByText(/fails at line 3\. Lines 3 to 8 no longer match/)).toBeInTheDocument();
+    expect(within(record).getByRole("columnheader", { name: "Seal" })).toBeInTheDocument();
+    expect(within(record).getAllByText("matches")).toHaveLength(EDITED.index);
+    expect(within(record).getAllByText("edited")).toHaveLength(1);
     expect(within(record).getAllByText("no match")).toHaveLength(TRACE.length - EDITED.index - 1);
     fireEvent.click(within(record).getByRole("button", { name: "Undo the edit" }));
     expect(within(record).queryByText(EDITED.text)).toBeNull();
+    expect(within(record).queryByRole("columnheader", { name: "Seal" })).toBeNull();
     expect(within(record).getByText(/all 8 lines match/)).toBeInTheDocument();
   });
 });
@@ -630,6 +638,24 @@ describe("the copy", () => {
     expect(text).toContain("Paper trading on Alpaca, with simulated money");
     expect(text).toContain("Live trading, once it has legal sign-off");
     expect(text).not.toMatch(/\bwaitlist\b|coming soon|launching/i);
+  });
+
+  it("says what Stop does to what the agents hold, and that an unanswered request is skipped", () => {
+    const { container } = renderLanding();
+    const text = readable(container);
+    expect(text).toContain("each one cancels its orders, sells what it holds and ends");
+    expect(text).toContain("If you don't answer in time, it's skipped.");
+    expect(QUESTIONS.find((q) => q.q === "How do I stop it?")?.a).toContain("sells what it holds");
+    expect(QUESTIONS.find((q) => q.q === "What if I miss a request?")?.a).toMatch(/^Nothing is sent\./);
+  });
+
+  it("marks what is not built yet as coming, wherever the page names it", () => {
+    const { container } = renderLanding();
+    const text = readable(container);
+    expect(text).toContain("in your own cloud, so strategy and keys stay with you. Both are coming during the beta.");
+    expect(text).toContain("MCP server, coming during the beta.");
+    expect(text).toContain("Agents that bring their own trade ideas.");
+    expect(text).not.toMatch(/three tries|a stop, a target and a time limit/);
   });
 
   it("says losses can pass a limit", () => {
