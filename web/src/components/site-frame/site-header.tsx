@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { OwlheadLockup } from "@/components/brand/Logo";
+import { BrandLockup } from "@/components/brand/brand-owl";
 import { SiteAction } from "./site-action";
 
 /**
@@ -15,9 +15,8 @@ export function SiteHeader({ signedIn }: { signedIn: boolean }) {
           href="/"
           aria-label="Owlhead"
           className="inline-flex min-h-11 shrink-0 items-center px-1 outline-none focus-visible:ring-3 focus-visible:ring-ring"
-          style={{ color: "var(--logo)" }}
         >
-          <OwlheadLockup title="" className="h-7 w-auto" />
+          <BrandLockup />
         </Link>
         <SiteAction signedIn={signedIn} />
       </div>

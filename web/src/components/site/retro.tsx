@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 import { ArrowClockwise, ArrowLeft, ArrowRight, FolderOpen, HandPalm, House, Image as ImageIcon, Key, MagnifyingGlass, Printer } from "@phosphor-icons/react/ssr";
-import { OwlheadMark } from "@/components/brand/Logo";
+import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
 import { MONO, PIXEL, PLAIN_BUTTON, RAISED, SUNKEN } from "./letter";
 import styles from "./letter.module.css";
@@ -105,7 +105,7 @@ export function Browser({ address, children }: { address: string; children: Reac
             ))}
           </div>
           <span aria-hidden className={cn(SUNKEN, "grid w-14 shrink-0 place-items-center bg-foreground text-highlight")}>
-            <OwlheadMark title="" className="size-9" />
+            <BrandOwl className="size-8" />
           </span>
         </div>
 

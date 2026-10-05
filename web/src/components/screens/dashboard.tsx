@@ -7,7 +7,8 @@ import { Deadline } from "@/components/approvals/deadline";
 import { AccountEquityChart } from "@/components/charts/equity-chart";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
 import { ModeBadge } from "@/components/domain/mode";
-import { AgentOwl, Owl } from "@/components/domain/owl";
+import { BrandOwl } from "@/components/brand/brand-owl";
+import { AgentOwl } from "@/components/domain/owl";
 import type { Agent, Approval, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { alertLines } from "@/lib/attention";
@@ -136,7 +137,7 @@ function NeedsYou({ ws, open, className }: { ws: Workspace; open: Approval[]; cl
       </h2>
       {count === 0 ? (
         <p data-slot="all-clear" className="flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
-          <Owl seed="owlhead" mood="awake" className="size-8" />
+          <BrandOwl className="size-8" />
           All clear. Nothing needs you.
         </p>
       ) : (

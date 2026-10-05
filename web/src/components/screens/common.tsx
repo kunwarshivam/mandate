@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { ArrowRight, Plugs } from "@phosphor-icons/react";
-import { Owl } from "@/components/domain/owl";
+import { BrandOwl } from "@/components/brand/brand-owl";
 import { Skeleton } from "@/components/domain/skeleton";
 import { clock } from "@/lib/format";
 import { useRuntime } from "@/lib/mock-runtime";
@@ -49,7 +49,7 @@ export function Panel({ children, className, well = false }: { children: ReactNo
 export function EmptyBoard() {
   return (
     <section data-slot="empty" aria-labelledby="empty-title" className="reveal grid max-w-xl content-start gap-5 pt-6 sm:pt-12">
-      <Owl seed="owlhead" mood="awake" className="size-20" />
+      <BrandOwl className="size-20" />
       <h1 id="empty-title" className="text-h1">
         No agents yet
       </h1>

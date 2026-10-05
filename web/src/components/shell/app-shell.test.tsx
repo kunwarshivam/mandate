@@ -76,16 +76,18 @@ describe("status strip", () => {
 });
 
 describe("Owlhead", () => {
-  it("names the product Owlhead in the header, with the founder's mark below lg and the lockup from lg", () => {
+  it("names the product Owlhead in the header, with the brand owl at every width and the wordmark from lg (DEC-452)", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const [header] = screen.getAllByRole("banner");
     const home = within(header).getByRole("link", { name: "Owlhead, dashboard" });
-    const mark = home.querySelector("[data-slot=owlhead-mark]");
-    const lockup = home.querySelector("[data-slot=owlhead-lockup]");
-    expect(mark).toHaveAttribute("aria-hidden", "true");
-    expect(mark).toHaveClass("lg:hidden");
-    expect(lockup).toHaveAttribute("aria-hidden", "true");
-    expect(lockup).toHaveClass("hidden", "lg:block");
+    const owl = home.querySelector("[data-slot=brand-owl] svg[data-slot=owl]");
+    const wordmark = home.querySelector("[data-slot=owlhead-wordmark]");
+    expect(owl).toHaveAttribute("aria-hidden", "true");
+    expect(owl).toHaveAttribute("data-mood", "awake");
+    expect(owl?.querySelector("rect[fill='var(--brand-owl)']")).not.toBeNull();
+    expect(wordmark).toHaveAttribute("aria-hidden", "true");
+    expect(wordmark).toHaveClass("hidden", "lg:block");
+    expect(home.querySelector("[data-slot=owlhead-mark], [data-slot=owlhead-lockup]")).toBeNull();
     expect(document.body.textContent).not.toMatch(/\bMandate\b/);
   });
 
@@ -97,7 +99,9 @@ describe("Owlhead", () => {
 
   it("sets the brand in the logo colour, never on a block of colour", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    for (const brand of document.querySelectorAll<HTMLElement>("[data-slot=owlhead-mark], [data-slot=owlhead-lockup]")) {
+    const brands = document.querySelectorAll<HTMLElement>("[data-slot=brand-lockup]");
+    expect(brands.length).toBeGreaterThan(0);
+    for (const brand of brands) {
       expect(brand.closest<HTMLElement>("[style]")?.style.color).toBe("var(--logo)");
       expect(brand.closest("[data-surface]")).toBeNull();
     }

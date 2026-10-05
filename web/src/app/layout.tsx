@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import "@fontsource-variable/public-sans";
 import "./globals.css";
 import { NIGHT, OFF_WHITE } from "@/lib/brand-palette";
+import { BRAND_OWL_SCRIPT } from "@/lib/brand-owl";
 import { getColourBlind, getThemePref } from "@/lib/get-workspace";
 import { THEME_SCRIPT } from "@/lib/theme";
 
@@ -63,6 +64,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: BRAND_OWL_SCRIPT }} />
       </head>
       <body>
         <div className="isolate">{children}</div>

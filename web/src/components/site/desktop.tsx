@@ -4,8 +4,7 @@ import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRe
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { OwlheadMark } from "@/components/brand/Logo";
-import { Owl } from "@/components/domain/owl";
+import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
 import { DISCARDED, Notepad, PictureViewer, RecycleBin } from "./apps";
 import { Assistant } from "./assistant";
@@ -92,7 +91,7 @@ const APPS: Record<AppId, App> = {
   home: {
     title: "Owlhead Home Page",
     task: "Owlhead",
-    icon: <OwlheadMark title="" className="size-4 shrink-0" />,
+    icon: <BrandOwl className="size-4" />,
     frame: "sm:inset-y-3 sm:mx-auto sm:w-[min(66rem,calc(100%-15rem))]",
     offset: { x: 0, y: 0 },
   },
@@ -139,7 +138,7 @@ type Shortcut = { id: string; label: string; icon: ReactNode; right?: true } & (
 const sprite = (s: Sprite) => <PixelIcon sprite={s} />;
 
 const SHORTCUTS: Shortcut[] = [
-  { id: "owlhead", label: "Owlhead", icon: <Owl seed="owlhead" mood="awake" className="size-8" />, app: "home" },
+  { id: "owlhead", label: "Owlhead", icon: <BrandOwl className="size-8" />, app: "home" },
   { id: "guestbook", label: "Guestbook", icon: sprite(BOOK), app: "home", hash: "beta" },
   { id: "record", label: "The record", icon: sprite(LEDGER), app: "home", hash: "record" },
   { id: "questions", label: "Questions", icon: sprite(HELP), app: "home", hash: "questions" },
@@ -515,7 +514,7 @@ export function Desktop({ home }: { home: ReactNode }) {
             onClick={() => setStart((v) => !v)}
             className={cn(start ? SUNKEN : RAISED, "flex h-8 shrink-0 cursor-pointer items-center gap-1.5 bg-muted px-2 text-[0.9375rem] outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground")}
           >
-            <OwlheadMark title="" className="size-5" />
+            <BrandOwl className="size-4" />
             Start
           </button>
           {start && (
@@ -526,7 +525,7 @@ export function Desktop({ home }: { home: ReactNode }) {
                 </span>
               </span>
               <ul className="grid min-w-56 py-1">
-                {[{ id: "home", label: "Owlhead Home Page", icon: <OwlheadMark title="" className="size-6" />, app: "home" as const }, ...SHORTCUTS.slice(1)].map((s) => (
+                {[{ id: "home", label: "Owlhead Home Page", icon: <BrandOwl className="size-6" />, app: "home" as const }, ...SHORTCUTS.slice(1)].map((s) => (
                   <li key={s.id} className={cn(s.id === "signin" && "mt-1 border-t border-t-foreground/40 pt-1")}>
                     <ShortcutItem s={s} onOpen={launch} role="menuitem" className={MENU_ITEM}>
                       <span className="grid size-6 place-items-center [&>svg]:size-6">{iconFor(s)}</span>
