@@ -221,7 +221,7 @@ describe("figures with a plain zero", () => {
       .sort();
     expect(importers, "DEC-469: the landing page and the sign-in pages' logon window").toEqual(["src/components/site/landing.tsx", "src/components/site/logon.tsx"]);
     const root = readFileSync(resolve(process.cwd(), "src/app/layout.tsx"), "utf8");
-    expect(root, "DEC-452: the bevelled buttons' face, loaded beside Public Sans and before globals.css").toMatch(
+    expect(root, "DEC-452: the pixel-face titles' face, loaded beside Public Sans and before globals.css").toMatch(
       /import "@fontsource-variable\/pixelify-sans";\nimport "\.\/globals\.css";/,
     );
     expect(root).not.toMatch(/dotgothic|vt323/i);

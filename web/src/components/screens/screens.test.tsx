@@ -292,7 +292,7 @@ describe("D5 inbox and D6 request", () => {
       expect(b.className).not.toMatch(/bg-\[|shadow-(?!none)/);
     }
     const stop = within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name: "Stop" });
-    expect(stop.className + stop.innerHTML).not.toMatch(/pixel-face|border-t-card/);
+    expect(stop.className + stop.innerHTML, "DEC-469: Stop keeps its own shape, never the key").not.toMatch(/pixel-face|border-t-card|border-b-\[3px\]/);
   });
 
   it("states the default, the trigger, the risk in dollars, and the score's meaning", () => {
