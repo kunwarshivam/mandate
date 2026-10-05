@@ -1,6 +1,7 @@
-# Per-PR checks (ADR-0001 ES-12, DEC-75, DEC-76). Two required checks, `fast` and `full`, so the
-# setup cost is paid twice rather than once per check. Each is one `cargo xtask ci <job>`; run
-# `cargo xtask check` locally for the same set. main itself is covered by the nightly workflow.
+# Per-PR checks (ADR-0001 ES-12, DEC-75, DEC-76, DEC-464). The required checks remain `fast` and
+# `full`. The latter is a quick aggregate over the non-mutation full checks and every deterministic
+# mutation shard. Run `cargo xtask check` locally for the same complete set, unsharded. main itself
+# is covered by the nightly workflow.
 # A documentation-only change takes the short path in both jobs (DEC-112): no toolchain, just
 # typos, the spec guard, and the trailer check (`.github/scripts/docs-checks.sh`). So does a change
 # that touches only documentation and `web/`, whose checks run in `web.yml` (DEC-200).
@@ -85,11 +86,9 @@ jobs:
       - run: cargo xtask ci fast
         if: steps.change.outputs.docs_only != 'true'
 
-  full:
+  full-checks:
     runs-on: ubuntu-24.04
-    # 61 mutants on one PR's diff did not finish in 30 minutes (DEC-398); the cap must clear the
-    # mutation run, not cancel it.
-    timeout-minutes: 60
+    timeout-minutes: 10
     permissions:
       contents: read
     env:
@@ -132,6 +131,41 @@ jobs:
           curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
           tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
+      - run: cargo xtask ci full
+        if: steps.change.outputs.docs_only != 'true'
+
+  mutants:
+    name: mutants (${{ matrix.shard }}/12)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    env:
+      MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
+      - name: No changed safety-critical source
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; no mutation shard has source to test (DEC-112)"
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          tool: cargo-nextest@0.9.146
       - name: Install cargo-mutants (checksum-verified)
         if: steps.change.outputs.docs_only != 'true'
         run: |
@@ -143,5 +177,20 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: steps.change.outputs.docs_only != 'true'
-      - run: cargo xtask ci full
+      - run: cargo xtask ci mutants
         if: steps.change.outputs.docs_only != 'true'
+
+  full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    permissions: {}
+    if: always()
+    needs: [full-checks, mutants]
+    steps:
+      - name: Require every full check and mutation shard
+        env:
+          FULL_CHECKS_RESULT: ${{ needs.full-checks.result }}
+          MUTANTS_RESULT: ${{ needs.mutants.result }}
+        run: |
+          test "$FULL_CHECKS_RESULT" = success
+          test "$MUTANTS_RESULT" = success
