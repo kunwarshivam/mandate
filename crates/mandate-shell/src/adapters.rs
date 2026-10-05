@@ -40,15 +40,17 @@ use mandate_executor::{
     InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView, Order as ExecutorOrder,
     Ports, Seq, WorkspaceId, WriterEpoch, fold, is_protected, paper_only_fee_config,
 };
-use mandate_journal::{AppendOutcome, StoredEvent};
+use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
+use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
 use mandate_marketdata::model::{Kind, Records, TimeUnit, Timeframe};
 use mandate_num::{Bps, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
 use mandate_risk::{Decision, FlattenInitiator, FlattenInput, agent_flatten};
 use mandate_runtime::{
-    AgentId, Autonomy, FlattenLeg, FlattenPlan, FlattenRequest, Initiator, IntentHandoff,
-    MandateView, Proposal, Purpose, RiskClock, SignalInputs,
+    AgentId, Autonomy, FlattenLeg, FlattenPlan, FlattenRequest, Initiator, IntentBody,
+    IntentHandoff, MandateView, OrderExecution, Proposal, Purpose, RiskClock, SignalInputs,
+    TimeInForce,
 };
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
@@ -938,18 +940,85 @@ impl Gate for RiskGate {
 /// The journal store: `mandate_journal::MemoryJournal` for CI and a scratch run,
 /// `mandate-journal-pg` at the DSN for the manual paper run.
 pub struct StoreJournal {
-    pub dsn: Option<String>,
+    backend: StoreBackend,
+    recorded_at: UtcNanos,
+}
+
+enum StoreBackend {
+    Memory(MemoryJournal),
+    Postgres {
+        journal: PgJournal,
+        runtime: tokio::runtime::Runtime,
+    },
+    Unavailable,
+}
+
+impl StoreJournal {
+    /// A scratch journal sealed with the injected clock value.
+    pub fn memory(recorded_at: UtcNanos) -> Self {
+        Self {
+            backend: StoreBackend::Memory(MemoryJournal::new()),
+            recorded_at,
+        }
+    }
+
+    /// A DSN selects Postgres and never falls back to volatile memory.
+    pub fn from_dsn(dsn: Option<String>, recorded_at: UtcNanos) -> Self {
+        let backend = match dsn {
+            None => StoreBackend::Memory(MemoryJournal::new()),
+            Some(dsn) => match PgJournal::from_dsn(&dsn) {
+                Ok(journal) => match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => StoreBackend::Postgres { journal, runtime },
+                    Err(_) => StoreBackend::Unavailable,
+                },
+                Err(_) => StoreBackend::Unavailable,
+            },
+        };
+        Self {
+            backend,
+            recorded_at,
+        }
+    }
+
+    fn stream(stream: &str) -> Result<StreamId, Cause> {
+        StreamId::parse(stream).ok_or(Cause::Absent {
+            what: "a valid journal stream id",
+        })
+    }
 }
 
 impl JournalWriter for StoreJournal {
     fn take_ownership(&mut self, stream: &str) -> Result<u64, Cause> {
-        let _ = stream;
-        Err(Cause::Unimplemented { story: "E7-7" })
+        let stream = Self::stream(stream)?;
+        match &mut self.backend {
+            StoreBackend::Memory(journal) => Ok(journal.take_ownership(&stream)),
+            StoreBackend::Postgres { journal, runtime } => runtime
+                .block_on(journal.take_ownership(&stream))
+                .map_err(|_| Cause::Absent {
+                    what: "the durable journal",
+                }),
+            StoreBackend::Unavailable => Err(Cause::Absent {
+                what: "the durable journal",
+            }),
+        }
     }
 
     fn read(&self, stream: &str) -> Result<Vec<StoredEvent>, Cause> {
-        let _ = stream;
-        Err(Cause::Unimplemented { story: "E7-7" })
+        let stream = Self::stream(stream)?;
+        match &self.backend {
+            StoreBackend::Memory(journal) => Ok(journal.rows(&stream).to_vec()),
+            StoreBackend::Postgres { journal, runtime } => runtime
+                .block_on(journal.rows(&stream))
+                .map_err(|_| Cause::Absent {
+                    what: "the durable journal",
+                }),
+            StoreBackend::Unavailable => Err(Cause::Absent {
+                what: "the durable journal",
+            }),
+        }
     }
 
     fn append(
@@ -959,8 +1028,32 @@ impl JournalWriter for StoreJournal {
         writer_epoch: u64,
         drafts: &[Vec<u8>],
     ) -> AppendOutcome {
-        let _ = (stream, expected_head, writer_epoch, drafts);
-        AppendOutcome::Unavailable
+        let Ok(stream) = Self::stream(stream) else {
+            return AppendOutcome::Unavailable;
+        };
+        let drafts: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
+        match &mut self.backend {
+            StoreBackend::Memory(journal) => journal.append(
+                &stream,
+                expected_head,
+                writer_epoch,
+                self.recorded_at,
+                &drafts,
+            ),
+            StoreBackend::Postgres { journal, runtime } => {
+                match runtime.block_on(journal.append(
+                    &stream,
+                    expected_head,
+                    writer_epoch,
+                    self.recorded_at,
+                    &drafts,
+                )) {
+                    Ok(outcome) => outcome,
+                    Err(_) => AppendOutcome::Unavailable,
+                }
+            }
+            StoreBackend::Unavailable => AppendOutcome::Unavailable,
+        }
     }
 }
 
@@ -971,8 +1064,132 @@ pub struct ExecutorSink {
 
 impl Sink for ExecutorSink {
     fn hand(&mut self, handoff: &IntentHandoff) -> Result<mandate_executor::IntentHandoff, Cause> {
-        let _ = handoff;
-        Err(Cause::Unimplemented { story: "E7-7" })
+        let body = match &handoff.body {
+            IntentBody::Order {
+                instrument,
+                side,
+                qty,
+                limit,
+                purpose,
+            } => {
+                let execution = handoff.execution.ok_or(Cause::Absent {
+                    what: "the mandate-derived order execution policy",
+                })?;
+                validate_order_execution(*side, *purpose, execution)?;
+                mandate_executor::IntentBody::Order {
+                    instrument: instrument.clone(),
+                    side: *side,
+                    qty: *qty,
+                    limit: *limit,
+                    purpose: executor_purpose(*purpose),
+                    protection: execution.protection.map(|prices| {
+                        mandate_executor::ProtectionPrices {
+                            stop: prices.stop,
+                            take_profit: prices.take_profit,
+                        }
+                    }),
+                }
+            }
+            IntentBody::Flatten(plan) => {
+                if handoff.execution.is_some() {
+                    return Err(Cause::Absent {
+                        what: "a flatten without opening-order policy",
+                    });
+                }
+                mandate_executor::IntentBody::Flatten(mandate_executor::FlattenPlan {
+                    cancel_client_order_ids: plan.cancel_client_order_ids.clone(),
+                    sells: plan
+                        .sells
+                        .iter()
+                        .map(|leg| mandate_executor::FlattenLeg {
+                            instrument: leg.instrument.clone(),
+                            asset_class: leg.asset_class,
+                            qty: leg.qty,
+                            deferred_to_regular_session: leg.deferred_to_regular_session,
+                        })
+                        .collect(),
+                    purpose: executor_purpose(plan.purpose),
+                    confirmation: plan.confirmation.as_ref().map(|confirmation| {
+                        mandate_executor::OwnerConfirmation {
+                            bid: confirmation.bid,
+                            bid_size: confirmation.bid_size,
+                            floor: confirmation.floor,
+                            user: confirmation.user.clone(),
+                            step_up: confirmation.step_up.clone(),
+                        }
+                    }),
+                })
+            }
+        };
+        Ok(mandate_executor::IntentHandoff {
+            intent_id: mandate_executor::IntentId(mandate_executor::EventId(
+                handoff.intent_id.0.clone(),
+            )),
+            agent: ExecutorAgentId(self.agent.0.clone()),
+            tif: executor_tif(handoff.execution)?,
+            body,
+        })
+    }
+}
+
+fn validate_order_execution(
+    side: Side,
+    purpose: Purpose,
+    execution: OrderExecution,
+) -> Result<(), Cause> {
+    let direction_is_valid = match purpose {
+        Purpose::Open | Purpose::Increase => side == Side::Buy,
+        Purpose::RiskExit
+        | Purpose::OwnerExit
+        | Purpose::DiscretionaryExit
+        | Purpose::Protective
+        | Purpose::Flatten => side == Side::Sell,
+    };
+    if !direction_is_valid {
+        return Err(Cause::Absent {
+            what: "an order direction that cannot create a short position",
+        });
+    }
+    if execution.protection_required != execution.protection.is_some() {
+        return Err(Cause::Absent {
+            what: "the mandate-required protective prices",
+        });
+    }
+    match (execution.asset_class, execution.tif) {
+        (AssetClass::Crypto, TimeInForce::Day)
+        | (AssetClass::UsEquity, TimeInForce::Ioc) => Err(Cause::Absent {
+            what: "a time in force allowed by the mandate's asset class",
+        }),
+        (AssetClass::UsEquity, TimeInForce::Day | TimeInForce::Gtc)
+        | (AssetClass::Crypto, TimeInForce::Gtc | TimeInForce::Ioc) => Ok(()),
+    }
+}
+
+fn executor_tif(
+    execution: Option<OrderExecution>,
+) -> Result<mandate_executor::TimeInForce, Cause> {
+    let Some(execution) = execution else {
+        return Ok(mandate_executor::TimeInForce::Day);
+    };
+    match (execution.asset_class, execution.tif) {
+        (AssetClass::UsEquity, TimeInForce::Day)
+        | (AssetClass::Crypto, TimeInForce::Day) => Ok(mandate_executor::TimeInForce::Day),
+        (AssetClass::UsEquity, TimeInForce::Gtc)
+        | (AssetClass::Crypto, TimeInForce::Gtc) => Ok(mandate_executor::TimeInForce::Gtc),
+        (AssetClass::UsEquity, TimeInForce::Ioc)
+        | (AssetClass::Crypto, TimeInForce::Ioc) => Ok(mandate_executor::TimeInForce::Ioc),
+    }
+}
+
+fn executor_purpose(purpose: Purpose) -> mandate_executor::Purpose {
+    match purpose {
+        Purpose::Open => mandate_executor::Purpose::Open,
+        Purpose::Increase => mandate_executor::Purpose::Increase,
+        Purpose::RiskExit => mandate_executor::Purpose::RiskExit,
+        Purpose::OwnerExit => mandate_executor::Purpose::OwnerExit,
+        Purpose::DiscretionaryExit => mandate_executor::Purpose::DiscretionaryExit,
+        Purpose::Protective => mandate_executor::Purpose::Protective,
+        Purpose::Flatten => mandate_executor::Purpose::Flatten,
     }
 }
 
@@ -1049,6 +1266,7 @@ pub struct Sources<T> {
     /// `None` is a scratch in-memory journal: a run that places nothing keeps nothing, so a later
     /// start cannot re-hand an intent a planning run proposed (DEC-157 item 6).
     pub journal: Option<String>,
+    pub recorded_at: UtcNanos,
     pub agent: AgentId,
     pub transport: T,
 }
@@ -1059,6 +1277,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         mandate,
         dataset,
         journal,
+        recorded_at,
         agent,
         transport,
     } = sources;
@@ -1066,6 +1285,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         mandate,
         dataset,
         journal,
+        recorded_at,
         agent,
         transport: Box::new(AlpacaConnector { transport }),
     })
@@ -1091,9 +1311,10 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
         sizing: Box::new(BuilderPlan),
         classifier: Box::new(BuilderPlan),
         gate: Box::new(RiskGate),
-        journal: Box::new(StoreJournal {
-            dsn: sources.journal,
-        }),
+        journal: Box::new(StoreJournal::from_dsn(
+            sources.journal,
+            sources.recorded_at,
+        )),
         sink: Box::new(ExecutorSink {
             agent: sources.agent,
         }),
@@ -1109,11 +1330,12 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        ExecutorMandateView, ExecutorOrder, ExecutorProtection, Protection, ProtectionProbePorts,
-        is_unattributed_exit, working_order_of,
+        ExecutorMandateView, ExecutorOrder, ExecutorProtection, ExecutorSink, Protection,
+        ProtectionProbePorts, StoreJournal, is_unattributed_exit, working_order_of,
     };
     use mandate_backtest::{BacktestError, Signal};
-    use mandate_canon::DecStr;
+    use mandate_canon::{DecStr, Value};
+    use mandate_journal::AppendOutcome;
     use mandate_marketdata::actions::{RecordedActions, write_actions};
     use mandate_marketdata::dataset::{Store, partition_name};
     use mandate_marketdata::inspect::{self, ActionsReport, Problem};
@@ -1122,7 +1344,183 @@ mod tests {
         SplitRatio, Symbol, TimeUnit, Timeframe,
     };
     use mandate_num::{Price, Qty};
+    use mandate_runtime::{
+        AgentId, EventId as RuntimeEventId, IntentBody, IntentHandoff, OrderExecution,
+        ProtectionPrices, Purpose as RuntimePurpose, TimeInForce as RuntimeTimeInForce,
+    };
     use mandate_time::{Date, UtcNanos};
+
+    use crate::envelope::{DraftFields, Envelope, Writer, draft_bytes};
+    use crate::stages::{JournalWriter, Sink};
+
+    fn value_object(fields: &[(&str, Value)]) -> Result<Value, String> {
+        let mut object = mandate_canon::Object::new();
+        for (name, value) in fields {
+            object.insert(
+                mandate_canon::Key::new(name).map_err(|e| e.to_string())?,
+                value.clone(),
+            );
+        }
+        Ok(Value::Object(object))
+    }
+
+    #[test]
+    fn memory_journal_seals_with_the_injected_recorded_at() -> Result<(), String> {
+        let recorded_at =
+            UtcNanos::parse("2026-09-25T20:00:00.123456789Z").map_err(|e| e.to_string())?;
+        let stream = "acct:tracer:tracer-paper";
+        let payload = value_object(&[
+            ("stream_type", Value::Str("account".to_owned())),
+            ("workspace_id", Value::Str("tracer".to_owned())),
+            ("account_ref", Value::Str("tracer-paper".to_owned())),
+            ("broker", Value::Str("alpaca".to_owned())),
+        ])?;
+        let draft = draft_bytes(
+            &Envelope {
+                stream,
+                writer: Writer::Executor,
+                actor_id: "executor",
+                event_time: recorded_at,
+            },
+            &DraftFields {
+                event_id: "10000100000000000000000000",
+                event_type: "StreamOpened",
+                causation_id: None,
+                payload: &payload,
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let mut journal = StoreJournal::memory(recorded_at);
+        let epoch = journal.take_ownership(stream).map_err(|e| e.to_string())?;
+        assert!(matches!(
+            journal.append(stream, 0, epoch, &[draft]),
+            AppendOutcome::Committed(_)
+        ));
+        let rows = journal.read(stream).map_err(|e| e.to_string())?;
+        assert_eq!(rows.len(), 1);
+        let row = rows.first().ok_or("the committed row is absent")?;
+        assert_eq!(row.recorded_at, recorded_at.to_string());
+        Ok(())
+    }
+
+    #[test]
+    fn a_dsn_parse_failure_never_falls_back_to_memory() -> Result<(), String> {
+        let recorded_at =
+            UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|e| e.to_string())?;
+        let mut journal =
+            StoreJournal::from_dsn(Some("not a postgres dsn".to_owned()), recorded_at);
+        assert!(journal
+            .take_ownership("acct:tracer:tracer-paper")
+            .is_err());
+        assert!(matches!(
+            journal.append("acct:tracer:tracer-paper", 0, 0, &[]),
+            AppendOutcome::Unavailable
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn executor_sink_carries_the_mandate_order_policy_without_substitution() -> Result<(), String> {
+        let instrument = mandate_accounting::InstrumentId::new(
+            "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+        )
+        .map_err(|e| e.to_string())?;
+        let stop = Price::parse("242.44").map_err(|e| e.to_string())?;
+        let mut sink = ExecutorSink {
+            agent: AgentId("tracer-aapl".to_owned()),
+        };
+        let converted = sink
+            .hand(&IntentHandoff {
+                intent_id: RuntimeEventId("10000100000000000000000000".to_owned()),
+                body: IntentBody::Order {
+                    instrument: instrument.clone(),
+                    side: mandate_accounting::Side::Buy,
+                    qty: Qty::parse("1").map_err(|e| e.to_string())?,
+                    limit: Price::parse("255.2").map_err(|e| e.to_string())?,
+                    purpose: RuntimePurpose::Open,
+                },
+                execution: Some(OrderExecution {
+                    asset_class: mandate_accounting::AssetClass::UsEquity,
+                    tif: RuntimeTimeInForce::Gtc,
+                    protection_required: true,
+                    protection: Some(ProtectionPrices {
+                        stop,
+                        take_profit: None,
+                    }),
+                }),
+            })
+            .map_err(|e| e.to_string())?;
+        assert_eq!(converted.agent.0, "tracer-aapl");
+        assert_eq!(converted.tif, mandate_executor::TimeInForce::Gtc);
+        let mandate_executor::IntentBody::Order {
+            instrument: got_instrument,
+            side,
+            purpose,
+            protection,
+            ..
+        } = converted.body
+        else {
+            return Err("the order handoff became a flatten".to_owned());
+        };
+        assert_eq!(got_instrument, instrument);
+        assert_eq!(side, mandate_accounting::Side::Buy);
+        assert_eq!(purpose, mandate_executor::Purpose::Open);
+        assert_eq!(
+            protection,
+            Some(mandate_executor::ProtectionPrices {
+                stop,
+                take_profit: None,
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn executor_sink_refuses_missing_policy_missing_protection_and_short_openings()
+    -> Result<(), String> {
+        let instrument = mandate_accounting::InstrumentId::new(
+            "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+        )
+        .map_err(|e| e.to_string())?;
+        let order = |side, execution| -> Result<IntentHandoff, String> {
+            Ok(IntentHandoff {
+                intent_id: RuntimeEventId("10000100000000000000000000".to_owned()),
+                body: IntentBody::Order {
+                    instrument: instrument.clone(),
+                    side,
+                    qty: Qty::parse("1").map_err(|e| e.to_string())?,
+                    limit: Price::parse("255.2").map_err(|e| e.to_string())?,
+                    purpose: RuntimePurpose::Open,
+                },
+                execution,
+            })
+        };
+        let mut sink = ExecutorSink {
+            agent: AgentId("tracer-aapl".to_owned()),
+        };
+        assert!(sink
+            .hand(&order(mandate_accounting::Side::Buy, None)?)
+            .is_err());
+        let required = Some(OrderExecution {
+            asset_class: mandate_accounting::AssetClass::UsEquity,
+            tif: RuntimeTimeInForce::Day,
+            protection_required: true,
+            protection: None,
+        });
+        assert!(sink
+            .hand(&order(mandate_accounting::Side::Buy, required)?)
+            .is_err());
+        let unprotected = Some(OrderExecution {
+            asset_class: mandate_accounting::AssetClass::UsEquity,
+            tif: RuntimeTimeInForce::Day,
+            protection_required: false,
+            protection: None,
+        });
+        assert!(sink
+            .hand(&order(mandate_accounting::Side::Sell, unprotected)?)
+            .is_err());
+        Ok(())
+    }
 
     #[test]
     fn the_protection_probe_refuses_without_its_mandate() {

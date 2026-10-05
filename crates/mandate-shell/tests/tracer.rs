@@ -232,6 +232,7 @@ fn stages(mandate: &str, dataset: PathBuf, transport: Scripted) -> Stages {
         mandate: fixtures().join(mandate),
         dataset,
         journal: None,
+        recorded_at: UtcNanos::parse(NOW).unwrap(),
         agent: AgentId(AGENT.to_owned()),
         transport,
     })

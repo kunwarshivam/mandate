@@ -251,10 +251,12 @@ fn all_stubs_at_once_refuse_at_the_first_probe_and_place_nothing() -> Result<(),
 /// today at the first probe, and once the adapters are real at the protection probe or validation.
 #[test]
 fn the_production_stages_refuse_without_their_inputs() -> Result<(), String> {
+    let recorded_at = setup()?.now;
     let mut stages = over(Sources {
         mandate: PathBuf::from("no-such-mandate.json"),
         dataset: PathBuf::from("no-such-dataset"),
         journal: None,
+        recorded_at,
         agent: AgentId("tracer-aapl".to_owned()),
         transport: Box::new(Disconnected),
     });

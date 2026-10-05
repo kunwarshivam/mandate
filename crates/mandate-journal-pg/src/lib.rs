@@ -30,7 +30,7 @@ use mandate_journal::{
 };
 use mandate_time::UtcNanos;
 use sqlx::migrate::{Migration, MigrationType, Migrator};
-use sqlx::postgres::{PgDatabaseError, PgRow, PgSeverity};
+use sqlx::postgres::{PgDatabaseError, PgPoolOptions, PgRow, PgSeverity};
 use sqlx::{PgPool, Postgres, Row, SqlSafeStr, Transaction};
 
 /// The migration-only role that owns the journal tables (journal spec §6.1). Deployments create it
@@ -130,6 +130,15 @@ pub struct PgJournal {
 impl PgJournal {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// Builds a lazily connecting application pool from a deployment DSN.
+    ///
+    /// The constructor parses the DSN but performs no I/O. Migrations remain an explicit owner-role
+    /// deployment step, and the DSN must authenticate as [`APP_ROLE`].
+    pub fn from_dsn(dsn: &str) -> Result<Self, PgError> {
+        let pool = PgPoolOptions::new().connect_lazy(dsn)?;
+        Ok(Self::new(pool))
     }
 
     /// Increments the stream's writer epoch, fencing out the previous writer, and returns it.
@@ -641,4 +650,22 @@ fn signed(value: u64) -> Result<i64, sqlx::Error> {
 /// A statement assembled from this crate's own constants, never from input.
 fn sql(text: String) -> sqlx::AssertSqlSafe<String> {
     sqlx::AssertSqlSafe(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PgError, PgJournal};
+
+    #[test]
+    fn a_postgres_dsn_builds_a_lazy_journal_without_connecting() {
+        assert!(PgJournal::from_dsn("postgres://journal.invalid/mandate").is_ok());
+    }
+
+    #[test]
+    fn a_non_postgres_dsn_is_refused() {
+        assert!(matches!(
+            PgJournal::from_dsn("not a postgres dsn"),
+            Err(PgError::Unavailable(_))
+        ));
+    }
 }

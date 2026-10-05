@@ -302,12 +302,40 @@ pub enum IntentBody {
     Flatten(FlattenPlan),
 }
 
+/// The proposal's time in force, copied into the account stream exactly as proposed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeInForce {
+    Day,
+    Gtc,
+    Ioc,
+}
+
+/// Protective prices computed before the shell boundary from the confirmed mandate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProtectionPrices {
+    pub stop: Price,
+    pub take_profit: Option<Price>,
+}
+
+/// Mandate-derived order inputs that are not present in [`IntentBody`].
+///
+/// `None` on a replay means the journaled intent predates this explicit source. The sink refuses
+/// such an order instead of choosing a time in force, asset class, or protection policy itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OrderExecution {
+    pub asset_class: AssetClass,
+    pub tif: TimeInForce,
+    pub protection_required: bool,
+    pub protection: Option<ProtectionPrices>,
+}
+
 /// One handoff: the intent id is the `event_id` of the `IntentProposed` that recorded it, which is
 /// what makes the sink safely at-least-once (journal spec §2, §5.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntentHandoff {
     pub intent_id: EventId,
     pub body: IntentBody,
+    pub execution: Option<OrderExecution>,
 }
 
 /// Which deadline a timer is for. Keyed so that arming twice replaces rather than duplicates.
@@ -357,6 +385,7 @@ pub struct Proposal {
     pub limit: Price,
     pub purpose: Purpose,
     pub combined_score: Value,
+    pub execution: Option<OrderExecution>,
 }
 
 /// The dry run's answer. `Allow` authorises nothing: the binding gate runs on the account stream

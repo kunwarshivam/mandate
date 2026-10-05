@@ -26,7 +26,8 @@ use mandate_num::{Price, Qty};
 use mandate_risk::{Check, CheckOutcome, Computed, Decision, Purpose as GatePurpose, Verdict};
 use mandate_runtime::{
     AgentId, ApprovalSettings, Autonomy, ConnectionId, Deployment, FlattenPlan, FlattenRequest,
-    IntentBody, IntentHandoff, MandateView, Proposal, Purpose, SignalInputs, WorkspaceId,
+    IntentBody, IntentHandoff, MandateView, OrderExecution, Proposal, Purpose, SignalInputs,
+    TimeInForce as RuntimeTimeInForce, WorkspaceId,
 };
 use mandate_time::UtcNanos;
 
@@ -422,6 +423,12 @@ impl Sizing for OneShare {
             limit: Price::parse("255.2").map_err(|_| Cause::Absent { what: "a limit" })?,
             purpose: Purpose::Open,
             combined_score: Value::Str("1".to_owned()),
+            execution: Some(OrderExecution {
+                asset_class: AssetClass::UsEquity,
+                tif: RuntimeTimeInForce::Day,
+                protection_required: false,
+                protection: None,
+            }),
         }))
     }
 }
@@ -545,11 +552,6 @@ impl JournalWriter for LedgerJournal {
     }
 }
 
-/// The TIF the tracer's proposals carry, which `IntentReceived` copies exactly: the tracer's
-/// handoffs are regular-session limit proposals (`AGENTS.md` rule 12); the sink this double stands
-/// in for carries the proposal's own tif from E7-7 on (DEC-448 item 7).
-const TRACER_PROPOSED_TIF: mandate_executor::TimeInForce = mandate_executor::TimeInForce::Day;
-
 /// Converts the runtime's handoff into the executor's, joining the deployment's `AgentId`, and
 /// checks the ledger for the `IntentProposed` before counting the hand.
 pub struct ConvertingSink(pub World);
@@ -569,6 +571,9 @@ impl Sink for ConvertingSink {
                 tally.unrecorded_hands = tally.unrecorded_hands.saturating_add(1);
             }
         }
+        let execution = handoff.execution.ok_or(Cause::Absent {
+            what: "the doubled proposal's execution policy",
+        })?;
         let body = match &handoff.body {
             IntentBody::Order {
                 instrument,
@@ -582,7 +587,12 @@ impl Sink for ConvertingSink {
                 qty: *qty,
                 limit: *limit,
                 purpose: executor_purpose(*purpose),
-                protection: None,
+                protection: execution.protection.map(|prices| {
+                    mandate_executor::ProtectionPrices {
+                        stop: prices.stop,
+                        take_profit: prices.take_profit,
+                    }
+                }),
             },
             IntentBody::Flatten(plan) => {
                 let _ = plan;
@@ -594,7 +604,11 @@ impl Sink for ConvertingSink {
         Ok(mandate_executor::IntentHandoff {
             intent_id: IntentId(mandate_executor::EventId(handoff.intent_id.0.clone())),
             agent: mandate_executor::AgentId(AGENT.to_owned()),
-            tif: TRACER_PROPOSED_TIF,
+            tif: match execution.tif {
+                RuntimeTimeInForce::Day => mandate_executor::TimeInForce::Day,
+                RuntimeTimeInForce::Gtc => mandate_executor::TimeInForce::Gtc,
+                RuntimeTimeInForce::Ioc => mandate_executor::TimeInForce::Ioc,
+            },
             body,
         })
     }
