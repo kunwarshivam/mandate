@@ -13,6 +13,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -661,6 +662,21 @@ impl TradingTransport for Scripted {
         ));
         let answer = self.answer(request);
         async move { answer }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RequiresTokioIo;
+
+impl TradingTransport for RequiresTokioIo {
+    async fn send(&self, _request: &HttpRequest) -> Result<Response, TransportError> {
+        let (stream, _peer) = StdUnixStream::pair().map_err(|_| TransportError::Connect)?;
+        stream
+            .set_nonblocking(true)
+            .map_err(|_| TransportError::Connect)?;
+        let _registered =
+            tokio::net::UnixStream::from_std(stream).map_err(|_| TransportError::Connect)?;
+        Err(TransportError::RefusedPath)
     }
 }
 
@@ -1541,4 +1557,21 @@ fn the_connector_is_the_alpaca_client_over_the_given_transport() {
     );
     assert!(answer.is_ok(), "{answer:?}");
     assert_eq!(seen.borrow().requests.len(), 1);
+}
+
+#[test]
+fn the_connector_runtime_drives_tokio_io_without_network() {
+    let mut connector = AlpacaConnector {
+        transport: RequiresTokioIo,
+    };
+    let answer = mandate_shell::stages::Connector::call(
+        &mut connector,
+        &mandate_executor::BrokerRequest::GetAccount,
+    );
+    assert_eq!(
+        answer,
+        Err(mandate_executor::ConnectorError::NotSent {
+            code: "refused_path"
+        })
+    );
 }

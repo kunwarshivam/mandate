@@ -1838,6 +1838,7 @@ pub struct AlpacaConnector<T> {
 impl<T: TradingTransport + Clone> Connector for AlpacaConnector<T> {
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
             .enable_time()
             .build()
             .map_err(|_| ConnectorError::NotSent {
