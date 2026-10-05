@@ -462,7 +462,7 @@ fn binding_checks_value(checks: &[CheckOutcome]) -> Result<Value, ExecutorError>
         })
         .map(|(id, result)| {
             object(vec![
-                ("id", text(id)),
+                ("id", text(*id)),
                 ("result", text(result)),
                 ("inputs", object(Vec::new())?),
                 ("computed", object(Vec::new())?),
