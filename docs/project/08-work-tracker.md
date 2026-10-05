@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-10-05, while #598 completes E7-7 in one consolidated PR: DEC-453 to DEC-463, all 330 diff mutants resolved (223 caught, 107 unviable, zero missed), with the full local check, CI, independent review, and founder-approved paper run still to follow. The per-session change log that used to live in this cell is in the git history of this file |
+| **Last updated** | 2026-10-05, after #598 merged E7-7 and while #602 applies DEC-465: Vercel deploys the web app from the production branch only, preventing pull-request previews from exhausting its rate limit while GitHub web checks remain unchanged. The per-session change log that used to live in this cell is in the git history of this file |
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
 decisions in [04-decision-log.md](04-decision-log.md). This file only tracks progress against them.
