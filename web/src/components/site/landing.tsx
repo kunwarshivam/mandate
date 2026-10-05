@@ -1,6 +1,4 @@
-import "@fontsource/dotgothic16/400.css";
-import "@fontsource/vt323/400.css";
-import "@fontsource-variable/pixelify-sans";
+import "./faces";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
