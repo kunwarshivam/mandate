@@ -9,6 +9,7 @@ import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
 import { Deadline } from "@/components/approvals/deadline";
 import { ResponseProgress, responseSteps } from "@/components/approvals/response-progress";
 import { LimitRail } from "@/components/domain/envelope";
+import { BEVEL } from "@/components/kumo/bevel";
 import { ApprovalChart } from "@/components/charts/price-chart";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import type { Approval, Environment, ModelOutput, RiskFigure, Workspace } from "@/fixtures/types";
@@ -23,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { WorkspaceGate } from "./common";
 
 /** Approve and Skip share one variant and one size, and neither is focused or selected first (PX-10). */
-const CHOICE = "h-12 w-full justify-center rounded-lg text-base font-semibold";
+const CHOICE = cn("h-12 w-full justify-center text-base font-semibold", BEVEL);
 const BACK = "-ml-2 inline-flex h-11 w-fit items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:h-9";
 
 function ResponseStatus({ approval, response }: { approval: Approval; response: ApprovalResponse }) {
@@ -121,7 +122,7 @@ function NotFound() {
         No request with this ID
       </h1>
       <p className="max-w-measure text-muted-foreground">This workspace has no approval request with that ID.</p>
-      <LinkButton href="/approvals" variant="outline" size="lg" className="h-11 w-fit rounded-lg px-5">
+      <LinkButton href="/approvals" variant="outline" size="lg" className={cn("h-11 w-fit px-5", BEVEL)}>
         See all approvals
       </LinkButton>
     </section>
@@ -364,7 +365,7 @@ function Request({ approvalId }: { approvalId: string }) {
           ) : stale ? (
             <div data-slot="record-changed" className="grid gap-2">
               <p className="text-sm font-medium">This request changed since the page opened, so the record above is out of date. Nothing was sent.</p>
-              <Button variant="outline" size="lg" className="h-11 w-fit rounded-lg px-5" onClick={refresh}>
+              <Button variant="outline" size="lg" className={cn("h-11 w-fit px-5", BEVEL)} onClick={refresh}>
                 Show the current version
               </Button>
             </div>

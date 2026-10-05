@@ -522,6 +522,11 @@ html:root[data-cvd="on"] {
   }
 }
 
+/* The landing page's chrome face, Pixelify Sans, for the bevelled buttons' labels and a few titles. */
+@utility pixel-face {
+  font-family: "Pixelify Sans Variable", "MS Sans Serif", Tahoma, sans-serif;
+}
+
 /*
  * A list settles in the first time it renders: each row rises 6 px and fades in, 30 ms after the
  * one above. Set `--i` for the stagger. CSS transitions, so a re-render interrupts cleanly.

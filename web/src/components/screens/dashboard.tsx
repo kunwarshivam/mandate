@@ -136,7 +136,7 @@ function NeedsYou({ ws, open, className }: { ws: Workspace; open: Approval[]; cl
         ) : null}
       </h2>
       {count === 0 ? (
-        <p data-slot="all-clear" className="flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
+        <p data-slot="all-clear" className="pixel-face flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
           <BrandOwl className="size-8" />
           All clear. Nothing needs you.
         </p>

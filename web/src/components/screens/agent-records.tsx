@@ -8,6 +8,7 @@ import { ChartSkeleton } from "@/components/charts/chart-parts";
 import { PositionChart } from "@/components/charts/price-chart";
 import { AsOf } from "@/components/domain/as-of";
 import { SourceTag } from "@/components/domain/mode";
+import { BEVEL } from "@/components/kumo/bevel";
 import { Money, SignedMoney } from "@/components/domain/money";
 import { FixtureTag, Placeholder } from "@/components/domain/placeholders";
 import { OrdersTable, SendingStopped, protectionText } from "@/components/domain/positions";
@@ -167,7 +168,7 @@ function PositionRecord({ agent, assetId }: { agent: Agent; assetId: string }) {
             <Placeholder name="performance" />
           </span>
           {canClose ? (
-            <LinkButton href={`${positionHref(agent.agent_id, assetId)}/close`} variant="outline" size="lg" className="h-11">
+            <LinkButton href={`${positionHref(agent.agent_id, assetId)}/close`} variant="outline" size="lg" className={`h-11 ${BEVEL}`}>
               Close position…
             </LinkButton>
           ) : null}

@@ -7,6 +7,7 @@ import { BrandSpecimen } from "@/components/brand/brand-specimen";
 import { ChartCredit, LevelLegend } from "@/components/charts/chart-parts";
 import type { ChartLevel } from "@/components/charts/options";
 import { Sparkline } from "@/components/charts/sparkline";
+import { BEVEL } from "@/components/kumo/bevel";
 import { KumoSurfaces } from "@/components/design/kumo-surfaces";
 import { MotionSamples } from "@/components/design/motion-samples";
 import { AsOf } from "@/components/domain/as-of";
@@ -392,6 +393,9 @@ export default function DesignPage() {
               </Button>
               <Button size="lg" variant="outline" className="h-11 rounded-lg px-5" disabled>
                 Disabled
+              </Button>
+              <Button size="lg" variant="secondary" className={`h-11 px-5 ${BEVEL}`}>
+                Bevel, from the landing page
               </Button>
             </div>
             <div className="flex flex-wrap items-center gap-2">

@@ -50,7 +50,7 @@ export function EmptyBoard() {
   return (
     <section data-slot="empty" aria-labelledby="empty-title" className="reveal grid max-w-xl content-start gap-5 pt-6 sm:pt-12">
       <BrandOwl className="size-20" />
-      <h1 id="empty-title" className="text-h1">
+      <h1 id="empty-title" className="pixel-face text-h1">
         No agents yet
       </h1>
       <p className="max-w-measure text-lg text-muted-foreground">An agent trades on paper within a mandate you describe and confirm, field by field.</p>
