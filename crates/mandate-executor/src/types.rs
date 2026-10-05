@@ -814,6 +814,8 @@ pub struct NotificationRef {
 pub struct EventDraft {
     pub event_id: EventId,
     pub event_type: String,
+    /// The registered journal payload schema selected by the executor that owns this draft.
+    pub schema_version: u64,
     pub causation_id: Option<EventId>,
     pub payload: Value,
 }

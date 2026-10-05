@@ -101,6 +101,7 @@ impl<'p, 'a> Batch<'p, 'a> {
         self.effects.push(Effect::Journal(EventDraft {
             event_id: event_id.clone(),
             event_type: event_type.to_owned(),
+            schema_version: schema_version(event_type),
             causation_id,
             payload,
         }));
@@ -135,6 +136,13 @@ impl<'p, 'a> Batch<'p, 'a> {
     }
 }
 
+fn schema_version(event_type: &str) -> u64 {
+    match event_type {
+        "IntentReceived" | "GateDecided" | "OrderSubmitted" => 2,
+        _ => 1,
+    }
+}
+
 #[cfg(test)]
 fn default_binding_gate() -> Option<&'static dyn BindingGateSource> {
     Some(&crate::ports::ALLOWING_BINDING_GATE)
@@ -143,4 +151,24 @@ fn default_binding_gate() -> Option<&'static dyn BindingGateSource> {
 #[cfg(not(test))]
 fn default_binding_gate() -> Option<&'static dyn BindingGateSource> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::schema_version;
+
+    #[test]
+    fn the_executor_owns_each_account_draft_schema_version() {
+        for event_type in ["IntentReceived", "GateDecided", "OrderSubmitted"] {
+            assert_eq!(schema_version(event_type), 2, "{event_type}");
+        }
+        for event_type in [
+            "OrderRequestRecorded",
+            "ProtectionChanged",
+            "ReconciliationRun",
+            "OwnerCommandRefused",
+        ] {
+            assert_eq!(schema_version(event_type), 1, "{event_type}");
+        }
+    }
 }

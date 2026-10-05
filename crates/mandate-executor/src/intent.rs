@@ -802,7 +802,9 @@ mod oco_round_trip_tests {
         let companion_draft = drafts.first().ok_or_else(|| refused("the companion"))?;
         let submission = drafts.get(1).ok_or_else(|| refused("the submission"))?;
         assert_eq!(companion_draft.event_type, "OrderRequestRecorded");
+        assert_eq!(companion_draft.schema_version, 1);
         assert_eq!(submission.event_type, "OrderSubmitted");
+        assert_eq!(submission.schema_version, 2);
         assert_eq!(
             submission.causation_id.as_ref(),
             Some(&companion_draft.event_id),

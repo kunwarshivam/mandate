@@ -55,6 +55,7 @@ pub struct Envelope<'a> {
 pub struct DraftFields<'a> {
     pub event_id: &'a str,
     pub event_type: &'a str,
+    pub schema_version: u64,
     pub causation_id: Option<&'a str>,
     pub config_refs: &'a Object,
     pub payload: &'a Value,
@@ -99,7 +100,7 @@ pub fn draft_bytes(
         ("event_type", text(draft.event_type)),
         ("payload", draft.payload.clone()),
         ("pii_refs", Value::Array(Vec::new())),
-        ("schema_version", int(1)?),
+        ("schema_version", int(draft.schema_version)?),
         ("stream_id", text(envelope.stream)),
     ])?;
     Ok(to_canonical(&fields))
@@ -213,10 +214,11 @@ impl mandate_executor::IdGen for Ids {
 
 #[cfg(test)]
 mod tests {
-    use mandate_canon::{Value, parse};
+    use mandate_canon::{Key, Value, parse};
+    use mandate_journal::{Draft, InvalidReason};
     use mandate_time::UtcNanos;
 
-    use super::{DraftFields, Envelope, IdSpace, Ids, Writer, draft_bytes};
+    use super::{DraftFields, Envelope, IdSpace, Ids, Writer, draft_bytes, object, text};
 
     fn envelope_of(bytes: &[u8]) -> Result<Value, String> {
         parse(bytes).map_err(|e| format!("{e:?}"))
@@ -261,6 +263,7 @@ mod tests {
             &DraftFields {
                 event_id: "10000100000000000001000000",
                 event_type: "OrderSubmitted",
+                schema_version: 2,
                 causation_id: Some("00000100000000000003000001"),
                 config_refs: &config_refs,
                 payload: &payload,
@@ -277,6 +280,11 @@ mod tests {
         assert_eq!(field("environment").as_deref(), Some("paper"));
         assert_eq!(field("stream_id").as_deref(), Some("acct:ws1:acc1"));
         assert_eq!(field("event_type").as_deref(), Some("OrderSubmitted"));
+        assert_eq!(
+            envelope.get("schema_version").and_then(Value::as_int),
+            Some(2),
+            "the executor's OrderSubmitted schema version reaches the envelope"
+        );
         assert_eq!(
             field("causation_id").as_deref(),
             Some("00000100000000000003000001")
@@ -317,6 +325,7 @@ mod tests {
             &DraftFields {
                 event_id: "00000100000000000000000000",
                 event_type: "AgentModeChanged",
+                schema_version: 1,
                 causation_id: None,
                 config_refs: &config_refs,
                 payload: &payload,
@@ -330,6 +339,84 @@ mod tests {
             .and_then(|actor| actor.get("kind"))
             .and_then(Value::as_str);
         assert_eq!(kind, Some("agent"));
+        Ok(())
+    }
+
+    #[test]
+    fn a_caller_selected_unregistered_version_is_refused() -> Result<(), String> {
+        let at = UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|e| e.to_string())?;
+        let payload = object(vec![
+            ("stream_type", text("account")),
+            ("workspace_id", text("ws1")),
+            ("broker", text("alpaca")),
+            ("account_ref", text("acc1")),
+        ])
+        .map_err(|e| e.to_string())?;
+        let config_refs = mandate_canon::Object::new();
+        let bytes = draft_bytes(
+            &Envelope {
+                stream: "acct:ws1:acc1",
+                writer: Writer::Executor,
+                actor_id: "executor",
+                event_time: at,
+            },
+            &DraftFields {
+                event_id: "10000100000000000000000000",
+                event_type: "StreamOpened",
+                schema_version: 2,
+                causation_id: None,
+                config_refs: &config_refs,
+                payload: &payload,
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let refusal = Draft::parse(&bytes).expect_err("StreamOpened has no version 2");
+        assert_eq!(refusal.reason, InvalidReason::UnknownSchema);
+        assert_eq!(refusal.path, "payload");
+        Ok(())
+    }
+
+    #[test]
+    fn intent_received_risk_clock_is_refused_at_version_one() -> Result<(), String> {
+        let at = UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|e| e.to_string())?;
+        let payload = object(vec![
+            ("intent_id", text("01JABCDEFGHJKMNPQRSTVWXYZ1")),
+            ("agent_id", text("agent-a")),
+            ("instrument_id", text("instrument-a")),
+            ("side", text("buy")),
+            ("type", text("limit")),
+            ("tif", text("day")),
+            ("qty", text("1")),
+            ("limit_price", text("100")),
+            ("purpose", text("open")),
+            ("risk_clock", text("2026-09-25T20:00:00.000000000Z")),
+        ])
+        .map_err(|e| e.to_string())?;
+        let mut config_refs = mandate_canon::Object::new();
+        config_refs.insert(
+            Key::new("mandate_version").map_err(|e| e.to_string())?,
+            text(&format!("sha256:{}", "0".repeat(64))),
+        );
+        let bytes = draft_bytes(
+            &Envelope {
+                stream: "acct:ws1:acc1",
+                writer: Writer::Executor,
+                actor_id: "executor",
+                event_time: at,
+            },
+            &DraftFields {
+                event_id: "10000100000000000001000000",
+                event_type: "IntentReceived",
+                schema_version: 1,
+                causation_id: None,
+                config_refs: &config_refs,
+                payload: &payload,
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let refusal = Draft::parse(&bytes).expect_err("version 1 excludes risk_clock");
+        assert_eq!(refusal.reason, InvalidReason::Schema);
+        assert_eq!(refusal.path, "payload.risk_clock");
         Ok(())
     }
 
@@ -356,6 +443,7 @@ mod tests {
             &DraftFields {
                 event_id: "00000100000000000000000000",
                 event_type: "ModelOutputRecorded",
+                schema_version: 1,
                 causation_id: None,
                 config_refs: &config_refs,
                 payload: &Value::Object(payload),

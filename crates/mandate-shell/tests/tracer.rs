@@ -884,6 +884,15 @@ fn happy() {
         "the decision and its caused intent are one journal append batch: {:?}",
         batches.borrow()
     );
+    assert!(
+        batches.borrow().iter().any(|batch| {
+            batch
+                .windows(2)
+                .any(|pair| pair == ["OrderRequestRecorded", "OrderSubmitted"])
+        }),
+        "the request companion and submission are one journal append batch before the broker call: {:?}",
+        batches.borrow()
+    );
 
     let agent = committed(&stages, &agent_stream());
     let account = committed(&stages, &account_stream());
@@ -897,6 +906,37 @@ fn happy() {
         Some("StreamOpened"),
         "the account stream opens before the executor journals reconciliation"
     );
+    assert!(
+        agent.iter().all(|row| row.schema_version == 1),
+        "runtime agent drafts retain schema version 1: {agent:?}"
+    );
+    for event_type in ["IntentReceived", "GateDecided", "OrderSubmitted"] {
+        let rows: Vec<_> = account
+            .iter()
+            .filter(|row| row.event_type == event_type)
+            .collect();
+        assert!(!rows.is_empty(), "{event_type} is journaled");
+        assert!(
+            rows.iter().all(|row| row.schema_version == 2),
+            "{event_type} is executor-owned schema version 2: {rows:?}"
+        );
+    }
+    for event_type in [
+        "StreamOpened",
+        "ReconciliationRun",
+        "ProtectionChanged",
+        "OrderRequestRecorded",
+    ] {
+        let rows: Vec<_> = account
+            .iter()
+            .filter(|row| row.event_type == event_type)
+            .collect();
+        assert!(!rows.is_empty(), "{event_type} is journaled");
+        assert!(
+            rows.iter().all(|row| row.schema_version == 1),
+            "{event_type} retains its registered schema version: {rows:?}"
+        );
+    }
     let intents = of_type(&agent, "IntentProposed");
     assert_eq!(intents.len(), 1);
     let submitted = of_type(&account, "OrderSubmitted");

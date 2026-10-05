@@ -401,6 +401,7 @@ impl Reconciler for FixedReconciler {
                 mandate_executor::EventDraft {
                     event_id: mandate_executor::EventId(event_id),
                     event_type: "ReconciliationRun".to_owned(),
+                    schema_version: 1,
                     causation_id: None,
                     payload: object(&[("result", result)])?,
                 },
@@ -565,7 +566,10 @@ impl JournalWriter for LedgerJournal {
                 seq,
                 event_id: field("event_id"),
                 event_type: field("event_type"),
-                schema_version: 1,
+                schema_version: body
+                    .get("schema_version")
+                    .and_then(Value::as_int)
+                    .unwrap_or_default(),
                 environment: field("environment"),
                 recorded_at: NOW.to_owned(),
                 prev_hash: prev,
@@ -676,6 +680,10 @@ impl PaperExecutor {
             mandate_executor::EventDraft {
                 event_id: mandate_executor::EventId(event_id),
                 event_type: event_type.to_owned(),
+                schema_version: match event_type {
+                    "IntentReceived" | "GateDecided" | "OrderSubmitted" => 2,
+                    _ => 1,
+                },
                 causation_id: causation.map(|id| mandate_executor::EventId(id.to_owned())),
                 payload: object(members)?,
             },

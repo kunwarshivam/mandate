@@ -2209,6 +2209,7 @@ mod tests {
             &DraftFields {
                 event_id: "10000100000000000000000000",
                 event_type: "StreamOpened",
+                schema_version: 1,
                 causation_id: None,
                 config_refs: &config_refs,
                 payload: &payload,

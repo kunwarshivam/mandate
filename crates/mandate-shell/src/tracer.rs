@@ -214,6 +214,7 @@ impl<'s> Session<'s> {
             &DraftFields {
                 event_id: &event_id,
                 event_type: "StreamOpened",
+                schema_version: 1,
                 causation_id: None,
                 config_refs: &config_refs,
                 payload: &Value::Object(object),
@@ -267,7 +268,8 @@ impl<'s> Session<'s> {
         effects: Vec<mandate_executor::Effect>,
     ) -> Result<Vec<BrokerRequest>, ShellError> {
         let mut requests = Vec::new();
-        for effect in effects {
+        let mut effects = VecDeque::from(effects);
+        while let Some(effect) = effects.pop_front() {
             match effect {
                 mandate_executor::Effect::Broker(request) => match request {
                     BrokerRequest::ListOpenOrders
@@ -283,9 +285,11 @@ impl<'s> Session<'s> {
                         self.perform_executor(vec![mandate_executor::Effect::Broker(request)])?;
                     }
                 },
-                mandate_executor::Effect::Journal(_)
-                | mandate_executor::Effect::Timer(_)
-                | mandate_executor::Effect::Notify(_) => {
+                mandate_executor::Effect::Journal(draft) => {
+                    let drafts = consecutive_executor_journals(draft, &mut effects);
+                    self.append_account(&drafts)?;
+                }
+                mandate_executor::Effect::Timer(_) | mandate_executor::Effect::Notify(_) => {
                     self.perform_executor(vec![effect])?;
                 }
             }
@@ -388,7 +392,10 @@ impl<'s> Session<'s> {
         let mut queue = VecDeque::from(effects);
         while let Some(effect) = queue.pop_front() {
             match effect {
-                mandate_executor::Effect::Journal(draft) => self.append_account(&draft)?,
+                mandate_executor::Effect::Journal(draft) => {
+                    let drafts = consecutive_executor_journals(draft, &mut queue);
+                    self.append_account(&drafts)?;
+                }
                 mandate_executor::Effect::Broker(request) => {
                     if let Some(input) = self.broker(&request)? {
                         let more = self
@@ -462,6 +469,7 @@ impl<'s> Session<'s> {
                     &DraftFields {
                         event_id: &draft.event_id.0,
                         event_type: &draft.event_type,
+                        schema_version: 1,
                         causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
                         config_refs: &config_refs,
                         payload: &draft.payload,
@@ -472,7 +480,10 @@ impl<'s> Session<'s> {
         self.append(&stream, bytes)
     }
 
-    fn append_account(&mut self, draft: &mandate_executor::EventDraft) -> Result<(), ShellError> {
+    fn append_account(
+        &mut self,
+        drafts: &[mandate_executor::EventDraft],
+    ) -> Result<(), ShellError> {
         let stream = self.account_stream.clone();
         let mut config_refs = Object::new();
         config_refs.insert(
@@ -481,26 +492,34 @@ impl<'s> Session<'s> {
             })?,
             Value::Str(self.view.version.clone()),
         );
-        let bytes = draft_bytes(
-            &Envelope {
-                stream: &stream,
-                writer: Writer::Executor,
-                actor_id: "executor",
-                event_time: self.setup.now,
-            },
-            &DraftFields {
-                event_id: &draft.event_id.0,
-                event_type: &draft.event_type,
-                causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
-                config_refs: &config_refs,
-                payload: &draft.payload,
-            },
-        )?;
-        self.append(&stream, vec![bytes])?;
-        if draft.event_type == "OrderSubmitted"
-            && let Some(id) = draft.payload.get("client_order_id").and_then(Value::as_str)
-        {
-            self.submitted_drafts.insert(id.to_owned());
+        let bytes = drafts
+            .iter()
+            .map(|draft| {
+                draft_bytes(
+                    &Envelope {
+                        stream: &stream,
+                        writer: Writer::Executor,
+                        actor_id: "executor",
+                        event_time: self.setup.now,
+                    },
+                    &DraftFields {
+                        event_id: &draft.event_id.0,
+                        event_type: &draft.event_type,
+                        schema_version: draft.schema_version,
+                        causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
+                        config_refs: &config_refs,
+                        payload: &draft.payload,
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.append(&stream, bytes)?;
+        for draft in drafts {
+            if draft.event_type == "OrderSubmitted"
+                && let Some(id) = draft.payload.get("client_order_id").and_then(Value::as_str)
+            {
+                self.submitted_drafts.insert(id.to_owned());
+            }
         }
         Ok(())
     }
@@ -581,6 +600,60 @@ impl<'s> Session<'s> {
             Some(epoch) => *epoch,
             None => 0,
         }
+    }
+}
+
+fn consecutive_executor_journals(
+    first: mandate_executor::EventDraft,
+    effects: &mut VecDeque<mandate_executor::Effect>,
+) -> Vec<mandate_executor::EventDraft> {
+    let mut drafts = vec![first];
+    while matches!(effects.front(), Some(mandate_executor::Effect::Journal(_))) {
+        if let Some(mandate_executor::Effect::Journal(next)) = effects.pop_front() {
+            drafts.push(next);
+        }
+    }
+    drafts
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use mandate_canon::Value;
+    use mandate_executor::{Effect, EventDraft, EventId, NotificationRef};
+
+    use super::consecutive_executor_journals;
+
+    fn draft(id: &str, event_type: &str, schema_version: u64) -> EventDraft {
+        EventDraft {
+            event_id: EventId(id.to_owned()),
+            event_type: event_type.to_owned(),
+            schema_version,
+            causation_id: None,
+            payload: Value::Null,
+        }
+    }
+
+    #[test]
+    fn consecutive_executor_drafts_stay_in_one_append_run() {
+        let companion = draft("companion", "OrderRequestRecorded", 1);
+        let submitted = draft("submitted", "OrderSubmitted", 2);
+        let boundary = Effect::Notify(NotificationRef {
+            subject_event: EventId("submitted".to_owned()),
+            message_key: "submitted",
+        });
+        let mut effects = VecDeque::from([Effect::Journal(submitted), boundary]);
+        let drafts = consecutive_executor_journals(companion, &mut effects);
+        assert_eq!(
+            drafts
+                .iter()
+                .map(|draft| (draft.event_type.as_str(), draft.schema_version))
+                .collect::<Vec<_>>(),
+            [("OrderRequestRecorded", 1), ("OrderSubmitted", 2)]
+        );
+        assert!(matches!(effects.front(), Some(Effect::Notify(_))));
+        assert_eq!(effects.len(), 1);
     }
 }
 
