@@ -65,7 +65,7 @@ every workspace crate and reference-case suite has an entry and that every path 
   and charges, splits, dividends, cash in lieu, receivables, income, realized and unrealized P&L,
   equity, buying power), `crates/mandate-accounting/src/reservation.rs` (`fee_reservation`: §2.1's
   `round(estimated fees, 2, ceiling)` for a `ProspectiveOrder`, by folding an equity buy; a crypto
-  buy and every sell reserve zero, DEC-469 item 3).
+  buy and every sell reserve zero, DEC-471 item 3).
 - **Tests:** `crates/mandate-accounting/tests/hand.rs` (hand-calculated cases, partial fills, flips),
   `crates/mandate-accounting/tests/properties.rs` (one property per invariant against an i128
   ledger oracle), `crates/mandate-accounting/tests/corporate_actions.rs` (hand-calculated splits,
@@ -282,10 +282,10 @@ crates.
   deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
   `src/bin/mandate-tracer.rs` the binary; `src/paper.rs` the DEC-466 one-run loader that verifies the
   reviewed E7-7 AAPL artifacts and binds the bytes it checked, reads the GET-only broker preflight
-  (including the trailing window's IEX minute bars, DEC-469) and the liquidity facts into one
+  (including the trailing window's IEX minute bars, DEC-471) and the liquidity facts into one
   `PaperFacts` snapshot, refuses any missing, stale, or
   ambiguous fact or a non-clean account, and assembles the trusted run and executor contexts from
-  that snapshot alone (DEC-468); `src/adapters.rs` the production adapters: `StoredBars`, `MovingAverage`,
+  that snapshot alone (DEC-470); `src/adapters.rs` the production adapters: `StoredBars`, `MovingAverage`,
   `AlpacaConnector`, `RiskExitPath`, the validated mandate, builder, gate, journal, executor, and
   reconciler. The risk exit plans over the journal, stream, clock, and agent the run's bridge hands
   it (DEC-449, amended by DEC-451). It holds no trading logic—no sizing, gating, pricing, state
@@ -316,7 +316,7 @@ crates.
   (`artifacts`, `facts`, `judge`, `gate`, `context`) and computes no money or quantity: the
   liquidity figures are `mandate-liquidity`'s, the bracket prices and 1× buying power the
   executor's, the classification facts the builder's `buy_action`, and the fee reservation
-  `mandate-accounting`'s (DEC-469 item 3). `src/paper/tests.rs` covers the artifact members and
+  `mandate-accounting`'s (DEC-471 item 3). `src/paper/tests.rs` covers the artifact members and
   values, each single-fact refusal and its boundary, the session and close window, the mapping of
   the protection prices and the builder's action, and the per-request fee reservation;
   `src/paper/facts/tests.rs` the liquidity mapping and each refusal it names. `tests/paper.rs`
@@ -334,7 +334,7 @@ crates.
   <dir> --config-dir <dir> --journal <dsn> --confirm-paper --place-one-order`, which needs both
   flags, accepts only the reviewed E7-7 paper artifacts, constructs the fixed Alpaca paper
   transport, refuses any attempt to configure a host, and reads today's minute bars from the data
-  host (DEC-469, Proposed; see the task brief).
+  host (DEC-471, Proposed; see the task brief).
 
 ## Idempotent executor and broker connector
 
@@ -362,13 +362,13 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   gate's call site), `crates/mandate-executor/src/ports.rs`, `crates/mandate-executor/src/error.rs`,
   `crates/mandate-executor/src/opening.rs` (`equity_bracket_prices`, the bracket's stop and
   take-profit rounded up onto the Reg NMS grid, and `BrokerAccount::one_x_buying_power`, with
-  in-module hand cases; DEC-469 item 3);
+  in-module hand cases; DEC-471 item 3);
   `crates/mandate-alpaca/src/http.rs` (the paper host, the endpoint allowlist, `secrecy`-held
   credentials), `crates/mandate-alpaca/src/wire.rs`, `crates/mandate-alpaca/src/client.rs`,
   `crates/mandate-alpaca/src/record.rs` (the redaction pass), `crates/mandate-alpaca/src/error.rs`,
   and E7-8's reference-data reads (DEC-168): `crates/mandate-alpaca/src/read.rs` (the asset record
   and the latest quote as exact values, and their refusals) and `crates/mandate-alpaca/src/data.rs`
-  (the data host's own request types and transport trait), plus DEC-469's one GET of the latest
+  (the data host's own request types and transport trait), plus DEC-471's one GET of the latest
   complete IEX minute bars (`BarsRequest::recent_minutes`, `DataClient::recent_minute_bars`, and
   `read::minute_bars`, which refuses another symbol, a second page, an empty page, and a bar off the
   grid or outside the window).
@@ -396,7 +396,7 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-alpaca/tests/fixtures/record.sh`, and the recorded scenarios under
   `crates/mandate-alpaca/tests/fixtures/alpaca-trading/`; for E7-8,
   `crates/mandate-alpaca/tests/reads.rs` and the latest-quote scenarios under
-  `crates/mandate-alpaca/tests/fixtures/alpaca-data/`; for DEC-469,
+  `crates/mandate-alpaca/tests/fixtures/alpaca-data/`; for DEC-471,
   `crates/mandate-alpaca/tests/bars.rs` (request construction and its refusals, exact volumes, and
   every refused answer over a scripted transport) and the bars cases in `src/http.rs`. In prose: the hand cases of the brief
   (the submission chain, the `Unknown` lookup discipline, the
@@ -946,7 +946,7 @@ proves each pending test fails on them (DEC-110).
 
 ## Liquidity figures
 
-- **Spec:** trading-domain spec §3.2 item 5 and §9.6; DEC-468 item 4; DEC-469 item 3.
+- **Spec:** trading-domain spec §3.2 item 5 and §9.6; DEC-470 item 4; DEC-471 item 3.
 - **Code:** `crates/mandate-liquidity/src/lib.rs` (pure typed inputs and the prior close,
   lower-median 20-session dollar volume, truncated 20-session average volume, and trailing
   five-minute volume of complete bars). `crates/mandate-shell/src/paper/facts.rs` validates the

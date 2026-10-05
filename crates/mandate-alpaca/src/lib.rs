@@ -33,7 +33,7 @@
 //! host compiled in (ES-23), through a request type and a transport trait of its own so neither
 //! host can be sent the other's request (DEC-168). [`DataClient::recent_minute_bars`] reads one
 //! equity's complete one-minute IEX bars inside a short window before the clock, one page only,
-//! through the same transport trait and its own request type (DEC-469).
+//! through the same transport trait and its own request type (DEC-471).
 //!
 //! # Credentials and personal data
 //!

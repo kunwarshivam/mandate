@@ -9,10 +9,10 @@
 //!
 //! A refusal exits non-zero and prints its stable reason code and message on one line of stderr.
 //!
-//! The order of a run is fixed (DEC-466, DEC-468): the host refusal and the reviewed artifacts
+//! The order of a run is fixed (DEC-466, DEC-470): the host refusal and the reviewed artifacts
 //! first, which read no credential; then the paper credentials and the one transport; then the
 //! GET-only preflight of the account, positions, open orders, asset record, latest IEX quote, and
-//! the last five minutes' IEX minute bars (DEC-469); then the liquidity facts, from the stored daily
+//! the last five minutes' IEX minute bars (DEC-471); then the liquidity facts, from the stored daily
 //! bars and those minute bars; and only then the trusted contexts, assembled from that one
 //! snapshot, and the run, whose executor journals the intent before its one `POST`.
 

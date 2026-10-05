@@ -1,7 +1,7 @@
-//! The recent one-minute IEX bars read (E7-7, DEC-469): the request it builds, what it reads, and
+//! The recent one-minute IEX bars read (E7-7, DEC-471): the request it builds, what it reads, and
 //! what it refuses, over scripted replies with no network (ADR-0001 ES-19).
 //!
-//! Each expectation is written from Alpaca's bars answer shape and from DEC-469's rules, never from
+//! Each expectation is written from Alpaca's bars answer shape and from DEC-471's rules, never from
 //! the code. Every refusal case first reads a good answer and asserts its exact values, so an
 //! implementation that refuses everything passes none of them (`AGENTS.md` rule 3).
 

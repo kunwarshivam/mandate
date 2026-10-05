@@ -8,7 +8,7 @@
 //! executor, reconciliation, mandate validation, sizing, classification, and advisory-gate
 //! boundaries are also live when their trusted inputs are injected. The E7-7 shipping binary
 //! injects the one-run paper contexts [`crate::paper`] assembles from its GET-only broker preflight
-//! and the stored datasets (DEC-466, DEC-468); callers that omit either context fail closed rather
+//! and the stored datasets (DEC-466, DEC-470); callers that omit either context fail closed rather
 //! than inventing effective-dated inputs.
 //!
 //! What each will bind, per the task brief's step table:

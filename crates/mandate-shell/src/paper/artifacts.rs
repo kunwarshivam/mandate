@@ -1,5 +1,5 @@
 //! The reviewed E7-7 artifacts, each read once and judged on the bytes hashed into the executor's
-//! config references (DEC-468 item 2).
+//! config references (DEC-470 item 2).
 
 use std::fs;
 use std::path::Path;

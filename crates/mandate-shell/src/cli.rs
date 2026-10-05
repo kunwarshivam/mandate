@@ -234,7 +234,7 @@ mod tests {
         assert_eq!(
             usage_of(&["--confirm-paper", "--minute-dataset", "minutes"]),
             "unknown argument --minute-dataset",
-            "the trailing volume is read from the broker, never from a stored dataset (DEC-469)"
+            "the trailing volume is read from the broker, never from a stored dataset (DEC-471)"
         );
         assert_eq!(
             usage_of(&["--confirm-paper", "--journal"]),

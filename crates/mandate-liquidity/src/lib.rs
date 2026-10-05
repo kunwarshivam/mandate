@@ -10,7 +10,7 @@
 )]
 //! The pure liquidity figures the gate's liquidity floor and participation caps read
 //! (trading-domain spec §3.2 item 5 and §9.6), each computed by one stated rule from typed bars
-//! the caller has already judged fit to decide on (DEC-468 item 4, DEC-469).
+//! the caller has already judged fit to decide on (DEC-470 item 4, DEC-471).
 //!
 //! Every figure errs toward the tighter limit: the median is the lower of the two middle values,
 //! the average is truncated to whole shares, and the trailing volume counts only bars that are

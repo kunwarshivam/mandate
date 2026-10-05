@@ -1,5 +1,5 @@
 //! The latest-quote read on Alpaca's market-data host (backlog E7-8, DEC-168), and the recent
-//! one-minute IEX bars of one equity (E7-7, DEC-469).
+//! one-minute IEX bars of one equity (E7-7, DEC-471).
 //!
 //! The trading host serves no market data, so these two GETs are the only reads this crate sends
 //! anywhere else, and they are kept apart by type: a [`QuoteRequest`] or a [`BarsRequest`] is not

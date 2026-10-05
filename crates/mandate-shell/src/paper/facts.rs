@@ -1,6 +1,6 @@
 //! The one snapshot the contexts are assembled from: what the broker answered to the preflight's
 //! GETs, and the liquidity figures `mandate-liquidity` computes from typed stored daily bars and
-//! broker minute bars (DEC-468 item 4, DEC-469). Nothing here computes a figure; it reads, parses,
+//! broker minute bars (DEC-470 item 4, DEC-471). Nothing here computes a figure; it reads, parses,
 //! maps, and names the refusal.
 
 use std::path::Path;

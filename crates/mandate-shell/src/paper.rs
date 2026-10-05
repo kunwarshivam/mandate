@@ -1,4 +1,4 @@
-//! Trusted, paper-only assembly for E7-7's one AAPL migration run (DEC-466, DEC-468, DEC-469).
+//! Trusted, paper-only assembly for E7-7's one AAPL migration run (DEC-466, DEC-470, DEC-471).
 //!
 //! Three steps, each a refusal when its answer is missing, stale, or ambiguous (`AGENTS.md` rule 3):
 //!
@@ -12,7 +12,7 @@
 //!    volume from typed minute bars.
 //! 3. [`load_contexts`] judges that [`PaperFacts`] snapshot at the run clock and assembles the two
 //!    trusted contexts from it and from nothing else. An account holding any position or open order
-//!    is refused: this one first-order migration maps no existing broker state (DEC-468 item 1).
+//!    is refused: this one first-order migration maps no existing broker state (DEC-470 item 1).
 //!
 //! No value here is invented, and no money or quantity is computed here (DEC-138 item 3): the
 //! gate configuration is the trading-domain spec's own defaults, the limits are the mandate's, every

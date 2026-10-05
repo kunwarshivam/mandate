@@ -1,6 +1,6 @@
 //! Two figures an equity opening needs that the builder does not size: the protective prices of
 //! its bracket, since protection is the executor's to place (DEC-130 item 18), and the account's
-//! 1× buying power, which the gate's check 7 compares against (trading-domain spec §7.2, DEC-468
+//! 1× buying power, which the gate's check 7 compares against (trading-domain spec §7.2, DEC-470
 //! item 5).
 
 use mandate_num::{Adverse, Fraction, Price, TickRule, Usd};
@@ -12,7 +12,7 @@ use crate::types::{BrokerAccount, ProtectionPrices};
 /// of the entry price (mandate spec §3, `protection`): the stop at `entry × (1 − stop_distance)` and
 /// the take-profit at `entry × (1 + take_profit_distance)`. Both are sell prices, so each rounds up
 /// onto the Reg NMS grid (trading-domain spec §2.1): a stop that triggers sooner and a take-profit
-/// that asks more, never the reverse (DEC-468 item 3).
+/// that asks more, never the reverse (DEC-470 item 3).
 ///
 /// The take-profit's exact product is first truncated to the 9 places a price holds, as
 /// [`Price::collar_bound`] does for a buy's bound. That can only lower it, by at most one tick, and
@@ -42,7 +42,7 @@ pub fn equity_bracket_prices(
 impl BrokerAccount {
     /// §7.2's enforced 1× cap as the broker reports it: the lesser of its cash and its
     /// non-marginable buying power, so no margin the account's `multiplier` offers is spent
-    /// (DEC-129 item 7, DEC-468 item 5).
+    /// (DEC-129 item 7, DEC-470 item 5).
     pub fn one_x_buying_power(&self) -> Usd {
         self.cash.min(self.non_marginable_buying_power)
     }

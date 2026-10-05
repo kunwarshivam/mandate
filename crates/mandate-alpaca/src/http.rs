@@ -474,7 +474,7 @@ impl DataTransport for AlpacaPaperHttp {
             .await
     }
 
-    /// The request is the one bars read by construction, sent the same way (DEC-469).
+    /// The request is the one bars read by construction, sent the same way (DEC-471).
     async fn send_bars(&self, request: &BarsRequest) -> Result<Response, TransportError> {
         self.dispatch(reqwest::Method::GET, bars_url(request)?, None)
             .await

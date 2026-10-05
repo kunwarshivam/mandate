@@ -1,7 +1,7 @@
 //! The shipping assembly end to end with no network: [`Artifacts::load`], the GET-only
 //! [`preflight`], [`liquidity_facts`], [`load_contexts`], and `production`, in the binary's order,
 //! over one scripted transport that answers both the trading and the data host from recorded
-//! fixtures (DEC-466, DEC-468, DEC-469). `AlpacaPaperHttp` is never constructed and no credential is
+//! fixtures (DEC-466, DEC-470, DEC-471). `AlpacaPaperHttp` is never constructed and no credential is
 //! read.
 //!
 //! What it proves: the preflight sends no `POST` and reads the trailing minute bars from the data

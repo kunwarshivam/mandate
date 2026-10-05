@@ -43,7 +43,7 @@ pub struct Contexts {
 
 /// Judges `facts` at `now` and assembles the two trusted contexts from them.
 ///
-/// Refused, in order: any broker position or open order (DEC-468 item 1); an account that is not
+/// Refused, in order: any broker position or open order (DEC-470 item 1); an account that is not
 /// `ACTIVE`, is blocked or suspended, or owes accrued fees; an asset record older than the quote
 /// bound, read after `now`, or naming another asset id, class, or exchange; an ETP classification
 /// dated after `now`; a quote for another instrument, off the IEX feed, stamped after `now`, older
