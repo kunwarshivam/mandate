@@ -3871,6 +3871,29 @@ mod sequence_tests {
         assert!(cancels(&early).is_empty() && submissions(&early).is_empty());
         let stepped = executor.run(Input::Tick(RiskClock::from_secs(10)), &ports)?;
         assert_eq!(cancels(&stepped), vec![rung_id(0).as_str()]);
+        let state_change = stepped
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Journal(draft)
+                    if draft.event_type == "OrderStateChanged"
+                        && draft.payload.get("client_order_id").and_then(Value::as_str)
+                            == Some(rung_id(0).as_str()) =>
+                {
+                    Some(draft)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("the rung cancel's state change"));
+        assert_eq!(
+            state_change.payload.get("cancel_requested"),
+            Some(&Value::Bool(true)),
+            "the transition records that this pending cancel was requested"
+        );
+        assert_eq!(
+            state_change.payload.get("ladder_step"),
+            Some(&Value::Bool(true)),
+            "the transition records why this cancel was requested"
+        );
         assert!(
             submissions(&stepped).is_empty(),
             "the next rung waits for the confirmation"

@@ -5,8 +5,8 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
-    ACCOUNT_STREAM, AGENT, FixedInstruments, FixedMandate, Shell, TestIds, VERSION, config, event,
-    handoff, opening, ports, risk_exit, stream_opened, text, with_clock,
+    ACCOUNT_STREAM, AGENT, FixedInstruments, FixedMandate, Shell, TestIds, VERSION, config,
+    discretionary_exit, event, handoff, opening, ports, risk_exit, stream_opened, text, with_clock,
 };
 use mandate_executor::{
     BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, BrokerRequest,
@@ -205,6 +205,14 @@ fn input(state: AccountState, halted: bool) -> BindingGateInput {
         data_profile: "iex".to_owned(),
         feed: "iex".to_owned(),
     }
+}
+
+fn input_with_position() -> BindingGateInput {
+    let mut trusted = input(AccountState::Active, false);
+    let asset = trusted.asset.clone();
+    trusted.account.positions.insert(asset.clone(), qty("10"));
+    trusted.agent.positions.insert(asset, qty("10"));
+    trusted
 }
 
 fn bound_ports<'a>(
@@ -543,6 +551,132 @@ fn a_mandate_reference_that_differs_from_the_resolved_version_fails_closed() {
         .expect_err("mismatched mandate evidence must fail closed");
     assert_eq!(error, ExecutorError::BindingGateInputMissing);
     assert_eq!(shell.connector.total_accepted(), 0);
+}
+
+#[test]
+fn each_mismatched_binding_identity_fails_closed_before_any_submission() {
+    for mismatch in ["instrument", "agent"] {
+        let (mut shell, ports) = ready();
+        let mut trusted = input(AccountState::Active, false);
+        match mismatch {
+            "instrument" => {
+                trusted.asset =
+                    AssetId::new("MSFT").unwrap_or_else(|error| panic!("asset: {error}"));
+            }
+            "agent" => trusted.gate_agent = AgentId(2),
+            other => panic!("unknown mismatch {other}"),
+        }
+        let gate = GateFixture {
+            input: Some(trusted),
+        };
+        let error = shell
+            .step_with_binding(
+                handoff(INTENT, AGENT, opening(AAPL, "1", "150")),
+                &ports,
+                &gate,
+            )
+            .expect_err("mismatched gate identities must fail closed");
+        assert_eq!(error, ExecutorError::BindingGateInputMissing, "{mismatch}");
+        assert_eq!(shell.connector.total_accepted(), 0, "{mismatch}");
+    }
+}
+
+#[test]
+fn a_binding_gate_error_fails_an_opening_but_does_not_block_a_risk_exit() {
+    let outside_calendar = at("2027-01-02T15:00:00Z");
+
+    let (mut opening_shell, opening_ports) = ready();
+    let mut opening_input = input(AccountState::Active, false);
+    opening_input.now = outside_calendar;
+    opening_input.universe = WorkingUniverse::Unavailable;
+    let opening_gate = GateFixture {
+        input: Some(opening_input),
+    };
+    let error = opening_shell
+        .step_with_binding(
+            handoff(INTENT, AGENT, opening(AAPL, "1", "150")),
+            &opening_ports,
+            &opening_gate,
+        )
+        .expect_err("a binding-gate error must fail a risk-adding order closed");
+    assert_eq!(
+        error,
+        ExecutorError::BindingGateFailed {
+            code: "working_universe_unavailable"
+        }
+    );
+    assert_eq!(opening_shell.connector.total_accepted(), 0);
+
+    let (mut exit_shell, exit_ports) = ready_with_position();
+    let mut exit_input = input_with_position();
+    exit_input.now = outside_calendar;
+    let exit_gate = GateFixture {
+        input: Some(exit_input),
+    };
+    let ran = exit_shell.run_with_binding(
+        handoff(INTENT, AGENT, risk_exit(AAPL, "10", "149")),
+        &exit_ports,
+        &exit_gate,
+    );
+    assert!(
+        submitted(&ran),
+        "rule 13 keeps the locally allowed risk exit routable when the binding gate cannot decide"
+    );
+}
+
+#[test]
+fn a_binding_deferral_is_journaled_as_defer_and_sends_no_order() {
+    let (mut shell, ports) = ready_with_position();
+    let mut trusted = input_with_position();
+    trusted.now = at("2026-09-21T21:00:00Z");
+    let gate = GateFixture {
+        input: Some(trusted),
+    };
+    let ran = shell.run_with_binding(
+        handoff(INTENT, AGENT, discretionary_exit(AAPL, "10", "149")),
+        &ports,
+        &gate,
+    );
+    assert!(!submitted(&ran));
+    let decision = ran
+        .draft("GateDecided")
+        .unwrap_or_else(|| panic!("deferred gate decision"));
+    assert_eq!(
+        decision
+            .payload
+            .get("verdict")
+            .and_then(mandate_canon::Value::as_str),
+        Some("defer")
+    );
+    assert_eq!(
+        decision
+            .payload
+            .get("reason_code")
+            .and_then(mandate_canon::Value::as_str),
+        Some("discretionary_exit_regular_session_only")
+    );
+}
+
+#[test]
+fn binding_pacing_changes_the_submitted_quantity_and_limit() {
+    let (mut shell, ports) = ready_with_position();
+    let mut trusted = input_with_position();
+    trusted.market.trailing_5m_volume = Some(qty("100"));
+    let gate = GateFixture {
+        input: Some(trusted),
+    };
+    let ran = shell.run_with_binding(
+        handoff(INTENT, AGENT, discretionary_exit(AAPL, "10", "100")),
+        &ports,
+        &gate,
+    );
+    let submitted = ran
+        .submissions()
+        .first()
+        .copied()
+        .unwrap_or_else(|| panic!("paced exit submission"));
+    assert_eq!(submitted.qty, qty("5"));
+    assert_eq!(submitted.limit_price, Some(price("148.49")));
 }
 
 #[test]

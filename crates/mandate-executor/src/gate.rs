@@ -590,6 +590,75 @@ fn binding_check_ids(check: BindingCheck) -> &'static [&'static str] {
     }
 }
 
+#[cfg(test)]
+mod journal_tests {
+    use mandate_canon::Value;
+    use mandate_risk::{Check, CheckOutcome};
+
+    use super::{binding_checks_value, journal_evidence};
+    use crate::error::ExecutorError;
+    use crate::payload::{object, text};
+
+    #[test]
+    fn local_gate_evidence_preserves_objects_and_redacts_non_objects() -> Result<(), ExecutorError>
+    {
+        let evidence = object(vec![("available", text("10"))])?;
+        assert_eq!(journal_evidence(&evidence), evidence);
+        assert_eq!(
+            journal_evidence(&text("not structured")),
+            object(Vec::new())?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn binding_gate_journal_expands_every_check_to_the_registered_ids() -> Result<(), ExecutorError>
+    {
+        let checks = [
+            Check::AccountAndMode,
+            Check::UniverseAndLimits,
+            Check::SessionAndHalt,
+            Check::OrderConstraints,
+            Check::MarkAndCollar,
+            Check::ConductControls,
+            Check::BuyingPowerAndExposure,
+            Check::DayTradeBudget,
+        ]
+        .map(CheckOutcome::Passed);
+        let Value::Array(rows) = binding_checks_value(&checks)? else {
+            panic!("binding checks are an array");
+        };
+        let ids: Vec<&str> = rows
+            .iter()
+            .map(|row| {
+                row.get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(|| panic!("each binding check has a registered id"))
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "account_status",
+                "agent_mode",
+                "eligibility",
+                "concentration",
+                "order_size",
+                "session",
+                "halt",
+                "order_constraints",
+                "mark_freshness",
+                "collar",
+                "conduct",
+                "buying_power",
+                "gross_exposure",
+                "day_trade_budget",
+            ]
+        );
+        Ok(())
+    }
+}
+
 /// DEC-160's leg-agent rule fails closed: a broker-created protective leg no agent can be named for
 /// leaves its instrument **held** for openings, never denied, until the leg is attributed or gone;
 /// a reconciliation establishes its presence, not its owner (trading-domain spec §5.4, §9.1 check

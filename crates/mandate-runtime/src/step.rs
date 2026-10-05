@@ -905,13 +905,15 @@ mod tests {
     use mandate_canon::{Digest, Value};
     use mandate_num::{Conviction, Unit};
 
-    use super::modelled;
+    use super::{clip_name, exit_origin_name, modelled};
     use crate::payload::model_output_of;
-    use crate::{EventId, ModelDirection, ModelOutput, ModelOutputIgnored, RiskClock};
+    use crate::{
+        DecisionClip, EventId, ExitOrigin, ModelDirection, ModelOutput, ModelOutputIgnored,
+        RiskClock,
+    };
 
-    #[test]
-    fn model_output_uses_the_closed_journal_shape_and_replays_exactly() -> Result<(), String> {
-        let output = ModelOutput {
+    fn model_output_fixture() -> Result<ModelOutput, String> {
+        Ok(ModelOutput {
             model_id: "quant.ma_crossover".to_owned(),
             model_version: "1.0.0".to_owned(),
             content_hash: Digest::from_hex(
@@ -932,8 +934,40 @@ mod tests {
             thesis_id: None,
             lineage_id: None,
             ignored: Some(ModelOutputIgnored::NotPinned),
-        };
+        })
+    }
+
+    #[test]
+    fn model_output_uses_the_closed_journal_shape_and_replays_exactly() -> Result<(), String> {
+        let output = model_output_fixture()?;
         let payload = modelled(&output).map_err(|error| error.to_string())?;
+        let fields = payload
+            .as_object()
+            .ok_or("model output object")?
+            .keys()
+            .map(|key| key.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            fields,
+            [
+                "as_of",
+                "confidence",
+                "content_hash",
+                "conviction",
+                "direction",
+                "evidence",
+                "expires_at",
+                "horizon_s",
+                "ignored",
+                "instrument_id",
+                "invalidation",
+                "lineage_id",
+                "model_id",
+                "model_version",
+                "thesis_id",
+                "thesis_ref",
+            ]
+        );
         assert_eq!(
             payload.get("model_id").and_then(Value::as_str),
             Some("quant.ma_crossover")
@@ -951,10 +985,74 @@ mod tests {
             Some("not_pinned")
         );
         assert_eq!(payload.get("content"), None);
+        assert_eq!(payload.get("thesis_ref"), Some(&Value::Null));
         assert_eq!(
             model_output_of(&payload).map_err(|error| error.to_string())?,
             output
         );
         Ok(())
+    }
+
+    #[test]
+    fn model_output_replays_digest_and_every_ignored_reason() -> Result<(), String> {
+        let thesis =
+            Digest::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .ok_or("thesis digest")?;
+        let cases = [
+            (ModelOutputIgnored::NotPinned, "not_pinned"),
+            (ModelOutputIgnored::ModelWithdrawn, "model_withdrawn"),
+            (ModelOutputIgnored::OutputLimits, "output_limits"),
+            (ModelOutputIgnored::NotInUniverse, "not_in_universe"),
+            (
+                ModelOutputIgnored::DirectionNotAllowed,
+                "direction_not_allowed",
+            ),
+            (ModelOutputIgnored::HorizonMismatch, "horizon_mismatch"),
+            (
+                ModelOutputIgnored::RevisionWithoutPredecessor,
+                "revision_without_predecessor",
+            ),
+        ];
+        for (reason, canonical_name) in cases {
+            let mut output = model_output_fixture()?;
+            output.thesis_ref = Some(thesis);
+            output.ignored = Some(reason);
+            let payload = modelled(&output).map_err(|error| error.to_string())?;
+            assert_eq!(
+                payload.get("thesis_ref").and_then(Value::as_str),
+                Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            );
+            assert_eq!(
+                payload.get("ignored").and_then(Value::as_str),
+                Some(canonical_name)
+            );
+            assert_eq!(
+                model_output_of(&payload).map_err(|error| error.to_string())?,
+                output
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn decision_enum_names_are_exact_canonical_field_values() {
+        assert_eq!(exit_origin_name(ExitOrigin::Signal), "signal");
+        assert_eq!(
+            exit_origin_name(ExitOrigin::GoalCompletion),
+            "goal_completion"
+        );
+        assert_eq!(
+            exit_origin_name(ExitOrigin::RemovedInstrument),
+            "removed_instrument"
+        );
+        assert_eq!(clip_name(DecisionClip::MaxOrderUsd), "max_order_usd");
+        assert_eq!(clip_name(DecisionClip::PositionCap), "position_cap");
+        assert_eq!(
+            clip_name(DecisionClip::GrossExposureCap),
+            "gross_exposure_cap"
+        );
+        assert_eq!(clip_name(DecisionClip::TargetQty), "target_qty");
+        assert_eq!(clip_name(DecisionClip::MaxSpendUsd), "max_spend_usd");
+        assert_eq!(clip_name(DecisionClip::MaxAvgPrice), "max_avg_price");
     }
 }

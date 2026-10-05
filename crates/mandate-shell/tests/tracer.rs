@@ -16,6 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use mandate_accounting::InstrumentId as RuntimeInstrumentId;
 use mandate_alpaca::{HttpRequest, Method, Response, TradingTransport, TransportError};
 use mandate_builder::{
     AccountSnapshot as BuilderAccountSnapshot, ActionContext, Market as BuilderMarket, RequestedBy,
@@ -27,8 +28,8 @@ use mandate_journal::{AppendOutcome, Environment, StoredEvent, TrustedStart, ver
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_num::{
-    Adverse, CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, Ratio, ShareIncrement, Signed,
-    SizeFraction, Unit, Usd,
+    Adverse, Conviction, CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, Ratio,
+    ShareIncrement, Signed, SizeFraction, Unit, Usd,
 };
 use mandate_risk::spec_types::{GoalState, RiskLimits};
 use mandate_risk::{
@@ -40,8 +41,8 @@ use mandate_risk::{
     ValidatedMandate as GateMandate, WorkingUniverse,
 };
 use mandate_runtime::{
-    AgentId, ConnectionId, Deployment, OrderExecution, Proposal, ProtectionPrices, SignalInputs,
-    TimeInForce, WorkspaceId,
+    AgentId, ConnectionId, Deployment, MandateView, ModelOutput, OrderExecution, Proposal,
+    ProtectionPrices, Purpose as RuntimePurpose, SignalInputs, TimeInForce, WorkspaceId,
 };
 use mandate_shell::adapters::{
     AdvisoryGateContext, AdvisoryOrderFacts, AlpacaConnector, BuilderContext, BuilderPlan,
@@ -807,6 +808,52 @@ fn stream_bytes(stages: &Stages) -> Vec<u8> {
     bytes
 }
 
+fn builder_fixture() -> (MandateView, ModelOutput) {
+    let admitted = SpecMandate {
+        path: fixtures().join("mandate.json"),
+        context: Some(Rc::new(run_context(false))),
+    }
+    .admitted()
+    .unwrap();
+    let now = mandate_runtime::RiskClock::from_secs(UtcNanos::parse(NOW).unwrap().secs());
+    let instrument = admitted.view.working_universe.first().unwrap().clone();
+    let output = mandate_shell::map::model_output(
+        mandate_backtest::Signal::Long,
+        &admitted.model,
+        &instrument,
+        now,
+    )
+    .unwrap();
+    (admitted.view, output)
+}
+
+fn size_output(
+    context: RunContext,
+    view: &MandateView,
+    output: ModelOutput,
+    outer_model: String,
+    outer_instrument: RuntimeInstrumentId,
+) -> Result<Option<Proposal>, Cause> {
+    let now = output.as_of;
+    let inputs = SignalInputs {
+        outputs: BTreeMap::from([(outer_model, BTreeMap::from([(outer_instrument, output)]))]),
+        output_events: BTreeMap::new(),
+        now,
+    };
+    BuilderPlan {
+        mandate: fixtures().join("mandate.json"),
+        context: Some(Rc::new(context)),
+    }
+    .size(view, &inputs)
+}
+
+fn assert_absent<T: std::fmt::Debug>(result: Result<T, Cause>, expected: &'static str) {
+    match result {
+        Err(Cause::Absent { what }) => assert_eq!(what, expected),
+        other => panic!("expected Cause::Absent({expected:?}), got {other:?}"),
+    }
+}
+
 /// Step 1: the fixture mandate validates with no violation before anything else uses it.
 #[test]
 fn the_fixture_mandate_validates_with_no_violation() {
@@ -934,6 +981,229 @@ fn sizing_refuses_a_model_output_without_its_trusted_content_hash() {
             what: "the model output's trusted content hash"
         })
     ));
+}
+
+#[test]
+fn sizing_refuses_each_inconsistent_output_key() {
+    let (view, output) = builder_fixture();
+    let expected = "a consistently keyed model output";
+    let canonical_model = output.model_id.clone();
+    let canonical_instrument = output.instrument_id.clone();
+
+    let mut wrong_model = output.clone();
+    wrong_model.model_id = "quant.untrusted".to_owned();
+    assert_absent(
+        size_output(
+            run_context(true),
+            &view,
+            wrong_model,
+            canonical_model.clone(),
+            canonical_instrument.clone(),
+        ),
+        expected,
+    );
+
+    let wrong_outer_instrument =
+        RuntimeInstrumentId::new("8f475fc4-8bad-4ec1-bbeb-8023ad80310f").unwrap();
+    assert_absent(
+        size_output(
+            run_context(true),
+            &view,
+            output,
+            canonical_model,
+            wrong_outer_instrument,
+        ),
+        expected,
+    );
+}
+
+#[test]
+fn sizing_refuses_each_unpinned_model_identity_field() {
+    let (view, output) = builder_fixture();
+    let expected = "a model output pinned by the validated mandate";
+
+    let mut wrong_version = output.clone();
+    wrong_version.model_version = "2.0.0".to_owned();
+    let mut wrong_version_context = run_context(true);
+    wrong_version_context
+        .decision
+        .as_mut()
+        .unwrap()
+        .builder
+        .as_mut()
+        .unwrap()
+        .model_content_hashes
+        .insert(
+            (
+                wrong_version.model_id.clone(),
+                wrong_version.model_version.clone(),
+            ),
+            wrong_version.content_hash,
+        );
+    assert_absent(
+        size_output(
+            wrong_version_context,
+            &view,
+            wrong_version.clone(),
+            wrong_version.model_id.clone(),
+            wrong_version.instrument_id.clone(),
+        ),
+        expected,
+    );
+
+    let mut wrong_model = output;
+    wrong_model.model_id = "quant.untrusted".to_owned();
+    let mut wrong_model_context = run_context(true);
+    wrong_model_context
+        .decision
+        .as_mut()
+        .unwrap()
+        .builder
+        .as_mut()
+        .unwrap()
+        .model_content_hashes
+        .insert(
+            (
+                wrong_model.model_id.clone(),
+                wrong_model.model_version.clone(),
+            ),
+            wrong_model.content_hash,
+        );
+    assert_absent(
+        size_output(
+            wrong_model_context,
+            &view,
+            wrong_model.clone(),
+            wrong_model.model_id.clone(),
+            wrong_model.instrument_id.clone(),
+        ),
+        expected,
+    );
+}
+
+#[test]
+fn sizing_refuses_each_execution_policy_mismatch() {
+    let (view, output) = builder_fixture();
+    let expected = "the mandate-derived execution policy";
+
+    let mut wrong_asset = run_context(true);
+    let execution = &mut wrong_asset
+        .decision
+        .as_mut()
+        .unwrap()
+        .builder
+        .as_mut()
+        .unwrap()
+        .execution;
+    execution.asset_class = DomainAssetClass::Crypto;
+    execution.tif = TimeInForce::Gtc;
+    assert_absent(
+        size_output(
+            wrong_asset,
+            &view,
+            output.clone(),
+            output.model_id.clone(),
+            output.instrument_id.clone(),
+        ),
+        expected,
+    );
+
+    let mut missing_protection = run_context(true);
+    let execution = &mut missing_protection
+        .decision
+        .as_mut()
+        .unwrap()
+        .builder
+        .as_mut()
+        .unwrap()
+        .execution;
+    execution.protection_required = false;
+    execution.protection = None;
+    assert_absent(
+        size_output(
+            missing_protection,
+            &view,
+            output.clone(),
+            output.model_id.clone(),
+            output.instrument_id.clone(),
+        ),
+        expected,
+    );
+}
+
+#[test]
+fn sizing_accepts_an_unprotected_sell() {
+    let (view, mut output) = builder_fixture();
+    output.conviction = Conviction::MINUS_ONE;
+    let mut context = run_context(true);
+    let builder = context.decision.as_mut().unwrap().builder.as_mut().unwrap();
+    builder.account.position_qty = Qty::parse("1").unwrap();
+    builder.account.cost_basis = CostBasis::parse("255.1").unwrap();
+    builder.account.gross_usd = Usd::parse("255.1").unwrap();
+    builder.action.purpose = Purpose::DiscretionaryExit;
+    builder.action.order_usd = Usd::parse("255.1").unwrap();
+    builder.action.position_usd_after = Usd::ZERO;
+    builder.action.gross_usd_after = Usd::ZERO;
+    builder.execution.protection_required = false;
+    builder.execution.protection = None;
+
+    let proposal = size_output(
+        context,
+        &view,
+        output.clone(),
+        output.model_id.clone(),
+        output.instrument_id.clone(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(proposal.side, mandate_accounting::Side::Sell);
+    assert_eq!(proposal.purpose, RuntimePurpose::DiscretionaryExit);
+    assert_eq!(
+        proposal.execution,
+        Some(OrderExecution {
+            asset_class: DomainAssetClass::UsEquity,
+            tif: TimeInForce::Day,
+            protection_required: false,
+            protection: None,
+        })
+    );
+}
+
+#[test]
+fn classification_refuses_each_mismatched_action_fact() {
+    let (view, output) = builder_fixture();
+    let context = run_context(true);
+    let proposal = size_output(
+        context.clone(),
+        &view,
+        output.clone(),
+        output.model_id.clone(),
+        output.instrument_id.clone(),
+    )
+    .unwrap()
+    .unwrap();
+    let plan = BuilderPlan {
+        mandate: fixtures().join("mandate.json"),
+        context: Some(Rc::new(context)),
+    };
+    let expected = "classification facts for the proposed action";
+
+    let mut wrong_instrument = proposal.clone();
+    wrong_instrument.instrument =
+        RuntimeInstrumentId::new("8f475fc4-8bad-4ec1-bbeb-8023ad80310f").unwrap();
+    assert_absent(plan.classify(&view, &wrong_instrument), expected);
+
+    let mut wrong_asset = proposal.clone();
+    wrong_asset.asset_class = DomainAssetClass::Crypto;
+    assert_absent(plan.classify(&view, &wrong_asset), expected);
+
+    let mut wrong_purpose = proposal.clone();
+    wrong_purpose.purpose = RuntimePurpose::Increase;
+    assert_absent(plan.classify(&view, &wrong_purpose), expected);
+
+    let mut wrong_score = proposal;
+    wrong_score.combined_score = Value::Str("0".to_owned());
+    assert_absent(plan.classify(&view, &wrong_score), expected);
 }
 
 /// The whole path: one order, its intent journaled before it was sent, both streams verifying,

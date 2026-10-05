@@ -2728,7 +2728,10 @@ mod tests {
     }
 
     fn as_of() -> UtcNanos {
-        UtcNanos::parse("2026-09-25T20:00:00.000000000Z").expect("the test clock is canonical")
+        match UtcNanos::parse("2026-09-25T20:00:00.000000000Z") {
+            Ok(at) => at,
+            Err(error) => panic!("the test clock is canonical: {error}"),
+        }
     }
 
     fn dataset(symbol: &str, timeframe: &str) -> Result<DatasetId, String> {

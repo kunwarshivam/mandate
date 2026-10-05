@@ -808,7 +808,10 @@ mod tests {
     use mandate_canon::Digest;
     use mandate_journal::{TrustedStart, verify_events};
 
-    use super::{nth, root_artifact_store, rows_from_chain};
+    use super::{
+        append, chain_append, nth, root_artifact_store, rows_from_chain, tamper,
+        verified_artifact_store,
+    };
     use crate::{Json, ensure, expect_eq, read_fixture, str_at};
 
     fn fixture() -> Result<Json, String> {
@@ -837,6 +840,66 @@ mod tests {
             .err()
             .ok_or("wrong declared digest was accepted")?;
         ensure(error.starts_with("fee_config: ref:"), || error)
+    }
+
+    #[test]
+    fn duplicate_digest_with_identical_bytes_is_accepted() -> Result<(), String> {
+        let fixture = fixture()?;
+        let artifact = fixture
+            .pointer("/artifacts/0")
+            .ok_or("the fixture has no first artifact")?;
+        let canonical = str_at(artifact, "canonical")?.as_bytes().to_vec();
+        let digest = Digest::of(&canonical);
+        let store = verified_artifact_store([artifact, artifact])?;
+
+        expect_eq("deduplicated artifact count", store.len(), 1)?;
+        expect_eq(
+            "bytes retained for duplicate digest",
+            store.get(&digest),
+            Some(&canonical),
+        )
+    }
+
+    #[test]
+    fn chain_append_rejects_a_vector_hash_that_the_append_did_not_produce() -> Result<(), String> {
+        let mut fixture = fixture()?;
+        let hash = fixture
+            .pointer_mut("/chain/4/hash")
+            .ok_or("the fixture has no fifth chain hash")?;
+        *hash = Json::String("0".repeat(64));
+
+        let error = chain_append(&fixture, "")
+            .err()
+            .ok_or("chain_append accepted a wrong vector hash")?;
+        ensure(error.starts_with("stored hash:"), || error)
+    }
+
+    #[test]
+    fn tamper_rejects_an_expected_check_that_differs_from_verification() -> Result<(), String> {
+        let mut fixture = fixture()?;
+        let expected_check = fixture
+            .pointer_mut("/tamper_cases/0/expect/check")
+            .ok_or("the fixture has no first tamper expectation")?;
+        *expected_check = Json::String("seq_gap".to_owned());
+
+        let error = tamper(&fixture, "payload_modified")
+            .err()
+            .ok_or("tamper accepted the wrong expected check")?;
+        ensure(error.contains("rehash_mismatch"), || error)
+    }
+
+    #[test]
+    fn append_rejects_an_expected_sequence_that_differs_from_the_outcome() -> Result<(), String> {
+        let mut fixture = fixture()?;
+        let expected_seq = fixture
+            .pointer_mut("/append_cases/cases/6/expect/seq")
+            .ok_or("the fixture has no committed append sequence")?;
+        *expected_seq = Json::from(7);
+
+        let error = append(&fixture, "committed")
+            .err()
+            .ok_or("append accepted the wrong expected sequence")?;
+        ensure(error.contains("committed seqs"), || error)
     }
 
     #[test]
