@@ -2850,7 +2850,8 @@ mod tests {
         listed_mutant_counts, live_test_counts, mutant_verdicts, mutants, mutants_outcome,
         mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
         plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
-        status_flip_problems, test_binary, test_outcomes, unjudged_mutants, verdicts,
+        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
+        unjudged_mutants, verdicts,
     };
 
     #[test]
