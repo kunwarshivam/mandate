@@ -23,7 +23,8 @@ use crate::ports::{BindingGateInput, BindingGateSource, Ports};
 use crate::protection::{between_rungs, rests};
 use crate::state::ExecutorState;
 use crate::types::{
-    AccountState, AgentId, GateCheck, GateVerdict, Mode, OrderState, Purpose, TimeInForce,
+    AccountState, AgentId, GateCheck, GateVerdict, Mode, OrderState, ProtectionPrices, Purpose,
+    TimeInForce,
 };
 
 /// What the executor's own account-stream checks concluded: a **partial** gate verdict, journaled
@@ -218,7 +219,7 @@ pub(crate) struct Proposal<'s> {
     pub(crate) qty: Qty,
     pub(crate) purpose: Purpose,
     /// Whether the order carries protection prices: a bracket, never a plain add (§5.4).
-    pub(crate) bracketed: bool,
+    pub(crate) protection: Option<ProtectionPrices>,
     pub(crate) limit: Price,
     pub(crate) tif: TimeInForce,
 }
@@ -374,10 +375,10 @@ fn evaluate_binding(
         side: proposal.side,
         qty: proposal.qty,
         limit_price: proposal.limit,
-        kind: if proposal.bracketed {
+        kind: if let Some(protection) = proposal.protection {
             ProposedKind::Bracket {
-                take_profit: proposal.limit,
-                stop: proposal.limit,
+                take_profit: protection.take_profit.unwrap_or(proposal.limit),
+                stop: protection.stop,
             }
         } else {
             ProposedKind::Plain
@@ -426,7 +427,10 @@ fn evaluate_binding(
     partial.verdict = verdict;
     partial.held = held;
     partial.deferred = deferred;
-    partial.sized = decision.pacing.as_ref().map(|pacing| pacing.qty);
+    partial.sized = match (partial.sized, decision.pacing.as_ref().map(|pacing| pacing.qty)) {
+        (Some(local), Some(binding)) => Some(local.min(binding)),
+        (local, binding) => local.or(binding),
+    };
     partial.binding = Some(BindingEvidence {
         checks: decision.checks,
         data_profile: snapshot.data_profile,
@@ -690,7 +694,7 @@ mod attribution_tests {
                     side,
                     qty: Qty::parse("5")?,
                     purpose,
-                    bracketed: false,
+                    protection: None,
                     limit: mandate_num::Price::parse("150")?,
                     tif: crate::types::TimeInForce::Day,
                 },
@@ -831,7 +835,7 @@ mod remainder_tests {
                 side,
                 qty: Qty::parse(qty)?,
                 purpose,
-                bracketed: false,
+                protection: None,
                 limit: mandate_num::Price::parse("150")?,
                 tif: crate::types::TimeInForce::Day,
             },

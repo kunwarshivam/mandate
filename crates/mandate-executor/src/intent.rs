@@ -194,7 +194,7 @@ fn decide(
             side: *side,
             qty: *qty,
             purpose: *purpose,
-            bracketed: protection.is_some(),
+            protection: *protection,
             limit: *limit,
             tif: order_tif(batch, instrument),
         },

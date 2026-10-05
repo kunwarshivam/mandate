@@ -13654,7 +13654,7 @@ mod remainder_pins {
                     side: Side::Sell,
                     qty: Qty::parse(qty)?,
                     purpose,
-                    bracketed: false,
+                    protection: None,
                     limit: mandate_num::Price::parse("150")?,
                     tif: crate::types::TimeInForce::Day,
                 },
