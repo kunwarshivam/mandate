@@ -80,8 +80,7 @@ impl BindingGateSource for AllowingBindingGate {
         } else {
             (AssetClass::UsEquity, Some(Exchange::Nasdaq))
         };
-        let mut positions = BTreeMap::new();
-        positions.insert(asset.clone(), held);
+        let positions = BTreeMap::new();
         let gate_agent = GateAgentId(1);
         Some(BindingGateInput {
             now: at,
@@ -173,7 +172,7 @@ impl BindingGateSource for AllowingBindingGate {
                 etp: EtpClass::Plain,
                 etp_classified_at: Some(at),
                 quote_currency: Some(QuoteCurrency::Usd),
-                prior_close: Some(Price::parse("150").ok()?),
+                prior_close: Some(request.limit),
                 median_dollar_volume_20d: Some(equity),
                 median_dollar_volume_30d: Some(equity),
                 min_order_size: Qty::parse("0.000000001").ok()?,
@@ -183,11 +182,11 @@ impl BindingGateSource for AllowingBindingGate {
             },
             market: MarketSnapshot {
                 quote: Some(SaneQuote {
-                    bid: Price::parse("150").ok()?,
-                    ask: Price::parse("150").ok()?,
+                    bid: request.limit,
+                    ask: request.limit,
                     at: quote_at,
                 }),
-                last_trade: Some((Price::parse("150").ok()?, quote_at)),
+                last_trade: Some((request.limit, quote_at)),
                 trailing_5m_volume: Some(held),
                 adv_20d: Some(held),
             },
