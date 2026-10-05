@@ -61,7 +61,7 @@ const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: s
 ];
 
 const CHART_RULES: Array<[string, string, string]> = [
-  ["bg-gain", "A hero line, up", "Account or agent equity over the range shown: a smooth 2 px line in green when the range ends higher, with no fill, over a dotted rule at the range's opening value."],
+  ["bg-gain", "A hero line, up", "Account or agent equity over the range shown: a smooth 3 px line in green when the range ends higher, with no fill, over a dotted rule at the range's opening value."],
   ["bg-loss", "A hero line, down", "The same line in red when the range ends lower, and in ink when it ends exactly where it began."],
   ["bg-muted-foreground", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit: 1 px dashed grey price lines with a pale azure axis label in deep azure; a crowded label gives way and the legend names it."],
   ["bg-ink", "A proposal", "The limit an agent asks you to approve, dashed, in ink, on a small neutral chart."],

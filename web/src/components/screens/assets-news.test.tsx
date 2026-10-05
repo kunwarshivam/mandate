@@ -1,7 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { HEADLINES } from "@/fixtures/news";
-import { buildWorkspace } from "@/fixtures/workspace";
+import { AGENT_IDS, buildWorkspace } from "@/fixtures/workspace";
 import { positionHref } from "@/lib/screens";
 import { renderWithRuntime } from "@/test/harness";
 import { AssetsSection } from "./assets-section";
@@ -42,29 +42,43 @@ describe("the dashboard's assets", () => {
   });
 });
 
-describe("the dashboard's news", () => {
-  it("shows sample headlines about what the agents hold or may trade, newest first, and links nowhere", () => {
-    const ws = buildWorkspace("normal");
-    renderWithRuntime(<NewsSection ws={ws} now={NOW} />);
+describe("an agent's news", () => {
+  const ws = buildWorkspace("normal");
+
+  it.each(ws.agents.map((a) => [a.label, a] as const))("shows %s only sample headlines about what it holds or may trade, newest first, and links nowhere", (_, agent) => {
+    renderWithRuntime(<NewsSection ws={ws} agent={agent} now={NOW} />);
     const region = screen.getByRole("region", { name: "News" });
-    const list = within(region).getByRole("list", { name: "Sample headlines" });
-    const times = [...list.querySelectorAll("time")].map((t) => Date.parse(t.getAttribute("datetime")!));
-    expect(times.length).toBeGreaterThan(0);
-    expect(times).toEqual([...times].sort((a, b) => b - a));
+    const symbols = new Set([...agent.positions.map((p) => p.instrument.symbol), ...agent.mandate.universe.pinned_instruments.map((i) => i.symbol)]);
+    const expected = HEADLINES.filter((h) => h.symbols.some((s) => symbols.has(s)));
     expect(region.querySelectorAll("a")).toHaveLength(0);
-    const symbols = new Set([
-      ...ws.agents.flatMap((a) => [...a.positions.map((p) => p.instrument.symbol), ...a.mandate.universe.pinned_instruments.map((i) => i.symbol)]),
-      ...ws.external_positions.map((e) => e.instrument.symbol),
-    ]);
-    for (const li of list.querySelectorAll("[data-slot=headline]")) {
+    if (expected.length === 0) {
+      expect(region).toHaveTextContent("No headlines about what this agent holds or may trade.");
+      return;
+    }
+    const list = within(region).getByRole("list", { name: "Sample headlines" });
+    const items = [...list.querySelectorAll("[data-slot=headline]")];
+    expect(items).toHaveLength(expected.length);
+    const times = [...list.querySelectorAll("time")].map((t) => Date.parse(t.getAttribute("datetime")!));
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+    for (const li of items) {
       const h = HEADLINES.find((x) => li.textContent?.includes(x.title))!;
       expect(h.symbols.some((s) => symbols.has(s)), h.title).toBe(true);
     }
   });
 
-  it("says so when nothing on the account has a headline", () => {
-    const ws = { ...buildWorkspace("normal"), agents: [], external_positions: [] };
-    renderWithRuntime(<NewsSection ws={ws} now={NOW} />);
-    expect(screen.getByRole("region", { name: "News" })).toHaveTextContent("No headlines about what your agents hold or may trade.");
+  it("leaves out headlines about what only other agents or the owner hold", () => {
+    const swing = ws.agents.find((a) => a.agent_id === AGENT_IDS.swing)!;
+    renderWithRuntime(<NewsSection ws={ws} agent={swing} now={NOW} />);
+    const region = screen.getByRole("region", { name: "News" });
+    const own = new Set([...swing.positions.map((p) => p.instrument.symbol), ...swing.mandate.universe.pinned_instruments.map((i) => i.symbol)]);
+    const others = HEADLINES.filter((h) => !h.symbols.some((s) => own.has(s)));
+    expect(others.length).toBeGreaterThan(0);
+    for (const h of others) expect(region).not.toHaveTextContent(h.title);
+  });
+
+  it("says so when the agent holds nothing and pins nothing", () => {
+    const agent = { ...ws.agents[0], positions: [], mandate: { ...ws.agents[0].mandate, universe: { ...ws.agents[0].mandate.universe, pinned_instruments: [] } } };
+    renderWithRuntime(<NewsSection ws={ws} agent={agent} now={NOW} />);
+    expect(screen.getByRole("region", { name: "News" })).toHaveTextContent("No headlines about what this agent holds or may trade.");
   });
 });
