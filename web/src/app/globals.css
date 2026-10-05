@@ -624,10 +624,13 @@ html:root[data-cvd="on"] {
 [data-slot="owl"] {
   --owl-eye: var(--card);
   --owl-pupil: var(--foreground);
+  --owl-line: var(--foreground);
 }
+/* The outline stays dark at night, as a sprite's did, so the feathers carry the silhouette. */
 html:root[data-mode="dark"] [data-slot="owl"] {
   --owl-eye: var(--foreground);
   --owl-pupil: var(--card);
+  --owl-line: var(--background);
 }
 [data-slot="owl"] :is(.owl-blink, .owl-body, .owl-z) {
   transform-box: fill-box;
