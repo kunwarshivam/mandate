@@ -24,7 +24,7 @@ use mandate_num::{
     CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, Ratio, ShareIncrement, Signed,
     SizeFraction, Unit, Usd,
 };
-use mandate_risk::spec_types::{GoalState, RiskLimits};
+use mandate_risk::spec_types::{GoalState, RiskLimits, Rung, RungAction, ScaleAction};
 use mandate_risk::{
     AccountSnapshot, AccountState, AgentId as GateAgentId, AgentMode, AgentSnapshot,
     AssetId as GateAssetId, ClientOrderId as GateOrderId, ConductState, DayTradeLedger,
@@ -132,8 +132,12 @@ pub fn load_contexts(
         .canonical_bytes()
         .map_err(|_| absent("the mandate's canonical artifact"))?;
     let config_refs = config_refs(config_dir, canonical_mandate)?;
+    let gate_config = platform_gate_config()?;
+    let gate_mandate = gate_mandate(&mandate)?;
     let source = Rc::new(TrustedPaperContext {
         config_refs: config_refs.clone(),
+        gate_config: gate_config.clone(),
+        mandate: gate_mandate.clone(),
         now,
         agent: agent.0.clone(),
     });
@@ -149,7 +153,13 @@ pub fn load_contexts(
     );
     Ok(Contexts {
         executor,
-        run: run_context(now, model.content_hash, config_refs)?,
+        run: run_context(
+            now,
+            model.content_hash,
+            config_refs,
+            gate_config,
+            gate_mandate,
+        )?,
     })
 }
 
@@ -199,10 +209,82 @@ fn config_refs(config_dir: &Path, mandate_bytes: Vec<u8>) -> Result<BindingGateC
     ))
 }
 
+fn platform_gate_config() -> Result<GateConfig, Cause> {
+    Ok(GateConfig {
+        price_floor: usd("5")?,
+        liquidity_floor_usd: usd("1000000")?,
+        crypto_liquidity_floor_usd: usd("1000000")?,
+        collar_liquid_threshold_usd: usd("50000000")?,
+        collar_liquid_x: Fraction::parse("0.01")?,
+        collar_other_x: Fraction::parse("0.02")?,
+        collar_crypto_x: Fraction::parse("0.02")?,
+        collar_passive_band: Fraction::parse("0.2")?,
+        opposite_fill_interval_s: 60,
+        min_resting_time_s: 2,
+        order_to_fill_max: 10,
+        order_to_fill_min_orders: 20,
+        order_size_participation: Fraction::parse("0.05")?,
+        daily_participation: Fraction::parse("0.05")?,
+        close_window_minutes: 10,
+        legacy_pdt_equity_threshold: usd("25000")?,
+        etp_classification_max_age_s: 604_800,
+    })
+}
+
+fn gate_mandate(document: &mandate_spec::Mandate) -> Result<GateMandate, Cause> {
+    let risk = &document.risk;
+    let scale_action = match risk.scale_action {
+        mandate_spec::document::ScaleAction::LimitBuys => ScaleAction::LimitBuys,
+        mandate_spec::document::ScaleAction::TrimToTarget => ScaleAction::TrimToTarget,
+    };
+    let drawdown_ladder = risk
+        .drawdown_ladder
+        .iter()
+        .enumerate()
+        .map(|(index, rung)| {
+            Ok(Rung {
+                index: u8::try_from(index).map_err(|_| absent("the mandate's drawdown ladder"))?,
+                at: Fraction::parse(rung.at.as_str())?,
+                action: match rung.action {
+                    mandate_spec::document::LadderAction::ScaleSizes => RungAction::ScaleSizes,
+                    mandate_spec::document::LadderAction::ExitsOnly => RungAction::ExitsOnly,
+                    mandate_spec::document::LadderAction::FlattenAndPause => {
+                        RungAction::FlattenAndPause
+                    }
+                },
+                factor: rung
+                    .factor
+                    .as_ref()
+                    .map(|factor| Fraction::parse(factor.as_str()))
+                    .transpose()?,
+                scale_action: Some(scale_action),
+            })
+        })
+        .collect::<Result<Vec<_>, Cause>>()?;
+    Ok(GateMandate::from_validated_parts(
+        RiskLimits {
+            max_position_usd: usd(document.risk.max_position_usd.as_str())?,
+            max_position_fraction: Fraction::parse(document.risk.max_position_fraction.as_str())?,
+            max_order_usd: usd(document.risk.max_order_usd.as_str())?,
+            max_gross_exposure_usd: usd(document.risk.max_gross_exposure_usd.as_str())?,
+            max_orders_per_day: document.risk.max_orders_per_day,
+            reentry_cooldown_s: document.risk.reentry_cooldown_s,
+            rebalance_band: Fraction::parse(document.behavior.sizing.rebalance_band.as_str())?,
+            breach_confirm_s: document.risk.breach_confirm_s,
+            drawdown_ladder,
+        },
+        GoalState::Running,
+        document.universe.leveraged_etps_enabled,
+        document.universe.leveraged_etp_disclosure_version.is_some(),
+    ))
+}
+
 fn run_context(
     now: UtcNanos,
     model_hash: Digest,
     config_refs: BindingGateConfigRefs,
+    gate_config: GateConfig,
+    gate_mandate: GateMandate,
 ) -> Result<RunContext, Cause> {
     let instrument = AssetId::parse(INSTRUMENT_ID).map_err(|_| absent("the AAPL asset id"))?;
     let equity = usd("100000")?;
@@ -297,13 +379,20 @@ fn run_context(
         restricted_instruments: BTreeSet::new(),
         decision: Some(DecisionContext {
             builder: Some(builder),
-            gate: Some(advisory_gate_context(now, config_refs)?),
+            gate: Some(advisory_gate_context(
+                now,
+                config_refs,
+                gate_config,
+                gate_mandate,
+            )?),
         }),
     })
 }
 
 struct TrustedPaperContext {
     config_refs: BindingGateConfigRefs,
+    gate_config: GateConfig,
+    mandate: GateMandate,
     now: UtcNanos,
     agent: String,
 }
@@ -342,7 +431,13 @@ impl BindingGateSource for TrustedPaperContext {
         reason = "BindingGateSource represents every invalid trusted input as fail-closed None"
     )]
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
-        match gate_input(self.now, self.config_refs.clone(), request) {
+        match gate_input(
+            self.now,
+            self.config_refs.clone(),
+            self.gate_config.clone(),
+            self.mandate.clone(),
+            request,
+        ) {
             Ok(input) => Some(input),
             Err(_) => None,
         }
@@ -352,6 +447,8 @@ impl BindingGateSource for TrustedPaperContext {
 fn advisory_gate_context(
     now: UtcNanos,
     config_refs: BindingGateConfigRefs,
+    gate_config: GateConfig,
+    gate_mandate: GateMandate,
 ) -> Result<AdvisoryGateContext, Cause> {
     let agent = mandate_executor::AgentId("tracer-aapl".to_owned());
     let instrument = InstrumentId::new(INSTRUMENT_ID).map_err(|_| absent("the AAPL instrument"))?;
@@ -365,7 +462,7 @@ fn advisory_gate_context(
         tif: mandate_executor::TimeInForce::Day,
         protection: None,
     };
-    let trusted = gate_input(now, config_refs, &request)?;
+    let trusted = gate_input(now, config_refs, gate_config, gate_mandate, &request)?;
     Ok(AdvisoryGateContext {
         now: trusted.now,
         pass: GatePass::First,
@@ -393,6 +490,8 @@ fn advisory_gate_context(
 fn gate_input(
     now: UtcNanos,
     config_refs: BindingGateConfigRefs,
+    config: GateConfig,
+    mandate: GateMandate,
     request: &BindingGateRequest<'_>,
 ) -> Result<BindingGateInput, Cause> {
     let asset = GateAssetId::new(request.instrument.as_str())
@@ -405,41 +504,8 @@ fn gate_input(
     Ok(BindingGateInput {
         config_refs,
         now,
-        config: GateConfig {
-            price_floor: usd("0.01")?,
-            liquidity_floor_usd: Usd::ZERO,
-            crypto_liquidity_floor_usd: Usd::ZERO,
-            collar_liquid_threshold_usd: Usd::ZERO,
-            collar_liquid_x: Fraction::parse("0.5")?,
-            collar_other_x: Fraction::parse("0.5")?,
-            collar_crypto_x: Fraction::parse("0.5")?,
-            collar_passive_band: Fraction::parse("0.5")?,
-            opposite_fill_interval_s: 0,
-            min_resting_time_s: 0,
-            order_to_fill_max: u32::MAX,
-            order_to_fill_min_orders: u32::MAX,
-            order_size_participation: Fraction::ONE,
-            daily_participation: Fraction::ONE,
-            close_window_minutes: 0,
-            legacy_pdt_equity_threshold: Usd::ZERO,
-            etp_classification_max_age_s: u32::MAX,
-        },
-        mandate: GateMandate::from_validated_parts(
-            RiskLimits {
-                max_position_usd: usd("1000")?,
-                max_position_fraction: Fraction::ONE,
-                max_order_usd: usd("300")?,
-                max_gross_exposure_usd: usd("1000")?,
-                max_orders_per_day: 50,
-                reentry_cooldown_s: 3600,
-                rebalance_band: Fraction::parse("0.05")?,
-                breach_confirm_s: 60,
-                drawdown_ladder: Vec::new(),
-            },
-            GoalState::Running,
-            true,
-            true,
-        ),
+        config,
+        mandate,
         risk: RiskSnapshot {
             agent_equity: usd("1000")?,
             high_water_mark: usd("1000")?,
@@ -549,8 +615,8 @@ mod tests {
     use mandate_time::UtcNanos;
 
     use super::{
-        INSTRUMENT_ID, TrustedPaperContext, advisory_gate_context, config_refs, load_contexts,
-        require_empty_array, require_text,
+        INSTRUMENT_ID, TrustedPaperContext, advisory_gate_context, config_refs, gate_mandate,
+        load_contexts, platform_gate_config, require_empty_array, require_text,
     };
     use crate::Cause;
 
@@ -634,7 +700,19 @@ mod tests {
 
     #[test]
     fn the_reviewed_aapl_snapshot_meets_the_platform_liquidity_floor() -> Result<(), String> {
-        let context = advisory_gate_context(now()?, refs()).map_err(|error| error.to_string())?;
+        let mandate_bytes =
+            fs::read(fixtures().join("mandate.json")).map_err(|error| error.to_string())?;
+        let mandate_value =
+            mandate_canon::parse(&mandate_bytes).map_err(|error| error.to_string())?;
+        let mandate =
+            mandate_spec::Mandate::parse(&mandate_value).map_err(|error| error.to_string())?;
+        let context = advisory_gate_context(
+            now()?,
+            refs(),
+            platform_gate_config().map_err(|error| error.to_string())?,
+            gate_mandate(&mandate).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
         let platform_floor = Usd::parse("1000000").map_err(|error| error.to_string())?;
         assert_eq!(
             context.instrument.median_dollar_volume_20d,
@@ -644,6 +722,39 @@ mod tests {
             context.instrument.median_dollar_volume_30d,
             Some(platform_floor)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn the_gate_uses_the_spec_defaults_and_the_mandates_exact_limits() -> Result<(), String> {
+        let config = platform_gate_config().map_err(|error| error.to_string())?;
+        assert_eq!(
+            config.price_floor,
+            Usd::parse("5").map_err(|error| error.to_string())?
+        );
+        assert_eq!(
+            config.liquidity_floor_usd,
+            Usd::parse("1000000").map_err(|error| error.to_string())?
+        );
+        assert_eq!(config.close_window_minutes, 10);
+        assert_eq!(
+            config.legacy_pdt_equity_threshold,
+            Usd::parse("25000").map_err(|error| error.to_string())?
+        );
+
+        let bytes = fs::read(fixtures().join("mandate.json")).map_err(|error| error.to_string())?;
+        let value = mandate_canon::parse(&bytes).map_err(|error| error.to_string())?;
+        let document = mandate_spec::Mandate::parse(&value).map_err(|error| error.to_string())?;
+        let mandate = gate_mandate(&document).map_err(|error| error.to_string())?;
+        assert_eq!(
+            mandate.risk().max_order_usd,
+            Usd::parse("300").map_err(|error| error.to_string())?
+        );
+        assert_eq!(
+            mandate.risk().max_position_usd,
+            Usd::parse("1000").map_err(|error| error.to_string())?
+        );
+        assert_eq!(mandate.risk().drawdown_ladder.len(), 3);
         Ok(())
     }
 
@@ -732,8 +843,16 @@ mod tests {
 
     #[test]
     fn trusted_context_exposes_only_the_reviewed_agent_instrument_and_gate() -> Result<(), String> {
+        let mandate_bytes =
+            fs::read(fixtures().join("mandate.json")).map_err(|error| error.to_string())?;
+        let mandate_value =
+            mandate_canon::parse(&mandate_bytes).map_err(|error| error.to_string())?;
+        let mandate =
+            mandate_spec::Mandate::parse(&mandate_value).map_err(|error| error.to_string())?;
         let trusted = TrustedPaperContext {
             config_refs: refs(),
+            gate_config: platform_gate_config().map_err(|error| error.to_string())?,
+            mandate: gate_mandate(&mandate).map_err(|error| error.to_string())?,
             now: now()?,
             agent: "tracer-aapl".to_owned(),
         };
