@@ -536,18 +536,70 @@ fn absent(what: &'static str) -> Cause {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::{Path, PathBuf};
 
-    use mandate_executor::BindingGateConfigRefs;
-    use mandate_num::Usd;
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_executor::{
+        AgentId as ExecutorAgentId, BindingGateConfigRefs, BindingGateRequest, BindingGateSource,
+        InstrumentSnapshot, MandateView, Purpose,
+    };
+    use mandate_num::{Price, Qty, Usd};
     use mandate_runtime::AgentId;
     use mandate_time::UtcNanos;
 
-    use super::{advisory_gate_context, load_contexts};
+    use super::{
+        INSTRUMENT_ID, TrustedPaperContext, advisory_gate_context, config_refs, load_contexts,
+        require_empty_array, require_text,
+    };
     use crate::Cause;
 
     fn fixtures() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tracer")
+    }
+
+    fn isolated_fixtures(name: &str) -> Result<PathBuf, String> {
+        let destination =
+            std::env::temp_dir().join(format!("mandate-e77-{name}-{}", std::process::id()));
+        if destination.exists() {
+            fs::remove_dir_all(&destination).map_err(|error| error.to_string())?;
+        }
+        let config = destination.join("config");
+        fs::create_dir_all(&config).map_err(|error| error.to_string())?;
+        fs::copy(
+            fixtures().join("mandate.json"),
+            destination.join("mandate.json"),
+        )
+        .map_err(|error| error.to_string())?;
+        for name in [
+            "fee-config.json",
+            "instrument-snapshot.json",
+            "model-artifact.json",
+            "rule-set.json",
+            "trading-calendar.json",
+        ] {
+            fs::copy(fixtures().join("config").join(name), config.join(name))
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(destination)
+    }
+
+    fn replace_mandate(directory: &Path, from: &str, to: &str) -> Result<(), String> {
+        let path = directory.join("mandate.json");
+        let original = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        let changed = original.replace(from, to);
+        if changed == original {
+            return Err(format!("fixture text not found: {from}"));
+        }
+        fs::write(path, changed).map_err(|error| error.to_string())
+    }
+
+    fn now() -> Result<UtcNanos, String> {
+        UtcNanos::parse("2026-10-05T17:00:00.000000000Z").map_err(|error| error.to_string())
+    }
+
+    fn refs() -> BindingGateConfigRefs {
+        BindingGateConfigRefs::complete("fee", "calendar", "instrument", "rules", "mandate")
     }
 
     #[test]
@@ -555,7 +607,7 @@ mod tests {
         let loaded = load_contexts(
             &fixtures().join("mandate.json"),
             &fixtures().join("config"),
-            UtcNanos::parse("2026-10-05T17:00:00.000000000Z").map_err(|error| error.to_string())?,
+            now()?,
             &AgentId("tracer-aapl".to_owned()),
         );
         assert!(
@@ -570,7 +622,7 @@ mod tests {
         let loaded = load_contexts(
             &fixtures().join("mandate.json"),
             &fixtures().join("no-config"),
-            UtcNanos::parse("2026-10-05T17:00:00.000000000Z").map_err(|error| error.to_string())?,
+            now()?,
             &AgentId("tracer-aapl".to_owned()),
         );
         assert!(
@@ -582,11 +634,7 @@ mod tests {
 
     #[test]
     fn the_reviewed_aapl_snapshot_meets_the_platform_liquidity_floor() -> Result<(), String> {
-        let context = advisory_gate_context(
-            UtcNanos::parse("2026-10-05T17:00:00.000000000Z").map_err(|error| error.to_string())?,
-            BindingGateConfigRefs::complete("fee", "calendar", "instrument", "rules", "mandate"),
-        )
-        .map_err(|error| error.to_string())?;
+        let context = advisory_gate_context(now()?, refs()).map_err(|error| error.to_string())?;
         let platform_floor = Usd::parse("1000000").map_err(|error| error.to_string())?;
         assert_eq!(
             context.instrument.median_dollar_volume_20d,
@@ -595,6 +643,128 @@ mod tests {
         assert_eq!(
             context.instrument.median_dollar_volume_30d,
             Some(platform_floor)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn every_reviewed_mandate_identity_field_is_required_independently() -> Result<(), String> {
+        let cases = [
+            (
+                "asset-id",
+                INSTRUMENT_ID,
+                "b0b6dd9d-8b9b-48a9-ba46-b9d54906e416",
+            ),
+            ("symbol", "\"symbol\": \"AAPL\"", "\"symbol\": \"MSFT\""),
+            (
+                "asset-class",
+                "\"asset_class\": \"us_equity\",\n        \"asset_id\"",
+                "\"asset_class\": \"crypto_spot\",\n        \"asset_id\"",
+            ),
+            ("model-id", "quant.ma_crossover", "quant.other_model"),
+            (
+                "model-version",
+                "\"version\": \"1.0.0\"",
+                "\"version\": \"2.0.0\"",
+            ),
+        ];
+        for (name, from, to) in cases {
+            let directory = isolated_fixtures(name)?;
+            replace_mandate(&directory, from, to)?;
+            let loaded = load_contexts(
+                &directory.join("mandate.json"),
+                &directory.join("config"),
+                now()?,
+                &AgentId("tracer-aapl".to_owned()),
+            );
+            assert!(loaded.is_err(), "{name} must be checked independently");
+            fs::remove_dir_all(directory).map_err(|error| error.to_string())?;
+        }
+
+        let directory = isolated_fixtures("model-hash")?;
+        fs::write(
+            directory.join("config/model-artifact.json"),
+            b"{\"id\":\"quant.ma_crossover\",\"version\":\"1.0.0\"} ",
+        )
+        .map_err(|error| error.to_string())?;
+        let loaded = load_contexts(
+            &directory.join("mandate.json"),
+            &directory.join("config"),
+            now()?,
+            &AgentId("tracer-aapl".to_owned()),
+        );
+        assert!(loaded.is_err(), "the model content hash must be checked");
+        fs::remove_dir_all(directory).map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn artifact_shape_checks_refuse_wrong_text_and_nonempty_arrays() -> Result<(), String> {
+        let text = mandate_canon::parse(br#"{"environment":"live"}"#)
+            .map_err(|error| error.to_string())?;
+        assert!(require_text(&text, "environment", "paper").is_err());
+
+        let array = mandate_canon::parse(br#"{"holidays":["2026-01-01"]}"#)
+            .map_err(|error| error.to_string())?;
+        assert!(require_empty_array(&array, "holidays").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn artifact_bytes_produce_complete_nondefault_binding_refs() -> Result<(), String> {
+        let refs = config_refs(&fixtures().join("config"), b"mandate".to_vec())
+            .map_err(|error| error.to_string())?;
+        for value in [
+            refs.fee_config,
+            refs.trading_calendar,
+            refs.instrument_snapshot,
+            refs.rule_set,
+            refs.mandate_version,
+        ] {
+            assert!(
+                value
+                    .as_deref()
+                    .is_some_and(|reference| reference.starts_with("sha256:")),
+                "every artifact must contribute a content-addressed binding reference"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn trusted_context_exposes_only_the_reviewed_agent_instrument_and_gate() -> Result<(), String> {
+        let trusted = TrustedPaperContext {
+            config_refs: refs(),
+            now: now()?,
+            agent: "tracer-aapl".to_owned(),
+        };
+        let agent = ExecutorAgentId("tracer-aapl".to_owned());
+        let other_agent = ExecutorAgentId("other".to_owned());
+        let instrument = InstrumentId::new(INSTRUMENT_ID).map_err(|error| error.to_string())?;
+        let other_instrument = InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e416")
+            .map_err(|error| error.to_string())?;
+
+        assert!(trusted.version(&agent).is_some());
+        assert!(trusted.covers(&agent, &instrument));
+        assert!(!trusted.covers(&other_agent, &instrument));
+        assert!(!trusted.covers(&agent, &other_instrument));
+        assert!(trusted.asset_class(&instrument).is_some());
+        assert!(trusted.asset_class(&other_instrument).is_none());
+        assert!(trusted.increment(&instrument).is_some());
+        assert!(trusted.increment(&other_instrument).is_none());
+
+        let request = BindingGateRequest {
+            agent: &agent,
+            instrument: &instrument,
+            side: Side::Buy,
+            qty: Qty::parse("1").map_err(|error| error.to_string())?,
+            limit: Price::parse("255.2").map_err(|error| error.to_string())?,
+            purpose: Purpose::Open,
+            tif: mandate_executor::TimeInForce::Day,
+            protection: None,
+        };
+        assert!(
+            trusted.input(&request).is_some(),
+            "the reviewed request must produce its binding gate input"
         );
         Ok(())
     }
