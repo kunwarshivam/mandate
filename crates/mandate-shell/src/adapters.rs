@@ -4,11 +4,11 @@
 //! [`StoredBars`], [`MovingAverage`] and [`AlpacaConnector`], whose upstreams are fully implemented
 //! and whose every input the shell holds; since DEC-449's flip also [`RiskExitPath`], which probes
 //! and plans over the journal, stream, clock, and agent the run's bridge hands it; and
-//! [`ExecutorProtection`], through the executor's public protection probe. **Still refusing**, each
-//! with [`Cause::Unimplemented`]: every other adapter, because its upstream is a stub or no
-//! production source exists for one of its inputs, and the shell never invents one (DEC-166 item
-//! 2) — so a run over [`production`] refuses at mandate validation, the first stage after the exit
-//! probes and reconciliation, and places no order.
+//! [`ExecutorProtection`], through the executor's public protection probe. The journal, sink,
+//! executor, and reconciliation boundaries are also live when their trusted inputs are injected.
+//! **Still refusing**, each with [`Cause::Unimplemented`]: mandate validation, sizing,
+//! classification, and the advisory gate. Production injects no executor context yet, so that
+//! boundary also fails closed rather than inventing effective-dated inputs (DEC-166 item 2).
 //!
 //! What each will bind, per the task brief's step table:
 //!
@@ -27,18 +27,21 @@
 //! | [`AlpacaConnector`] | `mandate_alpaca::TradingClient` over a `TradingTransport` (stream K) |
 //! | [`ExecutorReconciler`] | `mandate_executor::reconcile` on the connector's snapshot (E7-3) |
 
+use std::cell::{Ref, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
 use mandate_backtest::{Signal, Strategy, StrategyConfig};
 use mandate_canon::{Key, Object, Value};
 use mandate_executor::{
-    AccountRef, AccountScope, AgentId as ExecutorAgentId, BrokerConnector, BrokerOutcome,
-    BrokerRequest, ConnectorError, EventId, ExecutorConfig, ExecutorState, FoldedEvent, IdGen,
-    InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView, Order as ExecutorOrder,
-    Ports, Seq, WorkspaceId, WriterEpoch, fold, is_protected, paper_only_fee_config,
+    AccountRef, AccountScope, AgentId as ExecutorAgentId, BindingGateSource, BrokerConnector,
+    BrokerOutcome, BrokerRequest, ConnectorError, EventId, ExecutorConfig, ExecutorState,
+    FoldedEvent, IdGen, InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView,
+    Order as ExecutorOrder, Ports, Seq, WorkspaceId, WriterEpoch, fold, is_protected,
+    paper_only_fee_config,
 };
 use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
 use mandate_journal_pg::PgJournal;
@@ -54,10 +57,11 @@ use mandate_runtime::{
 };
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
+use crate::envelope::account_stream;
 use crate::error::Cause;
 use crate::stages::{
     Admitted, Bars, Classifier, Connector, Executor, ExitPath, Gate, JournalWriter, MandateSource,
-    ModelRef, Protection, Reconciled, Reconciler, SignalModel, Sink, Sizing, Stages,
+    ModelRef, Protection, Reconciler, SignalModel, Sink, Sizing, Stages,
 };
 
 /// `mandate_risk::agent_flatten`, probed once against a synthetic request before anything starts
@@ -1198,21 +1202,102 @@ fn executor_purpose(purpose: Purpose) -> mandate_executor::Purpose {
     }
 }
 
-/// `mandate_executor::handle` and `fold` over the account stream's state.
-pub struct CoreExecutor;
+/// Trusted, effective-dated inputs used by both executor entry points.
+///
+/// The binding source supplies facts, never a verdict. Keeping every collaborator in one value
+/// prevents `handle` and reconciliation from observing different configuration in one run.
+pub struct ExecutorContext {
+    ids: Rc<dyn IdGen>,
+    mandates: Rc<dyn ExecutorMandateView>,
+    instruments: Rc<dyn InstrumentSnapshot>,
+    binding_gate: Rc<dyn BindingGateSource>,
+    config: ExecutorConfig,
+    fees: mandate_accounting::Config,
+}
+
+impl ExecutorContext {
+    pub fn new(
+        ids: Rc<dyn IdGen>,
+        mandates: Rc<dyn ExecutorMandateView>,
+        instruments: Rc<dyn InstrumentSnapshot>,
+        binding_gate: Rc<dyn BindingGateSource>,
+        config: ExecutorConfig,
+        fees: mandate_accounting::Config,
+    ) -> Self {
+        Self {
+            ids,
+            mandates,
+            instruments,
+            binding_gate,
+            config,
+            fees,
+        }
+    }
+
+    fn ports(&self) -> Ports<'_> {
+        Ports {
+            ids: &*self.ids,
+            mandates: &*self.mandates,
+            instruments: &*self.instruments,
+            config: &self.config,
+            fees: &self.fees,
+        }
+    }
+}
+
+/// `mandate_executor::handle` and `fold` over the account stream's shared state.
+pub struct CoreExecutor {
+    state: Rc<RefCell<ExecutorState>>,
+    context: Option<Rc<ExecutorContext>>,
+}
+
+impl CoreExecutor {
+    /// Builds the executor and reconciler over one replayed state and one trusted context.
+    pub fn pair(
+        scope: AccountScope,
+        context: Option<ExecutorContext>,
+    ) -> (CoreExecutor, ExecutorReconciler) {
+        let state = Rc::new(RefCell::new(ExecutorState::new(scope)));
+        let context = context.map(Rc::new);
+        (
+            CoreExecutor {
+                state: Rc::clone(&state),
+                context: context.clone(),
+            },
+            ExecutorReconciler { state, context },
+        )
+    }
+
+    pub fn state(&self) -> Ref<'_, ExecutorState> {
+        self.state.borrow()
+    }
+
+    fn context(&self) -> Result<&ExecutorContext, Cause> {
+        self.context.as_deref().ok_or(Cause::Absent {
+            what: "the trusted executor context",
+        })
+    }
+}
 
 impl Executor for CoreExecutor {
     fn step(
         &mut self,
         input: mandate_executor::Input,
     ) -> Result<Vec<mandate_executor::Effect>, Cause> {
-        let _ = input;
-        Err(Cause::Unimplemented { story: "E7-7" })
+        let context = self.context()?;
+        let ports = context.ports();
+        let effects = mandate_executor::handle(
+            &mut self.state.borrow_mut(),
+            input,
+            &ports,
+            &*context.binding_gate,
+        )?;
+        Ok(effects)
     }
 
     fn committed(&mut self, event: &mandate_executor::FoldedEvent) -> Result<(), Cause> {
-        let _ = event;
-        Err(Cause::Unimplemented { story: "E7-7" })
+        fold(&mut self.state.borrow_mut(), event)?;
+        Ok(())
     }
 }
 
@@ -1256,11 +1341,124 @@ impl Connector for Disconnected {
 }
 
 /// `mandate_executor::reconcile` on the broker snapshot the connector reads at startup.
-pub struct ExecutorReconciler;
+pub struct ExecutorReconciler {
+    state: Rc<RefCell<ExecutorState>>,
+    context: Option<Rc<ExecutorContext>>,
+}
+
+impl ExecutorReconciler {
+    fn context(&self) -> Result<&ExecutorContext, Cause> {
+        self.context.as_deref().ok_or(Cause::Absent {
+            what: "the trusted executor context",
+        })
+    }
+
+    fn snapshot(
+        &self,
+        connector: &mut dyn Connector,
+        requests: &[BrokerRequest],
+    ) -> Result<mandate_executor::BrokerSnapshot, Cause> {
+        let state = self.state.borrow();
+        let [
+            open_orders_request @ BrokerRequest::ListOpenOrders,
+            positions_request @ BrokerRequest::ListPositions,
+            account_request @ BrokerRequest::GetAccount,
+            activities_request @ BrokerRequest::ListActivities { since },
+        ] = requests
+        else {
+            return Err(Cause::Absent {
+                what: "the executor's complete reconciliation request",
+            });
+        };
+        let expected_since = match state.checkpoint() {
+            Some(cursor) => cursor.clone(),
+            None => mandate_executor::ActivityCursor(String::new()),
+        };
+        if since != &expected_since {
+            return Err(Cause::Absent {
+                what: "the executor's current reconciliation cursor",
+            });
+        }
+        let open_orders = match connector.call(open_orders_request)? {
+            BrokerOutcome::OpenOrders(orders) => orders,
+            unexpected => {
+                return Err(unexpected_snapshot(
+                    unexpected,
+                    "the broker's open-order snapshot",
+                ));
+            }
+        };
+        let positions = match connector.call(positions_request)? {
+            BrokerOutcome::Positions(positions) => positions,
+            unexpected => {
+                return Err(unexpected_snapshot(
+                    unexpected,
+                    "the broker's position snapshot",
+                ));
+            }
+        };
+        let account = match connector.call(account_request)? {
+            BrokerOutcome::Account(account) => account,
+            unexpected => {
+                return Err(unexpected_snapshot(
+                    unexpected,
+                    "the broker's account snapshot",
+                ));
+            }
+        };
+        let (fills, cursor) = match connector.call(activities_request)? {
+            BrokerOutcome::Activities { fills, cursor } => (fills, cursor),
+            unexpected => {
+                return Err(unexpected_snapshot(
+                    unexpected,
+                    "the broker's activity snapshot",
+                ));
+            }
+        };
+        let scope = state.scope();
+        let stream = account_stream(&scope.workspace.0, &scope.account.0);
+        Ok(mandate_executor::BrokerSnapshot {
+            open_orders,
+            positions,
+            account,
+            fills,
+            cursor,
+            reason: mandate_executor::ReconcileReason::Startup,
+            taken_at_head: match state.head(&stream) {
+                Some(head) => head,
+                None => Seq(0),
+            },
+        })
+    }
+}
+
+fn unexpected_snapshot(outcome: BrokerOutcome, what: &'static str) -> Cause {
+    match outcome {
+        BrokerOutcome::Submitted(_)
+        | BrokerOutcome::DuplicateClientOrderId { .. }
+        | BrokerOutcome::Rejected(_)
+        | BrokerOutcome::Order(_)
+        | BrokerOutcome::Absent { .. }
+        | BrokerOutcome::OpenOrders(_)
+        | BrokerOutcome::Positions(_)
+        | BrokerOutcome::Account(_)
+        | BrokerOutcome::Activities { .. }
+        | BrokerOutcome::CancelAccepted { .. }
+        | BrokerOutcome::AccountWideAccepted => Cause::Absent { what },
+    }
+}
 
 impl Reconciler for ExecutorReconciler {
-    fn reconcile(&mut self) -> Result<Reconciled, Cause> {
-        Err(Cause::Unimplemented { story: "E7-7" })
+    fn reconcile(
+        &mut self,
+        connector: &mut dyn Connector,
+        requests: &[BrokerRequest],
+    ) -> Result<mandate_executor::Reconciliation, Cause> {
+        let context = self.context()?;
+        let snapshot = self.snapshot(connector, requests)?;
+        let ports = context.ports();
+        let reconciliation = mandate_executor::reconcile(&self.state.borrow(), &snapshot, &ports)?;
+        Ok(reconciliation)
     }
 }
 
@@ -1273,6 +1471,11 @@ pub struct Sources<T> {
     pub journal: Option<String>,
     pub recorded_at: UtcNanos,
     pub agent: AgentId,
+    pub workspace: String,
+    pub account_ref: String,
+    /// Trusted executor snapshots and effective-dated configuration. `None` refuses before the
+    /// executor mutates process state or reads the broker.
+    pub executor: Option<ExecutorContext>,
     pub transport: T,
 }
 
@@ -1284,6 +1487,9 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         journal,
         recorded_at,
         agent,
+        workspace,
+        account_ref,
+        executor,
         transport,
     } = sources;
     over(Sources {
@@ -1292,6 +1498,9 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         journal,
         recorded_at,
         agent,
+        workspace,
+        account_ref,
+        executor,
         transport: Box::new(AlpacaConnector { transport }),
     })
 }
@@ -1299,6 +1508,13 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
 /// The production stages over the given connector: the binary's [`Disconnected`] one, or
 /// [`production`]'s.
 pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
+    let (executor, reconciler) = CoreExecutor::pair(
+        AccountScope {
+            account: AccountRef(sources.account_ref),
+            workspace: WorkspaceId(sources.workspace),
+        },
+        sources.executor,
+    );
     Stages {
         exit: Box::new(RiskExitPath::new(
             sources.agent.clone(),
@@ -1312,7 +1528,7 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
             dir: sources.dataset,
         }),
         signal: Box::new(MovingAverage),
-        reconciler: Box::new(ExecutorReconciler),
+        reconciler: Box::new(reconciler),
         sizing: Box::new(BuilderPlan),
         classifier: Box::new(BuilderPlan),
         gate: Box::new(RiskGate),
@@ -1320,20 +1536,22 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
         sink: Box::new(ExecutorSink {
             agent: sources.agent,
         }),
-        executor: Box::new(CoreExecutor),
+        executor: Box::new(executor),
         connector: sources.transport,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, VecDeque};
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::rc::Rc;
 
     use super::{
-        ExecutorMandateView, ExecutorOrder, ExecutorProtection, ExecutorSink, Protection,
-        ProtectionProbePorts, StoreJournal, is_unattributed_exit, working_order_of,
+        CoreExecutor, ExecutorContext, ExecutorMandateView, ExecutorOrder, ExecutorProtection,
+        ExecutorSink, Protection, ProtectionProbePorts, StoreJournal, is_unattributed_exit,
+        working_order_of,
     };
     use mandate_backtest::{BacktestError, Signal};
     use mandate_canon::{DecStr, Value};
@@ -1353,7 +1571,7 @@ mod tests {
     use mandate_time::{Date, UtcNanos};
 
     use crate::envelope::{DraftFields, Envelope, Writer, draft_bytes};
-    use crate::stages::{JournalWriter, Sink};
+    use crate::stages::{Connector, Executor, JournalWriter, Reconciler, Sink};
 
     fn value_object(fields: &[(&str, Value)]) -> Result<Value, String> {
         let mut object = mandate_canon::Object::new();
@@ -1364,6 +1582,111 @@ mod tests {
             );
         }
         Ok(Value::Object(object))
+    }
+
+    struct TestExecutorSource;
+
+    impl mandate_executor::IdGen for TestExecutorSource {
+        fn event_id(
+            &self,
+            epoch: mandate_executor::WriterEpoch,
+            head: mandate_executor::Seq,
+            ordinal: u32,
+        ) -> mandate_executor::EventId {
+            mandate_executor::EventId(format!("{}-{}-{ordinal}", epoch.0, head.0))
+        }
+    }
+
+    impl mandate_executor::MandateView for TestExecutorSource {
+        fn version(
+            &self,
+            _agent: &mandate_executor::AgentId,
+        ) -> Option<mandate_executor::MandateVersion> {
+            None
+        }
+
+        fn crypto_stop_limit_offset(
+            &self,
+            _agent: &mandate_executor::AgentId,
+        ) -> Option<mandate_num::Fraction> {
+            None
+        }
+
+        fn covers(
+            &self,
+            _agent: &mandate_executor::AgentId,
+            _instrument: &mandate_accounting::InstrumentId,
+        ) -> bool {
+            false
+        }
+    }
+
+    impl mandate_executor::InstrumentSnapshot for TestExecutorSource {
+        fn asset_class(
+            &self,
+            _instrument: &mandate_accounting::InstrumentId,
+        ) -> Option<mandate_accounting::AssetClass> {
+            None
+        }
+
+        fn increment(
+            &self,
+            _instrument: &mandate_accounting::InstrumentId,
+        ) -> Option<mandate_num::ShareIncrement> {
+            None
+        }
+
+        fn exit_tier(
+            &self,
+            _instrument: &mandate_accounting::InstrumentId,
+        ) -> Option<mandate_executor::ExitTier> {
+            None
+        }
+    }
+
+    impl mandate_executor::BindingGateSource for TestExecutorSource {
+        fn input(
+            &self,
+            _request: &mandate_executor::BindingGateRequest<'_>,
+        ) -> Option<mandate_executor::BindingGateInput> {
+            None
+        }
+    }
+
+    fn test_executor_context() -> Result<ExecutorContext, String> {
+        let first = Date::parse("2026-01-01").map_err(|e| e.to_string())?;
+        let last = Date::parse("2026-12-31").map_err(|e| e.to_string())?;
+        let calendar =
+            mandate_time::TradingCalendar::new(first, last, [], []).map_err(|e| e.to_string())?;
+        let fees = mandate_executor::paper_only_fee_config("paper", calendar, "2026-01-01")
+            .map_err(|e| e.to_string())?;
+        let source = Rc::new(TestExecutorSource);
+        Ok(ExecutorContext::new(
+            source.clone(),
+            source.clone(),
+            source.clone(),
+            source,
+            mandate_executor::ExecutorConfig::PROPOSED,
+            fees,
+        ))
+    }
+
+    fn account_scope() -> mandate_executor::AccountScope {
+        mandate_executor::AccountScope {
+            account: mandate_executor::AccountRef("tracer-paper".to_owned()),
+            workspace: mandate_executor::WorkspaceId("tracer".to_owned()),
+        }
+    }
+
+    fn stream_opened() -> Result<mandate_executor::FoldedEvent, String> {
+        Ok(mandate_executor::FoldedEvent {
+            stream: "acct:tracer:tracer-paper".to_owned(),
+            seq: mandate_executor::Seq(1),
+            event_id: mandate_executor::EventId("10000100000000000000000000".to_owned()),
+            event_type: "StreamOpened".to_owned(),
+            causation_id: None,
+            payload: value_object(&[("environment", Value::Str("paper".to_owned()))])?,
+        })
     }
 
     #[test]
@@ -1416,6 +1739,158 @@ mod tests {
             journal.append("acct:tracer:tracer-paper", 0, 0, &[]),
             AppendOutcome::Unavailable
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn core_executor_replays_then_starts_through_real_handle() -> Result<(), String> {
+        let (mut core, _) = CoreExecutor::pair(account_scope(), Some(test_executor_context()?));
+        core.committed(&stream_opened()?)
+            .map_err(|e| e.to_string())?;
+        let effects = core
+            .step(mandate_executor::Input::Started(
+                mandate_executor::WriterEpoch(7),
+            ))
+            .map_err(|e| e.to_string())?;
+        assert_eq!(
+            effects,
+            [
+                mandate_executor::Effect::Broker(mandate_executor::BrokerRequest::ListOpenOrders),
+                mandate_executor::Effect::Broker(mandate_executor::BrokerRequest::ListPositions),
+                mandate_executor::Effect::Broker(mandate_executor::BrokerRequest::GetAccount),
+                mandate_executor::Effect::Broker(mandate_executor::BrokerRequest::ListActivities {
+                    since: mandate_executor::ActivityCursor(String::new())
+                })
+            ]
+        );
+        assert!(core.state().started());
+        assert_eq!(core.state().epoch(), Some(mandate_executor::WriterEpoch(7)));
+        assert_eq!(
+            core.state().head("acct:tracer:tracer-paper"),
+            Some(mandate_executor::Seq(1))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn core_executor_without_trusted_context_fails_before_starting() -> Result<(), String> {
+        let (mut core, _) = CoreExecutor::pair(account_scope(), None);
+        core.committed(&stream_opened()?)
+            .map_err(|e| e.to_string())?;
+        assert!(matches!(
+            core.step(mandate_executor::Input::Started(
+                mandate_executor::WriterEpoch(7)
+            )),
+            Err(crate::Cause::Absent {
+                what: "the trusted executor context"
+            })
+        ));
+        assert!(!core.state().started());
+        Ok(())
+    }
+
+    struct SnapshotConnector {
+        outcomes: VecDeque<mandate_executor::BrokerOutcome>,
+        requests: Vec<mandate_executor::BrokerRequest>,
+    }
+
+    impl Connector for SnapshotConnector {
+        fn call(
+            &mut self,
+            request: &mandate_executor::BrokerRequest,
+        ) -> Result<mandate_executor::BrokerOutcome, mandate_executor::ConnectorError> {
+            self.requests.push(request.clone());
+            self.outcomes
+                .pop_front()
+                .ok_or(mandate_executor::ConnectorError::NotSent {
+                    code: "fixture_exhausted",
+                })
+        }
+    }
+
+    #[test]
+    fn reconciliation_reads_the_broker_at_the_shared_folded_head_and_runs_the_core()
+    -> Result<(), String> {
+        let account = mandate_executor::BrokerAccount {
+            status: "ACTIVE".to_owned(),
+            crypto_status: "ACTIVE".to_owned(),
+            trading_blocked: false,
+            account_blocked: false,
+            trade_suspended_by_user: false,
+            multiplier: 2,
+            equity: mandate_num::Usd::ZERO,
+            cash: mandate_num::Usd::ZERO,
+            buying_power: mandate_num::Usd::ZERO,
+            non_marginable_buying_power: mandate_num::Usd::ZERO,
+            accrued_fees: mandate_num::Usd::ZERO,
+        };
+        let mut connector = SnapshotConnector {
+            outcomes: VecDeque::from([
+                mandate_executor::BrokerOutcome::OpenOrders(Vec::new()),
+                mandate_executor::BrokerOutcome::Positions(Vec::new()),
+                mandate_executor::BrokerOutcome::Account(account),
+                mandate_executor::BrokerOutcome::Activities {
+                    fills: Vec::new(),
+                    cursor: mandate_executor::ActivityCursor("cursor-1".to_owned()),
+                },
+            ]),
+            requests: Vec::new(),
+        };
+        let (mut core, mut reconciler) =
+            CoreExecutor::pair(account_scope(), Some(test_executor_context()?));
+        core.committed(&stream_opened()?)
+            .map_err(|e| e.to_string())?;
+        let requests: Vec<_> = core
+            .step(mandate_executor::Input::Started(
+                mandate_executor::WriterEpoch(7),
+            ))
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter_map(|effect| match effect {
+                mandate_executor::Effect::Broker(request) => Some(request),
+                mandate_executor::Effect::Journal(_)
+                | mandate_executor::Effect::Timer(_)
+                | mandate_executor::Effect::Notify(_) => None,
+            })
+            .collect();
+        let result = reconciler
+            .reconcile(&mut connector, &requests)
+            .map_err(|e| e.to_string())?;
+        assert_eq!(result.expected_head, mandate_executor::Seq(1));
+        assert!(result.effects.iter().any(|effect| matches!(
+            effect,
+            mandate_executor::Effect::Journal(draft)
+                if draft.event_type == "ReconciliationRun"
+        )));
+        assert_eq!(
+            connector.requests,
+            [
+                mandate_executor::BrokerRequest::ListOpenOrders,
+                mandate_executor::BrokerRequest::ListPositions,
+                mandate_executor::BrokerRequest::GetAccount,
+                mandate_executor::BrokerRequest::ListActivities {
+                    since: mandate_executor::ActivityCursor(String::new())
+                }
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn incomplete_reconciliation_request_reads_nothing_from_the_broker() -> Result<(), String> {
+        let mut connector = SnapshotConnector {
+            outcomes: VecDeque::new(),
+            requests: Vec::new(),
+        };
+        let (_, mut reconciler) =
+            CoreExecutor::pair(account_scope(), Some(test_executor_context()?));
+        assert!(matches!(
+            reconciler.reconcile(&mut connector, &[]),
+            Err(crate::Cause::Absent {
+                what: "the executor's complete reconciliation request"
+            })
+        ));
+        assert!(connector.requests.is_empty());
         Ok(())
     }
 
@@ -1658,7 +2133,7 @@ mod tests {
 
     use super::{Disconnected, MovingAverage, StoredBars, split_inside, trusted};
     use crate::error::Cause;
-    use crate::stages::{Bars, Connector, ModelRef, SignalModel};
+    use crate::stages::{Bars, ModelRef, SignalModel};
 
     /// A scratch directory, removed when dropped.
     struct Scratch(PathBuf);

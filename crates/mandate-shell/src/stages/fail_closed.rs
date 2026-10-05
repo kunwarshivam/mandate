@@ -258,6 +258,9 @@ fn the_production_stages_refuse_without_their_inputs() -> Result<(), String> {
         journal: None,
         recorded_at,
         agent: AgentId("tracer-aapl".to_owned()),
+        workspace: "tracer".to_owned(),
+        account_ref: "tracer-paper".to_owned(),
+        executor: None,
         transport: Box::new(Disconnected),
     });
     let error = refusal(run_with(&mut stages)?)?;

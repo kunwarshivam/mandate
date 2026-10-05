@@ -33,7 +33,7 @@ use mandate_time::UtcNanos;
 
 use super::{
     Admitted, Bars, Classifier, Connector, Executor, ExitPath, Gate, JournalWriter, MandateSource,
-    ModelRef, Protection, Reconciled, Reconciler, SignalModel, Sink, Sizing, Stage, Stages,
+    ModelRef, Protection, Reconciler, SignalModel, Sink, Sizing, Stage, Stages,
 };
 use crate::envelope::{IdSpace, Ids};
 use crate::error::Cause;
@@ -386,18 +386,31 @@ pub struct FixedReconciler {
 }
 
 impl Reconciler for FixedReconciler {
-    fn reconcile(&mut self) -> Result<Reconciled, Cause> {
+    fn reconcile(
+        &mut self,
+        connector: &mut dyn Connector,
+        requests: &[BrokerRequest],
+    ) -> Result<mandate_executor::Reconciliation, Cause> {
+        let _ = (connector, requests);
         self.world.called(Stage::Reconcile);
         let result = if self.clean { "clean" } else { "mismatch" };
         let event_id = self.world.tally.borrow_mut().next_account_id();
-        Ok(Reconciled {
-            clean: self.clean,
-            drafts: vec![mandate_executor::EventDraft {
-                event_id: mandate_executor::EventId(event_id),
-                event_type: "ReconciliationRun".to_owned(),
-                causation_id: None,
-                payload: object(&[("result", result)])?,
-            }],
+        Ok(mandate_executor::Reconciliation {
+            effects: vec![mandate_executor::Effect::Journal(
+                mandate_executor::EventDraft {
+                    event_id: mandate_executor::EventId(event_id),
+                    event_type: "ReconciliationRun".to_owned(),
+                    causation_id: None,
+                    payload: object(&[("result", result)])?,
+                },
+            )],
+            verdict: if self.clean {
+                mandate_executor::ReconciliationVerdict::Clean
+            } else {
+                mandate_executor::ReconciliationVerdict::Mismatch
+            },
+            differences: Vec::new(),
+            expected_head: mandate_executor::Seq(0),
         })
     }
 }
@@ -749,7 +762,9 @@ impl Executor for PaperExecutor {
         &mut self,
         input: mandate_executor::Input,
     ) -> Result<Vec<mandate_executor::Effect>, Cause> {
-        self.world.called(Stage::Executor);
+        if !matches!(&input, mandate_executor::Input::Started(_)) {
+            self.world.called(Stage::Executor);
+        }
         if let mandate_executor::Input::Intent(handoff) = &input {
             return self.intent(handoff);
         }
@@ -960,7 +975,12 @@ impl SignalModel for Stubbed {
 }
 
 impl Reconciler for Stubbed {
-    fn reconcile(&mut self) -> Result<Reconciled, Cause> {
+    fn reconcile(
+        &mut self,
+        connector: &mut dyn Connector,
+        requests: &[BrokerRequest],
+    ) -> Result<mandate_executor::Reconciliation, Cause> {
+        let _ = (connector, requests);
         self.refuse()
     }
 }

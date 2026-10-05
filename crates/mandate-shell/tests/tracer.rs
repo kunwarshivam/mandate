@@ -234,6 +234,9 @@ fn stages(mandate: &str, dataset: PathBuf, transport: Scripted) -> Stages {
         journal: None,
         recorded_at: UtcNanos::parse(NOW).unwrap(),
         agent: AgentId(AGENT.to_owned()),
+        workspace: WORKSPACE.to_owned(),
+        account_ref: ACCOUNT_REF.to_owned(),
+        executor: None,
         transport,
     })
 }

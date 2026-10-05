@@ -65,6 +65,9 @@ fn tracer() -> Result<Report, ShellError> {
         journal: args.journal,
         recorded_at,
         agent: AgentId(cli::AGENT.to_owned()),
+        workspace: cli::WORKSPACE.to_owned(),
+        account_ref: cli::ACCOUNT_REF.to_owned(),
+        executor: None,
         transport: Box::new(Disconnected),
     });
     run(&mut stages, &setup)

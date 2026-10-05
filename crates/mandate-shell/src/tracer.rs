@@ -175,22 +175,62 @@ impl<'s> Session<'s> {
     /// Recovery, then the startup reconciliation. The runtime holds every opening until a clean
     /// `ReconciliationRun` has been folded (DEC-131 item 13), and a mismatch keeps it held.
     pub(crate) fn start(&mut self) -> Result<(), ShellError> {
-        let epoch = self.epoch(&self.agent_stream.clone());
-        self.feed(Input::Started(WriterEpoch(epoch)))?;
+        let agent_epoch = self.epoch(&self.agent_stream.clone());
+        self.feed(Input::Started(WriterEpoch(agent_epoch)))?;
+        let account_epoch = self.epoch(&self.account_stream.clone());
+        let executor_effects = self
+            .stages
+            .executor
+            .step(mandate_executor::Input::Started(
+                mandate_executor::WriterEpoch(account_epoch),
+            ))
+            .map_err(refused(Stage::Executor))?;
+        let reconciliation_requests = self.prepare_reconciliation(executor_effects)?;
         let reconciled = self
             .stages
             .reconciler
-            .reconcile()
+            .reconcile(&mut *self.stages.connector, &reconciliation_requests)
             .map_err(refused(Stage::Reconcile))?;
-        for draft in &reconciled.drafts {
-            self.append_account(draft)?;
+        self.perform_executor(reconciled.effects)?;
+        match reconciled.verdict {
+            mandate_executor::ReconciliationVerdict::Clean
+            | mandate_executor::ReconciliationVerdict::Adopted => Ok(()),
+            mandate_executor::ReconciliationVerdict::Mismatch => {
+                self.report.alerts.push("reconciliation_mismatch");
+                Err(ShellError::ReconciliationMismatch)
+            }
         }
-        if reconciled.clean {
-            Ok(())
-        } else {
-            self.report.alerts.push("reconciliation_mismatch");
-            Err(ShellError::ReconciliationMismatch)
+    }
+
+    fn prepare_reconciliation(
+        &mut self,
+        effects: Vec<mandate_executor::Effect>,
+    ) -> Result<Vec<BrokerRequest>, ShellError> {
+        let mut requests = Vec::new();
+        for effect in effects {
+            match effect {
+                mandate_executor::Effect::Broker(request) => match request {
+                    BrokerRequest::ListOpenOrders
+                    | BrokerRequest::ListPositions
+                    | BrokerRequest::GetAccount
+                    | BrokerRequest::ListActivities { .. } => requests.push(request),
+                    BrokerRequest::Submit(_)
+                    | BrokerRequest::Cancel { .. }
+                    | BrokerRequest::AcknowledgeReplace { .. }
+                    | BrokerRequest::GetOrderByClientId(_)
+                    | BrokerRequest::CancelAll(_)
+                    | BrokerRequest::ClosePosition(_, _) => {
+                        self.perform_executor(vec![mandate_executor::Effect::Broker(request)])?;
+                    }
+                },
+                mandate_executor::Effect::Journal(_)
+                | mandate_executor::Effect::Timer(_)
+                | mandate_executor::Effect::Notify(_) => {
+                    self.perform_executor(vec![effect])?;
+                }
+            }
         }
+        Ok(requests)
     }
 
     /// One runtime step and every effect it describes, in order. A refusal a stage recorded during

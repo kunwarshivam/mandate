@@ -169,14 +169,6 @@ pub struct ModelRef {
     pub params: BTreeMap<String, String>,
 }
 
-/// What the startup reconciliation found: whether the journal and the broker agree, and the
-/// account-stream drafts that record it (trading-domain spec §11).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Reconciled {
-    pub clean: bool,
-    pub drafts: Vec<mandate_executor::EventDraft>,
-}
-
 /// Step 17's flatten half, and the planner behind the runtime's infallible `FlattenPlanner`.
 pub trait ExitPath {
     /// Whether an agent-scoped flatten can be planned at all. Asked once, before anything else.
@@ -273,7 +265,12 @@ pub trait Connector {
 
 /// Step 16: the startup reconciliation.
 pub trait Reconciler {
-    fn reconcile(&mut self) -> Result<Reconciled, Cause>;
+    /// Reads the broker through the run's connector and reconciles it with replayed executor state.
+    fn reconcile(
+        &mut self,
+        connector: &mut dyn Connector,
+        requests: &[BrokerRequest],
+    ) -> Result<mandate_executor::Reconciliation, Cause>;
 }
 
 /// Every stage the tracer reaches, one implementation each.
