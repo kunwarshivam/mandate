@@ -1448,6 +1448,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-liquidity"
+version = "0.0.0"
+dependencies = [
+ "mandate-num",
+ "mandate-time",
+]
+
+[[package]]
 name = "mandate-marketdata"
 version = "0.0.0"
 dependencies = [
@@ -1551,6 +1559,7 @@ dependencies = [
  "mandate-executor",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-liquidity",
  "mandate-marketdata",
  "mandate-num",
  "mandate-risk",

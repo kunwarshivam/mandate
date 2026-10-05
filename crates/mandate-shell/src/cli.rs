@@ -22,11 +22,12 @@ pub const ACCOUNT_REF: &str = "tracer-paper";
 pub struct Args {
     pub mandate: PathBuf,
     pub dataset: PathBuf,
+    /// Effective-dated E7-7 artifacts, including the pinned model artifact.
+    pub config_dir: PathBuf,
     /// The journal's DSN. Only a run that places its order keeps a journal: a planning run uses a
     /// scratch one, so a later start cannot re-hand what it proposed (DEC-157 item 6).
     pub journal: Option<String>,
     pub place_one_order: bool,
-    pub new_cycle: bool,
 }
 
 /// Parses the arguments after the program name.
@@ -40,19 +41,19 @@ where
 {
     let mut mandate = None;
     let mut dataset = None;
+    let mut config_dir = None;
     let mut journal = None;
     let mut confirm_paper = false;
     let mut place_one_order = false;
-    let mut new_cycle = false;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--mandate" => mandate = Some(PathBuf::from(value_of(&arg, args.next())?)),
             "--dataset" => dataset = Some(PathBuf::from(value_of(&arg, args.next())?)),
+            "--config-dir" => config_dir = Some(PathBuf::from(value_of(&arg, args.next())?)),
             "--journal" => journal = Some(value_of(&arg, args.next())?),
             "--confirm-paper" => confirm_paper = true,
             "--place-one-order" => place_one_order = true,
-            "--new-cycle" => new_cycle = true,
             unknown => return Err(usage(format!("unknown argument {unknown}"))),
         }
     }
@@ -72,9 +73,9 @@ where
     Ok(Args {
         mandate: mandate.ok_or_else(|| usage("--mandate is required".to_owned()))?,
         dataset: dataset.ok_or_else(|| usage("--dataset is required".to_owned()))?,
+        config_dir: config_dir.ok_or_else(|| usage("--config-dir is required".to_owned()))?,
         journal,
         place_one_order,
-        new_cycle,
     })
 }
 
@@ -115,6 +116,8 @@ mod tests {
             "m.json",
             "--dataset",
             "bars",
+            "--config-dir",
+            "config",
             "--confirm-paper",
         ])
         .map_err(|e| e.to_string())?;
@@ -123,9 +126,9 @@ mod tests {
             Args {
                 mandate: PathBuf::from("m.json"),
                 dataset: PathBuf::from("bars"),
+                config_dir: PathBuf::from("config"),
                 journal: None,
                 place_one_order: false,
-                new_cycle: false,
             }
         );
         assert_eq!(
@@ -152,9 +155,10 @@ mod tests {
         let parsed = args(&[
             "--confirm-paper",
             "--place-one-order",
-            "--new-cycle",
             "--journal",
             "postgres://localhost/j",
+            "--config-dir",
+            "config",
             "--mandate",
             "m.json",
             "--dataset",
@@ -162,7 +166,7 @@ mod tests {
         ])
         .map_err(|e| e.to_string())?;
         assert!(parsed.place_one_order);
-        assert!(parsed.new_cycle);
+        assert_eq!(parsed.config_dir, PathBuf::from("config"));
         assert_eq!(parsed.journal.as_deref(), Some("postgres://localhost/j"));
         assert_eq!(
             usage_of(&[
@@ -195,6 +199,10 @@ mod tests {
             "unknown argument --host"
         );
         assert_eq!(
+            usage_of(&["--confirm-paper", "--new-cycle"]),
+            "unknown argument --new-cycle"
+        );
+        assert_eq!(
             usage_of(&["--confirm-paper", "--mandate"]),
             "--mandate needs a value"
         );
@@ -209,6 +217,21 @@ mod tests {
         assert_eq!(
             usage_of(&["--confirm-paper", "--mandate", "m.json"]),
             "--dataset is required"
+        );
+        assert_eq!(
+            usage_of(&[
+                "--confirm-paper",
+                "--mandate",
+                "m.json",
+                "--dataset",
+                "bars"
+            ]),
+            "--config-dir is required"
+        );
+        assert_eq!(
+            usage_of(&["--confirm-paper", "--minute-dataset", "minutes"]),
+            "unknown argument --minute-dataset",
+            "the trailing volume is read from the broker, never from a stored dataset (DEC-471)"
         );
         assert_eq!(
             usage_of(&["--confirm-paper", "--journal"]),

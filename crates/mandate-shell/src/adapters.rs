@@ -6,9 +6,10 @@
 //! and plans over the journal, stream, clock, and agent the run's bridge hands it; and
 //! [`ExecutorProtection`], through the executor's public protection probe. The journal, sink,
 //! executor, reconciliation, mandate validation, sizing, classification, and advisory-gate
-//! boundaries are also live when their trusted inputs are injected. Production injects no run or
-//! executor context yet, so both boundaries fail closed rather than inventing effective-dated
-//! inputs (DEC-166 item 2).
+//! boundaries are also live when their trusted inputs are injected. The E7-7 shipping binary
+//! injects the one-run paper contexts [`crate::paper`] assembles from its GET-only broker preflight
+//! and the stored datasets (DEC-466, DEC-470); callers that omit either context fail closed rather
+//! than inventing effective-dated inputs.
 //!
 //! What each will bind, per the task brief's step table:
 //!
@@ -53,7 +54,7 @@ use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
 use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
-use mandate_marketdata::model::{Kind, Records, TimeUnit, Timeframe};
+use mandate_marketdata::model::{Bar, Kind, Records, TimeUnit, Timeframe};
 use mandate_num::{Bps, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd, UsdExact};
 use mandate_risk::{
     AccountSnapshot as GateAccountSnapshot, AgentSnapshot as GateAgentSnapshot, ConductState,
@@ -1002,24 +1003,41 @@ impl StoredBars {
     /// partition the manifest does not list is not opened even if `trusted` were to let it pass
     /// (#248 review, minor 1).
     fn listed_closes(&self, kind: Kind) -> Result<Vec<Price>, Cause> {
-        let (_, days) = dataset::read_manifest(&self.dir)?;
-        let mut closes = Vec::new();
-        for listed in days.iter().filter(|listed| listed.file.is_some()) {
-            let path = self.dir.join(dataset::partition_name(listed.day));
-            match dataset::read(&path, kind)? {
-                Records::Bars(bars) => match bars.as_slice() {
-                    [bar] => closes.push(Price::parse(bar.close.as_str())?),
-                    [] | [_, _, ..] => {
-                        return Err(untrusted("a listed day does not hold exactly one bar"));
-                    }
-                },
-                Records::Trades(_) | Records::Quotes(_) => {
-                    return Err(untrusted("the dataset holds no bars"));
-                }
+        listed_bars(&self.dir, kind)?
+            .iter()
+            .map(|bar| Ok(Price::parse(bar.close.as_str())?))
+            .collect()
+    }
+}
+
+/// The daily bars [`StoredBars`] decides on, exactly as stored and only once `trusted` admits the
+/// dataset at `now`, so the paper assembly's liquidity facts read the same span as the signal.
+pub(crate) fn trusted_daily_bars(
+    dir: &Path,
+    symbol: &str,
+    now: UtcNanos,
+) -> Result<Vec<Bar>, Cause> {
+    let inspection = inspect::inspect(dir)?;
+    trusted(&inspection, symbol, now)?;
+    listed_bars(dir, inspection.dataset.kind())
+}
+
+fn listed_bars(dir: &Path, kind: Kind) -> Result<Vec<Bar>, Cause> {
+    let (_, days) = dataset::read_manifest(dir)?;
+    let mut listed_bars = Vec::new();
+    for listed in days.iter().filter(|listed| listed.file.is_some()) {
+        let path = dir.join(dataset::partition_name(listed.day));
+        match dataset::read(&path, kind)? {
+            Records::Bars(bars) => match <[Bar; 1]>::try_from(bars) {
+                Ok([bar]) => listed_bars.push(bar),
+                Err(_) => return Err(untrusted("a listed day does not hold exactly one bar")),
+            },
+            Records::Trades(_) | Records::Quotes(_) => {
+                return Err(untrusted("the dataset holds no bars"));
             }
         }
-        Ok(closes)
     }
+    Ok(listed_bars)
 }
 
 /// Whether `inspect` found the dataset fit to decide on: the pinned symbol's daily bars through
@@ -1104,7 +1122,7 @@ fn split_inside(inspection: &Inspection) -> bool {
     }
 }
 
-fn untrusted(what: &'static str) -> Cause {
+pub(crate) fn untrusted(what: &'static str) -> Cause {
     Cause::Untrusted { what }
 }
 
@@ -1375,6 +1393,14 @@ impl Sizing for BuilderPlan {
     }
 }
 
+fn action_order_matches(
+    action_order_usd: Usd,
+    proposal_qty: Qty,
+    proposal_limit: Price,
+) -> Result<bool, Cause> {
+    Ok(action_order_usd == proposal_qty.notional(proposal_limit)?)
+}
+
 impl Classifier for BuilderPlan {
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let context = required_context(&self.context)?;
@@ -1390,6 +1416,7 @@ impl Classifier for BuilderPlan {
             || action.asset_class != proposal.asset_class
             || runtime_purpose(action.purpose) != proposal.purpose
             || expected_score != proposal.combined_score
+            || !action_order_matches(action.order_usd, proposal.qty, proposal.limit)?
         {
             return Err(Cause::Absent {
                 what: "classification facts for the proposed action",
@@ -1838,6 +1865,7 @@ pub struct AlpacaConnector<T> {
 impl<T: TradingTransport + Clone> Connector for AlpacaConnector<T> {
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
             .enable_time()
             .build()
             .map_err(|_| ConnectorError::NotSent {
@@ -1850,8 +1878,8 @@ impl<T: TradingTransport + Clone> Connector for AlpacaConnector<T> {
 }
 
 /// The connector of a process that holds no transport: every request is refused before it leaves
-/// the process. The binary uses it until the slice that makes the exit probes real, since every run
-/// refuses at the first probe before any request (DEC-166 item 3).
+/// the process (DEC-166 item 3). The shipping binary never uses it (DEC-466 item 3); the
+/// fail-closed tests do.
 pub struct Disconnected;
 
 impl Connector for Disconnected {
@@ -2039,8 +2067,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
     })
 }
 
-/// The production stages over the given connector: the binary's [`Disconnected`] one, or
-/// [`production`]'s.
+/// The production stages over a caller-supplied connector.
 pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
     let run = sources.run.map(Rc::new);
     let (executor, reconciler) = CoreExecutor::pair(
@@ -2093,8 +2120,8 @@ mod tests {
     use super::{
         AdvisoryGateContext, AdvisoryOrderFacts, CoreExecutor, DecisionContext, ExecutorContext,
         ExecutorMandateView, ExecutorOrder, ExecutorProtection, ExecutorSink, Protection,
-        ProtectionProbePorts, RiskGate, RunContext, StoreJournal, is_unattributed_exit,
-        proposed_order, working_order_of,
+        ProtectionProbePorts, RiskGate, RunContext, StoreJournal, action_order_matches,
+        is_unattributed_exit, proposed_order, working_order_of,
     };
     use mandate_backtest::{BacktestError, Signal};
     use mandate_canon::{DecStr, Digest, Value};
@@ -2106,7 +2133,7 @@ mod tests {
         AssetClass, Bar, CorporateActions, DatasetId, DayRange, Feed, Kind, Records, Split,
         SplitRatio, Symbol, TimeUnit, Timeframe,
     };
-    use mandate_num::{Price, Qty};
+    use mandate_num::{Price, Qty, Usd};
     use mandate_runtime::{
         AgentId, EventId as RuntimeEventId, IntentBody, IntentHandoff, OrderExecution,
         ProtectionPrices, Purpose as RuntimePurpose, TimeInForce as RuntimeTimeInForce,
@@ -3241,6 +3268,30 @@ mod tests {
             "quant.ma_crossover",
             &[("fast_periods", "five"), ("slow_periods", "20")]
         )));
+        Ok(())
+    }
+
+    #[test]
+    fn classification_order_facts_must_match_the_sized_proposal() -> Result<(), String> {
+        let one_share = Usd::parse("255.2").map_err(|e| e.to_string())?;
+        let limit = Price::parse("255.2").map_err(|e| e.to_string())?;
+        assert!(
+            action_order_matches(
+                one_share,
+                Qty::parse("1").map_err(|e| e.to_string())?,
+                limit
+            )
+            .map_err(|e| e.to_string())?
+        );
+        assert!(
+            !action_order_matches(
+                one_share,
+                Qty::parse("2").map_err(|e| e.to_string())?,
+                limit
+            )
+            .map_err(|e| e.to_string())?,
+            "one-share autonomy facts cannot classify a two-share proposal"
+        );
         Ok(())
     }
 

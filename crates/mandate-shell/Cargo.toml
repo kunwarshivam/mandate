@@ -23,6 +23,7 @@ mandate-domain.workspace = true
 mandate-executor.workspace = true
 mandate-journal.workspace = true
 mandate-journal-pg.workspace = true
+mandate-liquidity.workspace = true
 mandate-marketdata.workspace = true
 mandate-num.workspace = true
 mandate-risk.workspace = true
@@ -30,7 +31,7 @@ mandate-runtime.workspace = true
 mandate-spec.workspace = true
 mandate-time.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt", "time"] }
+tokio = { workspace = true, features = ["net", "rt", "time"] }
 
 [dev-dependencies]
 proptest.workspace = true

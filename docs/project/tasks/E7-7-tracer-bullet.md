@@ -128,7 +128,7 @@ prompted a finding.
 | TI-9 | `Autonomy::Ask` and `Autonomy::Deny` send no order. The tracer has no escalation, so ask resolves to the safe default (skip), journaled |
 | TI-10 | The tracer is deterministic: the same fixtures, mandate, and injected clock produce byte-identical journal drafts |
 | TI-11 | The shell never treats an opening `Verdict::Allow` as gated when `Decision.checks` contains any `CheckOutcome::NotReached`. This is **defence in depth, not the mechanism**: `mandate-risk` already fails closed for adding risk — an owed check is recorded `NotReached`, and an opening the implemented checks would allow returns `Err(GateError::Unimplemented("evaluate", story))` (DEC-129 item 29; `gate.rs`'s `owed()` and its `first_owed` arm, on #160's head `9ae15c2`), which the shell's existing error mapping already denies. The shell holds **no list of its own** of which story owns which check: that would be gating knowledge in the shell, against DEC-138 item 3, and it would drift from `owed()` |
-| TI-12 | Running the tracer twice never buys a second share: it refuses when the agent stream already carries an open order or a position in the instrument, unless the operator asks for a new cycle, and a journal that has lost the record of a position the broker holds is a reconciliation mismatch that pauses and alerts |
+| TI-12 | Running the shipping tracer twice never buys a second share: it refuses when the agent stream already carries an intent, exposes no new-cycle override, and treats a journal that has lost the record of a position the broker holds as a reconciliation mismatch that pauses and alerts |
 
 ### Oracles
 
@@ -160,6 +160,7 @@ seeded bug before it is trusted ([AGENTS.md](../../../AGENTS.md) "Independent or
 | `mandate-marketdata` | 6 | `dataset::read_manifest`, `dataset::partition::read` — stored daily bars |
 | `mandate-builder` | 5 | Sizing and autonomy classification, behind the shell's `OrderPlan` adapter |
 | `mandate-risk` | 4 | `evaluate` behind the shell's `GateDryRun` adapter; the **binding** call stays inside `mandate-executor` |
+| `mandate-liquidity` | 1 | Pure daily and trailing liquidity arithmetic over typed bar inputs |
 | `mandate-spec`, `mandate-domain` | 3, 1 | `validate`, `ValidatedMandate` |
 | `mandate-journal` | 2 | `Draft::parse`, `verify_events`, `Environment` |
 | `mandate-num`, `mandate-time` | 0 | Parsing and display of the fixture's numbers and times. **No arithmetic on money or quantity happens in `mandate-shell`** |
@@ -237,7 +238,7 @@ default — it is an unprotected position (AGENTS.md rule 13, TI-4).
 | Protective sequence | `Unimplemented` | **refuse to start**, `protection_unavailable` | same |
 | Connector transport, unknown outcome | `Err(ConnectorError::Unknown(u))` | `ConnectorError::as_unknown()` gives `Some(u)`, handed on as `Input::Broker(Err(u))` | the executor queries by `client_order_id`; one absence never resubmits, so no duplicate |
 | Connector transport, uninterpretable | `Err(ConnectorError::Unreadable { .. })` or `NotSent { .. }` | `as_unknown()` gives `None`, which is **not** an unknown outcome: the shell stops the executor and alerts, naming the `code` | no order, and nothing is handed to the executor that it cannot interpret (DEC-85: an uninterpreted input fails loudly, never a guess) |
-| Repeat run | the agent stream already carries an open order or a position in the instrument | refuse, `cycle_already_open`, unless the operator passes `--new-cycle` | no second share (TI-12) |
+| Repeat run | the agent stream already carries an intent | refuse, `cycle_already_open`; the one-shot shipping CLI has no `--new-cycle` (DEC-470 item 9) | no second order and no reset of first-deployment risk history (TI-12) |
 
 ### How the mapping is made unrepresentable, not remembered
 
@@ -462,8 +463,28 @@ from a build that ships (see "How the mapping is made unrepresentable" item 5).
 
 ```
 cargo run -p mandate-shell --bin mandate-tracer -- \
-  --mandate <path> --dataset <dir> --journal <dsn> --confirm-paper [--place-one-order]
+  --mandate <path> --dataset <dir> --config-dir <dir> --journal <dsn> \
+  --confirm-paper [--place-one-order]
 ```
+
+- **The order of a run is fixed** (DEC-466, DEC-470, DEC-471). First the host refusal and the
+  reviewed artifacts, which read no credential. Then the paper credentials and the one transport,
+  and a GET-only preflight of the account, positions, open orders, asset record, latest IEX quote,
+  and the last five minutes' complete 1-minute IEX bars. Then the liquidity facts, which
+  `mandate-liquidity` computes after the shell parses and maps the stored daily bars and maps those
+  minute bars. Only then are the trusted contexts assembled from that one snapshot, and the run
+  journals the intent before its one `POST`. Any missing, stale, or ambiguous fact refuses.
+- **A clean paper account only.** Any position or open order on the account refuses the run
+  (DEC-470 item 1), so a restart after the submission sends nothing.
+- **The run's freshness bounds.** The quote and the asset record must be at most
+  `iex_quote_max_age_s` old (`rule-set.json`). The clock must be inside the regular session and
+  before its close window. `etp_classified_at` in `instrument-snapshot.json` must be no later than
+  the run and within the gate's seven-day bound, so refresh it, and re-review it, before a run.
+- **Today's minute bars come from the broker** (DEC-471, Proposed). `DataClient::recent_minute_bars`
+  reads one page of AAPL's closed IEX minutes inside the five-minute window, on today's New York
+  date, from the compiled data host. A page that is empty, paginated, for another symbol, or holding
+  a bar outside the window refuses the run at the preflight; no default volume stands in for it.
+  There is no `--minute-dataset`: `mandate download` cannot store today.
 
 - **Nothing is sent without `--place-one-order`.** The default runs every stage, journals the
   decision, and stops before the submission, printing the order it *would* place. That is the safe
@@ -570,7 +591,7 @@ which is how review findings 1 to 4 got in.
 
 | Adversary | The attack | What blocks it |
 |---|---|---|
-| **A careless user** | Runs `--place-one-order` twice and buys two shares; or points it at a fresh journal DSN so the journal forgets the position the broker holds; or runs it during a halt | TI-12: a refusal (`cycle_already_open`) when the agent stream carries an open order or a position, overridable only by an explicit `--new-cycle`; a fresh journal against an existing broker position is a reconciliation mismatch that pauses and alerts, never a clean start; a halt is `SessionAndHalt`'s business once E6-6 lands, and until then **the gate itself** refuses the opening with `Err(GateError::Unimplemented("evaluate", "E6-6"))` because that check is owed — the tracer never decides it, and TI-11 is not what holds this |
+| **A careless user** | Runs `--place-one-order` twice and buys two shares; or points it at a fresh journal DSN so the journal forgets the position the broker holds; or runs it during a halt | TI-12: a refusal (`cycle_already_open`) when the agent stream already carries an intent, with no `--new-cycle` in the one-shot shipping CLI (DEC-470 item 9); a fresh journal against an existing broker position is a reconciliation mismatch that pauses and alerts, never a clean start; a halt is `SessionAndHalt`'s business once E6-6 lands, and until then **the gate itself** refuses the opening with `Err(GateError::Unimplemented("evaluate", "E6-6"))` because that check is owed — the tracer never decides it, and TI-11 is not what holds this |
 | **A bad model or a bad builder** | Returns a `Proposal` with `qty` zero, a quantity above the mandate's cap, a limit far from the mark, or the wrong side | The shell refuses only the structurally impossible (`qty > 0`), because a cap or a mark is the gate's comparison to make, not the shell's; the advisory gate narrows and the binding gate denies the rest. The shell does no sizing, so it cannot enlarge one |
 | **A half-built gate** | Lets an opening through while some of §9.1's eight checks are still owed | `mandate-risk` blocks it at source: an owed check is `NotReached` and an opening returns `Err(GateError::Unimplemented)` (DEC-129 item 29), which the shell's mapping denies. TI-11 and PB-13 are the shell's belt and braces, and they add nothing the gate does not already know. **An earlier draft of this brief claimed the opposite** — that the gate passes an unowned check and answers `Allow` — read off a superseded head (`eca4af4`, before `267a5f6`) and false on the current one. It is recorded because the mistake is the instructive kind: a stale read of a safety-critical crate produced a confident, wrong claim of a fail-open, and the remedy it motivated would have moved gating into the shell |
 | **A malicious insider** | Adds an HTTP client to the shell to reach a live host; adds a `_ =>` arm that permits; widens `is_paper_trading_path`; puts a credential in a draft | `allowed_external` plus `cargo xtask layers` (rung 1), the source scan and the clippy lint, CODEOWNERS on the founder-owned files, the host scanner, and the credential scan (PB-9). None of these depends on a reviewer noticing |
@@ -703,9 +724,12 @@ The manual paper run, for the founder or a cloud routine with the paper keys in 
 
 ```
 cargo run -p mandate-shell --bin mandate-tracer -- \
-  --mandate fixtures/tracer/mandate.json --dataset data/alpaca/bars/1d \
-  --journal "$MANDATE_JOURNAL_DSN" --confirm-paper                      # plans, sends nothing
-cargo run -p mandate-shell --bin mandate-tracer -- ... --confirm-paper --place-one-order
+  --mandate crates/mandate-shell/tests/fixtures/tracer/mandate.json \
+  --dataset data/alpaca/iex/bars-1Day/AAPL \
+  --config-dir crates/mandate-shell/tests/fixtures/tracer/config \
+  --confirm-paper                                                       # plans, sends nothing
+cargo run -p mandate-shell --bin mandate-tracer -- ... \
+  --journal "$MANDATE_JOURNAL_DSN" --confirm-paper --place-one-order
 mandate journal verify --stream <agent-stream> --trusted-start <file>   # the record, after
 ```
 

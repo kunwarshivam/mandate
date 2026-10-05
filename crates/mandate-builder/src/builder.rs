@@ -674,7 +674,14 @@ fn decide_and_size(
     {
         return hold(HoldReason::BelowMinimumAfterClipping);
     }
-    buy(account, market, risk, proposal, quantity)
+    let action = buy_action(account, market, risk, proposal.combined.score, quantity)?;
+    Ok(Action::Buy {
+        purpose: action.purpose,
+        qty: quantity,
+        limit_price: market.ask,
+        order_usd: action.order_usd,
+        action,
+    })
 }
 
 /// §8.3 step 2's exit branch: disabled for `accumulate` (§3.1), which is checked **before** the
@@ -771,18 +778,25 @@ fn per_unit_terms(market: &Market) -> Result<(UsdExact, UsdExact), BuilderError>
     ))
 }
 
-/// The buy and the facts §6.2 step 4 reads: the exposure fields are this order's **after** values
-/// (§6.3). A buy is sized off the ask, so a crossed quote prices it against a market that does not
-/// exist (DEC-130 item 17); and an opening order has no session name in the overnight session, where
-/// none may trade (DEC-30). Both refusals are here, on the buy path alone, so that neither can stop an
+/// The facts §6.2 step 4 evaluates a buy of `quantity` at the ask against, the one rule
+/// [`propose`] uses, so a caller that must state an opening's classification facts before the
+/// builder runs reads them from here rather than computing a copy. The exposure fields are this
+/// order's **after** values (§6.3).
+///
+/// A buy is sized off the ask, so a crossed quote prices it against a market that does not exist
+/// (DEC-130 item 17); and an opening order has no session name in the overnight session, where none
+/// may trade (DEC-30). Both refusals are here, on the buy path alone, so that neither can stop an
 /// exit (`AGENTS.md` rule 13).
-fn buy(
+///
+/// # Errors
+/// [`BuilderError::CrossedQuote`], [`BuilderError::UntradableSession`], or an arithmetic error.
+pub fn buy_action(
     account: &AccountSnapshot,
     market: &Market,
     risk: &RiskContext,
-    proposal: &Proposal,
+    combined_score: Unit,
     quantity: Qty,
-) -> Result<Action, BuilderError> {
+) -> Result<ActionContext, BuilderError> {
     if market.bid > market.ask {
         return Err(BuilderError::CrossedQuote);
     }
@@ -799,30 +813,24 @@ fn buy(
         .value_at_mark(account.risk_mark)?
         .checked_add(account.working_opening_cost)?
         .checked_add(order_usd)?;
-    Ok(Action::Buy {
+    Ok(ActionContext {
         purpose,
-        qty: quantity,
-        limit_price: market.ask,
         order_usd,
-        action: ActionContext {
-            purpose,
-            order_usd,
-            combined_score: proposal.combined.score,
-            instrument: market.instrument.clone(),
-            asset_class: market.asset_class,
-            session: market.session,
-            first_trade_in_instrument: !risk.has_prior_fill,
-            new_instrument: risk.new_instrument,
-            thesis_confidence: risk.thesis_confidence,
-            drawdown: risk.drawdown,
-            daily_pnl_fraction: risk.daily_pnl_fraction,
-            position_usd_after: position_after,
-            gross_usd_after: account.gross_usd.checked_add(order_usd)?,
-            bought_today_usd: risk.bought_today_usd.checked_add(order_usd)?,
-            position_pnl_fraction: risk.position_pnl_fraction,
-            requested_by: RequestedBy::Agent,
-            risk_day: risk.risk_day,
-        },
+        combined_score,
+        instrument: market.instrument.clone(),
+        asset_class: market.asset_class,
+        session: market.session,
+        first_trade_in_instrument: !risk.has_prior_fill,
+        new_instrument: risk.new_instrument,
+        thesis_confidence: risk.thesis_confidence,
+        drawdown: risk.drawdown,
+        daily_pnl_fraction: risk.daily_pnl_fraction,
+        position_usd_after: position_after,
+        gross_usd_after: account.gross_usd.checked_add(order_usd)?,
+        bought_today_usd: risk.bought_today_usd.checked_add(order_usd)?,
+        position_pnl_fraction: risk.position_pnl_fraction,
+        requested_by: RequestedBy::Agent,
+        risk_day: risk.risk_day,
     })
 }
 

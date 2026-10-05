@@ -31,7 +31,9 @@
 //! [`TradingClient::asset`] reads one instrument's asset record from the paper trading host, and
 //! [`DataClient::latest_quote`] reads its latest quote from [`data::DATA_HOST`], the one other
 //! host compiled in (ES-23), through a request type and a transport trait of its own so neither
-//! host can be sent the other's request (DEC-168).
+//! host can be sent the other's request (DEC-168). [`DataClient::recent_minute_bars`] reads one
+//! equity's complete one-minute IEX bars inside a short window before the clock, one page only,
+//! through the same transport trait and its own request type (DEC-471).
 //!
 //! # Credentials and personal data
 //!
@@ -61,7 +63,7 @@ pub mod record;
 pub mod wire;
 
 pub use client::{Pause, RetryPolicy, TokioPause, TradingClient};
-pub use data::{DATA_HOST, DataClient, DataTransport, QuoteRequest};
+pub use data::{BarsRequest, DATA_HOST, DataClient, DataTransport, MAX_BARS_WINDOW, QuoteRequest};
 pub use error::{
     ClientError, CredentialsError, HttpSetupError, ReadError, TransportError, WireError,
 };
@@ -69,5 +71,5 @@ pub use http::{
     AlpacaPaperHttp, Credentials, ENDPOINTS, Endpoint, HttpRequest, KEY_ID_VAR, Method, PAPER_HOST,
     Response, SECRET_VAR, TradingTransport, endpoint_for, is_paper_trading_path,
 };
-pub use read::{Asset, AssetSnapshot, Exchange, Feed, LatestQuote};
+pub use read::{Asset, AssetSnapshot, Exchange, Feed, LatestQuote, MinuteBar, MinuteBars};
 pub use record::{Direction, INLINE_LIMIT, RecordedBody, RecordedExchange};

@@ -4,11 +4,17 @@
 
 use std::process::{Command, Output};
 
+use mandate_alpaca::{KEY_ID_VAR, SECRET_VAR};
 use mandate_shell::Stage;
+
+const CONFIG: &str = "crates/mandate-shell/tests/fixtures/tracer/config";
+const MANDATE: &str = "crates/mandate-shell/tests/fixtures/tracer/mandate.json";
 
 fn tracer(args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_mandate-tracer"));
+    command.current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     command.args(args);
+    command.env_remove(KEY_ID_VAR).env_remove(SECRET_VAR);
     for (name, value) in env {
         command.env(name, value);
     }
@@ -37,6 +43,8 @@ fn a_planning_run_without_its_inputs_refuses_before_anything_is_sent() {
             "no-such-mandate.json",
             "--dataset",
             "no-such-dataset",
+            "--config-dir",
+            CONFIG,
             "--confirm-paper",
         ],
         &[],
@@ -54,6 +62,31 @@ fn a_planning_run_without_its_inputs_refuses_before_anything_is_sent() {
     assert_eq!(text.lines().count(), 1, "{text}");
 }
 
+/// The reviewed artifacts are judged first and read no credential: with them valid and no paper
+/// credential in the environment, the run stops at the credential read, before any transport
+/// exists, so nothing can reach a network.
+#[test]
+fn valid_artifacts_reach_the_credential_read_and_nothing_further() {
+    let output = tracer(
+        &[
+            "--mandate",
+            MANDATE,
+            "--dataset",
+            "no-such-dataset",
+            "--config-dir",
+            CONFIG,
+            "--confirm-paper",
+        ],
+        &[],
+    );
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        stderr(&output),
+        "usage: Alpaca paper credentials are unavailable\n"
+    );
+}
+
 #[test]
 fn a_configured_host_is_refused_before_anything_runs() {
     let output = tracer(
@@ -62,6 +95,8 @@ fn a_configured_host_is_refused_before_anything_runs() {
             "m.json",
             "--dataset",
             "bars",
+            "--config-dir",
+            CONFIG,
             "--confirm-paper",
         ],
         &[("ALPACA_BASE_URL", "https://api.alpaca.markets")],
@@ -71,5 +106,47 @@ fn a_configured_host_is_refused_before_anything_runs() {
         stderr(&output),
         "non_paper_host: ALPACA_BASE_URL looks like a URL; the tracer reaches only the Alpaca paper \
          host\n"
+    );
+}
+
+/// The position of `needle` in the binary's `tracer` function, which must be present.
+fn position(source: &str, needle: &str) -> usize {
+    source
+        .find(needle)
+        .unwrap_or_else(|| panic!("the shipping binary must call {needle}"))
+}
+
+#[test]
+fn the_shipping_binary_reads_the_broker_before_it_assembles_the_trusted_contexts() {
+    let source = include_str!("../src/bin/mandate-tracer.rs");
+    let body = &source[source.find("fn tracer()").unwrap()..];
+    let order = [
+        "cli::parse(",
+        "host::refuse_configured_host(",
+        "Artifacts::load(",
+        "Credentials::from_env()",
+        "AlpacaPaperHttp::new(",
+        "preflight(",
+        "liquidity_facts(",
+        "load_contexts_with_clock(",
+        "production(",
+        "run(&mut stages",
+    ];
+    let positions = order.map(|needle| position(body, needle));
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "the shipping binary must run {order:?} in that order"
+    );
+    assert!(
+        !source.contains("Disconnected"),
+        "the shipping binary must not retain the disconnected adapter"
+    );
+    assert!(
+        !source.contains("executor: None"),
+        "the shipping binary must supply an executor context"
+    );
+    assert!(
+        !source.contains("run: None"),
+        "the shipping binary must supply a run context"
     );
 }

@@ -26,7 +26,7 @@ use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::data::{DATA_HOST, DataTransport, QuoteRequest};
+use crate::data::{BarsRequest, DATA_HOST, DataTransport, QuoteRequest};
 use crate::error::{CredentialsError, HttpSetupError, TransportError};
 
 /// The paper trading host. The only one compiled in.
@@ -255,6 +255,7 @@ pub trait TradingTransport {
 ///
 /// `Debug` prints neither value: the derive is deliberately absent and the manual implementation
 /// names the fields without their contents (`AGENTS.md` rule 7, ES-09).
+#[derive(Clone)]
 pub struct Credentials {
     key_id: SecretString,
     secret: SecretString,
@@ -427,7 +428,7 @@ fn safe(text: &str, extra: &[u8]) -> bool {
 
 /// HTTPS to [`PAPER_HOST`] with the paper credentials: HTTPS only, no redirects, bounded
 /// timeouts, and TLS on the `ring` provider.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AlpacaPaperHttp {
     client: reqwest::Client,
     credentials: Credentials,
@@ -472,6 +473,18 @@ impl DataTransport for AlpacaPaperHttp {
         self.dispatch(reqwest::Method::GET, data_url(request)?, None)
             .await
     }
+
+    /// The request is the one bars read by construction, sent the same way (DEC-471).
+    async fn send_bars(&self, request: &BarsRequest) -> Result<Response, TransportError> {
+        self.dispatch(reqwest::Method::GET, bars_url(request)?, None)
+            .await
+    }
+}
+
+/// The URL a bars read is dialled at: always on [`DATA_HOST`], and only if a parser sends it exactly
+/// as it was built.
+fn bars_url(request: &BarsRequest) -> Result<Url, TransportError> {
+    sent_as_built_on(DATA_HOST, request.path_and_query())
 }
 
 /// The URL a latest-quote read is dialled at: always on [`DATA_HOST`], and only if a parser sends
@@ -527,10 +540,14 @@ fn classify(error: reqwest::Error) -> TransportError {
 mod tests {
     use mandate_accounting::InstrumentId;
 
+    use std::time::Duration;
+
+    use mandate_time::UtcNanos;
+
     use super::{
-        AlpacaPaperHttp, Credentials, DATA_HOST, DataTransport, HttpRequest, Method, QuoteRequest,
-        TradingTransport, TransportError, data_url, is_dot_segment, position_path, sent_as_built,
-        sent_as_built_on,
+        AlpacaPaperHttp, BarsRequest, Credentials, DATA_HOST, DataTransport, HttpRequest, Method,
+        QuoteRequest, TradingTransport, TransportError, bars_url, data_url, is_dot_segment,
+        position_path, sent_as_built, sent_as_built_on,
     };
 
     /// A request as [`HttpRequest::close_position`] builds one: straight from an instrument id,
@@ -638,6 +655,40 @@ mod tests {
         assert_eq!(
             url.as_str(),
             "https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest?feed=iex"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_bars_read_a_parser_would_move_is_refused_and_never_sent() -> Result<(), String> {
+        let transport = transport()?;
+        for path in [
+            "/v2/stocks/%2e%2e/bars?timeframe=1Min",
+            "/v2/stocks/AAPL/../../v2/account",
+        ] {
+            let request = BarsRequest::for_tests(path);
+            assert_eq!(
+                DataTransport::send_bars(&transport, &request).await.err(),
+                Some(TransportError::RefusedPath),
+                "{path} would be sent somewhere else once parsed, so it is refused before \
+                 anything leaves"
+            );
+        }
+        Ok(())
+    }
+
+    /// The bars read is dialled at the data host, its RFC 3339 instants unencoded and unchanged.
+    #[test]
+    fn a_bars_read_is_dialled_at_the_data_host_as_built() -> Result<(), String> {
+        let aapl = InstrumentId::new("AAPL").map_err(|e| format!("{e:?}"))?;
+        let now = UtcNanos::parse_rfc3339("2026-09-28T17:00:00Z").map_err(|e| e.to_string())?;
+        let request = BarsRequest::recent_minutes(&aapl, now, Duration::from_secs(300))
+            .map_err(|e| e.to_string())?;
+        let url = bars_url(&request).map_err(|e| e.to_string())?;
+        assert_eq!(url.host_str(), Some("data.alpaca.markets"));
+        assert_eq!(
+            url.as_str(),
+            "https://data.alpaca.markets/v2/stocks/AAPL/bars?timeframe=1Min&start=2026-09-28T16:55:00Z&end=2026-09-28T16:59:00Z&limit=5&adjustment=raw&feed=iex&sort=asc"
         );
         Ok(())
     }

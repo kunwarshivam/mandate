@@ -63,7 +63,9 @@ every workspace crate and reference-case suite has an entry and that every path 
   actions, fee configuration, account type, reservations, errors),
   `crates/mandate-accounting/src/account.rs` (the pure fold: positions, cash buckets, fee accrual
   and charges, splits, dividends, cash in lieu, receivables, income, realized and unrealized P&L,
-  equity, buying power).
+  equity, buying power), `crates/mandate-accounting/src/reservation.rs` (`fee_reservation`: §2.1's
+  `round(estimated fees, 2, ceiling)` for a `ProspectiveOrder`, by folding an equity buy; a crypto
+  buy and every sell reserve zero, DEC-471 item 3).
 - **Tests:** `crates/mandate-accounting/tests/hand.rs` (hand-calculated cases, partial fills, flips),
   `crates/mandate-accounting/tests/properties.rs` (one property per invariant against an i128
   ledger oracle), `crates/mandate-accounting/tests/corporate_actions.rs` (hand-calculated splits,
@@ -72,7 +74,9 @@ every workspace crate and reference-case suite has an entry and that every path 
   `crates/mandate-accounting/tests/settlement.rs` (hand-calculated buying power in cash and margin
   accounts, pending charges, reservations), `crates/mandate-accounting/tests/settlement_properties.rs`
   (buying power and the no-debit rule I4 against an i128 oracle whose holidays come from the
-  `us_2026` calendar fixture, with a gated generator and a live guard on the branches it reaches).
+  `us_2026` calendar fixture, with a gated generator and a live guard on the branches it reaches),
+  `crates/mandate-accounting/tests/reservation.rs` (hand-calculated CAT reservations at the cent
+  ceiling, the no-fee schedule, sells and crypto buys at zero, and the zero-quantity refusal).
 - **Reference cases:** `trading_domain::*` in `fixtures/refcases/trading-domain.json`.
 - **Run:** `cargo nextest run -p mandate-accounting`.
 
@@ -154,7 +158,9 @@ the crate is pending.
   presents to a §6.3 rule, with in-module tests of the rule walk, the re-check and `decide`),
   `crates/mandate-spec/src/condition.rs` (`Condition::matches`, with in-module tests of every
   operator and combinator), `crates/mandate-builder/src/builder.rs` (§8.1 and §8.2's pinned triple
-  and freshness, and §8.3's combine, decide, size, accumulate clips and minimum order). The exact
+  and freshness, and §8.3's combine, decide, size, accumulate clips and minimum order, and
+  `buy_action`, the classification facts of a buy that `propose` and a caller stating them up front
+  share). The exact
   arithmetic is `mandate-num`'s (ES-04): `crates/mandate-num/src/sizing.rs` (`SizeFraction`, `Unit`,
   `Conviction`, `Signed`, the two `weighted_ratio` quotients, and `UsdExact`). The gate's dry-run
   verdict reaches the crate as a value, so `mandate-risk` is not a dependency (DEC-130 item 2), and
@@ -167,7 +173,9 @@ the crate is pending.
   rounding, the sizing chain as rationals compared by cross-multiplication, and a naive rule walk
   that re-reads the list from the start), `crates/mandate-builder/tests/refcases.rs` (the 16 `MC-A`
   and 28 `MC-B` cases loaded from the fixture, one test per case id),
-  `crates/mandate-builder/tests/common/mod.rs` (the two reference bases as typed inputs), and the
+  `crates/mandate-builder/tests/common/mod.rs` (the two reference bases as typed inputs),
+  `crates/mandate-builder/tests/buy_action.rs` (the after-values of an opening and an increase by
+  hand, the crossed and overnight refusals, and `propose`'s action equal to `buy_action`'s), and the
   two `mandate-num` additions in `crates/mandate-num/tests/num.rs`. Planted bugs per test: the task
   brief and the tests PR's body.
 - **Reference cases:** the 16 `mandate::MC-A` cases and the 28 `mandate::MC-B` builder cases other
@@ -272,11 +280,16 @@ crates.
   after its `OrderSubmitted` committed in the same run; `src/map.rs` the total mappings with no
   permitting arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
   deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
-  `src/bin/mandate-tracer.rs` the binary; `src/adapters.rs` the production adapters: `StoredBars`,
-  `MovingAverage`, `AlpacaConnector`, `RiskExitPath`, the validated mandate, builder, gate, journal,
-  executor, and reconciler. The risk exit plans over the journal, stream, clock, and agent the run's
-  bridge hands it (DEC-449, amended by DEC-451). It holds no trading logic—no sizing, gating,
-  pricing, state machine, or arithmetic on money or quantity—and binds the owning crates directly.
+  `src/bin/mandate-tracer.rs` the binary; `src/paper.rs` the DEC-466 one-run loader that verifies the
+  reviewed E7-7 AAPL artifacts and binds the bytes it checked, reads the GET-only broker preflight
+  (including the trailing window's IEX minute bars, DEC-471) and the liquidity facts into one
+  `PaperFacts` snapshot, refuses any missing, stale, or
+  ambiguous fact or a non-clean account, and assembles the trusted run and executor contexts from
+  that snapshot alone (DEC-470); `src/adapters.rs` the production adapters: `StoredBars`, `MovingAverage`,
+  `AlpacaConnector`, `RiskExitPath`, the validated mandate, builder, gate, journal, executor, and
+  reconciler. The risk exit plans over the journal, stream, clock, and agent the run's bridge hands
+  it (DEC-449, amended by DEC-451). It holds no trading logic—no sizing, gating, pricing, state
+  machine, or arithmetic on money or quantity—and binds the owning crates directly.
 - **Tests:** `src/stages/fail_closed.rs` over the permissive doubles of `src/stages/doubles.rs`: one
   case per `Stage`, each asserting at the furthest boundary its stage could reach (zero submissions;
   zero hands up to `Sink`; zero `IntentProposed` up to `Journal`; zero `OrderSubmitted` up to
@@ -299,16 +312,29 @@ crates.
   remains pending and failing on E2-14 until its founder-gated price-trust rule lands; the shell
   cannot invent price arithmetic (DEC-138 item 3). The mandate
   fixtures are generated and checked against `reference/mandate/ref.py` by
-  `tests/fixtures/tracer/generate.py`. `AlpacaPaperHttp` is never constructed in a test, so no test
-  can reach a network (ES-19).
+  `tests/fixtures/tracer/generate.py`. The paper assembly is split by step under `src/paper/`
+  (`artifacts`, `facts`, `judge`, `gate`, `context`) and computes no money or quantity: the
+  liquidity figures are `mandate-liquidity`'s, the bracket prices and 1× buying power the
+  executor's, the classification facts the builder's `buy_action`, and the fee reservation
+  `mandate-accounting`'s (DEC-471 item 3). `src/paper/tests.rs` covers the artifact members and
+  values, each single-fact refusal and its boundary, the session and close window, the mapping of
+  the protection prices and the builder's action, and the per-request fee reservation;
+  `src/paper/facts/tests.rs` the liquidity mapping and each refusal it names. `tests/paper.rs`
+  drives the shipping assembly (`Artifacts::load`, `preflight`, `liquidity_facts`, `load_contexts`,
+  `production`) over one scripted transport that also answers the minute-bars read: GETs only
+  before the run, exactly one `POST` after the intent and submission commit, none on a restart, and
+  none when the bars read is empty. `tests/binary.rs` holds the binary's order and its pre-credential
+  refusals. The real HTTP runtime's I/O driver is tested with a local socket and no test holds paper
+  credentials or can reach Alpaca (ES-19).
 - **Reference cases:** none move, and `crates/mandate-refcases/status.toml` is untouched by every PR of
   this stream. The tracer cites `trading_domain::RC-04`, `RC-09`, `RC-09B`, `RC-11`, `RC-14`, `RC-16`,
   `RC-17`, the mandate gate and autonomy families, and the journal append vectors read-only.
 - **Run:** `cargo nextest run -p mandate-shell`; `cargo xtask ci pending` for the pending cases; the
   manual paper run is `cargo run -p mandate-shell --bin mandate-tracer -- --mandate <path> --dataset
-  <dir> --journal <dsn> --confirm-paper --place-one-order`, which needs both flags, refuses any attempt
-  to configure a host, and cannot reach one of its own because the crate's `allowed_external` names no
-  HTTP client.
+  <dir> --config-dir <dir> --journal <dsn> --confirm-paper --place-one-order`, which needs both
+  flags, accepts only the reviewed E7-7 paper artifacts, constructs the fixed Alpaca paper
+  transport, refuses any attempt to configure a host, and reads today's minute bars from the data
+  host (DEC-471, Proposed; see the task brief).
 
 ## Idempotent executor and broker connector
 
@@ -333,13 +359,19 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   parser, no free constructor), `crates/mandate-executor/src/types.rs` (the vocabulary, including
   `BrokerRequest` and `AccountWideScope`), `crates/mandate-executor/src/reconcile.rs`,
   `crates/mandate-executor/src/protection.rs`, `crates/mandate-executor/src/gate.rs` (the binding
-  gate's call site), `crates/mandate-executor/src/ports.rs`, `crates/mandate-executor/src/error.rs`;
+  gate's call site), `crates/mandate-executor/src/ports.rs`, `crates/mandate-executor/src/error.rs`,
+  `crates/mandate-executor/src/opening.rs` (`equity_bracket_prices`, the bracket's stop and
+  take-profit rounded up onto the Reg NMS grid, and `BrokerAccount::one_x_buying_power`, with
+  in-module hand cases; DEC-471 item 3);
   `crates/mandate-alpaca/src/http.rs` (the paper host, the endpoint allowlist, `secrecy`-held
   credentials), `crates/mandate-alpaca/src/wire.rs`, `crates/mandate-alpaca/src/client.rs`,
   `crates/mandate-alpaca/src/record.rs` (the redaction pass), `crates/mandate-alpaca/src/error.rs`,
   and E7-8's reference-data reads (DEC-168): `crates/mandate-alpaca/src/read.rs` (the asset record
   and the latest quote as exact values, and their refusals) and `crates/mandate-alpaca/src/data.rs`
-  (the data host's own request type and transport trait).
+  (the data host's own request types and transport trait), plus DEC-471's one GET of the latest
+  complete IEX minute bars (`BarsRequest::recent_minutes`, `DataClient::recent_minute_bars`, and
+  `read::minute_bars`, which refuses another symbol, a second page, an empty page, and a bar off the
+  grid or outside the window).
   In prose: `mandate-executor` (`fold` and `handle` over the account stream, the intent protocol,
   `ClientOrderId` with three derivations and no free constructor, the section 5.7 order state machine,
   reservations released by the whole terminal set, the protective sequences and the exit ladder,
@@ -364,7 +396,9 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-alpaca/tests/fixtures/record.sh`, and the recorded scenarios under
   `crates/mandate-alpaca/tests/fixtures/alpaca-trading/`; for E7-8,
   `crates/mandate-alpaca/tests/reads.rs` and the latest-quote scenarios under
-  `crates/mandate-alpaca/tests/fixtures/alpaca-data/`. In prose: the hand cases of the brief
+  `crates/mandate-alpaca/tests/fixtures/alpaca-data/`; for DEC-471,
+  `crates/mandate-alpaca/tests/bars.rs` (request construction and its refusals, exact volumes, and
+  every refused answer over a scripted transport) and the bars cases in `src/http.rs`. In prose: the hand cases of the brief
   (the submission chain, the `Unknown` lookup discipline, the
   status mapping, the protective and kill-switch sequences, the ladder, the restriction table, error
   codes), twelve `fault::crash_at_*` cases at the enumerated submission steps, and property tests
@@ -910,6 +944,17 @@ proves each pending test fails on them (DEC-110).
   `reference/mandate/check_cases.py`, `reference/mandate/mutants.py`.
 - **Run:** `cargo xtask refcases`, `cargo xtask ci reference`.
 
+## Liquidity figures
+
+- **Spec:** trading-domain spec §3.2 item 5 and §9.6; DEC-470 item 4; DEC-471 item 3.
+- **Code:** `crates/mandate-liquidity/src/lib.rs` (pure typed inputs and the prior close,
+  lower-median 20-session dollar volume, truncated 20-session average volume, and trailing
+  five-minute volume of complete bars). `crates/mandate-shell/src/paper/facts.rs` validates the
+  stored dataset, parses its close and volume fields, maps broker minute bars, and orchestrates.
+- **Tests:** the in-module hand cases in `crates/mandate-liquidity/src/lib.rs`, plus the mapping and
+  refusal cases in `crates/mandate-shell/src/paper/facts/tests.rs`.
+- **Run:** `cargo nextest run -p mandate-liquidity -p mandate-shell`.
+
 ## Historical market data download
 
 - **Spec:** backlog E2-1; ADR-0001 ES-19, ES-23; DEC-88, DEC-89, DEC-90;
@@ -922,7 +967,8 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-marketdata/src/http.rs` (the market-data host only, credentials),
   `crates/mandate-marketdata/src/dataset.rs` and
   `crates/mandate-marketdata/src/dataset/partition.rs` (Parquet partitions, manifest,
-  compare-before-write), `crates/mandate-marketdata/src/download.rs` (one dataset over a day range).
+  compare-before-write), and `crates/mandate-marketdata/src/download.rs` (one dataset over a day
+  range).
   `mandate-cli`: `crates/mandate-cli/src/download.rs` (`mandate download`),
   `config/research-basket.toml`.
 - **Tests:** `crates/mandate-marketdata/tests/` against recorded responses in
