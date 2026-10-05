@@ -215,6 +215,8 @@ fn input_with_position() -> BindingGateInput {
     trusted
 }
 
+type ConfigRefRemoval = (&'static str, fn(&mut BindingGateConfigRefs));
+
 fn bound_ports<'a>(
     ids: &'a TestIds,
     mandates: &'a FixedMandate,
@@ -507,7 +509,7 @@ fn missing_binding_input_fails_closed_before_any_submission() {
 
 #[test]
 fn each_missing_config_reference_fails_closed_before_any_submission() {
-    let cases: [(&str, fn(&mut BindingGateConfigRefs)); 5] = [
+    let cases: [ConfigRefRemoval; 5] = [
         ("fee_config", |refs| refs.fee_config = None),
         ("trading_calendar", |refs| refs.trading_calendar = None),
         ("instrument_snapshot", |refs| {
