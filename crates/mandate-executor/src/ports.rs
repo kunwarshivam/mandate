@@ -1,10 +1,8 @@
 //! The injected collaborators. Every one is pure, so [`crate::handle`] stays deterministic.
 //!
-//! The binding gate is deliberately **not** here. A gate a caller can substitute is not
-//! independent of agent logic (`AGENTS.md` rule 1; journal spec §2: "the risk gate is a pure
-//! library it calls"), so `mandate-risk` is a crate-private dependency and stream I's injectable
-//! `GateDryRun` — which can only narrow — is the advisory call, not this one
-//! (task brief interpretation 4).
+//! [`BindingGateSource`] supplies trusted facts, never a verdict. The executor derives the order
+//! and calls `mandate-risk` itself, so neither this port nor stream I's advisory `GateDryRun` can
+//! inject an allow (`AGENTS.md` rule 1; journal spec §2).
 
 use std::future::Future;
 #[cfg(test)]

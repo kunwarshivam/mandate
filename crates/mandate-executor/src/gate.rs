@@ -1,13 +1,11 @@
-//! The executor's own checks at the binding gate's call site: **partial**, and named so.
+//! The executor's local checks and the binding §9.1 gate.
 //!
-//! Stream G's §9.1 evaluation (`mandate-risk`) is not wired here yet. It arrives through a gate
-//! port whose production adapter assembles G's inputs and fails closed (the coordinator's ruling
-//! on DEC-129's partial gate). Until then this module runs only the checks whose inputs the
-//! account stream itself carries — the account state, the agent's mode, an `Unknown` order in the
-//! instrument, the working universe, and the quantity a sell may take — and every verdict it
-//! returns is a [`PartialGateDecision`], journaled with `evaluation: account_stream_only`. An
-//! allow from it is **not** the §9.1 evaluation, and no paper run may treat it as one. Nothing it
-//! runs can be replaced from outside; the gate port can only narrow it further.
+//! Local account-stream checks run first and may only narrow the result. [`BindingGateSource`]
+//! then supplies the trusted snapshots that are not in the executor fold; this module derives
+//! `mandate-risk`'s proposal and calls `mandate_risk::evaluate` directly. Only a completed binding
+//! run replaces `evaluation: account_stream_only` in the journal. Missing or invalid snapshots
+//! fail closed for risk-adding orders, while a risk reduction keeps the local result as
+//! `AGENTS.md` rule 13 requires.
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;

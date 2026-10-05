@@ -351,7 +351,8 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   reject mappings). It calls `mandate-risk` directly as the binding gate and reads
   `mandate-accounting` and `mandate-journal` unchanged. The shell that binds runtime, executor, and
   connector is not here.
-- **Tests:** `crates/mandate-executor/tests/hand.rs`,
+- **Tests:** `crates/mandate-executor/tests/binding_gate.rs`,
+  `crates/mandate-executor/tests/hand.rs`,
   `crates/mandate-executor/tests/properties.rs`, `crates/mandate-executor/tests/fault.rs`,
   `crates/mandate-executor/tests/refcases.rs`, `crates/mandate-executor/tests/common/mod.rs`,
   `crates/mandate-executor/tests/common/golden.rs`,
