@@ -2621,12 +2621,7 @@ fn spec_guard() -> Result<()> {
     };
     let pr_body = env::var("MANDATE_PR_BODY").unwrap_or_default();
     report(
-        spec_guard_problems_for_pr(
-            Path::new("."),
-            &base,
-            &pr_body,
-            current_pr_number(Path::new("."))?,
-        )?,
+        spec_guard_problems(Path::new("."), &base, &pr_body)?,
         "spec-guard",
     )
 }
