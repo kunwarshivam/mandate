@@ -11,8 +11,7 @@ import { DISCARDED, Notepad, PictureViewer, RecycleBin } from "./apps";
 import { Assistant } from "./assistant";
 import { MONO, PIXEL, RAISED, SUNKEN } from "./letter";
 import { MediaPlayer } from "./media-player";
-import { Minesweeper } from "./minesweeper";
-import { BIN, BIN_EMPTY, BOLT, BOOK, FILM, HELP, KEY, LEDGER, MINE, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
+import { BIN, BIN_EMPTY, BOLT, BOOK, FILM, HELP, KEY, LEDGER, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
 import { TitleBar, WINDOW_BUTTON } from "./retro";
 import { ThemeSwitch } from "./theme-switch";
 import { DisplayProperties, Wallpaper } from "./wallpaper";
@@ -21,7 +20,7 @@ import type { AmpState } from "./winamp";
 /** Webamp is a megabyte of player, so it loads only when someone opens Winamp. */
 const Winamp = dynamic(() => import("./winamp"), { ssr: false });
 
-export type AppId = "home" | "readme" | "owl" | "display" | "tour" | "mines" | "bin";
+export type AppId = "home" | "readme" | "owl" | "display" | "tour" | "bin";
 
 type Win = { open: boolean; min: boolean; max: boolean; x: number; y: number; z: number };
 
@@ -125,13 +124,6 @@ const APPS: Record<AppId, App> = {
     frame: "sm:m-auto sm:h-fit sm:max-h-[calc(100%-2rem)] sm:w-[min(44rem,calc(100%-2rem))]",
     offset: { x: 24, y: -12 },
   },
-  mines: {
-    title: "Minesweeper",
-    task: "Minesweeper",
-    icon: <PixelIcon sprite={MINE} className="size-4" />,
-    frame: "sm:m-auto sm:h-fit sm:w-fit",
-    offset: { x: -72, y: 12 },
-  },
   bin: {
     title: "Recycle Bin",
     task: "Recycle Bin",
@@ -156,7 +148,6 @@ const SHORTCUTS: Shortcut[] = [
   { id: "display", label: "Display", icon: sprite(MONITOR), app: "display" },
   { id: "winamp", label: "Winamp", icon: sprite(BOLT), amp: true },
   { id: "tour", label: "Tour.mp4", icon: sprite(FILM), app: "tour", right: true },
-  { id: "mines", label: "Minesweeper", icon: sprite(MINE), app: "mines", right: true },
   { id: "bin", label: "Recycle Bin", icon: sprite(BIN), app: "bin", right: true },
   { id: "signin", label: "Sign in", icon: sprite(KEY), href: "/login" },
 ];
@@ -419,7 +410,6 @@ export function Desktop({ home }: { home: ReactNode }) {
     owl: <PictureViewer />,
     display: <DisplayProperties onDone={() => dispatch({ type: "close", id: "display" })} />,
     tour: <MediaPlayer />,
-    mines: <Minesweeper />,
     bin: <RecycleBin items={bin} onEmpty={() => setBin([])} />,
   };
 
