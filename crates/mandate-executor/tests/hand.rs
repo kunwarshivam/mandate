@@ -354,7 +354,6 @@ fn an_opening_without_protective_prices_is_gated_and_sent_as_a_plain_order() {
     let ran = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
-        &MISSING_BINDING_GATE,
     );
 
     let decided = ran
@@ -387,6 +386,7 @@ fn an_intent_enters_only_as_an_input() {
         &mut state,
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
+        &MISSING_BINDING_GATE,
     );
     let error = effects.expect_err("nothing may be handled before Started");
     assert_eq!(
