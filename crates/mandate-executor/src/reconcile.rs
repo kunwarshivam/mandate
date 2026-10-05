@@ -12,7 +12,8 @@ use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::orders::{
-    EXTERNAL, account_fields, account_restriction, every_agent_alerted, fill, status_mapping,
+    EXTERNAL, StateEvidence, account_fields, account_restriction, every_agent_alerted, fill,
+    record_state_change, status_mapping,
 };
 use crate::payload::{int, text};
 use crate::ports::Ports;
@@ -262,14 +263,14 @@ fn adopt(
     to: OrderState,
     differences: &mut Vec<Difference>,
 ) -> Result<(), ExecutorError> {
-    let corrected = batch.journal(
-        "OrderStateChanged",
-        None,
-        vec![
-            ("client_order_id", text(id.as_str())),
-            ("state", text(state_name(to))),
-            ("adopted", Value::Bool(true)),
-        ],
+    let corrected = record_state_change(
+        batch,
+        id,
+        to,
+        StateEvidence {
+            adopted: true,
+            ..StateEvidence::default()
+        },
     )?;
     compensate(batch, corrected, id, from, to)?;
     differences.push(Difference::adopting(Adopted::OrderState, id.as_str()));

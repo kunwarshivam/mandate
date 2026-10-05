@@ -17,7 +17,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::orders::{legal, transition};
+use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
 use crate::ports::Ports;
 use crate::session::{
@@ -499,10 +499,11 @@ pub(crate) fn ladder_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
             )
         });
         if live {
-            let asked = vec![
-                ("cancel_requested", Value::Bool(true)),
-                ("ladder_step", Value::Bool(true)),
-            ];
+            let asked = StateEvidence {
+                cancel_requested: true,
+                ladder_step: true,
+                ..StateEvidence::default()
+            };
             transition(batch, &id, OrderState::PendingCancel, asked)?;
             batch.broker(BrokerRequest::Cancel {
                 client_order_id: id,
@@ -704,7 +705,15 @@ pub(crate) fn overdue(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(
         OrderState::Submitting => OrderState::Unknown,
         kept => kept,
     };
-    transition(batch, id, to, vec![("cancel_overdue", Value::Bool(true))])?;
+    transition(
+        batch,
+        id,
+        to,
+        StateEvidence {
+            cancel_overdue: true,
+            ..StateEvidence::default()
+        },
+    )?;
     batch.broker(BrokerRequest::GetOrderByClientId(id.clone()));
     Ok(())
 }
@@ -907,7 +916,10 @@ fn ask_cancel(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<bool, Exe
         .get(id)
         .is_some_and(|order| !order.cancel_unconfirmed && !order.state.is_terminal());
     if live {
-        let requested = vec![("cancel_requested", Value::Bool(true))];
+        let requested = StateEvidence {
+            cancel_requested: true,
+            ..StateEvidence::default()
+        };
         transition(batch, id, OrderState::PendingCancel, requested)?;
     }
     Ok(live)
@@ -1640,7 +1652,10 @@ fn cancel_resting(
         if outstanding {
             continue;
         }
-        let requested = vec![("cancel_requested", Value::Bool(true))];
+        let requested = StateEvidence {
+            cancel_requested: true,
+            ..StateEvidence::default()
+        };
         transition(batch, &id, OrderState::PendingCancel, requested)?;
         batch.broker(BrokerRequest::Cancel {
             client_order_id: id,

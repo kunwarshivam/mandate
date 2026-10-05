@@ -164,14 +164,13 @@ const RISK_STATE_ON_ACCOUNT: [(&str, &str); 2] =
 /// The agent stream's research-agent thesis records journal spec §9.4 closes (DEC-413, DEC-414).
 const THESIS_ON_AGENT: [(&str, &str); 2] = [("ThesisProposed", AGENT), ("ThesisRevised", AGENT)];
 
-/// The account stream's executor records journal spec v0.13 §9.5 closes (DEC-446, DEC-447):
-/// `ProtectionChanged` at `schema_version` 1, and the other three at 2 with their version-1
-/// schemas staying registered (§8).
-const EXECUTOR_ON_ACCOUNT: [(&str, &str); 5] = [
+/// The account stream's closed executor records (DEC-446, DEC-447, DEC-459).
+const EXECUTOR_ON_ACCOUNT: [(&str, &str); 6] = [
     ("IntentReceived", ACCT),
     ("GateDecided", ACCT),
     ("OrderSubmitted", ACCT),
     ("OrderRequestRecorded", ACCT),
+    ("OrderStateChanged", ACCT),
     ("ProtectionChanged", ACCT),
 ];
 
@@ -275,6 +274,134 @@ fn account_state_observed() -> Vec<u8> {
             "risk_clock":"{T}"}}"#
         ),
     )
+}
+
+fn order_state_changed() -> Vec<u8> {
+    with_payload(
+        "OrderStateChanged",
+        &[],
+        &format!(
+            r#"{{"client_order_id":"md-order-1","state":"accepted","attempted":null,
+            "broker_status":null,"filled_qty":null,"reject_code":null,"replaces":null,
+            "replaced_by":null,"replaced_by_broker_order_id":null,"lookup":null,
+            "ignored":false,"cancel_requested":false,"cancel_confirmed":false,
+            "cancel_overdue":false,"adopted":false,"ladder_step":false,"risk_clock":"{T}"}}"#
+        ),
+    )
+}
+
+#[test]
+fn order_state_changed_is_closed_and_every_member_is_required() {
+    let complete = order_state_changed();
+    assert_eq!(Draft::parse(&complete).map(|_| ()), Ok(()));
+    for field in [
+        "client_order_id",
+        "state",
+        "attempted",
+        "broker_status",
+        "filled_qty",
+        "reject_code",
+        "replaces",
+        "replaced_by",
+        "replaced_by_broker_order_id",
+        "lookup",
+        "ignored",
+        "cancel_requested",
+        "cancel_confirmed",
+        "cancel_overdue",
+        "adopted",
+        "ladder_step",
+        "risk_clock",
+    ] {
+        let missing = edit(&complete, &format!("payload.{field}"), None);
+        let refusal = Draft::parse(&missing).expect_err("every transition member is required");
+        assert_eq!(
+            (refusal.reason, refusal.path),
+            (InvalidReason::Schema, format!("payload.{field}")),
+            "{field}"
+        );
+    }
+    let extra = edit(&complete, "payload.unregistered", Some("true"));
+    let refusal = Draft::parse(&extra).expect_err("the transition payload is closed");
+    assert_eq!(
+        (refusal.reason, refusal.path.as_str()),
+        (InvalidReason::Schema, "payload.unregistered")
+    );
+}
+
+#[test]
+fn order_state_changed_catches_a_planted_writer_omission() {
+    let without_ladder_marker = edit(&order_state_changed(), "payload.ladder_step", None);
+    let refusal =
+        Draft::parse(&without_ladder_marker).expect_err("a writer omitted a required member");
+    assert_eq!(
+        (refusal.reason, refusal.path.as_str()),
+        (InvalidReason::Schema, "payload.ladder_step")
+    );
+}
+
+#[test]
+fn order_state_changed_covers_every_state_and_nullable_evidence_branch() {
+    let complete = order_state_changed();
+    for field in ["state", "attempted"] {
+        for state in [
+            "intent",
+            "submitting",
+            "accepted",
+            "partially_filled",
+            "pending_cancel",
+            "pending_replace",
+            "unknown",
+            "filled",
+            "canceled",
+            "rejected",
+            "expired",
+            "replaced",
+            "abandoned",
+        ] {
+            let value = format!("\"{state}\"");
+            let draft = edit(&complete, &format!("payload.{field}"), Some(&value));
+            assert_eq!(Draft::parse(&draft).map(|_| ()), Ok(()), "{field}={state}");
+        }
+    }
+    for (field, value) in [
+        ("broker_status", "\"accepted\""),
+        ("filled_qty", "\"1.25\""),
+        ("reject_code", "\"insufficient_buying_power\""),
+        ("replaces", "\"md-order-0\""),
+        ("replaced_by", "\"md-order-2\""),
+        ("replaced_by_broker_order_id", "\"broker-order-2\""),
+        ("lookup", "\"absent\""),
+    ] {
+        let draft = edit(&complete, &format!("payload.{field}"), Some(value));
+        assert_eq!(Draft::parse(&draft).map(|_| ()), Ok(()), "{field}");
+    }
+}
+
+#[test]
+fn order_state_changed_rejects_invalid_transition_evidence() {
+    let complete = order_state_changed();
+    for (field, value, reason) in [
+        ("state", "\"new\"", InvalidReason::NonCanonical),
+        ("attempted", "\"new\"", InvalidReason::NonCanonical),
+        ("lookup", "\"present\"", InvalidReason::NonCanonical),
+        ("filled_qty", "\"one\"", InvalidReason::NonCanonical),
+        ("broker_status", "\"\"", InvalidReason::NonCanonical),
+        ("reject_code", "\"\"", InvalidReason::NonCanonical),
+        (
+            "replaced_by_broker_order_id",
+            "\"\"",
+            InvalidReason::NonCanonical,
+        ),
+    ] {
+        let draft = edit(&complete, &format!("payload.{field}"), Some(value));
+        let refusal = Draft::parse(&draft).expect_err("invalid transition evidence");
+        assert_eq!(
+            (refusal.reason, refusal.path),
+            (reason, format!("payload.{field}")),
+            "{field}"
+        );
+    }
 }
 
 #[test]

@@ -58,13 +58,15 @@ const RISK_STATE: [&str; 2] = ["MandateVersionApplied", "UniverseChanged"];
 /// The agent stream's research-agent thesis records journal spec §9.4 closes, with rules 34 to 38.
 const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 
-/// The account stream's executor records journal spec §9.5 closes, with rules 39 to 45 (DEC-446).
-/// `ProtectionChanged` closes at `schema_version` 1; the other three close at 2 and stay at 1.
-const EXECUTOR: [&str; 5] = [
+/// The account stream's closed executor records (DEC-446, DEC-447, DEC-459).
+/// `OrderStateChanged`, `OrderRequestRecorded`, and `ProtectionChanged` close at version 1;
+/// `IntentReceived`, `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1.
+const EXECUTOR: [&str; 6] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
     "OrderRequestRecorded",
+    "OrderStateChanged",
     "ProtectionChanged",
 ];
 
@@ -589,6 +591,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("GateDecided", 2) => Some(&GATE_DECIDED_V2),
         ("OrderSubmitted", 2) => Some(&ORDER_SUBMITTED_V2),
         (COMPANION, 1) => Some(&ORDER_REQUEST_RECORDED),
+        ("OrderStateChanged", 1) => Some(&ORDER_STATE_CHANGED),
         ("ProtectionChanged", 1) => Some(&PROTECTION_CHANGED),
         ("StreamOpened", 1) => Some(&STREAM_OPENED),
         ("ConnectionEstablished", 1) => Some(&CONNECTION_ESTABLISHED),
@@ -870,6 +873,44 @@ static ORDER_REQUEST_RECORDED: Ty = Ty::Record(&[
     ("stop", Ty::Nullable(&Ty::Decimal)),
     ("rung", Ty::Nullable(&Ty::Int)),
     ("at_floor", Ty::Nullable(&Ty::Bool)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+const ORDER_STATES: &[&str] = &[
+    "intent",
+    "submitting",
+    "accepted",
+    "partially_filled",
+    "pending_cancel",
+    "pending_replace",
+    "unknown",
+    "filled",
+    "canceled",
+    "rejected",
+    "expired",
+    "replaced",
+    "abandoned",
+];
+
+/// DEC-459's `OrderStateChanged` at `schema_version` 1. Every evidence member is present on every
+/// record; absent evidence is `null` and inactive flags are false.
+static ORDER_STATE_CHANGED: Ty = Ty::Record(&[
+    ("client_order_id", Ty::Str),
+    ("state", Ty::OneOf(ORDER_STATES)),
+    ("attempted", Ty::Nullable(&Ty::OneOf(ORDER_STATES))),
+    ("broker_status", Ty::Nullable(&Ty::Str)),
+    ("filled_qty", Ty::Nullable(&Ty::Decimal)),
+    ("reject_code", Ty::Nullable(&Ty::Str)),
+    ("replaces", Ty::Nullable(&Ty::Str)),
+    ("replaced_by", Ty::Nullable(&Ty::Str)),
+    ("replaced_by_broker_order_id", Ty::Nullable(&Ty::Str)),
+    ("lookup", Ty::Nullable(&Ty::OneOf(&["absent"]))),
+    ("ignored", Ty::Bool),
+    ("cancel_requested", Ty::Bool),
+    ("cancel_confirmed", Ty::Bool),
+    ("cancel_overdue", Ty::Bool),
+    ("adopted", Ty::Bool),
+    ("ladder_step", Ty::Bool),
     ("risk_clock", Ty::RiskClock),
 ]);
 

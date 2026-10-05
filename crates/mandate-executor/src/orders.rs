@@ -102,29 +102,112 @@ fn known(batch: &Batch<'_, '_>, raw: Option<&str>) -> Option<ClientOrderId> {
     batch.view.orders.contains_key(&id).then_some(id)
 }
 
+/// The complete nullable and boolean evidence carried by `OrderStateChanged` (DEC-459).
+#[derive(Default)]
+pub(crate) struct StateEvidence {
+    pub(crate) attempted: Option<OrderState>,
+    pub(crate) broker_status: Option<String>,
+    pub(crate) filled_qty: Option<Qty>,
+    pub(crate) reject_code: Option<String>,
+    pub(crate) replaces: Option<ClientOrderId>,
+    pub(crate) replaced_by: Option<ClientOrderId>,
+    pub(crate) replaced_by_broker_order_id: Option<String>,
+    pub(crate) lookup_absent: bool,
+    pub(crate) ignored: bool,
+    pub(crate) cancel_requested: bool,
+    pub(crate) cancel_confirmed: bool,
+    pub(crate) cancel_overdue: bool,
+    pub(crate) adopted: bool,
+    pub(crate) ladder_step: bool,
+}
+
+fn nullable(value: Option<Value>) -> Value {
+    value.unwrap_or(Value::Null)
+}
+
+/// The one constructor for every newly journaled `OrderStateChanged`; [`Batch::journal`] appends
+/// its `risk_clock`.
+fn state_change_fields(
+    id: &ClientOrderId,
+    state: OrderState,
+    evidence: StateEvidence,
+) -> Vec<(&'static str, Value)> {
+    vec![
+        ("client_order_id", text(id.as_str())),
+        ("state", text(state_name(state))),
+        (
+            "attempted",
+            nullable(evidence.attempted.map(|state| text(state_name(state)))),
+        ),
+        ("broker_status", nullable(evidence.broker_status.map(text))),
+        (
+            "filled_qty",
+            nullable(evidence.filled_qty.map(|qty| text(qty.to_string()))),
+        ),
+        ("reject_code", nullable(evidence.reject_code.map(text))),
+        (
+            "replaces",
+            nullable(evidence.replaces.map(|order| text(order.as_str()))),
+        ),
+        (
+            "replaced_by",
+            nullable(evidence.replaced_by.map(|order| text(order.as_str()))),
+        ),
+        (
+            "replaced_by_broker_order_id",
+            nullable(evidence.replaced_by_broker_order_id.map(text)),
+        ),
+        (
+            "lookup",
+            if evidence.lookup_absent {
+                text("absent")
+            } else {
+                Value::Null
+            },
+        ),
+        ("ignored", Value::Bool(evidence.ignored)),
+        ("cancel_requested", Value::Bool(evidence.cancel_requested)),
+        ("cancel_confirmed", Value::Bool(evidence.cancel_confirmed)),
+        ("cancel_overdue", Value::Bool(evidence.cancel_overdue)),
+        ("adopted", Value::Bool(evidence.adopted)),
+        ("ladder_step", Value::Bool(evidence.ladder_step)),
+    ]
+}
+
+pub(crate) fn record_state_change(
+    batch: &mut Batch<'_, '_>,
+    id: &ClientOrderId,
+    state: OrderState,
+    evidence: StateEvidence,
+) -> Result<EventId, ExecutorError> {
+    batch.journal(
+        "OrderStateChanged",
+        None,
+        state_change_fields(id, state, evidence),
+    )
+}
+
 /// Journals one transition, or — when §5.7 has no such edge — the attempt, marked ignored, with
 /// the order left where it was (§5.7: "journaled and ignored").
 pub(crate) fn transition(
     batch: &mut Batch<'_, '_>,
     id: &ClientOrderId,
     to: OrderState,
-    mut extra: Vec<(&'static str, Value)>,
+    mut evidence: StateEvidence,
 ) -> Result<EventId, ExecutorError> {
     let from = batch
         .view
         .orders
         .get(id)
         .map_or(OrderState::Unknown, |order| order.state);
-    let mut pairs = vec![("client_order_id", text(id.as_str()))];
-    if legal(from, to) {
-        pairs.push(("state", text(state_name(to))));
+    let state = if legal(from, to) {
+        to
     } else {
-        pairs.push(("state", text(state_name(from))));
-        pairs.push(("attempted", text(state_name(to))));
-        pairs.push(("ignored", Value::Bool(true)));
-    }
-    pairs.append(&mut extra);
-    batch.journal("OrderStateChanged", None, pairs)
+        evidence.attempted = Some(to);
+        evidence.ignored = true;
+        from
+    };
+    record_state_change(batch, id, state, evidence)
 }
 
 /// An order the broker described — an acknowledgment, a query answer, or a pushed update — folded
@@ -138,10 +221,11 @@ pub(crate) fn described(
         batch.request_reconciliation();
         return Ok(());
     };
-    let status = vec![
-        ("broker_status", text(order.status.clone())),
-        ("filled_qty", text(order.filled_qty.to_string())),
-    ];
+    let status = StateEvidence {
+        broker_status: Some(order.status.clone()),
+        filled_qty: Some(order.filled_qty),
+        ..StateEvidence::default()
+    };
     let current = batch
         .view
         .orders
@@ -158,11 +242,15 @@ pub(crate) fn described(
         }
         Ok(StatusMapping::ReplacedPair) => replaced(batch, &id, order, status)?,
         Ok(StatusMapping::Becomes(to)) => {
-            let mut extra = status;
-            if let Some(code) = &order.reject_code {
-                extra.push(("reject_code", text(code.clone())));
-            }
-            transition(batch, &id, to, extra)?;
+            transition(
+                batch,
+                &id,
+                to,
+                StateEvidence {
+                    reject_code: order.reject_code.clone(),
+                    ..status
+                },
+            )?;
         }
     }
     let applied = batch
@@ -210,7 +298,7 @@ pub(crate) fn silence(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .map(|order| order.client_order_id.clone())
         .collect();
     for id in in_flight {
-        transition(batch, &id, OrderState::Unknown, Vec::new())?;
+        transition(batch, &id, OrderState::Unknown, StateEvidence::default())?;
         batch.broker(BrokerRequest::GetOrderByClientId(id));
     }
     Ok(())
@@ -222,7 +310,7 @@ pub(crate) fn duplicate(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
     let Some(id) = known(batch, Some(raw)) else {
         return Ok(());
     };
-    transition(batch, &id, OrderState::Unknown, Vec::new())?;
+    transition(batch, &id, OrderState::Unknown, StateEvidence::default())?;
     batch.broker(BrokerRequest::GetOrderByClientId(id));
     Ok(())
 }
@@ -237,14 +325,14 @@ pub(crate) fn absent(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Executo
     if batch.view.orders.get(&id).map(|order| order.state) != Some(OrderState::Unknown) {
         return Ok(());
     }
-    batch.journal(
-        "OrderStateChanged",
-        None,
-        vec![
-            ("client_order_id", text(id.as_str())),
-            ("state", text(state_name(OrderState::Unknown))),
-            ("lookup", text("absent")),
-        ],
+    record_state_change(
+        batch,
+        &id,
+        OrderState::Unknown,
+        StateEvidence {
+            lookup_absent: true,
+            ..StateEvidence::default()
+        },
     )?;
     let config = batch.ports.config;
     let confirmed = batch.view.orders.get(&id).is_some_and(|order| {
@@ -254,7 +342,7 @@ pub(crate) fn absent(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Executo
             })
     });
     if confirmed {
-        transition(batch, &id, OrderState::Intent, Vec::new())?;
+        transition(batch, &id, OrderState::Intent, StateEvidence::default())?;
         resubmit(batch, &id)?;
     }
     Ok(())
@@ -273,7 +361,10 @@ pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
         batch,
         &id,
         OrderState::Canceled,
-        vec![("cancel_confirmed", Value::Bool(true))],
+        StateEvidence {
+            cancel_confirmed: true,
+            ..StateEvidence::default()
+        },
     )?;
     match batch.view.orders.get(&id) {
         Some(order) if order.purpose == Purpose::Protective => {
@@ -323,7 +414,7 @@ fn replaced(
     batch: &mut Batch<'_, '_>,
     id: &ClientOrderId,
     order: &BrokerOrder,
-    mut status: Vec<(&'static str, Value)>,
+    status: StateEvidence,
 ) -> Result<(), ExecutorError> {
     let from = batch
         .view
@@ -335,19 +426,24 @@ fn replaced(
         return Ok(());
     }
     let linked = ClientOrderId::for_replacement(&batch.next_id())?;
-    status.push(("replaced_by", text(linked.as_str())));
-    if let Some(broker) = &order.replaced_by_broker_order_id {
-        status.push(("replaced_by_broker_order_id", text(broker.clone())));
-    }
-    transition(batch, id, OrderState::Replaced, status)?;
-    batch.journal(
-        "OrderStateChanged",
-        None,
-        vec![
-            ("client_order_id", text(linked.as_str())),
-            ("state", text(state_name(OrderState::Accepted))),
-            ("replaces", text(id.as_str())),
-        ],
+    transition(
+        batch,
+        id,
+        OrderState::Replaced,
+        StateEvidence {
+            replaced_by: Some(linked.clone()),
+            replaced_by_broker_order_id: order.replaced_by_broker_order_id.clone(),
+            ..status
+        },
+    )?;
+    record_state_change(
+        batch,
+        &linked,
+        OrderState::Accepted,
+        StateEvidence {
+            replaces: Some(id.clone()),
+            ..StateEvidence::default()
+        },
     )?;
     Ok(())
 }
@@ -437,7 +533,7 @@ pub(crate) fn fill(
             OrderState::PartiallyFilled
         };
         if to != order.state {
-            transition(batch, &id, to, Vec::new())?;
+            transition(batch, &id, to, StateEvidence::default())?;
         }
     }
     Ok(())
@@ -696,12 +792,15 @@ pub(crate) fn reject(
     if let Some(id) = cancelling {
         overdue(batch, &id)?;
     } else if let Some(id) = known(batch, reject.client_order_id.as_deref()) {
-        let extra = reject
-            .code
-            .iter()
-            .map(|code| ("reject_code", text(code.clone())))
-            .collect();
-        transition(batch, &id, OrderState::Rejected, extra)?;
+        transition(
+            batch,
+            &id,
+            OrderState::Rejected,
+            StateEvidence {
+                reject_code: reject.code.clone(),
+                ..StateEvidence::default()
+            },
+        )?;
     }
     let message = reject.message.to_ascii_lowercase();
     let closing_only = message.contains("closing") || message.contains("restricted");
@@ -723,5 +822,121 @@ fn fee_name(kind: FeeKind) -> &'static str {
         FeeKind::Cat => "cat",
         FeeKind::CryptoAsset => "crypto_asset",
         FeeKind::CryptoUsd => "crypto_usd",
+    }
+}
+
+#[cfg(test)]
+mod state_change_tests {
+    use mandate_canon::{Value, to_canonical};
+    use mandate_journal::Draft;
+    use mandate_num::Qty;
+
+    use super::{StateEvidence, state_change_fields};
+    use crate::error::ExecutorError;
+    use crate::ids::ClientOrderId;
+    use crate::payload::{object, text};
+    use crate::types::OrderState;
+
+    fn accepted(evidence: StateEvidence) -> Result<(), ExecutorError> {
+        let id = ClientOrderId::parse("md-order-1")?;
+        let mut fields = state_change_fields(&id, OrderState::Accepted, evidence);
+        fields.push(("risk_clock", text("2026-09-21T14:00:00.000000000Z")));
+        let payload = object(fields)?;
+        let body = format!(
+            r#"{{"envelope_version":1,"environment":"paper",
+            "event_id":"01J8Z3M4000000000000000001","stream_id":"acct:ws_1:ACCT1",
+            "event_type":"OrderStateChanged","schema_version":1,
+            "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
+            "causation_id":null,"correlation_id":null,
+            "actor":{{"kind":"system","id":"executor","version":"0.1.0",
+            "build":"sha256:{}"}},"config_refs":{{}},"payload":{},
+            "artifact_refs":[],"pii_refs":[]}}"#,
+            "3".repeat(64),
+            String::from_utf8_lossy(&to_canonical(&payload))
+        );
+        assert_eq!(
+            Draft::parse(body.as_bytes()).map(|_| ()),
+            Ok(()),
+            "{payload:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn every_reachable_writer_evidence_shape_passes_the_journal_schema() -> Result<(), ExecutorError>
+    {
+        let cases = [
+            StateEvidence::default(),
+            StateEvidence {
+                attempted: Some(OrderState::Filled),
+                ignored: true,
+                ..StateEvidence::default()
+            },
+            StateEvidence {
+                broker_status: Some("partially_filled".to_owned()),
+                filled_qty: Some(Qty::parse("1.25")?),
+                reject_code: Some("insufficient_buying_power".to_owned()),
+                ..StateEvidence::default()
+            },
+            StateEvidence {
+                lookup_absent: true,
+                ..StateEvidence::default()
+            },
+            StateEvidence {
+                cancel_requested: true,
+                ..StateEvidence::default()
+            },
+            StateEvidence {
+                cancel_confirmed: true,
+                ..StateEvidence::default()
+            },
+            StateEvidence {
+                cancel_overdue: true,
+                ..StateEvidence::default()
+            },
+            StateEvidence {
+                adopted: true,
+                ..StateEvidence::default()
+            },
+            StateEvidence {
+                ladder_step: true,
+                cancel_requested: true,
+                ..StateEvidence::default()
+            },
+            StateEvidence {
+                replaces: Some(ClientOrderId::parse("md-order-0")?),
+                ..StateEvidence::default()
+            },
+            StateEvidence {
+                replaced_by: Some(ClientOrderId::parse("md-order-2")?),
+                replaced_by_broker_order_id: Some("broker-order-2".to_owned()),
+                ..StateEvidence::default()
+            },
+        ];
+        for evidence in cases {
+            accepted(evidence)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn constructor_emits_every_boolean_even_when_false() -> Result<(), ExecutorError> {
+        let id = ClientOrderId::parse("md-order-1")?;
+        let payload = object(state_change_fields(
+            &id,
+            OrderState::Accepted,
+            StateEvidence::default(),
+        ))?;
+        for field in [
+            "ignored",
+            "cancel_requested",
+            "cancel_confirmed",
+            "cancel_overdue",
+            "adopted",
+            "ladder_step",
+        ] {
+            assert_eq!(payload.get(field), Some(&Value::Bool(false)), "{field}");
+        }
+        Ok(())
     }
 }
