@@ -2850,12 +2850,12 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANTS_OUT, MutatedCrate, PendingTest,
-        PendingTestRun, TestOutcome, actionlint_workflows, backticked_paths, base_ref_in, ci,
-        classify, contains_dec_id, contains_word, failure_cause, first_panic_line,
+        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, MUTANTS_OUT, MutantShard, MutatedCrate,
+        PendingTest, PendingTestRun, TestOutcome, actionlint_workflows, backticked_paths,
+        base_ref_in, ci, classify, contains_dec_id, contains_word, failure_cause, first_panic_line,
         generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function, lint,
-        listed_mutant_counts, live_test_counts, mutant_verdicts, mutants, mutants_outcome,
-        mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
+        listed_mutant_counts, live_test_counts, mutant_verdicts, mutants, mutants_args,
+        mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
         plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
         status_flip_problems, test_binary, test_outcomes, unjudged_mutants, verdicts,
     };
