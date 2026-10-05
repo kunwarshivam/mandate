@@ -7,6 +7,7 @@ import { BrandSpecimen } from "@/components/brand/brand-specimen";
 import { ChartCredit, LevelLegend } from "@/components/charts/chart-parts";
 import type { ChartLevel } from "@/components/charts/options";
 import { Sparkline } from "@/components/charts/sparkline";
+import { BEVEL } from "@/components/kumo/bevel";
 import { KumoSurfaces } from "@/components/design/kumo-surfaces";
 import { MotionSamples } from "@/components/design/motion-samples";
 import { AsOf } from "@/components/domain/as-of";
@@ -17,7 +18,7 @@ import { AgentOwl, Owl } from "@/components/domain/owl";
 import { FixtureTag, InlineDisclosures, Placeholder } from "@/components/domain/placeholders";
 import { ProvenanceBadge } from "@/components/domain/provenance-badge";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
-import { StopControl } from "@/components/shell/stop-control";
+import { StopButton } from "@/components/shell/stop-control";
 import type { AgentMode, Provenance } from "@/fixtures/types";
 import { AGENT_IDS } from "@/fixtures/workspace";
 import { contrastRatio, toHex } from "@/lib/color";
@@ -89,7 +90,7 @@ const DO = [
   "Sentence case everywhere. Weight 600 at most in the product.",
   "Tabular figures wherever numbers line up or change.",
   "Motion that answers the owner: a press, a sheet, the line drawing in once.",
-  "Stop in the header at every width, never disabled, never behind a menu.",
+  "Stop at the end of the dock and the tab bar at every width, never disabled, never behind a menu.",
 ];
 
 const DONT = [
@@ -393,9 +394,12 @@ export default function DesignPage() {
               <Button size="lg" variant="outline" className="h-11 rounded-lg px-5" disabled>
                 Disabled
               </Button>
+              <Button size="lg" variant="secondary" className={`h-11 px-5 ${BEVEL}`}>
+                Bevel, from the landing page
+              </Button>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <StopControl />
+              <StopButton place="inline" />
               <span data-meaning="kill" className="inline-flex h-11 items-center rounded-xl bg-crimson px-4 font-semibold text-crimson-foreground">
                 Kill switch (crimson, only here)
               </span>

@@ -3,7 +3,7 @@ import { AGENT_IDS } from "../src/fixtures/workspace";
 import { SCREENS, SECTION_INDEX } from "../src/lib/screens";
 
 /**
- * The phone is a remote control (DEC-207): three things in the header, four tabs, one navigation,
+ * The phone is a remote control (DEC-207): two things in the header, four tabs and Stop (DEC-452), one navigation,
  * a banner only when a feed is failing, and everything else one press away under More. Checked at
  * the four common phone widths, in the light and dark projects, and with reduced motion.
  */
@@ -16,6 +16,7 @@ const header = (page: Page) => page.getByRole("banner");
 const tabBar = (page: Page) => page.getByRole("navigation", { name: "Main" });
 const moreTab = (page: Page) => tabBar(page).getByRole("button", { name: "More" });
 const moreSheet = (page: Page) => page.getByRole("dialog", { name: "More" });
+const tabStop = (page: Page) => tabBar(page).getByRole("button", { name: "Stop", exact: true });
 
 async function open(page: Page, path: string, width: number, height = HEIGHT) {
   await page.setViewportSize({ width, height });
@@ -54,20 +55,21 @@ async function smallTargets(root: Locator) {
 
 for (const width of PHONES) {
   test.describe(`${width} px`, () => {
-    test("the header holds three things: the mark, the paper badge and Stop", async ({ page }) => {
+    test("the header holds two things: the mark and the paper badge", async ({ page }) => {
       await open(page, "/", width);
       const controls = header(page).locator("a[href], button, [role=button], input").locator("visible=true");
-      expect(await labels(controls)).toEqual(["Owlhead, dashboard", "Stop"]);
+      expect(await labels(controls)).toEqual(["Owlhead, dashboard"]);
       await expect(header(page).locator("[data-slot=environment-badge]")).toBeVisible();
       await expect(header(page).locator("[data-slot=environment-badge]")).toContainText("PAPER");
       expect(await smallTargets(header(page))).toEqual([]);
-      await expect(header(page).getByRole("button", { name: "Stop", exact: true })).toBeEnabled();
     });
 
-    test("four tabs sit at the bottom, 44 px or more, frosted, and the page never scrolls sideways", async ({ page }) => {
+    test("four tabs and then Stop sit at the bottom, 44 px or more, frosted, and the page never scrolls sideways", async ({ page }) => {
       await open(page, "/", width);
       const items = tabBar(page).locator(":scope > a, :scope > button");
-      expect((await labels(items)).map((l) => l.replace(/\d+ open/, "").trim())).toEqual(["Home", "Approvals", "Agents", "More"]);
+      expect((await labels(items)).map((l) => l.replace(/\d+ open/, "").trim())).toEqual(["Home", "Approvals", "Agents", "More", "Stop"]);
+      await expect(tabStop(page)).toBeEnabled();
+      await expect(tabStop(page)).toBeInViewport({ ratio: 1 });
       const bar = (await tabBar(page).boundingBox())!;
       expect(bar.y + bar.height).toBeCloseTo(HEIGHT, 0);
       expect(bar.width).toBe(width);
@@ -100,7 +102,7 @@ for (const width of PHONES) {
       expect(box.y, "the sheet stops below the header").toBeGreaterThanOrEqual(65);
       const backdrop = (await page.locator("[data-slot=sheet-backdrop]").boundingBox())!;
       expect(backdrop.y, "so does its backdrop").toBeGreaterThanOrEqual(65);
-      const stop = header(page).getByRole("button", { name: "Stop", exact: true });
+      const stop = tabStop(page);
       await expect(stop, "Stop stays in view and in the accessibility tree").toBeInViewport({ ratio: 1 });
       const uncovered = await stop.evaluate((el) => {
         const r = el.getBoundingClientRect();
@@ -137,13 +139,13 @@ for (const width of PHONES) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     });
 
-    test("Stop in the phone header is quiet on a calm screen and loud on risk, 44 px either way", async ({ page }) => {
+    test("Stop on the tab bar is quiet on a calm screen and loud on risk, 44 px either way", async ({ page }) => {
       for (const [scenario, tone] of [
         ["normal", "quiet"],
         ["stale", "loud"],
       ] as const) {
         await open(page, `/?scenario=${scenario}`, width);
-        const stop = header(page).getByRole("button", { name: "Stop", exact: true });
+        const stop = tabStop(page);
         await expect(stop).toHaveAttribute("data-tone", tone);
         await expect(stop).toBeEnabled();
         const pill = (await stop.locator("[data-slot=stop-pill]").boundingBox())!;
@@ -153,13 +155,13 @@ for (const width of PHONES) {
 
     test("the stale banner and a loud Stop stand together, and the open More sheet leaves Stop pressable", async ({ page }) => {
       await open(page, "/?scenario=stale", width);
-      const stop = header(page).getByRole("button", { name: "Stop", exact: true });
+      const stop = tabStop(page);
       const banner = page.getByRole("region", { name: "Feed warning" });
       await expect(stop).toHaveAttribute("data-tone", "loud");
       await expect(banner).toBeVisible();
       await expect(stop).toBeInViewport({ ratio: 1 });
       const [s, b] = [(await stop.boundingBox())!, (await banner.boundingBox())!];
-      expect(b.y, "the banner sits under Stop, never over it").toBeGreaterThanOrEqual(s.y + s.height - 0.5);
+      expect(s.y, "the banner sits under the header, far from Stop on the tab bar").toBeGreaterThanOrEqual(b.y + b.height - 0.5);
       await openMore(page);
       await expect(stop, "More is not modal: Stop stays in the accessibility tree").toBeVisible();
       await expect(stop).toHaveAttribute("data-tone", "loud");
@@ -313,7 +315,7 @@ for (const width of PHONES) {
       await page.getByRole("navigation", { name: "This agent" }).getByRole("link", { name: "Mandate" }).click();
       await expect(page).toHaveURL(`${AGENT}/mandate`);
       await expect(page.locator("[data-slot=envelope]")).toBeVisible();
-      await expect(header(page).getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+      await expect(tabStop(page)).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     });
   });
@@ -361,7 +363,7 @@ for (const width of PHONES) {
       const response = page.getByRole("region", { name: "Your response" });
       await expect(response.locator("time")).toHaveText(/^\d\d:\d\d:\d\d [A-Z]+$/);
       await expect(response.locator("[data-slot=remaining]"), "the request states the minutes left, as the brief asks").toHaveText(/^\(\d+ min left\)$/);
-      await expect(header(page).getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+      await expect(tabStop(page)).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     });
   });

@@ -9,7 +9,7 @@ import * as dashboard from "@/app/(app)/page";
 import * as settings from "@/app/(app)/settings/page";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS } from "@/fixtures/workspace";
 import { can } from "@/lib/roles";
-import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
+import { RECORD_AFTER_MS, dockStop, isDisabled, renderWithRuntime, tabStop } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { ROUTES } from "@/test/routes";
 import { asPhone, shownOnPhone } from "@/test/viewport";
@@ -22,7 +22,7 @@ beforeEach(() => setPathname("/"));
 
 describe("every screen in every scenario", () => {
   it.each(ROUTES.flatMap(([path, Page]) => SCENARIO_IDS.map((scenario) => [path, scenario, Page] as const)))(
-    "%s in %s shows the paper badge and an enabled Stop control",
+    "%s in %s shows the paper badge and an enabled Stop control on the dock and the tab bar",
     (path, scenario, Page) => {
       setPathname(path);
       renderWithRuntime(
@@ -33,8 +33,9 @@ describe("every screen in every scenario", () => {
       );
       const [header] = screen.getAllByRole("banner");
       expect(within(header).getByText("PAPER").closest("[data-slot=environment-badge]")).toHaveTextContent("PAPER·simulated funds");
-      const stop = within(header).getByRole("button", { name: "Stop" });
-      expect(isDisabled(stop)).toBe(false);
+      expect(within(header).queryByRole("button", { name: "Stop" })).toBeNull();
+      expect(isDisabled(dockStop())).toBe(false);
+      expect(isDisabled(tabStop())).toBe(false);
       expect(screen.getByRole("main")).toBeInTheDocument();
       expect(screen.getAllByText("Fixture data").length).toBeGreaterThan(0);
     },
@@ -76,16 +77,18 @@ describe("status strip", () => {
 });
 
 describe("Owlhead", () => {
-  it("names the product Owlhead in the header, with the founder's mark below lg and the lockup from lg", () => {
+  it("names the product Owlhead in the header, with the brand owl at every width and the wordmark from lg (DEC-452)", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const [header] = screen.getAllByRole("banner");
     const home = within(header).getByRole("link", { name: "Owlhead, dashboard" });
-    const mark = home.querySelector("[data-slot=owlhead-mark]");
-    const lockup = home.querySelector("[data-slot=owlhead-lockup]");
-    expect(mark).toHaveAttribute("aria-hidden", "true");
-    expect(mark).toHaveClass("lg:hidden");
-    expect(lockup).toHaveAttribute("aria-hidden", "true");
-    expect(lockup).toHaveClass("hidden", "lg:block");
+    const owl = home.querySelector("[data-slot=brand-owl] svg[data-slot=owl]");
+    const wordmark = home.querySelector("[data-slot=owlhead-wordmark]");
+    expect(owl).toHaveAttribute("aria-hidden", "true");
+    expect(owl).toHaveAttribute("data-mood", "awake");
+    expect(owl?.querySelector("rect[fill='var(--brand-owl)']")).not.toBeNull();
+    expect(wordmark).toHaveAttribute("aria-hidden", "true");
+    expect(wordmark).toHaveClass("hidden", "lg:block");
+    expect(home.querySelector("[data-slot=owlhead-mark], [data-slot=owlhead-lockup]")).toBeNull();
     expect(document.body.textContent).not.toMatch(/\bMandate\b/);
   });
 
@@ -97,7 +100,9 @@ describe("Owlhead", () => {
 
   it("sets the brand in the logo colour, never on a block of colour", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    for (const brand of document.querySelectorAll<HTMLElement>("[data-slot=owlhead-mark], [data-slot=owlhead-lockup]")) {
+    const brands = document.querySelectorAll<HTMLElement>("[data-slot=brand-lockup]");
+    expect(brands.length).toBeGreaterThan(0);
+    for (const brand of brands) {
       expect(brand.closest<HTMLElement>("[style]")?.style.color).toBe("var(--logo)");
       expect(brand.closest("[data-surface]")).toBeNull();
     }
@@ -134,32 +139,47 @@ function phoneControls(root: Element) {
 }
 
 describe("the phone frame (DEC-207)", () => {
-  it.each(["owner", "approver", "viewer", "auditor"] as const)("as %s, holds three things in the header: the mark, the paper badge and Stop", (role) => {
+  it.each(["owner", "approver", "viewer", "auditor"] as const)("as %s, holds two things in the header: the mark and the paper badge", (role) => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "normal", { role });
     const [header] = screen.getAllByRole("banner");
     const things = [...header.querySelectorAll(`${CONTROLS}, [data-slot=environment-badge]`)].filter(shownOnPhone);
-    const stops = can(role, "stop.open");
     expect(things.map((c) => c.getAttribute("aria-label") ?? c.textContent)).toEqual([
       expect.stringMatching(/^Owlhead, /),
       expect.stringMatching(/^PAPER/),
-      ...(stops ? ["Stop"] : []),
     ]);
     expect(within(header).queryByRole("button", { name: "Go to…" })).toBeNull();
     expect(within(header).queryByRole("button", { name: /sidebar/i })).toBeNull();
   });
 
-  it("offers four tabs: Home, Approvals with its count, Agents and More", () => {
+  it("offers four tabs: Home, Approvals with its count, Agents and More, then Stop at the bar's end", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
     const tabs = screen.getByRole("navigation", { name: "Main" });
     expect(tabs.parentElement).toHaveClass("lg:hidden");
     const items = phoneControls(tabs);
-    expect(items.map((i) => i.textContent?.replace(/\d+ open/, "").trim())).toEqual(["Home", "Approvals", "Agents", "More"]);
-    expect(items.map((i) => i.getAttribute("href"))).toEqual(["/", "/approvals", "/agents", null]);
+    expect(items.map((i) => i.textContent?.replace(/\d+ open/, "").trim())).toEqual(["Home", "Approvals", "Agents", "More", "Stop"]);
+    expect(items.map((i) => i.getAttribute("href"))).toEqual(["/", "/approvals", "/agents", null, null]);
     expect(items[1].querySelector("[data-slot=approvals-count]")?.textContent).toMatch(/^\d+ open$/);
     expect(items[3]).toHaveAttribute("aria-haspopup", "dialog");
     expect(items[3]).toHaveAttribute("aria-expanded", "false");
+    expect(items[4]).toHaveAttribute("data-slot", "stop-control");
     for (const item of items) expect(item).toHaveClass("h-(--tab-bar)");
     expect(tabs).toHaveClass("pb-[env(safe-area-inset-bottom)]");
+  });
+
+  it.each(["viewer", "auditor"] as const)("as %s, who may not stop, shows no Stop on the tab bar or the dock", (role) => {
+    expect(can(role, "stop.open")).toBe(false);
+    renderWithRuntime(<AppShell>{null}</AppShell>, "normal", { role });
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(document.querySelector("[data-slot=dock-stop-divider]")).toBeNull();
+  });
+
+  it("opens one Stop sheet from either the dock or the tab bar", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    fireEvent.click(tabStop());
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    fireEvent.click(dockStop());
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
 
   it("keeps one navigation: no sidebar sheet or menu button, even when the browser reports a phone", () => {
@@ -301,7 +321,7 @@ describe("browser storage", () => {
       </AppShell>,
       scenario,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(dockStop());
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Pause all agents/ }));
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
 

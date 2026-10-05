@@ -522,6 +522,11 @@ html:root[data-cvd="on"] {
   }
 }
 
+/* The landing page's chrome face, Pixelify Sans, for the bevelled buttons' labels and a few titles. */
+@utility pixel-face {
+  font-family: "Pixelify Sans Variable", "MS Sans Serif", Tahoma, sans-serif;
+}
+
 /*
  * A list settles in the first time it renders: each row rises 6 px and fades in, 30 ms after the
  * one above. Set `--i` for the stagger. CSS transitions, so a re-render interrupts cleanly.
@@ -624,10 +629,26 @@ html:root[data-cvd="on"] {
 [data-slot="owl"] {
   --owl-eye: var(--card);
   --owl-pupil: var(--foreground);
+  --owl-line: var(--foreground);
+  --brand-owl: var(--series-1);
+  --brand-owl-beak: var(--highlight);
 }
+/* The brand owl's colour for this page load, from `BRAND_OWL_SCRIPT` (DEC-452). A sun owl's beak is dark. */
+html[data-owl="2"] [data-slot="owl"] {
+  --brand-owl: var(--series-2);
+  --brand-owl-beak: var(--owl-pupil);
+}
+html[data-owl="3"] [data-slot="owl"] {
+  --brand-owl: var(--series-3);
+}
+html[data-owl="4"] [data-slot="owl"] {
+  --brand-owl: var(--series-4);
+}
+/* The outline stays dark at night, as a sprite's did, so the feathers carry the silhouette. */
 html:root[data-mode="dark"] [data-slot="owl"] {
   --owl-eye: var(--foreground);
   --owl-pupil: var(--card);
+  --owl-line: var(--background);
 }
 [data-slot="owl"] :is(.owl-blink, .owl-body, .owl-z) {
   transform-box: fill-box;

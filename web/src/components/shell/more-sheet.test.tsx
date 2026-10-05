@@ -83,7 +83,19 @@ describe("the More sheet", () => {
       expect(row).toHaveClass("min-h-11", "focus-visible:ring-3");
     }
     expect(within(sheet).getByRole("button", { name: "Close" })).toHaveClass("size-11");
-    expect(sheet.className).toMatch(/pb-\[calc\(env\(safe-area-inset-bottom\)/);
+    expect(sheet.className).toMatch(/bottom-\[calc\(var\(--tab-bar\)\+env\(safe-area-inset-bottom\)\)\]/);
+  });
+
+  it("opens in the frame's sheet layer, under the header and the tab bar, so it never covers Stop (DEC-452)", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const sheet = openMore();
+    const layer = sheet.closest("[data-slot=sheet-layer]");
+    expect(layer).not.toBeNull();
+    const tabBar = screen.getByRole("navigation", { name: "Main" }).parentElement!;
+    expect(layer?.parentElement).toBe(tabBar.parentElement);
+    expect(layer!.compareDocumentPosition(tabBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const el of [sheet, document.querySelector("[data-slot=sheet-backdrop]")]) expect(el).toHaveClass("z-20");
+    expect(tabBar).toHaveClass("z-30");
   });
 
   it("closes when a screen is chosen", () => {

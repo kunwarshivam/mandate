@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { render } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { Providers } from "@/components/providers";
 import { type Passkey, PasskeyContext, mockPasskey } from "@/components/stop/step-up-dialog";
 import type { Scenario } from "@/fixtures/types";
@@ -32,6 +32,19 @@ export function renderWithRuntime(
   );
   const view = render(wrap(ui));
   return { ...view, rerender: (next: ReactElement) => view.rerender(wrap(next)) };
+}
+
+/**
+ * The desktop dock's Stop. The shell renders it twice, at the end of the dock and of the phone tab
+ * bar, and jsdom applies no breakpoints, so a test picks one by its navigation (DEC-452).
+ */
+export function dockStop(): HTMLElement {
+  return within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name: "Stop" });
+}
+
+/** The phone tab bar's Stop. */
+export function tabStop(): HTMLElement {
+  return within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", { name: "Stop" });
 }
 
 /** A control counts as disabled if the browser or assistive technology would treat it so. */

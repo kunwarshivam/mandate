@@ -208,13 +208,19 @@ describe("figures with a plain zero", () => {
     expect(css).not.toMatch(/@font-face/);
   });
 
-  it("keeps the landing page's period faces on the landing page, out of the product", () => {
+  it("keeps the landing page's period faces on the landing page, and lends the product only its chrome face", () => {
     const landing = readFileSync(resolve(process.cwd(), "src/components/site/landing.tsx"), "utf8");
     for (const font of LANDING_FONTS) {
       expect(pkg.dependencies[font], font).toBeDefined();
       expect(landing, font).toContain(`import "${font}`);
     }
-    expect(readFileSync(resolve(process.cwd(), "src/app/layout.tsx"), "utf8")).not.toMatch(/dotgothic|vt323|pixelify/i);
+    const root = readFileSync(resolve(process.cwd(), "src/app/layout.tsx"), "utf8");
+    expect(root, "DEC-452: the bevelled buttons' face, loaded beside Public Sans and before globals.css").toMatch(
+      /import "@fontsource-variable\/pixelify-sans";\nimport "\.\/globals\.css";/,
+    );
+    expect(root).not.toMatch(/dotgothic|vt323/i);
+    expect(readFileSync(resolve(process.cwd(), "src/components/shell/app-frame.tsx"), "utf8")).not.toMatch(/fontsource/);
+    expect(css).toMatch(/@utility pixel-face \{\s*font-family: "Pixelify Sans Variable", /);
   });
 
   it("ships the face self-hosted from the package, with no font from a third-party host", () => {

@@ -29,22 +29,19 @@ export function useStopAttention(ws: Workspace): string[] {
   return current ?? known;
 }
 
+export function openStop(): void {
+  window.dispatchEvent(new Event(OPEN_STOP_EVENT));
+}
+
 /**
- * The Stop control is always rendered for a role that may stop, and never disabled. It does not
- * wait for the dashboard, the dock, or any model to load (brief §5, rule 13). It is quiet until
- * something needs the owner (DEC-206): an ink outline on the header, then the filled ink pill,
- * the only filled thing in the header, while `stopAttention` gives a reason. Both tones share one
- * box, so nothing moves when it turns, and the hit area is 44px tall at every width. The command
- * palette opens it through `OPEN_STOP_EVENT`.
+ * The one Stop sheet in the frame. Every Stop button, the command palette and an agent's own page
+ * open it through `OPEN_STOP_EVENT`, so the dock and the tab bar, which are both in the document at
+ * every width, never stack two sheets.
  */
-export function StopControl({ className }: { className?: string }) {
+export function StopSheetHost() {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const allowed = useCan("stop.open");
-  const { ws } = useRuntime();
-  const reasons = useStopAttention(ws);
-  const loud = reasons.length > 0;
-  const descriptionId = useId();
 
   useEffect(() => {
     const onOpen = () => setOpen(true);
@@ -53,25 +50,67 @@ export function StopControl({ className }: { className?: string }) {
   }, []);
 
   if (!allowed) return null;
+  return <StopSheet open={open} onOpenChange={setOpen} agentId={agentIdFrom(pathname)} />;
+}
+
+export type StopPlace = "dock" | "tab" | "inline";
+
+/** Each place's box and pill. Both tones share them, so nothing moves when Stop turns loud. */
+const PLACE: Record<StopPlace, { button: string; pill: string; icon: string }> = {
+  dock: {
+    button: "h-12.5 rounded-2xl",
+    pill: "h-12.5 gap-2 rounded-2xl pr-5 pl-4",
+    icon: "size-5",
+  },
+  tab: {
+    button: "h-(--tab-bar) w-full min-w-0 place-content-center",
+    pill: "h-11 min-w-16 gap-1.5 rounded-xl px-3",
+    icon: "size-4.5",
+  },
+  inline: {
+    button: "h-11 rounded-lg",
+    pill: "h-11 gap-2 rounded-lg pr-4.5 pl-3.5 lg:h-10 lg:gap-1.5 lg:pr-4 lg:pl-3 lg:text-sm",
+    icon: "size-5 lg:size-4",
+  },
+};
+
+/**
+ * A Stop button, for a role that may stop, never disabled, and never waiting for the dashboard or
+ * any model (brief §5, rule 13). It sits at the end of the dock and the phone's tab bar, the
+ * frame's persistent controls, apart from the navigation (DEC-452). It is quiet until something
+ * needs the owner (DEC-206): an ink outline, then the filled ink pill, the only filled thing on the
+ * dock or the tab bar, while `stopAttention` gives a reason. The hit area is 44px tall or more.
+ */
+export function StopButton({ place, className }: { place: StopPlace; className?: string }) {
+  const allowed = useCan("stop.open");
+  const { ws } = useRuntime();
+  const reasons = useStopAttention(ws);
+  const loud = reasons.length > 0;
+  const descriptionId = useId();
+  const { button, pill, icon } = PLACE[place];
+
+  if (!allowed) return null;
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={openStop}
         data-slot="stop-control"
+        data-place={place}
         data-tone={loud ? "loud" : "quiet"}
         aria-haspopup="dialog"
         aria-describedby={loud ? descriptionId : undefined}
-        className={cn("press group inline-flex h-11 shrink-0 items-center rounded-lg outline-none", className)}
+        className={cn("press group inline-grid shrink-0 items-center outline-none", button, className)}
       >
         <span
           data-slot="stop-pill"
           className={cn(
-            "inline-flex h-11 items-center gap-2 rounded-lg border-2 border-ink pr-4.5 pl-3.5 font-semibold transition-colors duration-(--duration-hover) ease-(--ease-out) group-focus-visible:ring-3 group-focus-visible:ring-ring group-focus-visible:ring-offset-2 motion-reduce:transition-none lg:h-10 lg:gap-1.5 lg:pr-4 lg:pl-3 lg:text-sm",
+            "inline-flex items-center justify-center border-2 border-ink font-semibold transition-colors duration-(--duration-hover) ease-(--ease-out) group-focus-visible:ring-3 group-focus-visible:ring-ring group-focus-visible:ring-offset-2 motion-reduce:transition-none",
+            pill,
             loud ? "bg-ink text-ink-foreground group-hover:bg-ink/88" : "bg-card text-ink group-hover:bg-background",
           )}
         >
-          <Octagon className="size-5 lg:size-4" weight="fill" aria-hidden />
+          <Octagon className={icon} weight="fill" aria-hidden />
           Stop
         </span>
       </button>
@@ -80,7 +119,16 @@ export function StopControl({ className }: { className?: string }) {
           {attentionText(reasons)}
         </span>
       ) : null}
-      <StopSheet open={open} onOpenChange={setOpen} agentId={agentIdFrom(pathname)} />
+    </>
+  );
+}
+
+/** A Stop button with a sheet of its own, for a screen outside the frame and the design specimen. */
+export function StopControl({ className }: { className?: string }) {
+  return (
+    <>
+      <StopButton place="inline" className={className} />
+      <StopSheetHost />
     </>
   );
 }

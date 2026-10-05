@@ -5,9 +5,9 @@ import { agentHref } from "../src/lib/screens";
 /**
  * From 1024 px the header carries a wide command bar between its two sides: a search icon, the
  * prompt and a ⌘K key on a muted fill with a hairline. It opens the command palette, like ⌘K. The
- * header keeps its height, and the bar never overlaps Stop, the paper badge, the theme menu, the
- * approvals and alerts links, the account menus, the brand or the trail. Below 1024 px it is the
- * compact icon beside the theme menu.
+ * header keeps its height, and the bar never overlaps the paper badge, the theme menu, the approvals
+ * and alerts links, the account menus, the brand or the trail. Below 1024 px it is the compact icon
+ * beside the theme menu.
  */
 
 const bar = (page: Page) => page.locator("[data-slot=command-bar]");
@@ -49,9 +49,8 @@ for (const width of [1024, 1280, 1440]) {
         const apart = other.right <= found.bar.left || other.left >= found.bar.right;
         expect(apart, `${other.name} [${other.left}, ${other.right}] against the bar [${found.bar.left}, ${found.bar.right}]`).toBe(true);
       }
-      for (const name of ["Stop", "Theme", "Approvals"]) {
-        await expect(page.getByRole("banner").getByRole(name === "Stop" ? "button" : name === "Theme" ? "button" : "link", { name, exact: true })).toBeInViewport({ ratio: 1 });
-      }
+      await expect(page.getByRole("banner").getByRole("button", { name: "Theme", exact: true })).toBeInViewport({ ratio: 1 });
+      await expect(page.getByRole("banner").getByRole("link", { name: "Approvals", exact: true })).toBeInViewport({ ratio: 1 });
       const badge = page.getByRole("banner").locator("[data-slot=environment-badge]");
       await expect(badge).toBeInViewport({ ratio: 1 });
       await expect(badge.getByText("PAPER", { exact: true })).toBeVisible();

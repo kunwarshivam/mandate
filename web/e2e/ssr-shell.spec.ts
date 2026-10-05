@@ -8,9 +8,10 @@ import { agentHref } from "../src/lib/screens";
  * The shell is laid out by CSS from the first server render (brief §5, rule 13: Stop does not depend
  * on the dashboard having loaded), and nothing in it picks a layout in JS, so there is nothing for a
  * phone to wait for. With JavaScript off, and with it on but the bundle held back, a phone gets the
- * phone shell (DEC-207): the full-width content column, the tab bar, Stop in the header wholly on
- * screen, the status strip only on a record screen, and nothing wider than the viewport. A desktop
- * gets the desktop shell from the same markup: the dock at the bottom and the full-width column.
+ * phone shell (DEC-207): the full-width content column, the tab bar with Stop at its end wholly on
+ * screen (DEC-452), the status strip only on a record screen, and nothing wider than the viewport. A
+ * desktop gets the desktop shell from the same markup: the dock at the bottom, Stop at its end, and
+ * the full-width column.
  */
 
 const PHONES = [320, 360, 390, 430];
@@ -43,8 +44,7 @@ async function measureShell(page: Page) {
       const r = el.getBoundingClientRect();
       return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
     };
-    const header = document.querySelector("header");
-    const stop = Array.from(header?.querySelectorAll("button") ?? []).find((b) => b.textContent?.trim() === "Stop") ?? null;
+    const stop = Array.from(document.querySelectorAll<HTMLElement>('[data-slot="stop-control"]')).find((b) => b.getClientRects().length > 0) ?? null;
     const stopBox = box(stop);
     const hit = stopBox ? document.elementFromPoint(stopBox.left + stopBox.width / 2, stopBox.top + stopBox.height / 2) : null;
     const sidebar = document.querySelector("[data-sidebar]");
@@ -56,7 +56,7 @@ async function measureShell(page: Page) {
       innerWidth: window.innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
       stop: stopBox,
-      stopInHeader: stop !== null,
+      stopPlace: stop?.dataset.place ?? null,
       stopUncovered: stop !== null && hit !== null && (hit === stop || stop.contains(hit)),
       covering: stop && hit && hit !== stop && !stop.contains(hit) ? `<${hit.tagName.toLowerCase()} class="${(hit.getAttribute("class") ?? "").slice(0, 80)}">` : null,
       stopClipped: stop !== null && stop.scrollWidth > stop.clientWidth,
@@ -72,10 +72,10 @@ async function measureShell(page: Page) {
 
 type Shell = Awaited<ReturnType<typeof measureShell>>;
 
-function expectStopOnScreen(found: Shell, width: number, state: string) {
+function expectStopOnScreen(found: Shell, width: number, state: string, place: "dock" | "tab") {
   expect(found.innerWidth, `${state}: the layout viewport is the device's width`).toBe(width);
   expect(found.scrollWidth, `${state}: the page does not scroll sideways`).toBeLessThanOrEqual(found.innerWidth);
-  expect(found.stopInHeader, `${state}: Stop is in the header`).toBe(true);
+  expect(found.stopPlace, `${state}: the one Stop on screen ends the ${place === "dock" ? "dock" : "tab bar"}`).toBe(place);
   const stop = found.stop!;
   expect(stop.left, `${state}: Stop's left edge`).toBeGreaterThanOrEqual(0);
   expect(stop.top, `${state}: Stop's top edge`).toBeGreaterThanOrEqual(0);
@@ -87,7 +87,7 @@ function expectStopOnScreen(found: Shell, width: number, state: string) {
 }
 
 function expectPhoneShell(found: Shell, width: number, state: string, record: boolean) {
-  expectStopOnScreen(found, width, state);
+  expectStopOnScreen(found, width, state, "tab");
   expect(found.sidebar, `${state}: no sidebar`).toBe(false);
   expect(found.content?.left, `${state}: the content column starts at the left edge`).toBe(0);
   expect(found.content?.width, `${state}: the content column takes the full width`).toBe(width);
@@ -106,7 +106,7 @@ function expectPhoneShell(found: Shell, width: number, state: string, record: bo
 }
 
 function expectDesktopShell(found: Shell, width: number, state: string) {
-  expectStopOnScreen(found, width, state);
+  expectStopOnScreen(found, width, state, "dock");
   expect(found.sidebar, `${state}: no sidebar`).toBe(false);
   expect(found.content!.left, `${state}: the content column starts at the left edge`).toBe(0);
   expect(found.content!.width, `${state}: the content column takes the full width`).toBe(width);

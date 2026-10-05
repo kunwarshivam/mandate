@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { canOpen } from "@/lib/access";
 import { isRecordRoute } from "@/lib/frozen";
@@ -15,6 +15,7 @@ import { AppHeader } from "./app-header";
 import { Dock } from "./dock";
 import { TabNav } from "./nav";
 import { StatusStrip } from "./status-strip";
+import { StopSheetHost } from "./stop-control";
 
 /** Audit and admin read like a console; everything an owner lives in stays calm (DEC-204). */
 export function densityFor(pathname: string): "calm" | "dense" {
@@ -26,7 +27,8 @@ export function densityFor(pathname: string): "calm" | "dense" {
  * strip while a feed is stale or down, and the dock; below `lg` (DEC-207), a one-line banner of the
  * failing feeds, and the tab bar. A record screen keeps the full strip at every width, because a
  * decision is read against every feed's age, not against the absence of a warning. With no strip,
- * the "Fixture data" tag sits at the foot of the page.
+ * the "Fixture data" tag sits at the foot of the page. The More sheet opens into a layer inside the
+ * frame, under the header and the tab bar, so it rises from behind the bar and never covers Stop.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const { ws, now } = useRuntime();
@@ -37,6 +39,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const fresh = allFeedsOk(ws);
   const strip = record || !fresh;
   const banner = !record && !fresh && ws.status !== "loading";
+  const sheetLayer = useRef<HTMLDivElement>(null);
 
   return (
     <div className="relative isolate flex min-h-svh w-full">
@@ -74,12 +77,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           {record ? null : <FixtureTag />}
         </div>
       </div>
+      <div ref={sheetLayer} data-slot="sheet-layer" />
       <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden">
-        <TabNav approvals={open} />
+        <TabNav approvals={open} sheetLayer={sheetLayer} />
       </div>
       <div className="fixed bottom-[calc(var(--dock-gap)+env(safe-area-inset-bottom))] left-1/2 z-30 hidden -translate-x-1/2 lg:block">
         <Dock approvals={open} />
       </div>
+      <StopSheetHost />
     </div>
   );
 }
