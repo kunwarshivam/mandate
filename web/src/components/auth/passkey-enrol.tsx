@@ -6,7 +6,8 @@ import { CircleNotch, Fingerprint } from "@phosphor-icons/react";
 import { ADD_PASSKEY_COPY, passkeyProblem, webAuthnSupported } from "@/lib/auth-errors";
 import { LOGIN_PATH } from "@/lib/auth-routes";
 import { type BrowserClient, createClient } from "@/lib/supabase/client";
-import { LOGON_HEADING, LOGON_LINK, LOGON_NOTICE, LOGON_PRIMARY, LOGON_SECONDARY } from "./logon-styles";
+import { LOGON_LINK, LOGON_NOTICE, LOGON_PRIMARY, LOGON_SECONDARY } from "./logon-styles";
+import { LogonHeading } from "./logon-heading";
 
 export type EnrolAuth = Pick<BrowserClient["auth"], "registerPasskey">;
 
@@ -48,9 +49,9 @@ export function PasskeyEnrol({
   return (
     <section aria-labelledby="enrol-title" aria-busy={pending} className="grid gap-5" data-slot="passkey-enrol">
       <div className="grid gap-2">
-        <h1 id="enrol-title" className={LOGON_HEADING}>
+        <LogonHeading id="enrol-title">
           Add a passkey
-        </h1>
+        </LogonHeading>
         <p className="text-pretty">Next time, sign in with your fingerprint, face or device PIN instead of Google.</p>
       </div>
 
