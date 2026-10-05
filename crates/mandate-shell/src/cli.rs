@@ -115,6 +115,8 @@ mod tests {
             "m.json",
             "--dataset",
             "bars",
+            "--config-dir",
+            "config",
             "--confirm-paper",
         ])
         .map_err(|e| e.to_string())?;
@@ -123,6 +125,7 @@ mod tests {
             Args {
                 mandate: PathBuf::from("m.json"),
                 dataset: PathBuf::from("bars"),
+                config_dir: PathBuf::from("config"),
                 journal: None,
                 place_one_order: false,
                 new_cycle: false,
@@ -155,6 +158,8 @@ mod tests {
             "--new-cycle",
             "--journal",
             "postgres://localhost/j",
+            "--config-dir",
+            "config",
             "--mandate",
             "m.json",
             "--dataset",
@@ -163,6 +168,7 @@ mod tests {
         .map_err(|e| e.to_string())?;
         assert!(parsed.place_one_order);
         assert!(parsed.new_cycle);
+        assert_eq!(parsed.config_dir, PathBuf::from("config"));
         assert_eq!(parsed.journal.as_deref(), Some("postgres://localhost/j"));
         assert_eq!(
             usage_of(&[
@@ -209,6 +215,16 @@ mod tests {
         assert_eq!(
             usage_of(&["--confirm-paper", "--mandate", "m.json"]),
             "--dataset is required"
+        );
+        assert_eq!(
+            usage_of(&[
+                "--confirm-paper",
+                "--mandate",
+                "m.json",
+                "--dataset",
+                "bars"
+            ]),
+            "--config-dir is required"
         );
         assert_eq!(
             usage_of(&["--confirm-paper", "--journal"]),

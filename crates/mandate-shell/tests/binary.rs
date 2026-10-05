@@ -73,3 +73,36 @@ fn a_configured_host_is_refused_before_anything_runs() {
          host\n"
     );
 }
+
+#[test]
+fn the_shipping_binary_assembles_the_paper_transport_and_trusted_contexts() {
+    let source = include_str!("../src/bin/mandate-tracer.rs");
+    assert!(
+        source.contains("Credentials::from_env()"),
+        "the shipping binary must read paper credentials through mandate-alpaca"
+    );
+    assert!(
+        source.contains("AlpacaPaperHttp::new"),
+        "the shipping binary must construct the paper-only HTTP transport"
+    );
+    assert!(
+        source.contains("production("),
+        "the shipping binary must use the production connector assembly"
+    );
+    assert!(
+        source.contains("load_contexts("),
+        "the shipping binary must load explicit trusted run and executor contexts"
+    );
+    assert!(
+        !source.contains("Disconnected"),
+        "the shipping binary must not retain the disconnected adapter"
+    );
+    assert!(
+        !source.contains("executor: None"),
+        "the shipping binary must supply an executor context"
+    );
+    assert!(
+        !source.contains("run: None"),
+        "the shipping binary must supply a run context"
+    );
+}
