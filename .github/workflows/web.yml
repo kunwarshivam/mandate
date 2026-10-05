@@ -18,6 +18,7 @@ on:
   pull_request:
     paths:
       - "web/**"
+      - "vercel.json"
       - ".github/workflows/web.yml"
   workflow_dispatch:
 
