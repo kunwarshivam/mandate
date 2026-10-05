@@ -338,10 +338,7 @@ impl InstrumentSnapshot for TrustedPaperContext {
 
 impl BindingGateSource for TrustedPaperContext {
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
-        match gate_input(self.now, self.config_refs.clone(), request) {
-            Ok(input) => Some(input),
-            Err(_) => None,
-        }
+        gate_input(self.now, self.config_refs.clone(), request).ok()
     }
 }
 
@@ -547,41 +544,43 @@ mod tests {
     }
 
     #[test]
-    fn the_reviewed_artifacts_assemble_both_trusted_contexts() {
+    fn the_reviewed_artifacts_assemble_both_trusted_contexts() -> Result<(), String> {
         let loaded = load_contexts(
             &fixtures().join("mandate.json"),
             &fixtures().join("config"),
-            UtcNanos::parse("2026-10-05T17:00:00.000000000Z").unwrap(),
+            UtcNanos::parse("2026-10-05T17:00:00.000000000Z").map_err(|error| error.to_string())?,
             &AgentId("tracer-aapl".to_owned()),
         );
         assert!(
             loaded.is_ok(),
             "the reviewed artifacts must assemble both contexts"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_missing_effective_dated_artifact_refuses_the_assembly() {
+    fn a_missing_effective_dated_artifact_refuses_the_assembly() -> Result<(), String> {
         let loaded = load_contexts(
             &fixtures().join("mandate.json"),
             &fixtures().join("no-config"),
-            UtcNanos::parse("2026-10-05T17:00:00.000000000Z").unwrap(),
+            UtcNanos::parse("2026-10-05T17:00:00.000000000Z").map_err(|error| error.to_string())?,
             &AgentId("tracer-aapl".to_owned()),
         );
         assert!(
             matches!(loaded, Err(Cause::Absent { .. })),
             "a missing artifact must refuse"
         );
+        Ok(())
     }
 
     #[test]
-    fn the_reviewed_aapl_snapshot_meets_the_platform_liquidity_floor() {
+    fn the_reviewed_aapl_snapshot_meets_the_platform_liquidity_floor() -> Result<(), String> {
         let context = advisory_gate_context(
-            UtcNanos::parse("2026-10-05T17:00:00.000000000Z").unwrap(),
+            UtcNanos::parse("2026-10-05T17:00:00.000000000Z").map_err(|error| error.to_string())?,
             BindingGateConfigRefs::complete("fee", "calendar", "instrument", "rules", "mandate"),
         )
-        .unwrap();
-        let platform_floor = Usd::parse("1000000").unwrap();
+        .map_err(|error| error.to_string())?;
+        let platform_floor = Usd::parse("1000000").map_err(|error| error.to_string())?;
         assert_eq!(
             context.instrument.median_dollar_volume_20d,
             Some(platform_floor)
@@ -590,5 +589,6 @@ mod tests {
             context.instrument.median_dollar_volume_30d,
             Some(platform_floor)
         );
+        Ok(())
     }
 }
