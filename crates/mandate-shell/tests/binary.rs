@@ -128,7 +128,7 @@ fn the_shipping_binary_reads_the_broker_before_it_assembles_the_trusted_contexts
         "AlpacaPaperHttp::new(",
         "preflight(",
         "liquidity_facts(",
-        "load_contexts(",
+        "load_contexts_with_clock(",
         "production(",
         "run(&mut stages",
     ];

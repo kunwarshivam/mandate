@@ -128,7 +128,7 @@ prompted a finding.
 | TI-9 | `Autonomy::Ask` and `Autonomy::Deny` send no order. The tracer has no escalation, so ask resolves to the safe default (skip), journaled |
 | TI-10 | The tracer is deterministic: the same fixtures, mandate, and injected clock produce byte-identical journal drafts |
 | TI-11 | The shell never treats an opening `Verdict::Allow` as gated when `Decision.checks` contains any `CheckOutcome::NotReached`. This is **defence in depth, not the mechanism**: `mandate-risk` already fails closed for adding risk — an owed check is recorded `NotReached`, and an opening the implemented checks would allow returns `Err(GateError::Unimplemented("evaluate", story))` (DEC-129 item 29; `gate.rs`'s `owed()` and its `first_owed` arm, on #160's head `9ae15c2`), which the shell's existing error mapping already denies. The shell holds **no list of its own** of which story owns which check: that would be gating knowledge in the shell, against DEC-138 item 3, and it would drift from `owed()` |
-| TI-12 | Running the tracer twice never buys a second share: it refuses when the agent stream already carries an open order or a position in the instrument, unless the operator asks for a new cycle, and a journal that has lost the record of a position the broker holds is a reconciliation mismatch that pauses and alerts |
+| TI-12 | Running the shipping tracer twice never buys a second share: it refuses when the agent stream already carries an intent, exposes no new-cycle override, and treats a journal that has lost the record of a position the broker holds as a reconciliation mismatch that pauses and alerts |
 
 ### Oracles
 
