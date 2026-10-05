@@ -5111,6 +5111,10 @@ fn every_error_code_is_stable_and_unique() {
         },
         ExecutorError::AlreadyStarted,
         ExecutorError::NotStarted,
+        ExecutorError::BindingGateInputMissing,
+        ExecutorError::BindingGateFailed {
+            code: "unimplemented",
+        },
         ExecutorError::NonCanonicalPayload {
             field: "f".to_owned(),
         },
@@ -5141,7 +5145,7 @@ fn every_error_code_is_stable_and_unique() {
     }
     assert_eq!(
         codes.len(),
-        22,
+        24,
         "the set is closed: a new variant adds a row here and a match arm in `code()`"
     );
 }
