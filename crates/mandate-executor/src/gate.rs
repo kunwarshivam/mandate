@@ -612,8 +612,7 @@ mod journal_tests {
     }
 
     #[test]
-    fn binding_gate_journal_expands_every_check_to_the_registered_ids() -> Result<(), ExecutorError>
-    {
+    fn binding_gate_journal_expands_every_check_to_the_registered_ids() -> Result<(), String> {
         let checks = [
             Check::AccountAndMode,
             Check::UniverseAndLimits,
@@ -625,17 +624,16 @@ mod journal_tests {
             Check::DayTradeBudget,
         ]
         .map(CheckOutcome::Passed);
-        let Value::Array(rows) = binding_checks_value(&checks)? else {
-            panic!("binding checks are an array");
-        };
-        let ids: Vec<&str> = rows
+        let value = binding_checks_value(&checks).map_err(|error| error.to_string())?;
+        let rows = value.as_array().ok_or("binding checks are not an array")?;
+        let ids = rows
             .iter()
             .map(|row| {
                 row.get("id")
                     .and_then(Value::as_str)
-                    .unwrap_or_else(|| panic!("each binding check has a registered id"))
+                    .ok_or("a binding check has no registered id")
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         assert_eq!(
             ids,
             [

@@ -2727,11 +2727,8 @@ mod tests {
         Date::parse(text).map_err(|e| e.to_string())
     }
 
-    fn as_of() -> UtcNanos {
-        match UtcNanos::parse("2026-09-25T20:00:00.000000000Z") {
-            Ok(at) => at,
-            Err(error) => panic!("the test clock is canonical: {error}"),
-        }
+    fn as_of() -> Result<UtcNanos, String> {
+        UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|error| error.to_string())
     }
 
     fn dataset(symbol: &str, timeframe: &str) -> Result<DatasetId, String> {
@@ -2834,7 +2831,7 @@ mod tests {
         let read = StoredBars {
             dir: store.dataset_dir(&id),
         }
-        .closes("AAPL", as_of())
+        .closes("AAPL", as_of()?)
         .map_err(|e| e.to_string())?;
         let expected: Vec<String> = closes.iter().map(|c| canonical(c)).collect();
         let read: Vec<String> = read.iter().map(ToString::to_string).collect();
@@ -2935,7 +2932,7 @@ mod tests {
     fn another_instruments_bars_are_refused() -> Result<(), String> {
         let scratch = Scratch::new("symbol")?;
         let dir = aapl(&scratch.0, &[], &[])?;
-        let what = untrusted(StoredBars { dir }.closes("MSFT", as_of()))?;
+        let what = untrusted(StoredBars { dir }.closes("MSFT", as_of()?))?;
         assert_eq!(what, "the dataset is another instrument's");
         Ok(())
     }
@@ -2950,7 +2947,7 @@ mod tests {
             &[],
             &[],
         )?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
         assert_eq!(what, "the dataset is not daily bars");
         Ok(())
     }
@@ -2963,7 +2960,7 @@ mod tests {
         let mut bytes = fs::read(&path).map_err(|e| e.to_string())?;
         bytes.push(0);
         fs::write(&path, bytes).map_err(|e| e.to_string())?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
         assert_eq!(what, "a partition cannot be trusted");
         Ok(())
     }
@@ -2980,7 +2977,7 @@ mod tests {
                 &Records::Bars(vec![bar(on, "233.20")?, bar(on, "233.30")?]),
             )
             .map_err(|e| e.to_string())?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
         assert_eq!(what, "two bars share a start");
         Ok(())
     }
@@ -2989,7 +2986,7 @@ mod tests {
     fn a_trading_day_listed_without_a_bar_is_refused() -> Result<(), String> {
         let scratch = Scratch::new("empty")?;
         let dir = aapl(&scratch.0, &[], &["2026-08-26"])?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
         assert_eq!(what, "a trading day has no bar");
         Ok(())
     }
@@ -2998,7 +2995,7 @@ mod tests {
     fn a_trading_day_never_fetched_is_refused() -> Result<(), String> {
         let scratch = Scratch::new("gap")?;
         let dir = aapl(&scratch.0, &["2026-08-26"], &[])?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
         assert_eq!(what, "a trading day was never fetched");
         Ok(())
     }
@@ -3008,7 +3005,7 @@ mod tests {
         let scratch = Scratch::new("split")?;
         let dir = aapl(&scratch.0, &[], &[])?;
         let mut inspection = inspect::inspect(&dir).map_err(|e| e.to_string())?;
-        assert!(trusted(&inspection, "AAPL", as_of()).is_ok());
+        assert!(trusted(&inspection, "AAPL", as_of()?).is_ok());
         let span = inspection.coverage.span.ok_or("no span")?;
         let symbol = Symbol::parse("AAPL").map_err(|e| e.to_string())?;
         let split = |ex_date: Date| -> Result<Split, String> {
@@ -3046,7 +3043,7 @@ mod tests {
         inspection.corporate_actions = ActionsReport::Incomplete(with(Vec::new()));
         assert!(split_inside(&inspection));
         assert!(matches!(
-            trusted(&inspection, "AAPL", as_of()),
+            trusted(&inspection, "AAPL", as_of()?),
             Err(Cause::Untrusted {
                 what: "a split lies inside the span, or the corporate actions do not cover it"
             })
@@ -3076,7 +3073,7 @@ mod tests {
         )
         .map_err(|e| e.to_string())?;
         let closes = StoredBars { dir }
-            .closes("AAPL", as_of())
+            .closes("AAPL", as_of()?)
             .map_err(|e| e.to_string())?;
         assert_eq!(closes.len(), 25);
         Ok(())
@@ -3193,7 +3190,7 @@ mod tests {
             }],
             "the one problem `inspect` finds is the unlisted partition (#248 review, minor 1)"
         );
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
         assert_eq!(what, "a partition cannot be trusted");
         Ok(())
     }

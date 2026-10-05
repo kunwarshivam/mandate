@@ -200,15 +200,16 @@ mod tests {
     }
 
     #[test]
-    fn config_references_are_digest_refs_or_the_draft_is_refused() {
+    fn config_references_are_digest_refs_or_the_draft_is_refused() -> Result<(), String> {
         let digest = format!("sha256:{}", "1".repeat(64));
         let bare = "1".repeat(64);
         assert!(config_refs(&[("mandate_version", Some(&digest))]).is_ok());
         for raw in [None, Some(""), Some(bare.as_str()), Some("sha256:not-hex")] {
-            assert_eq!(
-                config_refs(&[("mandate_version", raw)]).unwrap_err(),
-                crate::error::ExecutorError::BindingGateInputMissing
-            );
+            let error = config_refs(&[("mandate_version", raw)])
+                .err()
+                .ok_or("an invalid config reference was accepted")?;
+            assert_eq!(error, crate::error::ExecutorError::BindingGateInputMissing);
         }
+        Ok(())
     }
 }
