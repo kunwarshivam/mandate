@@ -6,7 +6,7 @@ import { CircleNotch, Fingerprint } from "@phosphor-icons/react";
 import { ADD_PASSKEY_COPY, passkeyProblem, webAuthnSupported } from "@/lib/auth-errors";
 import { LOGIN_PATH } from "@/lib/auth-routes";
 import { type BrowserClient, createClient } from "@/lib/supabase/client";
-import { NOTICE, OUTLINE_PILL, PRIMARY_PILL } from "./buttons";
+import { LOGON_HEADING, LOGON_LINK, LOGON_NOTICE, LOGON_PRIMARY, LOGON_SECONDARY } from "./logon-styles";
 
 export type EnrolAuth = Pick<BrowserClient["auth"], "registerPasskey">;
 
@@ -46,22 +46,21 @@ export function PasskeyEnrol({
   }
 
   return (
-    <section aria-labelledby="enrol-title" aria-busy={pending} className="mx-auto grid w-full max-w-sm gap-8 pt-6 sm:pt-16" data-slot="passkey-enrol">
-      <div className="grid gap-3">
-        <Fingerprint className="size-10 text-lapis" aria-hidden />
-        <h1 id="enrol-title" className="text-h1">
+    <section aria-labelledby="enrol-title" aria-busy={pending} className="grid gap-5" data-slot="passkey-enrol">
+      <div className="grid gap-2">
+        <h1 id="enrol-title" className={LOGON_HEADING}>
           Add a passkey
         </h1>
-        <p className="text-muted-foreground">Next time, sign in with your fingerprint, face or device PIN instead of Google.</p>
+        <p className="text-pretty">Next time, sign in with your fingerprint, face or device PIN instead of Google.</p>
       </div>
 
       {problem ? (
-        <p role="alert" className={NOTICE}>
+        <p role="alert" className={LOGON_NOTICE}>
           {ADD_PASSKEY_COPY[problem]}
           {problem === "signed-out" ? (
             <>
               {" "}
-              <Link href={LOGIN_PATH} className="font-semibold underline decoration-lapis/30 underline-offset-4 hover:decoration-current">
+              <Link href={LOGIN_PATH} className={LOGON_LINK}>
                 Sign in
               </Link>
             </>
@@ -69,12 +68,12 @@ export function PasskeyEnrol({
         </p>
       ) : null}
 
-      <div className="grid gap-3">
-        <button type="button" onClick={add} disabled={pending || !enabled} className={PRIMARY_PILL}>
-          {pending ? <CircleNotch className="size-5 shrink-0 motion-safe:animate-spin" aria-hidden /> : null}
+      <div className="grid gap-2">
+        <button type="button" onClick={add} disabled={pending || !enabled} className={LOGON_PRIMARY}>
+          {pending ? <CircleNotch className="size-5 shrink-0 motion-safe:animate-spin" aria-hidden /> : <Fingerprint className="size-5 shrink-0" aria-hidden />}
           Add a passkey
         </button>
-        <Link href={next} className={OUTLINE_PILL}>
+        <Link href={next} className={LOGON_SECONDARY}>
           Not now
         </Link>
       </div>

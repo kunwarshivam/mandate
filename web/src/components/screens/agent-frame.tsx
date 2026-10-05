@@ -7,7 +7,7 @@ import { CaretRight, Octagon } from "@phosphor-icons/react";
 import { LinkButton } from "@cloudflare/kumo/components/button";
 import { AgentOwl } from "@/components/domain/owl";
 import { ModeBadge, ModeBanner } from "@/components/domain/mode";
-import { BEVEL } from "@/components/kumo/bevel";
+import { KEY } from "@/components/kumo/key";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { SECTION_ICON } from "@/components/shell/screen-icons";
 import { OPEN_STOP_EVENT } from "@/components/shell/stop-control";
@@ -24,7 +24,7 @@ export function AgentNotFound() {
         No agent with this ID
       </h1>
       <p className="max-w-measure text-muted-foreground">This workspace has no agent with that ID. It may belong to another workspace.</p>
-      <LinkButton href="/agents" variant="outline" size="lg" className={`h-11 w-fit px-5 ${BEVEL}`}>
+      <LinkButton href="/agents" variant="secondary" size="lg" className={`w-fit ${KEY}`}>
         See all agents
       </LinkButton>
     </section>
@@ -39,7 +39,7 @@ export function RecordNotFound({ title, text, back }: { title: string; text: str
         {title}
       </h2>
       <p className="max-w-measure text-muted-foreground">{text}</p>
-      <LinkButton href={back.href} variant="outline" size="lg" className={`h-11 w-fit px-5 ${BEVEL}`}>
+      <LinkButton href={back.href} variant="secondary" size="lg" className={`w-fit ${KEY}`}>
         {back.label}
       </LinkButton>
     </section>

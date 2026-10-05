@@ -5,6 +5,7 @@ import { LayerDialog } from "@cloudflare/kumo/components/layer-dialog";
 import { SkeletonLine } from "@cloudflare/kumo/components/loader";
 import { Table } from "@cloudflare/kumo/components/table";
 import { Tabs } from "@cloudflare/kumo/components/tabs";
+import { KEY } from "@/components/kumo/key";
 
 const ROWS = ["ABC", "XYZ", "LMN", "BTC", "ETH", "QRS", "TUV", "DEF"];
 const TABS = ["Overview", "Positions", "Orders", "Decisions", "Approvals", "Mandate", "Prove", "Activity"].map((label) => ({ value: label.toLowerCase(), label }));
@@ -18,10 +19,10 @@ export function KumoSurfaces() {
   return (
     <div className="grid gap-(--block-gap)" data-specimen="kumo">
       <div className="flex flex-wrap items-center gap-2" data-specimen="button">
-        <Button size="lg" variant="primary" className="h-11">
+        <Button size="lg" variant="secondary" className={KEY}>
           Primary button
         </Button>
-        <LinkButton href="/design" size="lg" variant="primary" className="h-11">
+        <LinkButton href="/design" size="lg" variant="secondary" className={KEY}>
           Primary link
         </LinkButton>
       </div>
@@ -62,7 +63,7 @@ export function KumoSurfaces() {
 
       <div data-specimen="layer-dialog">
         <LayerDialog.Root>
-          <LayerDialog.Trigger render={<Button size="lg" variant="outline" className="h-11" />}>Open a layer dialog</LayerDialog.Trigger>
+          <LayerDialog.Trigger render={<Button size="lg" variant="secondary" className={KEY} />}>Open a layer dialog</LayerDialog.Trigger>
           <LayerDialog.Content>
             <LayerDialog.Title>Layer dialog</LayerDialog.Title>
             <LayerDialog.Description>For short admin actions only; record screens are pages.</LayerDialog.Description>

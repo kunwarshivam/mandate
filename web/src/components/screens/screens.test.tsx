@@ -3,7 +3,7 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentRoute from "@/app/(app)/agents/[agentId]/page";
 import * as approvalRoute from "@/app/(app)/approvals/[approvalId]/page";
-import { DECISION_KEY } from "@/components/kumo/bevel";
+import { DECISION_KEY } from "@/components/kumo/key";
 import { AppShell } from "@/components/shell/app-shell";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
 import { clock, price } from "@/lib/format";
@@ -90,35 +90,37 @@ describe("D1 dashboard", () => {
     cards.forEach((card, i) => expect(card.querySelector("[data-slot=card-headroom]")).toHaveTextContent(headroomLine(ws.agents[i])));
   });
 
-  it("leads the main column with the decisions, and keeps what needs you and the account in the rail, in that order", () => {
+  it("leads the main column with the money, the account then the agents, and keeps what needs you and the latest decisions in the rail", () => {
     renderScreen("/", <DashboardScreen />);
     const column = main().querySelector<HTMLElement>("[data-layout=main]")!;
     const rail = main().querySelector<HTMLElement>("[data-layout=rail]")!;
     expect(main().querySelectorAll("[data-layout=rail]")).toHaveLength(1);
-    expect(column.querySelector("h2")).toHaveTextContent("Decisions");
-    expect([...rail.querySelectorAll("h2")].map((h) => h.textContent?.replace(/\d+ items?$/, ""))).toEqual(["Needs you", "Account equity"]);
-    expect(rail.compareDocumentPosition(column) & Node.DOCUMENT_POSITION_FOLLOWING, "a phone reads what needs you before the decisions").toBeTruthy();
+    expect([...column.querySelectorAll("h2")].slice(0, 2).map((h) => h.textContent)).toEqual(["Account equity", "Agents"]);
+    expect([...rail.querySelectorAll("h2")].map((h) => h.textContent?.replace(/\d+ items?$/, ""))).toEqual(["Needs you", "Decisions"]);
+    expect(rail.compareDocumentPosition(column) & Node.DOCUMENT_POSITION_FOLLOWING, "a phone reads what needs you before the money").toBeTruthy();
     expect(rail.parentElement?.className).toContain("lg:grid-cols-[minmax(0,1fr)_20rem]");
   });
 
-  it("draws the latest decisions as a timeline: the agent's owl, the action, the verdict in words, and the rule or what came next", () => {
+  it("draws the latest decisions as a timeline: the agent's owl, the action, the verdict in words, who and when, and the rule or what came next", () => {
     renderScreen("/", <DashboardScreen />);
     const ws = buildWorkspace("normal");
-    const region = within(main()).getByRole("region", { name: "Decisions" });
+    const rail = main().querySelector<HTMLElement>("[data-layout=rail]")!;
+    const region = rail.querySelector<HTMLElement>("section[aria-labelledby=rail-decisions-title]")!;
     const entries = [...region.querySelectorAll<HTMLElement>("[data-slot=timeline-entry]")];
-    expect(entries).toHaveLength(Math.min(6, ws.decisions.length));
+    expect(entries).toHaveLength(Math.min(4, ws.decisions.length));
     entries.forEach((entry, i) => {
       const d = ws.decisions[i];
       expect(entry).toHaveAttribute("data-verdict", d.verdict);
       expect(entry.querySelector("svg[data-slot=owl]")).not.toBeNull();
       expect(within(entry).getByRole("link")).toHaveAttribute("href", decisionHref(d.agent_id, d.event_id));
       expect(entry.querySelector("[data-slot=verdict]")).toHaveTextContent(/^(Allowed|Not allowed|Held|Waiting)$/);
+      expect(entry.querySelector("time")).toHaveTextContent(clock(d.at).slice(0, 5));
       if (d.verdict === "allow") expect(entry.querySelector("[data-slot=gate-rule]")).toBeNull();
       else expect(entry.querySelector("[data-slot=gate-rule]")).toHaveTextContent(/\w/);
       expect(entry.innerHTML).not.toMatch(/\b(text|bg|ring|border)-(gain|loss|crimson)\b/);
     });
-    expect(region.querySelector("[data-slot=decision-tally]")).toHaveTextContent(/^The latest 6 decisions: \d+ allowed(, \d+ (not allowed|held|waiting))+\.$/);
-    expect(within(region).getAllByRole("link", { name: "All decisions" })[0]).toHaveAttribute("href", "/audit/decisions");
+    expect(region.querySelector("[data-slot=decision-tally]")).toHaveTextContent(/^The latest 4 decisions: \d+ allowed(, \d+ (not allowed|held|waiting))+\.$/);
+    expect(within(region).getByRole("link", { name: /All decisions/ })).toHaveAttribute("href", "/audit/decisions");
   });
 
   it("keeps news off Home: it is read on each agent's page, beside its decisions", () => {
@@ -288,11 +290,11 @@ describe("D5 inbox and D6 request", () => {
       for (const c of DECISION_KEY.split(" ")) expect(b).toHaveClass(c);
       expect(b).toHaveClass("bg-card", "text-foreground", "font-semibold");
       expect(b).not.toHaveClass("pixel-face", "bg-muted", "border-t-card", "ring", "shadow-xs", "border-0");
-      expect(b).toHaveClass("focus-visible:ring-2");
+      expect(b).toHaveClass("focus-visible:ring-3", "focus-visible:ring-ring");
       expect(b.className).not.toMatch(/bg-\[|shadow-(?!none)/);
     }
     const stop = within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name: "Stop" });
-    expect(stop.className + stop.innerHTML).not.toMatch(/pixel-face|border-t-card/);
+    expect(stop.className + stop.innerHTML, "DEC-469: Stop keeps its own shape, never the key").not.toMatch(/pixel-face|border-t-card|border-b-\[3px\]/);
   });
 
   it("states the default, the trigger, the risk in dollars, and the score's meaning", () => {

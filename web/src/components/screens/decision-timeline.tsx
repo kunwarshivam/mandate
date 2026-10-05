@@ -27,11 +27,12 @@ export function tally(decisions: GateDecision[]): string {
 }
 
 /**
- * What the agents set out to do, newest first, and what their mandates said: each entry hangs off one
- * hairline by the agent's owl, with the action, the gate's verdict in words, and the rule that held it
- * or what happened next. The verdict wears no meaning colour; a held action is outlined.
+ * What the agents set out to do, newest first, narrow enough for a rail or a phone: each entry hangs
+ * off one hairline by the agent's owl, with the action, the gate's verdict in words, who and when, and
+ * one line of why: the rule that held it, or else what happened next. The verdict wears no meaning
+ * colour; a held action is outlined.
  */
-export function DecisionTimeline({ ws, decisions, shownOnPhone }: { ws: Workspace; decisions: GateDecision[]; shownOnPhone: number }) {
+export function DecisionTimeline({ ws, decisions }: { ws: Workspace; decisions: GateDecision[] }) {
   return (
     <ol aria-label="Decisions, newest first" data-slot="decision-timeline" className="grid">
       {decisions.map((d, i) => {
@@ -43,32 +44,20 @@ export function DecisionTimeline({ ws, decisions, shownOnPhone }: { ws: Workspac
             key={d.event_id}
             data-verdict={d.verdict}
             data-slot="timeline-entry"
-            className={cn(
-              "group/entry reveal relative -mx-3 grid grid-cols-[2.75rem_2rem_minmax(0,1fr)] gap-x-3 rounded-xl px-3 transition-colors duration-(--duration-hover) hover:bg-background",
-              i >= shownOnPhone && "max-lg:hidden",
-            )}
+            className="group/entry reveal relative -mx-2 grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 rounded-xl px-2 transition-colors duration-(--duration-hover) hover:bg-background"
             style={{ "--i": i + 1 } as CSSProperties}
           >
-            <time dateTime={d.at} className="pt-3.5 font-mono text-caption text-muted-foreground tabular">
-              {clock(d.at).slice(0, 5)}
-            </time>
-            <span
-              aria-hidden
-              className={cn(
-                "relative flex justify-center pt-2.5 before:absolute before:top-12 before:bottom-0 before:w-px before:bg-border group-last/entry:before:hidden",
-                i === shownOnPhone - 1 && "max-lg:before:hidden",
-              )}
-            >
+            <span aria-hidden className="relative flex justify-center pt-2.5 before:absolute before:top-12 before:bottom-0 before:w-px before:bg-border group-last/entry:before:hidden">
               {agent ? <AgentOwl agent={agent} still className="size-8" /> : <span className="mt-3 size-2 rounded-full bg-muted-foreground" />}
             </span>
-            <div className="grid content-start gap-1 pt-3 pb-5">
-              <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                <Link href={decisionHref(d.agent_id, d.event_id)} className={cn("font-medium underline-offset-4 group-hover/entry:underline after:rounded-xl", STRETCHED_LINK)}>
+            <div className="grid min-w-0 content-start gap-1 pt-3 pb-4">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <Link href={decisionHref(d.agent_id, d.event_id)} className={cn("font-medium text-pretty underline-offset-4 group-hover/entry:underline after:rounded-xl", STRETCHED_LINK)}>
                   {actionSentence(d.action)}
                 </Link>
                 <span
                   data-slot="verdict"
-                  className={cn("inline-flex h-6 items-center rounded-md px-2.5 text-label", allowed ? "bg-muted text-muted-foreground" : "bg-card text-foreground ring-1 ring-foreground ring-inset")}
+                  className={cn("inline-flex h-6 items-center rounded-md px-2 text-label", allowed ? "bg-muted text-muted-foreground" : "bg-card text-foreground ring-1 ring-foreground ring-inset")}
                 >
                   {verdictLabel(d)}
                 </span>
@@ -77,13 +66,18 @@ export function DecisionTimeline({ ws, decisions, shownOnPhone }: { ws: Workspac
                 <span className="font-medium text-foreground">{agent?.label ?? "An agent"}</span>
                 <span aria-hidden>·</span>
                 <span>{PURPOSE_LABEL[d.action.purpose]}</span>
+                <span aria-hidden>·</span>
+                <time dateTime={d.at} className="font-mono tabular">
+                  {clock(d.at).slice(0, 5)}
+                </time>
               </p>
               {rule ? (
                 <p className="text-sm text-pretty" data-slot="gate-rule">
                   {rule}
                 </p>
+              ) : d.then ? (
+                <p className="text-sm text-pretty text-muted-foreground">{d.then}</p>
               ) : null}
-              {d.then ? <p className="text-sm text-pretty text-muted-foreground">{d.then}</p> : null}
             </div>
           </li>
         );

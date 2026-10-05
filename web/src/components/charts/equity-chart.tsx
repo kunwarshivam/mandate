@@ -30,11 +30,11 @@ const RANGE_WORDS: Record<EquityRange, string> = {
 /** Short enough on a phone that the range picker clears the tab bar under what needs you (DEC-207). */
 const ACCOUNT_PHONE_HEIGHT = 180;
 
-/** In Home's rail the account is a compact figure beside the decisions, not the page's centrepiece (DEC-467). */
-const ACCOUNT_HEIGHT = 200;
+/** The account leads Home's main column: the money is what an owner opens Home to see (DEC-468). */
+const ACCOUNT_HEIGHT = 260;
 
-/** A week reads as a trend; a day of paper ticks is mostly noise (DEC-467). */
-export const ACCOUNT_RANGE: EquityRange = "1W";
+/** Home opens on today, the question an owner checks first (DEC-468). */
+export const ACCOUNT_RANGE: EquityRange = "1D";
 
 /** The change's soft pill: its tint by sign, and the type in the gain or loss colour. */
 const PILL: Record<Direction, string> = {

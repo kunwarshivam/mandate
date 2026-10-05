@@ -1,5 +1,7 @@
 "use client";
 
+import { KEY } from "@/components/kumo/key";
+
 /**
  * A rendering failure changes nothing on the deployment: no request is sent from here. Reloading is
  * safe because this screen submits nothing.
@@ -10,7 +12,7 @@ export default function ErrorScreen({ reset }: { error: Error & { digest?: strin
       <h1 className="text-h1 sm:text-h1">This screen failed to display</h1>
       <p>Nothing was sent or changed: displaying a screen never places or cancels an order. The Stop control still works.</p>
       <p>
-        <button type="button" onClick={reset} className="press inline-flex h-11 items-center rounded-lg border border-foreground/25 bg-card px-5 font-semibold hover:bg-background">
+        <button type="button" onClick={reset} className={KEY}>
           Display it again
         </button>
       </p>

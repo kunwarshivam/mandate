@@ -151,7 +151,7 @@ export function OrdersTable({ orders, hrefFor, empty = "No working orders." }: {
                 ) : (
                   title
                 )}
-                <span className="font-normal text-muted-foreground"> {orderPriceText(o)}</span>
+                <span className="font-normal text-muted-foreground tabular"> {orderPriceText(o)}</span>
               </span>
               <span className="flex flex-wrap items-center gap-1.5">
                 {unknown ? <SourceTag source="account" /> : null}

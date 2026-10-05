@@ -9,6 +9,8 @@ import { clock, dateLabel, zoneLabel } from "@/lib/format";
 import { type Draft, SECTION_KEYS, draftDigest } from "./draft";
 import { PrototypeNote, STEP_HEADING, StepHeading } from "./goal-steps";
 import { ContractCard, DraftFields, NotEnforcedList } from "./mandate-parts";
+import { KEY } from "@/components/kumo/key";
+import { cn } from "@/lib/utils";
 
 /** The agent the prototype would have created: a fixed fixture ID, so its owl is always the same one. */
 export const PROTOTYPE_AGENT_ID = "agt_01JB4N3W5Q8RZ2X6C9V7B1T3MK";
@@ -102,7 +104,7 @@ export function Confirmation({ draft, confirmedAt, onStartOver }: { draft: Draft
 
       <div className="grid justify-items-start gap-3 border-t border-border/70 pt-6">
         <p className="max-w-measure text-sm text-pretty text-muted-foreground">Start over to try other answers. Nothing from this run is kept.</p>
-        <Button type="button" variant="primary" size="lg" className="h-12 w-full justify-center gap-2 px-6 sm:w-auto" onClick={onStartOver}>
+        <Button type="button" variant="secondary" size="lg" className={cn(KEY, "w-full sm:w-auto")} onClick={onStartOver}>
           <ArrowCounterClockwise className="size-4" aria-hidden />
           Start over
         </Button>

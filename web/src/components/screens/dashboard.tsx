@@ -19,10 +19,10 @@ import { DecisionTimeline, tally } from "./decision-timeline";
 import { EmptyBoard, PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
 import { SideRail } from "./side-rail";
 
-/** Home's timeline shows the latest decisions; the audit has them all. */
-const DECISIONS_SHOWN = 6;
+/** Home's rail shows the latest decisions beside the money; the audit has them all. */
+const DECISIONS_SHOWN = 4;
 
-/** A phone's Home shows this many decisions; the rest is one link away. */
+/** A phone's Home ends on this many decisions; the rest is one link away. */
 const DECISIONS_SHOWN_ON_PHONE = 3;
 
 function requestSentence(ws: Workspace, a: Approval) {
@@ -125,79 +125,76 @@ function PhoneAgentRow({ agent }: { agent: Agent }) {
 }
 
 /**
- * Home answers three questions in the order an owner asks them (DEC-467): does anything need me, what
- * did my agents do and was it allowed, and how is the account. The rail holds the first and the last;
- * the decisions lead the main column. A phone reads them in the same order as the page's source.
+ * The latest decisions, after the fact: what each agent set out to do and what its mandate said. Home
+ * keeps them beside the money, not ahead of it, with the audit one link away.
+ */
+function RecentDecisions({ ws, count, id, className }: { ws: Workspace; count: number; id: string; className?: string }) {
+  const canAudit = useCan("audit.view");
+  const decisions = ws.decisions.slice(0, count);
+  return (
+    <Section title="Decisions" id={id} className={className} action={canAudit && decisions.length > 0 ? <SectionLink href="/audit/decisions">All decisions</SectionLink> : undefined}>
+      {decisions.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No decisions yet. Each action an agent wants appears here with what its mandate said.</p>
+      ) : (
+        <>
+          <p data-slot="decision-tally" className="-mt-1 text-sm text-muted-foreground">
+            The latest {tally(decisions)}.
+          </p>
+          <DecisionTimeline ws={ws} decisions={decisions} />
+        </>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * Home answers what an owner opens it for, in that order (DEC-468): does anything need me, and how is
+ * my money doing, in the account and in each agent. Needs you comes first in the source and the rail;
+ * the account and the agents lead the main column; the latest decisions sit in the rail beside them,
+ * and at the foot of a phone's Home.
  */
 function Dashboard() {
   const { ws, now } = useRuntime();
-  const canAudit = useCan("audit.view");
   if (ws.agents.length === 0) return <EmptyBoard />;
   const open = ws.approvals
     .map((a) => approvalAt(a, now))
     .filter((a) => a.status === "delivered")
     .sort((a, b) => Date.parse(a.deadline) - Date.parse(b.deadline));
   const marketStale = ws.health.market_data.state !== "ok";
-  const decisions = ws.decisions.slice(0, DECISIONS_SHOWN);
 
   return (
-    <div className="grid grid-cols-1 gap-(--section-gap)">
+    <div className={PAGE_GRID}>
       <h1 className="sr-only">Dashboard</h1>
-      <div className={PAGE_GRID}>
-        <SideRail className="max-lg:gap-8 lg:col-start-2 lg:row-start-1">
-          <NeedsYou ws={ws} open={open} />
-          <div data-slot="account-board" className="reveal grid min-w-0">
-            <AccountEquityChart />
-          </div>
-        </SideRail>
+      <SideRail className="max-lg:gap-8 lg:col-start-2 lg:row-start-1">
+        <NeedsYou ws={ws} open={open} />
+        <RecentDecisions ws={ws} count={DECISIONS_SHOWN} id="rail-decisions-title" className="max-lg:hidden" />
+      </SideRail>
 
-        <div data-layout="main" className="grid min-w-0 content-start lg:col-start-1 lg:row-start-1">
-          <Section
-            title="Decisions"
-            action={
-              canAudit ? (
-                <SectionLink href="/audit/decisions" className="max-lg:hidden">
-                  All decisions
-                </SectionLink>
-              ) : undefined
-            }
-          >
-            {decisions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No decisions yet. Each action an agent wants appears here with what its mandate said.</p>
-            ) : (
-              <>
-                <p data-slot="decision-tally" className="-mt-1 text-sm text-muted-foreground max-lg:hidden">
-                  The latest {tally(decisions)}.
-                </p>
-                <DecisionTimeline ws={ws} decisions={decisions} shownOnPhone={DECISIONS_SHOWN_ON_PHONE} />
-              </>
-            )}
-            {canAudit && decisions.length > 0 ? (
-              <SectionLink href="/audit/decisions" className="w-fit lg:hidden">
-                See all decisions
-              </SectionLink>
-            ) : null}
-          </Section>
+      <div data-layout="main" className="grid min-w-0 grid-cols-1 content-start gap-(--section-gap) lg:col-start-1 lg:row-start-1">
+        <div data-slot="account-board" className="reveal grid min-w-0">
+          <AccountEquityChart />
         </div>
+
+        <Section title="Agents" action={<SectionLink href="/agents">All agents</SectionLink>}>
+          <PaperPnlNote className="-mt-1 max-lg:hidden" />
+          <ul className="grid max-lg:hidden">
+            {ws.agents.map((agent, i) => (
+              <li key={agent.agent_id} className="grid">
+                <AgentCard agent={agent} now={now} marketStale={marketStale} index={i + 2} />
+              </li>
+            ))}
+          </ul>
+          <ul aria-label="Agents" data-slot="phone-agents" className="grid lg:hidden">
+            {ws.agents.map((agent) => (
+              <PhoneAgentRow key={agent.agent_id} agent={agent} />
+            ))}
+          </ul>
+        </Section>
+
+        <AssetsSection ws={ws} className="max-lg:hidden" />
+
+        <RecentDecisions ws={ws} count={DECISIONS_SHOWN_ON_PHONE} id="phone-decisions-title" className="lg:hidden" />
       </div>
-
-      <Section title="Agents" action={<SectionLink href="/agents">All agents</SectionLink>}>
-        <PaperPnlNote className="-mt-1 max-lg:hidden" />
-        <ul className="grid max-lg:hidden">
-          {ws.agents.map((agent, i) => (
-            <li key={agent.agent_id} className="grid">
-              <AgentCard agent={agent} now={now} marketStale={marketStale} index={i + 2} />
-            </li>
-          ))}
-        </ul>
-        <ul aria-label="Agents" data-slot="phone-agents" className="grid lg:hidden">
-          {ws.agents.map((agent) => (
-            <PhoneAgentRow key={agent.agent_id} agent={agent} />
-          ))}
-        </ul>
-      </Section>
-
-      <AssetsSection ws={ws} className="max-lg:hidden" />
     </div>
   );
 }

@@ -1,19 +1,15 @@
 import type { ReactNode } from "react";
-import { OffLanding } from "@/components/site-frame/off-landing";
-import { SiteHeader } from "@/components/site-frame/site-header";
-import { signedInUser } from "@/lib/supabase/server";
 
-/** The public pages' frame: the brand and "Sign in", on the same tokens, type and themes as the app. */
-export default async function SiteLayout({ children }: { children: ReactNode }) {
-  const signedIn = (await signedInUser()) !== null;
+/**
+ * The public pages' frame: no header, because each page draws its own window on the landing page's
+ * desktop (DEC-213, DEC-469), and none of the app's controls, because nothing here acts on an account.
+ */
+export default function SiteLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh flex-col bg-card text-foreground">
       <a href="#main" className="sr-only z-50 bg-card px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Skip to content
       </a>
-      <OffLanding>
-        <SiteHeader signedIn={signedIn} />
-      </OffLanding>
       {children}
     </div>
   );
