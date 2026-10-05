@@ -578,13 +578,7 @@ mod tests {
     fn the_reviewed_aapl_snapshot_meets_the_platform_liquidity_floor() {
         let context = advisory_gate_context(
             UtcNanos::parse("2026-10-05T17:00:00.000000000Z").unwrap(),
-            BindingGateConfigRefs::complete(
-                "fee",
-                "calendar",
-                "instrument",
-                "rules",
-                "mandate",
-            ),
+            BindingGateConfigRefs::complete("fee", "calendar", "instrument", "rules", "mandate"),
         )
         .unwrap();
         let platform_floor = Usd::parse("1000000").unwrap();
