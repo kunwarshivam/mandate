@@ -3,12 +3,13 @@
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
+use mandate_risk::GatePass;
 
 use crate::batch::Batch;
 use crate::codec::{order_type_name, purpose_name, side_name, tif_name};
 use crate::error::ExecutorError;
 use crate::gate::{
-    PartialGateDecision, Proposal, SESSION_CLOSED, SESSION_UNKNOWN, UNPRICED, account_stream_checks,
+    PartialGateDecision, Proposal, SESSION_CLOSED, SESSION_UNKNOWN, UNPRICED, binding_checks,
 };
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
@@ -144,12 +145,12 @@ fn begin_and_submit(
     intent: &IntentId,
     always: bool,
 ) -> Result<(), ExecutorError> {
-    if decide(batch, intent)?.0.verdict_name() == ALLOW {
+    if decide(batch, intent, GatePass::First)?.0.verdict_name() == ALLOW {
         begin_exit(batch, intent)?;
     }
     match gate(batch, intent, always)? {
         ALLOW => submit(batch, intent)?,
-        HOLD if WAITS.contains(&decide(batch, intent)?.0.reason_code()) => {
+        HOLD if WAITS.contains(&decide(batch, intent, GatePass::BeforeSubmission)?.0.reason_code()) => {
             reprotect_unpriced(batch, intent)?;
         }
         _ => {}
@@ -168,6 +169,7 @@ const WAITS: [&str; 3] = [UNPRICED, SESSION_CLOSED, SESSION_UNKNOWN];
 fn decide(
     batch: &Batch<'_, '_>,
     intent: &IntentId,
+    pass: GatePass,
 ) -> Result<(PartialGateDecision, Purpose), ExecutorError> {
     let (agent, body) = intent_of(batch, intent)?;
     let IntentBody::Order {
@@ -184,7 +186,7 @@ fn decide(
             story: "E7-4",
         });
     };
-    let decision = account_stream_checks(
+    let decision = binding_checks(
         &batch.view,
         &Proposal {
             agent: &agent,
@@ -193,7 +195,10 @@ fn decide(
             qty: *qty,
             purpose: *purpose,
             bracketed: protection.is_some(),
+            limit: *limit,
+            tif: order_tif(batch, instrument),
         },
+        pass,
         batch.ports,
     )?;
     let allowed = decision.verdict == GateVerdict::Allow;
@@ -219,7 +224,7 @@ fn gate(
     intent: &IntentId,
     always: bool,
 ) -> Result<&'static str, ExecutorError> {
-    let (decision, purpose) = decide(batch, intent)?;
+    let (decision, purpose) = decide(batch, intent, GatePass::BeforeSubmission)?;
     let verdict = decision.verdict_name();
     if verdict == ALLOW || always || decision.crowded_denial() {
         let decided = journal_decision(batch, intent, &decision, purpose, Vec::new())?;
@@ -234,6 +239,16 @@ fn gate(
             );
         }
     }
+    if verdict == ALLOW && decision.is_binding()
+        && let Some(IntentBody::Order { qty, limit, .. }) = batch.view.bodies.get_mut(intent)
+    {
+        if let Some(sized) = decision.sized() {
+            *qty = sized;
+        }
+        if let Some(paced) = decision.paced_limit() {
+            *limit = paced;
+        }
+    }
     Ok(verdict)
 }
 
@@ -244,15 +259,22 @@ fn journal_decision(
     purpose: Purpose,
     mut extra: Vec<(&'static str, Value)>,
 ) -> Result<EventId, ExecutorError> {
+    let reason = if decision.is_binding() && decision.reason_code().is_empty() {
+        Value::Null
+    } else {
+        text(decision.reason_code())
+    };
     let mut pairs = vec![
         ("intent_id", text(intent.0.0.clone())),
         ("verdict", text(decision.verdict_name())),
-        ("reason_code", text(decision.reason_code())),
+        ("reason_code", reason),
         ("purpose", text(purpose_name(purpose))),
         ("checks", decision.checks_value()?),
-        ("evaluation", text("account_stream_only")),
     ];
-    if let Some(sized) = decision.sized() {
+    pairs.extend(decision.binding_journal_fields()?);
+    if !decision.is_binding()
+        && let Some(sized) = decision.sized()
+    {
         pairs.push(("sized_qty", text(sized.to_string())));
     }
     pairs.append(&mut extra);
@@ -265,7 +287,7 @@ fn held_long(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), Executo
     if !exit(batch, intent) || !aged(batch, intent) || batch.view.held_long.contains(intent) {
         return Ok(());
     }
-    let (decision, purpose) = decide(batch, intent)?;
+    let (decision, purpose) = decide(batch, intent, GatePass::First)?;
     if decision.verdict_name() != HOLD {
         return Ok(());
     }

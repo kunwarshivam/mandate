@@ -10,6 +10,12 @@ use std::future::Future;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_num::{Fraction, ShareIncrement};
+use mandate_risk::{
+    AccountSnapshot, AgentId as GateAgentId, AgentSnapshot, AssetId, ClientOrderId as GateOrderId,
+    ConductState, GateConfig, InstrumentSnapshot as GateInstrumentSnapshot, MarketSnapshot,
+    RiskSnapshot, ValidatedMandate, WorkingUniverse,
+};
+use mandate_time::UtcNanos;
 
 use crate::types::{
     AgentId, BrokerOutcome, BrokerRequest, BrokerUnknown, EventId, ExecutorConfig, ExitTier,
@@ -51,6 +57,39 @@ pub trait InstrumentSnapshot {
     fn exit_tier(&self, instrument: &InstrumentId) -> Option<ExitTier>;
 }
 
+/// The trusted values outside the account-stream fold that complete one §9.1 [`mandate_risk::GateInput`].
+///
+/// The proposed order and gate pass are deliberately absent: the executor derives both, then calls
+/// [`mandate_risk::evaluate`] directly. A caller can supply facts, never a verdict.
+#[derive(Debug, Clone)]
+pub struct BindingGateInput {
+    pub now: UtcNanos,
+    pub config: GateConfig,
+    pub mandate: ValidatedMandate,
+    pub risk: RiskSnapshot,
+    pub account: AccountSnapshot,
+    pub agent: AgentSnapshot,
+    pub instrument: GateInstrumentSnapshot,
+    pub market: MarketSnapshot,
+    pub conduct: ConductState,
+    pub universe: WorkingUniverse,
+    pub asset: AssetId,
+    pub gate_agent: GateAgentId,
+    pub gate_client_order_id: GateOrderId,
+    pub owner_confirmed_bid: Option<mandate_num::Price>,
+    pub fee_reservation: mandate_num::Usd,
+    pub data_profile: String,
+    pub feed: String,
+}
+
+/// Pure lookup of the trusted snapshots for one executor agent and instrument.
+///
+/// Returning `None` is an unavailable input, never an allow. This port cannot return a gate
+/// decision; the binding verdict is therefore not injectable.
+pub trait BindingGateSource {
+    fn input(&self, agent: &AgentId, instrument: &InstrumentId) -> Option<BindingGateInput>;
+}
+
 /// The pure ports a step reads. Each is a function of its arguments, so `handle` stays
 /// deterministic and a test injects fixed implementations.
 pub struct Ports<'a> {
@@ -65,6 +104,8 @@ pub struct Ports<'a> {
     /// §6.3), from which the executor computes paper's simulated regulatory fees with
     /// `mandate-accounting`'s own fee rules (§10, DEC-133).
     pub fees: &'a mandate_accounting::Config,
+    /// The non-account-stream half of the binding §9.1 input. `None` fails closed for openings.
+    pub binding_gate: Option<&'a dyn BindingGateSource>,
 }
 
 /// Why one broker round trip produced no broker fact.

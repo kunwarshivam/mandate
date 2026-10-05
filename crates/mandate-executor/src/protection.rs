@@ -13655,6 +13655,8 @@ mod remainder_pins {
                     qty: Qty::parse(qty)?,
                     purpose,
                     bracketed: false,
+                    limit: Price::parse("150")?,
+                    tif: TimeInForce::Day,
                 },
                 ports,
             )

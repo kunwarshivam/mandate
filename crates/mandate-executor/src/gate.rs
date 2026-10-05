@@ -11,14 +11,20 @@
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;
-use mandate_num::{Qty, SignedQty};
+use mandate_num::{Price, Qty, SignedQty};
+use mandate_risk::{
+    Check as BindingCheck, CheckOutcome, GateInput, GatePass, Origin, ProposedKind, ProposedOrder,
+    TimeInForce as GateTimeInForce, Verdict,
+};
 
 use crate::error::ExecutorError;
 use crate::payload::{object, text};
-use crate::ports::Ports;
+use crate::ports::{BindingGateInput, Ports};
 use crate::protection::{between_rungs, rests};
 use crate::state::ExecutorState;
-use crate::types::{AccountState, AgentId, GateCheck, GateVerdict, Mode, OrderState, Purpose};
+use crate::types::{
+    AccountState, AgentId, GateCheck, GateVerdict, Mode, OrderState, Purpose, TimeInForce,
+};
 
 /// What the executor's own account-stream checks concluded: a **partial** gate verdict, journaled
 /// as `GateDecided` with `evaluation: account_stream_only`, the verdict, the first failing check's
@@ -41,6 +47,19 @@ pub struct PartialGateDecision {
     /// `sell_exceeds_available` only if nothing else holds it now ([`Self::crowded_out`]), so a
     /// hold for the session or a price comes first and it is decided again at release.
     crowded: bool,
+    deferred: bool,
+    binding: Option<BindingEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BindingEvidence {
+    checks: Vec<CheckOutcome>,
+    data_profile: String,
+    feed: String,
+    asset: mandate_risk::AssetId,
+    market: mandate_risk::MarketSnapshot,
+    side: Side,
+    paced_limit: Option<Price>,
 }
 
 impl PartialGateDecision {
@@ -48,6 +67,7 @@ impl PartialGateDecision {
     pub(crate) fn verdict_name(&self) -> &'static str {
         match &self.verdict {
             GateVerdict::Allow => "allow",
+            GateVerdict::Deny { .. } if self.deferred => "defer",
             GateVerdict::Deny { .. } if self.held => "hold",
             GateVerdict::Deny { .. } => "deny",
         }
@@ -56,6 +76,16 @@ impl PartialGateDecision {
     /// The quantity an allowed sell was sized to, if the gate sized it (DEC-410).
     pub(crate) fn sized(&self) -> Option<Qty> {
         self.sized
+    }
+
+    pub(crate) fn paced_limit(&self) -> Option<Price> {
+        self.binding
+            .as_ref()
+            .and_then(|evidence| evidence.paced_limit)
+    }
+
+    pub(crate) fn is_binding(&self) -> bool {
+        self.binding.is_some()
     }
 
     /// Whether this is [`Self::crowded_out`]'s denial, which is journaled even on a held
@@ -123,6 +153,9 @@ impl PartialGateDecision {
 
     /// The `checks` list as the journal carries it: each check's id and whether it passed.
     pub(crate) fn checks_value(&self) -> Result<Value, ExecutorError> {
+        if let Some(evidence) = &self.binding {
+            return binding_checks_value(&evidence.checks);
+        }
         let checks = self
             .checks
             .iter()
@@ -134,6 +167,40 @@ impl PartialGateDecision {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Value::Array(checks))
+    }
+
+    pub(crate) fn binding_journal_fields(
+        &self,
+    ) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
+        let Some(evidence) = &self.binding else {
+            return Ok(vec![("evaluation", text("account_stream_only"))]);
+        };
+        let quotes = evidence.market.quote.map_or_else(Vec::new, |quote| {
+            vec![object(vec![
+                ("instrument_id", text(evidence.asset.as_str())),
+                ("bid", text(quote.bid.to_string())),
+                ("ask", text(quote.ask.to_string())),
+                ("as_of", text(quote.at.to_string())),
+                ("feed", text(&evidence.feed)),
+            ])]
+        });
+        let marks = evidence.market.quote.map_or_else(Vec::new, |quote| {
+            let mark = match evidence.side {
+                Side::Buy => quote.ask,
+                Side::Sell => quote.bid,
+            };
+            vec![object(vec![
+                ("instrument_id", text(evidence.asset.as_str())),
+                ("price", text(mark.to_string())),
+                ("source", text("quote")),
+                ("kind", text("risk")),
+            ])]
+        });
+        Ok(vec![
+            ("data_profile", text(&evidence.data_profile)),
+            ("quotes_used", Value::Array(quotes.into_iter().collect::<Result<_, _>>()?)),
+            ("marks_used", Value::Array(marks.into_iter().collect::<Result<_, _>>()?)),
+        ])
     }
 }
 
@@ -152,6 +219,8 @@ pub(crate) struct Proposal<'s> {
     pub(crate) purpose: Purpose,
     /// Whether the order carries protection prices: a bracket, never a plain add (§5.4).
     pub(crate) bracketed: bool,
+    pub(crate) limit: Price,
+    pub(crate) tif: TimeInForce,
 }
 
 /// Runs the checks in trading-domain spec §9.1's evaluation order against fresh folded state.
@@ -239,6 +308,8 @@ pub(crate) fn account_stream_checks(
         held,
         sized: None,
         crowded: false,
+        deferred: false,
+        binding: None,
     };
     if decision.verdict == GateVerdict::Allow && sell && discretionary && left < proposal.qty {
         if left == Qty::ZERO {
@@ -248,6 +319,170 @@ pub(crate) fn account_stream_checks(
         }
     }
     Ok(decision)
+}
+
+/// Runs the executor's non-substitutable binding gate after its account-stream checks have allowed.
+///
+/// Missing or unreadable external snapshots refuse an opening. A reducing order keeps the local
+/// decision because §9.1 does not read those missing inputs for a limit denial and rule 13 forbids
+/// converting the absence into a denial.
+pub(crate) fn binding_checks(
+    state: &ExecutorState,
+    proposal: &Proposal<'_>,
+    pass: GatePass,
+    ports: &Ports<'_>,
+) -> Result<PartialGateDecision, ExecutorError> {
+    let partial = account_stream_checks(state, proposal, ports)?;
+    if partial.verdict != GateVerdict::Allow {
+        return Ok(partial);
+    }
+    let Some(source) = ports.binding_gate else {
+        return if proposal.purpose.adds_risk() {
+            Err(ExecutorError::BindingGateInputMissing)
+        } else {
+            Ok(partial)
+        };
+    };
+    let Some(snapshot) = source.input(proposal.agent, proposal.instrument) else {
+        return if proposal.purpose.adds_risk() {
+            Err(ExecutorError::BindingGateInputMissing)
+        } else {
+            Ok(partial)
+        };
+    };
+    if snapshot.asset != snapshot.instrument.instrument
+        || snapshot.gate_agent != snapshot.agent.agent
+    {
+        return if proposal.purpose.adds_risk() {
+            Err(ExecutorError::BindingGateInputMissing)
+        } else {
+            Ok(partial)
+        };
+    }
+    evaluate_binding(partial, proposal, pass, snapshot)
+}
+
+fn evaluate_binding(
+    mut partial: PartialGateDecision,
+    proposal: &Proposal<'_>,
+    pass: GatePass,
+    snapshot: BindingGateInput,
+) -> Result<PartialGateDecision, ExecutorError> {
+    let proposed = ProposedOrder {
+        instrument: snapshot.asset.clone(),
+        side: proposal.side,
+        qty: proposal.qty,
+        limit_price: proposal.limit,
+        kind: if proposal.bracketed {
+            ProposedKind::Bracket {
+                take_profit: proposal.limit,
+                stop: proposal.limit,
+            }
+        } else {
+            ProposedKind::Plain
+        },
+        tif: match proposal.tif {
+            TimeInForce::Day => GateTimeInForce::Day,
+            TimeInForce::Gtc => GateTimeInForce::Gtc,
+            TimeInForce::Ioc => GateTimeInForce::Day,
+        },
+        extended_hours: false,
+        origin: origin(proposal.purpose),
+        owner_confirmed_bid: snapshot.owner_confirmed_bid,
+        client_order_id: snapshot.gate_client_order_id,
+        fee_reservation: snapshot.fee_reservation,
+    };
+    let input = GateInput {
+        now: snapshot.now,
+        pass,
+        config: &snapshot.config,
+        mandate: &snapshot.mandate,
+        risk: &snapshot.risk,
+        account: &snapshot.account,
+        agent: &snapshot.agent,
+        instrument: &snapshot.instrument,
+        market: &snapshot.market,
+        conduct: &snapshot.conduct,
+        universe: &snapshot.universe,
+        proposed: &proposed,
+    };
+    let decision = match mandate_risk::evaluate(&input) {
+        Ok(decision) => decision,
+        Err(error) if proposal.purpose.adds_risk() => {
+            return Err(ExecutorError::BindingGateFailed { code: error.code() });
+        }
+        Err(_) => return Ok(partial),
+    };
+    let reason = decision
+        .reason
+        .map_or_else(String::new, |reason| reason.as_str().to_owned());
+    let (verdict, held, deferred) = match decision.verdict {
+        Verdict::Allow => (GateVerdict::Allow, false, false),
+        Verdict::Deny => (GateVerdict::Deny { reason_code: reason }, false, false),
+        Verdict::Hold => (GateVerdict::Deny { reason_code: reason }, true, false),
+        Verdict::Defer => (GateVerdict::Deny { reason_code: reason }, false, true),
+    };
+    partial.verdict = verdict;
+    partial.held = held;
+    partial.deferred = deferred;
+    partial.sized = decision.pacing.as_ref().map(|pacing| pacing.qty);
+    partial.binding = Some(BindingEvidence {
+        checks: decision.checks,
+        data_profile: snapshot.data_profile,
+        feed: snapshot.feed,
+        asset: snapshot.asset,
+        market: snapshot.market,
+        side: proposal.side,
+        paced_limit: decision.pacing.map(|pacing| pacing.limit_price),
+    });
+    Ok(partial)
+}
+
+fn origin(purpose: Purpose) -> Origin {
+    match purpose {
+        Purpose::Open | Purpose::Increase | Purpose::DiscretionaryExit => Origin::OrderBuilder,
+        Purpose::RiskExit | Purpose::Flatten => Origin::RiskEngine,
+        Purpose::OwnerExit => Origin::OwnerClose,
+        Purpose::Protective => Origin::ProtectiveLeg,
+    }
+}
+
+fn binding_checks_value(checks: &[CheckOutcome]) -> Result<Value, ExecutorError> {
+    let rows = checks
+        .iter()
+        .flat_map(|outcome| {
+            let (check, result) = match outcome {
+                CheckOutcome::Passed(check) => (*check, "pass"),
+                CheckOutcome::Failed(check, _) => (*check, "fail"),
+                CheckOutcome::NotReached(check) => (*check, "not_reached"),
+            };
+            binding_check_ids(check)
+                .into_iter()
+                .map(move |id| (id, result))
+        })
+        .map(|(id, result)| {
+            object(vec![
+                ("id", text(id)),
+                ("result", text(result)),
+                ("inputs", object(Vec::new())?),
+                ("computed", object(Vec::new())?),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Value::Array(rows))
+}
+
+fn binding_check_ids(check: BindingCheck) -> &'static [&'static str] {
+    match check {
+        BindingCheck::AccountAndMode => &["account_status", "agent_mode"],
+        BindingCheck::UniverseAndLimits => &["eligibility", "concentration", "order_size"],
+        BindingCheck::SessionAndHalt => &["session", "halt"],
+        BindingCheck::OrderConstraints => &["order_constraints"],
+        BindingCheck::MarkAndCollar => &["mark_freshness", "collar"],
+        BindingCheck::ConductControls => &["conduct"],
+        BindingCheck::BuyingPowerAndExposure => &["buying_power", "gross_exposure"],
+        BindingCheck::DayTradeBudget => &["day_trade_budget"],
+    }
 }
 
 /// DEC-160's leg-agent rule fails closed: a broker-created protective leg no agent can be named for
@@ -436,6 +671,7 @@ mod attribution_tests {
             instruments: &Everything,
             config: &config,
             fees: &fees,
+            binding_gate: None,
         };
         let aapl = InstrumentId::new("AAPL")?;
         let agent = AgentId("agent-a".to_owned());
@@ -455,6 +691,8 @@ mod attribution_tests {
                     qty: Qty::parse("5")?,
                     purpose,
                     bracketed: false,
+                    limit: mandate_num::Price::parse("150")?,
+                    tif: crate::types::TimeInForce::Day,
                 },
                 &ports,
             )
@@ -584,6 +822,7 @@ mod remainder_tests {
             instruments: &Everything,
             config: &config,
             fees: &fees,
+            binding_gate: None,
         };
         account_stream_checks(
             state,
@@ -594,6 +833,8 @@ mod remainder_tests {
                 qty: Qty::parse(qty)?,
                 purpose,
                 bracketed: false,
+                limit: mandate_num::Price::parse("150")?,
+                tif: crate::types::TimeInForce::Day,
             },
             &ports,
         )

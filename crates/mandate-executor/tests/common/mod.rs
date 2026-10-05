@@ -324,6 +324,7 @@ pub fn ports<'a>(
         instruments,
         config,
         fees: fee_config(),
+        binding_gate: None,
     }
 }
 

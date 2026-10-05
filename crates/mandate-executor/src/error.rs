@@ -58,6 +58,12 @@ pub enum ExecutorError {
     /// Any input other than `Input::Started` before the executor has started.
     #[error("the executor has not started")]
     NotStarted,
+    /// The trusted snapshots needed to construct the binding §9.1 input were unavailable.
+    #[error("the binding risk-gate input is unavailable")]
+    BindingGateInputMissing,
+    /// `mandate-risk` could not decide an opening from the supplied snapshots.
+    #[error("the binding risk gate could not decide ({code})")]
+    BindingGateFailed { code: &'static str },
     /// A payload value that is not canonical, or a field of the wrong type (journal spec §4).
     #[error("payload field {field} is not canonical")]
     NonCanonicalPayload { field: String },
@@ -114,6 +120,8 @@ impl ExecutorError {
             Self::EpochMismatch { .. } => "epoch_mismatch",
             Self::AlreadyStarted => "already_started",
             Self::NotStarted => "not_started",
+            Self::BindingGateInputMissing => "binding_gate_input_missing",
+            Self::BindingGateFailed { .. } => "binding_gate_failed",
             Self::NonCanonicalPayload { .. } => "non_canonical_payload",
             Self::MalformedClientOrderId { .. } => "malformed_client_order_id",
             Self::UnmappedBrokerStatus { .. } => "unmapped_broker_status",
@@ -128,7 +136,7 @@ impl ExecutorError {
 
     /// Every code this crate can answer with, in the order [`Self::code`] matches them. The set is
     /// closed, which is what `hand::every_error_code_is_stable_and_unique` checks (ES-09).
-    pub const CODES: [&'static str; 22] = [
+    pub const CODES: [&'static str; 24] = [
         "unimplemented",
         "not_interpreted",
         "sequence_out_of_order",
@@ -142,6 +150,8 @@ impl ExecutorError {
         "epoch_mismatch",
         "already_started",
         "not_started",
+        "binding_gate_input_missing",
+        "binding_gate_failed",
         "non_canonical_payload",
         "malformed_client_order_id",
         "unmapped_broker_status",
