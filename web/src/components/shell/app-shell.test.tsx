@@ -12,7 +12,7 @@ import { can } from "@/lib/roles";
 import { RECORD_AFTER_MS, dockStop, isDisabled, renderWithRuntime, tabStop } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { ROUTES } from "@/test/routes";
-import { asPhone, shownOnPhone } from "@/test/viewport";
+import { asPhone, shownOnDesktop, shownOnPhone } from "@/test/viewport";
 import { AppShell } from "./app-shell";
 import { hiddenToTheRight } from "./status-strip";
 
@@ -289,11 +289,16 @@ describe("the frame", () => {
 });
 
 describe("approvals badge", () => {
-  it("shows a count and nothing else, in the dock, the header, and the phone tab bar", () => {
+  it("shows a count and nothing else, once at each width: in the dock and the phone tab bar, never the header", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
-    const counts = document.querySelectorAll("[data-slot=approvals-count]");
-    expect(counts.length).toBe(3);
+    const counts = [...document.querySelectorAll("[data-slot=approvals-count]")];
+    expect(counts.length).toBe(2);
     for (const c of counts) expect(c.textContent).toMatch(/^\d+ open$/);
+    const [header] = screen.getAllByRole("banner");
+    expect(header.querySelector("[data-slot=approvals-count]")).toBeNull();
+    expect(within(header).queryByRole("link", { name: "Approvals" })).toBeNull();
+    expect(counts.filter(shownOnDesktop)).toHaveLength(1);
+    expect(counts.filter(shownOnPhone)).toHaveLength(1);
   });
 });
 
