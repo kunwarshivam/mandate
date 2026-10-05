@@ -3,9 +3,9 @@
 //! test"). No test here touches a network: the transport is scripted, and `AlpacaPaperHttp` is never
 //! constructed (ADR-0001 ES-19).
 //!
-//! Every test is pending on E7-7: each production adapter is a stub today, so each run stops at the
-//! first probe with `Cause::Unimplemented`, and each test fails by that refusal propagating
-//! (DEC-110, DEC-137). The implementation PR deletes the markers and changes nothing else here.
+//! The focused mandate and builder checks run as their adapters become live. Full-path scenarios
+//! stay pending until the binary can assemble every trusted run and executor input; each pending
+//! test still fails closed at that missing boundary (DEC-110, DEC-137).
 //!
 //! The fail-closed suite is not here. It lives in `src/stages/fail_closed.rs`, because its
 //! permissive doubles must not be reachable from a build that ships (task brief item 5).
@@ -17,14 +17,28 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use mandate_alpaca::{HttpRequest, Method, Response, TradingTransport, TransportError};
+use mandate_builder::{
+    AccountSnapshot as BuilderAccountSnapshot, ActionContext, Market as BuilderMarket, RequestedBy,
+    RiskContext as BuilderRiskContext,
+};
 use mandate_canon::{DecStr, Digest, Value};
+use mandate_domain::{AssetClass as DomainAssetClass, AssetId, MarketSession, Purpose};
 use mandate_journal::{Environment, StoredEvent, TrustedStart, verify_events};
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
-use mandate_runtime::{AgentId, ConnectionId, Deployment, Proposal, SignalInputs, WorkspaceId};
-use mandate_shell::adapters::{AlpacaConnector, BuilderPlan, Sources, SpecMandate, production};
-use mandate_shell::stages::{MandateSource, Sizing, Stages};
+use mandate_num::{CostBasis, FeeRate, MarkPrice, Price, Qty, Signed, SizeFraction, Unit, Usd};
+use mandate_runtime::{
+    AgentId, ConnectionId, Deployment, OrderExecution, Proposal, ProtectionPrices, SignalInputs,
+    TimeInForce, WorkspaceId,
+};
+use mandate_shell::adapters::{
+    AlpacaConnector, BuilderContext, BuilderPlan, DecisionContext, RunContext, Sources,
+    SpecMandate, production,
+};
+use mandate_shell::stages::{Classifier, MandateSource, Sizing, Stages};
 use mandate_shell::{Report, Setup, ShellError, run};
+use mandate_spec::ValidationContext;
+use mandate_spec::document::ProvenanceMap;
 use mandate_time::{Date, UtcNanos};
 
 const AGENT: &str = "tracer-aapl";
@@ -42,6 +56,110 @@ fn agent_stream() -> String {
 
 fn account_stream() -> String {
     format!("acct:{WORKSPACE}:{ACCOUNT_REF}")
+}
+
+fn run_context(with_builder: bool) -> RunContext {
+    let validation = ValidationContext {
+        account_equity_usd: Usd::parse("100000").unwrap(),
+        other_allocations_usd: Usd::ZERO,
+        validation_date: Date::parse("2026-09-25").unwrap(),
+        registry: None,
+        provenance: ProvenanceMap::default(),
+        workspace_users: 1,
+        approver_users: 1,
+        independent_approval_required: false,
+        disclosures_accepted: Default::default(),
+        instrument_groups: Default::default(),
+        claimed_by_other_agents: Default::default(),
+        connection_environment: Some(mandate_domain::Environment::Paper),
+        connection_loss_carry_usd: Usd::ZERO,
+        eligibility_failures: Default::default(),
+        previous_version: None,
+        current_mandate_version: None,
+    };
+    let decision = with_builder.then(|| {
+        let instrument = AssetId::parse("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415").unwrap();
+        let builder = BuilderContext {
+            account: BuilderAccountSnapshot {
+                agent_equity: Usd::parse("1000").unwrap(),
+                position_qty: Qty::ZERO,
+                cost_basis: CostBasis::ZERO,
+                risk_mark: MarkPrice::parse("255.1").unwrap(),
+                gross_usd: Usd::ZERO,
+                working_opening_cost: Usd::ZERO,
+                goal_spent_usd: Usd::ZERO,
+            },
+            market: BuilderMarket {
+                instrument: instrument.clone(),
+                asset_class: DomainAssetClass::UsEquity,
+                session: MarketSession::Regular,
+                in_close_window: false,
+                bid: Price::parse("255.1").unwrap(),
+                ask: Price::parse("255.2").unwrap(),
+                increment: Qty::parse("1").unwrap(),
+                min_order_usd: Usd::parse("1").unwrap(),
+                fee_rate_cash: FeeRate::parse("0").unwrap(),
+                fee_rate_asset: FeeRate::parse("0").unwrap(),
+            },
+            risk: BuilderRiskContext {
+                size_factor: SizeFraction::ONE,
+                drawdown: Unit::ZERO,
+                daily_pnl_fraction: Signed::ZERO,
+                position_pnl_fraction: Signed::ZERO,
+                bought_today_usd: Usd::ZERO,
+                has_prior_fill: false,
+                new_instrument: false,
+                thesis_confidence: Unit::ZERO,
+                risk_day: Date::parse("2026-09-25").unwrap(),
+            },
+            action: ActionContext {
+                purpose: Purpose::Open,
+                order_usd: Usd::parse("255.2").unwrap(),
+                combined_score: Unit::ONE,
+                instrument,
+                asset_class: DomainAssetClass::UsEquity,
+                session: MarketSession::Regular,
+                first_trade_in_instrument: true,
+                new_instrument: false,
+                thesis_confidence: Unit::ZERO,
+                drawdown: Unit::ZERO,
+                daily_pnl_fraction: Signed::ZERO,
+                position_usd_after: Usd::parse("255.2").unwrap(),
+                gross_usd_after: Usd::parse("255.2").unwrap(),
+                bought_today_usd: Usd::parse("255.2").unwrap(),
+                position_pnl_fraction: Signed::ZERO,
+                requested_by: RequestedBy::Agent,
+                risk_day: Date::parse("2026-09-25").unwrap(),
+            },
+            model_content_hashes: BTreeMap::from([(
+                ("quant.ma_crossover".to_owned(), "1.0.0".to_owned()),
+                Digest::from_hex(
+                    "5555555555555555555555555555555555555555555555555555555555555555",
+                )
+                .unwrap(),
+            )]),
+            execution: OrderExecution {
+                asset_class: DomainAssetClass::UsEquity,
+                tif: TimeInForce::Day,
+                protection_required: true,
+                protection: Some(ProtectionPrices {
+                    stop: Price::parse("242.44").unwrap(),
+                    take_profit: None,
+                }),
+            },
+        };
+        DecisionContext {
+            builder: Some(builder),
+            gate: None,
+        }
+    });
+    RunContext {
+        validation,
+        policies: Vec::new(),
+        author: "user-author".to_owned(),
+        restricted_instruments: Default::default(),
+        decision,
+    }
 }
 
 /// A scratch directory under the system's temporary directory, removed when dropped.
@@ -237,6 +355,7 @@ fn stages(mandate: &str, dataset: PathBuf, transport: Scripted) -> Stages {
         workspace: WORKSPACE.to_owned(),
         account_ref: ACCOUNT_REF.to_owned(),
         executor: None,
+        run: Some(run_context(true)),
         transport,
     })
 }
@@ -286,10 +405,10 @@ fn stream_bytes(stages: &Stages) -> Vec<u8> {
 
 /// Step 1: the fixture mandate validates with no violation before anything else uses it.
 #[test]
-#[ignore = "pending E7-7"]
 fn the_fixture_mandate_validates_with_no_violation() {
     let admitted = SpecMandate {
         path: fixtures().join("mandate.json"),
+        context: Some(Rc::new(run_context(false))),
     }
     .admitted()
     .unwrap();
@@ -304,10 +423,10 @@ fn the_fixture_mandate_validates_with_no_violation() {
 /// conviction of 1 and a target of 1000, the budget is min(1000, 300, 1000, 1000) = 300, and
 /// trunc(300 / 255.20) = 1 share, whose 255.20 clears the 50 band (0.05 × 1000).
 #[test]
-#[ignore = "pending E7-7"]
 fn the_fixture_sizes_to_exactly_one_share() {
     let admitted = SpecMandate {
         path: fixtures().join("mandate.json"),
+        context: Some(Rc::new(run_context(true))),
     }
     .admitted()
     .unwrap();
@@ -324,9 +443,73 @@ fn the_fixture_sizes_to_exactly_one_share() {
         outputs: BTreeMap::from([(output.model.clone(), BTreeMap::from([(instrument, output)]))]),
         now,
     };
-    let proposal: Proposal = BuilderPlan.size(&admitted.view, &inputs).unwrap().unwrap();
+    let plan = BuilderPlan {
+        mandate: fixtures().join("mandate.json"),
+        context: Some(Rc::new(run_context(true))),
+    };
+    let proposal: Proposal = plan.size(&admitted.view, &inputs).unwrap().unwrap();
     assert_eq!(proposal.qty.to_string(), "1");
     assert_eq!(proposal.limit.to_string(), "255.2");
+    assert_eq!(
+        proposal.execution,
+        Some(OrderExecution {
+            asset_class: DomainAssetClass::UsEquity,
+            tif: TimeInForce::Day,
+            protection_required: true,
+            protection: Some(ProtectionPrices {
+                stop: Price::parse("242.44").unwrap(),
+                take_profit: None,
+            }),
+        })
+    );
+    assert_eq!(
+        plan.classify(&admitted.view, &proposal).unwrap(),
+        mandate_runtime::Autonomy::Auto
+    );
+}
+
+#[test]
+fn sizing_refuses_a_model_output_without_its_trusted_content_hash() {
+    let admitted = SpecMandate {
+        path: fixtures().join("mandate.json"),
+        context: Some(Rc::new(run_context(false))),
+    }
+    .admitted()
+    .unwrap();
+    let now = mandate_runtime::RiskClock::from_secs(UtcNanos::parse(NOW).unwrap().secs());
+    let instrument = admitted.view.working_universe.first().unwrap().clone();
+    let output = mandate_shell::map::model_output(
+        mandate_backtest::Signal::Long,
+        &admitted.model,
+        &instrument,
+        now,
+    )
+    .unwrap();
+    let inputs = SignalInputs {
+        outputs: BTreeMap::from([(output.model.clone(), BTreeMap::from([(instrument, output)]))]),
+        now,
+    };
+    let mut context = run_context(true);
+    context
+        .decision
+        .as_mut()
+        .unwrap()
+        .builder
+        .as_mut()
+        .unwrap()
+        .model_content_hashes
+        .clear();
+    let result = BuilderPlan {
+        mandate: fixtures().join("mandate.json"),
+        context: Some(Rc::new(context)),
+    }
+    .size(&admitted.view, &inputs);
+    assert!(matches!(
+        result,
+        Err(mandate_shell::Cause::Absent {
+            what: "the model output's trusted content hash"
+        })
+    ));
 }
 
 /// The whole path: one order, its intent journaled before it was sent, both streams verifying,
@@ -438,7 +621,6 @@ fn autonomy_ask() {
 
 /// PB-7: falling closes put the five-day average below the twenty-day one; flat opens nothing.
 #[test]
-#[ignore = "pending E7-7"]
 fn signal_flat() {
     let scratch = Scratch::new("flat");
     let closes = falling();
@@ -454,7 +636,6 @@ fn signal_flat() {
 /// PB-7: ten closes are fewer than the twenty the slow window needs, so the signal is undecided,
 /// never a buy.
 #[test]
-#[ignore = "pending E7-7"]
 fn signal_undecided() {
     let scratch = Scratch::new("undecided");
     let closes = rising();

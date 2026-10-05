@@ -1547,6 +1547,7 @@ dependencies = [
  "mandate-backtest",
  "mandate-builder",
  "mandate-canon",
+ "mandate-domain",
  "mandate-executor",
  "mandate-journal",
  "mandate-journal-pg",

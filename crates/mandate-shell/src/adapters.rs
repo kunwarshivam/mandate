@@ -5,10 +5,10 @@
 //! and whose every input the shell holds; since DEC-449's flip also [`RiskExitPath`], which probes
 //! and plans over the journal, stream, clock, and agent the run's bridge hands it; and
 //! [`ExecutorProtection`], through the executor's public protection probe. The journal, sink,
-//! executor, and reconciliation boundaries are also live when their trusted inputs are injected.
-//! **Still refusing**, each with [`Cause::Unimplemented`]: mandate validation, sizing,
-//! classification, and the advisory gate. Production injects no executor context yet, so that
-//! boundary also fails closed rather than inventing effective-dated inputs (DEC-166 item 2).
+//! executor, reconciliation, mandate validation, sizing, classification, and advisory-gate
+//! boundaries are also live when their trusted inputs are injected. Production injects no run or
+//! executor context yet, so both boundaries fail closed rather than inventing effective-dated
+//! inputs (DEC-166 item 2).
 //!
 //! What each will bind, per the task brief's step table:
 //!
@@ -35,7 +35,13 @@ use std::rc::Rc;
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
 use mandate_backtest::{Signal, Strategy, StrategyConfig};
-use mandate_canon::{Key, Object, Value};
+use mandate_builder::{
+    AccountSnapshot as BuilderAccountSnapshot, Action as BuilderAction, ActionContext,
+    BuilderMandate, Direction, Market as BuilderMarket, ModelOutput as BuilderModelOutput,
+    RiskContext as BuilderRiskContext,
+};
+use mandate_canon::{Digest, Key, Object, Value};
+use mandate_domain::{AutonomyDecision, Purpose as BuilderPurpose};
 use mandate_executor::{
     AccountRef, AccountScope, AgentId as ExecutorAgentId, BindingGateSource, BrokerConnector,
     BrokerOutcome, BrokerRequest, ConnectorError, EventId, ExecutorConfig, ExecutorState,
@@ -48,13 +54,22 @@ use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
 use mandate_marketdata::model::{Kind, Records, TimeUnit, Timeframe};
-use mandate_num::{Bps, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
-use mandate_risk::{Decision, FlattenInitiator, FlattenInput, agent_flatten};
-use mandate_runtime::{
-    AgentId, Autonomy, FlattenLeg, FlattenPlan, FlattenRequest, Initiator, IntentBody,
-    IntentHandoff, MandateView, OrderExecution, Proposal, Purpose, RiskClock, SignalInputs,
-    TimeInForce,
+use mandate_num::{Bps, Conviction, Fraction, Price, Qty, ShareIncrement, SignedQty, Unit, Usd};
+use mandate_risk::{
+    AccountSnapshot as GateAccountSnapshot, AgentSnapshot as GateAgentSnapshot, ConductState,
+    Decision, FlattenInitiator, FlattenInput, GateConfig, GateInput, GatePass,
+    InstrumentSnapshot as GateInstrumentSnapshot, MarketSnapshot as GateMarketSnapshot, Origin,
+    ProposedKind, ProposedOrder, RiskSnapshot, TimeInForce as GateTimeInForce,
+    ValidatedMandate as GateMandate, WorkingUniverse, agent_flatten,
 };
+use mandate_runtime::{
+    AgentId, ApprovalSettings, Autonomy, FlattenLeg, FlattenPlan, FlattenRequest, Initiator,
+    IntentBody, IntentHandoff, MandateView, OrderExecution, Proposal, Purpose, RiskClock,
+    SignalInputs, TimeInForce,
+};
+use mandate_spec::document::ParamValue;
+use mandate_spec::policy::PolicyLevel;
+use mandate_spec::{ValidatedMandate, ValidationContext};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 use crate::envelope::account_stream;
@@ -768,14 +783,198 @@ impl Protection for ExecutorProtection {
     }
 }
 
-/// The mandate document at `path`, validated with no violation.
+/// Trusted facts for one decision that neither the mandate document nor runtime proposal contains.
+#[derive(Debug, Clone)]
+pub struct BuilderContext {
+    pub account: BuilderAccountSnapshot,
+    pub market: BuilderMarket,
+    pub risk: BuilderRiskContext,
+    pub action: ActionContext,
+    /// Effective model content hashes from the trusted model registry, keyed by `(id, version)`.
+    /// Runtime outputs do not carry this §8.1 identity, so absence refuses instead of copying the
+    /// mandate's expected hash into an observation that never stated it.
+    pub model_content_hashes: BTreeMap<(String, String), Digest>,
+    pub execution: OrderExecution,
+}
+
+/// Proposed-order fields the runtime proposal does not carry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdvisoryOrderFacts {
+    pub kind: ProposedKind,
+    pub tif: GateTimeInForce,
+    pub extended_hours: bool,
+    pub origin: Origin,
+    pub owner_confirmed_bid: Option<Price>,
+    pub client_order_id: mandate_risk::ClientOrderId,
+    pub fee_reservation: Usd,
+}
+
+/// Every advisory-gate fact other than the four order fields copied from the runtime proposal.
+#[derive(Debug, Clone)]
+pub struct AdvisoryGateContext {
+    pub now: UtcNanos,
+    pub pass: GatePass,
+    pub config: GateConfig,
+    pub mandate: GateMandate,
+    pub risk: RiskSnapshot,
+    pub account: GateAccountSnapshot,
+    pub agent: GateAgentSnapshot,
+    pub instrument: GateInstrumentSnapshot,
+    pub market: GateMarketSnapshot,
+    pub conduct: ConductState,
+    pub universe: WorkingUniverse,
+    pub order: AdvisoryOrderFacts,
+}
+
+/// The typed facts used after admission for one deterministic decision.
+#[derive(Debug, Clone)]
+pub struct DecisionContext {
+    pub builder: Option<BuilderContext>,
+    pub gate: Option<AdvisoryGateContext>,
+}
+
+/// Inputs outside the mandate document for validation, admission, and one decision run.
+#[derive(Debug, Clone)]
+pub struct RunContext {
+    pub validation: ValidationContext,
+    pub policies: Vec<PolicyLevel>,
+    pub author: String,
+    pub restricted_instruments: BTreeSet<InstrumentId>,
+    pub decision: Option<DecisionContext>,
+}
+
+fn required_context(context: &Option<Rc<RunContext>>) -> Result<&RunContext, Cause> {
+    context.as_deref().ok_or(Cause::Absent {
+        what: "the trusted run context",
+    })
+}
+
+fn builder_context(context: &RunContext) -> Result<&BuilderContext, Cause> {
+    context
+        .decision
+        .as_ref()
+        .and_then(|decision| decision.builder.as_ref())
+        .ok_or(Cause::Absent {
+            what: "the trusted builder context",
+        })
+}
+
+fn gate_context(context: &RunContext) -> Result<&AdvisoryGateContext, Cause> {
+    context
+        .decision
+        .as_ref()
+        .and_then(|decision| decision.gate.as_ref())
+        .ok_or(Cause::Absent {
+            what: "the trusted advisory gate context",
+        })
+}
+
+fn validated_mandate(path: &Path, context: &RunContext) -> Result<ValidatedMandate, Cause> {
+    let document = mandate_document(path)?;
+    ValidatedMandate::new(document, &context.validation, &context.policies).map_err(|_| {
+        Cause::Absent {
+            what: "a mandate with no validation or policy violations",
+        }
+    })
+}
+
+fn runtime_view(validated: &ValidatedMandate, context: &RunContext) -> Result<MandateView, Cause> {
+    let document = validated.mandate();
+    let working_universe = document
+        .universe
+        .pinned_instruments
+        .iter()
+        .map(|instrument| {
+            InstrumentId::new(instrument.asset_id.as_str()).map_err(|_| Cause::Absent {
+                what: "a runtime instrument id",
+            })
+        })
+        .collect::<Result<BTreeSet<_>, Cause>>()?;
+    let environment = match document.environment {
+        mandate_domain::Environment::Paper => mandate_journal::Environment::Paper,
+        mandate_domain::Environment::Live => mandate_journal::Environment::Live,
+    };
+    let approvers = document
+        .autonomy
+        .approval
+        .approvers
+        .iter()
+        .map(|approver| approver.as_str().to_owned())
+        .collect();
+    Ok(MandateView {
+        version: format!(
+            "sha256:{}",
+            document
+                .version()
+                .map_err(|_| Cause::Absent {
+                    what: "the validated mandate's canonical version",
+                })?
+                .digest()
+        ),
+        working_universe,
+        restricted_instruments: context.restricted_instruments.clone(),
+        approval: ApprovalSettings {
+            approvers,
+            author: context.author.clone(),
+            timeout_s: i64::from(document.autonomy.approval.timeout_s),
+            environment,
+        },
+    })
+}
+
+/// The mandate document at `path`, validated with no violation against the injected run context.
 pub struct SpecMandate {
     pub path: PathBuf,
+    pub context: Option<Rc<RunContext>>,
 }
 
 impl MandateSource for SpecMandate {
     fn admitted(&self) -> Result<Admitted, Cause> {
-        Err(Cause::Unimplemented { story: "E7-7" })
+        let context = required_context(&self.context)?;
+        let validated = validated_mandate(&self.path, context)?;
+        let document = validated.mandate();
+        let mut instruments = document.universe.pinned_instruments.iter();
+        let instrument = match (instruments.next(), instruments.next()) {
+            (Some(instrument), None) => instrument,
+            (None, _) | (Some(_), Some(_)) => {
+                return Err(Cause::Absent {
+                    what: "the tracer's one pinned instrument",
+                });
+            }
+        };
+        let mut models = document.behavior.signal_models.iter();
+        let model = match (models.next(), models.next()) {
+            (Some(model), None) => model,
+            (None, _) | (Some(_), Some(_)) => {
+                return Err(Cause::Absent {
+                    what: "the tracer's one signal model",
+                });
+            }
+        };
+        let params = model
+            .params
+            .iter()
+            .map(|param| {
+                let value = match &param.value {
+                    ParamValue::Decimal(value) => value.as_str().to_owned(),
+                    ParamValue::Bool(value) => value.to_string(),
+                    ParamValue::Text(value) => value.clone(),
+                };
+                (param.key.clone(), value)
+            })
+            .collect();
+        let view = runtime_view(&validated, context)?;
+        Ok(Admitted {
+            environment: view.approval.environment,
+            view,
+            model: ModelRef {
+                id: model.id.as_str().to_owned(),
+                version: model.version.clone(),
+                max_output_age_s: i64::from(model.max_output_age_s),
+                params,
+            },
+            symbol: instrument.symbol.clone(),
+        })
     }
 }
 
@@ -914,30 +1113,250 @@ fn window(model: &ModelRef, key: &'static str) -> Result<u32, Cause> {
 }
 
 /// `mandate-builder`'s `conviction_linear` sizing and §6 classification.
-pub struct BuilderPlan;
+pub struct BuilderPlan {
+    pub mandate: PathBuf,
+    pub context: Option<Rc<RunContext>>,
+}
+
+fn builder_output(
+    output: &mandate_runtime::ModelOutput,
+    outer_model: &str,
+    outer_instrument: &InstrumentId,
+    mandate: &BuilderMandate,
+    context: &BuilderContext,
+) -> Result<BuilderModelOutput, Cause> {
+    if output.model != outer_model || output.instrument != *outer_instrument {
+        return Err(Cause::Absent {
+            what: "a consistently keyed model output",
+        });
+    }
+    let pinned = mandate
+        .models
+        .iter()
+        .find(|model| model.id.as_str() == output.model && model.version.as_str() == output.version)
+        .ok_or(Cause::Absent {
+            what: "a model output pinned by the validated mandate",
+        })?;
+    let content_hash = context
+        .model_content_hashes
+        .get(&(output.model.clone(), output.version.clone()))
+        .copied()
+        .ok_or(Cause::Absent {
+            what: "the model output's trusted content hash",
+        })?;
+    let conviction = output
+        .content
+        .get("conviction")
+        .and_then(Value::as_str)
+        .ok_or(Cause::Absent {
+            what: "the model output's conviction",
+        })?;
+    let confidence = output
+        .content
+        .get("confidence")
+        .and_then(Value::as_str)
+        .ok_or(Cause::Absent {
+            what: "the model output's confidence",
+        })?;
+    Ok(BuilderModelOutput {
+        model_id: pinned.id.clone(),
+        model_version: pinned.version.clone(),
+        content_hash,
+        instrument: mandate_domain::AssetId::parse(output.instrument.as_str())
+            .map_err(mandate_builder::BuilderError::from)?,
+        as_of: UtcNanos::from_parts(output.as_of.secs(), 0).map_err(|_| Cause::Absent {
+            what: "the model output's timestamp",
+        })?,
+        expires_at: UtcNanos::from_parts(output.expires_at.secs(), 0).map_err(|_| {
+            Cause::Absent {
+                what: "the model output's expiry",
+            }
+        })?,
+        direction: Direction::Long,
+        conviction: Conviction::parse(conviction)?,
+        confidence: Unit::parse(confidence)?,
+    })
+}
+
+fn builder_outputs(
+    inputs: &SignalInputs,
+    mandate: &BuilderMandate,
+    context: &BuilderContext,
+) -> Result<Vec<BuilderModelOutput>, Cause> {
+    inputs
+        .outputs
+        .iter()
+        .flat_map(|(model, instruments)| {
+            instruments
+                .iter()
+                .map(move |(instrument, output)| (model, instrument, output))
+        })
+        .map(|(model, instrument, output)| {
+            builder_output(output, model, instrument, mandate, context)
+        })
+        .collect()
+}
+
+fn runtime_purpose(purpose: BuilderPurpose) -> Purpose {
+    match purpose {
+        BuilderPurpose::Open => Purpose::Open,
+        BuilderPurpose::Increase => Purpose::Increase,
+        BuilderPurpose::DiscretionaryExit => Purpose::DiscretionaryExit,
+        BuilderPurpose::OwnerExit => Purpose::OwnerExit,
+        BuilderPurpose::RiskExit => Purpose::RiskExit,
+        BuilderPurpose::Protective => Purpose::Protective,
+    }
+}
+
+fn runtime_proposal(
+    proposal: mandate_builder::Proposal,
+    context: &BuilderContext,
+    validated: &ValidatedMandate,
+) -> Result<Option<Proposal>, Cause> {
+    let (side, purpose, qty, limit) = match proposal.action {
+        BuilderAction::Hold { .. } => return Ok(None),
+        BuilderAction::Buy {
+            purpose,
+            qty,
+            limit_price,
+            ..
+        } => (Side::Buy, runtime_purpose(purpose), qty, limit_price),
+        BuilderAction::Sell {
+            purpose,
+            qty,
+            limit_price,
+            ..
+        } => (Side::Sell, runtime_purpose(purpose), qty, limit_price),
+    };
+    let instrument =
+        InstrumentId::new(context.market.instrument.as_str()).map_err(|_| Cause::Absent {
+            what: "the builder market's runtime instrument id",
+        })?;
+    validate_order_execution(side, purpose, context.execution)?;
+    let mandate_requires_protection = validated.mandate().protection.enabled;
+    let execution_matches_mandate = match side {
+        Side::Buy => context.execution.protection_required == mandate_requires_protection,
+        Side::Sell => !context.execution.protection_required,
+    };
+    if context.execution.asset_class != context.market.asset_class || !execution_matches_mandate {
+        return Err(Cause::Absent {
+            what: "the mandate-derived execution policy",
+        });
+    }
+    Ok(Some(Proposal {
+        instrument,
+        asset_class: context.market.asset_class,
+        side,
+        qty,
+        limit,
+        purpose,
+        combined_score: Value::Str(proposal.combined.score.to_string()),
+        execution: Some(context.execution),
+    }))
+}
 
 impl Sizing for BuilderPlan {
     fn size(&self, view: &MandateView, inputs: &SignalInputs) -> Result<Option<Proposal>, Cause> {
-        let _ = (view, inputs);
-        Err(Cause::Unimplemented { story: "E7-7" })
+        let context = required_context(&self.context)?;
+        let validated = validated_mandate(&self.mandate, context)?;
+        if runtime_view(&validated, context)? != *view {
+            return Err(Cause::Absent {
+                what: "the admitted mandate view used for sizing",
+            });
+        }
+        let mandate = BuilderMandate::try_from(&validated)?;
+        let builder = builder_context(context)?;
+        let outputs = builder_outputs(inputs, &mandate, builder)?;
+        let now = UtcNanos::from_parts(inputs.now.secs(), 0).map_err(|_| Cause::Absent {
+            what: "the decision timestamp",
+        })?;
+        let proposal = mandate_builder::propose(
+            &mandate,
+            &builder.account,
+            &builder.market,
+            &builder.risk,
+            &outputs,
+            now,
+        )?;
+        runtime_proposal(proposal, builder, &validated)
     }
 }
 
 impl Classifier for BuilderPlan {
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Autonomy, Cause> {
-        let _ = (view, proposal);
-        Err(Cause::Unimplemented { story: "E7-7" })
+        let context = required_context(&self.context)?;
+        let validated = validated_mandate(&self.mandate, context)?;
+        if runtime_view(&validated, context)? != *view {
+            return Err(Cause::Absent {
+                what: "the admitted mandate view used for classification",
+            });
+        }
+        let action = &builder_context(context)?.action;
+        let expected_score = Value::Str(action.combined_score.to_string());
+        if action.instrument.as_str() != proposal.instrument.as_str()
+            || action.asset_class != proposal.asset_class
+            || runtime_purpose(action.purpose) != proposal.purpose
+            || expected_score != proposal.combined_score
+        {
+            return Err(Cause::Absent {
+                what: "classification facts for the proposed action",
+            });
+        }
+        let classification =
+            mandate_builder::classify(mandate_builder::autonomy_policy(&validated), action)?;
+        Ok(match classification.decision {
+            AutonomyDecision::Auto => Autonomy::Auto,
+            AutonomyDecision::Ask => Autonomy::Ask,
+            AutonomyDecision::Deny => Autonomy::Deny,
+        })
     }
 }
 
 /// `mandate_risk::evaluate`, as the runtime's advisory pass. The binding call stays inside
 /// `mandate-executor` (`AGENTS.md` rules 1 and 12).
-pub struct RiskGate;
+pub struct RiskGate {
+    pub context: Option<Rc<RunContext>>,
+}
+
+fn proposed_order(proposal: &Proposal, facts: &AdvisoryOrderFacts) -> Result<ProposedOrder, Cause> {
+    Ok(ProposedOrder {
+        instrument: mandate_risk::AssetId::new(proposal.instrument.as_str()).map_err(|_| {
+            Cause::Absent {
+                what: "the gate's proposed instrument id",
+            }
+        })?,
+        side: proposal.side,
+        qty: proposal.qty,
+        limit_price: proposal.limit,
+        kind: facts.kind.clone(),
+        tif: facts.tif,
+        extended_hours: facts.extended_hours,
+        origin: facts.origin,
+        owner_confirmed_bid: facts.owner_confirmed_bid,
+        client_order_id: facts.client_order_id,
+        fee_reservation: facts.fee_reservation,
+    })
+}
 
 impl Gate for RiskGate {
     fn evaluate(&self, proposal: &Proposal) -> Result<Decision, Cause> {
-        let _ = proposal;
-        Err(Cause::Unimplemented { story: "E7-7" })
+        let context = required_context(&self.context)?;
+        let gate = gate_context(context)?;
+        let proposed = proposed_order(proposal, &gate.order)?;
+        Ok(mandate_risk::evaluate(&GateInput {
+            now: gate.now,
+            pass: gate.pass,
+            config: &gate.config,
+            mandate: &gate.mandate,
+            risk: &gate.risk,
+            account: &gate.account,
+            agent: &gate.agent,
+            instrument: &gate.instrument,
+            market: &gate.market,
+            conduct: &gate.conduct,
+            universe: &gate.universe,
+            proposed: &proposed,
+        })?)
     }
 }
 
@@ -1476,6 +1895,9 @@ pub struct Sources<T> {
     /// Trusted executor snapshots and effective-dated configuration. `None` refuses before the
     /// executor mutates process state or reads the broker.
     pub executor: Option<ExecutorContext>,
+    /// Validation, admission, builder, and advisory-gate facts. `None` keeps the binary fail closed
+    /// until live assembly can supply every effective-dated input.
+    pub run: Option<RunContext>,
     pub transport: T,
 }
 
@@ -1490,6 +1912,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         workspace,
         account_ref,
         executor,
+        run,
         transport,
     } = sources;
     over(Sources {
@@ -1501,6 +1924,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         workspace,
         account_ref,
         executor,
+        run,
         transport: Box::new(AlpacaConnector { transport }),
     })
 }
@@ -1508,6 +1932,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
 /// The production stages over the given connector: the binary's [`Disconnected`] one, or
 /// [`production`]'s.
 pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
+    let run = sources.run.map(Rc::new);
     let (executor, reconciler) = CoreExecutor::pair(
         AccountScope {
             account: AccountRef(sources.account_ref),
@@ -1522,16 +1947,23 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
         )),
         protection: Box::new(ExecutorProtection::new(sources.mandate.clone())),
         mandate: Box::new(SpecMandate {
-            path: sources.mandate,
+            path: sources.mandate.clone(),
+            context: run.clone(),
         }),
         bars: Box::new(StoredBars {
             dir: sources.dataset,
         }),
         signal: Box::new(MovingAverage),
         reconciler: Box::new(reconciler),
-        sizing: Box::new(BuilderPlan),
-        classifier: Box::new(BuilderPlan),
-        gate: Box::new(RiskGate),
+        sizing: Box::new(BuilderPlan {
+            mandate: sources.mandate.clone(),
+            context: run.clone(),
+        }),
+        classifier: Box::new(BuilderPlan {
+            mandate: sources.mandate,
+            context: run.clone(),
+        }),
+        gate: Box::new(RiskGate { context: run }),
         journal: Box::new(StoreJournal::from_dsn(sources.journal, sources.recorded_at)),
         sink: Box::new(ExecutorSink {
             agent: sources.agent,
@@ -1543,15 +1975,16 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::rc::Rc;
 
     use super::{
-        CoreExecutor, ExecutorContext, ExecutorMandateView, ExecutorOrder, ExecutorProtection,
-        ExecutorSink, Protection, ProtectionProbePorts, StoreJournal, is_unattributed_exit,
-        working_order_of,
+        AdvisoryGateContext, AdvisoryOrderFacts, CoreExecutor, DecisionContext, ExecutorContext,
+        ExecutorMandateView, ExecutorOrder, ExecutorProtection, ExecutorSink, Protection,
+        ProtectionProbePorts, RiskGate, RunContext, StoreJournal, is_unattributed_exit,
+        proposed_order, working_order_of,
     };
     use mandate_backtest::{BacktestError, Signal};
     use mandate_canon::{DecStr, Value};
@@ -1571,7 +2004,7 @@ mod tests {
     use mandate_time::{Date, UtcNanos};
 
     use crate::envelope::{DraftFields, Envelope, Writer, draft_bytes};
-    use crate::stages::{Connector, Executor, JournalWriter, Reconciler, Sink};
+    use crate::stages::{Connector, Executor, Gate, JournalWriter, Reconciler, Sink};
 
     fn value_object(fields: &[(&str, Value)]) -> Result<Value, String> {
         let mut object = mandate_canon::Object::new();
@@ -2643,6 +3076,242 @@ mod tests {
             "quant.ma_crossover",
             &[("fast_periods", "five"), ("slow_periods", "20")]
         )));
+        Ok(())
+    }
+
+    #[test]
+    fn the_advisory_order_copies_only_proposal_fields_from_the_runtime() -> Result<(), String> {
+        let proposal = mandate_runtime::Proposal {
+            instrument: mandate_accounting::InstrumentId::new(
+                "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+            )
+            .map_err(|e| e.to_string())?,
+            asset_class: mandate_accounting::AssetClass::UsEquity,
+            side: mandate_accounting::Side::Buy,
+            qty: Qty::parse("3").map_err(|e| e.to_string())?,
+            limit: Price::parse("12.34").map_err(|e| e.to_string())?,
+            purpose: RuntimePurpose::Open,
+            combined_score: Value::Str("0.8".to_owned()),
+            execution: None,
+        };
+        let facts = AdvisoryOrderFacts {
+            kind: mandate_risk::ProposedKind::Bracket {
+                take_profit: Price::parse("15").map_err(|e| e.to_string())?,
+                stop: Price::parse("10").map_err(|e| e.to_string())?,
+            },
+            tif: mandate_risk::TimeInForce::Gtc,
+            extended_hours: true,
+            origin: mandate_risk::Origin::OrderBuilder,
+            owner_confirmed_bid: Some(Price::parse("12").map_err(|e| e.to_string())?),
+            client_order_id: mandate_risk::ClientOrderId(71),
+            fee_reservation: mandate_num::Usd::parse("1.23").map_err(|e| e.to_string())?,
+        };
+        let mapped = proposed_order(&proposal, &facts).map_err(|e| e.to_string())?;
+        assert_eq!(mapped.instrument.as_str(), proposal.instrument.as_str());
+        assert_eq!(mapped.side, proposal.side);
+        assert_eq!(mapped.qty, proposal.qty);
+        assert_eq!(mapped.limit_price, proposal.limit);
+        assert_eq!(mapped.kind, facts.kind);
+        assert_eq!(mapped.tif, facts.tif);
+        assert_eq!(mapped.extended_hours, facts.extended_hours);
+        assert_eq!(mapped.origin, facts.origin);
+        assert_eq!(mapped.owner_confirmed_bid, facts.owner_confirmed_bid);
+        assert_eq!(mapped.client_order_id, facts.client_order_id);
+        assert_eq!(mapped.fee_reservation, facts.fee_reservation);
+        Ok(())
+    }
+
+    #[test]
+    fn decision_adapters_refuse_without_injected_context() -> Result<(), String> {
+        let proposal = mandate_runtime::Proposal {
+            instrument: mandate_accounting::InstrumentId::new(
+                "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+            )
+            .map_err(|e| e.to_string())?,
+            asset_class: mandate_accounting::AssetClass::UsEquity,
+            side: mandate_accounting::Side::Buy,
+            qty: Qty::parse("1").map_err(|e| e.to_string())?,
+            limit: Price::parse("12.34").map_err(|e| e.to_string())?,
+            purpose: RuntimePurpose::Open,
+            combined_score: Value::Str("1".to_owned()),
+            execution: None,
+        };
+        assert!(matches!(
+            RiskGate { context: None }.evaluate(&proposal),
+            Err(Cause::Absent {
+                what: "the trusted run context"
+            })
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn the_advisory_adapter_calls_the_real_gate_with_the_mapped_order() -> Result<(), String> {
+        let asset = mandate_risk::AssetId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+            .map_err(|e| e.to_string())?;
+        let zero_fraction = mandate_num::Fraction::parse("0").map_err(|e| e.to_string())?;
+        let gate = AdvisoryGateContext {
+            now: UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|e| e.to_string())?,
+            pass: mandate_risk::GatePass::First,
+            config: mandate_risk::GateConfig {
+                price_floor: mandate_num::Usd::ZERO,
+                liquidity_floor_usd: mandate_num::Usd::ZERO,
+                crypto_liquidity_floor_usd: mandate_num::Usd::ZERO,
+                collar_liquid_threshold_usd: mandate_num::Usd::ZERO,
+                collar_liquid_x: zero_fraction,
+                collar_other_x: zero_fraction,
+                collar_crypto_x: zero_fraction,
+                collar_passive_band: zero_fraction,
+                opposite_fill_interval_s: 0,
+                min_resting_time_s: 0,
+                order_to_fill_max: 0,
+                order_to_fill_min_orders: 0,
+                order_size_participation: zero_fraction,
+                daily_participation: zero_fraction,
+                close_window_minutes: 0,
+                legacy_pdt_equity_threshold: mandate_num::Usd::ZERO,
+                etp_classification_max_age_s: 0,
+            },
+            mandate: mandate_risk::ValidatedMandate::from_validated_parts(
+                mandate_risk::spec_types::RiskLimits {
+                    max_position_usd: mandate_num::Usd::ZERO,
+                    max_position_fraction: zero_fraction,
+                    max_order_usd: mandate_num::Usd::ZERO,
+                    max_gross_exposure_usd: mandate_num::Usd::ZERO,
+                    max_orders_per_day: 0,
+                    reentry_cooldown_s: 0,
+                    rebalance_band: zero_fraction,
+                    breach_confirm_s: 0,
+                    drawdown_ladder: Vec::new(),
+                },
+                mandate_risk::spec_types::GoalState::Running,
+                false,
+                false,
+            ),
+            risk: mandate_risk::RiskSnapshot {
+                agent_equity: mandate_num::Usd::ZERO,
+                high_water_mark: mandate_num::Usd::ZERO,
+                day_start_equity: mandate_num::Usd::ZERO,
+                capital_base: mandate_num::Usd::ZERO,
+                inherited_loss: mandate_num::Usd::ZERO,
+                latched: BTreeSet::new(),
+                active_rungs: BTreeMap::new(),
+                size_factor: mandate_num::Ratio::parse("1").map_err(|e| e.to_string())?,
+                agent_mode: mandate_risk::AgentMode::Normal,
+            },
+            account: mandate_risk::AccountSnapshot {
+                account_type: mandate_risk::AccountType::Cash,
+                state: mandate_risk::AccountState::Active,
+                crypto_active: false,
+                regime: mandate_risk::DayTradeRegime::LegacyPdt,
+                equity: mandate_num::Usd::ZERO,
+                prior_close_equity: mandate_num::Usd::ZERO,
+                model_buying_power: mandate_num::Usd::ZERO,
+                broker_buying_power: mandate_num::Usd::ZERO,
+                broker_non_marginable_buying_power: mandate_num::Usd::ZERO,
+                positions: BTreeMap::new(),
+                market_values: BTreeMap::new(),
+                working_orders: BTreeMap::new(),
+                unknown_orders: BTreeSet::new(),
+                related_account_resting: BTreeMap::new(),
+            },
+            agent: mandate_risk::AgentSnapshot {
+                agent: mandate_risk::AgentId(1),
+                mode: mandate_risk::AgentMode::Normal,
+                instrument_restrictions: BTreeMap::new(),
+                positions: BTreeMap::new(),
+                market_values: BTreeMap::new(),
+                working_orders: BTreeSet::new(),
+                instrument_groups: BTreeMap::new(),
+                last_exit_fill_at: BTreeMap::new(),
+                orders_today: 0,
+                day_trades: mandate_risk::DayTradeLedger::default(),
+            },
+            instrument: mandate_risk::InstrumentSnapshot {
+                instrument: asset,
+                asset_class: mandate_risk::AssetClass::UsEquity,
+                exchange: None,
+                status_active: false,
+                tradable: false,
+                fractionable: false,
+                ipo: false,
+                ptp_no_exception: false,
+                etp: mandate_risk::EtpClass::Plain,
+                etp_classified_at: None,
+                quote_currency: None,
+                prior_close: None,
+                median_dollar_volume_20d: None,
+                median_dollar_volume_30d: None,
+                min_order_size: Qty::ZERO,
+                qty_increment: Qty::parse("1").map_err(|e| e.to_string())?,
+                halted: false,
+                status_feed_current: false,
+            },
+            market: mandate_risk::MarketSnapshot {
+                quote: None,
+                last_trade: None,
+                trailing_5m_volume: None,
+                adv_20d: None,
+            },
+            conduct: mandate_risk::ConductState::default(),
+            universe: mandate_risk::WorkingUniverse::Unavailable,
+            order: AdvisoryOrderFacts {
+                kind: mandate_risk::ProposedKind::Plain,
+                tif: mandate_risk::TimeInForce::Day,
+                extended_hours: false,
+                origin: mandate_risk::Origin::OrderBuilder,
+                owner_confirmed_bid: None,
+                client_order_id: mandate_risk::ClientOrderId(1),
+                fee_reservation: mandate_num::Usd::ZERO,
+            },
+        };
+        let context = RunContext {
+            validation: mandate_spec::ValidationContext {
+                account_equity_usd: mandate_num::Usd::ZERO,
+                other_allocations_usd: mandate_num::Usd::ZERO,
+                validation_date: Date::parse("2026-09-25").map_err(|e| e.to_string())?,
+                registry: None,
+                provenance: mandate_spec::document::ProvenanceMap::default(),
+                workspace_users: 0,
+                approver_users: 0,
+                independent_approval_required: false,
+                disclosures_accepted: BTreeSet::new(),
+                instrument_groups: BTreeMap::new(),
+                claimed_by_other_agents: BTreeSet::new(),
+                connection_environment: None,
+                connection_loss_carry_usd: mandate_num::Usd::ZERO,
+                eligibility_failures: BTreeSet::new(),
+                previous_version: None,
+                current_mandate_version: None,
+            },
+            policies: Vec::new(),
+            author: String::new(),
+            restricted_instruments: BTreeSet::new(),
+            decision: Some(DecisionContext {
+                builder: None,
+                gate: Some(gate),
+            }),
+        };
+        let proposal = mandate_runtime::Proposal {
+            instrument: mandate_accounting::InstrumentId::new(
+                "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+            )
+            .map_err(|e| e.to_string())?,
+            asset_class: mandate_accounting::AssetClass::UsEquity,
+            side: mandate_accounting::Side::Buy,
+            qty: Qty::ZERO,
+            limit: Price::parse("12.34").map_err(|e| e.to_string())?,
+            purpose: RuntimePurpose::Open,
+            combined_score: Value::Str("1".to_owned()),
+            execution: None,
+        };
+        assert!(matches!(
+            RiskGate {
+                context: Some(Rc::new(context))
+            }
+            .evaluate(&proposal),
+            Err(Cause::Gate(mandate_risk::GateError::ZeroQuantity))
+        ));
         Ok(())
     }
 }

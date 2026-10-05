@@ -68,6 +68,7 @@ fn tracer() -> Result<Report, ShellError> {
         workspace: cli::WORKSPACE.to_owned(),
         account_ref: cli::ACCOUNT_REF.to_owned(),
         executor: None,
+        run: None,
         transport: Box::new(Disconnected),
     });
     run(&mut stages, &setup)
