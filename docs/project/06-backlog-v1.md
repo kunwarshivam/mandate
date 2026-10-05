@@ -2431,11 +2431,11 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   before it) and refuse coverage that ends earlier. Today `Bars::closes` reads no clock, so a
   months-old dataset is trusted and feeds the signal. That is harmless only while every downstream
   stage refuses (DEC-166; #241 review, round 1, minor 5).
-- **E7-7, unowned, blocking `tests/tracer.rs::outlier_close` (PB-15):** a market-data trust rule
-  that refuses a close too far from its neighbours. The shell may not judge one, because that is
-  price arithmetic (DEC-138 item 3, DEC-166 item 5). The test stays pending until an owner lands the
-  rule in `mandate-marketdata`, or until E6-8's mark-and-collar, in the gate since DEC-163,
-  refuses the limit end to end (the coordinator's ruling on #171).
+- **E2-14, blocking `tests/tracer.rs::outlier_close` (PB-15):** the wrong-high-print story owns the
+  market-data trust rule that refuses a close too far from its neighbours. The shell may not judge
+  one, because that is price arithmetic (DEC-138 item 3, DEC-166 item 5). The test stays pending on
+  E2-14 until its founder-gated price-trust rule lands in the owning market-data path, or until the
+  binding gate refuses the limit end to end (the coordinator's ruling on #171).
 - **E7-7, when streams F and H land:** a drift check for
   `crates/mandate-shell/tests/fixtures/tracer/generate.py`, like `reference/mandate/generate.py`'s,
   so the fixture's one share at 255.20, AUTO by `rule:routine`, stays recomputed from the rules

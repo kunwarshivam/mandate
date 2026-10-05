@@ -4,8 +4,8 @@
 //! constructed (ADR-0001 ES-19).
 //!
 //! The full production path runs against recorded fixtures. The one pending outlier case remains a
-//! failing test until the market-data owner defines its price-trust threshold; the shell cannot
-//! invent price arithmetic (DEC-138 item 3, backlog E7-7 follow-up).
+//! failing E2-14 test until its founder-gated price-trust rule lands; the shell cannot invent price
+//! arithmetic (DEC-138 item 3).
 //!
 //! The fail-closed suite is not here. It lives in `src/stages/fail_closed.rs`, because its
 //! permissive doubles must not be reachable from a build that ships (task brief item 5).
@@ -1172,7 +1172,7 @@ fn oversized_proposal() {
 
 /// PB-15: one close ten times the others is coverage the market-data stage cannot trust.
 #[test]
-#[ignore = "pending E7-7"]
+#[ignore = "pending E2-14"]
 fn outlier_close() {
     let scratch = Scratch::new("outlier");
     let mut closes = rising();

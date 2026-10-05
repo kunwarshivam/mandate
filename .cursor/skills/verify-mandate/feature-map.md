@@ -296,8 +296,8 @@ crates.
   `signal_flat`, `signal_undecided`, `stale_stored_bars_are_refused`, `oversized_proposal`,
   `duplicate_after_restart`, `fresh_journal_with_broker_position`, `broker_unknown_then_absent`,
   `reconcile_mismatch_pauses`, and the fixture's validation and one-share sizing). `outlier_close`
-  remains pending and failing until the market-data owner defines the price-trust threshold; the
-  shell cannot invent price arithmetic (DEC-138 item 3). The mandate
+  remains pending and failing on E2-14 until its founder-gated price-trust rule lands; the shell
+  cannot invent price arithmetic (DEC-138 item 3). The mandate
   fixtures are generated and checked against `reference/mandate/ref.py` by
   `tests/fixtures/tracer/generate.py`. `AlpacaPaperHttp` is never constructed in a test, so no test
   can reach a network (ES-19).
