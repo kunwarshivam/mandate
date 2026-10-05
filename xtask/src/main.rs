@@ -74,6 +74,10 @@ const PROTECTED_PATHS: [&str; 5] = [
     "crates/mandate-refcases/status.toml",
 ];
 const CODE_PATHS: [&str; 2] = ["crates/", "xtask/src/"];
+const PR_NUMBER: &str = "MANDATE_PR_NUMBER";
+const E77_ATOMIC_PR: u64 = 598;
+const E77_ATOMIC_BRANCH: &str = "cursor/e77-complete-tracer-4832";
+const E77_ATOMIC_MARKER: &str = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)";
 
 /// The verification skill's map of features to code, tests, and commands (AGENTS.md).
 const FEATURE_MAP: &str = ".cursor/skills/verify-mandate/feature-map.md";
@@ -1953,13 +1957,18 @@ const STUB_MARKERS: [&str; 5] = [
 /// DEC-110's rule still holds for them: each must run and must fail. Each row goes when its story
 /// lands, and the gate names every row it applies (DEC-137).
 ///
-/// The 3 protective-sequence rows left (all `hand`) are E7-4's (DEC-140's addendum, the
-/// coordinator's ruling (d) on #174): slice 5's crypto stop-limit and fractional position, which
+/// The 2 protective-sequence rows left (both `hand`) are E7-4's (DEC-140's addendum, the
+/// coordinator's ruling (d) on #174): slice 5's crypto stop-limit cases, which
 /// see no stop-limit or whole-share protection where E7-4's protective sequence belongs, instead of
 /// a stub's report. Each still runs and fails, and the slice that implements it deletes its row
 /// with its `#[ignore]` line; slice 2 deleted the four bracket and partial-fill OCO rows (DEC-346).
 /// The stub check runs first, so a row whose test stops at a stub is reported for deletion rather
 /// than applied (#194 review, round 1, finding 4).
+///
+/// The tracer row is E2-14's wrong-high-print rule. The shell deliberately owns no price-trust
+/// arithmetic (DEC-138 item 3), so the end-to-end test reaches the existing production path and
+/// proves the missing market-data behavior by observing the forbidden submission. E2-14 deletes
+/// both the marker and this row when its founder-gated price-trust rule lands.
 ///
 /// The `properties` row is E7-4's too. Since slice 2 places brackets, its minimal failure is a
 /// script that ends while the protected lead's partly filled entry is still inside its interval,
@@ -1976,10 +1985,7 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 4] = [
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity",
     ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction",
-    ),
+    ("crates/mandate-shell/tests/tracer.rs", "outlier_close"),
     (
         "crates/mandate-executor/tests/properties.rs",
         "every_unprotected_interval_has_a_journaled_start_and_end",
@@ -2623,6 +2629,15 @@ fn spec_guard() -> Result<()> {
 /// Protected paths (ES-22) changed since `base` need a DEC cited in the PR description or a commit
 /// message, and may not ship with code.
 fn spec_guard_problems(root: &Path, base: &str, pr_body: &str) -> Result<Vec<String>> {
+    spec_guard_problems_for_pr(root, base, pr_body, current_pr_number(root)?)
+}
+
+fn spec_guard_problems_for_pr(
+    root: &Path,
+    base: &str,
+    pr_body: &str,
+    pr_number: Option<u64>,
+) -> Result<Vec<String>> {
     let changed = output_in(
         root,
         "git",
@@ -2649,9 +2664,33 @@ fn spec_guard_problems(root: &Path, base: &str, pr_body: &str) -> Result<Vec<Str
         ));
     }
     if !code.is_empty() {
-        problems.push(format!("specs, schemas, or reference cases changed together with code ({} code files); split the change", code.len()));
+        if e77_atomic_exception(pr_body, pr_number) {
+            eprintln!(
+                "    spec-guard: founder-approved E7-7 atomic exception applies to PR #598 (DEC-462)"
+            );
+        } else {
+            problems.push(format!("specs, schemas, or reference cases changed together with code ({} code files); split the change", code.len()));
+        }
     }
     Ok(problems)
+}
+
+fn current_pr_number(root: &Path) -> Result<Option<u64>> {
+    if let Some(value) = env::var(PR_NUMBER)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return value
+            .parse()
+            .with_context(|| format!("{PR_NUMBER} must be an unsigned integer"))
+            .map(Some);
+    }
+    let branch = output_in(root, "git", &["branch", "--show-current"])?;
+    Ok((branch.trim() == E77_ATOMIC_BRANCH).then_some(E77_ATOMIC_PR))
+}
+
+fn e77_atomic_exception(pr_body: &str, pr_number: Option<u64>) -> bool {
+    pr_number == Some(E77_ATOMIC_PR) && pr_body.lines().any(|line| line.trim() == E77_ATOMIC_MARKER)
 }
 
 /// The founder-owned reference-case status file (ADR-0001 ES-11).
@@ -2806,7 +2845,8 @@ mod tests {
         listed_mutant_counts, live_test_counts, mutant_verdicts, mutants, mutants_outcome,
         mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
         plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
-        status_flip_problems, test_binary, test_outcomes, unjudged_mutants, verdicts,
+        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
+        unjudged_mutants, verdicts,
     };
 
     #[test]
@@ -4497,6 +4537,28 @@ mod tests {
             Vec::<String>::new(),
             "a cited spec-only PR passes"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn only_pr_598_with_the_exact_dec_462_marker_may_mix_spec_and_code() -> Result<()> {
+        let MovedBase { fx, main_tip, .. } = Fixture::moved_base(
+            "base-e77-atomic",
+            &["docs/specs/pr.md", "crates/c/src/lib.rs"],
+        )?;
+        let marker = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)";
+        assert_eq!(
+            spec_guard_problems_for_pr(&fx.0, &main_tip, marker, Some(598))?,
+            Vec::<String>::new(),
+            "the founder-approved E7-7 atomic migration passes only on PR 598"
+        );
+        for (body, pr_number) in [(marker, Some(599)), ("DEC-462", Some(598)), (marker, None)] {
+            let problems = spec_guard_problems_for_pr(&fx.0, &main_tip, body, pr_number)?;
+            assert!(
+                problems.iter().any(|p| p.contains("together with code")),
+                "an adjacent or unmarked change remains guarded: {problems:?}"
+            );
+        }
         Ok(())
     }
 

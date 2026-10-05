@@ -169,6 +169,7 @@ pub(crate) fn payload_schema(event_type: &str, schema_version: u64) -> Option<&'
         ("OrderSubmitted", 1) => Some(&ORDER_SUBMITTED_V1),
         ("FillApplied", 1) => Some(&FILL_APPLIED_V1),
         ("MarkUpdated", 1) => Some(&MARK_UPDATED_V1),
+        ("ReconciliationRun", 1) => Some(&RECONCILIATION_RUN_V1),
         _ => None,
     }
 }
@@ -283,5 +284,13 @@ static MARK_UPDATED_V1: Ty = Ty::Record(&[
     ("price", Ty::Decimal),
     ("source", Ty::Str),
     ("feed", Ty::Str),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+static RECONCILIATION_RUN_V1: Ty = Ty::Record(&[
+    ("result", Ty::OneOf(&["clean", "adopted", "mismatch"])),
+    ("checkpoint", Ty::Nullable(&Ty::Str)),
+    ("snapshot_head", Ty::Int),
+    ("differences", Ty::Int),
     ("risk_clock", Ty::RiskClock),
 ]);

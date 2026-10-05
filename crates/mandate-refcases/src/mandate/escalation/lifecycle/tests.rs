@@ -74,6 +74,7 @@ fn flatten(id: &str) -> Effect {
             purpose: Purpose::RiskExit,
             confirmation: None,
         }),
+        execution: None,
     })
 }
 
@@ -87,6 +88,7 @@ fn order(id: &str) -> Result<Effect, String> {
             limit: mandate_num::Price::parse("1").map_err(|e| e.to_string())?,
             purpose: Purpose::Open,
         },
+        execution: None,
     }))
 }
 

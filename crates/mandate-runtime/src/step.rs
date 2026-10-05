@@ -10,10 +10,10 @@ use crate::payload;
 use crate::ports::{IdGen, Ports};
 use crate::state::{RuntimeState, UnresolvedAppend};
 use crate::types::{
-    Autonomy, Classified, Command, DryRunVerdict, Effect, EventDraft, EventId, FlattenRequest,
-    Initiator, Input, IntentBody, IntentHandoff, KillScope, Mode, ModelOutput, NotificationRef,
-    Observation, OwnerConfirmation, Proposal, Purpose, RiskClock, Seq, TimerId, TimerRequest,
-    WriterEpoch,
+    Autonomy, Classified, Command, DecisionClip, DryRunVerdict, Effect, EventDraft, EventId,
+    ExitOrigin, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope, Mode,
+    ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal, Purpose, RiskClock,
+    Seq, TimeInForce, TimerId, TimerRequest, WriterEpoch,
 };
 
 /// One step of the runtime (ADR-0001 ES-06).
@@ -115,6 +115,7 @@ fn retried(
             effects.push(Effect::Intent(IntentHandoff {
                 intent_id: draft.event_id.clone(),
                 body,
+                execution: None,
             }));
         }
     }
@@ -215,6 +216,7 @@ fn started(
             batch.hand(IntentHandoff {
                 intent_id: live.intent_id.clone(),
                 body,
+                execution: None,
             });
         }
     }
@@ -229,6 +231,7 @@ fn started(
                 switch.confirmation.clone(),
                 ports,
             )),
+            execution: None,
         });
     }
     for (exit, owner) in state.untaken_owner_exits() {
@@ -241,6 +244,7 @@ fn started(
                     owner.confirmation.clone(),
                     ports,
                 )),
+                execution: None,
             });
         }
     }
@@ -363,6 +367,7 @@ pub(crate) fn switched(
     batch.hand(IntentHandoff {
         intent_id: switch,
         body: IntentBody::Flatten(flattened(state, *initiator, confirmation.cloned(), ports)),
+        execution: None,
     });
     Ok(())
 }
@@ -521,11 +526,10 @@ fn decide(
     }
     let verdict = ports.gate.check(&proposal);
     let classified = ports.plan.classify(ports.view, &proposal);
-    let autonomy = classified.autonomy;
     let decision = batch.journal(
         "DecisionMade",
         None,
-        decided(&proposal, &verdict, autonomy)?,
+        decided(&proposal, &inputs, &verdict, &classified)?,
     )?;
     match &verdict {
         DryRunVerdict::Deny { .. } => {
@@ -574,6 +578,7 @@ fn allowed(
                     limit: proposal.limit,
                     purpose: proposal.purpose,
                 },
+                execution: proposal.execution,
             });
             Ok(())
         }
@@ -596,10 +601,12 @@ fn remember(state: &mut RuntimeState, input: &Input, batch: &Batch<'_>) {
 
 pub(crate) fn proposed(proposal: &Proposal) -> Result<Value, RuntimeError> {
     payload::object(vec![
-        ("instrument", payload::text(proposal.instrument.as_str())),
+        ("instrument_id", payload::text(proposal.instrument.as_str())),
         ("side", payload::text(payload::side_name(proposal.side))),
+        ("type", payload::text("limit")),
+        ("tif", payload::text(tif_name(tif_of(proposal)))),
         ("qty", payload::text(&proposal.qty.to_string())),
-        ("limit", payload::text(&proposal.limit.to_string())),
+        ("limit_price", payload::text(&proposal.limit.to_string())),
         (
             "purpose",
             payload::text(payload::purpose_name(proposal.purpose)),
@@ -609,32 +616,133 @@ pub(crate) fn proposed(proposal: &Proposal) -> Result<Value, RuntimeError> {
 
 fn decided(
     proposal: &Proposal,
+    inputs: &crate::types::SignalInputs,
     verdict: &DryRunVerdict,
-    autonomy: Autonomy,
+    classified: &Classified,
 ) -> Result<Value, RuntimeError> {
     let (dry_run, reason_code) = match verdict {
-        DryRunVerdict::Allow => ("allow", String::new()),
-        DryRunVerdict::Deny { reason_code } => ("deny", reason_code.clone()),
+        DryRunVerdict::Allow => ("allow", Value::Null),
+        DryRunVerdict::Deny { reason_code } => ("deny", payload::text(reason_code)),
     };
-    let classification = match autonomy {
+    let classification = match classified.autonomy {
         Autonomy::Auto => "auto",
         Autonomy::Ask => "ask",
         Autonomy::Deny => "deny",
     };
+    let classified_value = match verdict {
+        DryRunVerdict::Allow => payload::text(classification),
+        DryRunVerdict::Deny { .. } => Value::Null,
+    };
+    let decided_by = match verdict {
+        DryRunVerdict::Allow => classified
+            .decided_by
+            .as_deref()
+            .map_or(Value::Null, payload::text),
+        DryRunVerdict::Deny { .. } => Value::Null,
+    };
+    let outputs_used = proposal
+        .outputs_used
+        .iter()
+        .map(|model| {
+            inputs
+                .output_events
+                .get(model)
+                .and_then(|by_instrument| by_instrument.get(&proposal.instrument))
+                .map(|event| payload::text(&event.0))
+                .ok_or_else(|| payload::non_canonical("outputs_used"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let model_weights = proposal
+        .model_weights
+        .iter()
+        .map(|(key, value)| {
+            payload::object(vec![("key", payload::text(key)), ("value", value.clone())])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     payload::object(vec![
-        ("instrument", payload::text(proposal.instrument.as_str())),
+        ("instrument_id", payload::text(proposal.instrument.as_str())),
         ("side", payload::text(payload::side_name(proposal.side))),
+        ("type", payload::text("limit")),
+        ("tif", payload::text(tif_name(tif_of(proposal)))),
         ("qty", payload::text(&proposal.qty.to_string())),
-        ("limit", payload::text(&proposal.limit.to_string())),
+        ("limit_price", payload::text(&proposal.limit.to_string())),
         (
             "purpose",
             payload::text(payload::purpose_name(proposal.purpose)),
         ),
-        ("dry_run", payload::text(dry_run)),
-        ("reason_code", payload::text(&reason_code)),
-        ("autonomy", payload::text(classification)),
+        (
+            "exit_origin",
+            proposal.exit_origin.map_or(Value::Null, |origin| {
+                payload::text(exit_origin_name(origin))
+            }),
+        ),
+        (
+            "exit_conviction",
+            proposal.exit_conviction.clone().unwrap_or(Value::Null),
+        ),
+        (
+            "buy_conviction",
+            proposal.buy_conviction.clone().unwrap_or(Value::Null),
+        ),
         ("combined_score", proposal.combined_score.clone()),
+        ("outputs_used", Value::Array(outputs_used)),
+        ("model_weights", Value::Array(model_weights)),
+        (
+            "clips_applied",
+            Value::Array(
+                proposal
+                    .clips_applied
+                    .iter()
+                    .map(|clip| payload::text(clip_name(*clip)))
+                    .collect(),
+            ),
+        ),
+        ("dry_run", payload::text(dry_run)),
+        ("reason_code", reason_code),
+        ("autonomy", classified_value),
+        ("ask_suppressed", Value::Null),
+        ("decided_by", decided_by),
+        ("delegation_id", Value::Null),
+        ("requested_by", payload::text("agent")),
+        ("client_id", Value::Null),
     ])
+}
+
+fn tif_of(proposal: &Proposal) -> TimeInForce {
+    proposal.execution.map_or_else(
+        || match proposal.asset_class {
+            mandate_accounting::AssetClass::UsEquity => TimeInForce::Day,
+            mandate_accounting::AssetClass::Crypto => TimeInForce::Gtc,
+        },
+        |execution| execution.tif,
+    )
+}
+
+fn tif_name(tif: TimeInForce) -> &'static str {
+    match tif {
+        TimeInForce::Day => "day",
+        TimeInForce::Gtc => "gtc",
+        TimeInForce::Ioc => "ioc",
+    }
+}
+
+fn exit_origin_name(origin: ExitOrigin) -> &'static str {
+    match origin {
+        ExitOrigin::Signal => "signal",
+        ExitOrigin::GoalCompletion => "goal_completion",
+        ExitOrigin::RemovedInstrument => "removed_instrument",
+    }
+}
+
+fn clip_name(clip: DecisionClip) -> &'static str {
+    match clip {
+        DecisionClip::MaxOrderUsd => "max_order_usd",
+        DecisionClip::PositionCap => "position_cap",
+        DecisionClip::GrossExposureCap => "gross_exposure_cap",
+        DecisionClip::TargetQty => "target_qty",
+        DecisionClip::MaxSpendUsd => "max_spend_usd",
+        DecisionClip::MaxAvgPrice => "max_avg_price",
+    }
 }
 
 /// The owner's instruction, without which the executor cannot price an exit outside the regular
@@ -723,14 +831,7 @@ fn observed(observation: &Observation) -> Result<Value, RuntimeError> {
 }
 
 fn modelled(output: &ModelOutput) -> Result<Value, RuntimeError> {
-    payload::object(vec![
-        ("model", payload::text(&output.model)),
-        ("version", payload::text(&output.version)),
-        ("instrument", payload::text(output.instrument.as_str())),
-        ("as_of", payload::seconds_text(output.as_of)),
-        ("expires_at", payload::seconds_text(output.expires_at)),
-        ("content", output.content.clone()),
-    ])
+    payload::model_output(output)
 }
 
 /// One step's effect list under construction. Ids are derived from the epoch, the head the batch is
@@ -795,5 +896,163 @@ impl<'a> Batch<'a> {
     /// (`AGENTS.md` rules 5 and 6).
     pub(crate) fn notify_approval(&mut self, notification: mandate_approval::Notification) {
         self.effects.push(Effect::NotifyApproval(notification));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_accounting::InstrumentId;
+    use mandate_canon::{Digest, Value};
+    use mandate_num::{Conviction, Unit};
+
+    use super::{clip_name, exit_origin_name, modelled};
+    use crate::payload::model_output_of;
+    use crate::{
+        DecisionClip, EventId, ExitOrigin, ModelDirection, ModelOutput, ModelOutputIgnored,
+        RiskClock,
+    };
+
+    fn model_output_fixture() -> Result<ModelOutput, String> {
+        Ok(ModelOutput {
+            model_id: "quant.ma_crossover".to_owned(),
+            model_version: "1.0.0".to_owned(),
+            content_hash: Digest::from_hex(
+                "5555555555555555555555555555555555555555555555555555555555555555",
+            )
+            .ok_or("content hash")?,
+            instrument_id: InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+                .map_err(|error| error.to_string())?,
+            as_of: RiskClock::from_secs(1_790_356_800),
+            expires_at: RiskClock::from_secs(1_790_443_200),
+            direction: ModelDirection::Long,
+            conviction: Conviction::parse("1").map_err(|error| error.to_string())?,
+            confidence: Unit::ONE,
+            horizon_s: 86_400,
+            thesis_ref: None,
+            evidence: vec![EventId("01J8Z3M0A000000000000000G2".to_owned())],
+            invalidation: None,
+            thesis_id: None,
+            lineage_id: None,
+            ignored: Some(ModelOutputIgnored::NotPinned),
+        })
+    }
+
+    #[test]
+    fn model_output_uses_the_closed_journal_shape_and_replays_exactly() -> Result<(), String> {
+        let output = model_output_fixture()?;
+        let payload = modelled(&output).map_err(|error| error.to_string())?;
+        let fields = payload
+            .as_object()
+            .ok_or("model output object")?
+            .keys()
+            .map(|key| key.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            fields,
+            [
+                "as_of",
+                "confidence",
+                "content_hash",
+                "conviction",
+                "direction",
+                "evidence",
+                "expires_at",
+                "horizon_s",
+                "ignored",
+                "instrument_id",
+                "invalidation",
+                "lineage_id",
+                "model_id",
+                "model_version",
+                "thesis_id",
+                "thesis_ref",
+            ]
+        );
+        assert_eq!(
+            payload.get("model_id").and_then(Value::as_str),
+            Some("quant.ma_crossover")
+        );
+        assert_eq!(
+            payload.get("direction").and_then(Value::as_str),
+            Some("long")
+        );
+        assert_eq!(
+            payload.get("horizon_s").and_then(Value::as_int),
+            Some(86_400)
+        );
+        assert_eq!(
+            payload.get("ignored").and_then(Value::as_str),
+            Some("not_pinned")
+        );
+        assert_eq!(payload.get("content"), None);
+        assert_eq!(payload.get("thesis_ref"), Some(&Value::Null));
+        assert_eq!(
+            model_output_of(&payload).map_err(|error| error.to_string())?,
+            output
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn model_output_replays_digest_and_every_ignored_reason() -> Result<(), String> {
+        let thesis =
+            Digest::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .ok_or("thesis digest")?;
+        let cases = [
+            (ModelOutputIgnored::NotPinned, "not_pinned"),
+            (ModelOutputIgnored::ModelWithdrawn, "model_withdrawn"),
+            (ModelOutputIgnored::OutputLimits, "output_limits"),
+            (ModelOutputIgnored::NotInUniverse, "not_in_universe"),
+            (
+                ModelOutputIgnored::DirectionNotAllowed,
+                "direction_not_allowed",
+            ),
+            (ModelOutputIgnored::HorizonMismatch, "horizon_mismatch"),
+            (
+                ModelOutputIgnored::RevisionWithoutPredecessor,
+                "revision_without_predecessor",
+            ),
+        ];
+        for (reason, canonical_name) in cases {
+            let mut output = model_output_fixture()?;
+            output.thesis_ref = Some(thesis);
+            output.ignored = Some(reason);
+            let payload = modelled(&output).map_err(|error| error.to_string())?;
+            assert_eq!(
+                payload.get("thesis_ref").and_then(Value::as_str),
+                Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            );
+            assert_eq!(
+                payload.get("ignored").and_then(Value::as_str),
+                Some(canonical_name)
+            );
+            assert_eq!(
+                model_output_of(&payload).map_err(|error| error.to_string())?,
+                output
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn decision_enum_names_are_exact_canonical_field_values() {
+        assert_eq!(exit_origin_name(ExitOrigin::Signal), "signal");
+        assert_eq!(
+            exit_origin_name(ExitOrigin::GoalCompletion),
+            "goal_completion"
+        );
+        assert_eq!(
+            exit_origin_name(ExitOrigin::RemovedInstrument),
+            "removed_instrument"
+        );
+        assert_eq!(clip_name(DecisionClip::MaxOrderUsd), "max_order_usd");
+        assert_eq!(clip_name(DecisionClip::PositionCap), "position_cap");
+        assert_eq!(
+            clip_name(DecisionClip::GrossExposureCap),
+            "gross_exposure_cap"
+        );
+        assert_eq!(clip_name(DecisionClip::TargetQty), "target_qty");
+        assert_eq!(clip_name(DecisionClip::MaxSpendUsd), "max_spend_usd");
+        assert_eq!(clip_name(DecisionClip::MaxAvgPrice), "max_avg_price");
     }
 }

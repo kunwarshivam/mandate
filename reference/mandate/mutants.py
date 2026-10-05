@@ -147,7 +147,7 @@ MUTANTS = {
     "the approval content hides the delegation shapes": ('["approve", "skip"] + list(req.get("delegation_shapes", []))', '["approve", "skip"]'),
     "a timeout acts": ('                drafts.append({"type": "ApprovalTimedOut", "approval": a, "on_timeout": "skip", "clock": c})',
                        '                drafts.append({"type": "ApprovalTimedOut", "approval": a, "on_timeout": "skip", "clock": c}); '
-                       'drafts.append(dict({k: st["pending"][a][k] for k in BOUND_FIELDS}, type="IntentProposed", approval=a, clock=c))'),
+                       'drafts.append(dict(approval_intent(st["pending"][a]), type="IntentProposed", approval=a, clock=c))'),
     "lateness uses the submitted time alone": ('    eff = max(T(resp["submitted_at"]), T(ctx["clock"]))', '    eff = T(resp["submitted_at"])'),
     "a response exactly at the deadline is timely": ('    if eff >= T(req["deadline"]):', '    if eff > T(req["deadline"]):'),
     "the fold keeps an acted approval pending": ('    elif t in ("ApprovalRevalidated", "ApprovalTimedOut", "ApprovalCanceled"):',
@@ -167,8 +167,10 @@ MUTANTS = {
     "drift uses the crypto band for equities": ('<= DRIFT_BAND_BP[asset_class] * D(m_req)', '<= 200 * D(m_req)'),
     "no mark is inside the band": ('    if m_req is None or m_now is None:\n        return False\n    return abs(',
                                    '    if m_req is None or m_now is None:\n        return True\n    return abs('),
-    "a grant re-prices at the current mark": ('"intent": {k: req[k] for k in BOUND_FIELDS}}',
-                                              '"intent": {k: req[k] for k in BOUND_FIELDS} | {"limit_price": now["mark"]}}'),
+    "a grant re-prices at the current mark": (
+        "    intent = approval_intent(req)",
+        '    intent = approval_intent(req) | {"limit_price": now["mark"]}',
+    ),
     "the notification carries the instrument": ('return {"subject": req["approval"], "text": "approval_needed"}',
                                                 'return {"subject": req["approval"], "text": "approval_needed " + req["instrument"]}'),
     "an agent actor is admitted": ('    if resp["actor_kind"] != "user" or resp["responder"] not in ctx["approvers"]:',

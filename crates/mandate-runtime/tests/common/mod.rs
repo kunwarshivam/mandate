@@ -8,19 +8,20 @@
 
 pub mod escalation;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_approval::Notification;
-use mandate_canon::{Int, Key, Value};
+use mandate_canon::{Digest, Int, Key, Value};
 use mandate_journal::Environment;
-use mandate_num::{Price, Qty};
+use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_runtime::{
     ActorKind, AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment,
-    DryRunVerdict, Effect, EventDraft, EventId, FlattenLeg, FlattenPlan, FlattenPlanner,
-    FlattenRequest, FoldedEvent, GateDryRun, IdGen, Initiator, IntentHandoff, MandateView,
-    ModelOutput, OrderPlan, Ports, Proposal, Purpose, RiskClock, RuntimeError, RuntimeState, Seq,
-    SignalInputs, TimerId, TimerRequest, WorkspaceId, WriterEpoch, fold, handle,
+    DryRunVerdict, Effect, EventDraft, EventId, ExitOrigin, FlattenLeg, FlattenPlan,
+    FlattenPlanner, FlattenRequest, FoldedEvent, GateDryRun, IdGen, Initiator, IntentHandoff,
+    MandateView, ModelDirection, ModelOutput, OrderExecution, OrderPlan, Ports, Proposal, Purpose,
+    RiskClock, RuntimeError, RuntimeState, Seq, SignalInputs, TimeInForce, TimerId, TimerRequest,
+    WorkspaceId, WriterEpoch, fold, handle,
 };
 
 pub const AGENT_STREAM: &str = "agent:ws1:agent-a";
@@ -192,7 +193,19 @@ impl FixedPlan {
                 qty: qty("10"),
                 limit: price("155"),
                 purpose: Purpose::Open,
+                exit_origin: None,
+                exit_conviction: Some(text("1")),
+                buy_conviction: Some(text("1")),
                 combined_score: text("0.5"),
+                outputs_used: BTreeSet::from(["ma_cross".to_owned()]),
+                model_weights: BTreeMap::from([("ma_cross".to_owned(), text("1"))]),
+                clips_applied: Vec::new(),
+                execution: Some(OrderExecution {
+                    asset_class: AssetClass::UsEquity,
+                    tif: TimeInForce::Day,
+                    protection_required: false,
+                    protection: None,
+                }),
             }),
             autonomy,
             requires_fresh: true,
@@ -209,7 +222,19 @@ impl FixedPlan {
                 qty: qty("10"),
                 limit: price("149"),
                 purpose: Purpose::DiscretionaryExit,
+                exit_origin: Some(ExitOrigin::Signal),
+                exit_conviction: Some(text("-1")),
+                buy_conviction: Some(text("-1")),
                 combined_score: text("-0.5"),
+                outputs_used: BTreeSet::from(["ma_cross".to_owned()]),
+                model_weights: BTreeMap::from([("ma_cross".to_owned(), text("1"))]),
+                clips_applied: Vec::new(),
+                execution: Some(OrderExecution {
+                    asset_class: AssetClass::UsEquity,
+                    tif: TimeInForce::Day,
+                    protection_required: false,
+                    protection: None,
+                }),
             }),
             autonomy,
             requires_fresh: true,
@@ -317,20 +342,33 @@ pub fn view_with_restriction(instruments: &[&str], restricted: &[&str]) -> Manda
 /// A fresh, unexpired model output for `AAPL`, which is what makes `FixedPlan` propose.
 pub fn fresh_output(at: i64) -> ModelOutput {
     ModelOutput {
-        model: "ma_cross".to_owned(),
-        version: "1".to_owned(),
-        instrument: instrument("AAPL"),
+        model_id: "ma_cross".to_owned(),
+        model_version: "1".to_owned(),
+        content_hash: Digest::of(b"ma_cross:1"),
+        instrument_id: instrument("AAPL"),
         as_of: clock(at),
         expires_at: clock(at.saturating_add(300)),
-        content: text("long"),
+        direction: ModelDirection::Long,
+        conviction: Conviction::parse("1").unwrap_or_else(|error| panic!("{error}")),
+        confidence: Unit::ONE,
+        horizon_s: 300,
+        thesis_ref: None,
+        evidence: Vec::new(),
+        invalidation: None,
+        thesis_id: None,
+        lineage_id: None,
+        ignored: None,
     }
 }
 
 pub fn stale_output(at: i64) -> ModelOutput {
-    ModelOutput {
-        expires_at: clock(at.saturating_sub(1)),
-        ..fresh_output(at.saturating_sub(600))
-    }
+    let as_of = at.saturating_sub(600).max(0);
+    let expires_at = at.saturating_sub(1).max(0);
+    let mut output = fresh_output(as_of);
+    output.expires_at = clock(expires_at);
+    output.horizon_s = u64::try_from(expires_at.saturating_sub(as_of))
+        .unwrap_or_else(|error| panic!("a non-negative stale horizon: {error}"));
+    output
 }
 
 /// What the shell did with one effect list, so a test can assert on order as well as content.

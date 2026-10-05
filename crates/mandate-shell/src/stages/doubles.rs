@@ -16,23 +16,25 @@ use std::rc::Rc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_backtest::Signal;
-use mandate_canon::{Digest, Key, Object, Value};
+use mandate_canon::{Digest, Int, Key, Object, Value};
 use mandate_executor::{
-    BrokerOrder, BrokerOutcome, BrokerRequest, BrokerUnknown, ClientOrderId, ConnectorError,
-    IntentId, OrderType, SubmitOrder, TimeInForce,
+    ActivityCursor, BrokerAccount, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerSnapshot,
+    BrokerUnknown, ClientOrderId, ConnectorError, IntentId, OrderType, ReconcileReason, Seq,
+    SubmitOrder, TimeInForce,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
-use mandate_num::{Price, Qty};
+use mandate_num::{Price, Qty, Usd};
 use mandate_risk::{Check, CheckOutcome, Computed, Decision, Purpose as GatePurpose, Verdict};
 use mandate_runtime::{
-    AgentId, ApprovalSettings, Autonomy, ConnectionId, Deployment, FlattenPlan, FlattenRequest,
-    IntentBody, IntentHandoff, MandateView, Proposal, Purpose, SignalInputs, WorkspaceId,
+    AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment, FlattenPlan,
+    FlattenRequest, IntentBody, IntentHandoff, MandateView, OrderExecution, Proposal, Purpose,
+    SignalInputs, TimeInForce as RuntimeTimeInForce, WorkspaceId,
 };
 use mandate_time::UtcNanos;
 
 use super::{
     Admitted, Bars, Classifier, Connector, Executor, ExitPath, Gate, JournalWriter, MandateSource,
-    ModelRef, Protection, Reconciled, Reconciler, SignalModel, Sink, Sizing, Stage, Stages,
+    ModelRef, Protection, Reconciler, SignalModel, Sink, Sizing, Stage, Stages,
 };
 use crate::envelope::{IdSpace, Ids};
 use crate::error::Cause;
@@ -62,6 +64,8 @@ pub struct Tally {
     pub queries: u32,
     /// Broker answers the executor double was handed.
     pub executor_broker_inputs: u32,
+    /// Order intents handed to the executor after startup.
+    pub executor_intents: u32,
     /// The stream of every committed event the executor double was asked to fold.
     pub executor_folds: Vec<String>,
     next_id: u64,
@@ -122,6 +126,15 @@ impl Ledger {
             Some(rows) => rows.len(),
             None => 0,
         }
+    }
+
+    pub fn types(&self, stream: &str) -> Vec<String> {
+        self.streams
+            .get(stream)
+            .into_iter()
+            .flatten()
+            .map(|row| row.event_type.clone())
+            .collect()
     }
 
     fn has(&self, event_type: &str, field: &str, value: &str) -> bool {
@@ -241,6 +254,41 @@ fn object(members: &[(&str, &str)]) -> Result<Value, Cause> {
     Ok(Value::Object(map))
 }
 
+fn account_payload(account: &BrokerAccount) -> Result<Value, Cause> {
+    let mut map = Object::new();
+    let mut insert = |name: &'static str, value: Value| -> Result<(), Cause> {
+        let key = Key::new(name).map_err(|_| Cause::Absent { what: "a key" })?;
+        map.insert(key, value);
+        Ok(())
+    };
+    insert("status", Value::Str(account.status.clone()))?;
+    insert("crypto_status", Value::Str(account.crypto_status.clone()))?;
+    insert("trading_blocked", Value::Bool(account.trading_blocked))?;
+    insert("account_blocked", Value::Bool(account.account_blocked))?;
+    insert(
+        "trade_suspended_by_user",
+        Value::Bool(account.trade_suspended_by_user),
+    )?;
+    insert(
+        "multiplier",
+        Value::Int(
+            Int::new(u64::from(account.multiplier)).ok_or(Cause::Absent {
+                what: "the account multiplier",
+            })?,
+        ),
+    )?;
+    insert("equity", Value::Str(account.equity.to_string()))?;
+    insert("cash", Value::Str(account.cash.to_string()))?;
+    insert("buying_power", Value::Str(account.buying_power.to_string()))?;
+    insert(
+        "non_marginable_buying_power",
+        Value::Str(account.non_marginable_buying_power.to_string()),
+    )?;
+    insert("accrued_fees", Value::Str(account.accrued_fees.to_string()))?;
+    insert("risk_clock", Value::Str(NOW.to_owned()))?;
+    Ok(Value::Object(map))
+}
+
 pub fn passed_checks() -> Vec<CheckOutcome> {
     [
         Check::AccountAndMode,
@@ -344,6 +392,7 @@ impl MandateSource for FixtureMandate {
             model: ModelRef {
                 id: "quant.ma_crossover".to_owned(),
                 version: "1.0.0".to_owned(),
+                content_hash: Digest::of(b"quant.ma_crossover:1.0.0"),
                 max_output_age_s: 86_400,
                 params: BTreeMap::from([
                     ("fast_periods".to_owned(), "5".to_owned()),
@@ -358,8 +407,8 @@ impl MandateSource for FixtureMandate {
 pub struct FixtureBars(pub World);
 
 impl Bars for FixtureBars {
-    fn closes(&self, symbol: &str) -> Result<Vec<Price>, Cause> {
-        let _ = symbol;
+    fn closes(&self, symbol: &str, now: UtcNanos) -> Result<Vec<Price>, Cause> {
+        let _ = (symbol, now);
         self.0.called(Stage::MarketData);
         let close = Price::parse("255.2").map_err(|_| Cause::Absent { what: "a close" })?;
         Ok(vec![close; 25])
@@ -385,18 +434,61 @@ pub struct FixedReconciler {
 }
 
 impl Reconciler for FixedReconciler {
-    fn reconcile(&mut self) -> Result<Reconciled, Cause> {
+    fn snapshot(
+        &mut self,
+        connector: &mut dyn Connector,
+        requests: &[BrokerRequest],
+    ) -> Result<BrokerSnapshot, Cause> {
+        let _ = (connector, requests);
         self.world.called(Stage::Reconcile);
+        Ok(BrokerSnapshot {
+            open_orders: Vec::new(),
+            positions: Vec::new(),
+            account: BrokerAccount {
+                status: "ACTIVE".to_owned(),
+                crypto_status: "ACTIVE".to_owned(),
+                trading_blocked: false,
+                account_blocked: false,
+                trade_suspended_by_user: false,
+                multiplier: 2,
+                equity: Usd::ZERO,
+                cash: Usd::ZERO,
+                buying_power: Usd::ZERO,
+                non_marginable_buying_power: Usd::ZERO,
+                accrued_fees: Usd::ZERO,
+            },
+            fills: Vec::new(),
+            cursor: ActivityCursor(String::new()),
+            reason: ReconcileReason::Startup,
+            taken_at_head: Seq(0),
+        })
+    }
+
+    fn reconcile(
+        &mut self,
+        snapshot: &BrokerSnapshot,
+    ) -> Result<mandate_executor::Reconciliation, Cause> {
+        let _ = snapshot;
         let result = if self.clean { "clean" } else { "mismatch" };
         let event_id = self.world.tally.borrow_mut().next_account_id();
-        Ok(Reconciled {
-            clean: self.clean,
-            drafts: vec![mandate_executor::EventDraft {
-                event_id: mandate_executor::EventId(event_id),
-                event_type: "ReconciliationRun".to_owned(),
-                causation_id: None,
-                payload: object(&[("result", result)])?,
-            }],
+        Ok(mandate_executor::Reconciliation {
+            effects: vec![mandate_executor::Effect::Journal(
+                mandate_executor::EventDraft {
+                    event_id: mandate_executor::EventId(event_id),
+                    event_type: "ReconciliationRun".to_owned(),
+                    schema_version: 1,
+                    config_refs: Object::new(),
+                    causation_id: None,
+                    payload: object(&[("result", result)])?,
+                },
+            )],
+            verdict: if self.clean {
+                mandate_executor::ReconciliationVerdict::Clean
+            } else {
+                mandate_executor::ReconciliationVerdict::Mismatch
+            },
+            differences: Vec::new(),
+            expected_head: mandate_executor::Seq(0),
         })
     }
 }
@@ -421,7 +513,24 @@ impl Sizing for OneShare {
             qty: Qty::parse(self.qty).map_err(|_| Cause::Absent { what: "a qty" })?,
             limit: Price::parse("255.2").map_err(|_| Cause::Absent { what: "a limit" })?,
             purpose: Purpose::Open,
+            exit_origin: None,
+            exit_conviction: Some(Value::Str("1".to_owned())),
+            buy_conviction: Some(Value::Str("1".to_owned())),
             combined_score: Value::Str("1".to_owned()),
+            outputs_used: inputs.outputs.keys().cloned().collect(),
+            model_weights: inputs
+                .outputs
+                .keys()
+                .cloned()
+                .map(|model| (model, Value::Str("1".to_owned())))
+                .collect(),
+            clips_applied: Vec::new(),
+            execution: Some(OrderExecution {
+                asset_class: AssetClass::UsEquity,
+                tif: RuntimeTimeInForce::Day,
+                protection_required: false,
+                protection: None,
+            }),
         }))
     }
 }
@@ -432,10 +541,13 @@ pub struct FixedClassifier {
 }
 
 impl Classifier for FixedClassifier {
-    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Autonomy, Cause> {
+    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let _ = (view, proposal);
         self.world.called(Stage::Classify);
-        Ok(self.autonomy)
+        Ok(Classified {
+            autonomy: self.autonomy,
+            decided_by: Some("default".to_owned()),
+        })
     }
 }
 
@@ -525,12 +637,16 @@ impl JournalWriter for LedgerJournal {
                 None => String::new(),
             };
             seq = seq.saturating_add(1);
+            let schema_version = match body.get("schema_version").and_then(Value::as_int) {
+                Some(version) => version,
+                None => return AppendOutcome::Unavailable,
+            };
             let row = StoredEvent {
                 stream_id: stream.to_owned(),
                 seq,
                 event_id: field("event_id"),
                 event_type: field("event_type"),
-                schema_version: 1,
+                schema_version,
                 environment: field("environment"),
                 recorded_at: NOW.to_owned(),
                 prev_hash: prev,
@@ -544,11 +660,6 @@ impl JournalWriter for LedgerJournal {
         AppendOutcome::Committed(committed)
     }
 }
-
-/// The TIF the tracer's proposals carry, which `IntentReceived` copies exactly: the tracer's
-/// handoffs are regular-session limit proposals (`AGENTS.md` rule 12); the sink this double stands
-/// in for carries the proposal's own tif from E7-7 on (DEC-448 item 7).
-const TRACER_PROPOSED_TIF: mandate_executor::TimeInForce = mandate_executor::TimeInForce::Day;
 
 /// Converts the runtime's handoff into the executor's, joining the deployment's `AgentId`, and
 /// checks the ledger for the `IntentProposed` before counting the hand.
@@ -569,6 +680,9 @@ impl Sink for ConvertingSink {
                 tally.unrecorded_hands = tally.unrecorded_hands.saturating_add(1);
             }
         }
+        let execution = handoff.execution.ok_or(Cause::Absent {
+            what: "the doubled proposal's execution policy",
+        })?;
         let body = match &handoff.body {
             IntentBody::Order {
                 instrument,
@@ -582,7 +696,12 @@ impl Sink for ConvertingSink {
                 qty: *qty,
                 limit: *limit,
                 purpose: executor_purpose(*purpose),
-                protection: None,
+                protection: execution
+                    .protection
+                    .map(|prices| mandate_executor::ProtectionPrices {
+                        stop: prices.stop,
+                        take_profit: prices.take_profit,
+                    }),
             },
             IntentBody::Flatten(plan) => {
                 let _ = plan;
@@ -594,7 +713,11 @@ impl Sink for ConvertingSink {
         Ok(mandate_executor::IntentHandoff {
             intent_id: IntentId(mandate_executor::EventId(handoff.intent_id.0.clone())),
             agent: mandate_executor::AgentId(AGENT.to_owned()),
-            tif: TRACER_PROPOSED_TIF,
+            tif: Some(match execution.tif {
+                RuntimeTimeInForce::Day => mandate_executor::TimeInForce::Day,
+                RuntimeTimeInForce::Gtc => mandate_executor::TimeInForce::Gtc,
+                RuntimeTimeInForce::Ioc => mandate_executor::TimeInForce::Ioc,
+            }),
             body,
         })
     }
@@ -630,10 +753,24 @@ impl PaperExecutor {
         members: &[(&str, &str)],
     ) -> Result<mandate_executor::Effect, Cause> {
         let event_id = self.world.tally.borrow_mut().next_account_id();
+        let schema_version = if matches!(
+            event_type,
+            "IntentReceived" | "GateDecided" | "OrderSubmitted"
+        ) {
+            2
+        } else if event_type == "OrderStateChanged" {
+            1
+        } else {
+            return Err(Cause::Absent {
+                what: "the doubled executor event's schema version",
+            });
+        };
         Ok(mandate_executor::Effect::Journal(
             mandate_executor::EventDraft {
                 event_id: mandate_executor::EventId(event_id),
                 event_type: event_type.to_owned(),
+                schema_version,
+                config_refs: Object::new(),
                 causation_id: causation.map(|id| mandate_executor::EventId(id.to_owned())),
                 payload: object(members)?,
             },
@@ -731,12 +868,23 @@ impl PaperExecutor {
 }
 
 impl Executor for PaperExecutor {
+    fn reset(&mut self) -> Result<(), Cause> {
+        self.seen.clear();
+        self.last_client_order_id = None;
+        Ok(())
+    }
+
     fn step(
         &mut self,
         input: mandate_executor::Input,
     ) -> Result<Vec<mandate_executor::Effect>, Cause> {
-        self.world.called(Stage::Executor);
+        if !matches!(&input, mandate_executor::Input::Started(_)) {
+            self.world.called(Stage::Executor);
+        }
         if let mandate_executor::Input::Intent(handoff) = &input {
+            let mut tally = self.world.tally.borrow_mut();
+            tally.executor_intents = tally.executor_intents.saturating_add(1);
+            drop(tally);
             return self.intent(handoff);
         }
         if let mandate_executor::Input::Broker(answer) = &input {
@@ -745,6 +893,22 @@ impl Executor for PaperExecutor {
                 tally.executor_broker_inputs = tally.executor_broker_inputs.saturating_add(1);
             }
             return self.answered(answer);
+        }
+        if let mandate_executor::Input::BrokerUpdate(mandate_executor::BrokerUpdate::Account(
+            account,
+        )) = &input
+        {
+            let event_id = self.world.tally.borrow_mut().next_account_id();
+            return Ok(vec![mandate_executor::Effect::Journal(
+                mandate_executor::EventDraft {
+                    event_id: mandate_executor::EventId(event_id),
+                    event_type: "AccountStateObserved".to_owned(),
+                    schema_version: 1,
+                    config_refs: Object::new(),
+                    causation_id: None,
+                    payload: account_payload(account)?,
+                },
+            )]);
         }
         Ok(Vec::new())
     }
@@ -932,8 +1096,8 @@ impl MandateSource for Stubbed {
 }
 
 impl Bars for Stubbed {
-    fn closes(&self, symbol: &str) -> Result<Vec<Price>, Cause> {
-        let _ = symbol;
+    fn closes(&self, symbol: &str, now: UtcNanos) -> Result<Vec<Price>, Cause> {
+        let _ = (symbol, now);
         self.refuse()
     }
 }
@@ -946,7 +1110,20 @@ impl SignalModel for Stubbed {
 }
 
 impl Reconciler for Stubbed {
-    fn reconcile(&mut self) -> Result<Reconciled, Cause> {
+    fn snapshot(
+        &mut self,
+        connector: &mut dyn Connector,
+        requests: &[BrokerRequest],
+    ) -> Result<BrokerSnapshot, Cause> {
+        let _ = (connector, requests);
+        self.refuse()
+    }
+
+    fn reconcile(
+        &mut self,
+        snapshot: &BrokerSnapshot,
+    ) -> Result<mandate_executor::Reconciliation, Cause> {
+        let _ = snapshot;
         self.refuse()
     }
 }
@@ -959,7 +1136,7 @@ impl Sizing for Stubbed {
 }
 
 impl Classifier for Stubbed {
-    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Autonomy, Cause> {
+    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let _ = (view, proposal);
         self.refuse()
     }
@@ -1004,6 +1181,10 @@ impl Sink for Stubbed {
 }
 
 impl Executor for Stubbed {
+    fn reset(&mut self) -> Result<(), Cause> {
+        Ok(())
+    }
+
     fn step(
         &mut self,
         input: mandate_executor::Input,

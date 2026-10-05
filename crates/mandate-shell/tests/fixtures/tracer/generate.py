@@ -12,8 +12,10 @@ share. AAPL is internal test data (DEC-90), not an instrument recommendation.
 """
 
 import copy
+import hashlib
 import json
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -24,7 +26,8 @@ from bases import CTX, REGISTRY, RISK  # noqa: E402
 from ref import V, builder, semantic  # noqa: E402
 
 AAPL = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
-H_MA = "sha256:" + "5" * 64
+MODEL_ARTIFACT = b'{"id":"quant.ma_crossover","version":"1.0.0"}\n'
+H_MA = "sha256:" + hashlib.sha256(MODEL_ARTIFACT).hexdigest()
 NOW = "2026-09-25T20:00:00.000000000Z"
 EXPIRES = "2026-09-26T20:00:00.000000000Z"
 BID, ASK = "255.10", "255.20"
@@ -84,7 +87,7 @@ def base():
         "protection": {
             "enabled": True,
             "stop_distance": "0.05",
-            "take_profit_distance": None,
+            "take_profit_distance": "0.1",
             "crypto_stop_limit_offset": None,
         },
         "risk": risk,
@@ -149,6 +152,13 @@ def sized(mandate):
 
 
 def main():
+    entry = Decimal(ASK)
+    assert entry * (Decimal("1") - Decimal("0.05")) == Decimal("242.4400")
+    assert entry * (Decimal("1") + Decimal("0.1")) == Decimal("280.720")
+    (HERE / "model-artifact.json").write_bytes(MODEL_ARTIFACT)
+    assert hashlib.sha256((HERE / "model-artifact.json").read_bytes()).hexdigest() == H_MA.removeprefix(
+        "sha256:"
+    )
     registry = dict(REGISTRY)
     registry["quant.ma_crossover"] = {
         "version": "1.0.0",

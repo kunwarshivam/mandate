@@ -103,14 +103,18 @@ fn check_order_and_columns() {
 }
 
 #[test]
-fn artifacts_are_checked() {
+fn artifacts_and_configuration_objects_are_checked() {
     let s = stream();
     let content = b"model response".to_vec();
     let digest = Digest::of(&content);
     let reference = format!("\"sha256:{}\"", digest.to_hex());
+    let config = b"fee configuration".to_vec();
+    let config_digest = Digest::of(&config);
+    let config_reference = format!("\"sha256:{}\"", config_digest.to_hex());
     let mut j = journal_with(0);
     let draft = edit(&mark_draft(1, "1"), "payload.source", Some(&reference));
     let draft = edit(&draft, "artifact_refs", Some(&format!("[{reference}]")));
+    let draft = edit(&draft, "config_refs.fee_config", Some(&config_reference));
     assert!(matches!(
         j.append(&s, 1, 1, now(), &[&draft]),
         AppendOutcome::Committed(_)
@@ -133,6 +137,22 @@ fn artifacts_are_checked() {
         })
     );
     store.insert(digest, content);
+    assert_eq!(
+        verify_events(rows, TrustedStart::GENESIS, &store),
+        Err(EventFailure {
+            seq: 2,
+            check: EventCheck::ArtifactMissing
+        })
+    );
+    store.insert(config_digest, b"tampered configuration".to_vec());
+    assert_eq!(
+        verify_events(rows, TrustedStart::GENESIS, &store),
+        Err(EventFailure {
+            seq: 2,
+            check: EventCheck::ArtifactMismatch
+        })
+    );
+    store.insert(config_digest, config);
     assert!(verify_events(rows, TrustedStart::GENESIS, &store).is_ok());
 }
 

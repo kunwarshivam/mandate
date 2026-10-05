@@ -47,6 +47,7 @@ fn tracer() -> Result<Report, ShellError> {
             value.to_string_lossy().into_owned(),
         )
     }))?;
+    let recorded_at = now()?;
     let setup = Setup {
         deployment: Deployment {
             agent: AgentId(cli::AGENT.to_owned()),
@@ -54,7 +55,7 @@ fn tracer() -> Result<Report, ShellError> {
             workspace: WorkspaceId(cli::WORKSPACE.to_owned()),
         },
         account_ref: cli::ACCOUNT_REF.to_owned(),
-        now: now()?,
+        now: recorded_at,
         place_one_order: args.place_one_order,
         new_cycle: args.new_cycle,
     };
@@ -62,7 +63,12 @@ fn tracer() -> Result<Report, ShellError> {
         mandate: args.mandate,
         dataset: args.dataset,
         journal: args.journal,
+        recorded_at,
         agent: AgentId(cli::AGENT.to_owned()),
+        workspace: cli::WORKSPACE.to_owned(),
+        account_ref: cli::ACCOUNT_REF.to_owned(),
+        executor: None,
+        run: None,
         transport: Box::new(Disconnected),
     });
     run(&mut stages, &setup)

@@ -9,9 +9,9 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
-use mandate_canon::{Int, Key, Value};
-use mandate_journal::Environment;
-use mandate_num::{Price, Qty};
+use mandate_canon::{Digest, Int, Key, Value, to_canonical};
+use mandate_journal::{Draft, Environment};
+use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_time::UtcNanos;
 
 use super::*;
@@ -19,8 +19,9 @@ use crate::ports::{FlattenPlanner, GateDryRun, IdGen, OrderPlan, Ports};
 use crate::state::{RuntimeState, fold};
 use crate::step::handle;
 use crate::types::{
-    ApprovalSettings, Classified, ConnectionId, Deployment, Effect, EventDraft, FlattenPlan,
-    FoldedEvent, Input, MandateView, ModelOutput, Seq, SignalInputs, WriterEpoch,
+    ApprovalSettings, Classified, ConnectionId, Deployment, Effect, EventDraft, ExitOrigin,
+    FlattenPlan, FoldedEvent, Input, MandateView, ModelDirection, ModelOutput, Seq, SignalInputs,
+    WriterEpoch,
 };
 
 type Checked = Result<(), String>;
@@ -30,6 +31,27 @@ const ACCOUNT_STREAM: &str = "acct:w:x";
 const CONTROL_STREAM: &str = "ctl:w";
 const OWNER: &str = "owner";
 const AT: i64 = 1_000;
+
+fn model_output(model: &str, as_of: i64, expires_at: i64) -> Result<ModelOutput, String> {
+    Ok(ModelOutput {
+        model_id: model.to_owned(),
+        model_version: "1".to_owned(),
+        content_hash: Digest::of(format!("{model}:1").as_bytes()),
+        instrument_id: instrument("AAPL")?,
+        as_of: RiskClock::from_secs(as_of),
+        expires_at: RiskClock::from_secs(expires_at),
+        direction: ModelDirection::Long,
+        conviction: Conviction::parse("1").map_err(failed)?,
+        confidence: Unit::ONE,
+        horizon_s: u64::try_from(expires_at.saturating_sub(as_of)).map_err(failed)?,
+        thesis_ref: None,
+        evidence: Vec::new(),
+        invalidation: None,
+        thesis_id: None,
+        lineage_id: None,
+        ignored: None,
+    })
+}
 
 fn failed(what: impl std::fmt::Display) -> String {
     what.to_string()
@@ -134,13 +156,20 @@ fn proposal(name: &str, purpose: Purpose, class: AssetClass) -> Result<Proposal,
         qty: Qty::parse("2").map_err(failed)?,
         limit: Price::parse("100").map_err(failed)?,
         purpose,
+        exit_origin: (purpose == Purpose::DiscretionaryExit).then_some(ExitOrigin::Signal),
+        exit_conviction: Some(text("0.5")),
+        buy_conviction: Some(text("0.5")),
         combined_score: text("0.5"),
+        outputs_used: BTreeSet::new(),
+        model_weights: Default::default(),
+        clips_applied: Vec::new(),
+        execution: None,
     })
 }
 
 fn view() -> Result<MandateView, String> {
     Ok(MandateView {
-        version: "v1".to_owned(),
+        version: format!("sha256:{}", "1".repeat(64)),
         working_universe: [
             instrument("AAPL")?,
             instrument("MSFT")?,
@@ -281,14 +310,7 @@ impl Rig {
     /// A fresh model output and a tick at `at`, which is one evaluation.
     fn evaluate(&mut self, at: i64, model: &str, ports: &Ports<'_>) -> Result<Vec<Effect>, String> {
         self.step(
-            Input::ModelOutput(ModelOutput {
-                model: model.to_owned(),
-                version: "1".to_owned(),
-                instrument: instrument("AAPL")?,
-                as_of: RiskClock::from_secs(at),
-                expires_at: RiskClock::from_secs(at.saturating_add(300)),
-                content: text("long"),
-            }),
+            Input::ModelOutput(model_output(model, at, at.saturating_add(300))?),
             ports,
         )?;
         self.step(Input::Tick(RiskClock::from_secs(at)), ports)
@@ -335,6 +357,52 @@ fn handed(effects: &[Effect]) -> Vec<&IntentHandoff> {
 
 fn member<'d>(draft: &'d EventDraft, key: &str) -> Option<&'d str> {
     draft.payload.get(key).and_then(Value::as_str)
+}
+
+fn journal_accepts(draft: &EventDraft, mandate_version: &str) -> Result<(), String> {
+    fn digest_refs(value: &Value, refs: &mut BTreeSet<String>) {
+        match value {
+            Value::Str(text)
+                if text
+                    .strip_prefix("sha256:")
+                    .is_some_and(|hex| hex.len() == 64) =>
+            {
+                refs.insert(text.clone());
+            }
+            Value::Array(items) => items.iter().for_each(|item| digest_refs(item, refs)),
+            Value::Object(members) => members
+                .values()
+                .for_each(|member| digest_refs(member, refs)),
+            Value::Null | Value::Bool(_) | Value::Int(_) | Value::Str(_) => {}
+        }
+    }
+    let mut refs = BTreeSet::new();
+    digest_refs(&draft.payload, &mut refs);
+    let artifacts = refs
+        .into_iter()
+        .map(|reference| format!("\"{reference}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let causation = draft
+        .causation_id
+        .as_ref()
+        .map_or_else(|| "null".to_owned(), |id| format!("\"{}\"", id.0));
+    let body = format!(
+        r#"{{"envelope_version":1,"environment":"paper","event_id":"{}",
+        "stream_id":"{AGENT_STREAM}","event_type":"{}","schema_version":1,
+        "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
+        "causation_id":{causation},"correlation_id":null,
+        "actor":{{"kind":"agent","id":"a","version":"0.1.0","build":"sha256:{}"}},
+        "config_refs":{{"mandate_version":"{mandate_version}"}},
+        "payload":{},"artifact_refs":[{artifacts}],"pii_refs":[]}}"#,
+        draft.event_id.0,
+        draft.event_type,
+        "3".repeat(64),
+        String::from_utf8_lossy(&to_canonical(&draft.payload))
+    );
+    Draft::parse(body.as_bytes())
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn evidence(assertion: &str, at: i64) -> Result<Value, String> {
@@ -589,6 +657,33 @@ fn an_ask_for_an_exit_is_proposed_and_an_ask_for_an_opening_asks() -> Checked {
     Ok(())
 }
 
+#[test]
+fn approval_writers_emit_payloads_the_closed_journal_schemas_accept() -> Checked {
+    let (view, flatten) = (
+        view()?,
+        Recording {
+            asked: RefCell::new(Vec::new()),
+        },
+    );
+    let opening = Plan::of(
+        vec![proposal("AAPL", Purpose::Open, AssetClass::UsEquity)?],
+        Autonomy::Ask,
+    );
+    let ports = Ports {
+        ids: &Ids,
+        gate: &Allow,
+        plan: &opening,
+        flatten: &flatten,
+        view: &view,
+    };
+    let (mut rig, _) = Rig::started(&ports)?;
+    let ran = rig.evaluate(AT, "m1", &ports)?;
+    for event_type in ["ApprovalRequested", "ApprovalDelivered"] {
+        journal_accepts(the(&ran, event_type)?, &view.version)?;
+    }
+    Ok(())
+}
+
 /// A request for an `increase` of a crypto pair binds both and folds back to a pending approval
 /// with the same bound action, so replay rebuilds what admission reads.
 #[test]
@@ -652,14 +747,11 @@ fn a_request_cites_the_unexpired_outputs_behind_it() -> Checked {
     };
     let (mut rig, _) = Rig::started(&ports)?;
     let early = rig.step(
-        Input::ModelOutput(ModelOutput {
-            model: "m0".to_owned(),
-            version: "1".to_owned(),
-            instrument: instrument("AAPL")?,
-            as_of: RiskClock::from_secs(AT.saturating_sub(600)),
-            expires_at: RiskClock::from_secs(AT.saturating_sub(1)),
-            content: text("long"),
-        }),
+        Input::ModelOutput(model_output(
+            "m0",
+            AT.saturating_sub(600),
+            AT.saturating_sub(1),
+        )?),
         &ports,
     )?;
     let expired = the(&early, "ModelOutputRecorded")?.event_id.clone();
@@ -1292,7 +1384,7 @@ fn an_owner_exit_names_only_its_instruments_orders() -> Checked {
     let aapl = the(&first, "IntentProposed")?.event_id.clone();
     let second = rig.evaluate(AT.saturating_add(1), "m1", &ports)?;
     assert_eq!(
-        member(the(&second, "IntentProposed")?, "instrument"),
+        member(the(&second, "IntentProposed")?, "instrument_id"),
         Some("MSFT")
     );
     rig.control(

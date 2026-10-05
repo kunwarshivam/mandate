@@ -8,12 +8,13 @@
 mod common;
 
 use common::{
-    ACCOUNT_STREAM, AGENT_STREAM, AllowGate, AppendOutcome, CLOCK_STREAM, CONTROL_STREAM, DenyGate,
-    FixedPlan, OTHER_AGENT_STREAM, Shell, TestIds, clock, derived_id, event, fresh_output,
-    instrument, int, object, ports, price, qty, stale_output, text, universe,
+    ACCOUNT_STREAM, AGENT_STREAM, ASK_RULE, AllowGate, AppendOutcome, CLOCK_STREAM, CONTROL_STREAM,
+    DenyGate, FixedPlan, OTHER_AGENT_STREAM, Shell, TestIds, clock, derived_id, event,
+    fresh_output, instrument, int, object, ports, price, qty, stale_output, text, universe,
     view_with_restriction, with_clock,
 };
-use mandate_accounting::AssetClass;
+use mandate_accounting::{AssetClass, Side};
+use mandate_canon::Value;
 use mandate_runtime::{
     Autonomy, Command, Effect, EventId, FOLD_VERSION, Initiator, Input, IntentBody, KillScope,
     Mode, OwnerConfirmation, Purpose, RuntimeError, RuntimeState, Seq, TimerId, TimerRequest,
@@ -94,6 +95,15 @@ fn an_unknown_event_type_fails_the_fold() {
         format!("{error}").contains("SomethingNobodyWrote"),
         "the refusal names what it could not interpret: {error}"
     );
+}
+
+#[test]
+fn the_executor_request_companion_is_interpreted_as_inert() {
+    let mut state = RuntimeState::new(common::deployment());
+    let companion = event(ACCOUNT_STREAM, 1, "OrderRequestRecorded", object(&[]));
+    fold(&mut state, &companion).expect("the executor owns and interprets its companion");
+    let next = reconciliation(2, 10);
+    fold(&mut state, &next).expect("the inert companion still advances the account head");
 }
 
 #[test]
@@ -819,6 +829,85 @@ fn a_proposal_journals_before_it_reaches_the_sink() {
     assert_eq!(
         handed.intent_id, draft.event_id,
         "the intent id is the IntentProposed event id (journal spec §2)"
+    );
+}
+
+#[test]
+fn a_decision_and_its_intent_use_the_closed_agent_stream_shapes() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+    let output = shell.run(Input::ModelOutput(fresh_output(100)), &ports);
+    let output_id = output
+        .drafts
+        .iter()
+        .find(|draft| draft.event_type == "ModelOutputRecorded")
+        .map(|draft| draft.event_id.0.clone())
+        .expect("the model output is recorded");
+
+    let ran = shell.run(Input::Tick(clock(100)), &ports);
+    let decision = ran
+        .drafts
+        .iter()
+        .find(|draft| draft.event_type == "DecisionMade")
+        .expect("one decision");
+    assert_eq!(
+        decision.payload,
+        object(&[
+            ("instrument_id", text("AAPL")),
+            ("side", text("buy")),
+            ("type", text("limit")),
+            ("tif", text("day")),
+            ("qty", text("10")),
+            ("limit_price", text("155")),
+            ("purpose", text("open")),
+            ("exit_origin", Value::Null),
+            ("exit_conviction", text("1")),
+            ("buy_conviction", text("1")),
+            ("combined_score", text("0.5")),
+            ("outputs_used", Value::Array(vec![text(&output_id)])),
+            (
+                "model_weights",
+                Value::Array(vec![object(&[
+                    ("key", text("ma_cross")),
+                    ("value", text("1")),
+                ])]),
+            ),
+            ("clips_applied", Value::Array(Vec::new())),
+            ("dry_run", text("allow")),
+            ("reason_code", Value::Null),
+            ("autonomy", text("auto")),
+            ("ask_suppressed", Value::Null),
+            ("decided_by", text(ASK_RULE)),
+            ("delegation_id", Value::Null),
+            ("requested_by", text("agent")),
+            ("client_id", Value::Null),
+        ]),
+        "DecisionMade is the exact closed §9.1 payload"
+    );
+    let intent = ran
+        .drafts
+        .iter()
+        .find(|draft| draft.event_type == "IntentProposed")
+        .expect("one intent");
+    assert_eq!(intent.causation_id.as_ref(), Some(&decision.event_id));
+    assert_eq!(
+        intent.payload,
+        object(&[
+            ("instrument_id", text("AAPL")),
+            ("side", text("buy")),
+            ("type", text("limit")),
+            ("tif", text("day")),
+            ("qty", text("10")),
+            ("limit_price", text("155")),
+            ("purpose", text("open")),
+        ]),
+        "IntentProposed duplicates the exact action members"
     );
 }
 
@@ -2178,6 +2267,18 @@ fn a_retried_append_hands_the_exit_its_draft_authorises() {
         "and hands the intent that draft records, by the same id: {:?}",
         retry.handed
     );
+    assert!(matches!(
+        retry.handed.first().map(|handoff| &handoff.body),
+        Some(IntentBody::Order {
+            instrument,
+            side: Side::Sell,
+            qty,
+            limit,
+            purpose: Purpose::DiscretionaryExit,
+        }) if instrument.as_str() == "AAPL"
+            && qty.to_string() == "10"
+            && limit.to_string() == "149"
+    ));
 }
 
 /// Round-1 review finding 2: `AgentModeApplied` is agent-scoped on a shared account stream (mandate
