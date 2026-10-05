@@ -559,6 +559,7 @@ fn revalidated(
             limit: act.limit,
             purpose: act.purpose,
         },
+        execution: act.execution,
     });
     Ok(())
 }
@@ -812,6 +813,7 @@ fn owner_exit(
             judged.confirmation.clone(),
             ports,
         )),
+        execution: None,
     });
     Ok(())
 }

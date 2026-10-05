@@ -115,6 +115,7 @@ fn retried(
             effects.push(Effect::Intent(IntentHandoff {
                 intent_id: draft.event_id.clone(),
                 body,
+                execution: None,
             }));
         }
     }
@@ -215,6 +216,7 @@ fn started(
             batch.hand(IntentHandoff {
                 intent_id: live.intent_id.clone(),
                 body,
+                execution: None,
             });
         }
     }
@@ -229,6 +231,7 @@ fn started(
                 switch.confirmation.clone(),
                 ports,
             )),
+            execution: None,
         });
     }
     for (exit, owner) in state.untaken_owner_exits() {
@@ -241,6 +244,7 @@ fn started(
                     owner.confirmation.clone(),
                     ports,
                 )),
+                execution: None,
             });
         }
     }
@@ -363,6 +367,7 @@ pub(crate) fn switched(
     batch.hand(IntentHandoff {
         intent_id: switch,
         body: IntentBody::Flatten(flattened(state, *initiator, confirmation.cloned(), ports)),
+        execution: None,
     });
     Ok(())
 }
@@ -574,6 +579,7 @@ fn allowed(
                     limit: proposal.limit,
                     purpose: proposal.purpose,
                 },
+                execution: proposal.execution,
             });
             Ok(())
         }
