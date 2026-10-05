@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-10-05, after the W4 consistency round (DEC-469, #605), money-first Home (DEC-468, #607) and the tour renderer's owl sprite (#606) merged. The tour video is re-rendered with the product's owls, synthesized sound effects on its cues, more motion, and stereo sound at -14 LUFS (it was -28), and the sign-in window is aligned on one left edge (#609). The per-session change log that used to live in this cell is in the git history of this file |
+| **Last updated** | 2026-10-05, after the W4 consistency round (DEC-469, #605), money-first Home (DEC-468, #607) and the tour renderer's owl sprite (#606) merged. The tour video is re-rendered with the product's owls, more motion, an original chiptune in place of the 1916 piano roll and synthesized sound effects, both cut to its cues, and stereo sound at -14 LUFS (it was -28), and the sign-in window is aligned on one left edge (#609). The per-session change log that used to live in this cell is in the git history of this file |
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
 decisions in [04-decision-log.md](04-decision-log.md). This file only tracks progress against them.
