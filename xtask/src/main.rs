@@ -4740,8 +4740,8 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            2,
-            "one checkout in each of `fast` and `full`"
+            3,
+            "one checkout in each source-reading job: `fast`, `full-checks`, and the mutants matrix"
         );
         for checkout in checkouts {
             assert!(
