@@ -237,10 +237,10 @@ fn gate(
     intent: &IntentId,
     always: bool,
 ) -> Result<&'static str, ExecutorError> {
-    let (decision, purpose) = decide(batch, intent, GatePass::BeforeSubmission)?;
+    let (decision, _) = decide(batch, intent, GatePass::BeforeSubmission)?;
     let verdict = decision.verdict_name();
     if verdict == ALLOW || always || decision.crowded_denial() {
-        let decided = journal_decision(batch, intent, &decision, purpose, Vec::new())?;
+        let decided = journal_decision(batch, intent, &decision, Vec::new())?;
         if let reason @ (UNPRICED | SESSION_UNKNOWN) = decision.reason_code() {
             batch.notify(
                 decided,
@@ -270,7 +270,6 @@ fn journal_decision(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
     decision: &PartialGateDecision,
-    purpose: Purpose,
     mut extra: Vec<(&'static str, Value)>,
 ) -> Result<EventId, ExecutorError> {
     let reason = if decision.is_binding() && decision.reason_code().is_empty() {
@@ -282,7 +281,6 @@ fn journal_decision(
         ("intent_id", text(intent.0.0.clone())),
         ("verdict", text(decision.verdict_name())),
         ("reason_code", reason),
-        ("purpose", text(purpose_name(purpose))),
         ("checks", decision.checks_value()?),
     ];
     pairs.extend(decision.binding_journal_fields()?);
@@ -301,12 +299,12 @@ fn held_long(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), Executo
     if !exit(batch, intent) || !aged(batch, intent) || batch.view.held_long.contains(intent) {
         return Ok(());
     }
-    let (decision, purpose) = decide(batch, intent, GatePass::First)?;
+    let (decision, _) = decide(batch, intent, GatePass::First)?;
     if decision.verdict_name() != HOLD {
         return Ok(());
     }
     let extra = vec![("held_long", Value::Bool(true))];
-    let decided = journal_decision(batch, intent, &decision, purpose, extra)?;
+    let decided = journal_decision(batch, intent, &decision, extra)?;
     batch.notify(decided, "exit_held_long");
     Ok(())
 }

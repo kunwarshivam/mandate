@@ -58,8 +58,9 @@
 //! cannot return a verdict: the executor derives `mandate-risk`'s proposal and calls
 //! `mandate_risk::evaluate` directly. Missing or invalid snapshots fail closed for a risk-adding
 //! order. A risk reduction retains the executor's local account-stream decision when an external
-//! snapshot is unavailable, preserving `AGENTS.md` rule 13. Only a completed binding run replaces
-//! `evaluation: account_stream_only` in `GateDecided`.
+//! snapshot is unavailable, preserving `AGENTS.md` rule 13. A completed binding run records its
+//! full evidence; a local denial records only its reached checks under the `account_stream_only`
+//! data profile.
 //!
 //! # Determinism
 //!

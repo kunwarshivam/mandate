@@ -3,9 +3,10 @@
 //! Local account-stream checks run first and may only narrow the result. [`BindingGateSource`]
 //! then supplies the trusted snapshots that are not in the executor fold; this module derives
 //! `mandate-risk`'s proposal and calls `mandate_risk::evaluate` directly. Only a completed binding
-//! run replaces `evaluation: account_stream_only` in the journal. Missing or invalid snapshots
-//! fail closed for risk-adding orders, while a risk reduction keeps the local result as
-//! `AGENTS.md` rule 13 requires.
+//! run records full evidence in the journal. A local denial records the checks it reached under
+//! the `account_stream_only` data profile. Missing or invalid snapshots fail closed for
+//! risk-adding orders, while a risk reduction keeps the local result as `AGENTS.md` rule 13
+//! requires.
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::{Object, Value};
@@ -27,8 +28,8 @@ use crate::types::{
 };
 
 /// What the executor's own account-stream checks concluded: a **partial** gate verdict, journaled
-/// as `GateDecided` with `evaluation: account_stream_only`, the verdict, the first failing check's
-/// reason code, and the whole `checks` list (journal spec §9). It is never the §9.1 evaluation.
+/// as `GateDecided` under the `account_stream_only` data profile, with the verdict, the first
+/// failing check's reason code, and the whole reached `checks` list (journal spec §9).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartialGateDecision {
     pub verdict: GateVerdict,
@@ -166,8 +167,10 @@ impl PartialGateDecision {
             .iter()
             .map(|check| {
                 object(vec![
-                    ("id", text(check.id)),
-                    ("passed", Value::Bool(check.passed)),
+                    ("id", text(journal_check_id(check.id)?)),
+                    ("result", text(if check.passed { "pass" } else { "fail" })),
+                    ("inputs", journal_evidence(&check.inputs)),
+                    ("computed", journal_evidence(&check.computed)),
                 ])
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -178,7 +181,11 @@ impl PartialGateDecision {
         &self,
     ) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
         let Some(evidence) = &self.binding else {
-            return Ok(vec![("evaluation", text("account_stream_only"))]);
+            return Ok(vec![
+                ("data_profile", text("account_stream_only")),
+                ("quotes_used", Value::Array(Vec::new())),
+                ("marks_used", Value::Array(Vec::new())),
+            ]);
         };
         let quotes = evidence.market.quote.map_or_else(Vec::new, |quote| {
             vec![object(vec![
@@ -213,6 +220,33 @@ impl PartialGateDecision {
             ),
         ])
     }
+}
+
+fn journal_evidence(value: &Value) -> Value {
+    match value {
+        Value::Object(_) => value.clone(),
+        _ => Value::Object(Object::new()),
+    }
+}
+
+fn journal_check_id(id: &str) -> Result<&'static str, ExecutorError> {
+    let registered = match id {
+        "account_state" | "startup_reconciliation" => "account_status",
+        "agent_mode" => "agent_mode",
+        "universe" => "eligibility",
+        "exit_priceable" => "mark_freshness",
+        "session_open" => "session",
+        "unknown_order_in_flight"
+        | "sell_exceeds_available"
+        | "protection_attributed"
+        | "protective_order" => "order_constraints",
+        _ => {
+            return Err(ExecutorError::NonCanonicalPayload {
+                field: format!("unregistered local gate check {id}"),
+            });
+        }
+    };
+    Ok(registered)
 }
 
 /// The hold reason of an exit with nothing to price from (DEC-160 (12)).

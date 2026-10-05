@@ -10,8 +10,9 @@ use common::{
 };
 use mandate_executor::{
     BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, BrokerRequest,
-    ExecutorError, Ports,
+    EventDraft, ExecutorError, Ports,
 };
+use mandate_journal::{Draft, InvalidReason};
 use mandate_num::{Fraction, Price, Qty, Ratio, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits};
 use mandate_risk::{
@@ -21,6 +22,7 @@ use mandate_risk::{
     WorkingUniverse,
 };
 use mandate_time::UtcNanos;
+use serde_json::{Map, Value as Json};
 
 const AAPL: &str = "AAPL";
 const INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ0";
@@ -227,6 +229,61 @@ fn ready() -> (Shell, Ports<'static>) {
     (shell.restart_ready(&ports), ports)
 }
 
+fn unreconciled() -> (Shell, Ports<'static>) {
+    let ids = Box::leak(Box::new(TestIds));
+    let mandates = Box::leak(Box::new(FixedMandate::covering(&[AAPL])));
+    let instruments = Box::leak(Box::new(FixedInstruments));
+    let executor_config = Box::leak(Box::new(config()));
+    let ports = bound_ports(ids, mandates, instruments, executor_config);
+    let mut shell = Shell::new(1);
+    shell
+        .fold_one(&stream_opened())
+        .unwrap_or_else(|error| panic!("{error}"));
+    let (shell, _) = shell.restart(&ports);
+    (shell, ports)
+}
+
+fn gate_draft(draft: &EventDraft) -> Map<String, Json> {
+    let fixture = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/refcases/journal.json"
+    ))
+    .unwrap_or_else(|error| panic!("journal fixture: {error}"));
+    let fixture: Json =
+        serde_json::from_str(&fixture).unwrap_or_else(|error| panic!("journal fixture: {error}"));
+    let mut body = fixture
+        .pointer("/account_stream/chain/3/body")
+        .and_then(Json::as_object)
+        .cloned()
+        .unwrap_or_else(|| panic!("version 2 GateDecided fixture"));
+    for sealed in ["seq", "recorded_at", "prev_hash"] {
+        body.remove(sealed);
+    }
+    let convert = |value: &mandate_canon::Value| {
+        serde_json::from_slice(&mandate_canon::to_canonical(value))
+            .unwrap_or_else(|error| panic!("canonical value: {error}"))
+    };
+    body.insert(
+        "config_refs".to_owned(),
+        convert(&mandate_canon::Value::Object(draft.config_refs.clone())),
+    );
+    body.insert("payload".to_owned(), convert(&draft.payload));
+    body
+}
+
+fn local_gate_draft() -> EventDraft {
+    let gate = GateFixture::allowing();
+    let (mut shell, ports) = unreconciled();
+    let ran = shell.run_with_binding(
+        handoff(INTENT, AGENT, opening(AAPL, "1", "150")),
+        &ports,
+        &gate,
+    );
+    ran.draft("GateDecided")
+        .cloned()
+        .unwrap_or_else(|| panic!("local GateDecided"))
+}
+
 fn ready_with_position() -> (Shell, Ports<'static>) {
     let (mut shell, ports) = ready();
     for (event_type, fields) in [
@@ -280,7 +337,7 @@ fn submitted(ran: &common::Ran) -> bool {
 }
 
 #[test]
-fn full_binding_input_allows_and_replaces_the_partial_evaluation() {
+fn full_binding_input_allows_and_records_its_evidence_profile() {
     let gate = GateFixture::allowing();
     let (mut shell, ports) = ready();
     let ran = shell.run_with_binding(
@@ -298,7 +355,14 @@ fn full_binding_input_allows_and_replaces_the_partial_evaluation() {
     );
     assert!(
         decided.payload.get("evaluation").is_none(),
-        "a full §9.1 decision is never labelled account_stream_only"
+        "a full §9.1 decision carries no unregistered member"
+    );
+    assert_eq!(
+        decided
+            .payload
+            .get("data_profile")
+            .and_then(|value| value.as_str()),
+        Some("iex")
     );
     let received = ran
         .draft("IntentReceived")
@@ -328,6 +392,71 @@ fn full_binding_input_allows_and_replaces_the_partial_evaluation() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn local_only_hold_uses_the_registered_schema_and_remains_a_denial() {
+    let draft = local_gate_draft();
+    assert_eq!(
+        draft
+            .payload
+            .get("verdict")
+            .and_then(|value| value.as_str()),
+        Some("hold")
+    );
+    assert_eq!(
+        draft
+            .payload
+            .get("reason_code")
+            .and_then(|value| value.as_str()),
+        Some("startup_reconciliation_pending")
+    );
+    assert_eq!(
+        draft
+            .payload
+            .get("data_profile")
+            .and_then(|value| value.as_str()),
+        Some("account_stream_only")
+    );
+    assert_eq!(
+        draft.payload.get("quotes_used"),
+        Some(&mandate_canon::Value::Array(Vec::new()))
+    );
+    assert_eq!(
+        draft.payload.get("marks_used"),
+        Some(&mandate_canon::Value::Array(Vec::new()))
+    );
+    assert_eq!(
+        draft
+            .payload
+            .get("checks")
+            .and_then(mandate_canon::Value::as_array)
+            .map(|checks| checks.len()),
+        Some(8)
+    );
+    assert!(draft.payload.get("evaluation").is_none());
+    let bytes = serde_json::to_vec(&Json::Object(gate_draft(&draft)))
+        .unwrap_or_else(|error| panic!("draft bytes: {error}"));
+    assert_eq!(Draft::parse(&bytes).map(|_| ()), Ok(()));
+}
+
+#[test]
+fn local_only_gate_rejects_the_superseded_evaluation_member() {
+    let draft = local_gate_draft();
+    let mut body = gate_draft(&draft);
+    let payload = body
+        .get_mut("payload")
+        .and_then(Json::as_object_mut)
+        .unwrap_or_else(|| panic!("GateDecided payload"));
+    payload.insert(
+        "evaluation".to_owned(),
+        Json::String("account_stream_only".to_owned()),
+    );
+    let bytes = serde_json::to_vec(&Json::Object(body))
+        .unwrap_or_else(|error| panic!("draft bytes: {error}"));
+    let refusal = Draft::parse(&bytes).expect_err("evaluation is not registered");
+    assert_eq!(refusal.reason, InvalidReason::Schema);
+    assert_eq!(refusal.path, "payload.evaluation");
 }
 
 #[test]
