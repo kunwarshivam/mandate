@@ -501,7 +501,15 @@ for cid in sorted(c for c in C if c.startswith("MC-E") and C[c]["op"] == "lifecy
         for x in st["drafts"]:
             if x["type"] == "IntentProposed":
                 b = C[cid]["script"][0]["bound"]
-                req(cid, all(x[k] == b[k] for k in ("instrument", "side", "qty", "limit_price", "purpose")), "the bound order")
+                req(
+                    cid,
+                    x["instrument_id"] == b["instrument"]
+                    and x["side"] == b["side"]
+                    and x["order_type"] == "limit"
+                    and x["tif"] == ("day" if b["asset_class"] == "us_equity" else "gtc")
+                    and all(x[k] == b[k] for k in ("qty", "limit_price", "purpose")),
+                    "the bound order",
+                )
         if not any(x["type"] == "ApprovalRevalidated" and x["result"] == "act" for x in st["drafts"]):
             req(cid, all(x["type"] != "IntentProposed" for x in st["drafts"]), "only an act proposes")
 req("MC-E01", C["MC-E01"]["expect"][1]["drafts"][0]["verdict"] == "approved", "a grant")

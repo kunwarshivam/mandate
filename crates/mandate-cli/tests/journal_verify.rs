@@ -77,6 +77,22 @@ fn vectors() -> serde_json::Value {
     serde_json::from_slice(&fs::read(&path).unwrap()).unwrap()
 }
 
+/// Materializes the config artifacts declared by the journal vectors.
+fn vector_store(scratch: &Scratch) -> String {
+    let store = scratch.dir("vector-artifacts");
+    let mut artifacts = FsArtifactStore::open(store.as_str()).unwrap();
+    for fixture in vectors()["artifacts"].as_array().unwrap() {
+        let bytes = fixture["canonical"].as_str().unwrap().as_bytes();
+        let reference = artifacts.put_artifact(bytes).unwrap();
+        assert_eq!(
+            reference.to_string(),
+            fixture["ref"].as_str().unwrap(),
+            "the fixture reference must be the digest of its canonical bytes"
+        );
+    }
+    store
+}
+
 /// The tamper case named `name`.
 fn tamper_case(name: &str) -> serde_json::Value {
     vectors()["tamper_cases"]
@@ -197,6 +213,19 @@ fn verify(scratch: &Scratch, name: &str, bytes: &[u8], extra: &[&str]) -> (Outco
     (outcome, String::from_utf8(report).unwrap())
 }
 
+/// Verifies an export built from the journal vectors with their declared config artifacts.
+fn verify_vector_export(
+    scratch: &Scratch,
+    name: &str,
+    bytes: &[u8],
+    extra: &[&str],
+) -> (Outcome, String) {
+    let store = vector_store(scratch);
+    let mut args = vec!["--store", store.as_str()];
+    args.extend_from_slice(extra);
+    verify(scratch, name, bytes, &args)
+}
+
 /// Asserts `outcome` is the per-event failure tamper case `name` expects.
 fn assert_tamper(name: &str, outcome: &Outcome) {
     let (seq, check) = expected_event_failure(name);
@@ -286,7 +315,8 @@ fn an_untampered_export_verifies_and_the_report_names_every_input() {
     let scratch = Scratch::new("verified");
     let events = chain();
     let path = scratch.file("segment.jsonl", &export(&events));
-    let args = parse(&[path.as_str()]).unwrap();
+    let store = vector_store(&scratch);
+    let args = parse(&[path.as_str(), "--store", store.as_str()]).unwrap();
     let mut report = Vec::new();
     let outcome = journal::verify(&args, &mut report).unwrap();
     assert_eq!(
@@ -306,7 +336,7 @@ fn an_untampered_export_verifies_and_the_report_names_every_input() {
             "export: {path}
 lines: 5
 trusted start: seq 1, prev_hash {ZERO_HASH}
-artifact store: none given
+artifact store: {store}
 anchor: none given
 result: verified, stream {VECTOR_STREAM}, seq 1 to 5, last hash {}
 ",
@@ -321,7 +351,7 @@ fn a_modified_payload_is_rehash_mismatch() {
     let mut events = chain();
     let third = at(&mut events, 3);
     third.body = replace_once(&third.body, r#""verdict":"allow""#, r#""verdict":"deny""#);
-    let (outcome, _) = verify(&scratch, "segment.jsonl", &export(&events), &[]);
+    let (outcome, _) = verify_vector_export(&scratch, "segment.jsonl", &export(&events), &[]);
     assert_tamper("payload_modified", &outcome);
 }
 
@@ -330,7 +360,7 @@ fn a_deleted_event_is_seq_gap() {
     let scratch = Scratch::new("deleted");
     let mut events = chain();
     events.remove(2);
-    let (outcome, report) = verify(&scratch, "segment.jsonl", &export(&events), &[]);
+    let (outcome, report) = verify_vector_export(&scratch, "segment.jsonl", &export(&events), &[]);
     assert_tamper("event_deleted", &outcome);
     assert!(report.contains("lines: 4"), "{report}");
     assert!(
@@ -350,7 +380,7 @@ fn a_prev_hash_changed_without_rehashing_is_rehash_mismatch() {
         &format!(r#""prev_hash":"{third_hash}""#),
         &format!(r#""prev_hash":"{FOREIGN_HASH}""#),
     );
-    let (outcome, _) = verify(&scratch, "segment.jsonl", &export(&events), &[]);
+    let (outcome, _) = verify_vector_export(&scratch, "segment.jsonl", &export(&events), &[]);
     assert_tamper("prev_hash_changed_without_rehash", &outcome);
 }
 
@@ -366,7 +396,7 @@ fn a_prev_hash_rewritten_and_rehashed_is_prev_hash_mismatch() {
         &format!(r#""prev_hash":"{FOREIGN_HASH}""#),
     );
     rehash(fourth);
-    let (outcome, _) = verify(&scratch, "segment.jsonl", &export(&events), &[]);
+    let (outcome, _) = verify_vector_export(&scratch, "segment.jsonl", &export(&events), &[]);
     assert_tamper("prev_hash_rewritten_and_rehashed", &outcome);
 }
 
@@ -426,7 +456,7 @@ fn a_tail_truncated_after_an_anchor_passes_every_per_event_check_and_fails_the_a
     let mut events = chain();
     events.pop();
     let anchor = scratch.file("anchor.json", &anchor_json());
-    let (outcome, report) = verify(
+    let (outcome, report) = verify_vector_export(
         &scratch,
         "segment.jsonl",
         &export(&events),
@@ -441,7 +471,7 @@ fn a_tail_truncated_after_an_anchor_passes_every_per_event_check_and_fails_the_a
         report.contains(&format!("result: failed, {expected}")),
         "{report}"
     );
-    let (without_anchor, _) = verify(&scratch, "plain.jsonl", &export(&events), &[]);
+    let (without_anchor, _) = verify_vector_export(&scratch, "plain.jsonl", &export(&events), &[]);
     assert!(
         !without_anchor.failed(),
         "every per-event check passes; only the anchor catches a truncated tail"
@@ -469,7 +499,7 @@ fn a_chain_rewritten_from_seq_3_passes_every_per_event_check_and_fails_the_ancho
         previous = event.hash.clone();
     }
     let anchor = scratch.file("anchor.json", &anchor_json());
-    let (outcome, _) = verify(
+    let (outcome, _) = verify_vector_export(
         &scratch,
         "segment.jsonl",
         &export(&events),
@@ -479,7 +509,7 @@ fn a_chain_rewritten_from_seq_3_passes_every_per_event_check_and_fails_the_ancho
         outcome.code(),
         Some(expected_range_check("chain_rewritten_from_seq_3").as_str())
     );
-    let (without_anchor, _) = verify(&scratch, "plain.jsonl", &export(&events), &[]);
+    let (without_anchor, _) = verify_vector_export(&scratch, "plain.jsonl", &export(&events), &[]);
     assert!(
         !without_anchor.failed(),
         "a rewritten chain is self-consistent; only the anchor catches it"
@@ -519,7 +549,7 @@ fn an_untampered_export_passes_the_anchor_it_is_covered_by() {
     let scratch = Scratch::new("anchored");
     let anchor = scratch.file("anchor.json", &anchor_json());
     let events = chain();
-    let (outcome, _) = verify(
+    let (outcome, _) = verify_vector_export(
         &scratch,
         "segment.jsonl",
         &export(&events),
@@ -546,7 +576,7 @@ fn an_anchor_whose_root_does_not_match_its_leaves_is_anchor_root_mismatch() {
         FOREIGN_HASH,
     );
     let anchor = scratch.file("anchor.json", broken.as_bytes());
-    let (outcome, _) = verify(
+    let (outcome, _) = verify_vector_export(
         &scratch,
         "segment.jsonl",
         &export(&chain()),
@@ -701,7 +731,7 @@ fn a_partial_segment_verifies_from_its_trusted_start() {
     let scratch = Scratch::new("partial");
     let events = chain();
     let trusted = events[1].hash.clone();
-    let (outcome, report) = verify(
+    let (outcome, report) = verify_vector_export(
         &scratch,
         "segment.jsonl",
         &export(&events[2..]),
@@ -719,7 +749,7 @@ fn a_partial_segment_verifies_from_its_trusted_start() {
 fn a_trusted_start_the_segment_does_not_chain_to_is_prev_hash_mismatch() {
     let scratch = Scratch::new("bad-start");
     let events = chain();
-    let (outcome, _) = verify(
+    let (outcome, _) = verify_vector_export(
         &scratch,
         "segment.jsonl",
         &export(&events[2..]),
@@ -965,7 +995,7 @@ fn a_store_path_that_is_not_a_directory_is_refused_rather_than_created() {
 fn identical_inputs_give_identical_output() {
     let scratch = Scratch::new("deterministic");
     let events = chain();
-    let store = scratch.dir("artifacts");
+    let store = vector_store(&scratch);
     let anchor = scratch.file("anchor.json", &anchor_json());
     let path = scratch.file("segment.jsonl", &export(&events));
     let run = |file: &str, extra: Vec<&str>| {
@@ -992,10 +1022,11 @@ fn identical_inputs_give_identical_output() {
         r#""verdict":"deny""#,
     );
     let failing = scratch.file("tampered.jsonl", &export(&tampered));
-    let (failed, failed_report) = run(&failing, vec![]);
+    let with_store = vec!["--store", store.as_str()];
+    let (failed, failed_report) = run(&failing, with_store.clone());
     assert_eq!(
         (failed.clone(), failed_report),
-        run(&failing, vec![]),
+        run(&failing, with_store),
         "a failing run repeats its report too"
     );
     assert_eq!(failed.code(), Some("rehash_mismatch"));
@@ -1031,7 +1062,15 @@ fn an_anchor_that_names_no_leaf_for_the_exports_stream_is_refused() {
     let elsewhere = anchor_over(vec![("acct:ws_other:OTHERACCT", 9, Digest::of(b"o"))]);
     let anchor = scratch.file("anchor.json", &elsewhere);
     let path = scratch.file("segment.jsonl", &export(&chain()));
-    let args = parse(&[path.as_str(), "--anchor", anchor.as_str()]).unwrap();
+    let store = vector_store(&scratch);
+    let args = parse(&[
+        path.as_str(),
+        "--store",
+        store.as_str(),
+        "--anchor",
+        anchor.as_str(),
+    ])
+    .unwrap();
     let mut report = Vec::new();
     let err = journal::verify(&args, &mut report).unwrap_err();
     let text = format!("{err:#}");
@@ -1054,7 +1093,7 @@ fn an_anchor_covering_more_streams_than_the_export_still_checks_its_own() {
         ("ctl:ws_other", 2, Digest::of(b"c")),
     ]);
     let anchor = scratch.file("anchor.json", &wide);
-    let (ok, _) = verify(
+    let (ok, _) = verify_vector_export(
         &scratch,
         "segment.jsonl",
         &export(&events),
@@ -1067,7 +1106,7 @@ fn an_anchor_covering_more_streams_than_the_export_still_checks_its_own() {
         ("acct:ws_other:OTHERACCT", 9, Digest::of(b"o")),
     ]);
     let anchor = scratch.file("stale.json", &stale);
-    let (bad, _) = verify(
+    let (bad, _) = verify_vector_export(
         &scratch,
         "stale.jsonl",
         &export(&events),
@@ -1101,6 +1140,7 @@ fn every_refusal_reports_its_stable_code_first() {
     let scratch = Scratch::new("codes");
     let events = chain();
     let path = scratch.file("segment.jsonl", &export(&events));
+    let store = vector_store(&scratch);
     let store_file = scratch.file("not-a-dir", b"x");
     let bad_anchor = scratch.file("bad.json", b"{");
     let elsewhere = scratch.file(
@@ -1133,7 +1173,13 @@ fn every_refusal_reports_its_stable_code_first() {
         ),
         (
             Refusal::AnchorStream,
-            vec![path.as_str(), "--anchor", elsewhere.as_str()],
+            vec![
+                path.as_str(),
+                "--store",
+                store.as_str(),
+                "--anchor",
+                elsewhere.as_str(),
+            ],
         ),
         (Refusal::ExportStreams, vec![mixed.as_str()]),
     ];

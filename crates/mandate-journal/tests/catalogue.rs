@@ -4,6 +4,7 @@
 mod common;
 
 use common::{STREAM, T, edit, event_id, mark_draft};
+use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::{Draft, InvalidReason};
 
 const FEE: &str = "fee_config";
@@ -118,6 +119,7 @@ const REGISTERED: &[&str] = &[
     "OrderSubmitted",
     "FillApplied",
     "MarkUpdated",
+    "ReconciliationRun",
     "MandateVersionApplied",
     "UniverseChanged",
 ];
@@ -130,6 +132,8 @@ const CLOSED_ON_AGENT: &[&str] = &[
     "ModelOutputRecorded",
     "DecisionMade",
     "IntentProposed",
+    "ApprovalRequested",
+    "ApprovalDelivered",
     "AgentModeChanged",
     "KillSwitchActivated",
     "OwnerExitRequested",
@@ -163,20 +167,23 @@ const RISK_STATE_ON_ACCOUNT: [(&str, &str); 2] =
 /// The agent stream's research-agent thesis records journal spec §9.4 closes (DEC-413, DEC-414).
 const THESIS_ON_AGENT: [(&str, &str); 2] = [("ThesisProposed", AGENT), ("ThesisRevised", AGENT)];
 
-/// The account stream's executor records journal spec v0.13 §9.5 closes (DEC-446, DEC-447):
-/// `ProtectionChanged` at `schema_version` 1, and the other three at 2 with their version-1
-/// schemas staying registered (§8).
-const EXECUTOR_ON_ACCOUNT: [(&str, &str); 5] = [
+/// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460).
+const EXECUTOR_ON_ACCOUNT: [(&str, &str); 9] = [
     ("IntentReceived", ACCT),
     ("GateDecided", ACCT),
     ("OrderSubmitted", ACCT),
     ("OrderRequestRecorded", ACCT),
+    ("OrderStateChanged", ACCT),
     ("ProtectionChanged", ACCT),
+    ("BrokerPositionObserved", ACCT),
+    ("AgentModeApplied", ACCT),
+    ("CompensatingEvent", ACCT),
 ];
 
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {
     CLOSED_BY_SECTION_9_2.contains(&(event_type, kind))
         || (event_type, kind) == SNAPSHOT_ON_ACCOUNT
+        || (event_type, kind) == ("AccountStateObserved", ACCT)
         || RISK_STATE_ON_ACCOUNT.contains(&(event_type, kind))
         || THESIS_ON_AGENT.contains(&(event_type, kind))
         || EXECUTOR_ON_ACCOUNT.contains(&(event_type, kind))
@@ -261,6 +268,553 @@ fn with_payload(event_type: &str, refs: &[&str], payload: &str) -> Vec<u8> {
     edit(&d, "payload", Some(payload))
 }
 
+fn with_agent_payload(event_type: &str, payload: &str) -> Vec<u8> {
+    let d = draft(event_type, AGENT, &[MAN]);
+    edit(&d, "payload", Some(payload))
+}
+
+fn approval_requested() -> Vec<u8> {
+    let mandate = format!("sha256:{}", "1".repeat(64));
+    let body = with_agent_payload(
+        "ApprovalRequested",
+        &format!(
+            r#"{{
+            "instrument":"AAPL","asset_class":"us_equity","side":"buy","qty":"2",
+            "limit":"150","purpose":"open","mandate_version":"{mandate}",
+            "decided_by":"rule:open","combined_score":"0.75",
+            "reference_mark":{{"price":"149.5","seq":7}},
+            "approvers_required":1,"independent_required":false,
+            "deadline":1789999200,"timeout_s":300,"on_timeout":"skip",
+            "content":{{
+                "action":{{"instrument":"AAPL","asset_class":"us_equity","side":"buy",
+                    "qty":"2","limit":"150","order_usd":"300","purpose":"open"}},
+                "trigger":{{"mandate_version":"{mandate}","decided_by":"rule:open"}},
+                "evidence":{{
+                    "combined_score":{{"label":"combined model score, not a probability of profit",
+                        "value":"0.75"}},
+                    "outputs":[{{"event_id":"{}","artifact":null,
+                        "label":"Output of software you selected"}}]
+                }},
+                "risk_impact":[{{"field":"order_usd","value":"300","cap":null}}],
+                "reference_mark":{{"price":"149.5","seq":7}},
+                "deadline":"{T}",
+                "default":"If you do nothing, this action is skipped",
+                "choices":["approve","skip"],
+                "approvers":{{"required":1,"independent":false}}
+            }},
+            "content_hash":"sha256:{}"
+        }}"#,
+            event_id(8),
+            "0".repeat(64)
+        ),
+    );
+    let value = parse(&body).expect("the approval fixture is JSON");
+    let content = value
+        .get("payload")
+        .and_then(|payload| payload.get("content"))
+        .expect("the approval fixture has content");
+    let content_hash = format!("sha256:{}", Digest::of(&to_canonical(content)));
+    let body = edit(
+        &body,
+        "payload.content_hash",
+        Some(&format!("\"{content_hash}\"")),
+    );
+    let mut refs = [mandate, content_hash];
+    refs.sort();
+    edit(
+        &body,
+        "artifact_refs",
+        Some(&format!(r#"["{}","{}"]"#, refs[0], refs[1])),
+    )
+}
+
+fn approval_delivered() -> Vec<u8> {
+    with_agent_payload(
+        "ApprovalDelivered",
+        &format!(
+            r#"{{"approval":"{}","channel":"cli_inbox","status":"delivered","message_id":null}}"#,
+            event_id(8)
+        ),
+    )
+}
+
+fn broker_position_observed() -> Vec<u8> {
+    with_payload(
+        "BrokerPositionObserved",
+        &[],
+        &format!(
+            r#"{{"instrument":"AAPL","broker_qty":"7","model_qty":"10","mismatch":true,
+            "risk_clock":"{T}"}}"#
+        ),
+    )
+}
+
+fn agent_mode_applied() -> Vec<u8> {
+    with_payload(
+        "AgentModeApplied",
+        &[],
+        &format!(
+            r#"{{"agent":"*","to":"paused","restriction":"reconciliation:AAPL",
+            "originated":true,"risk_clock":"{T}"}}"#
+        ),
+    )
+}
+
+fn compensating_event() -> Vec<u8> {
+    with_payload(
+        "CompensatingEvent",
+        &[],
+        &format!(
+            r#"{{"subject":"md-order-1","difference":"order_state","from":"submitting",
+            "to":"accepted","corrected_event_ids":["{}"],"risk_clock":"{T}"}}"#,
+            event_id(9)
+        ),
+    )
+}
+
+#[derive(Clone)]
+enum ValuePath {
+    Key(String),
+    Index(usize),
+}
+
+fn member_paths(value: &Value, prefix: Vec<ValuePath>, out: &mut Vec<Vec<ValuePath>>) {
+    match value {
+        Value::Object(members) => {
+            for (key, member) in members {
+                let mut path = prefix.clone();
+                path.push(ValuePath::Key(key.as_str().to_owned()));
+                out.push(path.clone());
+                member_paths(member, path, out);
+            }
+        }
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                let mut path = prefix.clone();
+                path.push(ValuePath::Index(index));
+                member_paths(item, path, out);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Int(_) | Value::Str(_) => {}
+    }
+}
+
+fn remove_member(value: &mut Value, path: &[ValuePath]) {
+    match path {
+        [ValuePath::Key(key)] => {
+            let Value::Object(object) = value else {
+                panic!("the path names an object")
+            };
+            object.remove(key.as_str()).expect("the member exists");
+        }
+        [ValuePath::Key(key), rest @ ..] => {
+            let Value::Object(object) = value else {
+                panic!("the path names an object")
+            };
+            remove_member(
+                object
+                    .get_mut(key.as_str())
+                    .expect("the object member exists"),
+                rest,
+            );
+        }
+        [ValuePath::Index(index), rest @ ..] => {
+            let Value::Array(array) = value else {
+                panic!("the path names an array")
+            };
+            remove_member(
+                array.get_mut(*index).expect("the array member exists"),
+                rest,
+            );
+        }
+        [] => unreachable!("a member path ends in an object key"),
+    }
+}
+
+fn path_text(path: &[ValuePath]) -> String {
+    let mut text = String::new();
+    for part in path {
+        match part {
+            ValuePath::Key(key) => {
+                if !text.is_empty() {
+                    text.push('.');
+                }
+                text.push_str(key);
+            }
+            ValuePath::Index(index) => text.push_str(&format!("[{index}]")),
+        }
+    }
+    text
+}
+
+fn assert_every_payload_member_is_required(bytes: &[u8]) {
+    let mut paths = Vec::new();
+    let value = parse(bytes).expect("the fixture is JSON");
+    let payload = value.get("payload").expect("the fixture has a payload");
+    member_paths(
+        payload,
+        vec![ValuePath::Key("payload".to_owned())],
+        &mut paths,
+    );
+    for path in paths {
+        let mut planted = value.clone();
+        remove_member(&mut planted, &path);
+        let refusal = Draft::parse(&to_canonical(&planted))
+            .expect_err("every member of a closed object is required");
+        assert_eq!(
+            (refusal.reason, refusal.path),
+            (InvalidReason::Schema, path_text(&path)),
+            "{}",
+            path_text(&path)
+        );
+    }
+}
+
+#[test]
+fn remaining_tracer_events_are_closed_and_every_member_is_required() {
+    for complete in [
+        approval_requested(),
+        approval_delivered(),
+        broker_position_observed(),
+        agent_mode_applied(),
+        compensating_event(),
+    ] {
+        assert_eq!(Draft::parse(&complete).map(|_| ()), Ok(()));
+        assert_every_payload_member_is_required(&complete);
+        let extra = edit(&complete, "payload.unregistered", Some("true"));
+        let refusal = Draft::parse(&extra).expect_err("the payload is closed");
+        assert_eq!(
+            (refusal.reason, refusal.path.as_str()),
+            (InvalidReason::Schema, "payload.unregistered")
+        );
+    }
+}
+
+#[test]
+fn approval_schemas_pin_nested_types_vocabularies_and_canonical_content() {
+    let requested = approval_requested();
+    for (path, invalid) in [
+        ("asset_class", "\"equity\""),
+        ("side", "\"sell\""),
+        ("qty", "\"two\""),
+        ("purpose", "\"risk_exit\""),
+        ("reference_mark.seq", "\"7\""),
+        ("approvers_required", "\"1\""),
+        ("independent_required", "0"),
+        ("deadline", "\"2026-09-21T14:00:00.000000000Z\""),
+        ("timeout_s", "\"300\""),
+        ("on_timeout", "\"deny\""),
+        ("content.action.asset_class", "\"equity\""),
+        ("content.action.side", "\"sell\""),
+        ("content.action.order_usd", "\"three hundred\""),
+        ("content.action.purpose", "\"risk_exit\""),
+        ("content.deadline", "\"2026-09-21T14:00:00.100000000Z\""),
+        ("content.evidence.outputs", "{}"),
+        ("content.risk_impact", "{}"),
+        ("content.approvers.required", "\"1\""),
+    ] {
+        let planted = edit(&requested, &format!("payload.{path}"), Some(invalid));
+        let refusal = Draft::parse(&planted).expect_err("the approval member type is exact");
+        assert!(
+            matches!(
+                refusal.reason,
+                InvalidReason::Schema | InvalidReason::NonCanonical
+            ),
+            "{path}: {refusal:?}"
+        );
+    }
+    for (path, valid) in [
+        ("asset_class", "\"crypto\""),
+        ("purpose", "\"increase\""),
+        ("content.action.asset_class", "\"crypto\""),
+        ("content.action.purpose", "\"increase\""),
+        (
+            "content.evidence.outputs",
+            &format!(
+                r#"[{{"event_id":"{}","artifact":"sha256:{}","label":"platform-authored"}}]"#,
+                event_id(7),
+                "3".repeat(64)
+            ),
+        ),
+        (
+            "content.risk_impact",
+            r#"[{"field":"daily_pnl_fraction","value":"0.1","cap":"0.2"}]"#,
+        ),
+    ] {
+        let planted = edit(&requested, &format!("payload.{path}"), Some(valid));
+        let parsed = Draft::parse(&planted);
+        assert!(
+            parsed.is_err(),
+            "changing canonical content without its hash must be refused: {path}"
+        );
+    }
+    let delivered = approval_delivered();
+    for status in ["delivered", "suppressed_quiet_hours", "failed"] {
+        let draft = edit(&delivered, "payload.status", Some(&format!("\"{status}\"")));
+        assert_eq!(Draft::parse(&draft).map(|_| ()), Ok(()), "{status}");
+    }
+    for (path, value) in [
+        ("channel", "\"email\""),
+        ("status", "\"sent\""),
+        ("approval", "\"not-a-ulid\""),
+        ("message_id", "\"\""),
+    ] {
+        let draft = edit(&delivered, &format!("payload.{path}"), Some(value));
+        assert!(Draft::parse(&draft).is_err(), "{path}");
+    }
+}
+
+#[test]
+fn reconciliation_schemas_pin_types_and_complete_vocabularies() {
+    let position = broker_position_observed();
+    for (path, value) in [
+        ("broker_qty", "\"seven\""),
+        ("model_qty", "10"),
+        ("mismatch", "\"true\""),
+        ("risk_clock", "\"2026-09-21T14:00:00.100000000Z\""),
+    ] {
+        let draft = edit(&position, &format!("payload.{path}"), Some(value));
+        assert!(Draft::parse(&draft).is_err(), "{path}");
+    }
+    let mode = agent_mode_applied();
+    for state in ["normal", "exits_only", "paused", "stopped"] {
+        let draft = edit(&mode, "payload.to", Some(&format!("\"{state}\"")));
+        assert_eq!(Draft::parse(&draft).map(|_| ()), Ok(()), "{state}");
+    }
+    for (path, value) in [
+        ("agent", "\"\""),
+        ("to", "\"unknown\""),
+        ("restriction", "\"\""),
+        ("originated", "\"true\""),
+    ] {
+        let draft = edit(&mode, &format!("payload.{path}"), Some(value));
+        assert!(Draft::parse(&draft).is_err(), "{path}");
+    }
+    let compensation = compensating_event();
+    for member in ["from", "to"] {
+        for state in [
+            "intent",
+            "submitting",
+            "accepted",
+            "partially_filled",
+            "pending_cancel",
+            "pending_replace",
+            "unknown",
+            "filled",
+            "canceled",
+            "rejected",
+            "expired",
+            "replaced",
+            "abandoned",
+        ] {
+            let draft = edit(
+                &compensation,
+                &format!("payload.{member}"),
+                Some(&format!("\"{state}\"")),
+            );
+            assert_eq!(Draft::parse(&draft).map(|_| ()), Ok(()), "{member}");
+        }
+    }
+    for (path, value) in [
+        ("difference", "\"quantity\""),
+        ("from", "\"new\""),
+        ("to", "\"new\""),
+        ("corrected_event_ids", r#"["not-a-ulid"]"#),
+    ] {
+        let draft = edit(&compensation, &format!("payload.{path}"), Some(value));
+        assert!(Draft::parse(&draft).is_err(), "{path}");
+    }
+}
+
+fn account_state_observed() -> Vec<u8> {
+    with_payload(
+        "AccountStateObserved",
+        &[],
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"ACTIVE","trading_blocked":false,
+            "account_blocked":false,"trade_suspended_by_user":false,"multiplier":2,
+            "equity":"1000","cash":"800","buying_power":"2000",
+            "non_marginable_buying_power":"800","accrued_fees":"0",
+            "risk_clock":"{T}"}}"#
+        ),
+    )
+}
+
+fn order_state_changed() -> Vec<u8> {
+    with_payload(
+        "OrderStateChanged",
+        &[],
+        &format!(
+            r#"{{"client_order_id":"md-order-1","state":"accepted","attempted":null,
+            "broker_status":null,"filled_qty":null,"reject_code":null,"replaces":null,
+            "replaced_by":null,"replaced_by_broker_order_id":null,"lookup":null,
+            "ignored":false,"cancel_requested":false,"cancel_confirmed":false,
+            "cancel_overdue":false,"adopted":false,"ladder_step":false,"risk_clock":"{T}"}}"#
+        ),
+    )
+}
+
+#[test]
+fn order_state_changed_is_closed_and_every_member_is_required() {
+    let complete = order_state_changed();
+    assert_eq!(Draft::parse(&complete).map(|_| ()), Ok(()));
+    for field in [
+        "client_order_id",
+        "state",
+        "attempted",
+        "broker_status",
+        "filled_qty",
+        "reject_code",
+        "replaces",
+        "replaced_by",
+        "replaced_by_broker_order_id",
+        "lookup",
+        "ignored",
+        "cancel_requested",
+        "cancel_confirmed",
+        "cancel_overdue",
+        "adopted",
+        "ladder_step",
+        "risk_clock",
+    ] {
+        let missing = edit(&complete, &format!("payload.{field}"), None);
+        let refusal = Draft::parse(&missing).expect_err("every transition member is required");
+        assert_eq!(
+            (refusal.reason, refusal.path),
+            (InvalidReason::Schema, format!("payload.{field}")),
+            "{field}"
+        );
+    }
+    let extra = edit(&complete, "payload.unregistered", Some("true"));
+    let refusal = Draft::parse(&extra).expect_err("the transition payload is closed");
+    assert_eq!(
+        (refusal.reason, refusal.path.as_str()),
+        (InvalidReason::Schema, "payload.unregistered")
+    );
+}
+
+#[test]
+fn order_state_changed_catches_a_planted_writer_omission() {
+    let without_ladder_marker = edit(&order_state_changed(), "payload.ladder_step", None);
+    let refusal =
+        Draft::parse(&without_ladder_marker).expect_err("a writer omitted a required member");
+    assert_eq!(
+        (refusal.reason, refusal.path.as_str()),
+        (InvalidReason::Schema, "payload.ladder_step")
+    );
+}
+
+#[test]
+fn order_state_changed_covers_every_state_and_nullable_evidence_branch() {
+    let complete = order_state_changed();
+    for field in ["state", "attempted"] {
+        for state in [
+            "intent",
+            "submitting",
+            "accepted",
+            "partially_filled",
+            "pending_cancel",
+            "pending_replace",
+            "unknown",
+            "filled",
+            "canceled",
+            "rejected",
+            "expired",
+            "replaced",
+            "abandoned",
+        ] {
+            let value = format!("\"{state}\"");
+            let draft = edit(&complete, &format!("payload.{field}"), Some(&value));
+            assert_eq!(Draft::parse(&draft).map(|_| ()), Ok(()), "{field}={state}");
+        }
+    }
+    for (field, value) in [
+        ("broker_status", "\"accepted\""),
+        ("filled_qty", "\"1.25\""),
+        ("reject_code", "\"insufficient_buying_power\""),
+        ("replaces", "\"md-order-0\""),
+        ("replaced_by", "\"md-order-2\""),
+        ("replaced_by_broker_order_id", "\"broker-order-2\""),
+        ("lookup", "\"absent\""),
+    ] {
+        let draft = edit(&complete, &format!("payload.{field}"), Some(value));
+        assert_eq!(Draft::parse(&draft).map(|_| ()), Ok(()), "{field}");
+    }
+}
+
+#[test]
+fn order_state_changed_rejects_invalid_transition_evidence() {
+    let complete = order_state_changed();
+    for (field, value, reason) in [
+        ("state", "\"new\"", InvalidReason::NonCanonical),
+        ("attempted", "\"new\"", InvalidReason::NonCanonical),
+        ("lookup", "\"present\"", InvalidReason::NonCanonical),
+        ("filled_qty", "\"one\"", InvalidReason::NonCanonical),
+        ("broker_status", "\"\"", InvalidReason::NonCanonical),
+        ("reject_code", "\"\"", InvalidReason::NonCanonical),
+        (
+            "replaced_by_broker_order_id",
+            "\"\"",
+            InvalidReason::NonCanonical,
+        ),
+    ] {
+        let draft = edit(&complete, &format!("payload.{field}"), Some(value));
+        let refusal = Draft::parse(&draft).expect_err("invalid transition evidence");
+        assert_eq!(
+            (refusal.reason, refusal.path),
+            (reason, format!("payload.{field}")),
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn account_state_observed_is_closed_complete_and_contains_no_sensitive_identity() {
+    let complete = account_state_observed();
+    assert_eq!(Draft::parse(&complete).map(|_| ()), Ok(()));
+    for field in [
+        "status",
+        "crypto_status",
+        "trading_blocked",
+        "account_blocked",
+        "trade_suspended_by_user",
+        "multiplier",
+        "equity",
+        "cash",
+        "buying_power",
+        "non_marginable_buying_power",
+        "accrued_fees",
+        "risk_clock",
+    ] {
+        let missing = edit(&complete, &format!("payload.{field}"), None);
+        let refusal = Draft::parse(&missing).expect_err("every account field is required");
+        assert_eq!(
+            (refusal.reason, refusal.path),
+            (InvalidReason::Schema, format!("payload.{field}")),
+            "{field}"
+        );
+    }
+    for field in [
+        "extra",
+        "account_number",
+        "account_id",
+        "credentials",
+        "personal_data",
+    ] {
+        let extra = edit(
+            &complete,
+            &format!("payload.{field}"),
+            Some("\"sensitive\""),
+        );
+        let refusal = Draft::parse(&extra).expect_err("the payload is closed");
+        assert_eq!(
+            (refusal.reason, refusal.path),
+            (InvalidReason::Schema, format!("payload.{field}")),
+            "{field}"
+        );
+    }
+}
+
 #[test]
 fn registered_schemas_accept_their_payloads() {
     let intent = event_id(7);
@@ -293,6 +847,15 @@ fn registered_schemas_accept_their_payloads() {
                 r#"{"fill_id":"f","client_order_id":"c-1","instrument_id":"i","side":"buy",
             "qty_gross":"10","price":"150.000","trade_date":"2026-09-21","risk_clock":"2026-09-21T14:00:01.000000000Z",
             "fees":[{"kind":"cat","amount":"0.00010","asset":"USD","status":"accrued"}]}"#,
+            ),
+        ),
+        (
+            r#""checkpoint":null,"differences":0,"result":"clean","risk_clock":"2026-09-21T14:00:01.000000000Z","snapshot_head":1"#,
+            with_payload(
+                "ReconciliationRun",
+                &[],
+                r#"{"result":"clean","checkpoint":null,"snapshot_head":1,"differences":0,
+            "risk_clock":"2026-09-21T14:00:01.000000000Z"}"#,
             ),
         ),
     ];
@@ -343,6 +906,17 @@ fn registered_schemas_accept_their_payloads() {
     assert_eq!(
         (e.reason, e.path.as_str()),
         (InvalidReason::Schema, "payload.attempt")
+    );
+    let bad_reconciliation = with_payload(
+        "ReconciliationRun",
+        &[],
+        r#"{"result":"unknown","checkpoint":"","snapshot_head":1,"differences":0,
+        "risk_clock":"2026-09-21T14:00:01.000000000Z"}"#,
+    );
+    let e = Draft::parse(&bad_reconciliation).unwrap_err();
+    assert_eq!(
+        (e.reason, e.path.as_str()),
+        (InvalidReason::NonCanonical, "payload.result")
     );
 }
 

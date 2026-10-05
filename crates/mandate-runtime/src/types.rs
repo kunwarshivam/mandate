@@ -4,9 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_approval::{ActorKind, Notification};
-use mandate_canon::Value;
+use mandate_canon::{Digest, Value};
 use mandate_journal::Environment;
-use mandate_num::{Price, Qty};
+use mandate_num::{Conviction, Price, Qty, Unit};
 
 /// The scheduler's whole-second risk clock (mandate spec §5.2). The only time the core knows:
 /// `event_time` and `recorded_at` are never read for timing, and nothing reads a wall clock.
@@ -232,12 +232,39 @@ pub struct Observation {
 /// against the risk-clock second, never against a wall clock.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelOutput {
-    pub model: String,
-    pub version: String,
-    pub instrument: InstrumentId,
+    pub model_id: String,
+    pub model_version: String,
+    pub content_hash: Digest,
+    pub instrument_id: InstrumentId,
     pub as_of: RiskClock,
     pub expires_at: RiskClock,
-    pub content: Value,
+    pub direction: ModelDirection,
+    pub conviction: Conviction,
+    pub confidence: Unit,
+    pub horizon_s: u64,
+    pub thesis_ref: Option<Digest>,
+    pub evidence: Vec<EventId>,
+    pub invalidation: Option<String>,
+    pub thesis_id: Option<String>,
+    pub lineage_id: Option<String>,
+    pub ignored: Option<ModelOutputIgnored>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelDirection {
+    Long,
+    Other(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelOutputIgnored {
+    NotPinned,
+    ModelWithdrawn,
+    OutputLimits,
+    NotInUniverse,
+    DirectionNotAllowed,
+    HorizonMismatch,
+    RevisionWithoutPredecessor,
 }
 
 /// Everything that can reach the core.
@@ -302,12 +329,59 @@ pub enum IntentBody {
     Flatten(FlattenPlan),
 }
 
+/// The proposal's time in force, copied into the account stream exactly as proposed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeInForce {
+    Day,
+    Gtc,
+    Ioc,
+}
+
+/// Why the builder proposed a discretionary exit (journal spec §9.1 rule 8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitOrigin {
+    Signal,
+    GoalCompletion,
+    RemovedInstrument,
+}
+
+/// One exact order-builder bound recorded on a decision, in journal §9.1 table order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionClip {
+    MaxOrderUsd,
+    PositionCap,
+    GrossExposureCap,
+    TargetQty,
+    MaxSpendUsd,
+    MaxAvgPrice,
+}
+
+/// Protective prices computed before the shell boundary from the confirmed mandate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProtectionPrices {
+    pub stop: Price,
+    pub take_profit: Option<Price>,
+}
+
+/// Mandate-derived order inputs that are not present in [`IntentBody`].
+///
+/// `None` on a replay means the journaled intent predates this explicit source. The sink refuses
+/// such an order instead of choosing a time in force, asset class, or protection policy itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OrderExecution {
+    pub asset_class: AssetClass,
+    pub tif: TimeInForce,
+    pub protection_required: bool,
+    pub protection: Option<ProtectionPrices>,
+}
+
 /// One handoff: the intent id is the `event_id` of the `IntentProposed` that recorded it, which is
 /// what makes the sink safely at-least-once (journal spec §2, §5.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntentHandoff {
     pub intent_id: EventId,
     pub body: IntentBody,
+    pub execution: Option<OrderExecution>,
 }
 
 /// Which deadline a timer is for. Keyed so that arming twice replaces rather than duplicates.
@@ -356,7 +430,14 @@ pub struct Proposal {
     pub qty: Qty,
     pub limit: Price,
     pub purpose: Purpose,
+    pub exit_origin: Option<ExitOrigin>,
+    pub exit_conviction: Option<Value>,
+    pub buy_conviction: Option<Value>,
     pub combined_score: Value,
+    pub outputs_used: BTreeSet<String>,
+    pub model_weights: BTreeMap<String, Value>,
+    pub clips_applied: Vec<DecisionClip>,
+    pub execution: Option<OrderExecution>,
 }
 
 /// The dry run's answer. `Allow` authorises nothing: the binding gate runs on the account stream
@@ -412,6 +493,7 @@ pub struct ApprovalSettings {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalInputs {
     pub outputs: BTreeMap<String, BTreeMap<InstrumentId, ModelOutput>>,
+    pub output_events: BTreeMap<String, BTreeMap<InstrumentId, EventId>>,
     pub now: RiskClock,
 }
 

@@ -14,7 +14,10 @@ use mandate_num::{Price, Qty};
 use mandate_time::UtcNanos;
 
 use crate::error::RuntimeError;
-use crate::types::{Initiator, Mode, ModelOutput, OwnerConfirmation, Purpose, RiskClock};
+use crate::types::{
+    EventId, Initiator, Mode, ModelDirection, ModelOutput, ModelOutputIgnored, OwnerConfirmation,
+    Purpose, RiskClock,
+};
 
 /// A canonical object, refusing a key the canonical form does not admit (journal spec §4.1).
 pub(crate) fn object(pairs: Vec<(&'static str, Value)>) -> Result<Value, RuntimeError> {
@@ -83,13 +86,6 @@ pub(crate) fn str_of<'a>(payload: &'a Value, field: &str) -> Option<&'a str> {
 pub(crate) fn clock_of(payload: &Value, field: &str) -> Option<RiskClock> {
     let secs = payload.get(field).and_then(Value::as_int)?;
     i64::try_from(secs).ok().map(RiskClock::from_secs)
-}
-
-/// The counterpart of [`seconds_text`].
-pub(crate) fn clock_text_of(payload: &Value, field: &str) -> Option<RiskClock> {
-    str_of(payload, field)
-        .and_then(|text| text.parse::<i64>().ok())
-        .map(RiskClock::from_secs)
 }
 
 pub(crate) fn mode_name(mode: Mode) -> &'static str {
@@ -178,24 +174,183 @@ pub(crate) fn initiator_from(name: &str) -> Option<Initiator> {
 /// The model output a `ModelOutputRecorded` payload carries, rebuilt field by field so that a
 /// replay reaches the same signal inputs the live run decided on (mandate spec §8.1).
 pub(crate) fn model_output_of(payload: &Value) -> Result<ModelOutput, RuntimeError> {
-    let model = str_of(payload, "model").ok_or_else(|| non_canonical("model"))?;
-    let version = str_of(payload, "version").ok_or_else(|| non_canonical("version"))?;
-    let instrument = str_of(payload, "instrument").ok_or_else(|| non_canonical("instrument"))?;
-    let as_of = clock_text_of(payload, "as_of").ok_or_else(|| non_canonical("as_of"))?;
-    let expires_at =
-        clock_text_of(payload, "expires_at").ok_or_else(|| non_canonical("expires_at"))?;
-    let content = payload
-        .get("content")
-        .cloned()
-        .ok_or_else(|| non_canonical("content"))?;
+    let model_id = str_of(payload, "model_id").ok_or_else(|| non_canonical("model_id"))?;
+    let model_version =
+        str_of(payload, "model_version").ok_or_else(|| non_canonical("model_version"))?;
+    let content_hash = digest_of(payload, "content_hash")?;
+    let instrument =
+        str_of(payload, "instrument_id").ok_or_else(|| non_canonical("instrument_id"))?;
+    let as_of = timestamp_of(payload, "as_of")?;
+    let expires_at = timestamp_of(payload, "expires_at")?;
+    let direction = str_of(payload, "direction")
+        .map(model_direction_from)
+        .ok_or_else(|| non_canonical("direction"))?;
+    let conviction = str_of(payload, "conviction")
+        .ok_or_else(|| non_canonical("conviction"))
+        .and_then(|value| mandate_num::Conviction::parse(value).map_err(RuntimeError::Num))?;
+    let confidence = str_of(payload, "confidence")
+        .ok_or_else(|| non_canonical("confidence"))
+        .and_then(|value| mandate_num::Unit::parse(value).map_err(RuntimeError::Num))?;
+    let horizon_s = payload
+        .get("horizon_s")
+        .and_then(Value::as_int)
+        .ok_or_else(|| non_canonical("horizon_s"))?;
+    let thesis_ref = optional_digest_of(payload, "thesis_ref")?;
+    let evidence = payload
+        .get("evidence")
+        .and_then(Value::as_array)
+        .ok_or_else(|| non_canonical("evidence"))?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(|event_id| EventId(event_id.to_owned()))
+                .ok_or_else(|| non_canonical("evidence"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let invalidation = optional_text_of(payload, "invalidation")?;
+    let thesis_id = optional_text_of(payload, "thesis_id")?;
+    let lineage_id = optional_text_of(payload, "lineage_id")?;
+    let ignored = optional_text_of(payload, "ignored")?
+        .map(|value| ignored_from(&value).ok_or_else(|| non_canonical("ignored")))
+        .transpose()?;
     Ok(ModelOutput {
-        model: model.to_owned(),
-        version: version.to_owned(),
-        instrument: instrument_of(instrument)?,
+        model_id: model_id.to_owned(),
+        model_version: model_version.to_owned(),
+        content_hash,
+        instrument_id: instrument_of(instrument)?,
         as_of,
         expires_at,
-        content,
+        direction,
+        conviction,
+        confidence,
+        horizon_s,
+        thesis_ref,
+        evidence,
+        invalidation,
+        thesis_id,
+        lineage_id,
+        ignored,
     })
+}
+
+pub(crate) fn model_output(output: &ModelOutput) -> Result<Value, RuntimeError> {
+    object(vec![
+        ("model_id", text(&output.model_id)),
+        ("model_version", text(&output.model_version)),
+        (
+            "content_hash",
+            text(&format!("sha256:{}", output.content_hash)),
+        ),
+        ("instrument_id", text(output.instrument_id.as_str())),
+        ("as_of", stamp(output.as_of, "as_of")?),
+        ("expires_at", stamp(output.expires_at, "expires_at")?),
+        ("direction", text(model_direction_name(&output.direction))),
+        ("conviction", text(&output.conviction.to_string())),
+        ("confidence", text(&output.confidence.to_string())),
+        ("horizon_s", count(output.horizon_s, "horizon_s")?),
+        (
+            "thesis_ref",
+            output
+                .thesis_ref
+                .map_or(Value::Null, |digest| text(&format!("sha256:{digest}"))),
+        ),
+        (
+            "evidence",
+            Value::Array(
+                output
+                    .evidence
+                    .iter()
+                    .map(|event_id| text(&event_id.0))
+                    .collect(),
+            ),
+        ),
+        (
+            "invalidation",
+            output.invalidation.as_deref().map_or(Value::Null, text),
+        ),
+        (
+            "thesis_id",
+            output.thesis_id.as_deref().map_or(Value::Null, text),
+        ),
+        (
+            "lineage_id",
+            output.lineage_id.as_deref().map_or(Value::Null, text),
+        ),
+        (
+            "ignored",
+            output.ignored.map(ignored_name).map_or(Value::Null, text),
+        ),
+    ])
+}
+
+fn digest_of(payload: &Value, field: &str) -> Result<Digest, RuntimeError> {
+    str_of(payload, field)
+        .and_then(|value| value.strip_prefix("sha256:"))
+        .and_then(Digest::from_hex)
+        .ok_or_else(|| non_canonical(field))
+}
+
+fn optional_digest_of(payload: &Value, field: &str) -> Result<Option<Digest>, RuntimeError> {
+    match payload.get(field) {
+        Some(Value::Null) => Ok(None),
+        Some(_) => digest_of(payload, field).map(Some),
+        None => Err(non_canonical(field)),
+    }
+}
+
+fn optional_text_of(payload: &Value, field: &str) -> Result<Option<String>, RuntimeError> {
+    match payload.get(field) {
+        Some(Value::Null) => Ok(None),
+        Some(Value::Str(value)) => Ok(Some(value.clone())),
+        Some(_) | None => Err(non_canonical(field)),
+    }
+}
+
+fn timestamp_of(payload: &Value, field: &str) -> Result<RiskClock, RuntimeError> {
+    str_of(payload, field)
+        .and_then(|value| UtcNanos::parse(value).ok())
+        .map(|value| RiskClock::from_secs(value.secs()))
+        .ok_or_else(|| non_canonical(field))
+}
+
+fn model_direction_name(direction: &ModelDirection) -> &str {
+    match direction {
+        ModelDirection::Long => "long",
+        ModelDirection::Other(direction) => direction,
+    }
+}
+
+fn model_direction_from(direction: &str) -> ModelDirection {
+    match direction {
+        "long" => ModelDirection::Long,
+        other => ModelDirection::Other(other.to_owned()),
+    }
+}
+
+fn ignored_name(reason: ModelOutputIgnored) -> &'static str {
+    match reason {
+        ModelOutputIgnored::NotPinned => "not_pinned",
+        ModelOutputIgnored::ModelWithdrawn => "model_withdrawn",
+        ModelOutputIgnored::OutputLimits => "output_limits",
+        ModelOutputIgnored::NotInUniverse => "not_in_universe",
+        ModelOutputIgnored::DirectionNotAllowed => "direction_not_allowed",
+        ModelOutputIgnored::HorizonMismatch => "horizon_mismatch",
+        ModelOutputIgnored::RevisionWithoutPredecessor => "revision_without_predecessor",
+    }
+}
+
+fn ignored_from(reason: &str) -> Option<ModelOutputIgnored> {
+    match reason {
+        "not_pinned" => Some(ModelOutputIgnored::NotPinned),
+        "model_withdrawn" => Some(ModelOutputIgnored::ModelWithdrawn),
+        "output_limits" => Some(ModelOutputIgnored::OutputLimits),
+        "not_in_universe" => Some(ModelOutputIgnored::NotInUniverse),
+        "direction_not_allowed" => Some(ModelOutputIgnored::DirectionNotAllowed),
+        "horizon_mismatch" => Some(ModelOutputIgnored::HorizonMismatch),
+        "revision_without_predecessor" => Some(ModelOutputIgnored::RevisionWithoutPredecessor),
+        _ => None,
+    }
 }
 
 /// The order an `IntentProposed` payload records. Shared by the fold and the retry, so an intent
@@ -204,12 +359,13 @@ pub(crate) fn order_of(payload: &Value) -> Result<crate::types::IntentBody, Runt
     let purpose = str_of(payload, "purpose")
         .and_then(purpose_from)
         .ok_or_else(|| non_canonical("purpose"))?;
-    let instrument = str_of(payload, "instrument").ok_or_else(|| non_canonical("instrument"))?;
+    let instrument =
+        str_of(payload, "instrument_id").ok_or_else(|| non_canonical("instrument_id"))?;
     let side = str_of(payload, "side")
         .and_then(side_from)
         .ok_or_else(|| non_canonical("side"))?;
     let qty = str_of(payload, "qty").ok_or_else(|| non_canonical("qty"))?;
-    let limit = str_of(payload, "limit").ok_or_else(|| non_canonical("limit"))?;
+    let limit = str_of(payload, "limit_price").ok_or_else(|| non_canonical("limit_price"))?;
     Ok(crate::types::IntentBody::Order {
         instrument: instrument_of(instrument)?,
         side,

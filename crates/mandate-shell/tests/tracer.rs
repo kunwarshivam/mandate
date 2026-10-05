@@ -3,28 +3,56 @@
 //! test"). No test here touches a network: the transport is scripted, and `AlpacaPaperHttp` is never
 //! constructed (ADR-0001 ES-19).
 //!
-//! Every test is pending on E7-7: each production adapter is a stub today, so each run stops at the
-//! first probe with `Cause::Unimplemented`, and each test fails by that refusal propagating
-//! (DEC-110, DEC-137). The implementation PR deletes the markers and changes nothing else here.
+//! The full production path runs against recorded fixtures. The one pending outlier case remains a
+//! failing E2-14 test until its founder-gated price-trust rule lands; the shell cannot invent price
+//! arithmetic (DEC-138 item 3).
 //!
 //! The fail-closed suite is not here. It lives in `src/stages/fail_closed.rs`, because its
 //! permissive doubles must not be reachable from a build that ships (task brief item 5).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use mandate_accounting::InstrumentId as RuntimeInstrumentId;
 use mandate_alpaca::{HttpRequest, Method, Response, TradingTransport, TransportError};
+use mandate_builder::{
+    AccountSnapshot as BuilderAccountSnapshot, ActionContext, Market as BuilderMarket, RequestedBy,
+    RiskContext as BuilderRiskContext,
+};
 use mandate_canon::{DecStr, Digest, Value};
-use mandate_journal::{Environment, StoredEvent, TrustedStart, verify_events};
+use mandate_domain::{AssetClass as DomainAssetClass, AssetId, MarketSession, Purpose};
+use mandate_journal::{AppendOutcome, Environment, StoredEvent, TrustedStart, verify_events};
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
-use mandate_runtime::{AgentId, ConnectionId, Deployment, Proposal, SignalInputs, WorkspaceId};
-use mandate_shell::adapters::{AlpacaConnector, BuilderPlan, Sources, SpecMandate, production};
-use mandate_shell::stages::{MandateSource, Sizing, Stages};
-use mandate_shell::{Report, Setup, ShellError, run};
+use mandate_num::{
+    Adverse, Conviction, CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, Ratio,
+    ShareIncrement, Signed, SizeFraction, Unit, Usd,
+};
+use mandate_risk::spec_types::{GoalState, RiskLimits};
+use mandate_risk::{
+    AccountSnapshot, AccountState as GateAccountState, AgentId as GateAgentId, AgentMode,
+    AgentSnapshot, AssetId as GateAssetId, ClientOrderId as GateOrderId, ConductState,
+    DayTradeLedger, DayTradeRegime, EtpClass, Exchange, GateConfig, GatePass,
+    InstrumentSnapshot as GateInstrumentSnapshot, MarketSnapshot, Origin, ProposedKind,
+    QuoteCurrency, RiskSnapshot, SaneQuote, TimeInForce as GateTimeInForce,
+    ValidatedMandate as GateMandate, WorkingUniverse,
+};
+use mandate_runtime::{
+    AgentId, ConnectionId, Deployment, MandateView, ModelOutput, OrderExecution, Proposal,
+    ProtectionPrices, Purpose as RuntimePurpose, SignalInputs, TimeInForce, WorkspaceId,
+};
+use mandate_shell::adapters::{
+    AdvisoryGateContext, AdvisoryOrderFacts, AlpacaConnector, BuilderContext, BuilderPlan,
+    DecisionContext, ExecutorContext, RunContext, Sources, SpecMandate, production,
+};
+use mandate_shell::envelope::{IdSpace, Ids};
+use mandate_shell::stages::{Classifier, JournalWriter, MandateSource, Sizing, Stages};
+use mandate_shell::{Cause, Report, Setup, ShellError, run};
+use mandate_spec::ValidationContext;
+use mandate_spec::document::ProvenanceMap;
 use mandate_time::{Date, UtcNanos};
 
 const AGENT: &str = "tracer-aapl";
@@ -36,12 +64,428 @@ fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tracer")
 }
 
+fn model_artifact() -> (Digest, Vec<u8>) {
+    let bytes = fs::read(fixtures().join("model-artifact.json"))
+        .unwrap_or_else(|error| panic!("the deterministic model artifact is readable: {error}"));
+    (Digest::of(&bytes), bytes)
+}
+
+fn executor_artifacts(
+    mandate: &str,
+) -> (
+    mandate_executor::BindingGateConfigRefs,
+    BTreeMap<Digest, Vec<u8>>,
+) {
+    let mandate_source = fs::read(fixtures().join(mandate)).unwrap();
+    let mandate_value = mandate_canon::parse(&mandate_source).unwrap();
+    let mandate_document = mandate_spec::Mandate::parse(&mandate_value).unwrap();
+    let mandate_bytes = mandate_document.canonical_bytes().unwrap();
+    let config = fixtures().join("config");
+    let named = [
+        (
+            "fee_config",
+            fs::read(config.join("fee-config.json")).unwrap(),
+        ),
+        (
+            "trading_calendar",
+            fs::read(config.join("trading-calendar.json")).unwrap(),
+        ),
+        (
+            "instrument_snapshot",
+            fs::read(config.join("instrument-snapshot.json")).unwrap(),
+        ),
+        ("rule_set", fs::read(config.join("rule-set.json")).unwrap()),
+        ("mandate_version", mandate_bytes),
+    ];
+    let refs = named
+        .iter()
+        .map(|(name, bytes)| ((*name).to_owned(), Digest::of(bytes)))
+        .collect::<BTreeMap<_, _>>();
+    let artifacts = named
+        .into_iter()
+        .map(|(_, bytes)| (Digest::of(&bytes), bytes))
+        .collect();
+    let reference = |name: &str| {
+        format!(
+            "sha256:{}",
+            refs.get(name)
+                .unwrap_or_else(|| panic!("{name} fixture digest"))
+                .to_hex()
+        )
+    };
+    (
+        mandate_executor::BindingGateConfigRefs::complete(
+            reference("fee_config"),
+            reference("trading_calendar"),
+            reference("instrument_snapshot"),
+            reference("rule_set"),
+            reference("mandate_version"),
+        ),
+        artifacts,
+    )
+}
+
 fn agent_stream() -> String {
     format!("agent:{WORKSPACE}:{AGENT}")
 }
 
 fn account_stream() -> String {
     format!("acct:{WORKSPACE}:{ACCOUNT_REF}")
+}
+
+fn run_context(with_builder: bool) -> RunContext {
+    let validation = ValidationContext {
+        account_equity_usd: Usd::parse("100000").unwrap(),
+        other_allocations_usd: Usd::ZERO,
+        validation_date: Date::parse("2026-09-25").unwrap(),
+        registry: None,
+        provenance: ProvenanceMap::default(),
+        workspace_users: 1,
+        approver_users: 1,
+        independent_approval_required: false,
+        disclosures_accepted: Default::default(),
+        instrument_groups: Default::default(),
+        claimed_by_other_agents: Default::default(),
+        connection_environment: Some(mandate_domain::Environment::Paper),
+        connection_loss_carry_usd: Usd::ZERO,
+        eligibility_failures: Default::default(),
+        previous_version: None,
+        current_mandate_version: None,
+    };
+    let decision = with_builder.then(|| {
+        let instrument = AssetId::parse("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415").unwrap();
+        let builder = BuilderContext {
+            account: BuilderAccountSnapshot {
+                agent_equity: Usd::parse("1000").unwrap(),
+                position_qty: Qty::ZERO,
+                cost_basis: CostBasis::ZERO,
+                risk_mark: MarkPrice::parse("255.1").unwrap(),
+                gross_usd: Usd::ZERO,
+                working_opening_cost: Usd::ZERO,
+                goal_spent_usd: Usd::ZERO,
+            },
+            market: BuilderMarket {
+                instrument: instrument.clone(),
+                asset_class: DomainAssetClass::UsEquity,
+                session: MarketSession::Regular,
+                in_close_window: false,
+                bid: Price::parse("255.1").unwrap(),
+                ask: Price::parse("255.2").unwrap(),
+                increment: Qty::parse("1").unwrap(),
+                min_order_usd: Usd::parse("1").unwrap(),
+                fee_rate_cash: FeeRate::parse("0").unwrap(),
+                fee_rate_asset: FeeRate::parse("0").unwrap(),
+            },
+            risk: BuilderRiskContext {
+                size_factor: SizeFraction::ONE,
+                drawdown: Unit::ZERO,
+                daily_pnl_fraction: Signed::ZERO,
+                position_pnl_fraction: Signed::ZERO,
+                bought_today_usd: Usd::ZERO,
+                has_prior_fill: false,
+                new_instrument: false,
+                thesis_confidence: Unit::ZERO,
+                risk_day: Date::parse("2026-09-25").unwrap(),
+            },
+            action: ActionContext {
+                purpose: Purpose::Open,
+                order_usd: Usd::parse("255.2").unwrap(),
+                combined_score: Unit::ONE,
+                instrument,
+                asset_class: DomainAssetClass::UsEquity,
+                session: MarketSession::Regular,
+                first_trade_in_instrument: true,
+                new_instrument: false,
+                thesis_confidence: Unit::ZERO,
+                drawdown: Unit::ZERO,
+                daily_pnl_fraction: Signed::ZERO,
+                position_usd_after: Usd::parse("255.2").unwrap(),
+                gross_usd_after: Usd::parse("255.2").unwrap(),
+                bought_today_usd: Usd::parse("255.2").unwrap(),
+                position_pnl_fraction: Signed::ZERO,
+                requested_by: RequestedBy::Agent,
+                risk_day: Date::parse("2026-09-25").unwrap(),
+            },
+            model_content_hashes: BTreeMap::from([(
+                ("quant.ma_crossover".to_owned(), "1.0.0".to_owned()),
+                model_artifact().0,
+            )]),
+            execution: OrderExecution {
+                asset_class: DomainAssetClass::UsEquity,
+                tif: TimeInForce::Day,
+                protection_required: true,
+                protection: Some(ProtectionPrices {
+                    stop: Price::parse("242.44").unwrap(),
+                    take_profit: Some(Price::parse("280.72").unwrap()),
+                }),
+            },
+        };
+        DecisionContext {
+            builder: Some(builder),
+            gate: Some(advisory_gate_context()),
+        }
+    });
+    RunContext {
+        validation,
+        policies: Vec::new(),
+        author: "user-author".to_owned(),
+        restricted_instruments: Default::default(),
+        decision,
+    }
+}
+
+/// Trusted, effective-dated facts for the executor half of the full tracer fixture. The binding
+/// gate receives snapshots only; `mandate-executor` still constructs the proposal and calls
+/// `mandate-risk::evaluate` itself.
+struct TrustedExecutorFixture {
+    config_refs: mandate_executor::BindingGateConfigRefs,
+}
+
+impl mandate_executor::MandateView for TrustedExecutorFixture {
+    fn version(
+        &self,
+        _agent: &mandate_executor::AgentId,
+    ) -> Option<mandate_executor::MandateVersion> {
+        self.config_refs
+            .mandate_version
+            .clone()
+            .map(mandate_executor::MandateVersion)
+    }
+
+    fn crypto_stop_limit_offset(&self, _agent: &mandate_executor::AgentId) -> Option<Fraction> {
+        None
+    }
+
+    fn covers(
+        &self,
+        agent: &mandate_executor::AgentId,
+        instrument: &mandate_accounting::InstrumentId,
+    ) -> bool {
+        agent.0 == AGENT && instrument.as_str() == "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
+    }
+}
+
+impl mandate_executor::InstrumentSnapshot for TrustedExecutorFixture {
+    fn asset_class(
+        &self,
+        instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<mandate_accounting::AssetClass> {
+        (instrument.as_str() == "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+            .then_some(mandate_accounting::AssetClass::UsEquity)
+    }
+
+    fn increment(&self, instrument: &mandate_accounting::InstrumentId) -> Option<ShareIncrement> {
+        (instrument.as_str() == "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+            .then_some(ShareIncrement::Whole)
+    }
+
+    fn exit_tier(
+        &self,
+        _instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<mandate_executor::ExitTier> {
+        None
+    }
+}
+
+impl mandate_executor::BindingGateSource for TrustedExecutorFixture {
+    fn input(
+        &self,
+        request: &mandate_executor::BindingGateRequest<'_>,
+    ) -> Option<mandate_executor::BindingGateInput> {
+        let asset = GateAssetId::new(request.instrument.as_str()).ok()?;
+        let now = UtcNanos::parse("2026-09-25T19:00:00.000000000Z").ok()?;
+        let quote_at = UtcNanos::parse("2026-09-25T18:59:59.000000000Z").ok()?;
+        let volume = Qty::parse("1000000").ok()?;
+        let equity = Usd::parse("1000000").ok()?;
+        let positions = BTreeMap::new();
+        let gate_agent = GateAgentId(1);
+        Some(mandate_executor::BindingGateInput {
+            config_refs: self.config_refs.clone(),
+            now,
+            config: GateConfig {
+                price_floor: Usd::parse("0.01").ok()?,
+                liquidity_floor_usd: Usd::ZERO,
+                crypto_liquidity_floor_usd: Usd::ZERO,
+                collar_liquid_threshold_usd: Usd::ZERO,
+                collar_liquid_x: Fraction::parse("0.5").ok()?,
+                collar_other_x: Fraction::parse("0.5").ok()?,
+                collar_crypto_x: Fraction::parse("0.5").ok()?,
+                collar_passive_band: Fraction::parse("0.5").ok()?,
+                opposite_fill_interval_s: 0,
+                min_resting_time_s: 0,
+                order_to_fill_max: u32::MAX,
+                order_to_fill_min_orders: u32::MAX,
+                order_size_participation: Fraction::ONE,
+                daily_participation: Fraction::ONE,
+                close_window_minutes: 0,
+                legacy_pdt_equity_threshold: Usd::ZERO,
+                etp_classification_max_age_s: u32::MAX,
+            },
+            mandate: GateMandate::from_validated_parts(
+                RiskLimits {
+                    max_position_usd: equity,
+                    max_position_fraction: Fraction::ONE,
+                    max_order_usd: equity,
+                    max_gross_exposure_usd: equity,
+                    max_orders_per_day: u32::MAX,
+                    reentry_cooldown_s: 0,
+                    rebalance_band: Fraction::ONE,
+                    breach_confirm_s: 0,
+                    drawdown_ladder: Vec::new(),
+                },
+                GoalState::Running,
+                true,
+                true,
+            ),
+            risk: RiskSnapshot {
+                agent_equity: equity,
+                high_water_mark: equity,
+                day_start_equity: equity,
+                capital_base: equity,
+                inherited_loss: Usd::ZERO,
+                latched: BTreeSet::new(),
+                active_rungs: BTreeMap::new(),
+                size_factor: Ratio::parse("1").ok()?,
+                agent_mode: AgentMode::Normal,
+            },
+            account: AccountSnapshot {
+                account_type: mandate_accounting::AccountType::Margin,
+                state: GateAccountState::Active,
+                crypto_active: true,
+                regime: DayTradeRegime::IntradayMargin {
+                    maintenance_excess: equity,
+                },
+                equity,
+                prior_close_equity: equity,
+                model_buying_power: equity,
+                broker_buying_power: equity,
+                broker_non_marginable_buying_power: equity,
+                positions: positions.clone(),
+                market_values: BTreeMap::new(),
+                working_orders: BTreeMap::new(),
+                unknown_orders: BTreeSet::new(),
+                related_account_resting: BTreeMap::new(),
+            },
+            agent: AgentSnapshot {
+                agent: gate_agent,
+                mode: AgentMode::Normal,
+                instrument_restrictions: BTreeMap::new(),
+                positions,
+                market_values: BTreeMap::new(),
+                working_orders: BTreeSet::new(),
+                instrument_groups: BTreeMap::new(),
+                last_exit_fill_at: BTreeMap::new(),
+                orders_today: 0,
+                day_trades: DayTradeLedger::default(),
+            },
+            instrument: GateInstrumentSnapshot {
+                instrument: asset.clone(),
+                asset_class: mandate_risk::AssetClass::UsEquity,
+                exchange: Some(Exchange::Nasdaq),
+                status_active: true,
+                tradable: true,
+                fractionable: true,
+                ipo: false,
+                ptp_no_exception: false,
+                etp: EtpClass::Plain,
+                etp_classified_at: Some(now),
+                quote_currency: Some(QuoteCurrency::Usd),
+                prior_close: Some(request.limit),
+                median_dollar_volume_20d: Some(equity),
+                median_dollar_volume_30d: Some(equity),
+                min_order_size: Qty::parse("0.000000001").ok()?,
+                qty_increment: Qty::parse("0.000000001").ok()?,
+                halted: false,
+                status_feed_current: true,
+            },
+            market: MarketSnapshot {
+                quote: Some(SaneQuote {
+                    bid: request.limit,
+                    ask: request.limit,
+                    at: quote_at,
+                }),
+                last_trade: Some((request.limit, quote_at)),
+                trailing_5m_volume: Some(volume),
+                adv_20d: Some(volume),
+            },
+            conduct: ConductState::default(),
+            universe: WorkingUniverse::Known {
+                instruments: BTreeSet::from([asset.clone()]),
+                pinned: true,
+            },
+            asset,
+            gate_agent,
+            gate_client_order_id: GateOrderId(1),
+            owner_confirmed_bid: None,
+            fee_reservation: Usd::ZERO,
+            data_profile: "tracer-fixture".to_owned(),
+            feed: "iex-fixture".to_owned(),
+        })
+    }
+}
+
+fn executor_context(mandate: &str) -> ExecutorContext {
+    let first = Date::parse("2026-01-01").unwrap();
+    let last = Date::parse("2026-12-31").unwrap();
+    let calendar = mandate_time::TradingCalendar::new(first, last, [], []).unwrap();
+    let fees = mandate_executor::paper_only_fee_config("paper", calendar, "2026-01-01").unwrap();
+    let source = Rc::new(TrustedExecutorFixture {
+        config_refs: executor_artifacts(mandate).0,
+    });
+    ExecutorContext::new(
+        Rc::new(Ids {
+            space: IdSpace::Account,
+        }),
+        source.clone(),
+        source.clone(),
+        source,
+        mandate_executor::ExecutorConfig::PROPOSED,
+        fees,
+    )
+}
+
+fn advisory_gate_context() -> AdvisoryGateContext {
+    let instrument =
+        mandate_accounting::InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415").unwrap();
+    let agent = mandate_executor::AgentId(AGENT.to_owned());
+    let limit = Price::parse("255.2").unwrap();
+    let request = mandate_executor::BindingGateRequest {
+        agent: &agent,
+        instrument: &instrument,
+        side: mandate_accounting::Side::Buy,
+        qty: Qty::parse("1").unwrap(),
+        limit,
+        purpose: mandate_executor::Purpose::Open,
+        tif: mandate_executor::TimeInForce::Day,
+        protection: None,
+    };
+    let fixture = TrustedExecutorFixture {
+        config_refs: executor_artifacts("mandate.json").0,
+    };
+    let trusted = mandate_executor::BindingGateSource::input(&fixture, &request)
+        .expect("the trusted executor fixture supplies the same opening gate facts");
+    AdvisoryGateContext {
+        now: trusted.now,
+        pass: GatePass::First,
+        config: trusted.config,
+        mandate: trusted.mandate,
+        risk: trusted.risk,
+        account: trusted.account,
+        agent: trusted.agent,
+        instrument: trusted.instrument,
+        market: trusted.market,
+        conduct: trusted.conduct,
+        universe: trusted.universe,
+        order: AdvisoryOrderFacts {
+            kind: ProposedKind::Plain,
+            tif: GateTimeInForce::Day,
+            extended_hours: false,
+            origin: Origin::OrderBuilder,
+            owner_confirmed_bid: None,
+            client_order_id: GateOrderId(1),
+            fee_reservation: Usd::ZERO,
+        },
+    }
 }
 
 /// A scratch directory under the system's temporary directory, removed when dropped.
@@ -69,9 +513,13 @@ fn dec(text: &str) -> DecStr {
     DecStr::parse(text).unwrap()
 }
 
-/// Writes one daily bar per weekday, starting 2026-08-21, with these closes, through
+/// Writes one daily bar per weekday, starting 2026-08-24, with these closes, through
 /// `mandate-marketdata`'s own writer, so the tracer reads the real format.
 fn bars(dir: &Path, closes: &[&str]) -> PathBuf {
+    bars_from(dir, "2026-08-24", closes)
+}
+
+fn bars_from(dir: &Path, first: &str, closes: &[&str]) -> PathBuf {
     let dataset = DatasetId::new(
         AssetClass::UsEquity,
         Feed::Iex,
@@ -80,7 +528,7 @@ fn bars(dir: &Path, closes: &[&str]) -> PathBuf {
     )
     .unwrap();
     let store = Store::new(dir);
-    let mut day = Date::parse("2026-08-21").unwrap();
+    let mut day = Date::parse(first).unwrap();
     for close in closes {
         while day.is_weekend() {
             day = day.next().unwrap();
@@ -178,6 +626,9 @@ impl Scripted {
         if path.starts_with("/v2/orders?") {
             return ok(b"[]".to_vec());
         }
+        if path.starts_with("/v2/account/activities?") {
+            return ok(b"[]".to_vec());
+        }
         if path == "/v2/orders" && request.method() == Method::Post {
             if self.broker == Broker::TimeoutThenAbsent {
                 return Err(TransportError::Timeout);
@@ -232,9 +683,86 @@ fn stages(mandate: &str, dataset: PathBuf, transport: Scripted) -> Stages {
         mandate: fixtures().join(mandate),
         dataset,
         journal: None,
+        recorded_at: UtcNanos::parse(NOW).unwrap(),
         agent: AgentId(AGENT.to_owned()),
+        workspace: WORKSPACE.to_owned(),
+        account_ref: ACCOUNT_REF.to_owned(),
+        executor: Some(executor_context(mandate)),
+        run: Some(run_context(true)),
         transport,
     })
+}
+
+struct UnreachableJournal;
+
+impl JournalWriter for UnreachableJournal {
+    fn take_ownership(&mut self, _stream: &str) -> Result<u64, Cause> {
+        panic!("the temporary replacement journal is never used")
+    }
+
+    fn read(&self, _stream: &str) -> Result<Vec<StoredEvent>, Cause> {
+        panic!("the temporary replacement journal is never used")
+    }
+
+    fn append(
+        &mut self,
+        _stream: &str,
+        _expected_head: u64,
+        _writer_epoch: u64,
+        _drafts: &[Vec<u8>],
+    ) -> AppendOutcome {
+        panic!("the temporary replacement journal is never used")
+    }
+}
+
+struct RecordingJournal {
+    inner: Box<dyn JournalWriter>,
+    batches: Rc<RefCell<Vec<Vec<String>>>>,
+}
+
+impl JournalWriter for RecordingJournal {
+    fn take_ownership(&mut self, stream: &str) -> Result<u64, Cause> {
+        self.inner.take_ownership(stream)
+    }
+
+    fn read(&self, stream: &str) -> Result<Vec<StoredEvent>, Cause> {
+        self.inner.read(stream)
+    }
+
+    fn append(
+        &mut self,
+        stream: &str,
+        expected_head: u64,
+        writer_epoch: u64,
+        drafts: &[Vec<u8>],
+    ) -> AppendOutcome {
+        let types = drafts
+            .iter()
+            .map(|bytes| {
+                mandate_canon::parse(bytes)
+                    .ok()
+                    .and_then(|body| {
+                        body.get("event_type")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .unwrap_or_else(|| "<invalid>".to_owned())
+            })
+            .collect();
+        self.batches.borrow_mut().push(types);
+        self.inner
+            .append(stream, expected_head, writer_epoch, drafts)
+    }
+}
+
+fn record_batches(stages: &mut Stages) -> Rc<RefCell<Vec<Vec<String>>>> {
+    let batches = Rc::new(RefCell::new(Vec::new()));
+    let inner = std::mem::replace(&mut stages.journal, Box::new(UnreachableJournal));
+    stages.journal = Box::new(RecordingJournal {
+        inner,
+        batches: Rc::clone(&batches),
+    });
+    batches
 }
 
 fn committed(stages: &Stages, stream: &str) -> Vec<StoredEvent> {
@@ -280,12 +808,58 @@ fn stream_bytes(stages: &Stages) -> Vec<u8> {
     bytes
 }
 
+fn builder_fixture() -> (MandateView, ModelOutput) {
+    let admitted = SpecMandate {
+        path: fixtures().join("mandate.json"),
+        context: Some(Rc::new(run_context(false))),
+    }
+    .admitted()
+    .unwrap();
+    let now = mandate_runtime::RiskClock::from_secs(UtcNanos::parse(NOW).unwrap().secs());
+    let instrument = admitted.view.working_universe.first().unwrap().clone();
+    let output = mandate_shell::map::model_output(
+        mandate_backtest::Signal::Long,
+        &admitted.model,
+        &instrument,
+        now,
+    )
+    .unwrap();
+    (admitted.view, output)
+}
+
+fn size_output(
+    context: RunContext,
+    view: &MandateView,
+    output: ModelOutput,
+    outer_model: String,
+    outer_instrument: RuntimeInstrumentId,
+) -> Result<Option<Proposal>, Cause> {
+    let now = output.as_of;
+    let inputs = SignalInputs {
+        outputs: BTreeMap::from([(outer_model, BTreeMap::from([(outer_instrument, output)]))]),
+        output_events: BTreeMap::new(),
+        now,
+    };
+    BuilderPlan {
+        mandate: fixtures().join("mandate.json"),
+        context: Some(Rc::new(context)),
+    }
+    .size(view, &inputs)
+}
+
+fn assert_absent<T: std::fmt::Debug>(result: Result<T, Cause>, expected: &'static str) {
+    match result {
+        Err(Cause::Absent { what }) => assert_eq!(what, expected),
+        other => panic!("expected Cause::Absent({expected:?}), got {other:?}"),
+    }
+}
+
 /// Step 1: the fixture mandate validates with no violation before anything else uses it.
 #[test]
-#[ignore = "pending E7-7"]
 fn the_fixture_mandate_validates_with_no_violation() {
     let admitted = SpecMandate {
         path: fixtures().join("mandate.json"),
+        context: Some(Rc::new(run_context(false))),
     }
     .admitted()
     .unwrap();
@@ -300,10 +874,10 @@ fn the_fixture_mandate_validates_with_no_violation() {
 /// conviction of 1 and a target of 1000, the budget is min(1000, 300, 1000, 1000) = 300, and
 /// trunc(300 / 255.20) = 1 share, whose 255.20 clears the 50 band (0.05 × 1000).
 #[test]
-#[ignore = "pending E7-7"]
 fn the_fixture_sizes_to_exactly_one_share() {
     let admitted = SpecMandate {
         path: fixtures().join("mandate.json"),
+        context: Some(Rc::new(run_context(true))),
     }
     .admitted()
     .unwrap();
@@ -317,19 +891,325 @@ fn the_fixture_sizes_to_exactly_one_share() {
     )
     .unwrap();
     let inputs = SignalInputs {
-        outputs: BTreeMap::from([(output.model.clone(), BTreeMap::from([(instrument, output)]))]),
+        outputs: BTreeMap::from([(
+            output.model_id.clone(),
+            BTreeMap::from([(instrument, output)]),
+        )]),
+        output_events: BTreeMap::new(),
         now,
     };
-    let proposal: Proposal = BuilderPlan.size(&admitted.view, &inputs).unwrap().unwrap();
+    let plan = BuilderPlan {
+        mandate: fixtures().join("mandate.json"),
+        context: Some(Rc::new(run_context(true))),
+    };
+    let proposal: Proposal = plan.size(&admitted.view, &inputs).unwrap().unwrap();
     assert_eq!(proposal.qty.to_string(), "1");
     assert_eq!(proposal.limit.to_string(), "255.2");
+    let take_profit = Price::parse("255.2")
+        .unwrap()
+        .collar_bound(Fraction::parse("0.1").unwrap(), Adverse::Up)
+        .unwrap();
+    assert_eq!(
+        take_profit.to_string(),
+        "280.72",
+        "255.20 × (1 + 0.10) is exact in the fixed-point price calculation"
+    );
+    assert_eq!(
+        proposal.execution,
+        Some(OrderExecution {
+            asset_class: DomainAssetClass::UsEquity,
+            tif: TimeInForce::Day,
+            protection_required: true,
+            protection: Some(ProtectionPrices {
+                stop: Price::parse("242.44").unwrap(),
+                take_profit: Some(take_profit),
+            }),
+        })
+    );
+    assert_eq!(
+        plan.classify(&admitted.view, &proposal).unwrap(),
+        mandate_runtime::Classified {
+            autonomy: mandate_runtime::Autonomy::Auto,
+            decided_by: Some("rule:routine".to_owned()),
+        }
+    );
+}
+
+#[test]
+fn sizing_refuses_a_model_output_without_its_trusted_content_hash() {
+    let admitted = SpecMandate {
+        path: fixtures().join("mandate.json"),
+        context: Some(Rc::new(run_context(false))),
+    }
+    .admitted()
+    .unwrap();
+    let now = mandate_runtime::RiskClock::from_secs(UtcNanos::parse(NOW).unwrap().secs());
+    let instrument = admitted.view.working_universe.first().unwrap().clone();
+    let output = mandate_shell::map::model_output(
+        mandate_backtest::Signal::Long,
+        &admitted.model,
+        &instrument,
+        now,
+    )
+    .unwrap();
+    let inputs = SignalInputs {
+        outputs: BTreeMap::from([(
+            output.model_id.clone(),
+            BTreeMap::from([(instrument, output)]),
+        )]),
+        output_events: BTreeMap::new(),
+        now,
+    };
+    let mut context = run_context(true);
+    context
+        .decision
+        .as_mut()
+        .unwrap()
+        .builder
+        .as_mut()
+        .unwrap()
+        .model_content_hashes
+        .clear();
+    let result = BuilderPlan {
+        mandate: fixtures().join("mandate.json"),
+        context: Some(Rc::new(context)),
+    }
+    .size(&admitted.view, &inputs);
+    assert!(matches!(
+        result,
+        Err(mandate_shell::Cause::Absent {
+            what: "the model output's trusted content hash"
+        })
+    ));
+}
+
+#[test]
+fn sizing_refuses_each_inconsistent_output_key() {
+    let (view, output) = builder_fixture();
+    let expected = "a consistently keyed model output";
+    let canonical_model = output.model_id.clone();
+    let canonical_instrument = output.instrument_id.clone();
+
+    let mut wrong_model = output.clone();
+    wrong_model.model_id = "quant.untrusted".to_owned();
+    assert_absent(
+        size_output(
+            run_context(true),
+            &view,
+            wrong_model,
+            canonical_model.clone(),
+            canonical_instrument.clone(),
+        ),
+        expected,
+    );
+
+    let wrong_outer_instrument =
+        RuntimeInstrumentId::new("8f475fc4-8bad-4ec1-bbeb-8023ad80310f").unwrap();
+    assert_absent(
+        size_output(
+            run_context(true),
+            &view,
+            output,
+            canonical_model,
+            wrong_outer_instrument,
+        ),
+        expected,
+    );
+}
+
+#[test]
+fn sizing_refuses_each_unpinned_model_identity_field() {
+    let (view, output) = builder_fixture();
+    let expected = "a model output pinned by the validated mandate";
+
+    let mut wrong_version = output.clone();
+    wrong_version.model_version = "2.0.0".to_owned();
+    let mut wrong_version_context = run_context(true);
+    wrong_version_context
+        .decision
+        .as_mut()
+        .unwrap()
+        .builder
+        .as_mut()
+        .unwrap()
+        .model_content_hashes
+        .insert(
+            (
+                wrong_version.model_id.clone(),
+                wrong_version.model_version.clone(),
+            ),
+            wrong_version.content_hash,
+        );
+    assert_absent(
+        size_output(
+            wrong_version_context,
+            &view,
+            wrong_version.clone(),
+            wrong_version.model_id.clone(),
+            wrong_version.instrument_id.clone(),
+        ),
+        expected,
+    );
+
+    let mut wrong_model = output;
+    wrong_model.model_id = "quant.untrusted".to_owned();
+    let mut wrong_model_context = run_context(true);
+    wrong_model_context
+        .decision
+        .as_mut()
+        .unwrap()
+        .builder
+        .as_mut()
+        .unwrap()
+        .model_content_hashes
+        .insert(
+            (
+                wrong_model.model_id.clone(),
+                wrong_model.model_version.clone(),
+            ),
+            wrong_model.content_hash,
+        );
+    assert_absent(
+        size_output(
+            wrong_model_context,
+            &view,
+            wrong_model.clone(),
+            wrong_model.model_id.clone(),
+            wrong_model.instrument_id.clone(),
+        ),
+        expected,
+    );
+}
+
+#[test]
+fn sizing_refuses_each_execution_policy_mismatch() {
+    let (view, output) = builder_fixture();
+    let expected = "the mandate-derived execution policy";
+
+    let mut wrong_asset = run_context(true);
+    let execution = &mut wrong_asset
+        .decision
+        .as_mut()
+        .unwrap()
+        .builder
+        .as_mut()
+        .unwrap()
+        .execution;
+    execution.asset_class = DomainAssetClass::Crypto;
+    execution.tif = TimeInForce::Gtc;
+    assert_absent(
+        size_output(
+            wrong_asset,
+            &view,
+            output.clone(),
+            output.model_id.clone(),
+            output.instrument_id.clone(),
+        ),
+        expected,
+    );
+
+    let mut missing_protection = run_context(true);
+    let execution = &mut missing_protection
+        .decision
+        .as_mut()
+        .unwrap()
+        .builder
+        .as_mut()
+        .unwrap()
+        .execution;
+    execution.protection_required = false;
+    execution.protection = None;
+    assert_absent(
+        size_output(
+            missing_protection,
+            &view,
+            output.clone(),
+            output.model_id.clone(),
+            output.instrument_id.clone(),
+        ),
+        expected,
+    );
+}
+
+#[test]
+fn sizing_accepts_an_unprotected_sell() {
+    let (view, mut output) = builder_fixture();
+    output.conviction = Conviction::MINUS_ONE;
+    let mut context = run_context(true);
+    let builder = context.decision.as_mut().unwrap().builder.as_mut().unwrap();
+    builder.account.position_qty = Qty::parse("1").unwrap();
+    builder.account.cost_basis = CostBasis::parse("255.1").unwrap();
+    builder.account.gross_usd = Usd::parse("255.1").unwrap();
+    builder.action.purpose = Purpose::DiscretionaryExit;
+    builder.action.order_usd = Usd::parse("255.1").unwrap();
+    builder.action.position_usd_after = Usd::ZERO;
+    builder.action.gross_usd_after = Usd::ZERO;
+    builder.execution.protection_required = false;
+    builder.execution.protection = None;
+
+    let proposal = size_output(
+        context,
+        &view,
+        output.clone(),
+        output.model_id.clone(),
+        output.instrument_id.clone(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(proposal.side, mandate_accounting::Side::Sell);
+    assert_eq!(proposal.purpose, RuntimePurpose::DiscretionaryExit);
+    assert_eq!(
+        proposal.execution,
+        Some(OrderExecution {
+            asset_class: DomainAssetClass::UsEquity,
+            tif: TimeInForce::Day,
+            protection_required: false,
+            protection: None,
+        })
+    );
+}
+
+#[test]
+fn classification_refuses_each_mismatched_action_fact() {
+    let (view, output) = builder_fixture();
+    let context = run_context(true);
+    let proposal = size_output(
+        context.clone(),
+        &view,
+        output.clone(),
+        output.model_id.clone(),
+        output.instrument_id.clone(),
+    )
+    .unwrap()
+    .unwrap();
+    let plan = BuilderPlan {
+        mandate: fixtures().join("mandate.json"),
+        context: Some(Rc::new(context)),
+    };
+    let expected = "classification facts for the proposed action";
+
+    let mut wrong_instrument = proposal.clone();
+    wrong_instrument.instrument =
+        RuntimeInstrumentId::new("8f475fc4-8bad-4ec1-bbeb-8023ad80310f").unwrap();
+    assert_absent(plan.classify(&view, &wrong_instrument), expected);
+
+    let mut wrong_asset = proposal.clone();
+    wrong_asset.asset_class = DomainAssetClass::Crypto;
+    assert_absent(plan.classify(&view, &wrong_asset), expected);
+
+    let mut wrong_purpose = proposal.clone();
+    wrong_purpose.purpose = RuntimePurpose::Increase;
+    assert_absent(plan.classify(&view, &wrong_purpose), expected);
+
+    let mut wrong_score = proposal;
+    wrong_score.combined_score = Value::Str("0".to_owned());
+    assert_absent(plan.classify(&view, &wrong_score), expected);
 }
 
 /// The whole path: one order, its intent journaled before it was sent, both streams verifying,
 /// every draft paper, and no account number or credential anywhere in the record (TI-1, TI-7,
 /// TI-8).
 #[test]
-#[ignore = "pending E7-7"]
 fn happy() {
     let scratch = Scratch::new("happy");
     let closes = rising();
@@ -338,12 +1218,71 @@ fn happy() {
     let transport = Scripted::new(Broker::Fresh);
     let seen = Rc::clone(&transport.seen);
     let mut stages = stages("mandate.json", dataset, transport);
+    let batches = record_batches(&mut stages);
     let report = run(&mut stages, &setup(true)).unwrap();
     assert_eq!(seen.borrow().posts(), 1);
     assert_eq!(report.submitted.len(), 1);
+    assert!(
+        batches
+            .borrow()
+            .iter()
+            .any(|batch| batch == &["DecisionMade".to_owned(), "IntentProposed".to_owned()]),
+        "the decision and its caused intent are one journal append batch: {:?}",
+        batches.borrow()
+    );
+    assert!(
+        batches.borrow().iter().any(|batch| {
+            batch
+                .windows(2)
+                .any(|pair| pair == ["OrderRequestRecorded", "OrderSubmitted"])
+        }),
+        "the request companion and submission are one journal append batch before the broker call: {:?}",
+        batches.borrow()
+    );
 
     let agent = committed(&stages, &agent_stream());
     let account = committed(&stages, &account_stream());
+    assert_eq!(
+        agent.first().map(|row| row.event_type.as_str()),
+        Some("StreamOpened"),
+        "the agent stream opens before the runtime journals its startup mode"
+    );
+    assert_eq!(
+        account.first().map(|row| row.event_type.as_str()),
+        Some("StreamOpened"),
+        "the account stream opens before the executor journals reconciliation"
+    );
+    assert!(
+        agent.iter().all(|row| row.schema_version == 1),
+        "runtime agent drafts retain schema version 1: {agent:?}"
+    );
+    for event_type in ["IntentReceived", "GateDecided", "OrderSubmitted"] {
+        let rows: Vec<_> = account
+            .iter()
+            .filter(|row| row.event_type == event_type)
+            .collect();
+        assert!(!rows.is_empty(), "{event_type} is journaled");
+        assert!(
+            rows.iter().all(|row| row.schema_version == 2),
+            "{event_type} is executor-owned schema version 2: {rows:?}"
+        );
+    }
+    for event_type in [
+        "StreamOpened",
+        "ReconciliationRun",
+        "ProtectionChanged",
+        "OrderRequestRecorded",
+    ] {
+        let rows: Vec<_> = account
+            .iter()
+            .filter(|row| row.event_type == event_type)
+            .collect();
+        assert!(!rows.is_empty(), "{event_type} is journaled");
+        assert!(
+            rows.iter().all(|row| row.schema_version == 1),
+            "{event_type} retains its registered schema version: {rows:?}"
+        );
+    }
     let intents = of_type(&agent, "IntentProposed");
     assert_eq!(intents.len(), 1);
     let submitted = of_type(&account, "OrderSubmitted");
@@ -357,17 +1296,27 @@ fn happy() {
         .find_map(|(method, _, body)| (*method == Method::Post).then(|| body.clone().unwrap()));
     assert!(posted.unwrap().contains(&client_order_id));
 
+    let (model_digest, model_bytes) = model_artifact();
+    let (config_refs, mut artifacts) = executor_artifacts("mandate.json");
+    artifacts.insert(model_digest, model_bytes);
     for rows in [&agent, &account] {
-        verify_events(
-            rows,
-            TrustedStart::GENESIS,
-            &BTreeMap::<Digest, Vec<u8>>::new(),
-        )
-        .unwrap();
+        verify_events(rows, TrustedStart::GENESIS, &artifacts).unwrap();
         for row in rows.iter() {
             assert_eq!(row.environment, "paper");
         }
     }
+    let fee_digest = config_refs
+        .fee_config
+        .as_deref()
+        .and_then(|reference| reference.strip_prefix("sha256:"))
+        .and_then(Digest::from_hex)
+        .unwrap();
+    let mut wrong = artifacts.clone();
+    wrong.insert(fee_digest, b"wrong fee config".to_vec());
+    assert!(
+        verify_events(&account, TrustedStart::GENESIS, &wrong).is_err(),
+        "verification rejects bytes that do not hash to the referenced fee configuration"
+    );
     let written = String::from_utf8(stream_bytes(&stages)).unwrap();
     for secret in [
         "pii:account_number",
@@ -381,7 +1330,6 @@ fn happy() {
 
 /// TI-10: the same fixtures, mandate, and clock journal byte-identical drafts.
 #[test]
-#[ignore = "pending E7-7"]
 fn happy_is_deterministic() {
     let closes = rising();
     let closes: Vec<&str> = closes.iter().map(String::as_str).collect();
@@ -399,7 +1347,6 @@ fn happy_is_deterministic() {
 
 /// A planning run sends nothing and reports the order it would place.
 #[test]
-#[ignore = "pending E7-7"]
 fn a_planning_run_sends_nothing() {
     let scratch = Scratch::new("planning");
     let closes = rising();
@@ -416,7 +1363,6 @@ fn a_planning_run_sends_nothing() {
 /// TI-9, PB-6: the mandate classifies the opening ASK, and the tracer has no escalation: the
 /// request is journaled and nothing is sent.
 #[test]
-#[ignore = "pending E7-7"]
 fn autonomy_ask() {
     let scratch = Scratch::new("ask");
     let closes = rising();
@@ -434,7 +1380,6 @@ fn autonomy_ask() {
 
 /// PB-7: falling closes put the five-day average below the twenty-day one; flat opens nothing.
 #[test]
-#[ignore = "pending E7-7"]
 fn signal_flat() {
     let scratch = Scratch::new("flat");
     let closes = falling();
@@ -450,12 +1395,11 @@ fn signal_flat() {
 /// PB-7: ten closes are fewer than the twenty the slow window needs, so the signal is undecided,
 /// never a buy.
 #[test]
-#[ignore = "pending E7-7"]
 fn signal_undecided() {
     let scratch = Scratch::new("undecided");
     let closes = rising();
     let closes: Vec<&str> = closes.iter().skip(15).map(String::as_str).collect();
-    let dataset = bars(&scratch.0, &closes);
+    let dataset = bars_from(&scratch.0, "2026-09-14", &closes);
     let transport = Scripted::new(Broker::Fresh);
     let seen = Rc::clone(&transport.seen);
     let mut stages = stages("mandate.json", dataset, transport);
@@ -463,10 +1407,26 @@ fn signal_undecided() {
     assert_eq!(seen.borrow().posts(), 0);
 }
 
+/// Stored bars must reach the last completed equity session at the run's injected clock. A clean,
+/// internally gapless dataset ending one session earlier is stale and sends nothing.
+#[test]
+fn stale_stored_bars_are_refused() {
+    let scratch = Scratch::new("stale-bars");
+    let closes = rising();
+    let closes: Vec<&str> = closes.iter().map(String::as_str).collect();
+    let dataset = bars(&scratch.0, &closes);
+    let transport = Scripted::new(Broker::Fresh);
+    let seen = Rc::clone(&transport.seen);
+    let mut stages = stages("mandate.json", dataset, transport);
+    let mut stale = setup(true);
+    stale.now = UtcNanos::parse("2026-09-29T13:00:00.000000000Z").unwrap();
+    assert_refused(run(&mut stages, &stale), "market_data_untrusted");
+    assert_eq!(seen.borrow().posts(), 0);
+}
+
 /// A mandate whose order cap is below one share: the builder holds, so nothing is proposed and
 /// nothing is sent. A cap is a limit, which the shell never judges (PB-14).
 #[test]
-#[ignore = "pending E7-7"]
 fn oversized_proposal() {
     let scratch = Scratch::new("oversized");
     let closes = rising();
@@ -486,7 +1446,7 @@ fn oversized_proposal() {
 
 /// PB-15: one close ten times the others is coverage the market-data stage cannot trust.
 #[test]
-#[ignore = "pending E7-7"]
+#[ignore = "pending E2-14"]
 fn outlier_close() {
     let scratch = Scratch::new("outlier");
     let mut closes = rising();
@@ -503,7 +1463,6 @@ fn outlier_close() {
 /// TI-6, PB-3: a second run over the same journal sends nothing further; across both runs there is
 /// exactly one submission and one intent, and the broker's duplicate check is never needed.
 #[test]
-#[ignore = "pending E7-7"]
 fn duplicate_after_restart() {
     let scratch = Scratch::new("restart");
     let closes = rising();
@@ -524,7 +1483,6 @@ fn duplicate_after_restart() {
 /// TI-12, PB-16: a fresh journal against a broker that already holds the position is a
 /// reconciliation mismatch, never a clean start.
 #[test]
-#[ignore = "pending E7-7"]
 fn fresh_journal_with_broker_position() {
     let scratch = Scratch::new("fresh-journal");
     let closes = rising();
@@ -539,7 +1497,6 @@ fn fresh_journal_with_broker_position() {
 
 /// PB-11: the submission times out, the query finds nothing, and one absence never resubmits.
 #[test]
-#[ignore = "pending E7-7"]
 fn broker_unknown_then_absent() {
     let scratch = Scratch::new("unknown");
     let closes = rising();
@@ -557,7 +1514,6 @@ fn broker_unknown_then_absent() {
 /// PB-12: after a mismatch the agent stays paused and alerted, and nothing in the tracer lifts it:
 /// its agent stream's last mode is `paused`.
 #[test]
-#[ignore = "pending E7-7"]
 fn reconcile_mismatch_pauses() {
     let scratch = Scratch::new("mismatch");
     let closes = rising();

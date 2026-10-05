@@ -60,10 +60,11 @@ pub use ports::{
 pub use state::{FOLD_VERSION, PendingApproval, RuntimeState, UnresolvedAppend, fold};
 pub use step::handle;
 pub use types::{
-    AgentId, ApprovalSettings, Autonomy, Classified, Command, ConnectionId, Deployment,
-    DryRunVerdict, Effect, EventDraft, EventId, FlattenLeg, FlattenPlan, FlattenRequest,
-    FoldedEvent, Handoff, Initiator, Input, IntentBody, IntentHandoff, KillScope, LocalHold,
-    MandateView, Mode, ModelOutput, NotificationRef, Observation, Outstanding, OwnerConfirmation,
-    Proposal, Purpose, RiskClock, Seq, SignalInputs, TimerId, TimerRequest, WorkspaceId,
+    AgentId, ApprovalSettings, Autonomy, Classified, Command, ConnectionId, DecisionClip,
+    Deployment, DryRunVerdict, Effect, EventDraft, EventId, ExitOrigin, FlattenLeg, FlattenPlan,
+    FlattenRequest, FoldedEvent, Handoff, Initiator, Input, IntentBody, IntentHandoff, KillScope,
+    LocalHold, MandateView, Mode, ModelDirection, ModelOutput, ModelOutputIgnored, NotificationRef,
+    Observation, OrderExecution, Outstanding, OwnerConfirmation, Proposal, ProtectionPrices,
+    Purpose, RiskClock, Seq, SignalInputs, TimeInForce, TimerId, TimerRequest, WorkspaceId,
     WriterEpoch,
 };

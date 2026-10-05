@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mandate_accounting::InstrumentId;
-use mandate_canon::Value;
+use mandate_canon::{Key, Object, Value};
 use mandate_executor::BrokerRequest;
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_runtime::{
@@ -74,7 +74,7 @@ pub fn run(stages: &mut Stages, setup: &Setup) -> Result<Report, ShellError> {
     let instrument = pinned(&admitted.view)?;
     let closes = stages
         .bars
-        .closes(&admitted.symbol)
+        .closes(&admitted.symbol, setup.now)
         .map_err(refused(Stage::MarketData))?;
     let signal = stages
         .signal
@@ -145,6 +145,11 @@ impl<'s> Session<'s> {
             cycle_open: false,
             report: Report::default(),
         };
+        session
+            .stages
+            .executor
+            .reset()
+            .map_err(refused(Stage::Executor))?;
         for stream in [session.agent_stream.clone(), session.account_stream.clone()] {
             let epoch = session
                 .stages
@@ -157,9 +162,70 @@ impl<'s> Session<'s> {
                 .journal
                 .read(&stream)
                 .map_err(refused(Stage::Journal))?;
-            session.replay(&stream, &rows)?;
+            if rows.is_empty() {
+                session.open_stream(&stream)?;
+            } else {
+                session.replay(&stream, &rows)?;
+            }
         }
         Ok(session)
+    }
+
+    /// Journal §2's stream lifecycle: the shell that owns a new stream writes its
+    /// `StreamOpened` at sequence 1 before either core receives `Started`. A replayed stream
+    /// already has this record and never passes through here.
+    fn open_stream(&mut self, stream: &str) -> Result<(), ShellError> {
+        let workspace = self.setup.deployment.workspace.0.clone();
+        let (writer, actor_id, space, members) = if stream == self.agent_stream {
+            (
+                Writer::Agent,
+                self.setup.deployment.agent.0.as_str(),
+                IdSpace::Agent,
+                vec![
+                    ("stream_type", "agent".to_owned()),
+                    ("workspace_id", workspace),
+                    ("agent_id", self.setup.deployment.agent.0.clone()),
+                ],
+            )
+        } else {
+            (
+                Writer::Executor,
+                "executor",
+                IdSpace::Account,
+                vec![
+                    ("stream_type", "account".to_owned()),
+                    ("workspace_id", workspace),
+                    ("broker", "alpaca".to_owned()),
+                    ("account_ref", self.setup.account_ref.clone()),
+                ],
+            )
+        };
+        let mut object = Object::new();
+        for (name, value) in members {
+            object.insert(
+                Key::new(name).map_err(|_| ShellError::Envelope { field: name })?,
+                Value::Str(value),
+            );
+        }
+        let event_id = Ids { space }.derive(self.epoch(stream), 0, 0);
+        let config_refs = Object::new();
+        let bytes = draft_bytes(
+            &Envelope {
+                stream,
+                writer,
+                actor_id,
+                event_time: self.setup.now,
+            },
+            &DraftFields {
+                event_id: &event_id,
+                event_type: "StreamOpened",
+                schema_version: 1,
+                causation_id: None,
+                config_refs: &config_refs,
+                payload: &Value::Object(object),
+            },
+        )?;
+        self.append(stream, vec![bytes])
     }
 
     fn replay(&mut self, stream: &str, rows: &[StoredEvent]) -> Result<(), ShellError> {
@@ -172,25 +238,82 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
-    /// Recovery, then the startup reconciliation. The runtime holds every opening until a clean
-    /// `ReconciliationRun` has been folded (DEC-131 item 13), and a mismatch keeps it held.
+    /// Recovery, then the startup account report and reconciliation. The account report commits
+    /// first; the runtime holds every opening until it and a clean `ReconciliationRun` have both
+    /// folded (DEC-458), and a mismatch keeps it held.
     pub(crate) fn start(&mut self) -> Result<(), ShellError> {
-        let epoch = self.epoch(&self.agent_stream.clone());
-        self.feed(Input::Started(WriterEpoch(epoch)))?;
+        let agent_epoch = self.epoch(&self.agent_stream.clone());
+        self.feed(Input::Started(WriterEpoch(agent_epoch)))?;
+        let account_epoch = self.epoch(&self.account_stream.clone());
+        let executor_effects = self
+            .stages
+            .executor
+            .step(mandate_executor::Input::Started(
+                mandate_executor::WriterEpoch(account_epoch),
+            ))
+            .map_err(refused(Stage::Executor))?;
+        let reconciliation_requests = self.prepare_reconciliation(executor_effects)?;
+        let snapshot = self
+            .stages
+            .reconciler
+            .snapshot(&mut *self.stages.connector, &reconciliation_requests)
+            .map_err(refused(Stage::Reconcile))?;
+        let account_effects = self
+            .stages
+            .executor
+            .step(mandate_executor::Input::BrokerUpdate(
+                mandate_executor::BrokerUpdate::Account(snapshot.account.clone()),
+            ))
+            .map_err(refused(Stage::Executor))?;
+        self.perform_executor(account_effects)?;
         let reconciled = self
             .stages
             .reconciler
-            .reconcile()
+            .reconcile(&snapshot)
             .map_err(refused(Stage::Reconcile))?;
-        for draft in &reconciled.drafts {
-            self.append_account(draft)?;
+        self.perform_executor(reconciled.effects)?;
+        match reconciled.verdict {
+            mandate_executor::ReconciliationVerdict::Clean
+            | mandate_executor::ReconciliationVerdict::Adopted => Ok(()),
+            mandate_executor::ReconciliationVerdict::Mismatch => {
+                self.report.alerts.push("reconciliation_mismatch");
+                Err(ShellError::ReconciliationMismatch)
+            }
         }
-        if reconciled.clean {
-            Ok(())
-        } else {
-            self.report.alerts.push("reconciliation_mismatch");
-            Err(ShellError::ReconciliationMismatch)
+    }
+
+    fn prepare_reconciliation(
+        &mut self,
+        effects: Vec<mandate_executor::Effect>,
+    ) -> Result<Vec<BrokerRequest>, ShellError> {
+        let mut requests = Vec::new();
+        let mut effects = VecDeque::from(effects);
+        while let Some(effect) = effects.pop_front() {
+            match effect {
+                mandate_executor::Effect::Broker(request) => match request {
+                    BrokerRequest::ListOpenOrders
+                    | BrokerRequest::ListPositions
+                    | BrokerRequest::GetAccount
+                    | BrokerRequest::ListActivities { .. } => requests.push(request),
+                    BrokerRequest::Submit(_)
+                    | BrokerRequest::Cancel { .. }
+                    | BrokerRequest::AcknowledgeReplace { .. }
+                    | BrokerRequest::GetOrderByClientId(_)
+                    | BrokerRequest::CancelAll(_)
+                    | BrokerRequest::ClosePosition(_, _) => {
+                        self.perform_executor(vec![mandate_executor::Effect::Broker(request)])?;
+                    }
+                },
+                mandate_executor::Effect::Journal(draft) => {
+                    let drafts = consecutive_executor_journals(draft, &mut effects);
+                    self.append_account(&drafts)?;
+                }
+                mandate_executor::Effect::Timer(_) | mandate_executor::Effect::Notify(_) => {
+                    self.perform_executor(vec![effect])?;
+                }
+            }
         }
+        Ok(requests)
     }
 
     /// One runtime step and every effect it describes, in order. A refusal a stage recorded during
@@ -239,9 +362,18 @@ impl<'s> Session<'s> {
     }
 
     pub(crate) fn perform(&mut self, effects: Vec<Effect>) -> Result<(), ShellError> {
-        for effect in effects {
+        let mut effects = VecDeque::from(effects);
+        while let Some(effect) = effects.pop_front() {
             match effect {
-                Effect::Journal(draft) => self.append_agent(&draft)?,
+                Effect::Journal(draft) => {
+                    let mut drafts = vec![draft];
+                    while matches!(effects.front(), Some(Effect::Journal(_))) {
+                        if let Some(Effect::Journal(next)) = effects.pop_front() {
+                            drafts.push(next);
+                        }
+                    }
+                    self.append_agent(&drafts)?;
+                }
                 Effect::Intent(handoff) => self.hand(&handoff)?,
                 Effect::Timer(_) => {}
                 Effect::Notify(notification) => self.report.alerts.push(notification.message_key),
@@ -279,7 +411,10 @@ impl<'s> Session<'s> {
         let mut queue = VecDeque::from(effects);
         while let Some(effect) = queue.pop_front() {
             match effect {
-                mandate_executor::Effect::Journal(draft) => self.append_account(&draft)?,
+                mandate_executor::Effect::Journal(draft) => {
+                    let drafts = consecutive_executor_journals(draft, &mut queue);
+                    self.append_account(&drafts)?;
+                }
                 mandate_executor::Effect::Broker(request) => {
                     if let Some(input) = self.broker(&request)? {
                         let more = self
@@ -331,57 +466,84 @@ impl<'s> Session<'s> {
             .map_err(refused(Stage::Connector))
     }
 
-    fn append_agent(&mut self, draft: &EventDraft) -> Result<(), ShellError> {
+    fn append_agent(&mut self, drafts: &[EventDraft]) -> Result<(), ShellError> {
         let stream = self.agent_stream.clone();
-        let bytes = draft_bytes(
-            &Envelope {
-                stream: &stream,
-                writer: Writer::Agent,
-                actor_id: &self.setup.deployment.agent.0,
-                event_time: self.setup.now,
-            },
-            &DraftFields {
-                event_id: &draft.event_id.0,
-                event_type: &draft.event_type,
-                causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
-                payload: &draft.payload,
-            },
-        )?;
+        let mut config_refs = Object::new();
+        config_refs.insert(
+            Key::new("mandate_version").map_err(|_| ShellError::Envelope {
+                field: "mandate_version",
+            })?,
+            Value::Str(self.view.version.clone()),
+        );
+        let bytes = drafts
+            .iter()
+            .map(|draft| {
+                draft_bytes(
+                    &Envelope {
+                        stream: &stream,
+                        writer: Writer::Agent,
+                        actor_id: &self.setup.deployment.agent.0,
+                        event_time: self.setup.now,
+                    },
+                    &DraftFields {
+                        event_id: &draft.event_id.0,
+                        event_type: &draft.event_type,
+                        schema_version: 1,
+                        causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
+                        config_refs: &config_refs,
+                        payload: &draft.payload,
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         self.append(&stream, bytes)
     }
 
-    fn append_account(&mut self, draft: &mandate_executor::EventDraft) -> Result<(), ShellError> {
+    fn append_account(
+        &mut self,
+        drafts: &[mandate_executor::EventDraft],
+    ) -> Result<(), ShellError> {
         let stream = self.account_stream.clone();
-        let bytes = draft_bytes(
-            &Envelope {
-                stream: &stream,
-                writer: Writer::Executor,
-                actor_id: "executor",
-                event_time: self.setup.now,
-            },
-            &DraftFields {
-                event_id: &draft.event_id.0,
-                event_type: &draft.event_type,
-                causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
-                payload: &draft.payload,
-            },
-        )?;
+        let bytes = drafts
+            .iter()
+            .map(|draft| {
+                draft_bytes(
+                    &Envelope {
+                        stream: &stream,
+                        writer: Writer::Executor,
+                        actor_id: "executor",
+                        event_time: self.setup.now,
+                    },
+                    &DraftFields {
+                        event_id: &draft.event_id.0,
+                        event_type: &draft.event_type,
+                        schema_version: draft.schema_version,
+                        causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
+                        config_refs: &draft.config_refs,
+                        payload: &draft.payload,
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         self.append(&stream, bytes)?;
-        if draft.event_type == "OrderSubmitted"
-            && let Some(id) = draft.payload.get("client_order_id").and_then(Value::as_str)
-        {
-            self.submitted_drafts.insert(id.to_owned());
+        for draft in drafts {
+            if draft.event_type == "OrderSubmitted"
+                && let Some(id) = draft.payload.get("client_order_id").and_then(Value::as_str)
+            {
+                self.submitted_drafts.insert(id.to_owned());
+            }
         }
         Ok(())
     }
 
-    /// Appends one draft at the stream's head and folds what committed back into both cores. An
+    /// Appends one batch at the stream's head and folds what committed back into both cores. An
     /// `AlreadyCommitted` answer can name rows this session already folded; those are never folded
     /// twice, since a fold of a `seq` already held is out of order.
-    fn append(&mut self, stream: &str, bytes: Vec<u8>) -> Result<(), ShellError> {
+    fn append(&mut self, stream: &str, bytes: Vec<Vec<u8>>) -> Result<(), ShellError> {
         let head = self.head(stream);
         let epoch = self.epoch(stream);
-        let rows = match self.stages.journal.append(stream, head, epoch, &[bytes]) {
+        let outcome = self.stages.journal.append(stream, head, epoch, &bytes);
+        let rows = match outcome {
             AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows) => rows,
             refusal @ (AppendOutcome::HeadMismatch { .. }
             | AppendOutcome::IdempotencyConflict { .. }
@@ -453,6 +615,61 @@ impl<'s> Session<'s> {
     }
 }
 
+fn consecutive_executor_journals(
+    first: mandate_executor::EventDraft,
+    effects: &mut VecDeque<mandate_executor::Effect>,
+) -> Vec<mandate_executor::EventDraft> {
+    let mut drafts = vec![first];
+    while matches!(effects.front(), Some(mandate_executor::Effect::Journal(_))) {
+        if let Some(mandate_executor::Effect::Journal(next)) = effects.pop_front() {
+            drafts.push(next);
+        }
+    }
+    drafts
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use mandate_canon::{Object, Value};
+    use mandate_executor::{Effect, EventDraft, EventId, NotificationRef};
+
+    use super::consecutive_executor_journals;
+
+    fn draft(id: &str, event_type: &str, schema_version: u64) -> EventDraft {
+        EventDraft {
+            event_id: EventId(id.to_owned()),
+            event_type: event_type.to_owned(),
+            schema_version,
+            config_refs: Object::new(),
+            causation_id: None,
+            payload: Value::Null,
+        }
+    }
+
+    #[test]
+    fn consecutive_executor_drafts_stay_in_one_append_run() {
+        let companion = draft("companion", "OrderRequestRecorded", 1);
+        let submitted = draft("submitted", "OrderSubmitted", 2);
+        let boundary = Effect::Notify(NotificationRef {
+            subject_event: EventId("submitted".to_owned()),
+            message_key: "submitted",
+        });
+        let mut effects = VecDeque::from([Effect::Journal(submitted), boundary]);
+        let drafts = consecutive_executor_journals(companion, &mut effects);
+        assert_eq!(
+            drafts
+                .iter()
+                .map(|draft| (draft.event_type.as_str(), draft.schema_version))
+                .collect::<Vec<_>>(),
+            [("OrderRequestRecorded", 1), ("OrderSubmitted", 2)]
+        );
+        assert!(matches!(effects.front(), Some(Effect::Notify(_))));
+        assert_eq!(effects.len(), 1);
+    }
+}
+
 /// The actor every event the tracer folds is read as. The tracer folds only its agent and account
 /// streams, where no response is admitted from anyone, and reads no control stream; `system` is
 /// what admission never admits (EI-10), so the control-stream tail that maps the envelope's
@@ -511,16 +728,23 @@ impl OrderPlan for Bridge<'_> {
         proposal
     }
 
-    /// The stage classifier names no `DecidedBy` label, so its answer carries none.
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Classified {
         let answer = self.classifier.classify(view, proposal);
-        let autonomy = map::autonomy_of(&answer);
-        let cause = match answer {
-            Err(cause) => Some(cause),
-            Ok(Autonomy::Auto) => None,
-            Ok(other @ (Autonomy::Ask | Autonomy::Deny)) => Some(Cause::NotAuto {
-                autonomy: map::autonomy_name(other),
-            }),
+        let (classified, cause) = match answer {
+            Err(cause) => (
+                Classified {
+                    autonomy: Autonomy::Deny,
+                    decided_by: None,
+                },
+                Some(cause),
+            ),
+            Ok(classified) if classified.autonomy == Autonomy::Auto => (classified, None),
+            Ok(classified) => {
+                let cause = Cause::NotAuto {
+                    autonomy: map::autonomy_name(classified.autonomy),
+                };
+                (classified, Some(cause))
+            }
         };
         if let Some(cause) = cause {
             self.record(ShellError::Refused {
@@ -528,10 +752,7 @@ impl OrderPlan for Bridge<'_> {
                 cause,
             });
         }
-        Classified {
-            autonomy,
-            decided_by: None,
-        }
+        classified
     }
 }
 

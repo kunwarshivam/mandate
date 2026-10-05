@@ -1806,8 +1806,21 @@ def fuzz_escalation(n):
                     if last is not None:
                         produced[last] = True
                     b = bound_of.get(d["approval"], {})
-                    check({f: d[f] for f in BOUND_FIELDS} == {f: b.get(f) for f in BOUND_FIELDS},
-                          "MI-22 the intent equals the bound fields", (d, b))
+                    bound_action = {
+                        "instrument_id": b.get("instrument"),
+                        "side": b.get("side"),
+                        "order_type": "limit",
+                        "tif": "day" if b.get("asset_class") == "us_equity" else "gtc",
+                        "qty": b.get("qty"),
+                        "limit_price": b.get("limit_price"),
+                        "purpose": b.get("purpose"),
+                        "mandate_version": b.get("mandate_version"),
+                    }
+                    check(
+                        {field: d[field] for field in bound_action} == bound_action,
+                        "MI-22 the intent equals the bound fields",
+                        (d, b),
+                    )
             for src, want in expected.items():
                 if want is None:
                     check(src not in produced, "MI-21 a re-tailed control-stream event is copied once", (src, drafts))

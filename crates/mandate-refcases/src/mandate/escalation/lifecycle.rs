@@ -14,14 +14,15 @@
 //! in DEC-317's later slices and fail naming theirs until then.
 //!
 //! **The map** (DEC-317 item 4). A draft's `clock` is the folded risk clock after its step;
-//! instants are whole seconds; `limit_price` is `limit`; every other member compares as the
-//! runtime's canonical value, which is how the case writes it. The case's approval and content-hash
-//! names are bound one to one to the runtime's request id and hash: the reference model hashes its
-//! request as a stand-in for the content object (`reference/mandate/ref.py`, `escalation_step`), so
-//! a case's hash is a name, and the runtime's `content_hash` must be the digest of its own inline
-//! `content`. Every member of a draft's payload is one the case states or one checked here, and so
-//! is its cause. The step's other effects, the deadline timer and the opaque notification, are
-//! `mandate-runtime`'s own tests' to pin (DEC-317 item 5).
+//! instants are whole seconds; `order_type` disambiguates the intent payload's `type` from the
+//! expected draft's event type; every other member compares under the closed journal name. The
+//! case's approval and content-hash names are bound one to one to the runtime's request id and hash:
+//! the reference model hashes its request as a stand-in for the content object
+//! (`reference/mandate/ref.py`, `escalation_step`), so a case's hash is a name, and the runtime's
+//! `content_hash` must be the digest of its own inline `content`. Every member of a draft's payload
+//! is one the case states or one checked here, and so is its cause. The step's other effects, the
+//! deadline timer and the opaque notification, are `mandate-runtime`'s own tests' to pin (DEC-317
+//! item 5).
 //!
 //! **Every member is read (DEC-85).** The case, the context, each step, the bound order, each
 //! expectation and each expected draft are swept, and a member or value this module does not know
@@ -117,10 +118,12 @@ const REVALIDATED: &[(&str, &str, As)] = &[
     ("reason", "reason", As::Canonical),
 ];
 const INTENDED: &[(&str, &str, As)] = &[
-    ("instrument", "instrument", As::Canonical),
+    ("instrument_id", "instrument_id", As::Canonical),
     ("side", "side", As::Canonical),
+    ("order_type", "type", As::Canonical),
+    ("tif", "tif", As::Canonical),
     ("qty", "qty", As::Canonical),
-    ("limit_price", "limit", As::Canonical),
+    ("limit_price", "limit_price", As::Canonical),
     ("purpose", "purpose", As::Canonical),
 ];
 /// The one member the runtime writes that no draft compares: the request's `content`, checked only
@@ -610,7 +613,14 @@ impl Shell {
                 "increase" => Purpose::Increase,
                 other => return Err(format!("`{other}` is not a purpose an ask binds")),
             },
+            exit_origin: None,
+            exit_conviction: None,
+            buy_conviction: None,
             combined_score: text(str_at(bound, "combined_score")?),
+            outputs_used: BTreeSet::new(),
+            model_weights: BTreeMap::new(),
+            clips_applied: Vec::new(),
+            execution: None,
         };
         self.view.version = str_at(bound, "mandate_version")?.to_owned();
         self.view.working_universe = [id].into();

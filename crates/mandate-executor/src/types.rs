@@ -1,7 +1,7 @@
 //! The core's vocabulary: what goes in, what comes out, and the order states in between.
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
-use mandate_canon::Value;
+use mandate_canon::{Object, Value};
 use mandate_num::{Fraction, Price, Qty, SignedQty, Usd};
 use mandate_time::Date;
 
@@ -257,9 +257,9 @@ pub struct ProtectionPrices {
 pub struct IntentHandoff {
     pub intent_id: IntentId,
     pub agent: AgentId,
-    /// The TIF the proposal carries, which the account stream's `IntentReceived` copies exactly —
-    /// as proposed, never the submission's (journal spec §9.1, DEC-389 item 3).
-    pub tif: TimeInForce,
+    /// The TIF an order proposal carries, which `IntentReceived` copies exactly — as proposed,
+    /// never the submission's (journal spec §9.1, DEC-389 item 3). A flatten has no proposal TIF.
+    pub tif: Option<TimeInForce>,
     pub body: IntentBody,
 }
 
@@ -814,6 +814,10 @@ pub struct NotificationRef {
 pub struct EventDraft {
     pub event_id: EventId,
     pub event_type: String,
+    /// The registered journal payload schema selected by the executor that owns this draft.
+    pub schema_version: u64,
+    /// The trusted configuration artifacts used for this exact event.
+    pub config_refs: Object,
     pub causation_id: Option<EventId>,
     pub payload: Value,
 }

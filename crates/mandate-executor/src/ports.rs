@@ -1,19 +1,36 @@
 //! The injected collaborators. Every one is pure, so [`crate::handle`] stays deterministic.
 //!
-//! The binding gate is deliberately **not** here. A gate a caller can substitute is not
-//! independent of agent logic (`AGENTS.md` rule 1; journal spec §2: "the risk gate is a pure
-//! library it calls"), so `mandate-risk` is a crate-private dependency and stream I's injectable
-//! `GateDryRun` — which can only narrow — is the advisory call, not this one
-//! (task brief interpretation 4).
+//! [`BindingGateSource`] supplies trusted facts, never a verdict. The executor derives the order
+//! and calls `mandate-risk` itself, so neither this port nor stream I's advisory `GateDryRun` can
+//! inject an allow (`AGENTS.md` rule 1; journal spec §2).
 
+#[cfg(test)]
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 
+#[cfg(test)]
+use mandate_accounting::AccountType;
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_num::{Fraction, ShareIncrement};
+#[cfg(test)]
+use mandate_num::{Price, Qty, Ratio, Usd};
+#[cfg(test)]
+use mandate_risk::spec_types::{GoalState, RiskLimits};
+use mandate_risk::{
+    AccountSnapshot, AgentId as GateAgentId, AgentSnapshot, AssetId, ClientOrderId as GateOrderId,
+    ConductState, GateConfig, InstrumentSnapshot as GateInstrumentSnapshot, MarketSnapshot,
+    RiskSnapshot, ValidatedMandate, WorkingUniverse,
+};
+#[cfg(test)]
+use mandate_risk::{
+    AccountState, AgentMode, DayTradeLedger, DayTradeRegime, EtpClass, Exchange, QuoteCurrency,
+    SaneQuote,
+};
+use mandate_time::UtcNanos;
 
 use crate::types::{
     AgentId, BrokerOutcome, BrokerRequest, BrokerUnknown, EventId, ExecutorConfig, ExitTier,
-    MandateVersion, Seq, WriterEpoch,
+    MandateVersion, ProtectionPrices, Purpose, Seq, TimeInForce, WriterEpoch,
 };
 
 /// Deterministic event identity (ADR-0001 ES-06, ES-21, DEC-131 item 6). The id is derived from
@@ -50,6 +67,233 @@ pub trait InstrumentSnapshot {
     /// Which of trading-domain spec §5.6's three tiers the instrument prices its exits from.
     fn exit_tier(&self, instrument: &InstrumentId) -> Option<ExitTier>;
 }
+
+/// The trusted values outside the account-stream fold that complete one §9.1 [`mandate_risk::GateInput`].
+///
+/// The proposed order and gate pass are deliberately absent: the executor derives both, then calls
+/// [`mandate_risk::evaluate`] directly. A caller can supply facts, never a verdict.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BindingGateConfigRefs {
+    pub fee_config: Option<String>,
+    pub trading_calendar: Option<String>,
+    pub instrument_snapshot: Option<String>,
+    pub rule_set: Option<String>,
+    pub mandate_version: Option<String>,
+}
+
+impl BindingGateConfigRefs {
+    pub fn complete(
+        fee_config: impl Into<String>,
+        trading_calendar: impl Into<String>,
+        instrument_snapshot: impl Into<String>,
+        rule_set: impl Into<String>,
+        mandate_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            fee_config: Some(fee_config.into()),
+            trading_calendar: Some(trading_calendar.into()),
+            instrument_snapshot: Some(instrument_snapshot.into()),
+            rule_set: Some(rule_set.into()),
+            mandate_version: Some(mandate_version.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BindingGateInput {
+    pub config_refs: BindingGateConfigRefs,
+    pub now: UtcNanos,
+    pub config: GateConfig,
+    pub mandate: ValidatedMandate,
+    pub risk: RiskSnapshot,
+    pub account: AccountSnapshot,
+    pub agent: AgentSnapshot,
+    pub instrument: GateInstrumentSnapshot,
+    pub market: MarketSnapshot,
+    pub conduct: ConductState,
+    pub universe: WorkingUniverse,
+    pub asset: AssetId,
+    pub gate_agent: GateAgentId,
+    pub gate_client_order_id: GateOrderId,
+    pub owner_confirmed_bid: Option<mandate_num::Price>,
+    pub fee_reservation: mandate_num::Usd,
+    pub data_profile: String,
+    pub feed: String,
+}
+
+/// The executor-owned proposal fields used to select trusted snapshots.
+///
+/// These are lookup keys, not a verdict and not the [`mandate_risk::ProposedOrder`]; the executor
+/// constructs that type itself after the lookup.
+pub struct BindingGateRequest<'a> {
+    pub agent: &'a AgentId,
+    pub instrument: &'a InstrumentId,
+    pub side: mandate_accounting::Side,
+    pub qty: mandate_num::Qty,
+    pub limit: mandate_num::Price,
+    pub purpose: Purpose,
+    pub tif: TimeInForce,
+    pub protection: Option<ProtectionPrices>,
+}
+
+/// Pure lookup of the trusted snapshots for one executor agent and instrument.
+///
+/// Returning `None` is an unavailable input, never an allow. This port cannot return a gate
+/// decision; the binding verdict is therefore not injectable.
+pub trait BindingGateSource {
+    fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput>;
+}
+
+#[cfg(test)]
+pub(crate) struct AllowingBindingGate;
+
+#[cfg(test)]
+impl BindingGateSource for AllowingBindingGate {
+    fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        if !request.purpose.adds_risk() {
+            return None;
+        }
+        let asset = AssetId::new(request.instrument.as_str()).ok()?;
+        let at = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z").ok()?;
+        let quote_at = UtcNanos::parse_rfc3339("2026-09-21T14:59:59Z").ok()?;
+        let held = Qty::parse("1000000").ok()?;
+        let equity = Usd::parse("1000000000").ok()?;
+        let mut positions = BTreeMap::new();
+        positions.insert(asset.clone(), held);
+        let gate_agent = GateAgentId(1);
+        Some(BindingGateInput {
+            config_refs: BindingGateConfigRefs::complete(
+                format!("sha256:{}", "1".repeat(64)),
+                format!("sha256:{}", "2".repeat(64)),
+                format!("sha256:{}", "3".repeat(64)),
+                format!("sha256:{}", "4".repeat(64)),
+                format!("sha256:{}", "5".repeat(64)),
+            ),
+            now: at,
+            config: GateConfig {
+                price_floor: Usd::parse("0.01").ok()?,
+                liquidity_floor_usd: Usd::ZERO,
+                crypto_liquidity_floor_usd: Usd::ZERO,
+                collar_liquid_threshold_usd: Usd::ZERO,
+                collar_liquid_x: Fraction::parse("0.5").ok()?,
+                collar_other_x: Fraction::parse("0.5").ok()?,
+                collar_crypto_x: Fraction::parse("0.5").ok()?,
+                collar_passive_band: Fraction::parse("0.5").ok()?,
+                opposite_fill_interval_s: 0,
+                min_resting_time_s: 0,
+                order_to_fill_max: u32::MAX,
+                order_to_fill_min_orders: u32::MAX,
+                order_size_participation: Fraction::parse("1").ok()?,
+                daily_participation: Fraction::parse("1").ok()?,
+                close_window_minutes: 0,
+                legacy_pdt_equity_threshold: Usd::ZERO,
+                etp_classification_max_age_s: u32::MAX,
+            },
+            mandate: ValidatedMandate::from_validated_parts(
+                RiskLimits {
+                    max_position_usd: equity,
+                    max_position_fraction: Fraction::parse("1").ok()?,
+                    max_order_usd: equity,
+                    max_gross_exposure_usd: equity,
+                    max_orders_per_day: u32::MAX,
+                    reentry_cooldown_s: 0,
+                    rebalance_band: Fraction::parse("1").ok()?,
+                    breach_confirm_s: 0,
+                    drawdown_ladder: Vec::new(),
+                },
+                GoalState::Running,
+                true,
+                true,
+            ),
+            risk: RiskSnapshot {
+                agent_equity: equity,
+                high_water_mark: equity,
+                day_start_equity: equity,
+                capital_base: equity,
+                inherited_loss: Usd::ZERO,
+                latched: BTreeSet::new(),
+                active_rungs: BTreeMap::new(),
+                size_factor: Ratio::parse("1").ok()?,
+                agent_mode: AgentMode::Normal,
+            },
+            account: AccountSnapshot {
+                account_type: AccountType::Margin,
+                state: AccountState::Active,
+                crypto_active: true,
+                regime: DayTradeRegime::IntradayMargin {
+                    maintenance_excess: equity,
+                },
+                equity,
+                prior_close_equity: equity,
+                model_buying_power: equity,
+                broker_buying_power: equity,
+                broker_non_marginable_buying_power: equity,
+                positions: positions.clone(),
+                market_values: BTreeMap::new(),
+                working_orders: BTreeMap::new(),
+                unknown_orders: BTreeSet::new(),
+                related_account_resting: BTreeMap::new(),
+            },
+            agent: AgentSnapshot {
+                agent: gate_agent,
+                mode: AgentMode::Normal,
+                instrument_restrictions: BTreeMap::new(),
+                positions,
+                market_values: BTreeMap::new(),
+                working_orders: BTreeSet::new(),
+                instrument_groups: BTreeMap::new(),
+                last_exit_fill_at: BTreeMap::new(),
+                orders_today: 0,
+                day_trades: DayTradeLedger::default(),
+            },
+            instrument: GateInstrumentSnapshot {
+                instrument: asset.clone(),
+                asset_class: AssetClass::UsEquity,
+                exchange: Some(Exchange::Nasdaq),
+                status_active: true,
+                tradable: true,
+                fractionable: true,
+                ipo: false,
+                ptp_no_exception: false,
+                etp: EtpClass::Plain,
+                etp_classified_at: Some(at),
+                quote_currency: Some(QuoteCurrency::Usd),
+                prior_close: Some(Price::parse("150").ok()?),
+                median_dollar_volume_20d: Some(equity),
+                median_dollar_volume_30d: Some(equity),
+                min_order_size: Qty::parse("0.000000001").ok()?,
+                qty_increment: Qty::parse("0.000000001").ok()?,
+                halted: false,
+                status_feed_current: true,
+            },
+            market: MarketSnapshot {
+                quote: Some(SaneQuote {
+                    bid: Price::parse("150").ok()?,
+                    ask: Price::parse("150").ok()?,
+                    at: quote_at,
+                }),
+                last_trade: Some((Price::parse("150").ok()?, quote_at)),
+                trailing_5m_volume: Some(held),
+                adv_20d: Some(held),
+            },
+            conduct: ConductState::default(),
+            universe: WorkingUniverse::Known {
+                instruments: BTreeSet::from([asset.clone()]),
+                pinned: true,
+            },
+            asset,
+            gate_agent,
+            gate_client_order_id: GateOrderId(1),
+            owner_confirmed_bid: None,
+            fee_reservation: Usd::ZERO,
+            data_profile: "test".to_owned(),
+            feed: "test".to_owned(),
+        })
+    }
+}
+
+#[cfg(test)]
+pub(crate) static ALLOWING_BINDING_GATE: AllowingBindingGate = AllowingBindingGate;
 
 /// The pure ports a step reads. Each is a function of its arguments, so `handle` stays
 /// deterministic and a test injects fixed implementations.

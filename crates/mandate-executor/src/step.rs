@@ -7,7 +7,7 @@ use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
 };
 use crate::payload::optional_text;
-use crate::ports::Ports;
+use crate::ports::{BindingGateSource, Ports};
 use crate::protection::{
     bound, breach, cancel_openings, ladder_steps, new_day, overdue_openings, settle, watchdog,
 };
@@ -43,9 +43,10 @@ pub fn handle(
     state: &mut ExecutorState,
     input: Input,
     ports: &Ports<'_>,
+    binding_gate: &dyn BindingGateSource,
 ) -> Result<Vec<Effect>, ExecutorError> {
     if let Input::Started(epoch) = input {
-        return started(state, epoch, ports);
+        return started(state, epoch, ports, binding_gate);
     }
     if !state.started {
         return Err(ExecutorError::NotStarted);
@@ -78,6 +79,7 @@ pub fn handle(
     }
     let head = state.account_head();
     let mut batch = Batch::new(state, ports)?;
+    batch.bind(binding_gate);
     step(&mut batch, input.clone())?;
     settle(&mut batch)?;
     let effects = batch.effects;
@@ -121,6 +123,7 @@ fn started(
     state: &mut ExecutorState,
     epoch: WriterEpoch,
     ports: &Ports<'_>,
+    binding_gate: &dyn BindingGateSource,
 ) -> Result<Vec<Effect>, ExecutorError> {
     if state.started {
         return Err(ExecutorError::AlreadyStarted);
@@ -129,6 +132,7 @@ fn started(
     state.started = true;
     state.started_at = Some(state.account_head());
     let mut batch = Batch::new(state, ports)?;
+    batch.bind(binding_gate);
     let unresolved: Vec<_> =
         batch
             .view

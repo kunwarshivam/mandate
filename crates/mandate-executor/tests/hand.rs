@@ -12,11 +12,11 @@ mod common;
 
 use common::{
     ACCOUNT_STREAM, AGENT_STREAM, AppendOutcome, CLOCK_STREAM, CONTROL_STREAM, FixedInstruments,
-    FixedMandate, OTHER_AGENT, OTHER_AGENT_STREAM, Shell, TestIds, agent, broker_account,
-    broker_fill, broker_order, broker_position, broker_reject, clock, config, copied, derived_id,
-    discretionary_exit, event, handoff, instrument, int, object, opening, ports, price,
-    protected_opening, qty, quote, risk_exit, scope, snapshot, stale_quote, stream_opened, text,
-    usd, with_clock,
+    FixedMandate, MISSING_BINDING_GATE, OTHER_AGENT, OTHER_AGENT_STREAM, Shell, TestIds, agent,
+    broker_account, broker_fill, broker_order, broker_position, broker_reject, clock, config,
+    copied, derived_id, discretionary_exit, event, handoff, instrument, int, object, opening,
+    ports, price, protected_opening, qty, quote, risk_exit, scope, snapshot, stale_quote,
+    stream_opened, text, usd, with_clock,
 };
 use mandate_accounting::Side;
 use mandate_executor::{
@@ -386,6 +386,7 @@ fn an_intent_enters_only_as_an_input() {
         &mut state,
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
+        &MISSING_BINDING_GATE,
     );
     let error = effects.expect_err("nothing may be handled before Started");
     assert_eq!(
@@ -1248,6 +1249,40 @@ fn every_broker_status_maps_to_the_table_row() {
 }
 
 #[test]
+fn a_described_rejection_records_the_broker_status_and_reject_code() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    let id = accepted_order(&mut shell, &ports, INTENT);
+    let mut rejected = broker_order("b-1", Some(&id), AAPL, Side::Buy, "10", "0", "rejected");
+    rejected.reject_code = Some("insufficient_buying_power".to_owned());
+
+    let ran = shell.run(Input::BrokerUpdate(BrokerUpdate::Order(rejected)), &ports);
+    let changed = ran
+        .draft("OrderStateChanged")
+        .unwrap_or_else(|| panic!("rejected state change"));
+    assert_eq!(
+        changed
+            .payload
+            .get("broker_status")
+            .and_then(mandate_canon::Value::as_str),
+        Some("rejected")
+    );
+    assert_eq!(
+        changed
+            .payload
+            .get("reject_code")
+            .and_then(mandate_canon::Value::as_str),
+        Some("insufficient_buying_power")
+    );
+}
+
+#[test]
 fn the_unchanged_statuses_leave_the_state_alone() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1723,12 +1758,19 @@ fn a_replaced_orders_reservation_passes_to_the_new_order() {
 
     let mut replaced = broker_order("b-1", Some(&id), AAPL, Side::Buy, "10", "0", "replaced");
     replaced.replaced_by_broker_order_id = Some("b-2".to_owned());
-    shell.run(Input::BrokerUpdate(BrokerUpdate::Order(replaced)), &ports);
+    let ran = shell.run(Input::BrokerUpdate(BrokerUpdate::Order(replaced)), &ports);
 
     assert_eq!(
         shell.state.order(&key).map(|o| o.state),
         Some(OrderState::Replaced),
         "the old order is Replaced"
+    );
+    assert_eq!(
+        ran.draft("OrderStateChanged")
+            .and_then(|draft| draft.payload.get("replaced_by_broker_order_id"))
+            .and_then(mandate_canon::Value::as_str),
+        Some("b-2"),
+        "the old order preserves the broker's replacement link"
     );
     let total: Vec<_> = shell.state.reservations().values().copied().collect();
     assert_eq!(
@@ -1759,14 +1801,9 @@ fn a_reject_releases_the_reservation_and_is_journaled_with_its_code() {
         .map(|o| o.client_order_id.clone())
         .expect("the attempt is sent");
 
-    let ran = shell.run(
-        Input::Broker(Ok(BrokerOutcome::Rejected(broker_reject(
-            Some(id.as_str()),
-            422,
-            "insufficient buying power",
-        )))),
-        &ports,
-    );
+    let mut reject = broker_reject(Some(id.as_str()), 422, "insufficient buying power");
+    reject.code = Some("insufficient_buying_power".to_owned());
+    let ran = shell.run(Input::Broker(Ok(BrokerOutcome::Rejected(reject))), &ports);
 
     assert!(
         ran.draft_types().contains(&"RejectObserved"),
@@ -1776,6 +1813,13 @@ fn a_reject_releases_the_reservation_and_is_journaled_with_its_code() {
     assert!(
         !shell.state.reservations().contains_key(&id),
         "Rejected is terminal and releases the reservation"
+    );
+    assert_eq!(
+        ran.draft("OrderStateChanged")
+            .and_then(|draft| draft.payload.get("reject_code"))
+            .and_then(mandate_canon::Value::as_str),
+        Some("insufficient_buying_power"),
+        "the state transition preserves the broker reject code"
     );
 }
 
@@ -5110,6 +5154,10 @@ fn every_error_code_is_stable_and_unique() {
         },
         ExecutorError::AlreadyStarted,
         ExecutorError::NotStarted,
+        ExecutorError::BindingGateInputMissing,
+        ExecutorError::BindingGateFailed {
+            code: "unimplemented",
+        },
         ExecutorError::NonCanonicalPayload {
             field: "f".to_owned(),
         },
@@ -5140,7 +5188,7 @@ fn every_error_code_is_stable_and_unique() {
     }
     assert_eq!(
         codes.len(),
-        22,
+        24,
         "the set is closed: a new variant adds a row here and a match arm in `code()`"
     );
 }

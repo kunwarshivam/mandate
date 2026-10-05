@@ -122,13 +122,21 @@ fn acted(ran: &Ran, asked: &Asked, source: &EventId) {
         "after a grant the intent's causation is the ApprovalRevalidated (journal spec §9.1)"
     );
     let action = action_of(asked);
-    for key in ["instrument", "side", "qty", "limit", "purpose"] {
+    for (intent_key, action_key) in [
+        ("instrument_id", "instrument"),
+        ("side", "side"),
+        ("qty", "qty"),
+        ("limit_price", "limit"),
+        ("purpose", "purpose"),
+    ] {
         assert_eq!(
-            intent.payload.get(key),
-            action.get(key),
-            "the intent repeats the bound {key} (EI-4)"
+            intent.payload.get(intent_key),
+            action.get(action_key),
+            "the intent repeats the bound {action_key} (EI-4)"
         );
     }
+    assert_eq!(member(intent, "type"), Some("limit"));
+    assert_eq!(member(intent, "tif"), Some("day"));
     assert_eq!(ran.handed.len(), 1, "one handoff: {:?}", ran.handed);
     assert_eq!(ran.handed[0].intent_id, intent.event_id);
     assert_eq!(

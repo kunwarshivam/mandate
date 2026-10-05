@@ -54,10 +54,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_builder::{
-    AccountSnapshot, AccumulateGoal, Action, ActionContext, BuilderError, BuilderMandate, Clip,
-    Direction, GateVerdict, GoalKind, HoldReason, Limits, Market, ModelOutput, ModelVersion,
-    OrderShape, Outcome, Proposal, RequestedBy, RiskContext, SignalModel, Sizing, classify, decide,
-    propose,
+    AccountSnapshot, Action, ActionContext, BuilderError, BuilderMandate, Clip, Direction,
+    GateVerdict, HoldReason, Market, ModelOutput, ModelVersion, OrderShape, Outcome, Proposal,
+    RequestedBy, RiskContext, classify, decide, propose,
 };
 use mandate_domain::{AssetClass, AssetId, MarketSession, Purpose};
 use mandate_num::{
@@ -66,7 +65,8 @@ use mandate_num::{
 };
 use mandate_risk as gate;
 use mandate_risk::spec_types::{GoalState, RiskLimits, Rung, RungAction, ScaleAction};
-use mandate_spec::document::{self as spec_doc, Goal, LadderAction, Mandate, ModelId};
+use mandate_spec::ValidatedMandate;
+use mandate_spec::document::{self as spec_doc, LadderAction, Mandate, ModelId};
 use mandate_time::{UtcNanos, new_york_date_and_hour};
 
 use super::autonomy;
@@ -190,7 +190,7 @@ pub(super) fn builder_case(fixture: &Json, case: &Json) -> Result<(), String> {
     let stated = Inputs::read(document, input)?;
     let config = test_default_gate_config()?;
     if document.risk.scale_action == spec_doc::ScaleAction::TrimToTarget {
-        return trim_first(fixture, document, &stated, &config, expect);
+        return trim_first(fixture, &validated, &stated, &config, expect);
     }
     for key in TRIM_INPUT_KEYS {
         ensure(input.get(key).is_none(), || {
@@ -204,8 +204,10 @@ pub(super) fn builder_case(fixture: &Json, case: &Json) -> Result<(), String> {
     }
     let clock = gate::session_at(stated.now, &config, stated.gate_class())
         .map_err(|e| gate_error("session_at", &e))?;
+    let projected =
+        BuilderMandate::try_from(&validated).map_err(|e| builder_error("project mandate", &e))?;
     let proposal = propose(
-        &builder_mandate(document)?,
+        &projected,
         &stated.account,
         &stated.market(&clock),
         &stated.risk,
@@ -223,11 +225,12 @@ pub(super) fn builder_case(fixture: &Json, case: &Json) -> Result<(), String> {
 /// the builder then proposes as on any other mandate (DEC-400).
 fn trim_first(
     fixture: &Json,
-    document: &Mandate,
+    validated: &ValidatedMandate,
     stated: &Inputs,
     config: &gate::GateConfig,
     expect: &Json,
 ) -> Result<(), String> {
+    let document = validated.mandate();
     let trim = stated
         .trim
         .as_ref()
@@ -249,8 +252,10 @@ fn trim_first(
     .map_err(|e| gate_error("trim_proposals", &e))?;
     let clock = gate::session_at(stated.now, config, stated.gate_class())
         .map_err(|e| gate_error("session_at", &e))?;
+    let projected =
+        BuilderMandate::try_from(validated).map_err(|e| builder_error("project mandate", &e))?;
     let proposal = propose(
-        &builder_mandate(document)?,
+        &projected,
         &stated.account,
         &stated.market(&clock),
         &stated.risk,
@@ -1142,66 +1147,6 @@ fn model_output(index: usize, output: &Json) -> Result<ModelOutput, String> {
         direction: Direction::Long,
         conviction: num(Conviction::parse(text("conviction")?), &what("conviction"))?,
         confidence: num(Unit::parse(text("confidence")?), &what("confidence"))?,
-    })
-}
-
-/// The validated document's §8 fields as `mandate-builder`'s view, which `mandate-spec` does not
-/// supply yet (DEC-130 item 5); a value too wide for its type is refused, never approximated.
-fn builder_mandate(document: &Mandate) -> Result<BuilderMandate, String> {
-    let fraction = |value: &mandate_spec::SchemaDec, what: &str| {
-        num(SizeFraction::parse(value.as_str()), what)
-    };
-    let usd = |value: &mandate_spec::SchemaDec, what: &str| num(Usd::parse(value.as_str()), what);
-    let behavior = &document.behavior;
-    let models = behavior
-        .signal_models
-        .iter()
-        .map(|m| {
-            Ok(SignalModel {
-                id: m.id.clone(),
-                version: ModelVersion::parse(&m.version)
-                    .map_err(|e| format!("signal model `{}`: {}", m.id.as_str(), e.code()))?,
-                content_hash: m.content_hash,
-                weight: fraction(&m.weight, "signal_models.weight")?,
-                max_output_age_s: m.max_output_age_s,
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let sizing = &behavior.sizing;
-    let risk = &document.risk;
-    Ok(BuilderMandate {
-        models,
-        sizing: Sizing {
-            method: sizing.method,
-            entry_threshold: fraction(&sizing.entry_threshold, "entry_threshold")?,
-            exit_threshold: fraction(&sizing.exit_threshold, "exit_threshold")?,
-            rebalance_band: fraction(&sizing.rebalance_band, "rebalance_band")?,
-        },
-        limits: Limits {
-            max_position_usd: usd(&risk.max_position_usd, "max_position_usd")?,
-            max_position_fraction: fraction(&risk.max_position_fraction, "max_position_fraction")?,
-            max_order_usd: usd(&risk.max_order_usd, "max_order_usd")?,
-            max_gross_exposure_usd: usd(&risk.max_gross_exposure_usd, "max_gross_exposure_usd")?,
-        },
-        goal: match &document.goal {
-            Goal::Continuous { .. } => GoalKind::Continuous,
-            Goal::ProfitStop { .. } => GoalKind::ProfitStop,
-            Goal::Accumulate {
-                instrument,
-                target_qty,
-                max_avg_price,
-                max_spend_usd,
-                ..
-            } => GoalKind::Accumulate(AccumulateGoal {
-                instrument: instrument.clone(),
-                target_qty: num(Qty::parse(target_qty.as_str()), "target_qty")?,
-                max_avg_price: max_avg_price
-                    .as_ref()
-                    .map(|p| num(Price::parse(p.as_str()), "max_avg_price"))
-                    .transpose()?,
-                max_spend_usd: usd(max_spend_usd, "max_spend_usd")?,
-            }),
-        },
     })
 }
 
