@@ -1234,9 +1234,9 @@ impl MutantShard {
         let total = total
             .parse::<usize>()
             .with_context(|| format!("mutation shard `{value}` has a non-numeric total"))?;
-        if total == 0 || index == 0 || index > total {
+        if total == 0 || index >= total {
             bail!(
-                "mutation shard `{value}` must satisfy 1 <= INDEX <= TOTAL and TOTAL must be positive"
+                "mutation shard `{value}` must satisfy 0 <= INDEX < TOTAL and TOTAL must be positive"
             );
         }
         Ok(Self { index, total })
@@ -1267,7 +1267,7 @@ fn mutants_args(diff_path: &str, shard: Option<MutantShard>) -> Vec<String> {
             "--shard".to_owned(),
             shard.argument(),
             "--sharding".to_owned(),
-            "round-robin".to_owned(),
+            "slice".to_owned(),
         ]);
     }
     args
