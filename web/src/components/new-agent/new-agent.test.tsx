@@ -6,6 +6,7 @@ import { setPathname } from "@/test/navigation";
 import { PROTOTYPE_AGENT_ID } from "./confirmation";
 import { type Read, compile, draftDigest, read, readLoss, unaskedUsd } from "./draft";
 import { NewAgentPrototype } from "./new-agent-prototype";
+import { KEY } from "@/components/kumo/key";
 
 const main = () => screen.getByRole("main");
 const heading = () => screen.getByRole("heading", { level: 1 });
@@ -266,10 +267,13 @@ describe("A2, the compiled review", () => {
     expect(deploy).toBeDisabled();
   });
 
-  it("has one primary action on the screen", () => {
+  it("draws every action as the app's one key, so no button shouts over another (DEC-469)", () => {
     renderPrototype();
     toReview();
-    expect(main().querySelectorAll("button[data-variant=primary], button[class*='kumo-button-emphasis']")).toHaveLength(1);
+    expect(main().querySelectorAll("button[data-variant=primary], button[class*='kumo-button-emphasis']")).toHaveLength(0);
+    const actions = [...main().querySelectorAll<HTMLButtonElement>("button[data-kumo-component=Button], button[data-variant]")];
+    expect(actions.length).toBeGreaterThan(1);
+    for (const b of actions) for (const c of KEY.split(" ")) expect(b, b.textContent ?? "").toHaveClass(c);
   });
 });
 

@@ -208,12 +208,18 @@ describe("figures with a plain zero", () => {
     expect(css).not.toMatch(/@font-face/);
   });
 
-  it("keeps the landing page's period faces on the landing page, and lends the product only its chrome face", () => {
-    const landing = readFileSync(resolve(process.cwd(), "src/components/site/landing.tsx"), "utf8");
+  it("keeps the landing page's period faces on the signed-out pages, and lends the product only its chrome face", () => {
+    const faces = readFileSync(resolve(process.cwd(), "src/components/site/faces.ts"), "utf8");
     for (const font of LANDING_FONTS) {
       expect(pkg.dependencies[font], font).toBeDefined();
-      expect(landing, font).toContain(`import "${font}`);
+      expect(faces, font).toContain(`import "${font}`);
     }
+    const src = resolve(process.cwd(), "src");
+    const importers = (readdirSync(src, { recursive: true }) as string[])
+      .filter((f) => /\.tsx?$/.test(f) && /^import "(\.\/|@\/components\/site\/)faces";$/m.test(readFileSync(join(src, f), "utf8")))
+      .map((f) => `src/${f}`)
+      .sort();
+    expect(importers, "DEC-469: the landing page and the sign-in pages' logon window").toEqual(["src/components/site/landing.tsx", "src/components/site/logon.tsx"]);
     const root = readFileSync(resolve(process.cwd(), "src/app/layout.tsx"), "utf8");
     expect(root, "DEC-452: the bevelled buttons' face, loaded beside Public Sans and before globals.css").toMatch(
       /import "@fontsource-variable\/pixelify-sans";\nimport "\.\/globals\.css";/,

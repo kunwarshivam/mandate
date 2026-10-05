@@ -3,6 +3,8 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Dialog } from "@cloudflare/kumo/primitives/dialog";
 import { Fingerprint, X } from "@phosphor-icons/react";
+import { KEY } from "@/components/kumo/key";
+import { cn } from "@/lib/utils";
 
 export type PasskeyResult = "verified" | "failed";
 
@@ -125,14 +127,14 @@ export function StepUpDialog({
             <button
               type="button"
               onClick={cancel}
-              className="press h-11 min-w-28 rounded-lg border border-foreground/25 bg-card px-5 font-semibold outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className={cn("min-w-28", KEY)}
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={verify}
-              className="press h-11 min-w-28 rounded-lg bg-lapis px-5 font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className={cn("min-w-28", KEY)}
             >
               Use passkey
             </button>

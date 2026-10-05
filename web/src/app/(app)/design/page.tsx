@@ -7,7 +7,7 @@ import { BrandSpecimen } from "@/components/brand/brand-specimen";
 import { ChartCredit, LevelLegend } from "@/components/charts/chart-parts";
 import type { ChartLevel } from "@/components/charts/options";
 import { Sparkline } from "@/components/charts/sparkline";
-import { BEVEL } from "@/components/kumo/bevel";
+import { DECISION_KEY, KEY, KEY_SM } from "@/components/kumo/key";
 import { KumoSurfaces } from "@/components/design/kumo-surfaces";
 import { MotionSamples } from "@/components/design/motion-samples";
 import { AsOf } from "@/components/domain/as-of";
@@ -374,28 +374,27 @@ export default function DesignPage() {
         </div>
       </Block>
 
-      <Block title="Components" lead="Kumo components in the calm tokens: pill-shaped actions, flat fills. Stop and kill-switch actions are never disabled, so no disabled state is shown for them.">
+      <Block title="Components" lead="Kumo components in the calm tokens: one key for every action, flat fills. Stop and kill-switch actions are never disabled, so no disabled state is shown for them.">
         <div className="grid gap-(--section-gap)">
           <div className="grid gap-(--block-gap)">
             <h3 className="text-h3">Actions</h3>
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="lg" variant="primary" className="h-11 rounded-lg px-5">
-                Primary
+              <Button size="lg" variant="secondary" className={KEY}>
+                Key
               </Button>
-              <Button size="lg" variant="secondary" className="h-11 rounded-lg px-5">
-                Secondary
+              <Button size="lg" variant="secondary" className={KEY_SM}>
+                Key in a row
               </Button>
-              <Button size="lg" variant="outline" className="h-11 rounded-lg px-5">
-                Outline
-              </Button>
-              <Button size="lg" variant="ghost" className="h-11 rounded-lg px-5">
-                Ghost
-              </Button>
-              <Button size="lg" variant="outline" className="h-11 rounded-lg px-5" disabled>
+              <Button size="lg" variant="secondary" className={KEY} disabled>
                 Disabled
               </Button>
-              <Button size="lg" variant="secondary" className={`h-11 px-5 ${BEVEL}`}>
-                Bevel, from the landing page
+            </div>
+            <div className="grid max-w-md grid-cols-2 gap-3">
+              <Button size="lg" variant="secondary" className={DECISION_KEY}>
+                Approve
+              </Button>
+              <Button size="lg" variant="secondary" className={DECISION_KEY}>
+                Skip
               </Button>
             </div>
             <div className="flex flex-wrap items-center gap-2">

@@ -5,6 +5,7 @@ import { Button } from "@cloudflare/kumo/components/button";
 import { ArrowLeft, ChatText, ListNumbers } from "@phosphor-icons/react";
 import { FIELD } from "@/components/auth/buttons";
 import { cn } from "@/lib/utils";
+import { KEY } from "@/components/kumo/key";
 
 /** The id of every step's heading, so the prototype can move focus to it when the step changes. */
 export const STEP_HEADING = "new-agent-step";
@@ -30,7 +31,7 @@ export function PrototypeNote() {
 
 export function BackButton({ onClick, children = "Back" }: { onClick: () => void; children?: ReactNode }) {
   return (
-    <Button type="button" variant="ghost" size="lg" className="h-11 w-fit gap-1.5 px-3" onClick={onClick}>
+    <Button type="button" variant="secondary" size="lg" className={cn("w-fit", KEY)} onClick={onClick}>
       <ArrowLeft className="size-4" aria-hidden />
       {children}
     </Button>
@@ -138,7 +139,7 @@ export function QuestionStep({
       </div>
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <BackButton onClick={onBack} />
-        <Button type="submit" variant="primary" size="lg" className="h-12 w-full justify-center px-6 sm:w-auto">
+        <Button type="submit" variant="secondary" size="lg" className={cn(KEY, "w-full sm:w-auto")}>
           Continue
         </Button>
       </div>
@@ -200,7 +201,7 @@ export function DescribeStep({
       </div>
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <BackButton onClick={onBack} />
-        <Button type="submit" variant="primary" size="lg" className="h-12 w-full justify-center px-6 sm:w-auto">
+        <Button type="submit" variant="secondary" size="lg" className={cn(KEY, "w-full sm:w-auto")}>
           Continue
         </Button>
       </div>
