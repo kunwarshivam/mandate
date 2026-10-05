@@ -18,6 +18,7 @@ use mandate_runtime::{
     Classified, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal, RiskClock,
     SignalInputs,
 };
+use mandate_time::UtcNanos;
 
 use crate::error::Cause;
 

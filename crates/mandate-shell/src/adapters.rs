@@ -2845,11 +2845,12 @@ mod tests {
         let dir = aapl(&scratch.0, &[], &[])?;
         let before_monday_close =
             UtcNanos::parse("2026-09-28T19:59:59.000000000Z").map_err(|e| e.to_string())?;
+        let fresh = StoredBars { dir: dir.clone() }
+            .closes("AAPL", before_monday_close)
+            .map_err(|e| e.to_string())?;
         assert_eq!(
-            StoredBars { dir: dir.clone() }
-                .closes("AAPL", before_monday_close)
-                .map(|closes| closes.len()),
-            Ok(25),
+            fresh.len(),
+            25,
             "Friday remains the last completed session until Monday's regular close"
         );
         let after_monday_close =
