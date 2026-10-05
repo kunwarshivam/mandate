@@ -19,7 +19,7 @@ use mandate_risk::{
 
 use crate::error::ExecutorError;
 use crate::payload::{object, text};
-use crate::ports::{BindingGateInput, BindingGateSource, Ports};
+use crate::ports::{BindingGateInput, BindingGateRequest, BindingGateSource, Ports};
 use crate::protection::{between_rungs, rests};
 use crate::state::ExecutorState;
 use crate::types::{
@@ -345,7 +345,17 @@ pub(crate) fn binding_checks(
             Ok(partial)
         };
     };
-    let Some(snapshot) = source.input(proposal.agent, proposal.instrument) else {
+    let request = BindingGateRequest {
+        agent: proposal.agent,
+        instrument: proposal.instrument,
+        side: proposal.side,
+        qty: proposal.qty,
+        limit: proposal.limit,
+        purpose: proposal.purpose,
+        tif: proposal.tif,
+        protection: proposal.protection,
+    };
+    let Some(snapshot) = source.input(&request) else {
         return if proposal.purpose.adds_risk() {
             Err(ExecutorError::BindingGateInputMissing)
         } else {

@@ -9,7 +9,7 @@ use common::{
     stream_opened,
 };
 use mandate_executor::{
-    BindingGateInput, BindingGateSource, BrokerRequest, ExecutorError, Ports,
+    BindingGateInput, BindingGateRequest, BindingGateSource, BrokerRequest, ExecutorError, Ports,
 };
 use mandate_num::{Fraction, Price, Qty, Ratio, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits};
@@ -45,8 +45,7 @@ impl GateFixture {
 impl BindingGateSource for GateFixture {
     fn input(
         &self,
-        _agent: &mandate_executor::AgentId,
-        _instrument: &mandate_accounting::InstrumentId,
+        _request: &BindingGateRequest<'_>,
     ) -> Option<BindingGateInput> {
         self.input.clone()
     }

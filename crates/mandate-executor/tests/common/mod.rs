@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Int, Key, Value};
 use mandate_executor::{
-    AccountRef, AccountScope, AgentId, BindingGateInput, BindingGateSource, BrokerAccount,
+    AccountRef, AccountScope, AgentId, BindingGateInput, BindingGateRequest, BindingGateSource, BrokerAccount,
     BrokerFill, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerReject, BrokerRequest,
     BrokerSnapshot, BrokerUnknown, Effect, EventDraft, EventId, ExecutorConfig, ExecutorError,
     ExecutorState, ExitTier, FillId, FoldedEvent, IdGen, Input, InstrumentSnapshot, IntentId,
@@ -51,8 +51,7 @@ pub struct MissingBindingGate;
 impl BindingGateSource for MissingBindingGate {
     fn input(
         &self,
-        _agent: &AgentId,
-        _instrument: &InstrumentId,
+        _request: &BindingGateRequest<'_>,
     ) -> Option<BindingGateInput> {
         None
     }

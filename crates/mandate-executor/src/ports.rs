@@ -19,7 +19,7 @@ use mandate_time::UtcNanos;
 
 use crate::types::{
     AgentId, BrokerOutcome, BrokerRequest, BrokerUnknown, EventId, ExecutorConfig, ExitTier,
-    MandateVersion, Seq, WriterEpoch,
+    MandateVersion, ProtectionPrices, Purpose, Seq, TimeInForce, WriterEpoch,
 };
 
 /// Deterministic event identity (ADR-0001 ES-06, ES-21, DEC-131 item 6). The id is derived from
@@ -82,12 +82,27 @@ pub struct BindingGateInput {
     pub feed: String,
 }
 
+/// The executor-owned proposal fields used to select trusted snapshots.
+///
+/// These are lookup keys, not a verdict and not the [`mandate_risk::ProposedOrder`]; the executor
+/// constructs that type itself after the lookup.
+pub struct BindingGateRequest<'a> {
+    pub agent: &'a AgentId,
+    pub instrument: &'a InstrumentId,
+    pub side: mandate_accounting::Side,
+    pub qty: mandate_num::Qty,
+    pub limit: mandate_num::Price,
+    pub purpose: Purpose,
+    pub tif: TimeInForce,
+    pub protection: Option<ProtectionPrices>,
+}
+
 /// Pure lookup of the trusted snapshots for one executor agent and instrument.
 ///
 /// Returning `None` is an unavailable input, never an allow. This port cannot return a gate
 /// decision; the binding verdict is therefore not injectable.
 pub trait BindingGateSource {
-    fn input(&self, agent: &AgentId, instrument: &InstrumentId) -> Option<BindingGateInput>;
+    fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput>;
 }
 
 #[cfg(test)]
@@ -95,7 +110,7 @@ pub(crate) struct AllowingBindingGate;
 
 #[cfg(test)]
 impl BindingGateSource for AllowingBindingGate {
-    fn input(&self, _agent: &AgentId, instrument: &InstrumentId) -> Option<BindingGateInput> {
+    fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         use std::collections::{BTreeMap, BTreeSet};
 
         use mandate_accounting::AccountType;
@@ -106,7 +121,10 @@ impl BindingGateSource for AllowingBindingGate {
             QuoteCurrency, SaneQuote,
         };
 
-        let asset = AssetId::new(instrument.as_str()).ok()?;
+        if request.purpose == Purpose::Protective {
+            return None;
+        }
+        let asset = AssetId::new(request.instrument.as_str()).ok()?;
         let at = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z").ok()?;
         let quote_at = UtcNanos::parse_rfc3339("2026-09-21T14:59:59Z").ok()?;
         let held = Qty::parse("1000000").ok()?;
