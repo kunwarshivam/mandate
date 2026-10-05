@@ -644,6 +644,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         }
         "StreamOpened"
         | "GateDecided"
+        | "OrderRequestRecorded"
         | "OrderAbandoned"
         | "ObservationRecorded"
         | "ModelInvocationRecorded"

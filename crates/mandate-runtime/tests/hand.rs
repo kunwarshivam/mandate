@@ -98,6 +98,15 @@ fn an_unknown_event_type_fails_the_fold() {
 }
 
 #[test]
+fn the_executor_request_companion_is_interpreted_as_inert() {
+    let mut state = RuntimeState::new(common::deployment());
+    let companion = event(ACCOUNT_STREAM, 1, "OrderRequestRecorded", object(&[]));
+    fold(&mut state, &companion).expect("the executor owns and interprets its companion");
+    let next = reconciliation(2, 10);
+    fold(&mut state, &next).expect("the inert companion still advances the account head");
+}
+
+#[test]
 fn a_copied_mode_change_points_at_the_originating_event() {
     let ids = TestIds;
     let gate = AllowGate;

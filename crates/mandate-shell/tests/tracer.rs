@@ -27,7 +27,7 @@ use mandate_journal::{AppendOutcome, Environment, StoredEvent, TrustedStart, ver
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_num::{
-    CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, Ratio, ShareIncrement, Signed,
+    Adverse, CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, Ratio, ShareIncrement, Signed,
     SizeFraction, Unit, Usd,
 };
 use mandate_risk::spec_types::{GoalState, RiskLimits};
@@ -215,7 +215,7 @@ fn run_context(with_builder: bool) -> RunContext {
                 protection_required: true,
                 protection: Some(ProtectionPrices {
                     stop: Price::parse("242.44").unwrap(),
-                    take_profit: None,
+                    take_profit: Some(Price::parse("280.72").unwrap()),
                 }),
             },
         };
@@ -854,6 +854,15 @@ fn the_fixture_sizes_to_exactly_one_share() {
     let proposal: Proposal = plan.size(&admitted.view, &inputs).unwrap().unwrap();
     assert_eq!(proposal.qty.to_string(), "1");
     assert_eq!(proposal.limit.to_string(), "255.2");
+    let take_profit = Price::parse("255.2")
+        .unwrap()
+        .collar_bound(Fraction::parse("0.1").unwrap(), Adverse::Up)
+        .unwrap();
+    assert_eq!(
+        take_profit.to_string(),
+        "280.72",
+        "255.20 × (1 + 0.10) is exact in the fixed-point price calculation"
+    );
     assert_eq!(
         proposal.execution,
         Some(OrderExecution {
@@ -862,7 +871,7 @@ fn the_fixture_sizes_to_exactly_one_share() {
             protection_required: true,
             protection: Some(ProtectionPrices {
                 stop: Price::parse("242.44").unwrap(),
-                take_profit: None,
+                take_profit: Some(take_profit),
             }),
         })
     );
@@ -870,7 +879,7 @@ fn the_fixture_sizes_to_exactly_one_share() {
         plan.classify(&admitted.view, &proposal).unwrap(),
         mandate_runtime::Classified {
             autonomy: mandate_runtime::Autonomy::Auto,
-            decided_by: Some("default".to_owned()),
+            decided_by: Some("rule:routine".to_owned()),
         }
     );
 }

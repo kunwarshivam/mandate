@@ -538,13 +538,11 @@ mod tests {
         )
         .map_err(|e| e.to_string())?;
         let envelope = envelope_of(&bytes)?;
-        let listed: Vec<&str> = envelope
+        let listed_values = envelope
             .get("artifact_refs")
             .and_then(Value::as_array)
-            .unwrap_or_default()
-            .iter()
-            .filter_map(Value::as_str)
-            .collect();
+            .ok_or("the envelope has no artifact_refs array")?;
+        let listed: Vec<&str> = listed_values.iter().filter_map(Value::as_str).collect();
         let expected = [
             format!("sha256:{}", "2".repeat(64)),
             format!("sha256:{}", "5".repeat(64)),

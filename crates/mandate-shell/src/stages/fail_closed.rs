@@ -227,12 +227,12 @@ fn shadow_book_matches(
                 .map(str::to_owned)
         };
         assert_eq!(
-            field("instrument").as_deref(),
+            field("instrument_id").as_deref(),
             Some(order.instrument.as_str())
         );
         assert_eq!(field("qty"), Some(order.qty.to_string()));
         let limit = order.limit_price.map(|price| price.to_string());
-        assert_eq!(field("limit"), limit);
+        assert_eq!(field("limit_price"), limit);
         let intent_id = intent
             .get("event_id")
             .and_then(Value::as_str)
@@ -475,6 +475,22 @@ fn an_ambiguous_append_is_never_read_as_committed() -> Result<(), String> {
     );
     assert_eq!(world.ledger.borrow().count("OrderSubmitted"), 1);
     assert_eq!(world.tally.borrow().submissions, 0);
+    Ok(())
+}
+
+#[test]
+fn the_ledger_double_refuses_a_draft_without_its_schema_version() -> Result<(), String> {
+    let world = World::default();
+    let mut journal = LedgerJournal(world);
+    let stream = account_stream();
+    let epoch = journal
+        .take_ownership(&stream)
+        .map_err(|error| error.to_string())?;
+    let draft = br#"{"event_id":"01K6VY6M800000000000000000","event_type":"Unversioned"}"#.to_vec();
+    assert_eq!(
+        journal.append(&stream, 0, epoch, &[draft]),
+        AppendOutcome::Unavailable
+    );
     Ok(())
 }
 
@@ -748,10 +764,8 @@ fn a_new_cycle_is_a_new_intent_with_a_new_id() -> Result<(), String> {
     Ok(())
 }
 
-/// TI-9, PB-6: ASK sends nothing. The decision is journaled and the tracer, which has no
-/// escalation, stops. The stage classifier names no `DecidedBy` label until E7-7 wires the
-/// builder's, and a request that cannot show the rule that triggered it is not asked (mandate spec
-/// §6.4, DEC-278 item 2), so the runtime records the `ask` on `DecisionMade` and requests nothing.
+/// TI-9, PB-6: ASK sends nothing. The decision and its approval request are journaled, then the
+/// tracer stops because this harness supplies no approval response.
 #[test]
 fn ask_journals_the_decision_and_sends_nothing() -> Result<(), String> {
     let world = World::default();
@@ -765,7 +779,7 @@ fn ask_journals_the_decision_and_sends_nothing() -> Result<(), String> {
     assert!(error.to_string().contains("classified ask"), "{error}");
     let ledger = world.ledger.borrow();
     assert_eq!(ledger.count("DecisionMade"), 1);
-    assert_eq!(ledger.count("ApprovalRequested"), 0);
+    assert_eq!(ledger.count("ApprovalRequested"), 1);
     assert_eq!(ledger.count("IntentProposed"), 0);
     assert_eq!(world.tally.borrow().submissions, 0);
     Ok(())

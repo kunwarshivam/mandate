@@ -637,15 +637,16 @@ impl JournalWriter for LedgerJournal {
                 None => String::new(),
             };
             seq = seq.saturating_add(1);
+            let schema_version = match body.get("schema_version").and_then(Value::as_int) {
+                Some(version) => version,
+                None => return AppendOutcome::Unavailable,
+            };
             let row = StoredEvent {
                 stream_id: stream.to_owned(),
                 seq,
                 event_id: field("event_id"),
                 event_type: field("event_type"),
-                schema_version: body
-                    .get("schema_version")
-                    .and_then(Value::as_int)
-                    .unwrap_or_default(),
+                schema_version,
                 environment: field("environment"),
                 recorded_at: NOW.to_owned(),
                 prev_hash: prev,
@@ -752,14 +753,23 @@ impl PaperExecutor {
         members: &[(&str, &str)],
     ) -> Result<mandate_executor::Effect, Cause> {
         let event_id = self.world.tally.borrow_mut().next_account_id();
+        let schema_version = if matches!(
+            event_type,
+            "IntentReceived" | "GateDecided" | "OrderSubmitted"
+        ) {
+            2
+        } else if event_type == "OrderStateChanged" {
+            1
+        } else {
+            return Err(Cause::Absent {
+                what: "the doubled executor event's schema version",
+            });
+        };
         Ok(mandate_executor::Effect::Journal(
             mandate_executor::EventDraft {
                 event_id: mandate_executor::EventId(event_id),
                 event_type: event_type.to_owned(),
-                schema_version: match event_type {
-                    "IntentReceived" | "GateDecided" | "OrderSubmitted" => 2,
-                    _ => 1,
-                },
+                schema_version,
                 config_refs: Object::new(),
                 causation_id: causation.map(|id| mandate_executor::EventId(id.to_owned())),
                 payload: object(members)?,
