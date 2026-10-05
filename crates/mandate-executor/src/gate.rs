@@ -284,7 +284,7 @@ pub(crate) fn account_stream_checks(
         "protection_attributed",
         unattributed.then_some(("protection_unattributed", true)),
     );
-    let blocked = adds && !proposal.bracketed && rests(state, proposal.instrument);
+    let blocked = adds && proposal.protection.is_none() && rests(state, proposal.instrument);
     record(
         "protective_order",
         blocked.then_some(("add_blocked_by_protective_order", false)),
