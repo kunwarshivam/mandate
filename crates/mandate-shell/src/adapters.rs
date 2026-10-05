@@ -1480,7 +1480,7 @@ mod tests {
         let instrument =
             mandate_accounting::InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
                 .map_err(|e| e.to_string())?;
-        let order = |side, execution| -> Result<IntentHandoff, String> {
+        let order = |side, purpose, execution| -> Result<IntentHandoff, String> {
             Ok(IntentHandoff {
                 intent_id: RuntimeEventId("10000100000000000000000000".to_owned()),
                 body: IntentBody::Order {
@@ -1488,7 +1488,7 @@ mod tests {
                     side,
                     qty: Qty::parse("1").map_err(|e| e.to_string())?,
                     limit: Price::parse("255.2").map_err(|e| e.to_string())?,
-                    purpose: RuntimePurpose::Open,
+                    purpose,
                 },
                 execution,
             })
@@ -1497,8 +1497,12 @@ mod tests {
             agent: AgentId("tracer-aapl".to_owned()),
         };
         assert!(
-            sink.hand(&order(mandate_accounting::Side::Buy, None)?)
-                .is_err()
+            sink.hand(&order(
+                mandate_accounting::Side::Buy,
+                RuntimePurpose::Open,
+                None,
+            )?)
+            .is_err()
         );
         let required = Some(OrderExecution {
             asset_class: mandate_accounting::AssetClass::UsEquity,
@@ -1507,8 +1511,12 @@ mod tests {
             protection: None,
         });
         assert!(
-            sink.hand(&order(mandate_accounting::Side::Buy, required)?)
-                .is_err()
+            sink.hand(&order(
+                mandate_accounting::Side::Buy,
+                RuntimePurpose::Open,
+                required,
+            )?)
+            .is_err()
         );
         let unprotected = Some(OrderExecution {
             asset_class: mandate_accounting::AssetClass::UsEquity,
@@ -1517,9 +1525,27 @@ mod tests {
             protection: None,
         });
         assert!(
-            sink.hand(&order(mandate_accounting::Side::Sell, unprotected)?)
-                .is_err()
+            sink.hand(&order(
+                mandate_accounting::Side::Sell,
+                RuntimePurpose::Open,
+                unprotected,
+            )?)
+            .is_err()
         );
+        assert!(
+            sink.hand(&order(
+                mandate_accounting::Side::Buy,
+                RuntimePurpose::RiskExit,
+                unprotected,
+            )?)
+            .is_err()
+        );
+        sink.hand(&order(
+            mandate_accounting::Side::Sell,
+            RuntimePurpose::RiskExit,
+            unprotected,
+        )?)
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
