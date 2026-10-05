@@ -199,6 +199,8 @@ fn shifted(at: UtcNanos, secs: i64) -> Result<UtcNanos, TimeError> {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error as _;
+
     use mandate_num::{Price, Qty, Usd};
     use mandate_time::UtcNanos;
 
@@ -362,16 +364,45 @@ mod tests {
 
     #[test]
     fn every_code_is_stable() -> Result<()> {
-        assert_eq!(LiquidityError::FewerSessions.code(), "fewer_sessions");
-        assert_eq!(LiquidityError::AheadOfClock.code(), "ahead_of_clock");
-        assert_eq!(LiquidityError::Unordered.code(), "unordered");
-        assert_eq!(LiquidityError::EmptyWindow.code(), "empty_window");
+        let simple = [
+            (
+                LiquidityError::FewerSessions,
+                "fewer_sessions",
+                "fewer than 20 sessions were given",
+            ),
+            (
+                LiquidityError::AheadOfClock,
+                "ahead_of_clock",
+                "a minute bar ends after the clock, so it cannot have been seen complete",
+            ),
+            (
+                LiquidityError::Unordered,
+                "unordered",
+                "the minute bars do not start in strictly increasing order",
+            ),
+            (
+                LiquidityError::EmptyWindow,
+                "empty_window",
+                "no complete minute bar lies in the trailing window",
+            ),
+        ];
+        for (error, code, display) in simple {
+            assert_eq!(error.code(), code);
+            assert_eq!(error.to_string(), display);
+            assert!(error.source().is_none());
+        }
         let num = Qty::parse("-1").err().ok_or("a negative quantity parses")?;
-        assert_eq!(LiquidityError::Num(num).code(), num.code());
+        let num_error = LiquidityError::Num(num);
+        assert_eq!(num_error.code(), num.code());
+        assert_eq!(num_error.to_string(), num.to_string());
+        assert!(num_error.source().is_some());
         let time = UtcNanos::from_parts(-1, 0)
             .err()
             .ok_or("a negative instant exists")?;
-        assert_eq!(LiquidityError::Time(time).code(), time.code());
+        let time_error = LiquidityError::Time(time);
+        assert_eq!(time_error.code(), time.code());
+        assert_eq!(time_error.to_string(), time.to_string());
+        assert!(time_error.source().is_some());
         Ok(())
     }
 }
