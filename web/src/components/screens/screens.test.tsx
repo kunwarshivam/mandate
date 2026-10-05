@@ -3,7 +3,7 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentRoute from "@/app/(app)/agents/[agentId]/page";
 import * as approvalRoute from "@/app/(app)/approvals/[approvalId]/page";
-import { DECISION_KEY } from "@/components/kumo/bevel";
+import { DECISION_KEY } from "@/components/kumo/key";
 import { AppShell } from "@/components/shell/app-shell";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
 import { clock, price } from "@/lib/format";
@@ -288,11 +288,11 @@ describe("D5 inbox and D6 request", () => {
       for (const c of DECISION_KEY.split(" ")) expect(b).toHaveClass(c);
       expect(b).toHaveClass("bg-card", "text-foreground", "font-semibold");
       expect(b).not.toHaveClass("pixel-face", "bg-muted", "border-t-card", "ring", "shadow-xs", "border-0");
-      expect(b).toHaveClass("focus-visible:ring-2");
+      expect(b).toHaveClass("focus-visible:ring-3", "focus-visible:ring-ring");
       expect(b.className).not.toMatch(/bg-\[|shadow-(?!none)/);
     }
     const stop = within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name: "Stop" });
-    expect(stop.className + stop.innerHTML).not.toMatch(/pixel-face|border-t-card/);
+    expect(stop.className + stop.innerHTML, "DEC-469: Stop keeps its own shape, never the key").not.toMatch(/pixel-face|border-t-card|border-b-\[3px\]/);
   });
 
   it("states the default, the trigger, the risk in dollars, and the score's meaning", () => {

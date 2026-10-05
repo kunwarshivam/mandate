@@ -8,6 +8,7 @@ import { BrandOwl } from "@/components/brand/brand-owl";
 import { Skeleton } from "@/components/domain/skeleton";
 import { clock } from "@/lib/format";
 import { useRuntime } from "@/lib/mock-runtime";
+import { KEY } from "@/components/kumo/key";
 
 /**
  * The one page grid of every signed-in screen at 64rem and wider (DEC-467): a main column and a 20rem
@@ -62,7 +63,7 @@ export function EmptyBoard() {
       <p className="max-w-measure text-lg text-muted-foreground">An agent trades on paper within a mandate you describe and confirm, field by field.</p>
       <Link
         href="/agents/new"
-        className="press inline-flex h-12 w-fit items-center gap-2 rounded-lg bg-lapis pr-5 pl-6 font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className={cn("w-fit", KEY)}
       >
         Describe your first agent <ArrowRight aria-hidden className="size-4" />
       </Link>

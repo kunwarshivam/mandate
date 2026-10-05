@@ -6,7 +6,7 @@ import { CircleNotch, EnvelopeSimple, Fingerprint, GoogleLogo } from "@phosphor-
 import { CALLBACK_PATH } from "@/lib/auth-routes";
 import { EMAIL_SENT, SIGN_IN_FAILED, SIGN_IN_PASSKEY_COPY, UNREACHABLE, isNetworkFailure, passkeyProblem, webAuthnSupported } from "@/lib/auth-errors";
 import { type BrowserClient, createClient } from "@/lib/supabase/client";
-import { FIELD, NOTICE, OUTLINE_PILL, PRIMARY_PILL } from "./buttons";
+import { LOGON_FIELD, LOGON_HEADING, LOGON_LINK, LOGON_NOTICE, LOGON_PRIMARY, LOGON_SECONDARY } from "./logon-styles";
 
 export type LoginAuth = Pick<BrowserClient["auth"], "signInWithOAuth" | "signInWithPasskey" | "signInWithOtp">;
 
@@ -46,12 +46,12 @@ export function LoginPanel({ next, failed, enabled, emailEnabled, auth, navigate
 
   if (!enabled) {
     return (
-      <section aria-labelledby="login-title" className="mx-auto grid w-full max-w-sm gap-6 pt-6 sm:pt-16" data-slot="login">
-        <h1 id="login-title" className="text-h1">
+      <section aria-labelledby="login-title" className="grid gap-5" data-slot="login">
+        <h1 id="login-title" className={LOGON_HEADING}>
           Sign in
         </h1>
-        <p className={NOTICE}>Sign-in is off in this build. It runs on fixture data and opens without an account.</p>
-        <Link href="/" className={PRIMARY_PILL}>
+        <p className={LOGON_NOTICE}>Sign-in is off in this build. It runs on fixture data and opens without an account.</p>
+        <Link href="/" className={LOGON_PRIMARY}>
           Open Owlhead
         </Link>
       </section>
@@ -106,36 +106,36 @@ export function LoginPanel({ next, failed, enabled, emailEnabled, auth, navigate
   const status = pending === "google" ? "Opening Google…" : pending === "passkey" ? "Waiting for your passkey…" : pending === "email" ? "Sending…" : "";
 
   return (
-    <section aria-labelledby="login-title" aria-busy={busy} className="mx-auto grid w-full max-w-sm gap-8 pt-6 sm:pt-16" data-slot="login">
+    <section aria-labelledby="login-title" aria-busy={busy} className="grid gap-5" data-slot="login">
       <div className="grid gap-2">
-        <h1 id="login-title" className="text-h1">
+        <h1 id="login-title" className={LOGON_HEADING}>
           Sign in
         </h1>
-        <p className="text-muted-foreground">New to Owlhead? Continue with Google to create your account. After that, a passkey signs you in.</p>
+        <p className="text-pretty">New to Owlhead? Continue with Google to create your account. After that, a passkey signs you in.</p>
       </div>
 
       {message ? (
-        <p role="alert" className={NOTICE} data-slot="login-message">
+        <p role="alert" className={LOGON_NOTICE} data-slot="login-message">
           {message}
         </p>
       ) : null}
 
-      <div className="grid gap-3">
-        <button type="button" onClick={google} disabled={busy} className={PRIMARY_PILL}>
+      <div className="grid gap-2">
+        <button type="button" onClick={google} disabled={busy} className={LOGON_PRIMARY}>
           {pending === "google" ? <Busy /> : <GoogleLogo className="size-5 shrink-0" weight="bold" aria-hidden />}
           Continue with Google
         </button>
-        <button type="button" onClick={passkey} disabled={busy} className={OUTLINE_PILL}>
+        <button type="button" onClick={passkey} disabled={busy} className={LOGON_SECONDARY}>
           {pending === "passkey" ? <Busy /> : <Fingerprint className="size-5 shrink-0" aria-hidden />}
           Sign in with a passkey
         </button>
       </div>
 
       {emailEnabled ? (
-        <div className="grid gap-3 border-t border-border/70 pt-6" data-slot="login-email">
+        <div className="grid gap-3 border-t border-t-foreground/45 pt-4 shadow-[inset_0_1px_0_var(--card)]" data-slot="login-email">
           {sent ? (
             <>
-              <p role="status" className={NOTICE}>
+              <p role="status" className={LOGON_NOTICE}>
                 {EMAIL_SENT}
               </p>
               <button
@@ -144,14 +144,14 @@ export function LoginPanel({ next, failed, enabled, emailEnabled, auth, navigate
                   setSent(false);
                   setEmail("");
                 }}
-                className="w-fit text-sm font-semibold text-lapis underline decoration-lapis/30 underline-offset-4 hover:decoration-current"
+                className={LOGON_LINK}
               >
                 Use a different address
               </button>
             </>
           ) : (
-            <form onSubmit={sendLink} className="grid gap-3" noValidate>
-              <label htmlFor="login-email" className="field-label text-muted-foreground">
+            <form onSubmit={sendLink} className="grid gap-2" noValidate>
+              <label htmlFor="login-email">
                 Or get a sign-in link by email
               </label>
               <input
@@ -163,9 +163,9 @@ export function LoginPanel({ next, failed, enabled, emailEnabled, auth, navigate
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className={FIELD}
+                className={LOGON_FIELD}
               />
-              <button type="submit" disabled={busy || email.trim() === ""} className={OUTLINE_PILL}>
+              <button type="submit" disabled={busy || email.trim() === ""} className={LOGON_SECONDARY}>
                 {pending === "email" ? <Busy /> : <EnvelopeSimple className="size-5 shrink-0" aria-hidden />}
                 Email me a link
               </button>

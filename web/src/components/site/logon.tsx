@@ -1,0 +1,37 @@
+import "./faces";
+import type { ReactNode } from "react";
+import Link from "next/link";
+import { BrandOwl } from "@/components/brand/brand-owl";
+import { cn } from "@/lib/utils";
+import { BODY, PIXEL, RAISED } from "./letter";
+import { KEY, PixelIcon } from "./pixel-icons";
+import { TitleBar, WINDOW_BUTTON } from "./retro";
+import { Wallpaper } from "./wallpaper";
+
+/**
+ * The sign-in pages as the logon dialog of the landing page's desktop: the same wallpaper, one window
+ * in the middle with the key beside what it asks, in the landing page's faces and bevels. Its close
+ * box goes back to the home page.
+ */
+export function Logon({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <main id="main" tabIndex={-1} className={cn("relative isolate grid min-h-dvh flex-1 place-items-center px-3 py-6 outline-none sm:p-8", BODY)} data-slot="logon">
+      <Wallpaper />
+      <section aria-label={title} className={cn(RAISED, "w-full max-w-[31rem] bg-muted p-0.5 ring-1 ring-foreground/70")} data-slot="logon-window">
+        <TitleBar
+          title={title}
+          icon={<BrandOwl className="size-4" />}
+          controls={
+            <Link href="/" aria-label="Close, back to the Owlhead home page" className={cn(WINDOW_BUTTON, PIXEL, "cursor-pointer outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground")}>
+              ×
+            </Link>
+          }
+        />
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 px-4 pt-5 pb-4 sm:gap-x-5 sm:px-6 sm:pt-6 sm:pb-6">
+          <PixelIcon sprite={KEY} className="size-10 sm:size-12" />
+          <div className="min-w-0">{children}</div>
+        </div>
+      </section>
+    </main>
+  );
+}

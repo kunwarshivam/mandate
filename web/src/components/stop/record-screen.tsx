@@ -14,6 +14,8 @@ import type { RecordKind } from "./commands";
 import { KillSwitchButton } from "./kill-switch-button";
 import { type AgentModeLine, MODES_HEADING, RECORD_TITLE, type RecordList, type StopRecord, buildRecord, commandRecord } from "./record";
 import { StepUpDialog } from "./step-up-dialog";
+import { KEY } from "@/components/kumo/key";
+import { cn } from "@/lib/utils";
 
 const BACK = "-ml-2 inline-flex h-11 w-fit items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:h-9";
 
@@ -82,7 +84,7 @@ function Missing({ kind }: { kind: RecordKind }) {
   return (
     <section data-slot="record-missing" className="grid gap-4 pt-4">
       <p className="max-w-measure text-muted-foreground">{agent ? "This workspace has no agent with that ID." : "This workspace has no broker connection with that ID."}</p>
-      <Link href="/" className="press inline-flex h-11 w-fit items-center rounded-lg border border-foreground/25 bg-card px-5 font-semibold hover:bg-background">
+      <Link href="/" className={cn("w-fit", KEY)}>
         Go to the dashboard
       </Link>
     </section>
@@ -185,7 +187,7 @@ export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetI
                 <button
                   type="button"
                   onClick={refresh}
-                  className="press inline-flex h-11 w-fit items-center rounded-lg border border-foreground/25 bg-card px-5 font-semibold outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring"
+                  className={cn("w-fit", KEY)}
                 >
                   Show the current version
                 </button>

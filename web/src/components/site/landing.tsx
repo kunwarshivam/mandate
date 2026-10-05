@@ -1,13 +1,12 @@
-import "@fontsource/dotgothic16/400.css";
-import "@fontsource/vt323/400.css";
-import "@fontsource-variable/pixelify-sans";
+import "./faces";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { OWLHEAD_ASCII } from "./ascii";
 import { BetaForm } from "./beta-form";
 import { Contents } from "./contents";
-import { type AppId, Desktop } from "./desktop";
+import { Desktop } from "./desktop";
+import type { AppId } from "./windows";
 import { BODY, BOLD, BUTTON, H2, LINK, MONO, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
 import { OpenApp } from "./open-app";
 import { ModeChart, Perch, TitleOwl } from "./owls";
@@ -200,7 +199,7 @@ export function Landing() {
   return (
     <Desktop
       home={
-        <Browser address="http://www.owlhead.ai/">
+        <Browser address="http://www.owlhead.ai/" bookmarks={CONTENTS}>
           <div id="top" className={cn("text-[1.125rem] leading-[1.65]", BODY)} data-slot="landing-page">
           <header className="grid justify-items-center gap-4 px-4 pt-8 pb-2 text-center sm:px-8 sm:pt-12">
             <h1>

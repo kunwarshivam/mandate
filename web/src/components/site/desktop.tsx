@@ -8,19 +8,19 @@ import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
 import { DISCARDED, Guestbook, Help, Notepad, PictureViewer, RecordViewer, RecycleBin } from "./apps";
 import { Assistant } from "./assistant";
-import { MONO, PIXEL, RAISED, SUNKEN } from "./letter";
+import { MENU_ITEM, MONO, PIXEL, RAISED, SUNKEN } from "./letter";
 import { MediaPlayer } from "./media-player";
 import { OpenAppContext } from "./open-app";
 import { BIN, BIN_EMPTY, BOLT, BOOK, FILM, HELP, KEY, LEDGER, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
 import { TitleBar, WINDOW_BUTTON } from "./retro";
 import { ThemeSwitch } from "./theme-switch";
 import { DisplayProperties, Wallpaper } from "./wallpaper";
+import { type AppId, TASK } from "./windows";
 import type { AmpState } from "./winamp";
 
 /** Webamp is a megabyte of player, so it loads only when someone opens Winamp. */
 const Winamp = dynamic(() => import("./winamp"), { ssr: false });
 
-export type AppId = "home" | "record" | "questions" | "guestbook" | "readme" | "owl" | "display" | "tour" | "bin";
 
 type Win = { open: boolean; min: boolean; max: boolean; x: number; y: number; z: number };
 
@@ -81,7 +81,7 @@ function frontmost(state: State): AppId | null {
   return front;
 }
 
-type App = { title: string; task: string; icon: ReactNode; frame: string; offset: { x: number; y: number } };
+type App = { title: string; icon: ReactNode; frame: string; offset: { x: number; y: number } };
 
 /**
  * Each window's size on a wide screen. Every window opens centred on the desktop, the home page
@@ -91,63 +91,54 @@ type App = { title: string; task: string; icon: ReactNode; frame: string; offset
 const APPS: Record<AppId, App> = {
   home: {
     title: "Owlhead Home Page",
-    task: "Owlhead",
     icon: <BrandOwl className="size-4" />,
     frame: "sm:inset-y-3 sm:mx-auto sm:w-[min(66rem,calc(100%-15rem))]",
     offset: { x: 0, y: 0 },
   },
   record: {
     title: "The record - Example decision",
-    task: "The record",
     icon: <PixelIcon sprite={LEDGER} className="size-4" />,
     frame: "sm:m-auto sm:h-fit sm:max-h-[calc(100%-2rem)] sm:w-[min(46rem,calc(100%-2rem))]",
     offset: { x: -24, y: 12 },
   },
   questions: {
     title: "Questions - Owlhead Help",
-    task: "Questions",
     icon: <PixelIcon sprite={HELP} className="size-4" />,
     frame: "sm:m-auto sm:h-[min(34rem,calc(100%-2rem))] sm:w-[34rem]",
     offset: { x: -72, y: -12 },
   },
   guestbook: {
     title: "guestbook.cgi",
-    task: "Guestbook",
     icon: <PixelIcon sprite={BOOK} className="size-4" />,
     frame: "sm:m-auto sm:h-fit sm:max-h-[calc(100%-2rem)] sm:w-[30rem]",
     offset: { x: 36, y: 24 },
   },
   readme: {
     title: "readme.txt - Notepad",
-    task: "readme.txt",
     icon: <PixelIcon sprite={NOTE} className="size-4" />,
     frame: "sm:m-auto sm:h-[min(27rem,calc(100%-4rem))] sm:w-[27rem]",
     offset: { x: -48, y: -24 },
   },
   owl: {
     title: "owl.jpg - Picture Viewer",
-    task: "owl.jpg",
     icon: <PixelIcon sprite={PICTURE} className="size-4" />,
     frame: "sm:m-auto sm:h-[min(38rem,calc(100%-2rem))] sm:w-[23rem]",
     offset: { x: 48, y: 0 },
   },
   display: {
     title: "Display Properties",
-    task: "Display",
     icon: <PixelIcon sprite={MONITOR} className="size-4" />,
     frame: "sm:m-auto sm:h-fit sm:max-h-[calc(100%-2rem)] sm:w-[28rem]",
     offset: { x: 0, y: 24 },
   },
   tour: {
     title: "Tour.mp4 - Media Player",
-    task: "Tour.mp4",
     icon: <PixelIcon sprite={FILM} className="size-4" />,
     frame: "sm:m-auto sm:h-fit sm:max-h-[calc(100%-2rem)] sm:w-[min(44rem,calc(100%-2rem))]",
     offset: { x: 24, y: -12 },
   },
   bin: {
     title: "Recycle Bin",
-    task: "Recycle Bin",
     icon: <PixelIcon sprite={BIN} className="size-4" />,
     frame: "sm:m-auto sm:h-[min(25rem,calc(100%-2rem))] sm:w-[34rem]",
     offset: { x: 72, y: -36 },
@@ -328,8 +319,6 @@ function Clock() {
     </span>
   );
 }
-
-const MENU_ITEM = cn("flex w-full cursor-pointer items-center gap-2.5 px-2 py-1 text-start text-[0.9375rem] outline-none hover:bg-foreground hover:text-card focus-visible:bg-foreground focus-visible:text-card", PIXEL);
 
 /** Up and Down move through a menu's items, as a menu of the time did. */
 function arrowKeys(e: KeyboardEvent<HTMLElement>) {
@@ -586,7 +575,7 @@ export function Desktop({ home }: { home: ReactNode }) {
                 className={cn(front === id ? "bg-card" : "bg-muted", front === id ? SUNKEN : RAISED, "flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 px-1.5 text-[0.875rem] outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground")}
               >
                 {APPS[id].icon}
-                <span className="truncate">{APPS[id].task}</span>
+                <span className="truncate">{TASK[id]}</span>
               </button>
             </li>
           ))}

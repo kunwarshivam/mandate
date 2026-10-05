@@ -9,17 +9,13 @@ import { clockShort, dateLabel, zoneLabel } from "@/lib/format";
 import { type BrowserClient, createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { FIELD, NOTICE } from "./buttons";
+import { KEY_SM } from "@/components/kumo/key";
 
 export type PasskeysAuth = Pick<BrowserClient["auth"], "registerPasskey" | "passkey">;
 
 /** Supabase's limit on a passkey's name. */
 export const NAME_MAX = 120;
 
-const SMALL_PILL =
-  "press inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold outline-none focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
-const PRIMARY = `${SMALL_PILL} bg-lapis text-lapis-foreground hover:bg-lapis-strong`;
-const OUTLINE = `${SMALL_PILL} border border-foreground/25 bg-card hover:bg-background`;
-const QUIET = `${SMALL_PILL} px-3 text-muted-foreground hover:bg-muted hover:text-foreground`;
 
 const LOAD_FAILED = "Your passkeys couldn’t be loaded. Nothing changed; try again.";
 const SAVE_FAILED = "That change didn’t save. Nothing changed; try again.";
@@ -128,7 +124,7 @@ export function PasskeysSection({ auth }: { auth?: PasskeysAuth }) {
       title="Passkeys"
       className="max-w-3xl"
       action={
-        <button type="button" onClick={add} disabled={busy !== null || passkeys === null} className={PRIMARY}>
+        <button type="button" onClick={add} disabled={busy !== null || passkeys === null} className={KEY_SM}>
           {adding ? <CircleNotch className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden /> : <Plus className="size-4 shrink-0" aria-hidden />}
           Add a passkey
         </button>
@@ -144,7 +140,7 @@ export function PasskeysSection({ auth }: { auth?: PasskeysAuth }) {
         {loadFailed ? (
           <div className={cn(NOTICE, "flex flex-wrap items-center justify-between gap-3")}>
             <span>{LOAD_FAILED}</span>
-            <button type="button" onClick={() => void load()} className={OUTLINE}>
+            <button type="button" onClick={() => void load()} className={KEY_SM}>
               Try again
             </button>
           </div>
@@ -177,7 +173,7 @@ export function PasskeysSection({ auth }: { auth?: PasskeysAuth }) {
                           onClick={() => setEditing({ id: p.id, mode: "rename", draft: nameOf(p) })}
                           disabled={busy !== null}
                           aria-label={`Rename ${nameOf(p)}`}
-                          className={QUIET}
+                          className={KEY_SM}
                         >
                           Rename
                         </button>
@@ -186,7 +182,7 @@ export function PasskeysSection({ auth }: { auth?: PasskeysAuth }) {
                           onClick={() => setEditing({ id: p.id, mode: "delete" })}
                           disabled={busy !== null}
                           aria-label={`Delete ${nameOf(p)}`}
-                          className={QUIET}
+                          className={KEY_SM}
                         >
                           Delete
                         </button>
@@ -208,11 +204,11 @@ export function PasskeysSection({ auth }: { auth?: PasskeysAuth }) {
                           onChange={(e) => setEditing({ ...edit, draft: e.target.value })}
                           className={cn(FIELD, "h-11 min-w-0 flex-1 basis-48")}
                         />
-                        <button type="submit" disabled={rowBusy || edit.draft.trim() === ""} className={PRIMARY}>
+                        <button type="submit" disabled={rowBusy || edit.draft.trim() === ""} className={KEY_SM}>
                           {rowBusy ? <CircleNotch className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden /> : null}
                           Save
                         </button>
-                        <button type="button" onClick={() => setEditing(null)} disabled={rowBusy} className={OUTLINE}>
+                        <button type="button" onClick={() => setEditing(null)} disabled={rowBusy} className={KEY_SM}>
                           Cancel
                         </button>
                       </div>
@@ -226,11 +222,11 @@ export function PasskeysSection({ auth }: { auth?: PasskeysAuth }) {
                         {passkeys.length === 1 ? "; Google will be the only way in." : "."}
                       </p>
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => void remove(p.id)} disabled={rowBusy} className={PRIMARY}>
+                        <button type="button" onClick={() => void remove(p.id)} disabled={rowBusy} className={KEY_SM}>
                           {rowBusy ? <CircleNotch className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden /> : null}
                           Delete passkey
                         </button>
-                        <button type="button" onClick={() => setEditing(null)} disabled={rowBusy} className={OUTLINE}>
+                        <button type="button" onClick={() => setEditing(null)} disabled={rowBusy} className={KEY_SM}>
                           Keep it
                         </button>
                       </div>

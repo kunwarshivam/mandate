@@ -8,6 +8,8 @@ import { isPlatformAuthored } from "@/lib/labels";
 import { type Draft, type DraftSection, SECTION_KEYS, type SectionKey } from "./draft";
 import { BackButton, PrototypeNote, StepHeading } from "./goal-steps";
 import { ContractCard, DraftFields, NotEnforcedList } from "./mandate-parts";
+import { KEY } from "@/components/kumo/key";
+import { cn } from "@/lib/utils";
 
 /**
  * One section of the draft with its own confirmation (brief A2: per section, never all at once,
@@ -69,9 +71,9 @@ function ReviewSection({
             <p className="text-sm">You confirmed this section.</p>
             <Button
               type="button"
-              variant="ghost"
+              variant="secondary"
               size="lg"
-              className="h-11 px-3"
+              className={KEY}
               onClick={() => {
                 moveFocus.current = true;
                 onUndo();
@@ -83,9 +85,9 @@ function ReviewSection({
         ) : (
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="lg"
-            className="h-11 px-5"
+            className={KEY}
             onClick={() => {
               moveFocus.current = onConfirm();
             }}
@@ -200,7 +202,7 @@ export function CompiledReview({
         </div>
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
           <BackButton onClick={onBack}>Change your answers</BackButton>
-          <Button type="button" variant="primary" size="lg" className="h-12 w-full justify-center px-6 sm:w-auto" disabled={!ready} onClick={onDeploy}>
+          <Button type="button" variant="secondary" size="lg" className={cn(KEY, "w-full sm:w-auto")} disabled={!ready} onClick={onDeploy}>
             Confirm and deploy to paper
           </Button>
         </div>

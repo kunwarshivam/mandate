@@ -9,7 +9,7 @@ import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
 import { Deadline } from "@/components/approvals/deadline";
 import { ResponseProgress, responseSteps } from "@/components/approvals/response-progress";
 import { LimitRail } from "@/components/domain/envelope";
-import { BEVEL, DECISION_KEY } from "@/components/kumo/bevel";
+import { DECISION_KEY, KEY } from "@/components/kumo/key";
 import { ApprovalChart } from "@/components/charts/price-chart";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import type { Approval, Environment, ModelOutput, RiskFigure, Workspace } from "@/fixtures/types";
@@ -122,7 +122,7 @@ function NotFound() {
         No request with this ID
       </h1>
       <p className="max-w-measure text-muted-foreground">This workspace has no approval request with that ID.</p>
-      <LinkButton href="/approvals" variant="outline" size="lg" className={cn("h-11 w-fit px-5", BEVEL)}>
+      <LinkButton href="/approvals" variant="secondary" size="lg" className={cn("w-fit", KEY)}>
         See all approvals
       </LinkButton>
     </section>
@@ -365,7 +365,7 @@ function Request({ approvalId }: { approvalId: string }) {
           ) : stale ? (
             <div data-slot="record-changed" className="grid gap-2">
               <p className="text-sm font-medium">This request changed since the page opened, so the record above is out of date. Nothing was sent.</p>
-              <Button variant="outline" size="lg" className={cn("h-11 w-fit px-5", BEVEL)} onClick={refresh}>
+              <Button variant="secondary" size="lg" className={cn("w-fit", KEY)} onClick={refresh}>
                 Show the current version
               </Button>
             </div>

@@ -522,7 +522,7 @@ html:root[data-cvd="on"] {
   }
 }
 
-/* The landing page's chrome face, Pixelify Sans, for the bevelled buttons' labels and a few titles. */
+/* The landing page's chrome face, Pixelify Sans, for the empty board's title and the all-clear line. */
 @utility pixel-face {
   font-family: "Pixelify Sans Variable", "MS Sans Serif", Tahoma, sans-serif;
 }
