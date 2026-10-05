@@ -2829,6 +2829,61 @@ mod tests {
     }
 
     #[test]
+    fn mutation_shards_accept_only_one_based_indices_within_the_total() {
+        assert_eq!(
+            MutantShard::parse("1/12"),
+            Ok(MutantShard {
+                index: 1,
+                total: 12
+            })
+        );
+        assert_eq!(
+            MutantShard::parse("12/12"),
+            Ok(MutantShard {
+                index: 12,
+                total: 12
+            })
+        );
+        for invalid in ["0/12", "13/12", "1/0", "1", "1/2/3", "a/12"] {
+            assert!(
+                MutantShard::parse(invalid).is_err(),
+                "{invalid} must not select an incomplete or undefined shard"
+            );
+        }
+    }
+
+    #[test]
+    fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() {
+        let unsharded = mutants_args("change.diff", None);
+        assert!(
+            !unsharded.iter().any(|arg| arg == "--shard"),
+            "a local `cargo xtask check` run must cover the complete diff"
+        );
+
+        let sharded = mutants_args(
+            "change.diff",
+            Some(MutantShard {
+                index: 7,
+                total: 12,
+            }),
+        );
+        assert_eq!(
+            sharded
+                .windows(2)
+                .filter(|pair| pair[0] == "--shard" && pair[1] == "7/12")
+                .count(),
+            1
+        );
+        assert_eq!(
+            sharded
+                .windows(2)
+                .filter(|pair| pair[0] == "--sharding" && pair[1] == "round-robin")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn debt_markers_match_whole_words_only() {
         let marker = concat!("TO", "DO");
         assert!(contains_word(&format!("// {marker}: later"), marker));
