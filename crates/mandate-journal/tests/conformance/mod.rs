@@ -589,7 +589,7 @@ pub fn fixture() -> Value {
     parse(&std::fs::read(path).unwrap()).unwrap()
 }
 
-fn fixture_artifacts(fx: &Value) -> BTreeMap<Digest, Vec<u8>> {
+pub fn fixture_artifacts(fx: &Value) -> BTreeMap<Digest, Vec<u8>> {
     list(fx, "artifacts")
         .iter()
         .map(|artifact| {

@@ -374,7 +374,9 @@ mod tests {
             },
         )
         .map_err(|e| e.to_string())?;
-        let refusal = Draft::parse(&bytes).expect_err("StreamOpened has no version 2");
+        let refusal = Draft::parse(&bytes)
+            .err()
+            .ok_or("StreamOpened unexpectedly accepted version 2")?;
         assert_eq!(refusal.reason, InvalidReason::UnknownSchema);
         assert_eq!(refusal.path, "payload");
         Ok(())
@@ -418,7 +420,9 @@ mod tests {
             },
         )
         .map_err(|e| e.to_string())?;
-        let refusal = Draft::parse(&bytes).expect_err("version 1 excludes risk_clock");
+        let refusal = Draft::parse(&bytes)
+            .err()
+            .ok_or("IntentReceived version 1 unexpectedly accepted risk_clock")?;
         assert_eq!(refusal.reason, InvalidReason::Schema);
         assert_eq!(refusal.path, "payload.risk_clock");
         Ok(())

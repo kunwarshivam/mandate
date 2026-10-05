@@ -14,11 +14,13 @@ mod common;
 mod conformance;
 mod support;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use common::{edit, event_id, mark_draft, now, opened_draft, stream};
-use conformance::{append_chain, artifact_mark_draft, fixture, get, int, list, text};
+use conformance::{
+    append_chain, artifact_mark_draft, fixture, fixture_artifacts, get, int, list, text,
+};
 use mandate_canon::Digest;
 use mandate_journal::{
     Anchor, AnchorLeaf, AppendOutcome, Draft, EventCheck, EventFailure, Head, StoredEvent,
@@ -1011,6 +1013,7 @@ fn tamper_sql(name: &str) -> (&'static str, Vec<String>) {
 #[test]
 fn tamper_vectors_are_caught_when_the_stored_rows_are_read() {
     let fx = fixture();
+    let artifacts = fixture_artifacts(&fx);
     let anchor = Anchor {
         leaves: list(&fx, "merkle.leaves")
             .iter()
@@ -1048,7 +1051,7 @@ fn tamper_vectors_are_caught_when_the_stored_rows_are_read() {
             Some(range_check) => {
                 assert_eq!(text(case, "expect.per_event"), "pass");
                 let rows = read.unwrap_or_else(|e| panic!("{name}: {e}"));
-                assert!(verify_events(&rows, TrustedStart::GENESIS, &BTreeMap::new()).is_ok());
+                assert!(verify_events(&rows, TrustedStart::GENESIS, &artifacts).is_ok());
                 assert_eq!(
                     verify_anchor(&anchor, &s, &rows).map_err(|c| c.code()),
                     Err(range_check.as_str().unwrap()),
