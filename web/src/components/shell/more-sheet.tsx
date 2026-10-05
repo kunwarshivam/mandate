@@ -1,5 +1,6 @@
 "use client";
 
+import type { RefObject } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Dialog } from "@cloudflare/kumo/primitives/dialog";
@@ -109,10 +110,21 @@ function Row({ link, pathname, onGo }: { link: MoreLink; pathname: string; onGo:
  * More, the phone's fourth tab: a bottom sheet with the account and workspace, Search, and every
  * screen that is not a tab, then the theme and the feeds the status strip used to list. Flat like
  * every sheet (the glass is the frame's alone), hairline rows, 44px targets, clear of the home
- * indicator. Choosing a screen closes it on the way. It is not modal and it and its backdrop stop
- * at the header, so Stop stays in view, in the accessibility tree and one press away while it is open.
+ * indicator. Choosing a screen closes it on the way. It is not modal, and it and its backdrop sit
+ * between the header and the tab bar and under both, so it rises from behind the bar and Stop, at
+ * the bar's end, stays in view, in the accessibility tree and one press away while it opens and
+ * while it is open (DEC-452).
  */
-export function MoreSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export function MoreSheet({
+  open,
+  onOpenChange,
+  container,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Where the sheet mounts: the frame's sheet layer, under the header and the tab bar. */
+  container?: RefObject<HTMLElement | null>;
+}) {
   const pathname = usePathname();
   const { role } = useRole();
   const { ws, now } = useRuntime();
@@ -126,11 +138,11 @@ export function MoreSheet({ open, onOpenChange }: { open: boolean; onOpenChange:
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange} modal={false}>
-      <Dialog.Portal>
-        <Dialog.Backdrop data-slot="sheet-backdrop" className="fixed inset-x-0 top-[calc(4rem+1px)] bottom-0 z-50 bg-ink/40" />
+      <Dialog.Portal container={container}>
+        <Dialog.Backdrop data-slot="sheet-backdrop" className="fixed inset-x-0 top-[calc(4rem+1px)] bottom-[calc(var(--tab-bar)+env(safe-area-inset-bottom))] z-20 bg-ink/40" />
         <Dialog.Popup
           data-slot="more-sheet"
-          className="fixed inset-x-0 bottom-0 z-50 mx-auto flex max-h-[min(85dvh,calc(100dvh-4rem-1px))] w-full max-w-lg flex-col overflow-y-auto overscroll-contain rounded-t-3xl border-t border-border bg-card pb-[calc(env(safe-area-inset-bottom)+1rem)] text-foreground shadow-2xl outline-none sm:border-x"
+          className="fixed inset-x-0 bottom-[calc(var(--tab-bar)+env(safe-area-inset-bottom))] z-20 mx-auto flex max-h-[min(85dvh,calc(100dvh-4rem-1px-var(--tab-bar)-env(safe-area-inset-bottom)))] w-full max-w-lg flex-col overflow-y-auto overscroll-contain rounded-t-3xl border-t border-border bg-card pb-4 text-foreground shadow-2xl outline-none sm:border-x"
         >
           <div className="flex items-center justify-between gap-3 px-5 pt-3 pb-1">
             <Dialog.Title className="text-h2">More</Dialog.Title>

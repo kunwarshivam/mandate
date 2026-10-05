@@ -14,7 +14,9 @@ const LABELS = ["Home", "Approvals", "Alerts", "Agents", "Positions", "Connectio
 const DOCKED: Record<string, string> = { home: "Home", approvals: "Approvals", alerts: "Alerts", agents: "Agents", positions: "Positions", connections: "Connections" };
 
 const dock = (page: Page) => page.getByRole("navigation", { name: "Primary" });
-const items = (page: Page) => dock(page).locator("a, button");
+const items = (page: Page) => dock(page).locator("a, button:not([data-slot=stop-control])");
+/** The keyboard's order through the dock: every labelled item, then Stop at its end (DEC-452). */
+const TAB_ORDER = [...LABELS, "Stop"];
 
 async function open(page: Page, path: string, width = 1440, height = 900) {
   await page.setViewportSize({ width, height });
@@ -221,20 +223,25 @@ for (const width of [1024, 1280] as const) {
 
 test("the keyboard meets the dock after the page, in reading order, and Shift+Tab walks it back", async ({ page }) => {
   await open(page, "/", 1280, 800);
-  const labelOfFocus = () => page.evaluate(() => document.activeElement?.querySelector("[data-slot=dock-label]")?.textContent ?? null);
+  const labelOfFocus = () =>
+    page.evaluate(() => {
+      const el = document.activeElement;
+      if (el?.getAttribute("data-slot") === "stop-control") return el.textContent;
+      return el?.querySelector("[data-slot=dock-label]")?.textContent ?? null;
+    });
   await items(page).first().focus();
   const order = [await labelOfFocus()];
-  for (let i = 1; i < LABELS.length; i++) {
+  for (let i = 1; i < TAB_ORDER.length; i++) {
     await page.keyboard.press("Tab");
     order.push(await labelOfFocus());
   }
-  expect(order).toEqual(LABELS);
+  expect(order).toEqual(TAB_ORDER);
   const back: (string | null)[] = [];
-  for (let i = 1; i < LABELS.length; i++) {
+  for (let i = 1; i < TAB_ORDER.length; i++) {
     await page.keyboard.press("Shift+Tab");
     back.push(await labelOfFocus());
   }
-  expect(back).toEqual(LABELS.slice(0, -1).reverse());
+  expect(back).toEqual(TAB_ORDER.slice(0, -1).reverse());
   await page.keyboard.press("Shift+Tab");
   expect(await page.evaluate(() => !!document.activeElement?.closest("#main")), "before Home, the page's last control").toBe(true);
 });

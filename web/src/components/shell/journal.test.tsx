@@ -1,11 +1,11 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RECORD_AFTER_MS, renderWithRuntime } from "@/test/harness";
+import { RECORD_AFTER_MS, dockStop, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { AppShell } from "./app-shell";
 
 function pauseAll() {
-  fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  fireEvent.click(dockStop());
   const sheet = screen.getByRole("dialog");
   fireEvent.click(within(sheet).getByRole("button", { name: /Pause all agents/ }));
   return sheet;
@@ -56,7 +56,7 @@ describe("result unknown", () => {
 describe("Stop sheet", () => {
   it("names the environment in its title", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(dockStop());
     const title = within(screen.getByRole("dialog")).getByRole("heading", { level: 2, name: /^Stop/ });
     expect(title.querySelector("[data-slot=environment-badge]")).toHaveTextContent("PAPER");
   });

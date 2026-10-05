@@ -8,7 +8,7 @@ import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from
 import { clock, price } from "@/lib/format";
 import { PURPOSE_LABEL } from "@/lib/labels";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
-import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
+import { RECORD_AFTER_MS, dockStop, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
 import { AgentsListScreen } from "./agents-list";
@@ -45,7 +45,7 @@ describe("every screen in every scenario", () => {
     renderScreen(path, ui(), scenario);
     const [header] = screen.getAllByRole("banner");
     expect(within(header).getByText("PAPER")).toBeInTheDocument();
-    expect(isDisabled(within(header).getByRole("button", { name: "Stop" }))).toBe(false);
+    expect(isDisabled(dockStop())).toBe(false);
     expect(main()).not.toHaveTextContent(PERSUASIVE);
 
     if (scenario === "loading") {

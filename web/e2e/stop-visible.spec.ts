@@ -5,8 +5,9 @@ import { agentHref } from "../src/lib/screens";
 
 /**
  * Stop is always one press away (brief §5, rule 13): at every width, on every main route, with the
- * page at its top or scrolled to its end under the dock, the Stop button sits wholly inside the
- * viewport, nothing covers it, and its label is never clipped. On touch widths it is at least 44 by 44 px.
+ * page at its top or scrolled to its end, the Stop button at the end of the dock or the phone tab bar
+ * (DEC-452) sits wholly inside the viewport, nothing covers it, and its label is never clipped. On
+ * touch widths it is at least 44 by 44 px.
  */
 
 const WIDTHS = [320, 360, 375, 390, 414, 430, 480, 600, 640, 768, 820, 1024, 1180, 1280, 1440, 1920];
@@ -98,7 +99,7 @@ test.describe("Stop is fully visible at every width (brief §5, rule 13)", () =>
           await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }).click();
           await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
           await expectStopVisible(page, width, "with More open");
-          await page.getByRole("banner").getByRole("button", { name: "Stop", exact: true }).click();
+          await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Stop", exact: true }).click();
           await expect(page.getByRole("dialog", { name: /^Stop/ }), "Stop opens its sheet over More").toBeVisible();
           await expect(page.getByRole("dialog", { name: "More" })).toBeHidden();
           return;

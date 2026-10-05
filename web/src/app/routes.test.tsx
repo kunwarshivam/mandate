@@ -22,7 +22,7 @@ import { AGENT_IDS, APPROVAL_IDS, buildWorkspace } from "@/fixtures/workspace";
 import { canOpen, homeFor, routeNeeds } from "@/lib/access";
 import { ROLES, type Role, can } from "@/lib/roles";
 import { AGENT_SECTIONS, RECORD_TITLE, SCREENS, SECTION_INDEX, agentHref, decisionHref, orderHref, positionHref, screensIn } from "@/lib/screens";
-import { isDisabled, renderWithRuntime } from "@/test/harness";
+import { dockStop, isDisabled, renderWithRuntime } from "@/test/harness";
 import { pageFor } from "@/test/app-routes";
 import { setPathname } from "@/test/navigation";
 
@@ -71,7 +71,7 @@ describe("route coverage", () => {
     await renderPath(path);
     const [header] = screen.getAllByRole("banner");
     expect(within(header).getByText("PAPER")).toBeInTheDocument();
-    expect(isDisabled(within(header).getByRole("button", { name: "Stop" }))).toBe(false);
+    expect(isDisabled(dockStop())).toBe(false);
     expect(within(screen.getByRole("main")).getAllByRole("heading", { level: 1 }).length).toBeGreaterThan(0);
   });
 

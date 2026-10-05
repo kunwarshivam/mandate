@@ -4,17 +4,12 @@ import ErrorScreen from "@/app/(app)/error";
 import * as dashboard from "@/app/(app)/page";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
-import { isDisabled, renderWithRuntime } from "@/test/harness";
+import { dockStop, isDisabled, renderWithRuntime, tabStop } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { AppShell } from "./app-shell";
 import { useStopAttention } from "./stop-control";
 
 beforeEach(() => setPathname("/"));
-
-function headerStop(): HTMLElement {
-  const [header] = screen.getAllByRole("banner");
-  return within(header).getByRole("button", { name: "Stop" });
-}
 
 function pill(stop: HTMLElement): HTMLElement {
   const el = stop.querySelector<HTMLElement>("[data-slot=stop-pill]");
@@ -29,7 +24,7 @@ function renderShell(scenario: Scenario) {
     </AppShell>,
     scenario,
   );
-  return headerStop();
+  return dockStop();
 }
 
 /** Classes that only paint: what may differ between the quiet and the loud Stop. */
@@ -84,12 +79,25 @@ describe("the Stop control is quiet until something needs you (DEC-206)", () => 
     }
   });
 
-  it("keeps a 44px hit area at every width and a 40px pill from lg up, the command bar's height", () => {
+  it("keeps a 44px hit area or more on the dock and the tab bar, and sits after the navigation on both", () => {
     const stop = renderShell("normal");
-    expect(stop).toHaveClass("h-11");
-    expect([...stop.classList].some((c) => /^(lg|xl|md|sm):h-/.test(c))).toBe(false);
-    expect(pill(stop)).toHaveClass("h-11", "lg:h-10");
-    expect(document.querySelector("[data-slot=command-bar]")).toHaveClass("h-10");
+    expect(stop).toHaveAttribute("data-place", "dock");
+    expect(stop).toHaveClass("h-12.5");
+    expect(pill(stop)).toHaveClass("h-12.5");
+    const tab = tabStop();
+    expect(tab).toHaveAttribute("data-place", "tab");
+    expect(tab).toHaveClass("h-(--tab-bar)");
+    expect(pill(tab)).toHaveClass("h-11");
+    for (const nav of [screen.getByRole("navigation", { name: "Primary" }), screen.getByRole("navigation", { name: "Main" })]) {
+      const controls = within(nav).getAllByRole("button");
+      expect(controls.filter((c) => c.getAttribute("data-slot") === "stop-control")).toHaveLength(1);
+      expect(controls.at(-1)).toHaveAttribute("data-slot", "stop-control");
+    }
+  });
+
+  it("is never in the header", () => {
+    renderShell("stale");
+    for (const header of screen.getAllByRole("banner")) expect(header.querySelector("[data-slot=stop-control]")).toBeNull();
   });
 
   it("stays enabled and quiet on the error screen", () => {
@@ -98,7 +106,7 @@ describe("the Stop control is quiet until something needs you (DEC-206)", () => 
         <ErrorScreen error={new Error("probe")} reset={() => {}} />
       </AppShell>,
     );
-    const stop = headerStop();
+    const stop = dockStop();
     expect(isDisabled(stop)).toBe(false);
     expect(stop).toHaveAttribute("data-tone", "quiet");
   });

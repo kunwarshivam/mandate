@@ -1,14 +1,15 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, type RefObject, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
 import { DotsThreeOutline } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { useRole } from "@/lib/roles";
+import { can, useRole } from "@/lib/roles";
 import { isCurrent } from "./dock";
 import { MoreSheet, moreGroups, phoneTabs } from "./more-sheet";
+import { StopButton } from "./stop-control";
 
 const TAB =
   "press relative grid h-(--tab-bar) min-w-0 place-items-center content-center gap-1 px-0.5 text-[0.6875rem] leading-tight font-medium text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset";
@@ -35,10 +36,11 @@ function TabFace({ active, icon, label, badge }: { active: boolean; icon: ReactN
 
 /**
  * The phone's one navigation (DEC-207): Home, Approvals with its count, Agents, and More, a sheet
- * with every other screen. A role that sees no agents gets its home and More. The current tab's
+ * with every other screen, then Stop at the bar's end for a role that may stop (DEC-452). A role
+ * that sees no agents gets its home and More. The current tab's
  * icon fills and sits on a pale pill that glides between tabs; with reduced motion it jumps.
  */
-export function TabNav({ approvals }: { approvals: number }) {
+export function TabNav({ approvals, sheetLayer }: { approvals: number; sheetLayer?: RefObject<HTMLElement | null> }) {
   const pathname = usePathname();
   const { role } = useRole();
   const [more, setMore] = useState(false);
@@ -46,11 +48,12 @@ export function TabNav({ approvals }: { approvals: number }) {
   const onTab = tabs.some((t) => isCurrent(pathname, t.href));
   const inMore = !onTab && moreGroups(role).some((g) => g.links.some((l) => isCurrent(pathname, l.href)));
   const moreActive = more || inMore;
+  const stops = can(role, "stop.open");
   return (
     <nav
       aria-label="Main"
       className="glass grid border-t pb-[env(safe-area-inset-bottom)]"
-      style={{ gridTemplateColumns: `repeat(${tabs.length + 1}, minmax(0, 1fr))` }}
+      style={{ gridTemplateColumns: `repeat(${tabs.length + 1}, minmax(0, 1fr))${stops ? " auto" : ""}` }}
     >
       {tabs.map(({ href, label, icon: Icon }) => {
         const active = !more && isCurrent(pathname, href);
@@ -90,7 +93,8 @@ export function TabNav({ approvals }: { approvals: number }) {
           icon={<DotsThreeOutline className="relative size-5.5" weight={moreActive ? "fill" : "regular"} aria-hidden />}
         />
       </button>
-      <MoreSheet open={more} onOpenChange={setMore} />
+      {stops ? <StopButton place="tab" className="pr-3 pl-1" /> : null}
+      <MoreSheet open={more} onOpenChange={setMore} container={sheetLayer} />
     </nav>
   );
 }

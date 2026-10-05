@@ -19,7 +19,8 @@ function setCookie(name: string, value: string) {
 /**
  * Development only; the layout does not render it in a production build. The scenario and the
  * colour-blind friendly preference are cookies so the server renders them; the role is React state
- * only and resets on reload. Alt+Shift+C toggles colour-blind friendly.
+ * only and resets on reload. Alt+Shift+C toggles colour-blind friendly. It floats above the tab bar
+ * and the dock, never over Stop at their ends.
  */
 export function ScenarioSwitcher({ scenario, colourBlind }: { scenario: Scenario; colourBlind: boolean }) {
   const router = useRouter();
@@ -39,7 +40,7 @@ export function ScenarioSwitcher({ scenario, colourBlind }: { scenario: Scenario
   return (
     <div
       data-slot="scenario-switcher"
-      className="fixed right-3 bottom-20 z-40 flex flex-wrap items-center gap-2 border border-dashed border-foreground bg-card py-1 pr-1 pl-2.5 text-caption lg:bottom-3">
+      className="fixed right-3 bottom-20 z-20 flex flex-wrap items-center gap-2 border border-dashed border-foreground bg-card py-1 pr-1 pl-2.5 text-caption lg:bottom-[calc(var(--dock-clearance)+0.5rem)]">
       <Flask className="size-3.5 text-muted-foreground" aria-hidden />
       <label className="flex items-center gap-1.5">
         <span className="text-muted-foreground">Scenario</span>

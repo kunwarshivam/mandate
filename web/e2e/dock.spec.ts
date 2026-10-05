@@ -6,7 +6,8 @@ import { SCREENS, SECTION_INDEX } from "../src/lib/screens";
  * From 1024 px the dock carries the navigation: a floating glass bar centred at the bottom, every
  * item an icon over its name, the current section on a pill, menus a keyboard can open, move through
  * and close, and every screen the sidebar reached one press or one menu away. It never covers a
- * focused control, an approval's choices, the header or Stop. Below 1024 px the tab bar carries it instead.
+ * focused control, an approval's choices or the header, and Stop ends it (DEC-452). Below 1024 px the
+ * tab bar carries it instead.
  */
 
 const dock = (page: Page) => page.getByRole("navigation", { name: "Primary" });
@@ -37,7 +38,8 @@ test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide
       padding: parseFloat(style.paddingTop),
       shadow: style.boxShadow,
       height: el.getBoundingClientRect().height,
-      items: [...el.querySelectorAll<HTMLElement>("a, button")].map((item) => {
+      stop: el.querySelector<HTMLElement>("[data-slot=stop-control]")!.getBoundingClientRect().height,
+      items: [...el.querySelectorAll<HTMLElement>("a, button:not([data-slot=stop-control])")].map((item) => {
         const icon = item.querySelector("svg")!.getBoundingClientRect();
         const label = getComputedStyle(item.querySelector("[data-slot=dock-label]")!);
         return { width: item.getBoundingClientRect().width, height: item.getBoundingClientRect().height, icon: [icon.width, icon.height], size: label.fontSize, weight: label.fontWeight };
@@ -48,6 +50,7 @@ test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide
   expect(found.padding).toBe(6);
   expect(found.height, "the dock's height matches --dock-h").toBe(64);
   expect(found.items).toHaveLength(8);
+  expect(found.stop, "Stop, at the dock's end, is as tall as its items").toBe(50);
   for (const item of found.items) {
     expect(item.width).toBeGreaterThanOrEqual(64);
     expect(item.height).toBe(50);
@@ -85,7 +88,7 @@ test("the current section sits on a tinted pill with a semibold label; hover is 
 
 test("the labels name every item: no tooltip on hover or focus, and a visible focus ring", async ({ page }) => {
   await open(page, "/");
-  const items = dock(page).locator("a, button");
+  const items = dock(page).locator("a, button:not([data-slot=stop-control])");
   const names = await items.evaluateAll((els) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent));
   expect(names).toEqual(["Home", "Approvals", "Alerts", "Agents", "Positions", "Connections", "Audit", "More"]);
   await items.nth(4).hover();

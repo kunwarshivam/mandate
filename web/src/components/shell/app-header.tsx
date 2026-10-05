@@ -14,7 +14,6 @@ import { cn } from "@/lib/utils";
 import { Wordmark } from "./brand";
 import { CommandMenu } from "./command-menu";
 import { EnvironmentBadge } from "./environment-badge";
-import { StopControl } from "./stop-control";
 import { ThemeMenu } from "./theme-menu";
 
 /** Fixture workspaces: the switcher shows the shape of the control, and only one is connected. */
@@ -170,15 +169,15 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
 }
 
 /**
- * The header always renders, whatever is loading: the Stop control, the paper badge, and the way
- * home never wait for workspace data (brief §5, rule 13). Stop never shrinks and never leaves the
- * screen (`e2e/stop-visible.spec.ts`); as the header narrows, lower-priority items give way first:
+ * The header always renders, whatever is loading: the paper badge and the way home never wait for
+ * workspace data (brief §5). Stop is not here: it ends the dock and the phone's tab bar (DEC-452).
+ * As the header narrows, lower-priority items give way first:
  * the trail folds its earlier crumbs into a menu and then hides, never truncating the current page,
  * the command bar narrows (it is centred where both sides fit, `e2e/command-bar.spec.ts`), the
  * workspace switcher becomes an icon (below 100rem), alerts and the account menu fold into "Alerts
  * and account" (below `xl`), and the paper badge keeps its gloss for screen readers only (at `lg`
- * below 100rem, and below 30rem). Below `lg` the header holds three things, the mark, the paper
- * badge and Stop (DEC-207); the tab bar and its More sheet carry the rest.
+ * below 100rem, and below 30rem). Below `lg` the header holds two things, the brand owl and the
+ * paper badge (DEC-207, DEC-452); the tab bar and its More sheet carry the rest.
  */
 export function AppHeader() {
   const pathname = usePathname();
@@ -243,7 +242,6 @@ export function AppHeader() {
           <div className="max-lg:hidden xl:hidden">
             <MoreMenu seesAgents={seesAgents} />
           </div>
-          <StopControl className="ml-1 sm:ml-2" />
         </div>
       </div>
     </header>

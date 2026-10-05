@@ -17,7 +17,7 @@ import { AgentOwl, Owl } from "@/components/domain/owl";
 import { FixtureTag, InlineDisclosures, Placeholder } from "@/components/domain/placeholders";
 import { ProvenanceBadge } from "@/components/domain/provenance-badge";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
-import { StopControl } from "@/components/shell/stop-control";
+import { StopButton } from "@/components/shell/stop-control";
 import type { AgentMode, Provenance } from "@/fixtures/types";
 import { AGENT_IDS } from "@/fixtures/workspace";
 import { contrastRatio, toHex } from "@/lib/color";
@@ -89,7 +89,7 @@ const DO = [
   "Sentence case everywhere. Weight 600 at most in the product.",
   "Tabular figures wherever numbers line up or change.",
   "Motion that answers the owner: a press, a sheet, the line drawing in once.",
-  "Stop in the header at every width, never disabled, never behind a menu.",
+  "Stop at the end of the dock and the tab bar at every width, never disabled, never behind a menu.",
 ];
 
 const DONT = [
@@ -395,7 +395,7 @@ export default function DesignPage() {
               </Button>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <StopControl />
+              <StopButton place="inline" />
               <span data-meaning="kill" className="inline-flex h-11 items-center rounded-xl bg-crimson px-4 font-semibold text-crimson-foreground">
                 Kill switch (crimson, only here)
               </span>

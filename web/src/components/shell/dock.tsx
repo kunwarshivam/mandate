@@ -9,6 +9,7 @@ import { useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
 import { GROUP_LABEL, SCREENS, SECTION_INDEX, type Screen, type ScreenGroup } from "@/lib/screens";
 import { SCREEN_ICON } from "./screen-icons";
+import { StopButton } from "./stop-control";
 
 /** The screens that sit on the dock itself, in order; every other screen is one menu away. */
 export const DOCK_LINKS = ["home", "approvals", "alerts", "agents", "positions", "connections"] as const;
@@ -164,8 +165,9 @@ function MenuLinks({ groups, pathname }: { groups: MenuGroup[]; pathname: string
  * in place of the sidebar. Every item is an icon over its name, and the current section sits on a
  * pill. The owner's everyday screens sit on it; Audit and More open menus with every other screen,
  * so nothing the sidebar reached is lost, and the account the sidebar's header named heads More.
- * The dock sits in the page's bottom padding and scroll padding, so it never covers content, a
- * focused control or an approval's pinned choices, and it never reaches the header.
+ * Stop ends it, past a divider, so the one control that acts on the account sits apart from the
+ * places to go (DEC-452). The dock sits in the page's bottom padding and scroll padding, so it never
+ * covers content, a focused control or an approval's pinned choices, and it never reaches the header.
  */
 export function Dock({ approvals }: { approvals: number }) {
   const pathname = usePathname();
@@ -201,6 +203,12 @@ export function Dock({ approvals }: { approvals: number }) {
         {more.length > 0 ? <DropdownMenu.Separator /> : null}
         <MenuLinks groups={more} pathname={pathname} />
       </DockMenuButton>
+      {can(role, "stop.open") ? (
+        <>
+          <span aria-hidden data-slot="dock-stop-divider" className="mx-1 h-8 w-px bg-(--dock-edge)" />
+          <StopButton place="dock" />
+        </>
+      ) : null}
     </nav>
   );
 }

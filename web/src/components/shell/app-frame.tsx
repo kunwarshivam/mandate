@@ -13,7 +13,7 @@ import { signedInUser } from "@/lib/supabase/server";
 /**
  * The app's frame over the fixture workspace: the shell with Stop and the dock. The `(app)`
  * layout wraps every screen in it, and the root not-found page wraps an unknown address in it, so
- * Stop stays in the header there too (brief P1).
+ * Stop stays at the end of the dock and the tab bar there too (brief P1).
  */
 export async function AppFrame({ children }: { children: ReactNode }) {
   const scenario = await getScenario();
