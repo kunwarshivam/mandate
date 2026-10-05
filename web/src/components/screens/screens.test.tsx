@@ -3,7 +3,7 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentRoute from "@/app/(app)/agents/[agentId]/page";
 import * as approvalRoute from "@/app/(app)/approvals/[approvalId]/page";
-import { BEVEL } from "@/components/kumo/bevel";
+import { DECISION_KEY } from "@/components/kumo/bevel";
 import { AppShell } from "@/components/shell/app-shell";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
 import { clock, price } from "@/lib/format";
@@ -16,7 +16,7 @@ import { setPathname } from "@/test/navigation";
 import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
 import { AgentsListScreen } from "./agents-list";
 import { ApprovalRequestScreen } from "./approval-request";
-import { ApprovalsInboxScreen } from "./approvals-inbox";
+import { ApprovalsInboxScreen, askSentence } from "./approvals-inbox";
 import { DashboardScreen } from "./dashboard";
 
 const SCENARIO_IDS = SCENARIOS.map((s) => s.id);
@@ -241,6 +241,26 @@ describe("D5 inbox and D6 request", () => {
   const request = (id: string, scenario: (typeof SCENARIO_IDS)[number] = "approvals") =>
     renderScreen(`/approvals/${id}`, <ApprovalRequestScreen approvalId={id} />, scenario);
 
+  it("lays the inbox on the page grid, with why requests come in the rail: each agent's asking rules and its window", () => {
+    renderScreen("/approvals", <ApprovalsInboxScreen />, "approvals");
+    const column = main().querySelector<HTMLElement>("[data-layout=main]")!;
+    const rail = main().querySelector<HTMLElement>("[data-layout=rail]")!;
+    expect(column.parentElement).toBe(rail.parentElement);
+    expect(rail.parentElement?.className).toContain("lg:grid-cols-[minmax(0,1fr)_20rem]");
+    expect(within(column).getByRole("region", { name: "Open, by deadline" })).toBeInTheDocument();
+    const why = within(rail).getByRole("region", { name: "What sends you a request" });
+    const ws = buildWorkspace("approvals");
+    const rows = [...why.querySelectorAll("li")];
+    expect(rows).toHaveLength(ws.agents.length);
+    rows.forEach((row, i) => {
+      const agent = ws.agents[i];
+      expect(within(row).getByRole("link", { name: agent.label })).toHaveAttribute("href", `/agents/${agent.agent_id}/mandate`);
+      expect(row).toHaveTextContent(askSentence(agent));
+      expect(row).toHaveTextContent(/A request waits .+, then is skipped\.$/);
+    });
+    expect(askSentence(ws.agents.find((a) => a.agent_id === AGENT_IDS.swing)!)).toMatch(/^Your rules? (“\w+”, )*“low_score”/);
+  });
+
   it("gives Approve and Skip the same variant and weight, with no focus or selection", () => {
     request(APPROVAL_IDS.btc);
     const choices = main().querySelector("[data-slot=approval-choices]") as HTMLElement;
@@ -259,12 +279,15 @@ describe("D5 inbox and D6 request", () => {
     }
   });
 
-  it("draws Approve and Skip in the landing page's bevel, both alike, flat, with Kumo's ring left only for focus (DEC-452)", () => {
+  it("draws Approve and Skip as one solid lit key in Public Sans, both alike, flat, with Kumo's ring left only for focus (DEC-467)", () => {
     request(APPROVAL_IDS.btc);
     const choices = main().querySelector("[data-slot=approval-choices]") as HTMLElement;
-    for (const b of within(choices).getAllByRole("button")) {
-      for (const c of BEVEL.split(" ")) expect(b).toHaveClass(c);
-      expect(b).not.toHaveClass("ring", "shadow-xs", "border-0", "rounded-lg");
+    const [approve, skip] = within(choices).getAllByRole("button");
+    expect(approve.className).toBe(skip.className);
+    for (const b of [approve, skip]) {
+      for (const c of DECISION_KEY.split(" ")) expect(b).toHaveClass(c);
+      expect(b).toHaveClass("bg-card", "text-foreground", "font-semibold");
+      expect(b).not.toHaveClass("pixel-face", "bg-muted", "border-t-card", "ring", "shadow-xs", "border-0");
       expect(b).toHaveClass("focus-visible:ring-2");
       expect(b.className).not.toMatch(/bg-\[|shadow-(?!none)/);
     }
