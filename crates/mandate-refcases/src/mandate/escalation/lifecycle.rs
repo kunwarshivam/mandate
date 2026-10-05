@@ -611,6 +611,7 @@ impl Shell {
                 other => return Err(format!("`{other}` is not a purpose an ask binds")),
             },
             combined_score: text(str_at(bound, "combined_score")?),
+            execution: None,
         };
         self.view.version = str_at(bound, "mandate_version")?.to_owned();
         self.view.working_universe = [id].into();
