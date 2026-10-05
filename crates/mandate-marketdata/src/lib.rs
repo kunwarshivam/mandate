@@ -14,6 +14,7 @@ pub mod dataset;
 pub mod download;
 pub mod http;
 pub mod inspect;
+pub mod liquidity;
 pub mod model;
 pub mod number;
 mod rate;

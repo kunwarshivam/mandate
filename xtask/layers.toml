@@ -123,7 +123,7 @@ allowed_external = ["thiserror"]
 
 [crates.mandate-marketdata]
 layer = 6
-safety_critical = false
+safety_critical = true
 pure = false
 
 [crates.mandate-journal-pg]

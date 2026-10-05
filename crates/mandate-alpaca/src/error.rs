@@ -137,7 +137,8 @@ impl WireError {
     ];
 }
 
-/// Why one read of an instrument or of its latest quote (E7-8) produced no fact.
+/// Why one read of an instrument, of its latest quote (E7-8), or of its recent minute bars (E7-7)
+/// produced no fact.
 ///
 /// Every variant is a refusal: a caller holding one has no instrument snapshot and no quote, and
 /// nothing it does on the strength of either may add risk (`AGENTS.md` rule 3). An answer that is
@@ -170,6 +171,12 @@ pub enum ReadError {
     /// A status this read does not interpret, such as a `403` for a feed the account may not read.
     #[error("the broker answered with a status this read does not interpret")]
     UnexpectedStatus { status: u16 },
+    /// A bars answer that says more pages follow, which would be bars this read never judged.
+    #[error("the answer continues on another page")]
+    Paginated,
+    /// A bar off the one-minute grid, outside the window asked for, or not after the bar before it.
+    #[error("a bar lies outside the window asked for or out of order")]
+    OutOfWindow,
     #[error(transparent)]
     Wire(#[from] WireError),
     #[error(transparent)]
@@ -188,6 +195,8 @@ impl ReadError {
             Self::AheadOfClock => "ahead_of_clock",
             Self::Overloaded => "overloaded",
             Self::UnexpectedStatus { .. } => "unexpected_status",
+            Self::Paginated => "paginated",
+            Self::OutOfWindow => "out_of_window",
             Self::Wire(error) => error.code(),
             Self::Transport(error) => error.code(),
         }
@@ -195,7 +204,7 @@ impl ReadError {
 
     /// The codes of this enum's own variants, in the order [`Self::code`] matches them. The wire
     /// and transport codes are their enums' own.
-    pub const CODES: [&'static str; 8] = [
+    pub const CODES: [&'static str; 10] = [
         "unimplemented",
         "absent",
         "other_instrument",
@@ -204,6 +213,8 @@ impl ReadError {
         "ahead_of_clock",
         "overloaded",
         "unexpected_status",
+        "paginated",
+        "out_of_window",
     ];
 }
 

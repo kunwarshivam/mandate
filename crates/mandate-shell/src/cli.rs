@@ -232,6 +232,11 @@ mod tests {
             "--config-dir is required"
         );
         assert_eq!(
+            usage_of(&["--confirm-paper", "--minute-dataset", "minutes"]),
+            "unknown argument --minute-dataset",
+            "the trailing volume is read from the broker, never from a stored dataset (DEC-469)"
+        );
+        assert_eq!(
             usage_of(&["--confirm-paper", "--journal"]),
             "--journal needs a value"
         );

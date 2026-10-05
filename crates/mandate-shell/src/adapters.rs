@@ -7,8 +7,9 @@
 //! [`ExecutorProtection`], through the executor's public protection probe. The journal, sink,
 //! executor, reconciliation, mandate validation, sizing, classification, and advisory-gate
 //! boundaries are also live when their trusted inputs are injected. The E7-7 shipping binary
-//! injects the reviewed one-run paper contexts assembled by [`crate::paper`] (DEC-466); callers
-//! that omit either context fail closed rather than inventing effective-dated inputs.
+//! injects the one-run paper contexts [`crate::paper`] assembles from its GET-only broker preflight
+//! and the stored datasets (DEC-466, DEC-468); callers that omit either context fail closed rather
+//! than inventing effective-dated inputs.
 //!
 //! What each will bind, per the task brief's step table:
 //!
@@ -53,7 +54,7 @@ use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
 use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
-use mandate_marketdata::model::{Kind, Records, TimeUnit, Timeframe};
+use mandate_marketdata::model::{Bar, Kind, Records, TimeUnit, Timeframe};
 use mandate_num::{Bps, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd, UsdExact};
 use mandate_risk::{
     AccountSnapshot as GateAccountSnapshot, AgentSnapshot as GateAgentSnapshot, ConductState,
@@ -1002,24 +1003,41 @@ impl StoredBars {
     /// partition the manifest does not list is not opened even if `trusted` were to let it pass
     /// (#248 review, minor 1).
     fn listed_closes(&self, kind: Kind) -> Result<Vec<Price>, Cause> {
-        let (_, days) = dataset::read_manifest(&self.dir)?;
-        let mut closes = Vec::new();
-        for listed in days.iter().filter(|listed| listed.file.is_some()) {
-            let path = self.dir.join(dataset::partition_name(listed.day));
-            match dataset::read(&path, kind)? {
-                Records::Bars(bars) => match bars.as_slice() {
-                    [bar] => closes.push(Price::parse(bar.close.as_str())?),
-                    [] | [_, _, ..] => {
-                        return Err(untrusted("a listed day does not hold exactly one bar"));
-                    }
-                },
-                Records::Trades(_) | Records::Quotes(_) => {
-                    return Err(untrusted("the dataset holds no bars"));
-                }
+        listed_bars(&self.dir, kind)?
+            .iter()
+            .map(|bar| Ok(Price::parse(bar.close.as_str())?))
+            .collect()
+    }
+}
+
+/// The daily bars [`StoredBars`] decides on, exactly as stored and only once `trusted` admits the
+/// dataset at `now`, so the paper assembly's liquidity facts read the same span as the signal.
+pub(crate) fn trusted_daily_bars(
+    dir: &Path,
+    symbol: &str,
+    now: UtcNanos,
+) -> Result<Vec<Bar>, Cause> {
+    let inspection = inspect::inspect(dir)?;
+    trusted(&inspection, symbol, now)?;
+    listed_bars(dir, inspection.dataset.kind())
+}
+
+fn listed_bars(dir: &Path, kind: Kind) -> Result<Vec<Bar>, Cause> {
+    let (_, days) = dataset::read_manifest(dir)?;
+    let mut listed_bars = Vec::new();
+    for listed in days.iter().filter(|listed| listed.file.is_some()) {
+        let path = dir.join(dataset::partition_name(listed.day));
+        match dataset::read(&path, kind)? {
+            Records::Bars(bars) => match <[Bar; 1]>::try_from(bars) {
+                Ok([bar]) => listed_bars.push(bar),
+                Err(_) => return Err(untrusted("a listed day does not hold exactly one bar")),
+            },
+            Records::Trades(_) | Records::Quotes(_) => {
+                return Err(untrusted("the dataset holds no bars"));
             }
         }
-        Ok(closes)
     }
+    Ok(listed_bars)
 }
 
 /// Whether `inspect` found the dataset fit to decide on: the pinned symbol's daily bars through
@@ -1104,7 +1122,7 @@ fn split_inside(inspection: &Inspection) -> bool {
     }
 }
 
-fn untrusted(what: &'static str) -> Cause {
+pub(crate) fn untrusted(what: &'static str) -> Cause {
     Cause::Untrusted { what }
 }
 
@@ -1851,8 +1869,8 @@ impl<T: TradingTransport + Clone> Connector for AlpacaConnector<T> {
 }
 
 /// The connector of a process that holds no transport: every request is refused before it leaves
-/// the process. The binary uses it until the slice that makes the exit probes real, since every run
-/// refuses at the first probe before any request (DEC-166 item 3).
+/// the process (DEC-166 item 3). The shipping binary never uses it (DEC-466 item 3); the
+/// fail-closed tests do.
 pub struct Disconnected;
 
 impl Connector for Disconnected {

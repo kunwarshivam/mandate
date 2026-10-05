@@ -466,6 +466,25 @@ cargo run -p mandate-shell --bin mandate-tracer -- \
   --confirm-paper [--place-one-order]
 ```
 
+- **The order of a run is fixed** (DEC-466, DEC-468, DEC-469). First the host refusal and the
+  reviewed artifacts, which read no credential. Then the paper credentials and the one transport,
+  and a GET-only preflight of the account, positions, open orders, asset record, latest IEX quote,
+  and the last five minutes' complete 1-minute IEX bars. Then the liquidity facts, which
+  `mandate-marketdata` computes from `--dataset` (daily bars) and those minute bars. Only then are
+  the trusted contexts assembled from that one snapshot, and the run journals the intent before its
+  one `POST`. Any missing, stale, or ambiguous fact refuses.
+- **A clean paper account only.** Any position or open order on the account refuses the run
+  (DEC-468 item 1), so a restart after the submission sends nothing.
+- **The run's freshness bounds.** The quote and the asset record must be at most
+  `iex_quote_max_age_s` old (`rule-set.json`). The clock must be inside the regular session and
+  before its close window. `etp_classified_at` in `instrument-snapshot.json` must be no later than
+  the run and within the gate's seven-day bound, so refresh it, and re-review it, before a run.
+- **Today's minute bars come from the broker** (DEC-469, Proposed). `DataClient::recent_minute_bars`
+  reads one page of AAPL's closed IEX minutes inside the five-minute window, on today's New York
+  date, from the compiled data host. A page that is empty, paginated, for another symbol, or holding
+  a bar outside the window refuses the run at the preflight; no default volume stands in for it.
+  There is no `--minute-dataset`: `mandate download` cannot store today.
+
 - **Nothing is sent without `--place-one-order`.** The default runs every stage, journals the
   decision, and stops before the submission, printing the order it *would* place. That is the safe
   default (rule 3): the flag is the only way to reach a broker.
@@ -704,8 +723,9 @@ The manual paper run, for the founder or a cloud routine with the paper keys in 
 
 ```
 cargo run -p mandate-shell --bin mandate-tracer -- \
-  --mandate fixtures/tracer/mandate.json --dataset data/alpaca/bars/1d \
-  --config-dir fixtures/tracer/config \
+  --mandate crates/mandate-shell/tests/fixtures/tracer/mandate.json \
+  --dataset data/alpaca/iex/bars-1Day/AAPL \
+  --config-dir crates/mandate-shell/tests/fixtures/tracer/config \
   --confirm-paper                                                       # plans, sends nothing
 cargo run -p mandate-shell --bin mandate-tracer -- ... \
   --journal "$MANDATE_JOURNAL_DSN" --confirm-paper --place-one-order

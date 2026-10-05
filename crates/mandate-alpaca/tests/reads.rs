@@ -1135,6 +1135,8 @@ fn every_read_error_code_is_stable_and_unique() {
             ReadError::UnexpectedStatus { status: 403 },
             "unexpected_status",
         ),
+        (ReadError::Paginated, "paginated"),
+        (ReadError::OutOfWindow, "out_of_window"),
         (ReadError::Wire(WireError::NotJson), "not_json"),
         (
             ReadError::Wire(WireError::MissingField { field: "t" }),
@@ -1154,7 +1156,7 @@ fn every_read_error_code_is_stable_and_unique() {
         own.to_vec(),
         samples
             .iter()
-            .take(8)
+            .take(10)
             .map(|(_, code)| *code)
             .collect::<Vec<_>>(),
         "the declared set is the variants' own codes, in order"

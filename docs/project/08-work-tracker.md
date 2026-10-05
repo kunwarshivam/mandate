@@ -400,7 +400,9 @@ record.
 
 1. **The tracer (E7-7).** Finish #598's full local check, green CI, and independent review. After
    those gates pass, run the one external order only with explicit founder confirmation,
-   paper-only credentials, and a founder-selected instrument, as DEC-450 requires.
+   paper-only credentials, and a founder-selected instrument, as DEC-450 requires. PR #603's paper
+   assembly reads the trailing minute bars from the data host and computes its figures in their
+   owning crates under DEC-469, which is Proposed and needs acceptance before that run.
 2. **Tripwires (E6-13).** The MC-W01 to MC-W57 implementation in the DEC-77 sequence.
 3. **M7's remainder:** the CLI's `clap` wiring of the inbox and owner commands, email, one chat
    channel, and the pending MC-E cases.

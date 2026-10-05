@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mandate_alpaca::client::Pause;
-use mandate_alpaca::data::{DataTransport, QuoteRequest};
+use mandate_alpaca::data::{BarsRequest, DataTransport, QuoteRequest};
 use mandate_alpaca::error::TransportError;
 use mandate_alpaca::http::{HttpRequest, Method, Response, TradingTransport};
 use mandate_time::UtcNanos;
@@ -197,8 +197,8 @@ impl TradingTransport for FakeTransport {
     }
 }
 
-/// Answers each latest-quote read with the next scripted reply and records what was asked, the
-/// data host's counterpart of [`FakeTransport`].
+/// Answers each latest-quote or bars read with the next scripted reply and records what was asked,
+/// the data host's counterpart of [`FakeTransport`].
 #[derive(Clone, Default)]
 pub struct FakeDataTransport {
     script: Arc<Mutex<DataScript>>,
@@ -208,6 +208,7 @@ pub struct FakeDataTransport {
 struct DataScript {
     replies: VecDeque<Result<Response, TransportError>>,
     sent: Vec<QuoteRequest>,
+    sent_bars: Vec<BarsRequest>,
 }
 
 impl FakeDataTransport {
@@ -229,11 +230,19 @@ impl FakeDataTransport {
         }))
     }
 
-    /// Everything the client sent, in order.
+    /// Every latest-quote read the client sent, in order.
     pub fn sent(&self) -> Vec<QuoteRequest> {
         self.script
             .lock()
             .map(|script| script.sent.clone())
+            .unwrap_or_default()
+    }
+
+    /// Every bars read the client sent, in order.
+    pub fn sent_bars(&self) -> Vec<BarsRequest> {
+        self.script
+            .lock()
+            .map(|script| script.sent_bars.clone())
             .unwrap_or_default()
     }
 }
@@ -245,6 +254,18 @@ impl DataTransport for FakeDataTransport {
             Err(poisoned) => poisoned.into_inner(),
         };
         script.sent.push(request.clone());
+        script
+            .replies
+            .pop_front()
+            .unwrap_or(Err(TransportError::Timeout))
+    }
+
+    async fn send_bars(&self, request: &BarsRequest) -> Result<Response, TransportError> {
+        let mut script = match self.script.lock() {
+            Ok(script) => script,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        script.sent_bars.push(request.clone());
         script
             .replies
             .pop_front()

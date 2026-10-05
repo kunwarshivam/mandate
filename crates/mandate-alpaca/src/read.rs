@@ -15,6 +15,7 @@ use mandate_time::UtcNanos;
 use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 
+use crate::data::BarsRequest;
 use crate::error::{ReadError, WireError};
 use crate::wire;
 
@@ -99,6 +100,89 @@ pub struct LatestQuote {
     pub ask: Price,
     pub ask_size: Qty,
     pub feed: Feed,
+}
+
+/// One complete one-minute bar's start and volume, the two fields the trailing volume reads. The
+/// volume is the JSON number's own digits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MinuteBar {
+    pub start: UtcNanos,
+    pub volume: Qty,
+}
+
+/// One equity's complete one-minute IEX bars inside a [`BarsRequest`]'s window, in start
+/// order, at least one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinuteBars {
+    pub instrument: InstrumentId,
+    pub bars: Vec<MinuteBar>,
+}
+
+/// Parses the body of a bars read for `request`: `{"bars": [...], "next_page_token": null,
+/// "symbol": ...}`.
+///
+/// Refused: another symbol ([`ReadError::OtherInstrument`]); a `next_page_token` that is not `null`
+/// ([`ReadError::Paginated`]), since a second page would be bars this read never judged; no bar, or
+/// `null` ([`ReadError::Absent`]); a bar off the minute grid, outside the request's first and last
+/// starts, or not after the bar before it ([`ReadError::OutOfWindow`]); and a stamp or volume that
+/// is not exact text (`WireError`). Prices are not read.
+pub fn minute_bars(request: &BarsRequest, body: &[u8]) -> Result<MinuteBars, ReadError> {
+    let top = raw_object(raw_json(body)?, "bars")?;
+    let symbol = top
+        .get("symbol")
+        .ok_or(WireError::MissingField { field: "symbol" })?;
+    let symbol: String =
+        serde_json::from_str(symbol.get()).map_err(|_| WireError::WrongType { field: "symbol" })?;
+    if symbol != request.instrument().as_str() {
+        return Err(ReadError::OtherInstrument);
+    }
+    let page = top.get("next_page_token").ok_or(WireError::MissingField {
+        field: "next_page_token",
+    })?;
+    if page.get() != "null" {
+        return Err(ReadError::Paginated);
+    }
+    let listed = top
+        .get("bars")
+        .ok_or(WireError::MissingField { field: "bars" })?;
+    let listed: Option<Vec<&RawValue>> =
+        serde_json::from_str(listed.get()).map_err(|_| WireError::WrongType { field: "bars" })?;
+    let listed = listed
+        .filter(|bars| !bars.is_empty())
+        .ok_or(ReadError::Absent)?;
+    let mut bars: Vec<MinuteBar> = Vec::with_capacity(listed.len());
+    for bar in listed {
+        let fields = raw_object(bar, "bars")?;
+        let start = stamp(&fields, "t")?;
+        let on_grid = start.nanos() == 0 && start.secs().checked_rem(MINUTE_S) == Some(0);
+        let after_previous = bars.last().is_none_or(|previous| previous.start < start);
+        if !on_grid
+            || !after_previous
+            || start < request.first_start()
+            || start > request.last_start()
+        {
+            return Err(ReadError::OutOfWindow);
+        }
+        bars.push(MinuteBar {
+            start,
+            volume: Qty::parse(&token(&fields, "v")?).map_err(WireError::from)?,
+        });
+    }
+    Ok(MinuteBars {
+        instrument: request.instrument().clone(),
+        bars,
+    })
+}
+
+/// A bar's span in seconds, and the grid its start sits on.
+const MINUTE_S: i64 = 60;
+
+/// One RFC 3339 stamp field.
+fn stamp(fields: &BTreeMap<String, &RawValue>, field: &'static str) -> Result<UtcNanos, WireError> {
+    let text = fields.get(field).ok_or(WireError::MissingField { field })?;
+    let text: String =
+        serde_json::from_str(text.get()).map_err(|_| WireError::WrongType { field })?;
+    Ok(UtcNanos::parse_rfc3339(&text)?)
 }
 
 /// Parses the body of `GET /v2/assets/{symbol}` for `instrument`.

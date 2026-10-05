@@ -57,7 +57,7 @@ pub use autonomy::{
 pub use builder::{
     AccountSnapshot, AccumulateGoal, Action, BuilderMandate, Clip, Combined, Direction, GoalKind,
     HoldReason, Limits, Market, ModelOutput, ModelVersion, OrderShape, Proposal, RiskContext,
-    SignalModel, Sizes, Sizing, autonomy_policy, combine, propose,
+    SignalModel, Sizes, Sizing, autonomy_policy, buy_action, combine, propose,
 };
 
 use mandate_domain::DomainError;

@@ -84,6 +84,7 @@ mod fold;
 mod gate;
 mod ids;
 mod intent;
+mod opening;
 mod orders;
 mod payload;
 mod ports;
@@ -98,6 +99,7 @@ pub use error::{ExecutorError, JsonError};
 pub use fees::{FeeSchedule, fee_config, paper_only_fee_config};
 pub use gate::PartialGateDecision;
 pub use ids::{ClientOrderId, IntentId, PREFIX};
+pub use opening::equity_bracket_prices;
 pub use ports::{
     BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource,
     BrokerConnector, ConnectorError, IdGen, InstrumentSnapshot, MandateView, Ports,

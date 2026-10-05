@@ -26,8 +26,10 @@
 //! compares with the broker's (DEC-34).
 
 mod account;
+mod reservation;
 
 pub use account::{Account, Applied, Position, Receivable, ReceivableKind, Record};
+pub use reservation::{ProspectiveOrder, fee_reservation};
 
 use mandate_num::{
     Bps, FeeCap, FeePerShare, FeeRate, NumError, Price, Qty, ShareIncrement, SplitRatio, Usd,

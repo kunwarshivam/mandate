@@ -33,8 +33,9 @@
 //! The adapters in [`adapters`] become real one slice at a time. The flatten and protection probes,
 //! stored bars, signal, mandate validation, sizing, classification, advisory gate, journal, sink,
 //! executor, connector, and reconciliation are live when their trusted inputs are injected. An
-//! absent run or executor context refuses before deciding or reading the broker, so the binary stays
-//! fail closed until live assembly supplies both. The effect runner, mappings, envelope, and host
+//! absent run or executor context refuses before deciding or reading the broker. The binary supplies
+//! both from [`paper`]'s one snapshot of broker GETs and stored data, and refuses before the run when
+//! any fact in it is missing, stale, or ambiguous (DEC-466, DEC-468). The effect runner, mappings, envelope, and host
 //! controls are the harness the fail-closed suite tests (DEC-157 item 1).
 
 pub mod adapters;
