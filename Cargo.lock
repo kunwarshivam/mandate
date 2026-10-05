@@ -1404,6 +1404,7 @@ dependencies = [
  "mandate-canon",
  "mandate-journal",
  "mandate-num",
+ "mandate-risk",
  "mandate-time",
  "proptest",
  "serde_json",

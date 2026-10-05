@@ -7,13 +7,26 @@
 //! (task brief interpretation 4).
 
 use std::future::Future;
+#[cfg(test)]
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId};
+#[cfg(test)]
+use mandate_accounting::AccountType;
 use mandate_num::{Fraction, ShareIncrement};
+#[cfg(test)]
+use mandate_num::{Price, Qty, Ratio, Usd};
+#[cfg(test)]
+use mandate_risk::spec_types::{GoalState, RiskLimits};
 use mandate_risk::{
     AccountSnapshot, AgentId as GateAgentId, AgentSnapshot, AssetId, ClientOrderId as GateOrderId,
     ConductState, GateConfig, InstrumentSnapshot as GateInstrumentSnapshot, MarketSnapshot,
     RiskSnapshot, ValidatedMandate, WorkingUniverse,
+};
+#[cfg(test)]
+use mandate_risk::{
+    AccountState, AgentMode, DayTradeLedger, DayTradeRegime, EtpClass, Exchange, QuoteCurrency,
+    SaneQuote,
 };
 use mandate_time::UtcNanos;
 
@@ -111,17 +124,7 @@ pub(crate) struct AllowingBindingGate;
 #[cfg(test)]
 impl BindingGateSource for AllowingBindingGate {
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
-        use std::collections::{BTreeMap, BTreeSet};
-
-        use mandate_accounting::AccountType;
-        use mandate_num::{Price, Qty, Ratio, Usd};
-        use mandate_risk::spec_types::{GoalState, RiskLimits};
-        use mandate_risk::{
-            AccountState, AgentMode, DayTradeLedger, DayTradeRegime, EtpClass, Exchange,
-            QuoteCurrency, SaneQuote,
-        };
-
-        if request.purpose == Purpose::Protective {
+        if !request.purpose.adds_risk() {
             return None;
         }
         let asset = AssetId::new(request.instrument.as_str()).ok()?;
