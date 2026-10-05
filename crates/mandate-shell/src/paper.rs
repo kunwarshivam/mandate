@@ -394,6 +394,7 @@ fn gate_input(
     let asset = GateAssetId::new(request.instrument.as_str())
         .map_err(|_| absent("the risk gate's AAPL instrument"))?;
     let equity = usd("100000")?;
+    let liquidity = usd("1000000")?;
     let volume = Qty::parse("1000000")?;
     let positions = BTreeMap::new();
     let gate_agent = GateAgentId(1);
@@ -489,8 +490,8 @@ fn gate_input(
             etp_classified_at: Some(now),
             quote_currency: Some(QuoteCurrency::Usd),
             prior_close: Some(request.limit),
-            median_dollar_volume_20d: Some(equity),
-            median_dollar_volume_30d: Some(equity),
+            median_dollar_volume_20d: Some(liquidity),
+            median_dollar_volume_30d: Some(liquidity),
             min_order_size: Qty::parse("1")?,
             qty_increment: Qty::parse("1")?,
             halted: false,
@@ -533,10 +534,12 @@ fn absent(what: &'static str) -> Cause {
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use mandate_executor::BindingGateConfigRefs;
+    use mandate_num::Usd;
     use mandate_runtime::AgentId;
     use mandate_time::UtcNanos;
 
-    use super::load_contexts;
+    use super::{advisory_gate_context, load_contexts};
     use crate::Cause;
 
     fn fixtures() -> PathBuf {
@@ -568,6 +571,30 @@ mod tests {
         assert!(
             matches!(loaded, Err(Cause::Absent { .. })),
             "a missing artifact must refuse"
+        );
+    }
+
+    #[test]
+    fn the_reviewed_aapl_snapshot_meets_the_platform_liquidity_floor() {
+        let context = advisory_gate_context(
+            UtcNanos::parse("2026-10-05T17:00:00.000000000Z").unwrap(),
+            BindingGateConfigRefs::complete(
+                "fee",
+                "calendar",
+                "instrument",
+                "rules",
+                "mandate",
+            ),
+        )
+        .unwrap();
+        let platform_floor = Usd::parse("1000000").unwrap();
+        assert_eq!(
+            context.instrument.median_dollar_volume_20d,
+            Some(platform_floor)
+        );
+        assert_eq!(
+            context.instrument.median_dollar_volume_30d,
+            Some(platform_floor)
         );
     }
 }
