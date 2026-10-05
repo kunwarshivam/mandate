@@ -1971,6 +1971,20 @@ def within_drift(m_req, m_now, asset_class):
         return False
     return abs(D(m_now) - D(m_req)) * 10000 <= DRIFT_BAND_BP[asset_class] * D(m_req)
 
+
+def approval_intent(req):
+    return {
+        "instrument_id": req["instrument"],
+        "side": req["side"],
+        "order_type": "limit",
+        "tif": "day" if req["asset_class"] == "us_equity" else "gtc",
+        "qty": req["qty"],
+        "limit_price": req["limit_price"],
+        "purpose": req["purpose"],
+        "mandate_version": req["mandate_version"],
+    }
+
+
 def approval_revalidate(req, now):
     """§6.4 re-validation, checks 8 to 12 in order, for a grant admitted in the same step. It only skips: the act
     carries the bound fields unchanged. Check 9's `mode` arm is reached by no step the spec names: a step whose
@@ -1991,7 +2005,12 @@ def approval_revalidate(req, now):
         return skip(now["dry_run"]["reason"])
     if not within_drift((req["reference_mark"] or {}).get("price"), now["mark"], req["asset_class"]):
         return skip("drift")
-    return {"result": "act", "reason": None, "intent": {k: req[k] for k in BOUND_FIELDS}}
+    intent = approval_intent(req)
+    return {
+        "result": "act",
+        "reason": None,
+        "intent": intent,
+    }
 
 def ask_permit(ledger, instrument, at):
     """§6.4 anti-fatigue bounds over one agent's journaled asks, in the precedence budget, skipped_today,
