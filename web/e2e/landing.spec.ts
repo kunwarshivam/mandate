@@ -18,7 +18,7 @@ async function open(page: Page, width: number, height = 900) {
 }
 
 /** Opens one of the desktop's windows from the hero's buttons, as a visitor would, and returns it. */
-async function openWindow(page: Page, button: "See the record" | "Sign the guestbook", title: string) {
+async function openWindow(page: Page, button: "See why it traded" | "Sign the guestbook", title: string) {
   await page.locator("[data-slot=hero-actions]").getByRole("button", { name: button }).click();
   const win = page.getByRole("region", { name: title });
   await expect(win).toBeVisible();
@@ -118,7 +118,7 @@ test("the contents selects the section being read, and the status bar shows wher
 test("390 px: the record's window fits the phone without scrolling sideways", async ({ page }) => {
   await open(page, 390);
   await page.evaluate(() => document.fonts.ready);
-  const record = await openWindow(page, "See the record", "The record - Example decision");
+  const record = await openWindow(page, "See why it traded", "The record - Example decision");
   const table = record.locator("[data-slot=record-trace] table");
   await expect(table).toBeVisible();
   const fit = await table.evaluate((t) => t.parentElement!.clientWidth > 0 && t.scrollWidth <= t.parentElement!.clientWidth);
@@ -134,7 +134,7 @@ test("one main landmark, and no site header over the page", async ({ page }) => 
 
 test("editing a line of the record breaks the chain from there, and undoing it mends it", async ({ page }) => {
   await open(page, 1440);
-  const record = await openWindow(page, "See the record", "The record - Example decision");
+  const record = await openWindow(page, "See why it traded", "The record - Example decision");
   await expect(record.getByText("Chain check: all 8 lines match.")).toBeVisible();
   await record.getByRole("button", { name: "Edit line 3" }).click();
   await expect(record.getByText(/Chain check: fails at line 3/)).toBeVisible();

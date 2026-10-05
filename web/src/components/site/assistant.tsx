@@ -9,8 +9,9 @@ import { PIXEL, PLAIN_BUTTON } from "./letter";
 export const TIPS = [
   "Your rules are plain English. Owlhead shows you what it understood, in dollars, before you confirm them.",
   "Orders above a size you choose wait on your phone until you approve them.",
-  "One Stop button halts every agent and cancels their open orders.",
-  "Owlhead writes every decision down before it acts. Open The record and try editing a line.",
+  "Stop is on every screen. It can pause one agent, or end them all.",
+  "Owlhead writes down why it placed an order before it places it. Open The record to see one.",
+  "A request you don't answer in time is skipped. Nothing is sent.",
   "In the beta, agents trade on paper, with simulated money.",
   "As losses reach levels you set, it trades smaller, then only sells, then closes out and pauses.",
   "It can't take money out of your account, and it can't change its own rules.",

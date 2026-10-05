@@ -22,7 +22,7 @@ const MODES: Array<{ mood: OwlMood; name: string; means: string }> = [
   { mood: "awake", name: "Trading", means: "Inside your rules" },
   { mood: "focused", name: "Only selling", means: "Closing, not opening" },
   { mood: "asleep", name: "Paused", means: "Waiting for you" },
-  { mood: "stopped", name: "Stopped", means: "Orders canceled" },
+  { mood: "stopped", name: "Stopped", means: "Ended for good" },
 ];
 
 /** Each agent is an owl, and its eyes show what it may do right now. */
