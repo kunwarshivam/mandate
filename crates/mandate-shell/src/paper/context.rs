@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_builder::{
@@ -29,7 +30,7 @@ use mandate_time::{Date, UtcNanos};
 use super::artifacts::Artifacts;
 use super::facts::{BrokerFacts, PaperFacts};
 use super::gate::{advisory_gate_context, gate_template, platform_gate_config, reservation};
-use super::judge::judge;
+use super::judge::{judge, judge_submission_time};
 use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, absent, usd};
 use crate::adapters::{BuilderContext, DecisionContext, ExecutorContext, RunContext};
 use crate::envelope::{IdSpace, Ids};
@@ -39,6 +40,20 @@ use crate::error::Cause;
 pub struct Contexts {
     pub executor: ExecutorContext,
     pub run: RunContext,
+}
+
+/// The submission clock, injected so the binding gate rechecks freshness without reading a wall
+/// clock in the library.
+pub trait PaperClock {
+    fn now(&self) -> Option<UtcNanos>;
+}
+
+struct FixedPaperClock(UtcNanos);
+
+impl PaperClock for FixedPaperClock {
+    fn now(&self) -> Option<UtcNanos> {
+        Some(self.0)
+    }
 }
 
 /// Judges `facts` at `now` and assembles the two trusted contexts from them.
@@ -58,6 +73,20 @@ pub fn load_contexts(
     now: UtcNanos,
     agent: &AgentId,
 ) -> Result<Contexts, Cause> {
+    load_contexts_with_clock(artifacts, facts, now, agent, Rc::new(FixedPaperClock(now)))
+}
+
+/// [`load_contexts`] with a clock that the binding gate reads again for every order request.
+///
+/// # Errors
+/// The same refusals as [`load_contexts`].
+pub fn load_contexts_with_clock(
+    artifacts: &Artifacts,
+    facts: &PaperFacts,
+    now: UtcNanos,
+    agent: &AgentId,
+    clock: Rc<dyn PaperClock>,
+) -> Result<Contexts, Cause> {
     let config = platform_gate_config()?;
     let today = judge(artifacts, &facts.broker, now, &config)?;
     let template = gate_template(artifacts, facts, now, config)?;
@@ -66,6 +95,9 @@ pub fn load_contexts(
         agent: agent.0.clone(),
         increment: artifacts.instrument.increment,
         fees: artifacts.fees.clone(),
+        quote_at: facts.broker.quote.at,
+        quote_max_age: artifacts.quote_max_age,
+        clock,
     });
     let executor = ExecutorContext::new(
         Rc::new(Ids {
@@ -215,6 +247,9 @@ pub(super) struct TrustedPaperContext {
     pub(super) agent: String,
     pub(super) increment: ShareIncrement,
     pub(super) fees: mandate_accounting::Config,
+    pub(super) quote_at: UtcNanos,
+    pub(super) quote_max_age: Duration,
+    pub(super) clock: Rc<dyn PaperClock>,
 }
 
 impl TrustedPaperContext {
@@ -261,15 +296,26 @@ impl BindingGateSource for TrustedPaperContext {
         if !self.reviewed(request.agent, request.instrument) {
             return None;
         }
+        let now = self.clock.now()?;
+        if let Err(error) = judge_submission_time(
+            self.quote_at,
+            self.quote_max_age,
+            now,
+            &self.template.config,
+        ) {
+            let _ = error;
+            return None;
+        }
         match reservation(
             &self.fees,
             request.instrument,
             request.side,
             request.qty,
             request.limit,
-            self.template.now,
+            now,
         ) {
             Ok(fee_reservation) => Some(BindingGateInput {
+                now,
                 fee_reservation,
                 ..self.template.clone()
             }),

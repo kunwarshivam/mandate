@@ -17,12 +17,15 @@
 //! snapshot, and the run, whose executor journals the intent before its one `POST`.
 
 use std::process::ExitCode;
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mandate_alpaca::{AlpacaPaperHttp, Credentials, TokioPause};
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_shell::adapters::{Sources, production};
-use mandate_shell::paper::{Artifacts, PaperFacts, liquidity_facts, load_contexts, preflight};
+use mandate_shell::paper::{
+    Artifacts, PaperClock, PaperFacts, liquidity_facts, load_contexts_with_clock, preflight,
+};
 use mandate_shell::{Report, Setup, ShellError, Stage, cli, host, run};
 use mandate_time::UtcNanos;
 
@@ -79,11 +82,12 @@ fn tracer() -> Result<Report, ShellError> {
             }
         })?;
     let agent = AgentId(cli::AGENT.to_owned());
-    let contexts = load_contexts(
+    let contexts = load_contexts_with_clock(
         &artifacts,
         &PaperFacts { broker, liquidity },
         recorded_at,
         &agent,
+        Rc::new(SystemClock),
     )
     .map_err(|cause| ShellError::Refused {
         stage: Stage::Validate,
@@ -98,7 +102,7 @@ fn tracer() -> Result<Report, ShellError> {
         account_ref: cli::ACCOUNT_REF.to_owned(),
         now: recorded_at,
         place_one_order: args.place_one_order,
-        new_cycle: args.new_cycle,
+        new_cycle: false,
     };
     let mut stages = production(Sources {
         mandate: args.mandate,
@@ -115,8 +119,23 @@ fn tracer() -> Result<Report, ShellError> {
     run(&mut stages, &setup)
 }
 
-/// The process's one clock reading, injected into the library as an input (ADR-0001 ES-05). It
-/// keeps the nanoseconds, so the quote and asset ages it judges are not rounded in their favour.
+struct SystemClock;
+
+impl PaperClock for SystemClock {
+    fn now(&self) -> Option<UtcNanos> {
+        match now() {
+            Ok(now) => Some(now),
+            Err(error) => {
+                let _ = error;
+                None
+            }
+        }
+    }
+}
+
+/// The process's clock source, injected into the library (ADR-0001 ES-05). It keeps nanoseconds,
+/// so quote ages are not rounded in their favour; the binding gate reads it immediately before
+/// submission.
 #[allow(
     clippy::disallowed_methods,
     reason = "the binary is the shell's one clock reader; the library takes time as an input (ES-05)"

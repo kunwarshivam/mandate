@@ -26,7 +26,7 @@ mod gate;
 mod judge;
 
 pub use artifacts::Artifacts;
-pub use context::{Contexts, load_contexts};
+pub use context::{Contexts, PaperClock, load_contexts, load_contexts_with_clock};
 pub use facts::{BrokerFacts, LiquidityFacts, PaperFacts, liquidity_facts, preflight};
 
 use mandate_num::Usd;

@@ -28,7 +28,6 @@ pub struct Args {
     /// scratch one, so a later start cannot re-hand what it proposed (DEC-157 item 6).
     pub journal: Option<String>,
     pub place_one_order: bool,
-    pub new_cycle: bool,
 }
 
 /// Parses the arguments after the program name.
@@ -46,7 +45,6 @@ where
     let mut journal = None;
     let mut confirm_paper = false;
     let mut place_one_order = false;
-    let mut new_cycle = false;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -56,7 +54,6 @@ where
             "--journal" => journal = Some(value_of(&arg, args.next())?),
             "--confirm-paper" => confirm_paper = true,
             "--place-one-order" => place_one_order = true,
-            "--new-cycle" => new_cycle = true,
             unknown => return Err(usage(format!("unknown argument {unknown}"))),
         }
     }
@@ -79,7 +76,6 @@ where
         config_dir: config_dir.ok_or_else(|| usage("--config-dir is required".to_owned()))?,
         journal,
         place_one_order,
-        new_cycle,
     })
 }
 
@@ -133,7 +129,6 @@ mod tests {
                 config_dir: PathBuf::from("config"),
                 journal: None,
                 place_one_order: false,
-                new_cycle: false,
             }
         );
         assert_eq!(
@@ -160,7 +155,6 @@ mod tests {
         let parsed = args(&[
             "--confirm-paper",
             "--place-one-order",
-            "--new-cycle",
             "--journal",
             "postgres://localhost/j",
             "--config-dir",
@@ -172,7 +166,6 @@ mod tests {
         ])
         .map_err(|e| e.to_string())?;
         assert!(parsed.place_one_order);
-        assert!(parsed.new_cycle);
         assert_eq!(parsed.config_dir, PathBuf::from("config"));
         assert_eq!(parsed.journal.as_deref(), Some("postgres://localhost/j"));
         assert_eq!(
@@ -204,6 +197,10 @@ mod tests {
         assert_eq!(
             usage_of(&["--confirm-paper", "--host", "https://api.alpaca.markets"]),
             "unknown argument --host"
+        );
+        assert_eq!(
+            usage_of(&["--confirm-paper", "--new-cycle"]),
+            "unknown argument --new-cycle"
         );
         assert_eq!(
             usage_of(&["--confirm-paper", "--mandate"]),

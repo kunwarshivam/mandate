@@ -1,5 +1,7 @@
+use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{
@@ -16,7 +18,7 @@ use mandate_runtime::{AgentId, ProtectionPrices};
 use mandate_time::{Date, UtcNanos};
 
 use super::artifacts::reference;
-use super::context::{TrustedPaperContext, protection_prices};
+use super::context::{PaperClock, TrustedPaperContext, protection_prices};
 use super::gate::{gate_mandate, gate_template, platform_gate_config};
 use super::{Artifacts, BrokerFacts, INSTRUMENT_ID, LiquidityFacts, PaperFacts, load_contexts};
 use crate::Cause;
@@ -59,6 +61,15 @@ fn artifacts() -> Result<Artifacts, String> {
 
 fn agent() -> AgentId {
     AgentId(AGENT.to_owned())
+}
+
+#[derive(Clone)]
+struct TestClock(Rc<Cell<UtcNanos>>);
+
+impl PaperClock for TestClock {
+    fn now(&self) -> Option<UtcNanos> {
+        Some(self.0.get())
+    }
 }
 
 /// A scratch copy of the reviewed artifacts, under a name no other test uses.
@@ -786,6 +797,9 @@ fn trusted_context_exposes_only_the_reviewed_agent_and_instrument() -> Result<()
         agent: AGENT.to_owned(),
         increment: mandate_num::ShareIncrement::Whole,
         fees: loaded.fees.clone(),
+        quote_at: facts()?.broker.quote.at,
+        quote_max_age: loaded.quote_max_age,
+        clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let other_agent = ExecutorAgentId("other".to_owned());
@@ -839,6 +853,64 @@ fn trusted_context_exposes_only_the_reviewed_agent_and_instrument() -> Result<()
 }
 
 #[test]
+fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Result<(), String> {
+    let loaded = artifacts()?;
+    let template = gate_template(
+        &loaded,
+        &facts()?,
+        at(NOW)?,
+        platform_gate_config().map_err(text)?,
+    )
+    .map_err(text)?;
+    let current = Rc::new(Cell::new(at(NOW)?));
+    let trusted = TrustedPaperContext {
+        template: template.clone(),
+        agent: AGENT.to_owned(),
+        increment: mandate_num::ShareIncrement::Whole,
+        fees: loaded.fees.clone(),
+        quote_at: at("2026-09-28T16:59:59.5Z")?,
+        quote_max_age: loaded.quote_max_age,
+        clock: Rc::new(TestClock(Rc::clone(&current))),
+    };
+    let reviewed = ExecutorAgentId(AGENT.to_owned());
+    let instrument = symbol(INSTRUMENT_ID)?;
+    let request = BindingGateRequest {
+        agent: &reviewed,
+        instrument: &instrument,
+        side: Side::Buy,
+        qty: qty("1")?,
+        limit: price("255.2")?,
+        purpose: Purpose::Open,
+        tif: mandate_executor::TimeInForce::Day,
+        protection: None,
+    };
+
+    current.set(at("2026-09-28T17:00:09.5Z")?);
+    assert_eq!(
+        trusted.input(&request).map(|input| input.now),
+        Some(at("2026-09-28T17:00:09.5Z")?),
+        "the exact quote-age boundary reaches the gate with the refreshed clock"
+    );
+    current.set(at("2026-09-28T17:00:09.500000001Z")?);
+    assert!(
+        trusted.input(&request).is_none(),
+        "one nanosecond beyond the quote bound refuses before submission"
+    );
+
+    let close_clock = Rc::new(Cell::new(at("2026-09-28T19:50:00Z")?));
+    let close_window = TrustedPaperContext {
+        quote_at: at("2026-09-28T19:49:59.5Z")?,
+        clock: Rc::new(TestClock(close_clock)),
+        ..trusted
+    };
+    assert!(
+        close_window.input(&request).is_none(),
+        "the first instant of the close window refuses before submission"
+    );
+    Ok(())
+}
+
+#[test]
 fn each_binding_request_reserves_its_own_orders_fees() -> Result<(), String> {
     let loaded = artifacts()?;
     let template = gate_template(
@@ -853,6 +925,9 @@ fn each_binding_request_reserves_its_own_orders_fees() -> Result<(), String> {
         agent: AGENT.to_owned(),
         increment: mandate_num::ShareIncrement::Whole,
         fees: loaded.fees.clone(),
+        quote_at: facts()?.broker.quote.at,
+        quote_max_age: loaded.quote_max_age,
+        clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let instrument = symbol(INSTRUMENT_ID)?;

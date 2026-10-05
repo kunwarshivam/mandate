@@ -1393,6 +1393,14 @@ impl Sizing for BuilderPlan {
     }
 }
 
+fn action_order_matches(
+    action_order_usd: Usd,
+    proposal_qty: Qty,
+    proposal_limit: Price,
+) -> Result<bool, Cause> {
+    Ok(action_order_usd == proposal_qty.notional(proposal_limit)?)
+}
+
 impl Classifier for BuilderPlan {
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let context = required_context(&self.context)?;
@@ -1408,6 +1416,7 @@ impl Classifier for BuilderPlan {
             || action.asset_class != proposal.asset_class
             || runtime_purpose(action.purpose) != proposal.purpose
             || expected_score != proposal.combined_score
+            || !action_order_matches(action.order_usd, proposal.qty, proposal.limit)?
         {
             return Err(Cause::Absent {
                 what: "classification facts for the proposed action",
@@ -2111,8 +2120,8 @@ mod tests {
     use super::{
         AdvisoryGateContext, AdvisoryOrderFacts, CoreExecutor, DecisionContext, ExecutorContext,
         ExecutorMandateView, ExecutorOrder, ExecutorProtection, ExecutorSink, Protection,
-        ProtectionProbePorts, RiskGate, RunContext, StoreJournal, is_unattributed_exit,
-        proposed_order, working_order_of,
+        ProtectionProbePorts, RiskGate, RunContext, StoreJournal, action_order_matches,
+        is_unattributed_exit, proposed_order, working_order_of,
     };
     use mandate_backtest::{BacktestError, Signal};
     use mandate_canon::{DecStr, Digest, Value};
@@ -2124,7 +2133,7 @@ mod tests {
         AssetClass, Bar, CorporateActions, DatasetId, DayRange, Feed, Kind, Records, Split,
         SplitRatio, Symbol, TimeUnit, Timeframe,
     };
-    use mandate_num::{Price, Qty};
+    use mandate_num::{Price, Qty, Usd};
     use mandate_runtime::{
         AgentId, EventId as RuntimeEventId, IntentBody, IntentHandoff, OrderExecution,
         ProtectionPrices, Purpose as RuntimePurpose, TimeInForce as RuntimeTimeInForce,
@@ -3259,6 +3268,30 @@ mod tests {
             "quant.ma_crossover",
             &[("fast_periods", "five"), ("slow_periods", "20")]
         )));
+        Ok(())
+    }
+
+    #[test]
+    fn classification_order_facts_must_match_the_sized_proposal() -> Result<(), String> {
+        let one_share = Usd::parse("255.2").map_err(|e| e.to_string())?;
+        let limit = Price::parse("255.2").map_err(|e| e.to_string())?;
+        assert!(
+            action_order_matches(
+                one_share,
+                Qty::parse("1").map_err(|e| e.to_string())?,
+                limit
+            )
+            .map_err(|e| e.to_string())?
+        );
+        assert!(
+            !action_order_matches(
+                one_share,
+                Qty::parse("2").map_err(|e| e.to_string())?,
+                limit
+            )
+            .map_err(|e| e.to_string())?,
+            "one-share autonomy facts cannot classify a two-share proposal"
+        );
         Ok(())
     }
 

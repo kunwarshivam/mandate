@@ -7,6 +7,7 @@ use mandate_alpaca::{Exchange as BrokerExchange, Feed};
 use mandate_num::Usd;
 use mandate_risk::GateConfig;
 use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos, new_york_date_and_hour};
+use std::time::Duration;
 
 use super::artifacts::Artifacts;
 use super::facts::BrokerFacts;
@@ -51,17 +52,34 @@ pub(super) fn judge(
         return Err(absent("an ETP classification dated before the run"));
     }
     let quote = &broker.quote;
-    let max_age_s = i64::try_from(artifacts.quote_max_age.as_secs()).map_err(|_| clock())?;
-    let oldest = shifted(now, max_age_s.checked_neg().ok_or_else(clock)?)?;
     if quote.instrument != artifacts.instrument.symbol
         || quote.feed != Feed::Iex
-        || quote.at > now
-        || quote.at < oldest
         || quote.bid > quote.ask
     {
         return Err(absent("a current, uncrossed IEX quote"));
     }
+    current_quote(quote.at, artifacts.quote_max_age, now)?;
     regular_session_outside_close_window(now, config)
+}
+
+/// Rechecks the time-sensitive facts at the binding gate's clock immediately before submission.
+pub(super) fn judge_submission_time(
+    quote_at: UtcNanos,
+    quote_max_age: Duration,
+    now: UtcNanos,
+    config: &GateConfig,
+) -> Result<(), Cause> {
+    current_quote(quote_at, quote_max_age, now)?;
+    regular_session_outside_close_window(now, config).map(|_| ())
+}
+
+fn current_quote(quote_at: UtcNanos, max_age: Duration, now: UtcNanos) -> Result<(), Cause> {
+    let max_age_s = i64::try_from(max_age.as_secs()).map_err(|_| clock())?;
+    let oldest = shifted(now, max_age_s.checked_neg().ok_or_else(clock)?)?;
+    if quote_at > now || quote_at < oldest {
+        return Err(absent("a current, uncrossed IEX quote"));
+    }
+    Ok(())
 }
 
 /// The New York date of the regular session `now` is in, unless `now` is in its last
