@@ -9,7 +9,7 @@ import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
 import { Deadline } from "@/components/approvals/deadline";
 import { ResponseProgress, responseSteps } from "@/components/approvals/response-progress";
 import { LimitRail } from "@/components/domain/envelope";
-import { BEVEL } from "@/components/kumo/bevel";
+import { BEVEL, DECISION_KEY } from "@/components/kumo/bevel";
 import { ApprovalChart } from "@/components/charts/price-chart";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import type { Approval, Environment, ModelOutput, RiskFigure, Workspace } from "@/fixtures/types";
@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { WorkspaceGate } from "./common";
 
 /** Approve and Skip share one variant and one size, and neither is focused or selected first (PX-10). */
-const CHOICE = cn("h-12 w-full justify-center text-base font-semibold", BEVEL);
+const CHOICE = DECISION_KEY;
 const BACK = "-ml-2 inline-flex h-11 w-fit items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:h-9";
 
 function ResponseStatus({ approval, response }: { approval: Approval; response: ApprovalResponse }) {

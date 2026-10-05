@@ -15,11 +15,13 @@ import { clock, price, quantity, zoneLabel } from "@/lib/format";
 import type { Agent } from "@/fixtures/types";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { allOrders } from "@/lib/orders";
+import { cn } from "@/lib/utils";
 import { AGENT_SECTIONS, type AgentSectionKey, agentHref, decisionHref, orderHref, positionHref } from "@/lib/screens";
 import { AgentFrame, AgentNotFound, useAgent } from "./agent-frame";
 import { ComingSoon } from "./coming-soon";
-import { Section, SectionLink, WorkspaceGate } from "./common";
+import { PAGE_GRID, Section, SectionLink, WorkspaceGate } from "./common";
 import { MandateSummary } from "./mandate-summary";
+import { NewsSection } from "./news-section";
 import { SideRail } from "./side-rail";
 
 /** A list row that opens a record: the whole row is the target, on hairlines rather than boxes. */
@@ -79,7 +81,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
           </ul>
         </section>
       ) : null}
-      <div className="grid grid-cols-1 gap-(--section-gap) max-lg:gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_1fr] lg:gap-x-14">
+      <div className={cn(PAGE_GRID, "max-lg:gap-8 lg:grid-rows-[auto_1fr]")}>
         <div data-layout="main" className="reveal grid min-w-0 content-start gap-6 lg:col-start-1 lg:row-start-1">
           <AgentEquityChart agent={agent} />
         </div>
@@ -178,6 +180,8 @@ function AgentDetail({ agentId }: { agentId: string }) {
           <Section title="Activity" action={<SectionLink href={agentHref(agent.agent_id, "activity")}>View all activity</SectionLink>}>
             <Timeline events={activity.slice(0, RECENT_ACTIVITY)} today={ws.now.slice(0, 10)} />
           </Section>
+
+          <NewsSection ws={ws} agent={agent} now={now} />
         </div>
       </div>
     </AgentFrame>

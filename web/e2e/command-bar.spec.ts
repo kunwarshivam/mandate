@@ -50,7 +50,7 @@ for (const width of [1024, 1280, 1440]) {
         expect(apart, `${other.name} [${other.left}, ${other.right}] against the bar [${found.bar.left}, ${found.bar.right}]`).toBe(true);
       }
       await expect(page.getByRole("banner").getByRole("button", { name: "Theme", exact: true })).toBeInViewport({ ratio: 1 });
-      await expect(page.getByRole("banner").getByRole("link", { name: "Approvals", exact: true })).toBeInViewport({ ratio: 1 });
+      await expect(page.getByRole("banner").getByRole("link", { name: "Approvals", exact: true }), "the dock carries Approvals and its count").toHaveCount(0);
       const badge = page.getByRole("banner").locator("[data-slot=environment-badge]");
       await expect(badge).toBeInViewport({ ratio: 1 });
       await expect(badge.getByText("PAPER", { exact: true })).toBeVisible();

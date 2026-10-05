@@ -15,6 +15,7 @@ import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { Agent } from "@/fixtures/types";
 import { equityWindow, mandateLevels } from "@/lib/chart-data";
 import { quantity, usd } from "@/lib/format";
+import { headroomLine } from "@/lib/limits";
 import { describeRestriction } from "@/lib/restrictions";
 
 function holdings(agent: Agent): string {
@@ -22,10 +23,20 @@ function holdings(agent: Agent): string {
   return agent.positions.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ");
 }
 
+/** Said once over a list of agent rows, not on every row: their P&L is on paper (DEC-467). */
+export function PaperPnlNote({ className }: { className?: string }) {
+  return (
+    <p data-slot="paper-note" className={cn("text-caption text-muted-foreground", className)}>
+      Paper P&amp;L, simulated.
+    </p>
+  );
+}
+
 /**
  * An agent as one calm row: name and mode, what it holds, today's line against the daily loss
- * limit, and its equity with today's change. The P&L line and its disclosure sit right under it;
- * restrictions follow, each saying what it blocks and how it ends. The whole row opens the agent.
+ * limit, and its equity with today's change. The P&L since deployed, its disclosure and the headroom
+ * to the next level sit right under it; restrictions follow, each saying what it blocks and how it
+ * ends. The whole row opens the agent. Its list carries the one paper note, `PaperPnlNote`.
  */
 export function AgentCard({
   agent,
@@ -93,11 +104,14 @@ export function AgentCard({
       </div>
 
       <p className="col-start-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
-        <span>Paper P&amp;L, simulated</span>
         <SignedMoney value={agent.pnl_total} className="text-caption" />
         <span className="inline-flex items-center gap-x-2 whitespace-nowrap">
           since deployed
           <Placeholder name="performance" />
+        </span>
+        <span aria-hidden>·</span>
+        <span data-slot="card-headroom" className="tabular">
+          {headroomLine(agent)}
         </span>
         {marketStale && markAt ? <AsOf at={markAt} now={now} stale /> : null}
       </p>

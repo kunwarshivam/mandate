@@ -2,8 +2,10 @@ import type { ComponentProps, ReactNode } from "react";
 import { ArrowClockwise, ArrowLeft, ArrowRight, FolderOpen, HandPalm, House, Image as ImageIcon, Key, MagnifyingGlass, Printer } from "@phosphor-icons/react/ssr";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
+import type { AppId } from "./desktop";
 import { MONO, PIXEL, PLAIN_BUTTON, RAISED, SUNKEN } from "./letter";
 import styles from "./letter.module.css";
+import { OpenApp } from "./open-app";
 import { StatusText } from "./status-text";
 
 export function Blink({ children }: { children: ReactNode }) {
@@ -65,12 +67,12 @@ const TOOLS: { label: string; icon: ReactNode; off?: boolean; wide?: boolean }[]
   { label: "Stop", icon: <HandPalm className={ICON} />, wide: true },
 ];
 
-/** The row under the address, where a browser kept its guides. Here they open parts of the page. */
-export const DIRECTORY = [
+/** The row under the address, where a browser kept its guides. Here they open parts of the page, or its windows on the desktop. */
+export const DIRECTORY: ({ label: string; href: string } | { label: string; app: AppId })[] = [
   { label: "What's New?", href: "#status" },
-  { label: "What's Cool?", href: "#record" },
+  { label: "What's Cool?", app: "record" },
   { label: "Handbook", href: "#how" },
-  { label: "Questions", href: "#questions" },
+  { label: "Questions", app: "questions" },
 ];
 
 /**
@@ -122,10 +124,16 @@ export function Browser({ address, children }: { address: string; children: Reac
         <nav aria-label="Guides" className="mt-1.5">
           <ul className="grid grid-cols-2 gap-1 sm:flex sm:flex-wrap">
             {DIRECTORY.map((d) => (
-              <li key={d.href} className="grid">
-                <a href={d.href} className={PLAIN_BUTTON}>
-                  {d.label}
-                </a>
+              <li key={d.label} className="grid">
+                {"href" in d ? (
+                  <a href={d.href} className={PLAIN_BUTTON}>
+                    {d.label}
+                  </a>
+                ) : (
+                  <OpenApp app={d.app} className={PLAIN_BUTTON}>
+                    {d.label}
+                  </OpenApp>
+                )}
               </li>
             ))}
           </ul>

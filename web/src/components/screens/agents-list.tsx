@@ -3,7 +3,7 @@
 import { LinkButton } from "@cloudflare/kumo/components/button";
 import { useRuntime } from "@/lib/mock-runtime";
 import { BEVEL } from "@/components/kumo/bevel";
-import { AgentCard } from "./agent-card";
+import { AgentCard, PaperPnlNote } from "./agent-card";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { EmptyBoard, WorkspaceGate } from "./common";
 
@@ -23,6 +23,7 @@ function Agents() {
           </LinkButton>
         }
       />
+      <PaperPnlNote className="pb-2" />
       <ul className="grid">
         {ws.agents.map((agent, i) => (
           <li key={agent.agent_id} className="grid">

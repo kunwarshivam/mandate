@@ -9,6 +9,12 @@ import { Skeleton } from "@/components/domain/skeleton";
 import { clock } from "@/lib/format";
 import { useRuntime } from "@/lib/mock-runtime";
 
+/**
+ * The one page grid of every signed-in screen at 64rem and wider (DEC-467): a main column and a 20rem
+ * rail beside it. Below 64rem it is one column.
+ */
+export const PAGE_GRID = "grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14";
+
 export function Section({ title, action, children, className, id }: { title: string; action?: ReactNode; children: ReactNode; className?: string; id?: string }) {
   const headingId = id ?? `section-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
@@ -87,7 +93,7 @@ export function UnreachableNotice() {
 export function ScreenSkeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div className="grid gap-(--section-gap)" aria-busy="true" aria-label="Loading" data-slot="skeleton">
-      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14">
+      <div className={PAGE_GRID}>
         <div className="grid gap-5">
           <div className="grid gap-2.5">
             <Skeleton className="h-4 w-28 rounded-sm" />

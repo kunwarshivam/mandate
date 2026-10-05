@@ -10,7 +10,7 @@ import { PALETTE, PALETTE_DARK } from "@/lib/palette";
 import { type MockChart, chartControl, chartIn, liveCharts, pointerTime } from "@/test/chart-mock";
 import { renderWithRuntime } from "@/test/harness";
 import { drawn, spoken } from "@/test/spoken";
-import { AccountEquityChart, AgentEquityChart, unmanagedEquity } from "./equity-chart";
+import { ACCOUNT_RANGE, AccountEquityChart, AgentEquityChart, unmanagedEquity } from "./equity-chart";
 import { CHART_COLOR, CHART_TOKEN, type ChartLevel, HERO_FILL, LABEL_GAP, type Tone, areaOptions, baseOptions, candleOptions, crowdedLevels, heroAreaOptions, lineOptions, priceLineFor, setChartMode, trendColor, usdLabel } from "./options";
 import { ApprovalChart, PositionChart } from "./price-chart";
 
@@ -72,7 +72,7 @@ describe("chart builders draw flat, solid colour", () => {
       ["loss", CHART_COLOR.loss, CHART_COLOR.lossCvd],
       ["flat", CHART_COLOR.foreground, CHART_COLOR.foreground],
     ] as const) {
-      expect(heroAreaOptions(trend)).toMatchObject({ lineColor: plain, lineType: LineType.Curved, topColor: HERO_FILL, bottomColor: HERO_FILL, lastValueVisible: false });
+      expect(heroAreaOptions(trend)).toMatchObject({ lineColor: plain, lineWidth: 3, lineType: LineType.Curved, topColor: HERO_FILL, bottomColor: HERO_FILL, lastValueVisible: false });
       expect(heroAreaOptions(trend, true).lineColor).toBe(cvd);
       expect(trendColor(trend)).toBe(plain);
     }
@@ -246,7 +246,7 @@ describe("the hero chart scrubs", () => {
     const h = hero(container);
     expect(spoken(h.value)).toBe(usdLabel(point.value));
     expect(h.value.querySelector("[data-part=fraction]")).toHaveTextContent(usdLabel(point.value).slice(-3));
-    expect(h.when).toHaveTextContent(/^Sep 28, \d{2}:\d{2} ET$/);
+    expect(h.when).toHaveTextContent(/^Sep \d{2}, \d{2}:\d{2} ET$/);
     expect(h.section).toHaveAttribute("data-scrubbing");
     const change = Math.round((point.value - data[0].value) * 100) / 100;
     expect(h.change.querySelector("[data-direction]")).toHaveTextContent(usdLabel(Math.abs(change)).replace("\u2212", ""));
@@ -275,7 +275,7 @@ describe("the hero chart scrubs", () => {
     leave(chart);
     const h = hero(container);
     expect(h.value).toHaveTextContent(usd(WS.connection.account_equity));
-    expect(h.when).toHaveTextContent("today");
+    expect(h.when).toHaveTextContent("past week");
     expect(h.section).not.toHaveAttribute("data-scrubbing");
   });
 
@@ -326,8 +326,8 @@ describe("the hero chart scrubs", () => {
       expect(pill.parentElement!.className).not.toMatch(/flex-col/);
     }
     expect(spoken(hero(container).value)).toBe(usdLabel(data[0].value));
-    expect(spoken(hero(container).change)).toMatch(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);
-    expect(drawn(hero(container).change)).toMatch(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);
+    expect(spoken(hero(container).change)).toMatch(/^\$0\.00no change\(0\.00%\)Sep \d{2}, \d{2}:\d{2} ET$/);
+    expect(drawn(hero(container).change)).toMatch(/^\$0\.00no change\(0\.00%\)Sep \d{2}, \d{2}:\d{2} ET$/);
   });
 
   it("follows a finger: the crosshair is pinned to the nearest point and let go on release", () => {
@@ -359,6 +359,8 @@ describe("the hero chart scrubs", () => {
     expect(container.querySelector("[data-slot=chart-canvas]")).toHaveAttribute("data-draw-in");
     const picker = within(screen.getByRole("group", { name: "Account equity range" }));
     expect(picker.getAllByRole("button").map((b) => b.textContent)).toEqual(["1D", "1W", "1M", "3M", "1Y", "All"]);
+    expect(picker.getByRole("button", { name: ACCOUNT_RANGE }), "the account opens on a week, not a day of ticks").toHaveAttribute("aria-pressed", "true");
+    expect(hero(container).when).toHaveTextContent("past week");
     fireEvent.click(picker.getByRole("button", { name: "1Y" }));
     expect(hero(container).when).toHaveTextContent(/^since Sep 2\d$/);
     fireEvent.click(picker.getByRole("button", { name: "1D" }));

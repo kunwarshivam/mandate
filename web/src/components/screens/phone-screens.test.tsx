@@ -38,14 +38,12 @@ beforeEach(() => setPathname("/"));
 describe("Home on a phone", () => {
   const needsYou = () => main().querySelector<HTMLElement>("[data-slot=needs-you]")!;
 
-  it("opens with Needs you, then the account, the agents and recent activity, and no assets or news", () => {
+  it("opens with Needs you, then the account, the decisions and the agents, and no assets", () => {
     home();
-    const order = onPhone(main().querySelectorAll("h2")).map((h) => h.textContent?.replace(/\d+ items?$/, "").trim());
-    expect(order).toEqual(["Needs you", "Account equity", "Agents", "Recent activity"]);
-    expect(onDesktop(main().querySelectorAll("h2")).map((h) => h.textContent?.replace(/\d+ requests?$/, "").trim())).toEqual(
-      expect.arrayContaining(["Account equity", "Waiting for you", "Agents", "Assets", "Recent activity", "News"]),
-    );
-    expect(shownOnDesktop(needsYou())).toBe(false);
+    const heading = (h: Element) => h.textContent?.replace(/\d+ items?$/, "").trim();
+    expect(onPhone(main().querySelectorAll("h2")).map(heading)).toEqual(["Needs you", "Account equity", "Decisions", "Agents"]);
+    expect(onDesktop(main().querySelectorAll("h2")).map(heading)).toEqual(["Needs you", "Account equity", "Decisions", "Agents", "Assets"]);
+    expect(shownOnDesktop(needsYou())).toBe(true);
   });
 
   it("lists the requests first, soonest deadline first, each with the static time it is skipped at, then the alerts", () => {
@@ -74,16 +72,19 @@ describe("Home on a phone", () => {
     expect(needsYou().querySelector("h2")).toHaveTextContent("Needs you7 items");
   });
 
-  it("shows a request once on Home: in Needs you, and nowhere else a phone sees", () => {
+  it.each([
+    ["a phone", onPhone],
+    ["a desktop", onDesktop],
+  ] as const)("shows a request once on Home on %s: in Needs you, and nowhere else", (_, shown) => {
     home();
-    const links = onPhone(document.querySelectorAll(`a[href="/approvals/${APPROVAL_IDS.swingXyz}"]`));
+    const links = shown(document.querySelectorAll(`a[href="/approvals/${APPROVAL_IDS.swingXyz}"]`));
     expect(links).toHaveLength(1);
     expect(needsYou().contains(links[0])).toBe(true);
     const asks = /asks to buy|asked you to buy/;
     const innermost = [...document.body.querySelectorAll("*")].filter((el) => asks.test(el.textContent ?? "") && ![...el.children].some((c) => asks.test(c.textContent ?? "")));
-    expect(onPhone(innermost)).toHaveLength(1);
+    expect(shown(innermost)).toHaveLength(1);
     expect(main().querySelector("[data-slot=waiting-notice]")).toBeNull();
-    expect(shownOnPhone(main().querySelector("[data-layout=rail]")!)).toBe(false);
+    expect(main().querySelector("[data-slot=waiting], [data-slot=alerts-summary]")).toBeNull();
   });
 
   it("says all clear, plainly, with a check, when nothing needs you", () => {
@@ -102,12 +103,12 @@ describe("Home on a phone", () => {
     expect(needsYou().querySelector("ul")).toBeNull();
   });
 
-  it("keeps the account's hero, on a shorter chart", () => {
+  it("keeps the account's hero, on a compact chart", () => {
     home();
     const canvas = main().querySelector<HTMLElement>("[data-slot=account-equity] [data-slot=chart-canvas]")!;
     expect(canvas).toHaveClass("h-(--chart-phone)", "lg:h-(--chart-height)");
     expect(canvas.style.getPropertyValue("--chart-phone")).toBe("180px");
-    expect(canvas.style.getPropertyValue("--chart-height")).toBe("340px");
+    expect(canvas.style.getPropertyValue("--chart-height")).toBe("200px");
     const hero = main().querySelector<HTMLElement>("[data-slot=account-equity]")!;
     expect(shownOnPhone(hero.querySelector("[data-placeholder=performance]")!)).toBe(true);
     expect(shownOnPhone(hero.querySelector("[data-slot=range-picker]")!)).toBe(true);
@@ -139,20 +140,21 @@ describe("Home on a phone", () => {
     home();
     const bands = onDesktop(main().querySelectorAll<HTMLElement>("[data-slot=agent-band]"));
     expect(bands).toHaveLength(3);
+    expect(onDesktop(main().querySelectorAll("[data-slot=paper-note]"))).toHaveLength(1);
+    expect(onPhone(main().querySelectorAll("[data-slot=paper-note]"))).toEqual([]);
     for (const band of bands) {
-      expect(band).toHaveTextContent("Paper P&L, simulated");
       expect(band.querySelector("[data-placeholder=performance]")).not.toBeNull();
       expect(band.querySelector("[data-direction]")).not.toBeNull();
     }
     expect(onDesktop(main().querySelectorAll("[data-slot=phone-agent]"))).toEqual([]);
   });
 
-  it("shows the last three entries of recent activity, then See all activity", () => {
+  it("shows the last three decisions, then See all decisions", () => {
     home();
-    const activity = within(main()).getByRole("region", { name: "Recent activity" });
+    const activity = within(main()).getByRole("region", { name: "Decisions" });
     expect(onPhone(activity.querySelectorAll("ol > li"))).toHaveLength(3);
     expect(onDesktop(activity.querySelectorAll("ol > li")).length).toBeGreaterThan(3);
-    const all = onPhone(activity.querySelectorAll("a")).filter((a) => a.textContent === "See all activity");
+    const all = onPhone(activity.querySelectorAll("a")).filter((a) => a.textContent === "See all decisions");
     expect(all).toHaveLength(1);
     expect(all[0]).toHaveAttribute("href", "/audit/decisions");
     expect(shownOnDesktop(all[0])).toBe(false);

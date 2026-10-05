@@ -2,7 +2,7 @@
 
 import { FixtureTag } from "@/components/domain/placeholders";
 import { headlinesFor } from "@/fixtures/news";
-import type { Workspace } from "@/fixtures/types";
+import type { Agent, Workspace } from "@/fixtures/types";
 import { ago } from "@/lib/format";
 import { type SliceTone, assetTones } from "@/lib/holdings";
 import { cn } from "@/lib/utils";
@@ -17,26 +17,23 @@ const TAG: Record<SliceTone, string> = {
   muted: "bg-muted",
 };
 
-/** Every instrument on the account or in a mandate: what the headlines are filtered by. */
-function symbolsOf(ws: Workspace): Set<string> {
-  return new Set([
-    ...ws.agents.flatMap((a) => a.positions.map((p) => p.instrument.symbol)),
-    ...ws.agents.flatMap((a) => a.mandate.universe.pinned_instruments.map((i) => i.symbol)),
-    ...ws.external_positions.map((e) => e.instrument.symbol),
-  ]);
+/** What an agent holds or its mandate pins: what its headlines are filtered by. */
+function symbolsOf(agent: Agent): Set<string> {
+  return new Set([...agent.positions.map((p) => p.instrument.symbol), ...agent.mandate.universe.pinned_instruments.map((i) => i.symbol)]);
 }
 
 /**
- * Headlines about what the account holds or may trade, newest first, each with its source, age and
- * instruments. Sample text until a news source is connected: labelled so, and never a link.
+ * Headlines about what one agent holds or may trade, newest first, each with its source, age and
+ * instruments, read beside that agent's decisions rather than as a feed on Home (DEC-467). Sample
+ * text until a news source is connected: labelled so, and never a link.
  */
-export function NewsSection({ ws, now, className }: { ws: Workspace; now: string; className?: string }) {
+export function NewsSection({ ws, agent, now, className }: { ws: Workspace; agent: Agent; now: string; className?: string }) {
   const tones = assetTones(ws);
-  const items = headlinesFor(symbolsOf(ws));
+  const items = headlinesFor(symbolsOf(agent));
   return (
     <Section title="News" action={<FixtureTag />} className={className}>
       {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No headlines about what your agents hold or may trade.</p>
+        <p className="text-sm text-muted-foreground">No headlines about what this agent holds or may trade.</p>
       ) : (
         <ol aria-label="Sample headlines" className="grid">
           {items.map((h) => (
