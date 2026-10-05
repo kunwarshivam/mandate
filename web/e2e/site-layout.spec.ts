@@ -18,7 +18,7 @@ for (const width of [390, 1440]) {
       await expect(page.getByRole("heading", { level: 1, name: "Owlhead" })).toBeVisible();
       await expect(page.locator("header.glass")).toHaveCount(0);
       for (const selector of APP_CONTROLS) await expect(page.locator(selector), selector).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     });
 
@@ -34,7 +34,7 @@ for (const width of [390, 1440]) {
         expect(await logon.getByRole("heading", { level: 1 }).evaluate((h) => getComputedStyle(h).fontFamily)).toMatch(/Pixelify/);
         for (const selector of APP_CONTROLS) await expect(page.locator(selector), selector).toHaveCount(0);
         await expect(page.locator("[data-slot=environment-badge]")).toHaveCount(0);
-        await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
         await expect(page.getByRole("navigation", { name: "Main" })).toHaveCount(0);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       });

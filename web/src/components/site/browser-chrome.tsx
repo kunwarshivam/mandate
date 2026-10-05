@@ -196,9 +196,10 @@ const ICON = "size-5";
 /**
  * The toolbar. Home takes the page back to its top and Reload loads it again; the rest are greyed,
  * as they were on a page that had just finished loading, with nothing to go back or forward to,
- * nothing still loading to stop, and no dialog behind Open, Print or Find.
+ * nothing still loading to stop, and no dialog behind Open, Print or Find. Stop is named for what
+ * it stopped, loading, so it is never read as the product's Stop.
  */
-const TOOLS: { label: string; icon: ReactNode; act?: Act; wide?: boolean }[] = [
+const TOOLS: { label: string; name?: string; icon: ReactNode; act?: Act; wide?: boolean }[] = [
   { label: "Back", icon: <ArrowLeft className={ICON} /> },
   { label: "Forward", icon: <ArrowRight className={ICON} /> },
   { label: "Home", icon: <House className={ICON} />, act: "home" },
@@ -207,7 +208,7 @@ const TOOLS: { label: string; icon: ReactNode; act?: Act; wide?: boolean }[] = [
   { label: "Open", icon: <FolderOpen className={ICON} />, wide: true },
   { label: "Print", icon: <Printer className={ICON} />, wide: true },
   { label: "Find", icon: <MagnifyingGlass className={ICON} />, wide: true },
-  { label: "Stop", icon: <HandPalm className={ICON} />, wide: true },
+  { label: "Stop", name: "Stop loading", icon: <HandPalm className={ICON} />, wide: true },
 ];
 
 const TOOL = "grid w-[4.25rem] justify-items-center gap-0.5 bg-muted px-1 py-1 text-[0.8125rem] leading-none";
@@ -218,10 +219,11 @@ export function Toolbar() {
   const act = useActs(ref);
   return (
     <div ref={ref} role="toolbar" aria-label="Browser" className={cn("flex flex-wrap gap-1", PIXEL)} data-slot="browser-tools">
-      {TOOLS.map(({ label, icon, act: does, wide }) => (
+      {TOOLS.map(({ label, name, icon, act: does, wide }) => (
         <button
           key={label}
           type="button"
+          aria-label={name}
           tabIndex={-1}
           disabled={!does}
           onClick={does ? () => act(does) : undefined}

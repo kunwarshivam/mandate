@@ -138,6 +138,8 @@ describe("the landing page's structure", () => {
     const buttons = within(tools).getAllByRole("button");
     expect(buttons.map((b) => b.textContent)).toEqual(["Back", "Forward", "Home", "Reload", "Images", "Open", "Print", "Find", "Stop"]);
     expect(buttons.filter((b) => !(b as HTMLButtonElement).disabled).map((b) => b.textContent)).toEqual(["Home", "Reload"]);
+    expect(within(tools).getByRole("button", { name: "Stop loading" })).toBeDisabled();
+    expect(within(tools).queryByRole("button", { name: "Stop" })).toBeNull();
     for (const b of buttons) expect(b, b.textContent ?? "").toHaveAttribute("tabindex", "-1");
     const root = document.querySelector<HTMLElement>("[data-scroll-root]")!;
     const scrollTo = vi.fn();
