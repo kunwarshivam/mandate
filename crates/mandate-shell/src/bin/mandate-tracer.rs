@@ -149,3 +149,15 @@ fn now() -> Result<UtcNanos, ShellError> {
     UtcNanos::from_parts(secs, since.subsec_nanos())
         .map_err(|_| ShellError::Usage("the system clock is out of range".to_owned()))
 }
+
+#[cfg(test)]
+mod tests {
+    use mandate_shell::paper::PaperClock;
+
+    use super::SystemClock;
+
+    #[test]
+    fn the_shipping_clock_reads_a_current_instant() {
+        assert!(SystemClock.now().is_some());
+    }
+}
