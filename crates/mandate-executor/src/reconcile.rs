@@ -552,7 +552,7 @@ pub(crate) mod tests {
     use crate::ids::{ClientOrderId, IntentId};
     use crate::payload::object;
     use crate::ports::{
-        IdGen, InstrumentSnapshot, MISSING_BINDING_GATE, MandateView, Ports,
+        ALLOWING_BINDING_GATE, IdGen, InstrumentSnapshot, MandateView, Ports,
     };
     use crate::state::{ExecutorState, ObservedAccount, fold};
     use crate::step::handle;
@@ -738,7 +738,7 @@ pub(crate) mod tests {
             ports: &Ports<'_>,
             keep: usize,
         ) -> Result<Vec<Effect>, ExecutorError> {
-            let effects = handle(&mut self.state, input, ports, &MISSING_BINDING_GATE)?;
+            let effects = handle(&mut self.state, input, ports, &ALLOWING_BINDING_GATE)?;
             let mut kept = 0;
             for effect in &effects {
                 if let Effect::Journal(draft) = effect {
@@ -1918,7 +1918,7 @@ pub(crate) mod tests {
                 &mut executor.state,
                 Input::Journal(fact),
                 &ports,
-                &MISSING_BINDING_GATE,
+                &ALLOWING_BINDING_GATE,
             )
             .map(|_| ()),
             Err(ExecutorError::Unimplemented { story: "E7-4" })

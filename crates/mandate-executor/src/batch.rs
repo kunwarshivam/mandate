@@ -37,7 +37,7 @@ impl<'p, 'a> Batch<'p, 'a> {
             head: state.account_head(),
             view: state.clone(),
             effects: Vec::new(),
-            binding_gate: None,
+            binding_gate: default_binding_gate(),
             drafted: 0,
         })
     }
@@ -133,4 +133,14 @@ impl<'p, 'a> Batch<'p, 'a> {
         self.broker(BrokerRequest::GetAccount);
         self.broker(BrokerRequest::ListActivities { since });
     }
+}
+
+#[cfg(test)]
+fn default_binding_gate() -> Option<&'static dyn BindingGateSource> {
+    Some(&crate::ports::ALLOWING_BINDING_GATE)
+}
+
+#[cfg(not(test))]
+fn default_binding_gate() -> Option<&'static dyn BindingGateSource> {
+    None
 }
