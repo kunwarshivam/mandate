@@ -26,6 +26,11 @@ if it lacks something you need twice, add a subcommand (the `correction` playboo
 | `cargo xtask layers`, `cargo xtask deps` | Dependency directions and the dependency registry |
 | `cargo test -p mandate-refcases -- --include-ignored` | Pending reference cases, before a status change marks them passing |
 
+CI sets `MANDATE_MUTANT_SHARD=INDEX/TOTAL` on each deterministic mutation shard. Do not set it for
+local proof: `cargo xtask check` and `cargo xtask ci mutants` must cover the complete diff locally.
+The required `full` check aggregates every shard with `cargo xtask ci full`, which covers fixture
+drift, reference, supply-chain, and PostgreSQL checks (DEC-464).
+
 The toolchain comes from `.cursor/install.sh` (idempotent, pinned, checksum-verified).
 
 ## The feature map
