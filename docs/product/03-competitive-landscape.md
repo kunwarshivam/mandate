@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Owner** | Product |
-| **Status** | Draft v0.3, 2026-09-30. Adds the general-purpose agents section [ADR-0003](../adr/0003-earned-autonomy.md) sequenced. Replaces v0.2 of 2026-09-27, which replaced v0.1 after it made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
-| **Method** | Public web pages only, read 2026-09-26 and 2026-09-27; the general-agents section's sources were read 2026-09-30. Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
+| **Status** | Draft v0.4, 2026-10-05. Adds Volaren (YC F26), which v0.3 listed as pre-launch. Replaces v0.3 of 2026-09-30, which added the general-purpose agents section [ADR-0003](../adr/0003-earned-autonomy.md) sequenced; v0.2 of 2026-09-27 replaced v0.1 after it made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
+| **Method** | Public web pages only, read 2026-09-26 and 2026-09-27; the general-agents section's sources were read 2026-09-30, and Volaren's on 2026-10-05. Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
 | **Regulatory material** | Public commentary, not legal advice. Legal and compliance text is reserved for the founder and counsel ([DEC-79](../project/04-decision-log.md#decisions)) |
 | **Related** | [Strategy options](10-strategy-options.md), [Vision](01-vision-and-strategy.md), [Compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) |
 
@@ -55,6 +55,12 @@
    or trading reach, while the brokers their plugins would reach state they do not supervise
    connected agents. That is the gap the money-layer plugin (DEC-183) bets on, and their
    "always allow" scopes are exactly the perpetual delegation ADR-0003 caps at 30 days.
+7. **Research terminals are approaching execution from the other side.** Volaren (YC F26) turns a
+   plain-English thesis into a backtest or a basket sized to the account, and sends each rebalance
+   of a followed strategy as a ticket to review. Its broker connections are read-only today, and
+   it describes order placement as coming soon, with the owner confirming every order [VL2] [VL4]
+   [VL5]. It documents no delegation inside limits, which is where Mandate's difference sits. Its
+   free research stack sets what owners will expect to pay for the front half of the journey.
 
 ## Segment map
 
@@ -63,7 +69,7 @@
 | Agentic features inside brokers | Public Agents, Robinhood Agentic Trading, eToro Agent Portfolios, Composer by SoFi | Competitors for the retail user, and channels when they let outside agents in |
 | Direct agent-trading products on the user's own account | Scalar Field, Conviction, TradeAgentic, NexusTrade, Coil, Regent (a control layer, not an end-user product) | Closest competitors |
 | General-purpose agents with money ambitions | Meta Muse, SpaceXAI Grok Bot, OpenAI Dots | Not competitors today (no documented trading); the money-layer plugin (DEC-183) makes them a channel, and their permission scopes set the expectations ADR-0003's delegations answer |
-| Strategy and automation platforms | QuantConnect (Mia, LEAN), Composer, Surmount, Autopilot, Option Alpha, TradersPost, Capitalise.ai, Autonomous | Substitutes for delegated execution; several are registered advisers |
+| Strategy and automation platforms | QuantConnect (Mia, LEAN), Volaren, Composer, Surmount, Autopilot, Option Alpha, TradersPost, Capitalise.ai, Autonomous | Substitutes for delegated execution; several are registered advisers |
 | Broker channels and MCP servers | Alpaca, Interactive Brokers, Webull, Tradier, tastytrade, TradeStation, Kraken, Coinbase, Public MCP, Robinhood MCP | Channels and suppliers; each is also a substitute when a user connects their own agent directly |
 | Infrastructure | Alpaca (API, paper, OAuth), NautilusTrader, LEAN, SnapTrade | Suppliers, or build-versus-buy alternatives |
 
@@ -357,8 +363,10 @@ included" [CL1].
 - **Nof1:** ran Alpha Arena, where language models traded real money; raised $15 million in May 2026
   and plans a consumer platform [NF1]. In one US-equities season, "The portfolio as a
   whole lost about a third", and "a model finished in profit only six times" [NF2].
-- **Instinct (YC W26)** and **Volaren (YC F26):** pre-launch; execution not documented [YC1] [YC2].
-  An unrelated company also called Instinct raised a large round in 2026; do not conflate them.
+- **Instinct (YC W26):** pre-launch; execution not documented [YC1]. An unrelated company also
+  called Instinct raised a large round in 2026; do not conflate them.
+- **Volaren (YC F26)**, listed here as pre-launch in v0.3, has launched; see
+  [Volaren](#volaren-yc-f26) under strategy platforms.
 
 ## General-purpose agents with money ambitions
 
@@ -487,6 +495,94 @@ verifiable decision record.
 authority over runtime decisions and in the retail owner experience, not in "having an agent". It
 may also be a source of strategies for the bring-your-own-strategy mode.
 
+### Volaren (YC F26)
+
+**What it documents**
+
+- Company: YC Fall 2026, New York, team size 4, founded 2026. The founders list Goldman Sachs
+  (Investment Banking; Equity Alpha at Goldman Sachs Asset Management) and AQR among prior roles
+  [VL1]. The founder's post of 2026-09-15 says it "has raised a total of ~$1M for our pre-seed
+  round with participation from Afore Capital and the Andreessen Horowitz scout fund" and launched
+  free on the first day of the batch [VL10].
+- Proposition: "Think it. Test it. Trade it. Your own hedge fund research team. Describe a
+  strategy in plain English and backtest it, or turn a view on the future into a trade" [VL2].
+  The YC page: "You describe a thesis, a strategy, or a view of the world in plain English, and
+  Volaren's AI analysts do the research, build it, and backtest it for you", and "You see every
+  step and can change anything, so the judgment stays yours" [VL1].
+- The home page shows a thesis becoming "4 positions, sized to your account" with a "Review
+  trade" button, an S&P 500 backtest whose universe includes delisted members, a DCF "with every
+  cell sourced" that downloads to Excel, and a portfolio view of "Factor exposure, concentration,
+  scenarios and hedges" [VL2]. Natural-language edits to a model are shown as "specific, named
+  changes", and "You see each one and confirm it before anything moves" [VL7].
+- Coverage: eight asset classes, "each is at a different stage of build on the way to public
+  launch" [VL3] [VL7].
+- Alpha Hub: "Following sends you each rebalance to review before anything trades" [VL2]; "every
+  rebalance reaches you as an alert with a one-tap trade ticket", and "creators can publish theirs
+  to the Alpha Hub with a verified track record attached" [VL3]. Its strategies include
+  Volaren-authored ones such as Congress Tracker, which "buys the fifteen companies members of
+  Congress bought most on balance" each month [VL9]. "Returns shown are model backtests and
+  paper-traded records, not client returns" [VL8].
+- Strategy records: the Congress Tracker page shows a "Live record ... never backfilled", "forward
+  only" because "Volaren's valuations can't be backtested honestly"; a "Current book ...
+  simulated"; and a "Verify" block with a "Rules fingerprint" that identifies "the exact rules and
+  record shown on this page" [VL9].
+- Brokers: "Connect a brokerage read-only ... Volaren can never place an order on a read-only
+  connection. Placing orders from inside Volaren is coming soon; until then you trade at your
+  broker". Robinhood, Fidelity, and Vanguard are listed for holdings sync; Charles Schwab, Webull,
+  Alpaca, Tradier, and Kraken as "trading coming soon" [VL4]. The terms name SnapTrade as the
+  aggregator and say "We do not execute trades, move funds, or take any action in your brokerage
+  account" [VL6].
+- Pricing: free with 500 credits a month; Starter $20, Pro $50, and Max $100 a month, with 2,000,
+  5,000, and 10,000 credits [VL6]. Paid plans list "Trade from Volaren at your own broker" and "3
+  agents watching the market for you" (Starter), 10 (Pro), or unlimited (Max); the page also says
+  "Your broker keeps your money; you confirm every order" [VL5].
+- Regulatory posture (terms of 2026-10-02): "an information and analysis platform"; "not a
+  registered investment advisor ... It is not a broker-dealer"; the service is "beta software for
+  testing purposes only" [VL6].
+- Coming: a phone app with "the portfolio, the alerts and the trade tickets"; and co-investing
+  alongside followed strategies, "the disclosed trades of politicians, and top traders", which
+  "requires regulatory permissions we are working through", paid by "a share of assets under
+  management" [VL3].
+- Investor Pulse: users are opted in by default to anonymized aggregation of their model
+  assumptions and theses into crowd statistics and "performance leaderboards on a per-ticker
+  basis" [VL6].
+
+Pages disagree in two places. The pricing page lists trading from Volaren in every paid plan
+[VL5], while the brokerages page and the terms describe read-only connections [VL4] [VL6]. The
+"Who we are" page says users pay "if you choose to follow a premium strategy" [VL3], while the
+terms of 2026-10-02 say "Every public strategy on the platform, premium strategies included, is
+available at no charge" [VL6]. Prefer the terms and the brokerages page; they are newer or more
+specific.
+
+**What it does not document**
+
+- What its "agents watching the market" do, or whether any can act without a confirmation. The
+  agents page renders only after sign-in.
+- When order placement ships, through which provider, with which order types, and whether a ticket
+  expires or is checked against the account again before it is sent.
+- Limits that hold outside a strategy or ticket (capital, loss, concentration), or a kill switch.
+- How a user checks a rules fingerprint against the record, or exports a record.
+- The model provider behind its analysts.
+- Any user or follower count. The home page says the follower counts it shows "are an example"
+  [VL2].
+
+**Overlap with Mandate.** The front half of the journey is shared: a plain-English idea becomes a
+backtest and a position sized to the account, and the owner reviews it before anything trades.
+Volaren's research depth (company models, macro, a risk view, eight asset classes) is far broader
+than anything Mandate plans, and it is free; Mandate should not compete as a research terminal.
+The authority models differ: Volaren documents a person placing or confirming every trade, and no
+delegation, envelope, or gate, while Mandate's proposition is an agent that acts within limits the
+owner set (AUTO), asks above them (ASK), and is refused outside them (DENY). If its "agents
+watching the market" start to act, Volaren will need the layer Mandate builds (inference). Its
+rules fingerprint and never-backfilled forward record are the closest public analogue found to
+Mandate's forward-paper evidence (DEC-99) and journal, though they cover a strategy's rules and
+simulated book, not one owner's decisions. Its Alpha Hub sends platform-authored strategies as
+tickets under an information-platform posture, the same adviser question
+[Strategy options](10-strategy-options.md#option-0-baseline-platform-originated-theses-dec-97)
+raises for platform-originated theses; any reading is for counsel. Its copy
+publishes return figures and says "room to beat the market opened back up" [VL2] [VL9]; Mandate's
+copy rules exclude both.
+
 ### Registered-adviser automation: Surmount, Autopilot
 
 - **Surmount** connects to E*Trade, Alpaca, TradeStation, Coinbase, Kraken, and others; Surmount AI
@@ -546,19 +642,19 @@ itself (RAID R-13).
 
 Legend: **Yes** documented; **Partly** documented for part of the capability, scope in the cell;
 **No** the company's own material says it does not, or its design excludes it;
-**Not documented** no public statement found as of 2026-09-27. "(vc)" marks a vendor claim with no mechanism shown.
+**Not documented** no public statement found as of 2026-09-27 (Volaren: 2026-10-05). "(vc)" marks a vendor claim with no mechanism shown.
 
-| Differentiator | Public Agents | Robinhood Agentic | Scalar Field | QuantConnect Mia + LEAN | Composer by SoFi | TradeAgentic | Regent | Mandate (status) |
-|---|---|---|---|---|---|---|---|---|
-| D1 Owner limits enforced outside strategy or agent logic | Partly: limits live in each plan; buying power, eligibility, per-agent margin outside it [PU3] [PU10] | Partly: the funded agentic account caps capital; Robinhood states it does not supervise agents [RH1] [RH2] | Partly: capital and buying power enforced per strategy; drawdown thresholds only in the AI disclosure and guidance [SF1] [SF5] [SF16] | Partly: LEAN risk model runs inside the algorithm [QC2] | Not documented [CO1] | Yes (vc) [TA1] | Yes (vc), payments, devnet [RG1] | Specified; gate code merged (#157, #160), flatten open (#176) [M1] |
-| D2 Coordination across agents on one account | No: agents run independently [PU5] | Not documented [RH2] | Partly: isolated books, aggregate reconciliation [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Yes (vc): one shared capital pool [TA2] | Not documented [RG1] | Specified (E7-5, RC-17); not built [M2] |
-| D3 Per-action approval with expiry and revalidation | No: no confirmation before each transaction [PU8] | Partly: optional per-trade approval; expiry not documented [RH3] | Not documented: activation approval only; `venue.trade()` has no approval workflow [SF16] [SF19] | Not documented: live deployment decision stays with the user [QC1] | Not documented [CO1] | No: no per-trade override by design [TA2] | Partly (vc): hold verdict [RG1] | Classification tests merged (#175); approvals and drift revalidation are M7 (E8-1 to E8-3) [M3] |
-| D4 Exportable, verifiable decision record | Partly: run logs and activity feed; export not documented; automated extraction barred [PU5] [PU8] | Not documented [RH1] | Not documented [SF1] | Not documented [QC1] | Not documented [CO1] | Partly (vc): refusals recorded and scored; integrity not documented [TA1] | Yes (vc): anchored, operator-independent [RG1] | Journal hash chain and verify CLI merged (E5-1, E5-4); decision view is M9 (E12) [M4] |
-| D5 Documented handling of ambiguous submissions and restarts | Partly: repeated failures become "action required" [PU7] | Not documented [RH3] | Yes: idempotent execution, pending-order rule, reconcile and freeze [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Partly (vc): resumes after reboot [TA1] | Not documented [RG1] | Specified (E7-2, E7-3); tests #152 and implementation #174 open [M5] |
-| D6 Rehearsal before live (paper or forward evidence) | No backtest as of 2026-09-14; paper not documented [PU6] [PU7] | Not documented: no paper environment found [RH2] | Partly: paper on Alpaca; no evidence page [SF3] | Yes: backtest, paper, divergence monitoring [QC1] | Partly: backtest before activation [CO1] | Partly (vc): out-of-sample scoring [TA1] | Not applicable | Alpaca paper tracer (E7-7, #173) and forward-paper evaluation (DEC-99, E17-8) specified [M6] |
-| D7 One mandate across brokers | No: Public accounts only [PU8] | No: Robinhood accounts only [RH2] | Partly: same code across venues and paper or live; no mandate object [SF3] | Partly: one algorithm across many brokerages [QC3] | Not documented [CO2] | Not documented: brokers undisclosed [TA1] | Not documented [RG1] | Alpaca first, Robinhood at M8 (E7-6); not built [M7] |
-| D8 Ideas originated by the platform inside an owner envelope | No: "does only what you told it to do" [PU1] | No: the user's own agent; Robinhood does not recommend [RH1] | No: "user-defined logic" [SF9] | Yes: Mia generates ideas; the user decides live capital [QC1] | Partly: AI helps build rules the user activates [CO1] | Yes (vc) [TA2] | Not applicable | Accepted (DEC-97); users only after DEC-99 passes [M8] |
-| D9 Runs on the customer's infrastructure | Not applicable (broker) | Not applicable (broker) | Partly: Enterprise private workspaces [SF6] | Yes: LEAN is open source [QC5] | Not documented [CO2] | Yes (vc): self-hosted desktop [TA1] | Not documented [RG1] | Planned (M11 hybrid) [M9] |
+| Differentiator | Public Agents | Robinhood Agentic | Scalar Field | QuantConnect Mia + LEAN | Composer by SoFi | TradeAgentic | Regent | Volaren | Mandate (status) |
+|---|---|---|---|---|---|---|---|---|---|
+| D1 Owner limits enforced outside strategy or agent logic | Partly: limits live in each plan; buying power, eligibility, per-agent margin outside it [PU3] [PU10] | Partly: the funded agentic account caps capital; Robinhood states it does not supervise agents [RH1] [RH2] | Partly: capital and buying power enforced per strategy; drawdown thresholds only in the AI disclosure and guidance [SF1] [SF5] [SF16] | Partly: LEAN risk model runs inside the algorithm [QC2] | Not documented [CO1] | Yes (vc) [TA1] | Yes (vc), payments, devnet [RG1] | Not documented: every trade is placed or confirmed by the user [VL5] [VL6] | Specified; gate code merged (#157, #160), flatten open (#176) [M1] |
+| D2 Coordination across agents on one account | No: agents run independently [PU5] | Not documented [RH2] | Partly: isolated books, aggregate reconciliation [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Yes (vc): one shared capital pool [TA2] | Not documented [RG1] | Not documented [VL3] | Specified (E7-5, RC-17); not built [M2] |
+| D3 Per-action approval with expiry and revalidation | No: no confirmation before each transaction [PU8] | Partly: optional per-trade approval; expiry not documented [RH3] | Not documented: activation approval only; `venue.trade()` has no approval workflow [SF16] [SF19] | Not documented: live deployment decision stays with the user [QC1] | Not documented [CO1] | No: no per-trade override by design [TA2] | Partly (vc): hold verdict [RG1] | Partly: "you confirm every order" once order placement ships; expiry and revalidation not documented [VL4] [VL5] | Classification tests merged (#175); approvals and drift revalidation are M7 (E8-1 to E8-3) [M3] |
+| D4 Exportable, verifiable decision record | Partly: run logs and activity feed; export not documented; automated extraction barred [PU5] [PU8] | Not documented [RH1] | Not documented [SF1] | Not documented [QC1] | Not documented [CO1] | Partly (vc): refusals recorded and scored; integrity not documented [TA1] | Yes (vc): anchored, operator-independent [RG1] | Partly: strategy pages carry a rules fingerprint and a never-backfilled forward record; covers strategies, not a user's decisions; export not documented [VL9] | Journal hash chain and verify CLI merged (E5-1, E5-4); decision view is M9 (E12) [M4] |
+| D5 Documented handling of ambiguous submissions and restarts | Partly: repeated failures become "action required" [PU7] | Not documented [RH3] | Yes: idempotent execution, pending-order rule, reconcile and freeze [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Partly (vc): resumes after reboot [TA1] | Not documented [RG1] | Not applicable today: places no orders [VL4] [VL6] | Specified (E7-2, E7-3); tests #152 and implementation #174 open [M5] |
+| D6 Rehearsal before live (paper or forward evidence) | No backtest as of 2026-09-14; paper not documented [PU6] [PU7] | Not documented: no paper environment found [RH2] | Partly: paper on Alpaca; no evidence page [SF3] | Yes: backtest, paper, divergence monitoring [QC1] | Partly: backtest before activation [CO1] | Partly (vc): out-of-sample scoring [TA1] | Not applicable | Partly: backtests, and forward simulated records for its strategies [VL2] [VL9] | Alpaca paper tracer (E7-7, #173) and forward-paper evaluation (DEC-99, E17-8) specified [M6] |
+| D7 One mandate across brokers | No: Public accounts only [PU8] | No: Robinhood accounts only [RH2] | Partly: same code across venues and paper or live; no mandate object [SF3] | Partly: one algorithm across many brokerages [QC3] | Not documented [CO2] | Not documented: brokers undisclosed [TA1] | Not documented [RG1] | Not applicable today: read-only sync from several brokers; trading at five "coming soon" [VL4] | Alpaca first, Robinhood at M8 (E7-6); not built [M7] |
+| D8 Ideas originated by the platform inside an owner envelope | No: "does only what you told it to do" [PU1] | No: the user's own agent; Robinhood does not recommend [RH1] | No: "user-defined logic" [SF9] | Yes: Mia generates ideas; the user decides live capital [QC1] | Partly: AI helps build rules the user activates [CO1] | Yes (vc) [TA2] | Not applicable | Partly: platform strategies and thesis baskets arrive as tickets the user reviews; no owner envelope documented [VL2] [VL9] | Accepted (DEC-97); users only after DEC-99 passes [M8] |
+| D9 Runs on the customer's infrastructure | Not applicable (broker) | Not applicable (broker) | Partly: Enterprise private workspaces [SF6] | Yes: LEAN is open source [QC5] | Not documented [CO2] | Yes (vc): self-hosted desktop [TA1] | Not documented [RG1] | Not documented [VL3] | Planned (M11 hybrid) [M9] |
 
 **Reading the matrix.** No column is all "Yes". Mandate's column is specification and partial code,
 not shipped product, so no row supports a comparative claim until the demo in
@@ -597,6 +693,16 @@ not shipped product, so no row supports a comparative claim until the demo in
     named product. Mandate runs on paper only and its differentiators are unproven.
 18. That a broker endorses, partners with, or supervises Mandate.
 19. That a mandate limit caps realized loss. Gaps, halts, and outages can exceed any threshold.
+20. That Volaren places orders, or that it never will, without a date. As of 2026-10-05 its
+    brokerages page says connections are read-only and placing orders is "coming soon" [VL4].
+21. That Volaren has no agents. Its paid plans list "agents watching the market for you" [VL5];
+    what they do is not documented.
+22. Any Volaren strategy return as a performance figure. Its page says they are "model backtests
+    and paper-traded records, not client returns" [VL8].
+23. That Volaren needs a registration it lacks, or any other regulatory conclusion about it. Its
+    terms say it is not a registered adviser or broker-dealer [VL6]; readings are for counsel.
+24. That Volaren charges for strategies. Its terms of 2026-10-02 say every public strategy is free
+    [VL6], although an older page mentions premium strategies [VL3].
 
 ## Unknowns to verify by product trial
 
@@ -621,6 +727,9 @@ may place an order (`AGENTS.md` rule 8). Where access is unavailable, record "no
 | Conviction | Do its listed brokers take live orders today? Where are its guardrails enforced, and what happens on a rejected or ambiguous submission? What record can a user export? |
 | TradeAgentic | Who is behind RLG, LLC; which brokers work; is its scoring inspectable before purchase? |
 | NexusTrade | Is manual confirmation still required for live trades? |
+| Volaren | What do its "agents watching the market" do: alert, propose a ticket, or act? Can any act without a confirmation? |
+| Volaren | When order placement ships: through which provider, with which order types? Does a ticket expire, and is it checked against the account again before it is sent? |
+| Volaren | Can a user check a strategy's rules fingerprint against its record independently? Can records be exported? |
 | Webull | Can an agent submit without confirmation? |
 
 ## Sources
@@ -695,7 +804,16 @@ Accessed means the page carried no date and was read on 2026-09-26 or 2026-09-27
 | GA4 | [The Next Web: OpenAI launches dots, always-on AI agents with their own cloud computers](https://thenextweb.com/news/openai-dots-always-on-ai-agents-cloud-computers-devday) | 2026-09-29, re-read 2026-09-30 |
 | GA5 | [TradeRank: Alpha Arena leaderboard, final results](https://www.traderank.ai/alpha-arena-leaderboard) (nof1's own figures, from an archived nof1.ai snapshot of 2026-08-06) | accessed 2026-09-30 |
 | YC1 | [Instinct, YC company page](https://www.ycombinator.com/companies/instinct-xyz) | accessed |
-| YC2 | [Volaren, YC company page](https://www.ycombinator.com/companies/volaren-inc) | accessed |
+| VL1 | [Volaren, YC company page](https://www.ycombinator.com/companies/volaren-inc) | accessed 2026-10-05 |
+| VL2 | [Volaren home page](https://www.volaren.ai/) | accessed 2026-10-05 |
+| VL3 | [Volaren: Who we are](https://www.volaren.ai/who-we-are) | accessed 2026-10-05 |
+| VL4 | [Volaren: Brokerages](https://www.volaren.ai/brokerages) | accessed 2026-10-05 |
+| VL5 | [Volaren pricing](https://www.volaren.ai/pricing) | accessed 2026-10-05 |
+| VL6 | [Volaren terms of service](https://www.volaren.ai/terms) | version 2026-10-02 |
+| VL7 | [Volaren methodology](https://www.volaren.ai/methodology) | updated August 2026 |
+| VL8 | [Volaren Alpha Hub](https://www.volaren.ai/strategies) | accessed 2026-10-05 |
+| VL9 | [Volaren: Congress Tracker strategy](https://www.volaren.ai/strategies/revisions/congress-tracker) | record through 2026-10-02 |
+| VL10 | [Martin Pestana on LinkedIn: joining YC Fall 2026](https://www.linkedin.com/posts/martin-pestana_activity-7505737757198233602-lC4U) | 2026-09-15 |
 | QC1 | [QuantConnect: Mia](https://www.quantconnect.com/docs/v2/ai-assistance/predefined-agents/mia) | accessed |
 | QC2 | [QuantConnect: risk management key concepts](https://www.quantconnect.com/docs/v2/writing-algorithms/algorithm-framework/risk-management/key-concepts) | accessed |
 | QC3 | [QuantConnect: live brokerages](https://www.quantconnect.com/docs/v2/cloud-platform/live-trading/brokerages) | accessed |
