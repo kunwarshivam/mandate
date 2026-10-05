@@ -407,8 +407,8 @@ impl MandateSource for FixtureMandate {
 pub struct FixtureBars(pub World);
 
 impl Bars for FixtureBars {
-    fn closes(&self, symbol: &str) -> Result<Vec<Price>, Cause> {
-        let _ = symbol;
+    fn closes(&self, symbol: &str, now: UtcNanos) -> Result<Vec<Price>, Cause> {
+        let _ = (symbol, now);
         self.0.called(Stage::MarketData);
         let close = Price::parse("255.2").map_err(|_| Cause::Absent { what: "a close" })?;
         Ok(vec![close; 25])
@@ -1096,8 +1096,8 @@ impl MandateSource for Stubbed {
 }
 
 impl Bars for Stubbed {
-    fn closes(&self, symbol: &str) -> Result<Vec<Price>, Cause> {
-        let _ = symbol;
+    fn closes(&self, symbol: &str, now: UtcNanos) -> Result<Vec<Price>, Cause> {
+        let _ = (symbol, now);
         self.refuse()
     }
 }

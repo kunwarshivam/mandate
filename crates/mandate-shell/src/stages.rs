@@ -202,9 +202,9 @@ pub trait MandateSource {
 }
 
 /// Step 2: the closing prices of every stored daily bar of the pinned instrument, by its ticker,
-/// oldest first.
+/// oldest first, trusted through the last equity session completed by `now`.
 pub trait Bars {
-    fn closes(&self, symbol: &str) -> Result<Vec<Price>, Cause>;
+    fn closes(&self, symbol: &str, now: UtcNanos) -> Result<Vec<Price>, Cause>;
 }
 
 /// Step 3: the signal of the envelope's `model` at the close of the last period in `closes`.

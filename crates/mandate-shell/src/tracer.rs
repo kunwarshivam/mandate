@@ -74,7 +74,7 @@ pub fn run(stages: &mut Stages, setup: &Setup) -> Result<Report, ShellError> {
     let instrument = pinned(&admitted.view)?;
     let closes = stages
         .bars
-        .closes(&admitted.symbol)
+        .closes(&admitted.symbol, setup.now)
         .map_err(refused(Stage::MarketData))?;
     let signal = stages
         .signal

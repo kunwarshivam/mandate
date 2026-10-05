@@ -512,7 +512,7 @@ fn dec(text: &str) -> DecStr {
     DecStr::parse(text).unwrap()
 }
 
-/// Writes one daily bar per weekday, starting 2026-08-21, with these closes, through
+/// Writes one daily bar per weekday, starting 2026-08-24, with these closes, through
 /// `mandate-marketdata`'s own writer, so the tracer reads the real format.
 fn bars(dir: &Path, closes: &[&str]) -> PathBuf {
     let dataset = DatasetId::new(
@@ -523,7 +523,7 @@ fn bars(dir: &Path, closes: &[&str]) -> PathBuf {
     )
     .unwrap();
     let store = Store::new(dir);
-    let mut day = Date::parse("2026-08-21").unwrap();
+    let mut day = Date::parse("2026-08-24").unwrap();
     for close in closes {
         while day.is_weekend() {
             day = day.next().unwrap();
@@ -1134,6 +1134,23 @@ fn signal_undecided() {
     let seen = Rc::clone(&transport.seen);
     let mut stages = stages("mandate.json", dataset, transport);
     assert_refused(run(&mut stages, &setup(true)), "no_long_signal");
+    assert_eq!(seen.borrow().posts(), 0);
+}
+
+/// Stored bars must reach the last completed equity session at the run's injected clock. A clean,
+/// internally gapless dataset ending one session earlier is stale and sends nothing.
+#[test]
+fn stale_stored_bars_are_refused() {
+    let scratch = Scratch::new("stale-bars");
+    let closes = rising();
+    let closes: Vec<&str> = closes.iter().map(String::as_str).collect();
+    let dataset = bars(&scratch.0, &closes);
+    let transport = Scripted::new(Broker::Fresh);
+    let seen = Rc::clone(&transport.seen);
+    let mut stages = stages("mandate.json", dataset, transport);
+    let mut stale = setup(true);
+    stale.now = UtcNanos::parse("2026-09-29T13:00:00.000000000Z").unwrap();
+    assert_refused(run(&mut stages, &stale), "market_data_untrusted");
     assert_eq!(seen.borrow().posts(), 0);
 }
 

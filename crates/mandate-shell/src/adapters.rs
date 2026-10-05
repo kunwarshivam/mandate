@@ -70,7 +70,7 @@ use mandate_runtime::{
 use mandate_spec::document::ParamValue;
 use mandate_spec::policy::PolicyLevel;
 use mandate_spec::{ValidatedMandate, ValidationContext};
-use mandate_time::{Date, TradingCalendar, UtcNanos};
+use mandate_time::{Date, ExchangeCalendar, Session, TradingCalendar, UtcNanos};
 
 use crate::envelope::account_stream;
 use crate::error::Cause;
@@ -989,9 +989,9 @@ pub struct StoredBars {
 }
 
 impl Bars for StoredBars {
-    fn closes(&self, symbol: &str) -> Result<Vec<Price>, Cause> {
+    fn closes(&self, symbol: &str, now: UtcNanos) -> Result<Vec<Price>, Cause> {
         let inspection = inspect::inspect(&self.dir)?;
-        trusted(&inspection, symbol)?;
+        trusted(&inspection, symbol, now)?;
         self.listed_closes(inspection.dataset.kind())
     }
 }
@@ -1022,12 +1022,13 @@ impl StoredBars {
     }
 }
 
-/// Whether `inspect` found the dataset fit to decide on: the pinned symbol's daily bars, every
-/// partition intact, no trading day without its bar, and no split inside the span, whose prices
-/// the shell may not adjust (DEC-138 item 3). `inspect`'s quality warnings are the vendor's
-/// records as stored (DEC-89) and are not refusals.
-fn trusted(inspection: &Inspection, symbol: &str) -> Result<(), Cause> {
+/// Whether `inspect` found the dataset fit to decide on: the pinned symbol's daily bars through
+/// the last completed equity session, every partition intact, no trading day without its bar, and
+/// no split inside the span, whose prices the shell may not adjust (DEC-138 item 3). `inspect`'s
+/// quality warnings are the vendor's records as stored (DEC-89) and are not refusals.
+fn trusted(inspection: &Inspection, symbol: &str, now: UtcNanos) -> Result<(), Cause> {
     let daily = Kind::Bars(Timeframe::new(1, TimeUnit::Day)?);
+    let latest = latest_completed_equity_day(now)?;
     let refusal = if inspection.dataset.symbol().as_str() != symbol {
         Some("the dataset is another instrument's")
     } else if inspection.dataset.kind() != daily {
@@ -1044,6 +1045,8 @@ fn trusted(inspection: &Inspection, symbol: &str) -> Result<(), Cause> {
             .any(|stretch| matches!(stretch.class, GapClass::TrueGap | GapClass::Unclassified))
     }) {
         Some("a trading day was never fetched")
+    } else if inspection.coverage.span.map(|span| span.last()) != Some(latest) {
+        Some("the dataset does not end on the last completed equity session")
     } else if split_inside(inspection) {
         Some("a split lies inside the span, or the corporate actions do not cover it")
     } else {
@@ -1053,6 +1056,35 @@ fn trusted(inspection: &Inspection, symbol: &str) -> Result<(), Cause> {
         Some(what) => Err(untrusted(what)),
         None => Ok(()),
     }
+}
+
+/// The newest US-equity regular session whose end is not after the injected run clock. Calendar
+/// data, session hours, holidays, and early closes all come from `mandate-time`; the shell invents
+/// none of them. A clock outside the calendar or before its first completed session is untrusted.
+fn latest_completed_equity_day(now: UtcNanos) -> Result<Date, Cause> {
+    let calendar = ExchangeCalendar::us_equities()
+        .map_err(|_| untrusted("the equity calendar cannot name the last completed session"))?;
+    let mut day = calendar.valid_from();
+    let last = calendar.valid_to().min(now.date());
+    let mut completed = None;
+    while day <= last {
+        let sessions = calendar
+            .sessions(day)
+            .map_err(|_| untrusted("the equity calendar cannot name the last completed session"))?;
+        if sessions
+            .iter()
+            .any(|span| span.session() == Session::Regular && span.end() <= now)
+        {
+            completed = Some(day);
+        }
+        if day == last {
+            break;
+        }
+        day = day
+            .next()
+            .map_err(|_| untrusted("the equity calendar cannot name the last completed session"))?;
+    }
+    completed.ok_or_else(|| untrusted("the equity calendar cannot name the last completed session"))
 }
 
 /// Whether a split could have moved a close inside the span. Actions recorded for only part of the
@@ -2695,6 +2727,10 @@ mod tests {
         Date::parse(text).map_err(|e| e.to_string())
     }
 
+    fn as_of() -> UtcNanos {
+        UtcNanos::parse("2026-09-25T20:00:00.000000000Z").expect("the test clock is canonical")
+    }
+
     fn dataset(symbol: &str, timeframe: &str) -> Result<DatasetId, String> {
         DatasetId::new(
             AssetClass::UsEquity,
@@ -2795,11 +2831,34 @@ mod tests {
         let read = StoredBars {
             dir: store.dataset_dir(&id),
         }
-        .closes("AAPL")
+        .closes("AAPL", as_of())
         .map_err(|e| e.to_string())?;
         let expected: Vec<String> = closes.iter().map(|c| canonical(c)).collect();
         let read: Vec<String> = read.iter().map(ToString::to_string).collect();
         assert_eq!(read, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn stored_bars_must_end_on_the_last_completed_equity_session() -> Result<(), String> {
+        let scratch = Scratch::new("stale")?;
+        let dir = aapl(&scratch.0, &[], &[])?;
+        let before_monday_close =
+            UtcNanos::parse("2026-09-28T19:59:59.000000000Z").map_err(|e| e.to_string())?;
+        assert_eq!(
+            StoredBars { dir: dir.clone() }
+                .closes("AAPL", before_monday_close)
+                .map(|closes| closes.len()),
+            Ok(25),
+            "Friday remains the last completed session until Monday's regular close"
+        );
+        let after_monday_close =
+            UtcNanos::parse("2026-09-28T20:00:00.000000000Z").map_err(|e| e.to_string())?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", after_monday_close))?;
+        assert_eq!(
+            what,
+            "the dataset does not end on the last completed equity session"
+        );
         Ok(())
     }
 
@@ -2824,7 +2883,7 @@ mod tests {
                 &Records::Bars(vec![at("09", "999.99")?, at("04", "111.11")?]),
             )
             .map_err(|e| e.to_string())?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL"))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
         assert_eq!(what, "a listed day does not hold exactly one bar");
         Ok(())
     }
@@ -2870,7 +2929,7 @@ mod tests {
     fn another_instruments_bars_are_refused() -> Result<(), String> {
         let scratch = Scratch::new("symbol")?;
         let dir = aapl(&scratch.0, &[], &[])?;
-        let what = untrusted(StoredBars { dir }.closes("MSFT"))?;
+        let what = untrusted(StoredBars { dir }.closes("MSFT", as_of()))?;
         assert_eq!(what, "the dataset is another instrument's");
         Ok(())
     }
@@ -2885,7 +2944,7 @@ mod tests {
             &[],
             &[],
         )?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL"))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
         assert_eq!(what, "the dataset is not daily bars");
         Ok(())
     }
@@ -2898,7 +2957,7 @@ mod tests {
         let mut bytes = fs::read(&path).map_err(|e| e.to_string())?;
         bytes.push(0);
         fs::write(&path, bytes).map_err(|e| e.to_string())?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL"))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
         assert_eq!(what, "a partition cannot be trusted");
         Ok(())
     }
@@ -2915,7 +2974,7 @@ mod tests {
                 &Records::Bars(vec![bar(on, "233.20")?, bar(on, "233.30")?]),
             )
             .map_err(|e| e.to_string())?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL"))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
         assert_eq!(what, "two bars share a start");
         Ok(())
     }
@@ -2924,7 +2983,7 @@ mod tests {
     fn a_trading_day_listed_without_a_bar_is_refused() -> Result<(), String> {
         let scratch = Scratch::new("empty")?;
         let dir = aapl(&scratch.0, &[], &["2026-08-26"])?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL"))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
         assert_eq!(what, "a trading day has no bar");
         Ok(())
     }
@@ -2933,7 +2992,7 @@ mod tests {
     fn a_trading_day_never_fetched_is_refused() -> Result<(), String> {
         let scratch = Scratch::new("gap")?;
         let dir = aapl(&scratch.0, &["2026-08-26"], &[])?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL"))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
         assert_eq!(what, "a trading day was never fetched");
         Ok(())
     }
@@ -2943,7 +3002,7 @@ mod tests {
         let scratch = Scratch::new("split")?;
         let dir = aapl(&scratch.0, &[], &[])?;
         let mut inspection = inspect::inspect(&dir).map_err(|e| e.to_string())?;
-        assert!(trusted(&inspection, "AAPL").is_ok());
+        assert!(trusted(&inspection, "AAPL", as_of()).is_ok());
         let span = inspection.coverage.span.ok_or("no span")?;
         let symbol = Symbol::parse("AAPL").map_err(|e| e.to_string())?;
         let split = |ex_date: Date| -> Result<Split, String> {
@@ -2981,7 +3040,7 @@ mod tests {
         inspection.corporate_actions = ActionsReport::Incomplete(with(Vec::new()));
         assert!(split_inside(&inspection));
         assert!(matches!(
-            trusted(&inspection, "AAPL"),
+            trusted(&inspection, "AAPL", as_of()),
             Err(Cause::Untrusted {
                 what: "a split lies inside the span, or the corporate actions do not cover it"
             })
@@ -3011,7 +3070,7 @@ mod tests {
         )
         .map_err(|e| e.to_string())?;
         let closes = StoredBars { dir }
-            .closes("AAPL")
+            .closes("AAPL", as_of())
             .map_err(|e| e.to_string())?;
         assert_eq!(closes.len(), 25);
         Ok(())
@@ -3128,7 +3187,7 @@ mod tests {
             }],
             "the one problem `inspect` finds is the unlisted partition (#248 review, minor 1)"
         );
-        let what = untrusted(StoredBars { dir }.closes("AAPL"))?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()))?;
         assert_eq!(what, "a partition cannot be trusted");
         Ok(())
     }
