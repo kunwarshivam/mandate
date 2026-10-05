@@ -26,16 +26,12 @@ commands:
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
 ";
 
-/// The two required checks (DEC-76), so each pays the setup cost once. `pending` follows `test` in
-/// `fast` because it reuses the test binaries that `test` has just built.
+/// The two required-check command groups (DEC-76). `pending` follows `test` in `fast` because it
+/// reuses the test binaries that `test` has just built. CI shards `mutants` separately and makes
+/// its required `full` verdict depend on every shard (DEC-464); the local `check` command still
+/// runs every entry in [`PR_JOBS`] once, unsharded.
 const FAST_JOB: [&str; 4] = ["lint", "test", "pending", "spec-guard"];
-const FULL_JOB: [&str; 5] = [
-    "refcases",
-    "reference",
-    "supply-chain",
-    "postgres",
-    "mutants",
-];
+const FULL_JOB: [&str; 4] = ["refcases", "reference", "supply-chain", "postgres"];
 const PR_JOBS: [&str; 9] = [
     "lint",
     "test",
@@ -52,6 +48,7 @@ const PR_JOBS: [&str; 9] = [
 /// rather than a skip (DEC-109). CI's `full` and nightly jobs set both.
 const PG_URL: &str = "MANDATE_PG_URL";
 const PG_REQUIRED: &str = "MANDATE_PG_REQUIRED";
+const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
 
 /// Lint header every safety-critical crate's `src/lib.rs` must carry (ADR-0001 ES-09, ES-21).
 const REQUIRED_HEADER: &str = "#![deny(
@@ -1195,27 +1192,81 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
             return Err(unjudged);
         }
     }
-    let args = [
+    let shard = env::var(MUTANT_SHARD_ENV)
+        .ok()
+        .map(|value| MutantShard::parse(&value))
+        .transpose()
+        .with_context(|| format!("parsing {MUTANT_SHARD_ENV}"))?;
+    let args = mutants_args(&diff_path, shard);
+    fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
+    eprintln!("    $ cargo {}", args.join(" "));
+    let started = fs::metadata(&diff_file)
+        .and_then(|meta| meta.modified())
+        .context("timing the diff this run reads")?;
+    let status = mutants_job_cargo(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
+        .status()
+        .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
+    fs::remove_file(&diff_file).ok();
+    mutants_outcome(root, &crates, status?.code(), started)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct MutantShard {
+    index: usize,
+    total: usize,
+}
+
+impl MutantShard {
+    fn parse(value: &str) -> Result<Self> {
+        let Some((index, total)) = value.split_once('/') else {
+            bail!("mutation shard `{value}` must have the form INDEX/TOTAL");
+        };
+        if total.contains('/') {
+            bail!("mutation shard `{value}` must contain exactly one slash");
+        }
+        let index = index
+            .parse::<usize>()
+            .with_context(|| format!("mutation shard `{value}` has a non-numeric index"))?;
+        let total = total
+            .parse::<usize>()
+            .with_context(|| format!("mutation shard `{value}` has a non-numeric total"))?;
+        if total == 0 || index == 0 || index > total {
+            bail!(
+                "mutation shard `{value}` must satisfy 1 <= INDEX <= TOTAL and TOTAL must be positive"
+            );
+        }
+        Ok(Self { index, total })
+    }
+
+    fn argument(self) -> String {
+        format!("{}/{}", self.index, self.total)
+    }
+}
+
+fn mutants_args(diff_path: &str, shard: Option<MutantShard>) -> Vec<String> {
+    let mut args = [
         "mutants",
         "--in-diff",
-        &diff_path,
+        diff_path,
         "--test-tool",
         "nextest",
         "--jobs",
         "2",
         "--output",
         "target",
-    ];
-    fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
-    eprintln!("    $ cargo {}", args.join(" "));
-    let started = fs::metadata(&diff_file)
-        .and_then(|meta| meta.modified())
-        .context("timing the diff this run reads")?;
-    let status = mutants_job_cargo(root, &args)
-        .status()
-        .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
-    fs::remove_file(&diff_file).ok();
-    mutants_outcome(root, &crates, status?.code(), started)
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect::<Vec<_>>();
+    if let Some(shard) = shard {
+        args.extend([
+            "--shard".to_owned(),
+            shard.argument(),
+            "--sharding".to_owned(),
+            "round-robin".to_owned(),
+        ]);
+    }
+    args
 }
 
 /// The build directory a caller may export for their own builds. The mutants job's `cargo` children
@@ -2829,20 +2880,20 @@ mod tests {
     }
 
     #[test]
-    fn mutation_shards_accept_only_one_based_indices_within_the_total() {
+    fn mutation_shards_accept_only_one_based_indices_within_the_total() -> Result<()> {
         assert_eq!(
-            MutantShard::parse("1/12"),
-            Ok(MutantShard {
+            MutantShard::parse("1/12")?,
+            MutantShard {
                 index: 1,
                 total: 12
-            })
+            }
         );
         assert_eq!(
-            MutantShard::parse("12/12"),
-            Ok(MutantShard {
+            MutantShard::parse("12/12")?,
+            MutantShard {
                 index: 12,
                 total: 12
-            })
+            }
         );
         for invalid in ["0/12", "13/12", "1/0", "1", "1/2/3", "a/12"] {
             assert!(
@@ -2850,6 +2901,7 @@ mod tests {
                 "{invalid} must not select an incomplete or undefined shard"
             );
         }
+        Ok(())
     }
 
     #[test]

@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-10-03, second refresh, against `main` after #580: V-047's code (tests #536, implementation #580; DEC-428, DEC-444), E7-4 slice 5's trading-day part (#468) and the #524 fix (#559, #576; DEC-425), the E6-4 resting-sell trim (#561, #567, #568) and quantity grid (#571, #578, #579; DEC-427, DEC-445), MC-E18's status (#577), the Phase 2 design specs (DEC-431 to DEC-443 except DEC-435), and the next steps. The per-session change log that used to live in this cell is in the git history of this file |
+| **Last updated** | 2026-10-05, while #601 applies DEC-464: preserve the complete mutation gate but split its measured 55m48s critical path into twelve deterministic shards, with every required and aggregated CI job capped at ten minutes. The per-session change log that used to live in this cell is in the git history of this file |
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
 decisions in [04-decision-log.md](04-decision-log.md). This file only tracks progress against them.

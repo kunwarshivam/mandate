@@ -192,8 +192,10 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   implementation checks, supply chain (cargo-deny, the dependency registry, gitleaks), the spec
   guard, the Postgres journal tests (skipped unless `MANDATE_PG_URL` is set), and mutants on the
   diff of safety-critical crates. CI runs them as two required checks: `cargo xtask ci fast` (lint,
-  test, pending tests, spec guard) and `cargo xtask ci full` (fixtures, reference, supply chain,
-  Postgres, mutants).
+  test, pending tests, spec guard) and `full`, an aggregate over `cargo xtask ci full` (fixtures,
+  reference, supply chain, Postgres) and every deterministic `cargo xtask ci mutants` shard. Every
+  required check and aggregated job must finish in under ten minutes; add parallel shards rather
+  than removing tests, baselines, mutants, or safety gates (DEC-464).
 - **New crates** get an entry in `xtask/layers.toml` in the same change; safety-critical crates also
   get a CODEOWNERS line and start `src/lib.rs` with the lint header `cargo xtask layers` checks.
 - **New dependencies** need a row in `docs/dependencies.md` in the same change (none by default).
