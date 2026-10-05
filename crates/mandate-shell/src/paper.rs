@@ -337,8 +337,15 @@ impl InstrumentSnapshot for TrustedPaperContext {
 }
 
 impl BindingGateSource for TrustedPaperContext {
+    #[allow(
+        clippy::manual_ok_err,
+        reason = "BindingGateSource represents every invalid trusted input as fail-closed None"
+    )]
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
-        gate_input(self.now, self.config_refs.clone(), request).ok()
+        match gate_input(self.now, self.config_refs.clone(), request) {
+            Ok(input) => Some(input),
+            Err(_) => None,
+        }
     }
 }
 
