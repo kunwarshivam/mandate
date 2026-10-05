@@ -2929,7 +2929,7 @@ mod tests {
         assert_eq!(
             sharded
                 .windows(2)
-                .filter(|pair| pair[0] == "--sharding" && pair[1] == "round-robin")
+                .filter(|pair| pair[0] == "--sharding" && pair[1] == "slice")
                 .count(),
             1
         );
