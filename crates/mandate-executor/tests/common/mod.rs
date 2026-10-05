@@ -75,6 +75,11 @@ impl BindingGateSource for AllowingBindingGate {
         let quote_at = UtcNanos::parse_rfc3339("2026-09-21T14:59:59Z").ok()?;
         let held = Qty::parse("1000000").ok()?;
         let equity = Usd::parse("1000000000").ok()?;
+        let (asset_class, exchange) = if request.instrument.as_str() == FixedInstruments::CRYPTO {
+            (AssetClass::Crypto, None)
+        } else {
+            (AssetClass::UsEquity, Some(Exchange::Nasdaq))
+        };
         let mut positions = BTreeMap::new();
         positions.insert(asset.clone(), held);
         let gate_agent = GateAgentId(1);
@@ -158,8 +163,8 @@ impl BindingGateSource for AllowingBindingGate {
             },
             instrument: GateInstrumentSnapshot {
                 instrument: asset.clone(),
-                asset_class: AssetClass::UsEquity,
-                exchange: Some(Exchange::Nasdaq),
+                asset_class,
+                exchange,
                 status_active: true,
                 tradable: true,
                 fractionable: true,
