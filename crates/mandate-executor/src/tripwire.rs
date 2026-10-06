@@ -1,14 +1,16 @@
 //! The pure account-stream tripwire fold (mandate spec §6.7, MI-31; E6-13).
 //!
-//! This tests-PR module names the values shared by the executor and reference harness. [`fold`]
-//! refuses every input until the implementation PR can preserve the complete latch and journal
-//! contract; no caller can mistake an empty effect list for an evaluated tripwire.
+//! The state is rebuilt by folding journaled account-stream facts in sequence. Effects are returned
+//! in the order in which callers must append them before applying the projected behavior.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{InstrumentId, Side};
-use mandate_approval::{AssertionId, Environment, RiskClock, StepUp};
-use mandate_num::Usd;
+use mandate_approval::{
+    AssertionId, CommandAuthority, Environment, OwnerCommandKind, RiskClock, StepUp, StepUpRefusal,
+    owner_command,
+};
+use mandate_num::{NumError, Usd};
 use mandate_spec::SchemaDec;
 use mandate_spec::document::{Tripwire, TripwireAction, TripwireId, TripwireMetric};
 use mandate_time::Date;
@@ -20,10 +22,41 @@ use crate::ExecutorError;
 pub struct TripwireState {
     tripwires: Vec<Tripwire>,
     metrics: BTreeMap<TripwireId, TripwireValue>,
+    accumulators: BTreeMap<TripwireId, TripwireAccumulator>,
     fired: BTreeMap<TripwireId, TripwireAction>,
     instruments_ever_filled: BTreeSet<InstrumentId>,
     risk_day: Option<Date>,
     used_assertions: BTreeSet<AssertionId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TripwireAccumulator {
+    ConsecutiveLosingExits(u32),
+    RealizedNet(Usd),
+    NewInstruments(u32),
+}
+
+impl TripwireAccumulator {
+    fn zero(metric: TripwireMetric) -> Self {
+        match metric {
+            TripwireMetric::ConsecutiveLosingExits => Self::ConsecutiveLosingExits(0),
+            TripwireMetric::RealizedLossUsd => Self::RealizedNet(Usd::ZERO),
+            TripwireMetric::NewInstruments => Self::NewInstruments(0),
+        }
+    }
+
+    fn value(&self) -> TripwireValue {
+        match self {
+            Self::ConsecutiveLosingExits(value) | Self::NewInstruments(value) => {
+                TripwireValue::Count(*value)
+            }
+            Self::RealizedNet(value) => TripwireValue::Usd(if value.is_negative() {
+                value.negated()
+            } else {
+                Usd::ZERO
+            }),
+        }
+    }
 }
 
 /// A fill after accounting has derived its net realized P&L.
@@ -150,19 +183,263 @@ pub struct TripwireOutcome {
 }
 
 /// Applies one account-stream fact.
-///
-/// E6-13's tests PR is deliberately fail-closed. The implementation PR replaces this body; no
-/// production path may catch this error and continue as though no tripwire fired.
 pub fn fold(
-    _state: &TripwireState,
-    _input: &TripwireInput,
+    state: &TripwireState,
+    input: &TripwireInput,
 ) -> Result<TripwireOutcome, ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E6-13" })
+    let mut next = state.clone();
+    let mut journal = Vec::new();
+
+    match input {
+        TripwireInput::MandateVersionApplied { tripwires } => {
+            apply_version(&mut next, tripwires);
+        }
+        TripwireInput::FillApplied { fill } | TripwireInput::LateFillApplied { fill } => {
+            apply_fill(&mut next, fill)?;
+        }
+        TripwireInput::RiskDayStarted { day } => {
+            next.risk_day = Some(*day);
+            reset_realized_loss(&mut next);
+        }
+        TripwireInput::OwnerAcknowledged(acknowledgment) => {
+            apply_acknowledgment(&mut next, acknowledgment, &mut journal)?;
+        }
+        TripwireInput::Mark | TripwireInput::Clock | TripwireInput::Restart => {}
+    }
+
+    refresh_metrics(&mut next);
+    fire_reached_tripwires(&mut next, &mut journal)?;
+    let snapshot = snapshot(&next);
+    Ok(TripwireOutcome {
+        state: next,
+        snapshot,
+        journal,
+    })
+}
+
+fn apply_version(state: &mut TripwireState, tripwires: &[Tripwire]) {
+    let previous_metrics: BTreeMap<TripwireId, TripwireMetric> = state
+        .tripwires
+        .iter()
+        .map(|tripwire| (tripwire.id.clone(), tripwire.metric))
+        .collect();
+    let mut ordered = tripwires.to_vec();
+    ordered.sort_by(|left, right| left.id.cmp(&right.id));
+    let current_ids: BTreeSet<TripwireId> =
+        ordered.iter().map(|tripwire| tripwire.id.clone()).collect();
+
+    state.accumulators.retain(|id, _| current_ids.contains(id));
+    for tripwire in &ordered {
+        if previous_metrics.get(&tripwire.id) != Some(&tripwire.metric) {
+            state.accumulators.insert(
+                tripwire.id.clone(),
+                TripwireAccumulator::zero(tripwire.metric),
+            );
+        }
+    }
+    state.tripwires = ordered;
+}
+
+fn apply_fill(state: &mut TripwireState, fill: &TripwireFill) -> Result<(), ExecutorError> {
+    let first_fill = state
+        .instruments_ever_filled
+        .insert(fill.instrument.clone());
+    for accumulator in state.accumulators.values_mut() {
+        match accumulator {
+            TripwireAccumulator::ConsecutiveLosingExits(streak) if fill.side == Side::Sell => {
+                *streak = if fill.net_realized_usd.is_negative() {
+                    streak.checked_add(1).ok_or(NumError::Overflow)?
+                } else {
+                    0
+                };
+            }
+            TripwireAccumulator::RealizedNet(net) => {
+                *net = net.checked_add(fill.net_realized_usd)?;
+            }
+            TripwireAccumulator::NewInstruments(count) if first_fill => {
+                *count = count.checked_add(1).ok_or(NumError::Overflow)?;
+            }
+            TripwireAccumulator::ConsecutiveLosingExits(_)
+            | TripwireAccumulator::NewInstruments(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn reset_realized_loss(state: &mut TripwireState) {
+    for accumulator in state.accumulators.values_mut() {
+        if let TripwireAccumulator::RealizedNet(net) = accumulator {
+            *net = Usd::ZERO;
+        }
+    }
+}
+
+fn apply_acknowledgment(
+    state: &mut TripwireState,
+    acknowledgment: &TripwireAcknowledgment,
+    journal: &mut Vec<TripwireEvent>,
+) -> Result<(), ExecutorError> {
+    let authority = owner_command(
+        OwnerCommandKind::Acknowledge,
+        acknowledgment.step_up.as_ref(),
+        acknowledgment.committed_at,
+        acknowledgment.processed_at,
+        acknowledgment.environment,
+        &state.used_assertions,
+    )
+    .map_err(|_| ExecutorError::NotInterpreted {
+        what: "tripwire acknowledgment authority".to_owned(),
+        story: "E6-13",
+    })?;
+
+    if let Some(step_up) = &acknowledgment.step_up {
+        state.used_assertions.insert(step_up.assertion.clone());
+    }
+
+    if let CommandAuthority::Refused(reason) = authority {
+        journal.push(TripwireEvent::OwnerCommandRefused {
+            reason: acknowledgment_refusal(reason),
+        });
+        return Ok(());
+    }
+
+    if independence_required(acknowledgment)
+        && !independent_users(
+            acknowledgment.requester.as_deref(),
+            acknowledgment.acknowledging_user.as_deref(),
+        )
+    {
+        journal.push(TripwireEvent::OwnerCommandRefused {
+            reason: AcknowledgmentRefusal::NotIndependent,
+        });
+        return Ok(());
+    }
+
+    if state.fired.remove(&acknowledgment.tripwire).is_some() {
+        if let Some(tripwire) = state
+            .tripwires
+            .iter()
+            .find(|tripwire| tripwire.id == acknowledgment.tripwire)
+        {
+            state.accumulators.insert(
+                tripwire.id.clone(),
+                TripwireAccumulator::zero(tripwire.metric),
+            );
+        }
+        journal.push(TripwireEvent::RiskLimitLifted {
+            id: acknowledgment.tripwire.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn acknowledgment_refusal(reason: StepUpRefusal) -> AcknowledgmentRefusal {
+    match reason {
+        StepUpRefusal::Missing => AcknowledgmentRefusal::StepUpMissing,
+        StepUpRefusal::Stale => AcknowledgmentRefusal::StepUpStale,
+        StepUpRefusal::Reused => AcknowledgmentRefusal::StepUpReused,
+        StepUpRefusal::Method => AcknowledgmentRefusal::StepUpMethod,
+    }
+}
+
+fn independence_required(acknowledgment: &TripwireAcknowledgment) -> bool {
+    acknowledgment.independent_required_at_request || acknowledgment.independent_required_now
+}
+
+fn independent_users(requester: Option<&str>, acknowledging_user: Option<&str>) -> bool {
+    matches!(
+        (requester, acknowledging_user),
+        (Some(requester), Some(acknowledging_user)) if requester != acknowledging_user
+    )
+}
+
+fn refresh_metrics(state: &mut TripwireState) {
+    state.metrics = state
+        .accumulators
+        .iter()
+        .map(|(id, accumulator)| (id.clone(), accumulator.value()))
+        .collect();
+}
+
+fn fire_reached_tripwires(
+    state: &mut TripwireState,
+    journal: &mut Vec<TripwireEvent>,
+) -> Result<(), ExecutorError> {
+    for tripwire in &state.tripwires {
+        if state.fired.contains_key(&tripwire.id) {
+            continue;
+        }
+        let Some(value) = state.metrics.get(&tripwire.id).copied() else {
+            continue;
+        };
+        if !reached(value, &tripwire.threshold)? {
+            continue;
+        }
+        state.fired.insert(tripwire.id.clone(), tripwire.action);
+        let triggered_event_index = journal.len();
+        journal.push(TripwireEvent::RiskLimitTriggered {
+            id: tripwire.id.clone(),
+            action: tripwire.action,
+            metric: tripwire.metric,
+            threshold: tripwire.threshold.clone(),
+            value,
+        });
+        journal.push(TripwireEvent::OwnerAlertSent(TripwireAlert {
+            triggered_event_index,
+        }));
+    }
+    Ok(())
+}
+
+fn reached(value: TripwireValue, threshold: &SchemaDec) -> Result<bool, ExecutorError> {
+    match value {
+        TripwireValue::Count(value) => {
+            let threshold = threshold.as_str().parse::<u32>().map_err(|_| {
+                ExecutorError::NonCanonicalPayload {
+                    field: "tripwire.threshold".to_owned(),
+                }
+            })?;
+            Ok(value >= threshold)
+        }
+        TripwireValue::Usd(value) => Ok(value >= Usd::parse(threshold.as_str())?),
+    }
+}
+
+fn snapshot(state: &TripwireState) -> TripwireSnapshot {
+    let fired: BTreeMap<TripwireId, TripwireAction> = state
+        .fired
+        .iter()
+        .map(|(id, fired_action)| {
+            let current_action = state
+                .tripwires
+                .iter()
+                .find(|tripwire| tripwire.id == *id)
+                .map(|tripwire| tripwire.action);
+            (
+                id.clone(),
+                current_action.map_or(*fired_action, |action| action.max(*fired_action)),
+            )
+        })
+        .collect();
+    let effective_action = fired.values().copied().max();
+    let any_fired = !fired.is_empty();
+    TripwireSnapshot {
+        fired,
+        metrics: state.metrics.clone(),
+        effective_action,
+        delegations_suspended: any_fired,
+        allocation_increase_blocked: any_fired,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::TripwireAlert;
+    use mandate_spec::DecGrammar;
+
+    use super::{
+        InstrumentId, SchemaDec, Side, Tripwire, TripwireAction, TripwireAlert, TripwireFill,
+        TripwireId, TripwireInput, TripwireMetric, TripwireState, Usd, fold,
+    };
 
     /// The notification boundary exposes only the trigger link and fixed generic text.
     #[test]
@@ -172,5 +449,57 @@ mod tests {
         };
         assert_eq!(alert.triggered_event_index(), 7);
         assert_eq!(alert.generic_text(), "tripwire_fired");
+    }
+
+    /// A later version's stronger action is held only while that action remains current.
+    #[test]
+    fn a_version_does_not_rewrite_the_action_that_fired() {
+        let id = TripwireId::parse("wire").expect("a tripwire id");
+        let wire = |action| Tripwire {
+            id: id.clone(),
+            metric: TripwireMetric::ConsecutiveLosingExits,
+            threshold: SchemaDec::parse("1", DecGrammar::PositiveDecimal).expect("a threshold"),
+            action,
+        };
+        let armed = fold(
+            &TripwireState::default(),
+            &TripwireInput::MandateVersionApplied {
+                tripwires: vec![wire(TripwireAction::EndDelegations)],
+            },
+        )
+        .expect("the tripwire arms");
+        let fired = fold(
+            &armed.state,
+            &TripwireInput::FillApplied {
+                fill: TripwireFill {
+                    instrument: InstrumentId::new("AAPL").expect("an instrument"),
+                    side: Side::Sell,
+                    net_realized_usd: Usd::parse("-1").expect("dollars"),
+                },
+            },
+        )
+        .expect("the tripwire fires");
+        let strengthened = fold(
+            &fired.state,
+            &TripwireInput::MandateVersionApplied {
+                tripwires: vec![wire(TripwireAction::ExitsOnly)],
+            },
+        )
+        .expect("the stronger version applies");
+        assert_eq!(
+            strengthened.snapshot.effective_action,
+            Some(TripwireAction::ExitsOnly)
+        );
+        let restored = fold(
+            &strengthened.state,
+            &TripwireInput::MandateVersionApplied {
+                tripwires: vec![wire(TripwireAction::EndDelegations)],
+            },
+        )
+        .expect("the later version applies");
+        assert_eq!(
+            restored.snapshot.effective_action,
+            Some(TripwireAction::EndDelegations)
+        );
     }
 }

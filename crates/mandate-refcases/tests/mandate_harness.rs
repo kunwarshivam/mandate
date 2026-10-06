@@ -251,19 +251,10 @@ fn a_kind_no_arm_interprets_fails_naming_it() {
     );
 }
 
-/// MC-W27 reaches the E6-13-owned arm and fails on its named adapter stub, rather than on the
-/// generic unknown-kind guard or by silently passing.
+/// MC-W27 reaches the implemented E6-13-owned arm and checks its fixture expectation.
 #[test]
-fn a_tripwire_case_reaches_the_fail_closed_e6_13_adapter() {
-    let failure = run(fixture(), "MC-W27").expect_err("the tests-PR adapter must fail closed");
-    assert!(
-        failure.contains("E6-13 tripwire reference adapter is not implemented"),
-        "MC-W27 must stop at the owned tripwire adapter, got: {failure}"
-    );
-    assert!(
-        !failure.contains("unknown case kind"),
-        "the tripwire family has an owned arm"
-    );
+fn a_tripwire_case_reaches_the_implemented_e6_13_adapter() {
+    assert_eq!(run(fixture(), "MC-W27"), Ok(()));
 }
 
 /// A wrong expected value fails its case, and a right one passes: MC-S01 and the first rejection

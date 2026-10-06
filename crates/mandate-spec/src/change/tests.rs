@@ -190,8 +190,7 @@ fn blocks_that_differ_only_in_their_delegations_are_neutral_in_the_autonomy_row(
     Ok(())
 }
 
-/// The general autonomy row excludes tripwires, while the dedicated row reaches the fail-closed
-/// E6-13 classifier in this tests PR.
+/// The general autonomy row excludes tripwires, while the dedicated row classifies their change.
 #[test]
 fn tripwires_are_owned_only_by_their_dedicated_change_row() -> Checked {
     let old_autonomy = autonomy(not_in(ConditionField::Purpose, &["increase"]), Ask)?;
@@ -222,7 +221,7 @@ fn tripwires_are_owned_only_by_their_dedicated_change_row() -> Checked {
             &Value::Null,
             "/autonomy/tripwires"
         ),
-        Err(SpecError::Unimplemented)
+        Ok(ChangeClass::RiskReducing)
     );
     Ok(())
 }
