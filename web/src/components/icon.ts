@@ -1,7 +1,7 @@
 import { createElement, type JSX, type SVGProps } from "react";
 
 /**
- * One Pixelarticons glyph (DEC-475), imported one file per icon:
+ * One Pixelarticons glyph (DEC-478), imported one file per icon:
  * `import { Home } from "pixelarticons/react/Home.js"`. Each is drawn on a 24px grid without
  * anti-aliasing, so it renders at 24px (`size-6`, its default) or 48px (`size-12`) and never in
  * between, where its pixels would blur. The glyph sits inside the square with room around it, so a
