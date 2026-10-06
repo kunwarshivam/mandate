@@ -647,9 +647,9 @@ mod tests {
     use mandate_accounting::{Account, AccountType, InstrumentId, Side};
     use mandate_approval::Environment;
     use mandate_builder::{ActionContext, Classification, classify};
-    use mandate_domain::{AssetClass, AutonomyDecision};
+    use mandate_domain::{AssetClass, AutonomyDecision, Purpose};
     use mandate_executor::tripwire::TripwireState;
-    use mandate_num::{Qty, Unit, Usd};
+    use mandate_num::{Qty, Usd};
     use mandate_spec::document::{Autonomy, Lifts};
     use mandate_spec::{DecGrammar, SchemaDec, risk};
     use serde_json::json;
@@ -858,7 +858,7 @@ mod tests {
         assert!(!delegated(&at_expiry, &action, false, basic.clone())?);
 
         let mut false_condition = action.clone();
-        false_condition.combined_score = Unit::parse("0").map_err(|error| error.to_string())?;
+        false_condition.purpose = Purpose::Protective;
         assert!(!delegated(
             &mandate.autonomy,
             &false_condition,
