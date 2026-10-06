@@ -14,8 +14,22 @@ import { PROVENANCE_LABEL } from "@/lib/labels";
 import { type Deployment, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { type Draft, SECTION_KEYS } from "./draft";
-import { BackButton, STEP_HEADING, StepHeading } from "./goal-steps";
-import { CONTRACT_LEAD_CONFIRMED, CONTRACT_TITLE, ContractCard, DraftFields, GAP_NOTE, NOT_ENFORCED_EMPTY, NOT_ENFORCED_LEAD, NotEnforcedList, UNASKED_LABEL, contractTerms, lossFigures, unaskedNote } from "./mandate-parts";
+import { BackButton, STEP_HEADING, StepHeading } from "./steps";
+import {
+  CONTRACT_LEAD_CONFIRMED,
+  CONTRACT_TITLE,
+  ContractCard,
+  DraftFields,
+  GAP_NOTE,
+  NOT_ENFORCED_EMPTY,
+  NOT_ENFORCED_LEAD,
+  NotEnforcedList,
+  UNASKED_LABEL,
+  WORDS_TITLE,
+  contractTerms,
+  lossFigures,
+  unaskedNote,
+} from "./mandate-parts";
 import { KEY } from "@/components/kumo/key";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +55,7 @@ export function confirmationLines(draft: Draft, version: ContentRef): string[] {
     CONTRACT_TITLE,
     CONTRACT_LEAD_CONFIRMED,
     ...contractTerms(draft),
-    draft.answers.length === 1 ? "Your words" : "Your three answers",
+    WORDS_TITLE,
     ...draft.answers.map((a) => `${a.label}: “${a.quote}”`),
     UNASKED_LABEL,
     usd(draft.figures.unasked),

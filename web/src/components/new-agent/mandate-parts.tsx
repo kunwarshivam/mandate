@@ -108,8 +108,9 @@ export function lossFigures(draft: Draft): Array<{ label: string; value: Dec; pr
 }
 
 export const CONTRACT_TITLE = "Your mandate in plain words";
-export const CONTRACT_LEAD = "The fields below, read as sentences. Anything marked as proposed is not active until you confirm its section.";
-export const CONTRACT_LEAD_CONFIRMED = "The fields below, read as sentences. You confirmed every section.";
+export const WORDS_TITLE = "Your words";
+export const CONTRACT_LEAD = "Your mandate's fields, read as sentences. Anything marked as proposed is not active until you confirm its section.";
+export const CONTRACT_LEAD_CONFIRMED = "Your mandate's fields, read as sentences. You confirmed every section.";
 export const UNASKED_LABEL = "Unasked dollars: what could trade without asking you once you confirm";
 export const GAP_NOTE = "Price gaps and exit prices can make any of these losses larger. You stated only the last one; the platform worked out the others from it.";
 
@@ -135,7 +136,7 @@ export function ContractCard({ draft, confirmed = false }: { draft: Draft; confi
       </ul>
 
       <div className="grid gap-2">
-        <p className="text-label text-mandate-muted">{draft.answers.length === 1 ? "Your words" : "Your three answers"}</p>
+        <p className="text-label text-mandate-muted">{WORDS_TITLE}</p>
         <ul className="grid gap-2">
           {draft.answers.map((a) => (
             <li key={a.label} className="grid gap-0.5 border-l-2 border-mandate-marker pl-3">
