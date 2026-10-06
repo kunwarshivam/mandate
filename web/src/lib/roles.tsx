@@ -24,6 +24,8 @@ export type Capability =
   /** Stop, kill, release and close everything. */
   | "stop.full"
   | "approvals.respond"
+  /** Confirm a new mandate and deploy it: only the owner sets the envelope (rule 11). */
+  | "agents.deploy"
   | "agents.view"
   | "audit.view"
   | "workspace.view";
@@ -31,10 +33,11 @@ export type Capability =
 export function can(role: Role, capability: Capability): boolean {
   switch (role) {
     case "owner":
-    case "operator":
       return true;
+    case "operator":
+      return capability !== "agents.deploy";
     case "approver":
-      return capability !== "stop.full";
+      return capability !== "stop.full" && capability !== "agents.deploy";
     case "viewer":
       return capability === "agents.view" || capability === "workspace.view";
     case "auditor":

@@ -5,11 +5,20 @@ import { Button } from "@cloudflare/kumo/components/button";
 import { CheckCircle } from "@phosphor-icons/react";
 import { FIELD } from "@/components/auth/buttons";
 import { isPlatformAuthored } from "@/lib/labels";
-import { type Draft, type DraftSection, SECTION_KEYS, type SectionKey } from "./draft";
-import { BackButton, PrototypeNote, StepHeading } from "./goal-steps";
+import { type Draft, type DraftSection, MODELS, SECTION_KEYS, type SectionKey, type Strategy } from "./draft";
+import { BackButton, StepHeading } from "./goal-steps";
 import { ContractCard, DraftFields, NotEnforcedList } from "./mandate-parts";
 import { KEY } from "@/components/kumo/key";
 import { cn } from "@/lib/utils";
+
+function SectionError({ id, error }: { id?: string; error: string | null }) {
+  if (!error) return null;
+  return (
+    <p id={id} role="alert" data-slot="section-error" className="max-w-measure text-sm font-medium text-pretty">
+      {error}
+    </p>
+  );
+}
 
 /**
  * One section of the draft with its own confirmation (brief A2: per section, never all at once,
@@ -18,12 +27,15 @@ import { cn } from "@/lib/utils";
 function ReviewSection({
   section,
   confirmed,
+  error,
   onConfirm,
   onUndo,
   children,
 }: {
   section: DraftSection;
   confirmed: boolean;
+  /** Why this section cannot be confirmed, when the owner tried and it cannot. */
+  error?: string | null;
   /** False when the section cannot be confirmed yet. */
   onConfirm: () => boolean;
   onUndo: () => void;
@@ -65,6 +77,7 @@ function ReviewSection({
       </div>
       {children}
       <DraftFields fields={section.fields} confirmed={confirmed} />
+      <SectionError error={error ?? null} />
       <div ref={actions} className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {confirmed ? (
           <>
@@ -121,50 +134,133 @@ function SymbolsField({ value, error, onChange }: { value: string; error: string
         className={FIELD}
       />
       <p id={`${id}-hint`} className="text-sm text-muted-foreground">
-        Separate them with commas or spaces. At most 20.
+        Separate them with commas or spaces. At most 20. One agent trades an instrument on an account.
       </p>
-      {error ? (
-        <p id={`${id}-error`} role="alert" data-slot="section-error" className="text-sm font-medium">
-          {error}
-        </p>
-      ) : null}
+      <SectionError id={`${id}-error`} error={error} />
     </div>
   );
 }
 
+const MODEL_CHOICE =
+  "press grid content-start gap-1 rounded-2xl border border-foreground/25 bg-card px-4 py-4 has-checked:border-foreground has-checked:bg-background has-focus-visible:ring-3 has-focus-visible:ring-ring";
+
+/**
+ * The model and its settings, the owner's to choose (brief A3): methodology only, listed in a fixed
+ * order with no ranking and nothing recommended; nothing is preselected and every setting starts empty.
+ */
+function StrategyField({ strategy, error, onChange }: { strategy: Strategy; error: string | null; onChange: (next: Strategy) => void }) {
+  const id = useId();
+  const chosen = MODELS.find((m) => m.id === strategy.model);
+  return (
+    <div className="grid gap-5">
+      <fieldset className="grid gap-2" aria-describedby={`${id}-models-hint`}>
+        <legend className="field-label">Model</legend>
+        <p id={`${id}-models-hint`} className="pb-1 text-sm text-pretty text-muted-foreground">
+          In alphabetical order. The platform ranks none and recommends none.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2" data-slot="model-choices">
+          {MODELS.map((m) => (
+            <label key={m.id} className={MODEL_CHOICE} data-slot="model-choice">
+              <span className="flex items-center gap-2.5">
+                <input
+                  type="radio"
+                  name={`${id}-model`}
+                  value={m.id}
+                  checked={strategy.model === m.id}
+                  onChange={() => onChange({ model: m.id, params: Object.fromEntries(m.params.map((p) => [p.key, strategy.params[p.key] ?? ""])) })}
+                  className="size-4 accent-foreground outline-none"
+                />
+                <span className="text-base font-semibold">{m.name}</span>
+              </span>
+              <span className="text-sm text-pretty text-muted-foreground">{m.what}</span>
+              <span className="font-mono text-caption text-muted-foreground" translate="no">
+                {m.id} {m.version}
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      {chosen
+        ? chosen.params.map((p) => (
+            <div key={p.key} className="grid gap-2">
+              <label htmlFor={`${id}-${p.key}`} className="field-label">
+                {p.label}
+              </label>
+              <input
+                id={`${id}-${p.key}`}
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                spellCheck={false}
+                value={strategy.params[p.key] ?? ""}
+                aria-describedby={`${id}-${p.key}-hint`}
+                onChange={(e) => onChange({ ...strategy, params: { ...strategy.params, [p.key]: e.target.value } })}
+                className={cn(FIELD, "max-w-48")}
+              />
+              <p id={`${id}-${p.key}-hint`} className="max-w-measure text-sm text-pretty text-muted-foreground">
+                {p.hint}
+              </p>
+            </div>
+          ))
+        : null}
+      <SectionError error={error} />
+    </div>
+  );
+}
+
+export type SectionErrors = Partial<Record<SectionKey, string | null>>;
+
 /**
  * A2, the compiled review: the contract card on top, every field grouped by section with its
  * provenance, what is not enforced listed apart, and one primary action, enabled only once every
- * section is confirmed.
+ * section is confirmed, that opens the confirmation record (A5).
  */
 export function CompiledReview({
   draft,
   confirmed,
+  errors,
   symbolsText,
-  symbolsError,
+  strategy,
   onSymbols,
+  onStrategy,
   onConfirm,
   onUndo,
   onBack,
-  onDeploy,
+  onContinue,
 }: {
   draft: Draft;
   confirmed: Record<SectionKey, boolean>;
+  errors: SectionErrors;
   symbolsText: string;
-  /** Why the instrument list cannot be confirmed yet, if it cannot. */
-  symbolsError: string | null;
+  strategy: Strategy;
   onSymbols: (value: string) => void;
+  onStrategy: (next: Strategy) => void;
   onConfirm: (key: SectionKey) => boolean;
   onUndo: (key: SectionKey) => void;
   onBack: () => void;
-  onDeploy: () => void;
+  onContinue: () => void;
 }) {
   const done = SECTION_KEYS.filter((k) => confirmed[k]).length;
   const ready = done === SECTION_KEYS.length;
+  const extra = (key: SectionKey): ReactNode => {
+    switch (key) {
+      case "universe":
+        return <SymbolsField value={symbolsText} error={errors.universe ?? null} onChange={onSymbols} />;
+      case "strategy":
+        return <StrategyField strategy={strategy} error={errors.strategy ?? null} onChange={onStrategy} />;
+      case "money":
+      case "limits":
+      case "autonomy":
+        return null;
+      default: {
+        const unhandled: never = key;
+        throw new Error(`unhandled section ${String(unhandled)}`);
+      }
+    }
+  };
   return (
     <div className="grid gap-(--section-gap)">
       <div className="grid gap-3">
-        <PrototypeNote />
         <p className="text-label text-muted-foreground">Review</p>
         <StepHeading>Check your mandate</StepHeading>
         <p className="max-w-measure text-pretty text-muted-foreground">
@@ -180,10 +276,11 @@ export function CompiledReview({
           key={section.key}
           section={section}
           confirmed={confirmed[section.key]}
+          error={section.key === "universe" || section.key === "strategy" ? null : errors[section.key]}
           onConfirm={() => onConfirm(section.key)}
           onUndo={() => onUndo(section.key)}
         >
-          {section.key === "universe" ? <SymbolsField value={symbolsText} error={symbolsError} onChange={onSymbols} /> : null}
+          {extra(section.key)}
         </ReviewSection>
       ))}
 
@@ -194,7 +291,9 @@ export function CompiledReview({
           <h2 id="deploy-title" className="text-h3">
             Deploy to paper
           </h2>
-          <p className="max-w-measure text-sm text-pretty">It would trade simulated funds on your paper account. No real money moves.</p>
+          <p className="max-w-measure text-sm text-pretty">
+            Next you read the whole mandate once more, exactly as the journal will keep it, and confirm it with your passkey. Then it trades simulated funds on your paper account.
+          </p>
           <p role="status" className="text-sm text-muted-foreground" data-slot="confirmed-count">
             <span className="tabular">{done}</span> of <span className="tabular">{SECTION_KEYS.length}</span> sections confirmed.{" "}
             {ready ? "Every section is confirmed." : "Confirm each section to continue."}
@@ -202,11 +301,10 @@ export function CompiledReview({
         </div>
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
           <BackButton onClick={onBack}>Change your answers</BackButton>
-          <Button type="button" variant="secondary" size="lg" className={cn(KEY, "w-full sm:w-auto")} disabled={!ready} onClick={onDeploy}>
-            Confirm and deploy to paper
+          <Button type="button" variant="secondary" size="lg" className={cn(KEY, "w-full sm:w-auto")} disabled={!ready} onClick={onContinue}>
+            Continue to confirm
           </Button>
         </div>
-        <p className="text-caption text-pretty text-muted-foreground">In the product a passkey check comes next, and the journal keeps this screen as you saw it. This prototype skips both.</p>
       </section>
     </div>
   );

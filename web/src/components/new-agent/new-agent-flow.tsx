@@ -1,33 +1,53 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { claimedBy, unallocatedUsd } from "@/lib/fixture-journey";
 import { percent, usd } from "@/lib/format";
 import { useRuntime } from "@/lib/mock-runtime";
-import { CompiledReview } from "./compiled-review";
+import { CompiledReview, type SectionErrors } from "./compiled-review";
 import { Confirmation } from "./confirmation";
-import { type Answers, LOSS_CEILING, SECTION_KEYS, type SectionKey, type Source, compile, lossCeilingUsd, read, readGoal, readLoss, readMoney, readSymbols } from "./draft";
+import {
+  type Answers,
+  LOSS_CEILING,
+  NO_STRATEGY,
+  SECTION_KEYS,
+  type SectionKey,
+  type Source,
+  type Strategy,
+  compile,
+  lossCeilingUsd,
+  mandateFrom,
+  read,
+  readGoal,
+  readLoss,
+  readMoney,
+  readStrategy,
+  readSymbols,
+} from "./draft";
 import { DescribeStep, QuestionStep, STEP_HEADING, StartStep } from "./goal-steps";
 
-type Step = "start" | "money" | "goal" | "loss" | "describe" | "review" | "confirmed";
+type Step = "start" | "money" | "goal" | "loss" | "describe" | "review" | "confirm";
 
-const NONE_CONFIRMED: Record<SectionKey, boolean> = { money: false, limits: false, autonomy: false, universe: false };
+const NONE_CONFIRMED: Record<SectionKey, boolean> = { money: false, limits: false, strategy: false, autonomy: false, universe: false };
 const NO_ANSWERS: Answers = { money: "", goal: "", loss: "" };
 
 /**
- * The mandate-writing prototype (brief A0 → A2 → A5) on fixture rules. Everything lives in this
- * component's state: nothing is fetched, stored or sent, and leaving the page forgets it.
+ * Setting up an agent (brief A0 → A2 → A5) on the fixture workspace. The answers live in this
+ * component's state until the owner confirms A5 with a passkey; only then does anything reach the
+ * runtime, which repeats V-002 and V-006 when it applies the deployment.
  */
-export function NewAgentPrototype() {
-  const { now } = useRuntime();
+export function NewAgentFlow() {
+  const { ws } = useRuntime();
   const [step, setStep] = useState<Step>("start");
   const [path, setPath] = useState<"questions" | "description">("questions");
   const [answers, setAnswers] = useState<Answers>(NO_ANSWERS);
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [symbolsText, setSymbolsText] = useState("");
-  const [symbolsError, setSymbolsError] = useState<string | null>(null);
+  const [strategy, setStrategy] = useState<Strategy>(NO_STRATEGY);
+  const [errors, setErrors] = useState<SectionErrors>({});
   const [confirmed, setConfirmed] = useState(NONE_CONFIRMED);
-  const [confirmedAt, setConfirmedAt] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   const root = useRef<HTMLDivElement>(null);
   const firstStep = useRef(true);
@@ -44,11 +64,16 @@ export function NewAgentPrototype() {
     const parsed = readSymbols(symbolsText);
     return parsed.ok ? parsed.value : [];
   }, [symbolsText]);
+  const chosen = useMemo(() => {
+    const parsed = readStrategy(strategy);
+    return parsed.ok ? parsed.value : null;
+  }, [strategy]);
   const draft = useMemo(() => {
-    if (step !== "review" && step !== "confirmed") return null;
+    if (step !== "review" && step !== "confirm") return null;
     const parsed = read(path === "questions" ? { kind: "questions", answers } : { kind: "description", text: description });
-    return parsed.ok ? compile(parsed.value, symbols) : null;
-  }, [step, path, answers, description, symbols]);
+    return parsed.ok ? compile(parsed.value, symbols, chosen) : null;
+  }, [step, path, answers, description, symbols, chosen]);
+  const request = useMemo(() => (draft && step === "confirm" ? mandateFrom(draft, ws.connection.connection_id) : null), [draft, step, ws.connection.connection_id]);
 
   const go = (next: Step) => {
     setError(null);
@@ -58,6 +83,10 @@ export function NewAgentPrototype() {
     setAnswers((a) => ({ ...a, [key]: value }));
     setError(null);
   };
+  const unconfirm = (key: SectionKey) => {
+    setConfirmed((c) => (c[key] ? { ...c, [key]: false } : c));
+    setErrors((e) => ({ ...e, [key]: null }));
+  };
   const toReview = () => {
     const parsed = read(source);
     if (!parsed.ok) {
@@ -65,14 +94,60 @@ export function NewAgentPrototype() {
       return;
     }
     setConfirmed(NONE_CONFIRMED);
+    setErrors({});
     go("review");
+  };
+  const startOver = () => {
+    setAnswers(NO_ANSWERS);
+    setDescription("");
+    setSymbolsText("");
+    setStrategy(NO_STRATEGY);
+    setErrors({});
+    setConfirmed(NONE_CONFIRMED);
+    setAttempt((n) => n + 1);
+    go("start");
+  };
+
+  /** The checks a section must pass to be confirmed; the runtime repeats V-002 and V-006 when it deploys. */
+  const blocker = (key: SectionKey): string | null => {
+    if (!draft) return null;
+    switch (key) {
+      case "money": {
+        const room = unallocatedUsd(ws);
+        if (draft.terms.allocationUsd > room) {
+          return `Your paper account has ${usd(room)} that no agent uses, less than the ${usd(draft.terms.allocationUsd)} this agent asks for. Change your answers to use less.`;
+        }
+        return null;
+      }
+      case "strategy": {
+        const parsed = readStrategy(strategy);
+        return parsed.ok ? null : parsed.error;
+      }
+      case "universe": {
+        const parsed = readSymbols(symbolsText);
+        if (!parsed.ok) return parsed.error;
+        if (parsed.value.length === 0) return "Add at least one symbol. Only you choose what it may trade.";
+        for (const s of parsed.value) {
+          const holder = claimedBy(ws, s);
+          if (holder) return `${s} is already traded by ${holder.label}. One agent trades an instrument on an account; choose another.`;
+        }
+        return null;
+      }
+      case "limits":
+      case "autonomy":
+        return null;
+      default: {
+        const unhandled: never = key;
+        throw new Error(`unhandled section ${String(unhandled)}`);
+      }
+    }
   };
   const allocation = readMoney(answers.money);
 
   switch (step) {
     case "start":
       return (
-        <div ref={root} className="mx-auto w-full max-w-2xl reveal" key={step}>
+        <div ref={root} className="mx-auto w-full max-w-2xl reveal" key={`${step}-${attempt}`}>
           <StartStep
             onQuestions={() => {
               setPath("questions");
@@ -180,58 +255,41 @@ export function NewAgentPrototype() {
           <CompiledReview
             draft={draft}
             confirmed={confirmed}
+            errors={errors}
             symbolsText={symbolsText}
-            symbolsError={symbolsError}
+            strategy={strategy}
             onSymbols={(value) => {
               setSymbolsText(value);
-              setSymbolsError(null);
-              setConfirmed((c) => (c.universe ? { ...c, universe: false } : c));
+              unconfirm("universe");
+            }}
+            onStrategy={(next) => {
+              setStrategy(next);
+              unconfirm("strategy");
             }}
             onConfirm={(key) => {
-              if (key === "universe") {
-                const parsed = readSymbols(symbolsText);
-                if (!parsed.ok) {
-                  setSymbolsError(parsed.error);
-                  return false;
-                }
-                if (parsed.value.length === 0) {
-                  setSymbolsError("Add at least one symbol. Only you choose what it may trade.");
-                  return false;
-                }
-              }
+              const why = blocker(key);
+              setErrors((e) => ({ ...e, [key]: why }));
+              if (why) return false;
               setConfirmed((c) => ({ ...c, [key]: true }));
               return true;
             }}
             onUndo={(key) => setConfirmed((c) => ({ ...c, [key]: false }))}
             onBack={() => {
               setConfirmed(NONE_CONFIRMED);
+              setErrors({});
               go(path === "questions" ? "money" : "describe");
             }}
-            onDeploy={() => {
-              if (!SECTION_KEYS.every((k) => confirmed[k])) return;
-              setConfirmedAt(now);
-              go("confirmed");
+            onContinue={() => {
+              if (SECTION_KEYS.every((k) => confirmed[k])) go("confirm");
             }}
           />
         </div>
       );
-    case "confirmed":
-      if (!draft || !confirmedAt) return null;
+    case "confirm":
+      if (!draft || !request) return null;
       return (
         <div ref={root} className="mx-auto w-full max-w-3xl reveal" key={step}>
-          <Confirmation
-            draft={draft}
-            confirmedAt={confirmedAt}
-            onStartOver={() => {
-              setAnswers(NO_ANSWERS);
-              setDescription("");
-              setSymbolsText("");
-              setSymbolsError(null);
-              setConfirmed(NONE_CONFIRMED);
-              setConfirmedAt(null);
-              go("start");
-            }}
-          />
+          <Confirmation draft={draft} request={request} onBack={() => go("review")} onStartOver={startOver} />
         </div>
       );
     default: {

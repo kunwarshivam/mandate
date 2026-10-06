@@ -8,7 +8,7 @@ import { renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { type Capability, ROLES, type Role, can } from "./roles";
 
-const CAPABILITIES: Capability[] = ["stop.open", "stop.pause", "stop.full", "approvals.respond", "agents.view", "audit.view", "workspace.view"];
+const CAPABILITIES: Capability[] = ["stop.open", "stop.pause", "stop.full", "approvals.respond", "agents.deploy", "agents.view", "audit.view", "workspace.view"];
 
 function allowed(role: Role) {
   return CAPABILITIES.filter((c) => can(role, c));
@@ -30,9 +30,9 @@ function sidebarGroups() {
 beforeEach(() => setPathname("/"));
 
 describe("what each role may do", () => {
-  it("gives owners and operators everything", () => {
+  it("gives owners everything, and operators everything but deploying a new mandate", () => {
     expect(allowed("owner")).toEqual(CAPABILITIES);
-    expect(allowed("operator")).toEqual(CAPABILITIES);
+    expect(allowed("operator")).toEqual(CAPABILITIES.filter((c) => c !== "agents.deploy"));
   });
 
   it("lets approvers pause and respond, never stop or kill", () => {

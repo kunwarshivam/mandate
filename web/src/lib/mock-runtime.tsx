@@ -1,7 +1,8 @@
 "use client";
 
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ActiveRestriction, Agent, AgentMode, Approval, CancelReason, Environment, Iso, Workspace } from "@/fixtures/types";
+import type { ActiveRestriction, Agent, AgentMode, Approval, CancelReason, ContentRef, Environment, Iso, Workspace } from "@/fixtures/types";
+import { type NewAgent, addMs, agentIdFor, checkDeploy, deployAgent, fillApproved, firstProposal, mandateVersion, noteSkip, submitApproved } from "./fixture-journey";
 import { clock } from "./format";
 import { RESTRICTIONS } from "./restrictions";
 
@@ -58,14 +59,38 @@ export interface ApprovalResponse {
   record: ApprovalRecord;
 }
 
-interface Runtime {
+/** What A5 showed when the owner confirmed (brief §4.1): every line of the record screen, in order. */
+export interface DeployRecord {
+  screen: "A5";
+  environment: Environment;
+  shown: string[];
+}
+
+export interface Deployment {
+  id: string;
+  /**
+   * `rejected`: the checks repeated when it applied failed (V-002, V-006), and `reason` says which.
+   * `unknown`: the deployment took it but no journal entry came back.
+   */
+  phase: "sent" | "recorded" | "rejected" | "undelivered" | "unknown";
+  sentAt: Iso;
+  recordedAt?: Iso;
+  agentId: string;
+  version: ContentRef;
+  reason?: string;
+  record: DeployRecord;
+}
+
+export interface Runtime {
   ws: Workspace;
   now: Iso;
   reachable: boolean;
   commands: Command[];
   responses: Record<string, ApprovalResponse>;
+  deployments: Deployment[];
   send: (kind: CommandKind, agentId: string | null, record?: CommandRecord) => Command;
   respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => void;
+  deploy: (request: NewAgent, record: DeployRecord) => Deployment;
 }
 
 const RuntimeContext = createContext<Runtime | null>(null);
@@ -79,19 +104,6 @@ export function effectiveMode(restrictions: ActiveRestriction[]): AgentMode {
     if (imposed && SEVERITY[imposed] > SEVERITY[mode]) mode = imposed;
   }
   return mode;
-}
-
-function addSeconds(iso: Iso, ms: number): Iso {
-  const offset = iso.slice(-6);
-  const shifted = new Date(Date.parse(iso) + ms);
-  const local = new Date(shifted.getTime() + offsetMinutes(offset) * 60_000);
-  return `${local.toISOString().slice(0, 19)}${offset}`;
-}
-
-function offsetMinutes(offset: string): number {
-  const sign = offset.startsWith("-") ? -1 : 1;
-  const [h, m] = offset.slice(1).split(":").map(Number);
-  return sign * (h * 60 + m);
 }
 
 function note(ws: Workspace, agentId: string, at: Iso, text: string, kind: "mode" | "order" = "mode") {
@@ -219,8 +231,16 @@ export function RuntimeProvider({
   const [now, setNow] = useState(initial.now);
   const [commands, setCommands] = useState<Command[]>([]);
   const [responses, setResponses] = useState<Record<string, ApprovalResponse>>({});
+  const [deployments, setDeployments] = useState<Deployment[]>([]);
   const nowRef = useRef(initial.now);
+  const wsRef = useRef(initial);
   const counter = useRef(0);
+
+  /** Every change to the workspace, applied in order to the latest one, so a check made before it never reads a stale copy. */
+  const change = useCallback((apply: (current: Workspace) => Workspace) => {
+    wsRef.current = apply(wsRef.current);
+    setWs(wsRef.current);
+  }, []);
   const reachable = initial.status !== "unreachable";
   const silent = initial.journal === "silent";
 
@@ -228,7 +248,7 @@ export function RuntimeProvider({
     if (!tick) return;
     const started = Date.now();
     const id = window.setInterval(() => {
-      const next = addSeconds(initial.now, Date.now() - started);
+      const next = addMs(initial.now, Date.now() - started);
       nowRef.current = next;
       setNow(next);
     }, 1000);
@@ -250,12 +270,12 @@ export function RuntimeProvider({
           setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, phase: "unknown" } : c)));
           return;
         }
-        setWs((current) => applyCommand(current, command, at));
+        change((current) => applyCommand(current, command, at));
         setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, phase: "recorded", recordedAt: at } : c)));
       }, recordAfterMs);
       return command;
     },
-    [reachable, silent, recordAfterMs],
+    [reachable, silent, recordAfterMs, change],
   );
 
   const respond = useCallback(
@@ -268,22 +288,55 @@ export function RuntimeProvider({
           setResponses((map) => ({ ...map, [approvalId]: { ...entry, phase: "unknown" } }));
           return;
         }
-        setWs((current) => applyResponse(current, entry, at, "recorded"));
+        change((current) => noteSkip(applyResponse(current, entry, at, "recorded"), approvalId, at));
         setResponses((map) => ({ ...map, [approvalId]: { ...entry, phase: "recorded", recordedAt: at } }));
         if (response === "skip") return;
         window.setTimeout(() => {
           const decidedAt = nowRef.current;
-          setWs((current) => applyResponse(current, entry, decidedAt, "decided"));
+          change((current) => submitApproved(applyResponse(current, entry, decidedAt, "decided"), approvalId, decidedAt));
           setResponses((map) => ({ ...map, [approvalId]: { ...entry, phase: "decided", recordedAt: at } }));
+          window.setTimeout(() => {
+            const filledAt = nowRef.current;
+            change((current) => fillApproved(current, approvalId, filledAt));
+          }, recordAfterMs);
         }, recordAfterMs * 0.75);
       }, recordAfterMs);
     },
-    [silent, recordAfterMs],
+    [silent, recordAfterMs, change],
+  );
+
+  const deploy = useCallback(
+    (request: NewAgent, record: DeployRecord): Deployment => {
+      counter.current += 1;
+      const seed = `${initial.scenario}:${counter.current}`;
+      const deployment: Deployment = {
+        id: `dep-${counter.current}`,
+        phase: "sent",
+        sentAt: nowRef.current,
+        agentId: agentIdFor(request.mandate, seed),
+        version: mandateVersion(request.mandate),
+        record,
+      };
+      setDeployments((list) => [...list, deployment]);
+      const update = (patch: Partial<Deployment>) => setDeployments((list) => list.map((d) => (d.id === deployment.id ? { ...d, ...patch } : d)));
+      window.setTimeout(() => {
+        const at = nowRef.current;
+        if (!reachable) return update({ phase: "undelivered" });
+        if (silent) return update({ phase: "unknown" });
+        const check = checkDeploy(wsRef.current, request.mandate);
+        if (!check.ok) return update({ phase: "rejected", recordedAt: at, reason: check.reason });
+        change((current) => deployAgent(current, request, at, seed).ws);
+        update({ phase: "recorded", recordedAt: at });
+        window.setTimeout(() => change((current) => firstProposal(current, deployment.agentId, nowRef.current, seed)), recordAfterMs * 2);
+      }, recordAfterMs);
+      return deployment;
+    },
+    [initial.scenario, reachable, silent, recordAfterMs, change],
   );
 
   const value = useMemo(
-    () => ({ ws, now, reachable, commands, responses, send, respond }),
-    [ws, now, reachable, commands, responses, send, respond],
+    () => ({ ws, now, reachable, commands, responses, deployments, send, respond, deploy }),
+    [ws, now, reachable, commands, responses, deployments, send, respond, deploy],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

@@ -3,7 +3,6 @@ import AgentsNew from "@/app/(app)/agents/new/page";
 import Agents from "@/app/(app)/agents/page";
 import Approvals from "@/app/(app)/approvals/page";
 import Audit from "@/app/(app)/audit/page";
-import DesignNewAgent from "@/app/(app)/design/new-agent/page";
 import Design from "@/app/(app)/design/page";
 import ErrorScreen from "@/app/(app)/error";
 import Loading from "@/app/(app)/loading";
@@ -25,7 +24,6 @@ export const ROUTES: Array<[string, ComponentType]> = [
   ["/audit", Audit],
   ["/settings", Settings],
   ["/design", Design],
-  ["/design/new-agent", DesignNewAgent],
   ["/loading", Loading],
   ["/not-found", NotFound],
   ["/error", () => <ErrorScreen error={new Error("render failed")} reset={() => {}} />],

@@ -47,7 +47,7 @@ export const SCREENS: readonly Screen[] = [
     label: "New agent",
     purpose: "Describe an agent in your own words, review every drafted field with where it came from, and confirm each section before it deploys to paper.",
     group: "agents",
-    built: false,
+    built: true,
     needs: "agents.view",
   },
   {

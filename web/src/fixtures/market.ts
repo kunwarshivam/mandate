@@ -67,7 +67,18 @@ const DAY = 86_400;
 export const WINDOW_START_ISO = "2026-09-21T00:00:00-04:00";
 
 /** A price a symbol last traded at when no agent holds it. */
-const LAST_PRICE: Record<string, number> = { LMN: 45.6, XYZ: 141.2, QRS: 97.7, "BTC/USD": 56_780 };
+const LAST_PRICE: Record<string, string> = { LMN: "45.6", XYZ: "141.2", QRS: "97.7", "BTC/USD": "56780" };
+
+/**
+ * A symbol's last fixture price, as a decimal string: the recorded one, or for a symbol the fixtures
+ * do not list, one between $20 and $240 drawn from the symbol, so it never changes between visits.
+ */
+export function lastPrice(symbol: string): string {
+  const known = LAST_PRICE[symbol];
+  if (known) return known;
+  const cents = 2000 + (seedOf(`price:${symbol}`) % 22_000);
+  return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
+}
 
 /** Where an agent that holds one symbol touches its high-water mark while holding it. */
 const PEAK_AT: Record<string, string> = {
@@ -294,7 +305,7 @@ function dailyFrom(minute: Bar[], assetClass: AssetClass, symbol: string): Daily
   const normal = gaussian(rand);
   const sigma = assetClass === "crypto" ? 0.025 : 0.016;
   const earlier: DailyBar[] = [];
-  let next = recent[0]?.open ?? LAST_PRICE[symbol] ?? 100;
+  let next = recent[0]?.open ?? Number(lastPrice(symbol));
   let day = Date.parse(`${recent[0]?.day ?? WINDOW_START_ISO.slice(0, 10)}T12:00:00Z`);
   const count = assetClass === "crypto" ? 365 : 252;
   while (earlier.length < count) {
@@ -345,7 +356,7 @@ function symbolBars(symbol: string, assetClass: AssetClass, owner: Owner | undef
     for (const o of agent.orders) if (o.instrument.symbol === symbol) bands.push(...bandsFor(o, end, agent));
     for (const o of agent.past_orders) if (o.instrument.symbol === symbol) bands.push(...bandsFor(o, unix(o.closed_at), agent));
   }
-  if (!owner?.agent.positions.some((p) => p.instrument.symbol === symbol)) put(end, LAST_PRICE[symbol] ?? 100);
+  if (anchors.size === 0 || !owner?.agent.positions.some((p) => p.instrument.symbol === symbol)) put(end, Number(lastPrice(symbol)));
 
   const sorted = [...anchors.entries()].sort((a, b) => a[0] - b[0]).map(([index, price]) => ({ index, price }));
   const closes = bridge(grid, sorted, assetClass, rand).map((p, k) => (anchors.has(k) ? p : applyBands(p, grid[k], bands)));
@@ -447,7 +458,10 @@ export function buildMarket(ws: Workspace): Market {
 
   const equity: Record<string, Point[]> = {};
   const today = unix(`${ws.now.slice(0, 10)}T00:00:00-04:00`);
-  for (const agent of ws.agents) equity[agent.agent_id] = equityCurve(agent, symbols, Math.max(start, floorMinute(unix(agent.deployed_at))), end, today);
+  for (const agent of ws.agents) {
+    const deployed = Math.min(end, Math.max(start, floorMinute(unix(agent.deployed_at))));
+    equity[agent.agent_id] = equityCurve(agent, symbols, deployed, end, today);
+  }
 
   const account: Point[] = [];
   for (let t = start, i = 0; t <= end; t += MINUTE, i++) {

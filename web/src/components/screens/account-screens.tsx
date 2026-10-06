@@ -148,8 +148,6 @@ export function RegistryScreen({ screen }: { screen: Screen }) {
             <AllTimeline />
           </WorkspaceGate>
         );
-      case "agents-new":
-        return <ComingSoon purpose={screen.purpose} back={{ href: "/design/new-agent", label: "Try the prototype" }} />;
       default:
         return <ComingSoon purpose={screen.purpose} />;
     }
