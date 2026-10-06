@@ -9,6 +9,7 @@ import { AgentEquityChart } from "@/components/charts/equity-chart";
 import { AsOf } from "@/components/domain/as-of";
 import { Envelope, Headroom, MandateCard } from "@/components/domain/envelope";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
+import { MandateEdit } from "@/components/mandate/mandate-edit";
 import { Money, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
 import { OrdersTable, PositionsTable } from "@/components/domain/positions";
@@ -337,6 +338,11 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
         </Section>
       );
     case "mandate/edit":
+      return (
+        <Section title="Edit mandate" action={<SectionLink href={agentHref(agent.agent_id, "mandate/versions")}>Versions</SectionLink>}>
+          <MandateEdit agent={agent} />
+        </Section>
+      );
     case "prove/backtests":
     case "prove/paper":
     case "prove/live":

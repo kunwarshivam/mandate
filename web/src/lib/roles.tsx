@@ -24,7 +24,7 @@ export type Capability =
   /** Stop, kill, release and close everything. */
   | "stop.full"
   | "approvals.respond"
-  /** Confirm a new mandate and deploy it: only the owner sets the envelope (rule 11). */
+  /** Confirm a new mandate and deploy it, or confirm a new version of one: only the owner sets the envelope (rule 11). */
   | "agents.deploy"
   | "agents.view"
   | "audit.view"

@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { render, screen, within } from "@testing-library/react";
 import { Providers } from "@/components/providers";
 import { type Passkey, PasskeyContext, mockPasskey } from "@/components/stop/step-up-dialog";
-import type { Scenario } from "@/fixtures/types";
+import type { Scenario, Workspace } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { type Role, RoleProvider } from "@/lib/roles";
 import { type Session, SessionProvider } from "@/lib/session";
@@ -16,9 +16,15 @@ export const RECORD_AFTER_MS = 1600;
 export function renderWithRuntime(
   ui: ReactElement,
   scenario: Scenario = "normal",
-  { role = "owner", passkey = mockPasskey, session = null }: { role?: Role; passkey?: Passkey; session?: Session | null } = {},
+  {
+    role = "owner",
+    passkey = mockPasskey,
+    session = null,
+    workspace,
+  }: { role?: Role; passkey?: Passkey; session?: Session | null; workspace?: (ws: Workspace) => Workspace } = {},
 ) {
-  const initial = buildWorkspace(scenario);
+  const built = buildWorkspace(scenario);
+  const initial = workspace ? workspace(built) : built;
   const wrap = (inner: ReactElement) => (
     <SessionProvider session={session}>
       <PasskeyContext.Provider value={passkey}>
