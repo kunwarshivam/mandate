@@ -29,6 +29,7 @@ const SCREENS: Array<[string, () => ReactElement]> = [
   [`/agents/${AGENT_IDS.swing}`, () => <AgentDetailScreen agentId={AGENT_IDS.swing} />],
   [`/agents/${AGENT_IDS.lmn}`, () => <AgentDetailScreen agentId={AGENT_IDS.lmn} />],
   [`/agents/${AGENT_IDS.btc}/mandate/versions`, () => <AgentSectionScreen agentId={AGENT_IDS.btc} section="mandate/versions" />],
+  [`/agents/${AGENT_IDS.swing}/mandate/edit`, () => <AgentSectionScreen agentId={AGENT_IDS.swing} section="mandate/edit" />],
   ["/approvals", () => <ApprovalsInboxScreen />],
   [`/approvals/${APPROVAL_IDS.swingXyz}`, () => <ApprovalRequestScreen approvalId={APPROVAL_IDS.swingXyz} />],
   [`/approvals/${APPROVAL_IDS.btc}`, () => <ApprovalRequestScreen approvalId={APPROVAL_IDS.btc} />],
