@@ -13,7 +13,7 @@ use mandate_builder::{
     AccountSnapshot as BuilderAccountSnapshot, Market as BuilderMarket,
     RiskContext as BuilderRiskContext, buy_action,
 };
-use mandate_domain::{AssetClass as DomainAssetClass, AssetId, MarketSession};
+use mandate_domain::{AssetClass as DomainAssetClass, MarketSession};
 use mandate_executor::{
     BindingGateInput, BindingGateRequest, BindingGateSource, ExecutorConfig, InstrumentSnapshot,
     MandateVersion, MandateView as ExecutorMandateView, equity_bracket_prices,
@@ -31,7 +31,7 @@ use super::artifacts::Artifacts;
 use super::facts::{BrokerFacts, PaperFacts};
 use super::gate::{advisory_gate_context, gate_template, platform_gate_config, reservation};
 use super::judge::{judge, judge_submission_time};
-use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, absent, usd};
+use super::{absent, usd};
 use crate::adapters::{BuilderContext, DecisionContext, ExecutorContext, RunContext};
 use crate::envelope::{IdSpace, Ids};
 use crate::error::Cause;
@@ -151,7 +151,7 @@ fn run_context(
     today: Date,
     template: BindingGateInput,
 ) -> Result<RunContext, Cause> {
-    let instrument = AssetId::parse(INSTRUMENT_ID).map_err(|_| absent("the AAPL asset id"))?;
+    let instrument = artifacts.instrument.asset_id.clone();
     let quote = &broker.quote;
     let allocation = usd(artifacts.mandate.capital.allocation_usd.as_str())?;
     let protection = protection_prices(&artifacts.mandate.protection, quote.ask)?;
@@ -200,7 +200,7 @@ fn run_context(
         risk,
         action,
         model_content_hashes: BTreeMap::from([(
-            (MODEL_ID.to_owned(), MODEL_VERSION.to_owned()),
+            (artifacts.model_id.clone(), artifacts.model_version.clone()),
             artifacts.model_hash,
         )]),
         execution: OrderExecution {
@@ -254,7 +254,7 @@ pub(super) struct TrustedPaperContext {
 
 impl TrustedPaperContext {
     fn reviewed(&self, agent: &mandate_executor::AgentId, instrument: &InstrumentId) -> bool {
-        agent.0 == self.agent && instrument.as_str() == INSTRUMENT_ID
+        agent.0 == self.agent && instrument.as_str() == self.template.asset.as_str()
     }
 }
 
@@ -277,11 +277,13 @@ impl ExecutorMandateView for TrustedPaperContext {
 
 impl InstrumentSnapshot for TrustedPaperContext {
     fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
-        (instrument.as_str() == INSTRUMENT_ID).then_some(AssetClass::UsEquity)
+        (instrument.as_str() == self.template.asset.as_str()
+            && self.template.instrument.asset_class == mandate_risk::AssetClass::UsEquity)
+            .then_some(AssetClass::UsEquity)
     }
 
     fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
-        (instrument.as_str() == INSTRUMENT_ID).then_some(self.increment)
+        (instrument.as_str() == self.template.asset.as_str()).then_some(self.increment)
     }
 
     fn exit_tier(&self, _instrument: &InstrumentId) -> Option<mandate_executor::ExitTier> {

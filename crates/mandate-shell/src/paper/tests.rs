@@ -260,7 +260,6 @@ fn the_reviewed_artifacts_load_and_bind_the_bytes_they_checked() -> Result<(), S
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn production_artifacts_derive_the_instrument_and_model_without_shell_literals()
 -> Result<(), String> {
     let (scratch, loaded) = production_artifacts("production-inputs")?;
@@ -278,7 +277,6 @@ fn production_artifacts_derive_the_instrument_and_model_without_shell_literals()
 }
 
 #[test]
-#[ignore = "pending E7-19"]
 fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Result<(), String> {
     let (scratch, loaded) = production_artifacts("production-contexts")?;
     let mut snapshot = facts()?;

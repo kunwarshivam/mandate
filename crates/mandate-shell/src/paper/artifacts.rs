@@ -72,17 +72,33 @@ impl Artifacts {
     /// Loads production artifacts without selecting an instrument or model in the shell.
     ///
     /// # Errors
-    /// Refuses until E7-19's production input loader is implemented.
-    pub fn load_production(_mandate_path: &Path, _config_dir: &Path) -> Result<Self, Cause> {
-        Err(Cause::Unimplemented { story: "E7-19" })
+    /// [`Cause::Absent`] for an incomplete, mismatched, or unsupported reviewed input.
+    pub fn load_production(mandate_path: &Path, config_dir: &Path) -> Result<Self, Cause> {
+        Self::load_inputs(mandate_path, config_dir)
     }
 
-    /// Loads the mandate and the five effective-dated artifacts in `config_dir`.
+    /// Loads the temporary E7-7 AAPL adapter's reviewed artifacts.
     ///
     /// # Errors
-    /// [`Cause::Absent`] for an artifact that is missing, not canonical, short of a member, or
-    /// carrying one the run does not read, and for every value but the reviewed one.
+    /// [`Cause::Absent`] unless the production inputs also match the legacy E7-7 deployment.
     pub fn load(mandate_path: &Path, config_dir: &Path) -> Result<Self, Cause> {
+        let loaded = Self::load_inputs(mandate_path, config_dir)?;
+        let identity = loaded.production_identity();
+        if identity.asset_id.as_str() != INSTRUMENT_ID
+            || identity.symbol.as_str() != SYMBOL
+            || identity.asset_class != DomainAssetClass::UsEquity
+            || identity.broker_exchange != BrokerExchange::Nasdaq
+            || identity.model_id != MODEL_ID
+            || identity.model_version != MODEL_VERSION
+            || loaded.instrument.increment != ShareIncrement::Whole
+            || loaded.instrument.etp != EtpClass::Plain
+        {
+            return Err(absent("the reviewed E7-7 production inputs"));
+        }
+        Ok(loaded)
+    }
+
+    fn load_inputs(mandate_path: &Path, config_dir: &Path) -> Result<Self, Cause> {
         let mandate_bytes = fs::read(mandate_path).map_err(|_| absent("the mandate artifact"))?;
         let mandate_value = mandate_canon::parse(&mandate_bytes)
             .map_err(|_| absent("a canonical mandate artifact"))?;
@@ -92,25 +108,23 @@ impl Artifacts {
             return Err(absent("a paper mandate artifact"));
         }
         let [pinned] = mandate.universe.pinned_instruments.as_slice() else {
-            return Err(absent("the one AAPL instrument"));
+            return Err(absent("one pinned production instrument"));
         };
-        if pinned.asset_id.as_str() != INSTRUMENT_ID
-            || pinned.symbol != SYMBOL
-            || pinned.asset_class != DomainAssetClass::UsEquity
-        {
-            return Err(absent("the reviewed AAPL instrument"));
+        if pinned.asset_class != DomainAssetClass::UsEquity {
+            return Err(absent("a supported production instrument"));
         }
         let [model] = mandate.behavior.signal_models.as_slice() else {
             return Err(absent("the one reviewed signal model"));
         };
-        let model_bytes = fs::read(config_dir.join("model-artifact.json"))
-            .map_err(|_| absent("the model artifact"))?;
-        if model.id.as_str() != MODEL_ID
-            || model.version != MODEL_VERSION
-            || model.content_hash != Digest::of(&model_bytes)
+        let model_artifact = artifact(config_dir, "model-artifact.json", &["id", "version"])?;
+        if required_text(&model_artifact.value, "id")? != model.id.as_str()
+            || required_text(&model_artifact.value, "version")? != model.version
+            || model.content_hash != Digest::of(&model_artifact.bytes)
         {
             return Err(absent("the reviewed model artifact"));
         }
+        let model_id = model.id.as_str().to_owned();
+        let model_version = model.version.clone();
         let model_hash = model.content_hash;
 
         let fee = artifact(
@@ -153,21 +167,22 @@ impl Artifacts {
             ],
         )?;
         let reviewed = &instrument_artifact.value;
-        require_text(reviewed, "instrument_id", INSTRUMENT_ID)?;
-        require_text(reviewed, "symbol", SYMBOL)?;
+        require_text(reviewed, "instrument_id", pinned.asset_id.as_str())?;
+        require_text(reviewed, "symbol", &pinned.symbol)?;
         require_text(reviewed, "asset_class", "us_equity")?;
-        require_text(reviewed, "exchange", "nasdaq")?;
         require_text(reviewed, "increment", "whole")?;
         require_text(reviewed, "etp", "plain")?;
+        let (broker_exchange, gate_exchange) = exchanges(required_text(reviewed, "exchange")?)?;
         let etp_classified_at =
             UtcNanos::parse_rfc3339(required_text(reviewed, "etp_classified_at")?)
                 .map_err(|_| absent("the instrument's ETP classification date"))?;
         let instrument = ReviewedInstrument {
-            asset_id: AssetId::parse(INSTRUMENT_ID).map_err(|_| absent("the AAPL asset id"))?,
-            symbol: InstrumentId::new(SYMBOL).map_err(|_| absent("the AAPL symbol"))?,
+            asset_id: pinned.asset_id.clone(),
+            symbol: InstrumentId::new(&pinned.symbol)
+                .map_err(|_| absent("the reviewed instrument symbol"))?,
             asset_class: DomainAssetClass::UsEquity,
-            broker_exchange: BrokerExchange::Nasdaq,
-            gate_exchange: GateExchange::Nasdaq,
+            broker_exchange,
+            gate_exchange,
             increment: ShareIncrement::Whole,
             increment_qty: Qty::parse(WHOLE_SHARE)?,
             etp: EtpClass::Plain,
@@ -201,8 +216,8 @@ impl Artifacts {
         );
         Ok(Self {
             mandate,
-            model_id: MODEL_ID.to_owned(),
-            model_version: MODEL_VERSION.to_owned(),
+            model_id,
+            model_version,
             model_hash,
             fees,
             instrument,
@@ -263,6 +278,17 @@ fn require_text(value: &Value, name: &'static str, expected: &str) -> Result<(),
         Ok(())
     } else {
         Err(absent(name))
+    }
+}
+
+fn exchanges(text: &str) -> Result<(BrokerExchange, GateExchange), Cause> {
+    match text {
+        "nasdaq" => Ok((BrokerExchange::Nasdaq, GateExchange::Nasdaq)),
+        "nyse" => Ok((BrokerExchange::Nyse, GateExchange::Nyse)),
+        "arca" => Ok((BrokerExchange::Arca, GateExchange::Arca)),
+        "amex" => Ok((BrokerExchange::Amex, GateExchange::Amex)),
+        "bats" => Ok((BrokerExchange::Bats, GateExchange::Bats)),
+        _ => Err(absent("an eligible reviewed exchange")),
     }
 }
 
