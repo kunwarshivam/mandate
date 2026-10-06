@@ -5,7 +5,7 @@
 | **Status** | v0.16 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-483](../project/decisions/DEC-483.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` section of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, and `account_stream` section of §9.5; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` sections of §9.1, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, and `account_stream` section of §9.5; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
@@ -13,11 +13,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 ## Change history
 
 - **v0.16 ([DEC-483](../project/decisions/DEC-483.md)):** `config_refs` gains `policy_set` and
-  `model_registry`. `DecisionMade` requires both beside `mandate_version`, and
-  `ModelOutputRecorded` requires `model_registry` beside `mandate_version`. These hashes bind the
-  independently mutable policy and registry snapshots that admitted the production decision and
-  model output. Existing stored records are unchanged; the stricter requirements govern new
-  appends.
+  `model_registry`. Version 2 of `DecisionMade` requires both beside `mandate_version`; version 2
+  of `ModelOutputRecorded` requires `model_registry` beside `mandate_version`; both keep version
+  1's payload unchanged. `ConfigSnapshotRegistered` version 2 admits the two new kinds. These
+  hashes bind the independently mutable policy and registry snapshots that admitted the
+  production decision and model output. Existing version-1 records are unchanged.
 - **v0.15 ([DEC-460](../project/decisions/DEC-460.md)):** §9.6 closes
   `ApprovalRequested`, including its nested canonical content, `ApprovalDelivered`,
   `BrokerPositionObserved`, `AgentModeApplied`, and `CompensatingEvent` at schema version 1.
@@ -436,9 +436,14 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 `config_refs`** keys are enforced at append (`fee` = `fee_config`, `cal` = `trading_calendar`,
 `set` = `settlement_calendar`, `ins` = `instrument_snapshot`, `rule` = `rule_set`, `man` =
 `mandate_version`, `mod` = `model_version`, `pol` = `policy_set`, `reg` = `model_registry`).
-`policy_set` names the canonical effective-policy snapshot, including every level folded for the
-deployment. `model_registry` names the canonical registry snapshot against which model identity,
-version, parameters, admission capability, and content hash were validated.
+`policy_set` names the canonical effective-policy snapshot: an object with exactly
+`kind: "policy_set"`, `policy_set_version: 1`, and `levels`. Each `levels` item is a complete
+document valid against [`policy.schema.json`](../../schemas/policy.schema.json), ordered
+`platform`, `organization`, `workspace`, with at most one of each. `model_registry` names an object
+with exactly `kind: "model_registry"`, `model_registry_version: 1`, and `models`; each model has
+exactly `model_id`, `model_version`, `content_hash`, `params`, and `admits_instruments`. Models are
+strictly sorted and unique by `model_id`; `params` are strictly sorted and unique. These objects
+are canonical configuration artifacts registered on the control stream before use.
 
 **Account stream** (owner: executor). Risk inputs also carry `risk_clock` (§2).
 
@@ -477,9 +482,9 @@ version, parameters, admission capability, and content hash were validated.
 | `StreamOpened` | — | stream type, subject, environment |
 | `ObservationRecorded` | — | source, instrument, data (artifact) |
 | `ModelInvocationRecorded` | mod | purpose (compiler, fast model, research), provider, model and version, parameters, seed, prompt and retrieved context (artifact), response (artifact), provider request ID |
-| `ModelOutputRecorded` | man, reg | signal model id, version, content hash, instrument, as_of, expires_at, direction, conviction, confidence, horizon, thesis (artifact) and, for the research agent, its thesis and lineage ids; `ignored` reason if not used |
+| `ModelOutputRecorded` | v1: man; v2: man, reg | signal model id, version, content hash, instrument, as_of, expires_at, direction, conviction, confidence, horizon, thesis (artifact) and, for the research agent, its thesis and lineage ids; `ignored` reason if not used |
 | `ThesisProposed`, `ThesisRevised` | man, mod | The research agent's output and its admission decision ([mandate spec §8.4, §8.5](mandate.md#84-the-research-agent-dec-97-adr-0002)): research agent id, version, and content hash; thesis id, lineage id, revision, and for `ThesisRevised` the `predecessor_thesis_id` and what the revision changed; instrument, asset class, direction, horizon, evidence and cited sources, corroboration kind, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); `admitted` and the refusal reason from the ordered §8.5 checks; closed in §9.4 |
-| `DecisionMade` | man, pol, reg | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification and its source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling), `delegation_id` when a delegation lifted it ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003)), and `requested_by` (`agent`, `owner`, or `client`) with the client's id when a connected client asked (mandate §6.2 step 5a, DEC-185); `ask_suppressed` (`budget`, `skipped_today`, `recent_timeout`) when an `ask` was classified but not asked ([mandate spec §6.4](mandate.md#64-approvals)) |
+| `DecisionMade` | v1: man; v2: man, pol, reg | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification and its source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling), `delegation_id` when a delegation lifted it ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003)), and `requested_by` (`agent`, `owner`, or `client`) with the client's id when a connected client asked (mandate §6.2 step 5a, DEC-185); `ask_suppressed` (`budget`, `skipped_today`, `recent_timeout`) when an `ask` was classified but not asked ([mandate spec §6.4](mandate.md#64-approvals)) |
 | `IntentProposed` | man | intent fields (its `event_id` is the intent ID); after a grant, `causation_id` is the `ApprovalRevalidated` |
 | `ApprovalRequested` | man | Closed at schema version 1: approval (its `event_id`), instrument, asset class, side, quantity, limit price, purpose, mandate version, `decided_by`, score, approver requirements, nullable reference mark, deadline, timeout/default, recursively closed content, and its canonical hash (§9.6) |
 | `ApprovalDelivered` | man | Closed at schema version 1: approval, `cli_inbox` channel, delivery status (`delivered`, `suppressed_quiet_hours`, `failed`), and nullable message ID (§9.6) |
@@ -533,6 +538,14 @@ closed yet: the approval events that v0.5 added (§9, mandate spec §6.4) close 
 and `ModelInvocationRecorded` in its own story. `ThesisProposed` and `ThesisRevised` are closed in
 §9.4.
 `OwnerCommandRefused` is closed in §9.2, on both streams that write it.
+
+Journal spec v0.16 adds `schema_version` 2 for `ModelOutputRecorded` and `DecisionMade`. Each has
+exactly its version-1 payload, with the stricter `config_refs` §9 lists. Rule 17 requires a
+version-2 model output's `model_registry` object to contain exactly one entry whose `model_id`,
+`model_version`, and `content_hash` equal the payload's. Version 1 remains registered and replayable;
+a writer emits version 2 once it has the two new registered snapshots. The additive
+`production_config_refs` vectors hold both version-2 drafts and the version-2 control records that
+register their snapshots, without rewriting the historical version-1 chain.
 
 **Types.**
 
@@ -840,11 +853,18 @@ member.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `kind` | `fee_config` \| `trading_calendar` \| `settlement_calendar` \| `instrument_snapshot` \| `rule_set` \| `mandate_version` \| `model_version` | §9's `config_refs` kinds. A signal model is `model_version` |
+| `kind` | version 1: `fee_config` \| `trading_calendar` \| `settlement_calendar` \| `instrument_snapshot` \| `rule_set` \| `mandate_version` \| `model_version`; version 2 adds `policy_set` \| `model_registry` | §9's `config_refs` kinds. A signal model is `model_version`. Version 1's vocabulary stays closed |
 | `content_hash` | `ref` | The snapshot. For a model, its content hash (mandate spec §8.1) |
 | `model_id`, `model_version` | `text?` | A model's id and version, registered together with its hash (V-007): rule 21 |
 | `params` | `[text]` | A model's declared parameters (V-007), empty for any other kind: rules 20 and 21 |
 | `admits_instruments` | `boolean?` | Whether the model may admit instruments (mandate spec §8.4): rule 21 |
+
+Journal spec v0.16 registers `ConfigSnapshotRegistered` schema version 2 with the same payload
+members and consistency rules as version 1, plus the two new `kind` values. A writer uses version 2
+for `policy_set` and `model_registry`; it may use either registered version for an older kind.
+Before a configuration reference is appended, the referenced canonical object is stored, re-hashes
+to `content_hash`, and has a `kind` equal to the registration payload's `kind`. Rules 20 and 21 make
+the model-only members null or empty for both new kinds.
 
 **`MandateVersionCreated`** and **`MandateConfirmed`** carry, as members, the parts `JournaledFact`
 reads: the version, the provenance per path, and the confirmed paths. The rest of each
@@ -919,6 +939,9 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 21. `ConfigSnapshotRegistered`: `model_id`, `model_version`, and `admits_instruments` are non-null
     exactly when `kind` is `model_version`, and `params` is empty when it is not. Reported at the first
     offending member, in that order.
+21a. `ConfigSnapshotRegistered` version 2: `policy_set` and `model_registry` are valid kinds.
+    The stored canonical object's `kind` equals `payload.kind`, and it re-hashes to
+    `payload.content_hash`. Version 1 refuses either new kind as `schema` at `payload.kind`.
 22. `AgentDeployed`: `mandate_version` equals `config_refs.mandate_version` (`payload.mandate_version`).
     A missing ref is already `missing_config_ref`.
 23. `AgentStopped`: `loss_added` ≥ 0 (`payload.loss_added`). The loss carried is never negative
